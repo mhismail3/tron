@@ -24,6 +24,7 @@ import { logUnresolvedDrainOwners, RestartDrainProgress } from "./sessions/resta
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
+import { logHomeDiagnostic } from "./home/home-diagnostic.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
@@ -51,6 +52,8 @@ import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
 import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConfig } from "./knowledge/knowledge-observation.js";
+import { createModelRuntimeSummarizer } from "./episodic/episodic-compactor.js";
+import { isVirtualModel } from "./providers/virtual-model.js";
 import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
 import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
 import { JevDecisionClient } from "./knowledge/jev-client.js";
@@ -217,7 +220,11 @@ const resourceSampler: ResourceSampler = new ResourceSampler({
 // must not hide a session whose automation run is already dispatched.
 let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | undefined;
 const sessions = new RuntimeRegistry({
+  workspaceUnavailable: cause => logger.log("warning", "Tron internal workspace is unavailable", {
+    event: "workspace.unavailable", source: "workspace", cause,
+  }),
   agentDir: config.agentDir,
+  gatewayModelRuntime: modelRuntime,
   tronHome: config.tronHome,
   resources: resourceSampler,
   delegatedArtifactRoot: delegatedRoot,
@@ -249,6 +256,55 @@ const sessions = new RuntimeRegistry({
     : logger.log("info", `Archived session returned to the dashboard on new work (${diagnostic.trigger})`, {
       event: "sessions.archive.auto-unarchived", source: "sessions", outcome: diagnostic.outcome, reason: diagnostic.trigger,
     }),
+  // Home's memory compactor runs on the Gateway's own ModelRuntime, exactly as
+  // Knowledge resolves the model for its calls; never on a session's runtime,
+  // whose lifetime is the session's. A virtual (routed) model cannot back it:
+  // routing is decided per request from the canonical projection (#412 Q4).
+  homeMemorySummarizer: (model) => {
+    const resolved = modelForConfig(modelRuntime, `${model.provider}/${model.id}`);
+    if (!resolved) return { refusal: "unavailable" as const };
+    if (isVirtualModel(resolved)) return { refusal: "virtual-model" as const };
+    return { summarizer: createModelRuntimeSummarizer(modelRuntime, resolved) };
+  },
+  homeMemoryDiagnostic: (record) => {
+    if (record.event === "home.memory-ingest") {
+      // A code, never the failure's own message: an episodic ingest failure can
+      // name the canonical session path.
+      logger.log("warning", "Home memory could not ingest committed entries", {
+        event: "home.memory-ingest", source: "home", reason: record.reason,
+      });
+      return;
+    }
+    logger.log(record.level, "Tron Home memory diagnostic", {
+      event: record.event, source: "home",
+      ...(record.reason === undefined ? {} : { reason: record.reason }),
+      ...(record.counts === undefined ? {} : { counts: record.counts }),
+    });
+  },
+  // Home is used deliberately, one turn at a time, so one line per activation is
+  // both affordable and the only place a turn's effective size and the readiness
+  // wait it took are visible. No message text, entry id or nonce is included.
+  homeRequestDiagnostic: (record) => {
+    if (record.event === "activation") {
+      logger.log("info", "Tron Home activation", {
+        event: "home.activation", source: "home",
+        counts: {
+          effectiveTokens: record.effectiveTokens,
+          contextWindow: record.contextWindow,
+          viewLines: record.viewLines,
+          viewBytes: record.viewBytes,
+          excludedMessages: record.excludedMessages,
+        },
+        durationMs: record.waitedMs,
+      });
+      return;
+    }
+    logger.log("warning", "Tron Home activation refused", {
+      event: "home.activation-refused", source: "home", reason: record.reason,
+      ...(record.detail.length > 200 ? { detail: `${record.detail.slice(0, 200)}…` } : { detail: record.detail }),
+      ...(record.effectiveTokens === undefined ? {} : { counts: { effectiveTokens: record.effectiveTokens, contextWindow: record.contextWindow ?? 0 } }),
+    });
+  },
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
   // Load and eviction are transitions at info: the byte budget's decisions have
   // to be attributable to one session from the log alone, and the reason has to
@@ -299,6 +355,11 @@ const sessions = new RuntimeRegistry({
     `Codemode execution ${diagnostic.outcome}`,
     { event: "codemode.execution.completed", source: "session", ...diagnostic },
   ),
+  homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
+  homeTaskDiagnostic: record => logger.log(record.event === "home.task.runaway-stop" || record.event === "home.task.detached-work"
+    || record.event === "home.task.producer-refused" || record.event === "home.task.store-refused"
+    || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
+    "Home task lifecycle", { source: "home", ...record }),
   machineId: config.machineId,
   notifications,
   browserLiveViews,
@@ -399,6 +460,10 @@ const knowledge = new KnowledgeService(
       `Prospective knowledge observation cuts were not retained (${dropped} cut(s); ${queued} queued); no durable coverage is claimed`,
       { event: code, source: "knowledge" },
     ),
+    // Tron Home is one private conversation whose memory is its own: automatic
+    // Knowledge observation never sees it. The Home owner's designation is the
+    // predicate, so a fork (an ordinary session) is observed normally.
+    (sessionId) => sessions.homeOwner().profileFor(sessionId) === "home",
   ),
   {
     connector: (action, signal) => knowledgeConnector.invoke(action, signal),
@@ -724,6 +789,7 @@ const service = new GatewayService({
   automations,
   knowledge,
   connections,
+  home: sessions.homeOwner(),
   mcpAdmin: new McpAdminService(
     config.agentDir,
     join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"),
@@ -837,6 +903,8 @@ await transport.listen(async () => {
 // Serving already; these records account for post-listen recovery work.
 await sessions.recoverCanonicalAttention();
 startupCheckpoint("attention-recovery");
+await sessions.recoverHomeTasks();
+startupCheckpoint("home-task-recovery");
 const maintainStorage = async (): Promise<void> => {
   try {
     const [status] = await Promise.all([

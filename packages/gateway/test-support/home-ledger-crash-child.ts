@@ -1,0 +1,32 @@
+import { writeFileSync } from "node:fs";
+import { HomeOwner } from "../src/home/home-owner.js";
+import { TronWorkspace } from "../src/workspace/tron-workspace.js";
+
+const [tronHome, sessionId, marker] = process.argv.slice(2);
+if (!tronHome || !sessionId || !marker) throw new Error("expected crash fixture arguments");
+const owner = new HomeOwner({
+  tronHome,
+  trust: {} as never,
+  workspace: new TronWorkspace(tronHome),
+  // The crash path only seals a chapter, which never dispatches a task.
+  taskSessions: {} as never,
+  sessions: {
+    serializeSessionMutation: async <T>(_id: string, commit: () => Promise<T>) => commit(),
+    chapterMetrics: async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true }),
+    hasConversation: async () => false,
+  } as never,
+  memorySummarizer: () => ({ summarizer: async () => { throw new Error("unused"); } }),
+});
+await owner.initialize();
+const exposed = owner as unknown as { writeLocked(record: unknown): Promise<void> };
+const write = exposed.writeLocked.bind(owner);
+exposed.writeLocked = async record => {
+  await write(record);
+  // An unresolved top-level promise alone lets Node exit. The parent owns this
+  // pipe and holds it open until SIGKILL, so observing the marker cannot race a
+  // normal child exit and does not depend on a sleep or background timer.
+  process.stdin.resume();
+  writeFileSync(marker, "after\n");
+  await new Promise<void>(() => {});
+};
+await owner.chapterQuiescent(sessionId);

@@ -64,7 +64,8 @@ describe("session transcript paging", () => {
     });
     const service = new GatewayService({
       config: { tronHome: root },
-      sessions: { acquire: async () => ({ setModel: mutateModel }) },
+      // A real slot always exposes its ModelRuntime; eligibility lookup reads it.
+      sessions: { acquire: async () => ({ setModel: mutateModel, modelRuntime: {} }) },
       receipts: new CommandReceiptStore(root), workRegistry,
     } as unknown as GatewayServiceDependencies);
     try {

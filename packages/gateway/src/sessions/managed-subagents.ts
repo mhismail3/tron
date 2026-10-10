@@ -16,6 +16,7 @@ const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
 const pin = JSON.parse(readFileSync(join(gatewayRoot, "pi-subagents-pin.json"), "utf8")) as {
   version: string; fork: { commit: string }; closure: { path: string; sha512: string };
 };
+export const MANAGED_SUBAGENTS_VERSION = pin.version;
 export const MANAGED_SUBAGENTS_SOURCE = `tron:pi-subagents@${pin.version}#${pin.closure.sha512}`;
 type Settings = ReturnType<SettingsManager["getSettings"]>;
 type ManagedLoaderOptions = Required<Pick<ConstructorParameters<typeof DefaultResourceLoader>[0],

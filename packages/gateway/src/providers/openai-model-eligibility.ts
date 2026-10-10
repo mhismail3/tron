@@ -9,6 +9,8 @@ const REQUEST_TIMEOUT_MS = 5_000;
 const SUCCESS_TTL_MS = 60_000;
 const MAX_DISCOVERY_MODELS = 25_000;
 const installed = new WeakMap<ModelRuntime, OpenAIModelEligibility>();
+/** Session-local views may delegate lookup without installing filters or owning an attachment. */
+export const borrowedOpenAIModelEligibility = Symbol("borrowedOpenAIModelEligibility");
 
 type OpenAIModel = Model<Api>;
 interface DiscoveryEntry { slug: string; visibility: string; displayName?: string; }
@@ -309,9 +311,12 @@ export function installOpenAIModelEligibility(runtime: ModelRuntime, options: Op
   owner.attachRuntime(runtime);
   return owner;
 }
-export function openAIModelEligibility(runtime: ModelRuntime): OpenAIModelEligibility | undefined { return installed.get(runtime); }
+export function openAIModelEligibility(runtime: ModelRuntime): OpenAIModelEligibility | undefined {
+  return installed.get(runtime)
+    ?? (runtime as ModelRuntime & { readonly [borrowedOpenAIModelEligibility]?: OpenAIModelEligibility })[borrowedOpenAIModelEligibility];
+}
 export async function assertNewModelChoice(runtime: ModelRuntime, provider: string, id: string, signal?: AbortSignal): Promise<void> {
-  const owner = installed.get(runtime);
+  const owner = openAIModelEligibility(runtime);
   if (!owner) return;
   await owner.refresh(signal);
   owner.assertEligible(runtime, provider, id);

@@ -186,6 +186,34 @@ receipt owner authority. Timeline refresh admission is keyed to each endpoint's 
 capabilities, and catalog revision; retained failure text does not restart an equivalent read, while
 changed revisions still force fresh canonical occurrence reads. The dashboard has no pull-to-refresh surface and relies on
 `automation.changed`. No second mutation-reconciliation algorithm or Automation event journal exists.
+`HomeStatusPresentationOwner` is an observable owner of only the focused Gateway's in-memory Home status projection. The surface's mount owns the status read, so a dashboard mounted before pairing reads Home once pairing configures a profile; a profile transition forgets the advertised capability, while a dropped connection keeps it so the row does not flicker. A read that the Gateway answers with a status this client cannot admit publishes a typed `isStatusUnavailable` state, which the row shows instead of loading. `SessionShellView` registers its exact `PresentationSurfaceToken` with the shared `PresentationActivityCoordinator`; every status read and post-await publication checks that token's current managed activity, profile, authenticated connection and latest read generation. Retirement must name the exact token, so a delayed callback from an older dashboard cannot clear a replacement. The owner does not persist status, session identity, or memory data. Its typed DTO decodes exactly the fields the app reads: it requires the phase, activation, readiness gaps, recovery reason and memory sections, rejects an unknown phase rather than guessing, and ignores every other Gateway field. `AppModel` retires status with lifecycle connection ownership, clears it on loss, then admits a fresh status read from the authenticated reconnect callback only if the current profile advertises `home.v1`. Backgrounding suspends the read and clears status; foreground reconciliation re-admits it. Matching Home-session summaries and session-list invalidations trigger an immediate refresh, while the active Home dashboard or its mounted chat route runs one sequential fallback no more frequently than every five seconds. A chat opened before status is known takes a `connectionOnly(HomeChatRouteKey)` probe: it reads on each connection admission and retries once after a covering discards its read, but it never polls and is not refreshed by invalidations or mutations. The key is one predicate shared with the chat's Home header (`HomeChatRouteKey.matches`): a Home route always presents Home, even with no openable chapter, so its recovery state stays visible; an ordinary chat matches only the chapter it is (`sessionId`), so an ordinary chat on the sealed predecessor during a rollover neither claims the status nor shows the header. The first published status decides the claim. A matching route promotes the surface to the mounted cadence; any other route releases it, which keeps the published status for the dashboard and makes no further reads. A known status decides the chat by the same key alone. Cover/uncover activity is observed on the exact mounted surface so covering sheets retire disposable reads and dismissal resumes convergence.
+
+`HomeSheetReadOwner` owns one disposable settings/context/browser/evidence read
+per managed sheet. Its idle/loading/loaded/failed state carries the request's
+identity and the caller's request-intent ID; changing intent invalidates success,
+error and loading even before SwiftUI starts the replacement task.
+`AppModel.readHomeSheet` admits only the typed status, memory-page and canonical-
+evidence queries, capturing and rechecking the focused profile, connection and
+lifecycle generation. The sheet additionally checks its exact managed token and
+current activity across every await. Cover/background retires pending reads;
+uncover/reconnect starts a fresh request. Installed parent frames can remain
+while a picker or evidence child is mounted, without polling the covered chat.
+The picker preserves its installed frame while receipt-triggered status is read.
+Disposal retires the whole owner; no page, cursor, model or memory body is persisted.
+
+Browser requests retain only one bounded page, not an accumulated mirror. A
+continuation carries cursor, Home ID, revision and last catalog index; a mixed
+revision, different Home, repeated cursor or non-advancing row fails closed and
+Reload returns to page one. Evidence has a separate managed child lifetime and
+carries exact source session/entry/digest/index plus offset through every page.
+The DTO admits only `canonical-history`, matching identity and UTF-16 positions,
+with a 24,000-character page and explicit continuation for remaining content.
+The memory page admits at most 50 rows and 128 KiB encoded JSON using the shared
+Gateway wire encoder (no extra slash escaping), enforcing the
+Gateway's attribution/kind mapping and 4,096-character summary/projection caps.
+
+When `home.v1` is authenticated, the Sessions list prepends a pinned Home row without inserting Home into the ordinary session catalogue. `HomePinnedRowPolicy` routes only the enabled `openSessionId` in the current `home.status`: the current chapter when it is present, or the sealed predecessor while a rollover is pending, so the row stays routable and never names the reserved successor. An unopenable Home is unavailable; undesignated, disabled, and missing-session states call `home.designate` through `HomeMutationCoordinator` and the shared confirmed-mutation receipt owner. Designation and Home controls share one mutation authority; duplicate in-flight admission is refused. Every user action captures its exact profile/lifecycle authority synchronously before starting asynchronous work. Home commands use a receipt-only policy: `missing` and `pending` receipts never replay the mutation, and an unresolved command ID remains owned by the mutation coordinator until an explicit completion check resolves that same receipt. A single idle/running/unresolved state owns the command method, ID and profile; no parallel receipt map or per-control cleanup exists. Only `outcome_unknown` retains receipt ownership; the executor's non-Codable definitely-not-sent provenance is preserved so a pre-transmission failure leaves no unresolved command and a later explicit attempt creates a new command ID. For the profile that owns an unresolved command, the pinned row checks that receipt before considering any status-based chat route, including when status is unavailable; a completed check stays on the dashboard (it can also be a Disable receipt), and the next explicit tap uses current status; a fresh mounted `home.status` is required after the receipt resolves before the UI uses its session ID for the existing profile-qualified `ChatView` route. While that exact Home chat route is mounted, the status owner follows its managed surface token; retiring the route restores the dashboard token. Capability-absent profiles show no Home row, and ordinary Sessions filtering, sorting, row state and navigation remain unchanged. The route is a logical Home route (`SessionNavigationRoute.isHome`), and its physical `sessionID` is the chapter it opens. The Home chat's composer submits through `home.prompt` (text, attachments, steering behavior and resource invocation, admitted by the same Gateway code as `session.prompt`); the submission's `ComposerSubmissionRoute` travels with the admitted snapshot. When a materialized successor is named by `sessionId`, the dashboard replaces the route with that chapter, under the same logical route, so the Home header and sends follow Home. The follow carries the route's unsent composer text into the successor's draft as an absent-draft seed (`ComposerDraftCoordinator.carryDraft`); the sealed chapter keeps its own draft. The optimistic outgoing row stays with the sealed chapter's submission admission, so the successor shows the just-sent message only once its canonical row arrives. An ordinary chat never sends through `home.prompt`, and a sealed chapter never receives `session.prompt`.
+
 `SessionCatalogCoordinator` owns the focused profile's summaries, while the dashboard pool owns
 profile-qualified shallow catalogs for non-focused profiles. `SessionSummary` carries dashboard-only
 profile ownership and the dashboard aggregates by `(profileID, sessionID)`; equal bare session IDs from
@@ -1464,6 +1492,55 @@ immediate revocation; revoking this iPhone also removes its local profile.
 
 ## Presentation parity
 
+Home uses the ordinary `ChatView` transcript, composer, route and focus owners.
+`HomeChatHeader` adds a compact native top safe-area inset only for the current
+capable Home session, with shared semantic typography, the emerald glass surface,
+wrapping secondary memory copy and a native 44-point menu target. The existing
+mounted composer scope supplies the header's immutable profile identity. Both
+rendered admission and delayed menu callbacks use that owner identity, never the
+profile selected later; the mutation coordinator then captures and fences the
+lifecycle generation before asynchronous work. Gateway `active`
+is Working, `ready` is Ready, `paused` is Paused, `blocked` distinguishes missing
+configuration from Memory blocked, and `rollover-pending` is Recovery needed.
+No task or preparing state is guessed from unrelated runtime fields. An active
+response can remain Working while the independent memory projection is paused.
+Home sheets are presented by `ChatRoutes` from a `HomeSheetRoute` that `ChatView`
+holds, not by the header: a connection change clears the Home projection, which
+removes the header, but a presented sheet stays with the chat and re-reads from
+its profile/connection identity when the connection returns. Selecting another
+profile ends the chat route through the dashboard's profile route owner, which
+releases the sheet with it. The header only requests a destination.
+Stop response and the composer invoke the same `ChatView.abortCurrentOperation`
+using the current canonical operation ID; Pause/Resume never substitute for Stop.
+Pause memory, Resume memory and Disable Home use `HomeMutationCoordinator` and
+refresh the mounted status owner only on accepted terminal completion. Stop stays
+reachable while a Home mutation is running. Unresolved completion stays explicit,
+permits only receipt checks rather than replacement controls, and survives
+background/reconnect in the live invocation. An unresolved Disable retains the
+completion control even after authoritative status says Disabled; confirmed
+Disable removes the header without replacing chat. App restart reads current
+Gateway status, without claiming or replaying an old command. Memory model
+configuration uses the same receipt path; its settings UI is a separate sheet.
+The Home menu opens Memory Settings, Home Context and Browse Memory through the
+shared managed-sheet chrome. The browser additionally requires authenticated
+`home-memory-browser.v1`; settings/context require only `home.v1`. Memory Settings
+uses the existing progressive model-selection row and ModelPicker, filtered to
+registered, available physical models. Selection captures the mounted picker
+profile/lifecycle before sending `configureMemory` through the existing receipt
+owner. Choices stay Applying until the exact latest canonical status read
+converges, not merely until the configure receipt is terminal; an old installed
+model frame cannot admit a duplicate choice during that gap. It shows spend as
+information, configuration/pause/block state and explicit
+unresolved receipt checks, never budgets or cache/storage controls. The context
+inspector shows the activation's effective token/window, memory line/byte counts,
+start entry and refusal metadata from `home.status`, not SDK canonical usage or
+prompt/memory bodies. Browser cards distinguish summary, capped/omitted projection
+and canonical evidence, label attribution/date/omissions and expose source
+session/entry identity. Pagination replaces one page; canonical text is selectable.
+Loading, empty, blocked and retryable error states use shared presentation owners.
+
+
+
 Subagent context uses the shared seafoam compact inbound pill: supervisor progress
 keeps **Subagent · Progress Update**, per-child workflow notes use **Subagent ·
 Child Update**, and other admitted subagent messages use **Subagent · Update**.
@@ -2649,3 +2726,41 @@ false. A resource sheet presented by a composer chip/catalog must regain its own
 primary scroll eligibility rather than inherit the covered chat's exclusion.
 `managedSheetRestoresStatusBarOwnership` exercises actual bool/item presentations
 and their native document scrolls; without the reset both variants fail.
+
+### Home task sheets
+
+The Tasks sheet uses the task contract in
+`packages/gateway/docs/home.md` (task persistence, authorization, task recovery,
+inbox/redelivery and shared control). `home.taskList` is a bounded newest-first
+summary, not a native task catalog; `home.taskStatus` supplies exact detail and
+execution authority. One page replaces another. Dates are store-reported Unix
+milliseconds; spend shows the task's input and output token counts, or is unavailable when the Gateway reports none. Neither
+an unknown outcome nor a last assistant reply is labeled success.
+
+`HomeTaskSheet` uses the same managed chrome, glass cards, typography, loading,
+placeholder and action owners as the other Home sheets. It first reads status to
+show the task-only recovery fence and reason without issuing a fenced list or
+permission read. An empty uninitialized task list does not imply a permission
+grant: permission listing may refuse `not-initialized`. The menu requires the
+Gateway's task-recovery projection; ordinary session presentation is unchanged.
+
+All task/list/permission reads use `HomeSheetReadOwner` and AppModel's immutable
+profile, connection, lifecycle, managed activity and exact latest-intent fence
+before and after **each** awaited subread. A covered/backgrounded/disposed sheet
+cannot publish old values, errors or loading. Sheet controls require their exact
+installed read; accepted commands remain with `HomeMutationCoordinator` and its
+command ID/receipt invocation after dismissal. Unknown completion allows only
+receipt checks, never automatic mutation replay.
+
+Stop and steer capture task and operation from detail; the operation is the control fence;
+there is no transfer/takeover or successor targeting. Permissions list standing
+scopes and one-use grant states/expiry. Revocation does not stop admitted work.
+Grant review displays the exact stored target, intent revision/digest, scope,
+restore epoch. Native DatePicker requires the
+maintainer to select a future expiry for both approve and deny; only request ID,
+boolean decision, expiry and command ID are sent, never a substituted binding.
+Approval does not replay refused work. Explicit reconfirmation re-stamps active
+standing scopes after restore, never renews one-use grants or revoked scopes.
+Redelivery captures current Home/route generation and is offered only for a
+same-Home, unadmitted result on an older route; uncertain admitted results are
+not replayable. Canonical reports/inbox and all authorization remain Gateway-owned.

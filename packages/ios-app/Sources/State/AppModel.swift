@@ -115,15 +115,20 @@ final class AppModel {
         /// Full search evidence is retained through route replacement so the
         /// anchor RPC can validate branch/file identity before paging.
         let initialSearchResult: SessionSearchResult?
+        /// The Home conversation's logical route. Its `sessionID` is the physical
+        /// chapter it currently opens; sends go through `home.prompt`, and the
+        /// route follows Home to the chapter Home names next.
+        let isHome: Bool
         fileprivate let gatewayProfileID: String?
         fileprivate let gatewayLifecycleGeneration: Int?
         var id: String {
             let base = gatewayProfileID.map { "\($0):\(sessionID)" } ?? sessionID
+            let home = isHome ? "home" : nil
             let history = initialHistoryEntryID.map { "history:\($0)" }
             let evidence = initialSearchResult.map { result in
                 "search:\(result.anchorRevision.indexRevision):\(result.anchorRevision.fileIdentity):\(result.anchorRevision.branchDigest):\(result.anchorRevision.entryOrdinal)"
             }
-            return [base, history, evidence].compactMap { $0 }.joined(separator: ":")
+            return [base, home, history, evidence].compactMap { $0 }.joined(separator: ":")
         }
 
         init(
@@ -132,6 +137,7 @@ final class AppModel {
             initialModel: ModelRef? = nil,
             initialHistoryEntryID: String? = nil,
             initialSearchResult: SessionSearchResult? = nil,
+            isHome: Bool = false,
             gatewayProfileID: String? = nil,
             gatewayLifecycleGeneration: Int? = nil
         ) {
@@ -140,12 +146,13 @@ final class AppModel {
             self.initialModel = initialModel
             self.initialHistoryEntryID = initialHistoryEntryID
             self.initialSearchResult = initialSearchResult
+            self.isHome = isHome
             self.gatewayProfileID = gatewayProfileID
             self.gatewayLifecycleGeneration = gatewayLifecycleGeneration
         }
 
         func withEditorText(_ text: String?) -> SessionNavigationRoute {
-            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, initialHistoryEntryID: initialHistoryEntryID, initialSearchResult: initialSearchResult, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
+            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, initialHistoryEntryID: initialHistoryEntryID, initialSearchResult: initialSearchResult, isHome: isHome, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
         }
 
         func withInitialModel(_ model: ModelRef?) -> SessionNavigationRoute {
@@ -155,6 +162,7 @@ final class AppModel {
                 initialModel: model,
                 initialHistoryEntryID: initialHistoryEntryID,
                 initialSearchResult: initialSearchResult,
+                isHome: isHome,
                 gatewayProfileID: gatewayProfileID,
                 gatewayLifecycleGeneration: gatewayLifecycleGeneration
             )
@@ -246,6 +254,10 @@ final class AppModel {
     private var sessionSearchPolicyMutationTails: [String: (id: UUID, task: Task<SessionSearchPolicy, Error>)] = [:]
     private var sessionSearchPolicyLoadedConnections: [String: String] = [:]
     let automationCatalog: AutomationCatalogCoordinator
+    /// Focused-profile, disposable Home status; never a mirror of Home storage.
+    let homeStatus = HomeStatusPresentationOwner()
+    /// Owns idempotent Home designation receipts independently of dashboard reads.
+    let homeMutations: HomeMutationCoordinator
     /// Typed access to Gateway-owned Knowledge; no records are persisted here.
     let knowledge: KnowledgeRPCClient
     /// The Library's bounded first-page projection and its preview images. Both
@@ -561,6 +573,12 @@ final class AppModel {
             clock: clock,
             performanceSignposts: appLogSignposts
         )
+        let homeMutations = HomeMutationCoordinator(
+            client: client,
+            lifecycle: lifecycle,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
         let sessionMutations = SessionMutationService(
             client: client,
             executor: mutationExecutor,
@@ -617,9 +635,10 @@ final class AppModel {
             },
             attachmentFileAccess: composerAttachmentFileAccess,
             draftStore: composerDraftStore,
-            send: composerSend ?? { text, sessionID, uploadIDs, behavior, resourceInvocation in
-                try await sessionMutations.prompt(
+            send: composerSend ?? { text, sessionID, uploadIDs, behavior, resourceInvocation, route in
+                try await sessionMutations.submitComposer(
                     text,
+                    route: route,
                     sessionID: sessionID,
                     uploadIDs: uploadIDs,
                     behavior: behavior,
@@ -732,6 +751,7 @@ final class AppModel {
         self.knowledgeLibraryCache = knowledgeLibraryCache
         self.knowledgePreviews = knowledgePreviews
         self.integrations = integrations
+        self.homeMutations = homeMutations
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
         self.sessionImports = SessionImportCoordinator(
@@ -1883,6 +1903,7 @@ final class AppModel {
     @discardableResult
     func enteredBackground() -> Task<Void, Never> {
         recordSceneTransition(to: .background, flush: true)
+        homeStatus.suspendForBackground()
         sceneAllowsCatalogRefresh = false
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
@@ -2021,8 +2042,10 @@ final class AppModel {
         setGatewayEnabled(false, profile: profile)
     }
 
-    /// Disposable per-Gateway projections retire with the Gateway itself.
+    /// Disposable per-Gateway projections retire with the Gateway itself, and so
+    /// does the profile's pending Home receipt: its Gateway can no longer be checked.
     private func forgetProfileCaches(_ profileID: String) async {
+        homeMutations.forgetProfile(profileID)
         await composerDrafts.removeProfile(profileID).value
         await cache.remove(profileID: profileID)
         await knowledgeLibraryCache.remove(profileID: profileID)
@@ -3701,6 +3724,7 @@ final class AppModel {
     }
 
     private func invalidateSessionConnectionOwnership() {
+        homeStatus.connectionRetired()
         cancelAllExtensionEditorSynchronization()
         // Transcript media is profile/lifecycle-owned HTTP state. A disposable
         // WebSocket epoch handoff must not cancel an open preview or evict its
@@ -3725,6 +3749,7 @@ final class AppModel {
         target: SessionPresentationTarget,
         behavior: String? = nil,
         resourceInvocation: ComposerResourceInvocation? = nil,
+        route: ComposerSubmissionRoute = .session,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
         runtimeGeneration: String? = nil
@@ -3747,6 +3772,7 @@ final class AppModel {
             target: target,
             behavior: behavior,
             resourceInvocation: resourceInvocation,
+            route: route,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages,
             runtimeGeneration: runtimeGeneration
@@ -4688,6 +4714,214 @@ final class AppModel {
         try await terminal.terminate(id, intent: intent)
     }
 
+    /// The visible Home owner registers only authenticated focused-Gateway
+    /// status reads. This is disposable presentation work, never a mutation.
+    func mountHomeStatus(surfaceToken: PresentationSurfaceToken, activityCoordinator: PresentationActivityCoordinator) {
+        installHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator, cadence: .mounted)
+    }
+
+    /// A chat takes the status surface from the covered dashboard. A known status
+    /// decides by the route's key alone, so a chat the status does not present
+    /// never reads. Before any status is known, the chat's probe decides by its
+    /// first published read (see `HomeStatusPresentationOwner.Cadence`). Returns
+    /// whether the chat now owns the status surface.
+    func mountHomeStatusForChat(
+        surfaceToken: PresentationSurfaceToken,
+        activityCoordinator: PresentationActivityCoordinator,
+        route: HomeChatRouteKey
+    ) -> Bool {
+        if let status = homeStatus.status {
+            guard route.matches(status) else { return false }
+            mountHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator)
+            return true
+        }
+        guard lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true else { return false }
+        installHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator, cadence: .connectionOnly(route))
+        return true
+    }
+
+    private func installHomeStatus(
+        surfaceToken: PresentationSurfaceToken,
+        activityCoordinator: PresentationActivityCoordinator,
+        cadence: HomeStatusPresentationOwner.Cadence
+    ) {
+        // The read belongs to the surface, not to a selected profile: a dashboard
+        // mounted before pairing reads Home as soon as pairing configures it.
+        homeStatus.mountSurface(token: surfaceToken, coordinator: activityCoordinator, cadence: cadence) { [weak self] fence in
+            guard let self,
+                  self.lifecycle.selectedProfileID == fence.profileID,
+                  let admission = self.lifecycle.admission,
+                  let currentConnectionID = admission.connectionID,
+                  String(currentConnectionID) == fence.connectionID,
+                  self.lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true,
+                  self.lifecycle.admits(admission) else { throw CancellationError() }
+            let value = try await self.lifecycle.client.requestValue(
+                "home.status", JSONValue.object([:]),
+                expectedConnection: GatewayConnectionAdmission(connectionID: currentConnectionID)
+            )
+            guard self.lifecycle.selectedProfileID == fence.profileID,
+                  self.lifecycle.admits(admission),
+                  String(currentConnectionID) == fence.connectionID else { throw CancellationError() }
+            return try HomeStatusDTO.decode(value)
+        }
+        guard let profileID = lifecycle.selectedProfileID else { return }
+        let connectionID = lifecycle.admission?.connectionID.map(String.init)
+        let capable = lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true
+        homeStatus.configure(profileID: profileID, connectionID: connectionID, capabilityEnabled: capable)
+    }
+
+    /// Sheet reads share lifecycle authority, but not the covered chat's status
+    /// cadence. Each managed sheet owns and retires its bounded page.
+    func homeSheetReadIdentity(profileID: String, surfaceToken: PresentationSurfaceToken?) -> HomeSheetReadIdentity? {
+        guard let surfaceToken, lifecycle.selectedProfileID == profileID,
+              let admission = lifecycle.admission, lifecycle.admits(admission),
+              let connectionID = admission.connectionID,
+              lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true else { return nil }
+        return HomeSheetReadIdentity(profileID: profileID, connectionID: connectionID,
+                                     lifecycleGeneration: lifecycle.currentLifecycleGeneration, surfaceToken: surfaceToken)
+    }
+
+    func readHomeSheet(_ query: HomeSheetReadQuery, identity: HomeSheetReadIdentity, isCurrent: @escaping @MainActor () -> Bool) async throws -> HomeSheetContent {
+        guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
+              !Task.isCancelled, isCurrent() else { throw CancellationError() }
+        // Every request is fenced by the same identity and sheet currency before it is
+        // sent and again before its answer is published.
+        func read(_ method: String, _ params: JSONValue = .object([:])) async throws -> JSONValue {
+            guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
+                  !Task.isCancelled, isCurrent() else { throw CancellationError() }
+            let value = try await lifecycle.client.requestValue(method, params,
+                expectedConnection: GatewayConnectionAdmission(connectionID: identity.connectionID))
+            guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
+                  !Task.isCancelled, isCurrent() else { throw CancellationError() }
+            return value
+        }
+        // Each task sheet consumes status first, so a recovery refusal remains
+        // visible without attempting a fenced task/authorization read.
+        func readTaskStatus() async throws -> HomeStatusDTO {
+            try HomeStatusDTO.decode(try await read("home.status"))
+        }
+        func requireMemoryBrowser() throws {
+            guard lifecycle.gatewayInfo?.capabilities.contains("home-memory-browser.v1") == true else {
+                throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the memory browser.", retryable: false, details: nil)
+            }
+        }
+        switch query {
+        case .status:
+            return .status(try HomeStatusDTO.decode(try await read("home.status")))
+        case .tasks(let cursor):
+            let status = try await readTaskStatus()
+            var params: [String: JSONValue] = ["limit": .number(20)]
+            if let cursor { params["cursor"] = .string(cursor) }
+            return .tasks(status.admitsTaskReads ? try HomeTaskPageDTO.decode(try await read("home.taskList", .object(params))) : nil, status)
+        case .task(let id):
+            let status = try await readTaskStatus()
+            return .task(status.admitsTaskReads ? try HomeTaskDTO.decode(try await read("home.taskStatus", .object(["taskId": .string(id)])), taskID: id) : nil, status)
+        case .permissions:
+            let status = try await readTaskStatus()
+            return .permissions(status.admitsTaskReads ? try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions")) : nil, status)
+        case .memory(let continuation):
+            try requireMemoryBrowser()
+            var values: [String: JSONValue] = ["limit": .number(20)]
+            if let continuation { values["cursor"] = .string(continuation.cursor) }
+            return .memory(try HomeMemoryPageDTO.decode(try await read("home.memory.page", .object(values)), continuation: continuation))
+        case .evidence(let source, let offset):
+            try requireMemoryBrowser()
+            let params = JSONValue.object(["evidence": try JSONValue.encode(source), "offset": .number(Double(offset))])
+            return .evidence(try HomeMemoryEvidencePageDTO.decode(try await read("home.memory.evidence", params), evidence: source, offset: offset))
+        }
+    }
+
+    func unmountHomeStatus(surfaceToken: PresentationSurfaceToken) {
+        homeStatus.retireSurface(surfaceToken)
+    }
+
+    /// Forms a profile-qualified route only from the current authenticated Home
+    /// projection; it never switches profiles based on a stale row tap.
+    func navigationRouteForHome(profileID: String, status: HomeStatusDTO) throws -> SessionNavigationRoute {
+        guard lifecycle.selectedProfileID == profileID,
+              connectionState == .connected,
+              gatewayInfo?.capabilities.contains("home.v1") == true,
+              homeStatus.capabilityEnabled,
+              homeStatus.status == status,
+              case .open(let sessionID) = HomePinnedRowPolicy.action(for: status) else {
+            throw CancellationError()
+        }
+        return SessionNavigationRoute(
+            sessionID: sessionID,
+            editorText: nil,
+            isHome: true,
+            gatewayProfileID: profileID,
+            gatewayLifecycleGeneration: lifecycle.currentLifecycleGeneration
+        )
+    }
+
+    /// The Home route's next chapter, or nil when the route already opens the
+    /// chapter Home names. The route's unsent text moves with it to that chapter's
+    /// draft (see `ComposerDraftCoordinator.carryDraft`).
+    func followedHomeRoute(
+        from route: SessionNavigationRoute,
+        profileID: String,
+        status: HomeStatusDTO
+    ) throws -> SessionNavigationRoute? {
+        let next = try navigationRouteForHome(profileID: profileID, status: status)
+        guard next.sessionID != route.sessionID else { return nil }
+        composerDrafts.carryDraft(
+            from: ComposerDraftScope(profileID: profileID, sessionID: route.sessionID),
+            to: ComposerDraftScope(profileID: profileID, sessionID: next.sessionID)
+        )
+        return next
+    }
+
+    /// Home control effects belong to the receipt owner, not the mounted read.
+    /// A fresh projection is requested only after accepted terminal completion.
+    func performHomeControl(_ command: HomeMutationCoordinator.Command, authority: HomeMutationCoordinator.Authority) async throws {
+        guard command != .designate else { throw CancellationError() }
+        _ = try await homeMutations.perform(command, authority: authority)
+        await homeStatus.refreshMounted()
+    }
+
+    func checkHomeControlCompletion(authority: HomeMutationCoordinator.Authority) async throws {
+        _ = try await refreshingHomeStatusIfNotApplied {
+            try await homeMutations.checkCompletion(authority: authority)
+        }
+        await homeStatus.refreshMounted()
+    }
+
+    /// A receipt that proves a Home change was not applied leaves the projection
+    /// the user is looking at stale; reload it before reporting that outcome.
+    private func refreshingHomeStatusIfNotApplied<Value>(
+        _ operation: () async throws -> Value
+    ) async throws -> Value {
+        do { return try await operation() }
+        catch let failure as GatewayFailure where failure.code == HomeMutationCoordinator.notAppliedCode {
+            await homeStatus.refreshMounted()
+            throw failure
+        }
+    }
+
+    /// Designates Home through the mutation receipt owner, then requires a fresh
+    /// mounted `home.status` projection before exposing its session route.
+    func designateHomeAndRefreshStatus(authority: HomeMutationCoordinator.Authority) async throws -> HomeStatusDTO {
+        let designation = try await refreshingHomeStatusIfNotApplied {
+            try await homeMutations.designate(authority: authority)
+        }
+        await homeStatus.refreshMounted()
+        guard let status = homeStatus.status,
+              status.enabled,
+              status.sessionPresent,
+              status.homeId == designation.homeId,
+              status.sessionId == designation.sessionId,
+              status.generation == designation.generation else {
+            throw GatewayFailure(
+                code: "disconnected",
+                message: "Home was designated, but its current session is not available yet.",
+                retryable: true,
+                details: nil
+            )
+        }
+        return status
+    }
+
     func handle(_ event: GatewayEvent) async {
         await handle(event, connectionID: nil)
     }
@@ -4796,6 +5030,9 @@ final class AppModel {
         case "transport.resyncRequired":
             sessionPresentation.scheduleResynchronization(sessionID: event.sessionId)
         case "session.summary":
+            if let sessionID = event.sessionId {
+                Task { @MainActor [weak self] in await self?.homeStatus.invalidateMounted(sessionID: sessionID) }
+            }
             guard case .sessionSummary(let update) = event.preparation else {
                 // A malformed or newer summary must not silently leave a row's
                 // icon stale. The authoritative catalog is the recovery path;
@@ -4805,6 +5042,7 @@ final class AppModel {
             }
             apply(update)
         case "session.listChanged":
+            Task { @MainActor [weak self] in await self?.homeStatus.invalidateMounted() }
             scheduleSessionListRefresh()
         case "auth.prompt":
             providerAuth.handlePrompt(event.payload)
@@ -5422,6 +5660,17 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         invalidateSessionConnectionOwnership()
     }
 
+    func lifecycleRefreshHomeStatus(admission: GatewayLifecycleCoordinator.Admission) {
+        guard admitsLifecycle(admission),
+              let profileID = lifecycle.selectedProfileID,
+              let connectionID = admission.connectionID else { return }
+        homeStatus.configure(
+            profileID: profileID,
+            connectionID: String(connectionID),
+            capabilityEnabled: gatewayInfo?.capabilities.contains("home.v1") == true
+        )
+    }
+
     func lifecycleBeginReconciliationAggregate(
         admission: GatewayLifecycleCoordinator.Admission
     ) {
@@ -5452,6 +5701,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard !Task.isCancelled, admitsLifecycle(admission) else { return }
+        lifecycleRefreshHomeStatus(admission: admission)
         adoptConnectedGatewayIdentity()
         // No revision is bumped for the advertisement: nothing presents it yet,
         // and the profile's dial endpoint did not change.
@@ -5569,6 +5819,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
     func lifecycleRetireProjection(final: Bool) async {
         diagnosticsAreReady = false
+        // Revoke connection-bound owners before this transition can suspend or fail.
+        invalidateSessionConnectionOwnership()
+        homeStatus.profileRetired()
         optionalReconnectRefreshTask?.cancel()
         optionalReconnectRefreshTask = nil
         mountedOptionalRefreshTask?.cancel()
@@ -5592,7 +5845,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         dashboardConnections.retire(endedBy: .stopped)
         notificationInbox.cancelRefreshes()
         await dashboardConnections.waitForRetirement()
-        invalidateSessionConnectionOwnership()
         chatMedia.removeAll()
         clearGatewayProjection()
 

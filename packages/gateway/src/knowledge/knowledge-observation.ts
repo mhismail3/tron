@@ -338,6 +338,12 @@ export class KnowledgeObservationService {
     private readonly model: ObservationModel | ((config: KnowledgeConfig) => ObservationModel | undefined) | undefined,
     private readonly workRegistry?: GatewayWorkRegistry,
     private readonly onDiagnostic?: (fact: { code: string; dropped: number; queued: number }) => void,
+    /** Sessions this Gateway never observes automatically. It is a policy the
+     * observer consults, not a global setting: Tron Home is one private
+     * conversation whose memory is its own (docs/home.md), so the Gateway passes
+     * the Home owner's designation here. Explicit Knowledge actions never come
+     * through this path and are unaffected. */
+    private readonly sessionExcluded?: (sessionId: string) => boolean,
   ) {}
 
   /** Releases process-local prospective work. Cuts already recorded as pending
@@ -354,6 +360,9 @@ export class KnowledgeObservationService {
 
   admit(settlement: ObservationSettlement): boolean {
     if (this.cancelled.signal.aborted || !settlement.sessionId) return false;
+    // Refused before it is queued: an excluded session must not hold a
+    // reservation, reach the observer's model, or write coverage.
+    if (this.sessionExcluded?.(settlement.sessionId) === true) return false;
     if (!this.enqueue(settlement)) return false;
     void this.drain();
     return true;

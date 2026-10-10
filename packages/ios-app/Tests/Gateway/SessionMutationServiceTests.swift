@@ -1007,6 +1007,41 @@ struct SessionMutationServiceTests {
         let signposts: RecordingPerformanceSignposts
     }
 
+    /// The Home route's send is `home.prompt`: it carries the submission's
+    /// attachments and steering behavior, and names no physical chapter.
+    @Test("a Home submission is sent as home.prompt with its attachments and no physical session")
+    func homeSubmissionUsesLogicalRoute() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let sending = Task {
+                try await harness.service.submitComposer(
+                    "Review the attachment",
+                    route: .home,
+                    sessionID: "sealed-predecessor",
+                    uploadIDs: ["upload-a"],
+                    behavior: "followUp",
+                    resourceInvocation: nil
+                )
+            }
+            let prompt = try await request(in: harness.socket, frameIndex: 1)
+            #expect(prompt.method == "home.prompt")
+            #expect(prompt.params?["sessionId"] == nil)
+            #expect(prompt.params?["text"] == .string("Review the attachment"))
+            #expect(prompt.params?["uploadIds"] == .array([.string("upload-a")]))
+            #expect(prompt.params?["behavior"] == .string("followUp"))
+            try expectCommandID(prompt)
+            await harness.socket.enqueue(successResponse(
+                id: prompt.id,
+                result: .object([
+                    "logicalSessionId": .string("home"), "sessionId": .string("current-chapter"),
+                    "operationId": .string("operation"),
+                ])
+            ))
+            #expect(try await valueOfOwnedTask(sending) == "operation")
+            await harness.client.close()
+        }
+    }
+
     private struct Request {
         let id: String
         let method: String

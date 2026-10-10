@@ -992,8 +992,13 @@ worktrees, or branches.
 Every run durably snapshots its target and concrete execution-session ID before
 dispatch. Existing targets reuse their session ID; workspace runs receive a new
 predetermined UUID and create that exact identity through
-`RuntimeRegistry`/`RuntimeSlot`. A live-only generated slot carries an exact
-operation-owned lease until Pi persists its first user or assistant message.
+`RuntimeRegistry`/`RuntimeSlot`. `OwnedSessionDispatch` is the neutral boundary
+for shared session leases, exact recovery evidence, and terminal acknowledgement;
+Automation retains its own operation identity and result interpretation above
+that seam. The seam also owns the fixed 24-hour deadline primitive for callers
+that explicitly opt in; it does not impose a deadline on ordinary sessions or
+Automation. A live-only generated slot carries an exact operation-owned lease
+until Pi persists its first user or assistant message.
 Restart recovery always consults the run snapshot and concrete session identity.
 A new session with no user or assistant message remains memory-only; after the
 first user message, Pi persists the transcript and any earlier canonical
@@ -1063,6 +1068,48 @@ Gateway canonical stores stay with their existing owners. Initialization,
 fail-local recovery, backup, prompt coverage, internal-file display, and the
 future managed-state contract are owned by
 [`docs/internal-workspace.md`](docs/internal-workspace.md).
+
+## Tron Home
+
+Tron Home is one opt-in persistent conversation per Gateway installation. It is created only by an explicit
+`home.designate`; until then every session is ordinary. [`docs/home.md`](docs/home.md) owns its designation
+record, RPC shapes, chapters, runtime profile, memory, task delegation and terminal client.
+
+- **Memory.** There is no memory default: Home refuses activations until `home.configureMemory` records a
+  physical model. Memory spend is bounded by construction and reported; there is no budget to manage. Each
+  activation sends the model only the system messages before it, ONE frozen memory view and its own messages.
+  Prior activations are never re-sent, and the view is never persisted.
+- **Runtime.** Home runs in the neutral `<tronHome>/gateway/home/workspace` under an explicit untrusted decision,
+  with a curated profile: no agent-directory or project discovery (including `SYSTEM.md` and `APPEND_SYSTEM.md`),
+  no Pi built-ins, a fixed executable-tool allowlist, per-session compaction disabled, a fixed physical model,
+  and zero cache-warming requests. Designation is keyed by session id. A profile change replaces the live runtime
+  inside the session's lane. Bound Home chapters refuse fork and identity replacement (`home-identity-replacement`),
+  and a separately imported session is ordinary.
+- **Chapters.** Home's history is split into physical chapters at quiescent soft and hard size boundaries.
+  Sealed chapters stay readable and refuse mutation.
+- **Tasks.** Home is delegate-only for project work. `delegate` admits finite work once, in a trusted project,
+  through the neutral owned-session boundary. Workers keep normal project capabilities plus the explicit `report`
+  tool. v1 refuses subagent execution and revival, scheduled work and durable `bg_wait` wake subscriptions.
+  Reports seal exact canonical evidence, never the latest assistant reply; a missing report is `limited` or
+  `unknown`. A fixed internal 24-hour deadline cancels and joins operation-owned work. Usage is reported as tokens only,
+  and unknown tracked detached work yields `unknown`, never a clean-stop claim.
+- **Authority and recovery.** Task authority lives in a separate strict store, initialized on first dispatch.
+  Startup retires abandoned tasks from exact canonical reports or terminal `unknown`, without replaying a prompt,
+  and co-commits the result outbox. A recovery refusal fences task surfaces until the next start, exposed as
+  `home.status.taskRecovery`; ordinary sessions keep working. A restored or copied Tron home needs an explicit
+  maintainer `home.reconfirmPermissions` (terminal `/home reconfirm-permissions`), which renews active standing
+  scopes only. The maintainer-only `home.taskPermissions`, `home.revokeTaskScope`, `home.revokeTaskGrant` and
+  `home.decideTaskGrant` RPCs list and revoke authority, or approve or deny an exact durable request with a one-use,
+  expiry-bound grant. Home cannot approve its own requests.
+- **Task control.** `home.taskList`, `home.taskStatus`, `home.steerTask` and `home.stopTask` expose durable spend
+  and shared control. Terminal `/home task`, `/home steer` and `/home stop` target one task. Steering shares the
+  session lane; Stop persists exact intent and cancels outside blocked admission. Canonical usage identities dedupe
+  tokens before display. Task results never trigger an automatic Home call: terminal tasks co-commit a durable inbox
+  event, delivered on the next maintainer Home message, and make one advisory push decision at most.
+- **Protocol.** `home.v1` is advertised in `hello` and `system.info`. `home-memory-browser.v1` additionally gates the
+  typed memory browser, `home.memory.page` and `home.memory.evidence`: disposable reads of projected summaries and
+  canonical history. The RPC table, the `home.status` shape, the memory browser contract and the terminal `/home`
+  command table are in [`docs/home.md`](docs/home.md#rpcs).
 
 ## Runtime and state
 
@@ -1210,6 +1257,14 @@ rejected with bounded diagnostics and can never become an uncaught process exit.
 - Push grants and short-lived intents: `gateway/notifications.json`, an exact 1 MiB owner-only document. It stores endpoint-scoped grants, at most 64 active devices, 256 pending intents, 512 bounded receipts, and 192 revocation tombstones (128 rotation slots plus a 64-device revocation reserve). It never stores raw APNs tokens. Secrets and message content are excluded from RPC projections, logs, and Pi session JSONL.
 
 ## Push notifications
+
+Home task operations have one separate terminal owner: their immutable task
+record co-commits the wake inbox and durably decides one advisory push before
+enqueue. The hint uses a stable task-result event identity and logical `home`
+route; a crash after decision may omit it, never replay it. Ordinary terminal
+alerts remain unchanged. The wake inbox (not APNs or the notification bell)
+delivers the attributed result on the next Home message. See
+[Task wake inbox and terminal push](docs/home.md#task-wake-inbox-and-terminal-push).
 
 The first-party inline Pi extension reserves `notify({message})`; RuntimeSlot owns automatic terminal alerts. Pi 0.87 defines `agent_before_settle` as the final actionable boundary (entries plus one `continue: true` request) and `agent_settled` as notification-only after automatic work is finished. `pi.sendMessage(..., { triggerTurn: true })` from an `agent_settled` handler remains available but starts a distinct SDK run/operation with different receipt and notification semantics; it is not equivalent to an in-run `agent_before_settle` continuation. Candidate fixtures exercise `agent_before_settle`. A bounded installed-extension review found no equivalent old-style continuation consumer: `pi-subagents@0.59` uses `agent_settled` to resume widgets (its `triggerTurn` use belongs to `session_compact`), `pi-web-access@0.22` triggers turns from async fetch/command paths, and no `agent_settled` consumer was found in pi-goal, browser, or pi-sub-anthropic. Arbitrary project extensions were not exhaustively inspected, so review them before adoption if present; no compatibility shim is provided. Only Pi's final `agent_settled` at idle is terminal, so automatic retries, compaction retries, queued follow-ups, recoverable tool errors, and extension continuations do not announce an intermediate response. RuntimeSlot matches the exact final run's canonical assistant object and queues fixed, outcome-specific copy for normal completion, output limits, terminal errors (including retry exhaustion), aborts, or a tool/agent stop without a final response. Exact Gateway abort ownership overrides the last assistant reason, including cancellation during retry backoff. It never searches backward for an earlier successful answer or infers an outcome from error prose. The assistant entry ID remains the durable deduplication source and also keys one bounded RuntimeSlot observation disposition shared with successful-response attention state. Without a canonical assistant, the existing invocation terminal receipt ID is the source; a Gateway-derived run without an invocation uses its exact operation identity. An exact mobile subscription may publish `session.presentation.set` only after synchronization; monotonically revisioned visible/hidden updates are token-bound, one per connection, removed on close/replacement/disconnect/rekey/delete, and visible leases expire after 45 seconds unless iOS renews them. If that disposition observes an active chat, RuntimeSlot does not invoke notification enqueue: NotificationService writes only a durable `suppressed` receipt for the completion, creates no relay intent or inbox row, and excludes it from delivery quota. Terminal alerts otherwise carry the bounded session title plus the exact Gateway machine/session route; tapping is therefore profile-qualified rather than inferred from whichever server is selected on iOS. The extension receives only a narrow enqueue closure: the model cannot choose a device, APNs token, environment, topic, relay origin, request ID, priority, badge, payload dictionary, or presentation policy. Admission is persisted before dispatch, expires after fifteen minutes, and returns `queued`, `suppressed`, `rate_limited`, or `unavailable`; APNs acceptance is never described as user delivery. The Gateway does not impose a routine daily notification quota; admission is bounded by the durable pending-intent capacity, and the relay owns the per-device hourly and routine-daily runaway backstop. Capacity refusals are returned synchronously and do not create intents or inbox rows. Preview-disabled grants still replace model-authored `notify` text with fixed generic copy; automatic terminal body copy is fixed by Tron rather than the model. The session title is the product-required terminal-alert title and is therefore shown independently of that model-text preview flag.
 
@@ -1645,16 +1700,18 @@ A client that stops waiting for a disposable read sends `{type:"cancel",id}` and
 receives no answer: the Gateway abandons that request's work and records
 `rpc.cancelled` with the stage it interrupted. Cancellation applies only to
 `session.open`, `session.list`, `session.transcript`, `session.history.list`,
-`session.history.entry`, `session.search`, `model.list`, `provider.list` and
-`provider.usage`; a cancel for any other method is ignored. An accepted mutation
+`session.history.entry`, `home.memory.page`, `home.memory.evidence`,
+`session.search`, `model.list`, `provider.list` and `provider.usage`; a cancel for
+any other method is ignored. An accepted mutation
 or admitted prompt is never cancelled, and neither is a `session.sync`
 acknowledgement: their owners settle them durably whatever the client does with
 their wait.
-Five of those nine methods have server-side deadlines
+Seven of those eleven methods have server-side deadlines
 (`DISPOSABLE_READ_DEADLINES_MS` in `packages/gateway/src/transport/server.ts`):
 10 s for `session.open`, whose cold load may parse a large transcript before its
 subscription commits, and 5 s for `session.list` and the transcript pages
-(`session.transcript`, `session.history.list`, `session.history.entry`). A read
+(`session.transcript`, `session.history.list`, `session.history.entry`) and the
+Home browser (`home.memory.page`, `home.memory.evidence`). A read
 that outlives its deadline is aborted, answered `busy` with
 `details.retryAfterMs`, and recorded once as `gateway.shed` with
 `reason=deadline`; the phone waits that hint (bounded to 10 s), retries the read
@@ -2506,7 +2563,7 @@ it does not impose an FSEvents delivery deadline.
 
 `RuntimeRegistry` derives membership from the index rows, not a second catalog: `catalogAcquisition` projects canonical ID/path/cwd, the structural user-versus-subagent classification and the ambiguous-ID set from the owner's rows, with no filesystem read of its own. The index is authoritative for cold open, attention resolution, automation admission, workspace lookup and delete. A Gateway-owned change reaches a row at its commit point but asynchronously, so a read that finds no row for a named session waits for the owner's queued changes and re-resolves before it may answer `not_found`; an ID the owner read a header for but could not prove refuses retryably. Ordinary message/tool appends do not change membership. Additions, removals, aliases, duplicate identities, or same-path header identity replacement do. A malformed file under the reserved `subagent-artifacts` diagnostic subtree is ignored as a non-session artifact and cannot poison the cut. Malformed files in canonical session locations still fail closed. An unfinished delegated append therefore cannot force unrelated cold opens into discovery or prevent a user dashboard from serving its rows. The selected cold file is checked before SDK open, which can repair incomplete tails; an unfinished selected file fails retryably without being rewritten. Changing, replaced, symlinked, duplicate, or header-rewritten files remain strict; append-only tail growth of the exact inode currently owned by a live RuntimeSlot remains permitted. Directories named `*.jsonl` are not file candidates.
 
-The exact opened manager must still reproduce the admitted ID and canonical cwd, and the fence reads only the target: the index must still claim this exact file, and that file's own stat and header must still be the ones the index admitted, so no request walks the tree. Changes reject retryably, while the unavoidable cross-process race after that final validation point is not presented as eliminated. The owner's whole-folder scan reads canonical session headers with 512-byte first reads, runs in deterministic batches of at most 16 files, permits at most 64 KiB per candidate with a strict shared 64 MiB aggregate budget apportioned across the candidate set, and inserts at most 25,000 identities/4 MiB into the index. It reads only the canonical session header; later `session_info` and transcript appends do not change the structural identity. Gateway-owned mutations are generation-checked across an admission, so a catalog change that lands during one refuses retryably instead of committing stale membership. Mutable summary/attention overlays are captured per projection generation after the rows, so heartbeats cannot starve a list projection. Delete resolves membership from the index and re-proves the exact path, inode and user classification immediately before inode-safe quarantine, so a new parent file, duplicate ID, or topology change cannot commit stale deletion. A cut that cannot prove a file refuses retryably instead of publishing stale evidence. Same-session cold opens share one startup, while distinct session starts reserve capacity atomically and perform manager/runtime initialization outside the registry-global publication mutex. Creation uses the same short reservation boundary, so one slow project resource loader cannot serialize unrelated starts. Administrative drain and shutdown wait for already-admitted starts before snapshotting runtime ownership. Thus idle resume normally avoids a transcript-wide catalog parse while JSONL and the pinned manager remain canonical. Startup binds the HTTP listener before RuntimeRegistry recovery begins. RuntimeRegistry loads the bounded durable attention/marker inputs while health remains `starting`, waits for the catalog owner's first reconcile pass (`catalog-warming`), then reconciles attention and interrupted markers from that same cut (`attention-recovery`); blob storage follows as `storage-warming`. Storage warming loads durable stores without materializing the presentation catalog or treating an unavailable catalog as an empty membership set. Periodic attachment/display-artifact maintenance derives retention membership from the owner's reconciled cut plus live runtime slots, and never materializes transcript summaries. Ambiguous IDs still retain their artifacts; an unreconciled or incomplete cut refuses retryably instead of collecting orphans. Pending Knowledge observation recovery resolves membership from the owner's reconciled cut, rejects duplicate IDs, and re-reads and re-proves the row's exact file identity and manager header; incomplete or changed evidence leaves durable cuts pending instead of inventing a missing session. It does not start an agent runtime. Large previews or catalog presentation failures therefore cannot block storage initialization; canonical acquisition, catalog bounds, and artifact authorization remain enforced. Focused regressions in `runtime-registry.integration.test.ts`, `session-catalog.test.ts`, `catalog-metadata-index.test.ts`, and `summary-text.test.ts` cover cold scans, UTF-8 boundaries, cached/append metadata, storage readiness, and retained artifacts. Only after all startup phases succeed does GatewayServer publish `ok`. Catalog validation, SDK materialization, target manager open, runtime creation, attention resolution/persistence, and startup attention reconciliation are separately timed with privacy-safe stage records; they report only method/stage, outcome, and duration and never log IDs, paths, prompts, or parameters. Runtime snapshots reuse exact statistics/context and latest-cache derivation for an unchanged runtime revision, then invalidate naturally at canonical event, branch, compaction, or rebind revisions.
+The exact opened manager must still reproduce the admitted ID and canonical cwd, and the fence reads only the target: the index must still claim this exact file, and that file's own stat and header must still be the ones the index admitted, so no request walks the tree. Changes reject retryably, while the unavoidable cross-process race after that final validation point is not presented as eliminated. The owner's whole-folder scan reads canonical session headers with 512-byte first reads, runs in deterministic batches of at most 16 files, permits at most 64 KiB per candidate with a strict shared 64 MiB aggregate budget apportioned across the candidate set, and inserts at most 25,000 identities/4 MiB into the index. It reads only the canonical session header; later `session_info` and transcript appends do not change the structural identity. Gateway-owned mutations are generation-checked across an admission, so a catalog change that lands during one refuses retryably instead of committing stale membership. Mutable summary/attention overlays are captured per projection generation after the rows, so heartbeats cannot starve a list projection. Delete resolves membership from the index and re-proves the exact path, inode and user classification immediately before inode-safe quarantine, so a new parent file, duplicate ID, or topology change cannot commit stale deletion. A cut that cannot prove a file refuses retryably instead of publishing stale evidence. Same-session cold opens share one startup, while distinct session starts reserve capacity atomically and perform manager/runtime initialization outside the registry-global publication mutex. Creation uses the same short reservation boundary, so one slow project resource loader cannot serialize unrelated starts. Administrative drain and shutdown wait for already-admitted starts before snapshotting runtime ownership. Thus idle resume normally avoids a transcript-wide catalog parse while JSONL and the pinned manager remain canonical. Startup binds the HTTP listener before RuntimeRegistry recovery begins. RuntimeRegistry loads the bounded durable attention/marker inputs while health remains `starting`, waits for the catalog owner's first reconcile pass (`catalog-warming`), then reconciles attention and interrupted markers from that same cut (`attention-recovery`); blob storage follows as `storage-warming`. Home task recovery runs after the listener is serving, following attention recovery; until it settles `home.status.taskRecovery` reports `not-started` and task work is refused, and it does not gate `ok`. Storage warming loads durable stores without materializing the presentation catalog or treating an unavailable catalog as an empty membership set. Periodic attachment/display-artifact maintenance derives retention membership from the owner's reconciled cut plus live runtime slots, and never materializes transcript summaries. Ambiguous IDs still retain their artifacts; an unreconciled or incomplete cut refuses retryably instead of collecting orphans. Pending Knowledge observation recovery resolves membership from the owner's reconciled cut, rejects duplicate IDs, and re-reads and re-proves the row's exact file identity and manager header; incomplete or changed evidence leaves durable cuts pending instead of inventing a missing session. It does not start an agent runtime. Large previews or catalog presentation failures therefore cannot block storage initialization; canonical acquisition, catalog bounds, and artifact authorization remain enforced. Focused regressions in `runtime-registry.integration.test.ts`, `session-catalog.test.ts`, `catalog-metadata-index.test.ts`, and `summary-text.test.ts` cover cold scans, UTF-8 boundaries, cached/append metadata, storage readiness, and retained artifacts. Only after all startup phases succeed does GatewayServer publish `ok`. Catalog validation, SDK materialization, target manager open, runtime creation, attention resolution/persistence, and startup attention reconciliation are separately timed with privacy-safe stage records; they report only method/stage, outcome, and duration and never log IDs, paths, prompts, or parameters. Runtime snapshots reuse exact statistics/context and latest-cache derivation for an unchanged runtime revision, then invalidate naturally at canonical event, branch, compaction, or rebind revisions.
 
 Accepted `session.prompt` and `terminal.open` mutations synchronously retain their
 exact live runtime before receipt I/O and pre-effect materialization/resolution
@@ -3269,6 +3326,19 @@ open a real PTY so packaging cannot silently ship a non-executable helper.
 
 [Session search](docs/session-search.md) owns the `session-search.v1` capability.
 
+## Episodic memory
+
+[Episodic memory](docs/episodic-memory.md) owns the projected-summary tree
+(`packages/gateway/src/episodic/`): its projection rules, tree and view algorithms,
+invalidation semantics, reported token spend, bounded retries and blocked states,
+and its storage under the internal workspace. [Tron Home](docs/home.md#memory-and-readiness)
+is its live caller: HomeOwner keys one store by stable `homeId` and supplies the
+canonical chapter source in ledger order. RuntimeSlot reports committed entries
+and navigation; HomeMemory ingests the source and builds missing summaries in the
+background. Each activation waits for and freezes the view preceding its start,
+then sends that view instead of earlier activations' transcript. Ordinary sessions
+do not use episodic memory.
+
 ## Development
 
 ```bash
@@ -3288,12 +3358,16 @@ owners narrow while iterating and use the full configured suite for checkpoints.
 
 `npm test` runs two Vitest passes, in order. The main pass (`vitest.config.ts`) runs
 the parallel suite. The nested pass (`vitest.nested.config.ts`) runs the files that
-spawn nested Vitest or real pi children, one file at a time. That config's list is
-the single owner of which files are nested. Under parallel workers those children
-starve and miss their execFile or detached-process bounds, so they cannot share the
-parallel pass; the bounds are hang bounds only, and a passing run never reaches them.
-For the same reason the nested pass declares its own hang bounds (240 s waits under a
-300 s test timeout, owned by that config) instead of the main pass's 12 s under 15 s.
+spawn nested Vitest or real pi children, or that activate the real managed provider
+(including a first load from a fresh install root), one file at a time. That config's
+list is the single owner of which files are nested. Under parallel workers those
+children starve and miss their execFile or detached-process bounds, so they cannot
+share the parallel pass; the bounds are hang bounds only, and a passing run never
+reaches them. For the same reason the nested pass declares its own hang bounds (240 s
+waits under a 300 s test timeout, owned by that config) instead of the main pass's
+12 s under 15 s. A fresh root's first managed load transpiles the whole extension
+graph because jiti's cache is keyed by absolute path; production reuses one stable
+root, so only its first load per install pays that cost.
 Run one of them with `npx vitest run --config vitest.nested.config.ts <file>`.
 
 Tests own every remote boundary through injected fetchers, resolvers and HTTP
@@ -3326,6 +3400,14 @@ exposes. Where elapsed time, a pass count or an attempt count is itself the
 contract — a throughput or latency relationship the test measures, a bounded
 number of discovery passes, an event storm whose length is the assertion — keep
 that explicit bound or count and say why at the call site.
+
+Two shapes that have failed under load (#650). A Stop, abort or steer that
+follows a wait for `slot.isBusy` or a phase is racing SDK admission: `isBusy`
+turns true at slot admission, and a Stop before the SDK admits the run revokes
+the prompt. Gate on the run's own entry (the faux response function signals when
+it is called) instead. And a wait whose condition needs a streamed faux reply
+must keep that reply short: the faux provider paces each chunk with a timer of at
+least 1 ms, so an 88 KB reply alone costs seconds against a 10 s bound.
 
 Attach a terminal chat surface to the same Gateway-owned runtime as iOS:
 

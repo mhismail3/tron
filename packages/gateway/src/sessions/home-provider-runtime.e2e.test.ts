@@ -1,0 +1,216 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxProvider, type AssistantMessage } from "@earendil-works/pi-ai";
+import { afterAll, afterEach, describe, expect, it, onTestFinished } from "vitest";
+import { fileURLToPath } from "node:url";
+import { SettingsService } from "../admin/settings-service.js";
+import { TrustService } from "../admin/trust-service.js";
+import type { GatewayConfig } from "../config.js";
+import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
+import type { HomeStatus } from "../protocol/types.js";
+import { CommandReceiptStore } from "../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+import { waitFor } from "../../test-support/wait-for.js";
+import { RuntimeRegistry } from "./runtime-registry.js";
+import { installOpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
+
+// #480 A1-A4, found live: Home's chat reached Pi's built-in Anthropic provider
+// instead of the user's CortexKit package. A user package registers its provider
+// into the Gateway-wide runtime (GlobalProviderResources); here a faux provider
+// registered only there stands in for it, and every per-session runtime the
+// registry builds lacks it, as a session that loads no packages would.
+
+const PACKAGE = { provider: "user-package", id: "chat" };
+const BUILTIN = { provider: "builtin", id: "chat" };
+const client = { id: "terminal", identity: "device:home-provider", isLocal: false, unsubscribe: () => {} } as unknown as ClientContext;
+const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+const summarizer: EpisodicSummarizer = async () => ({ role: "assistant", content: [{ type: "text", text: "user: summarized" }],
+  api: "faux", provider: "faux", model: "summarizer", usage: zero, stopReason: "stop", timestamp: Date.now() }) as AssistantMessage;
+
+const GATEWAY_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+const REPORT_PATH = join(GATEWAY_ROOT, "test-results/home-provider-runtime/report.json");
+type CaseReport = { name: string; status: "not-run" | "passed" | "failed"; observations?: Record<string, string | number | boolean | null> };
+const report: { generatedAt: string; cases: CaseReport[] } = { generatedAt: new Date().toISOString(), cases: [
+  { name: "provider lifecycle reaches the Gateway-wide runtime", status: "not-run" },
+  { name: "context-window override remains session-local", status: "not-run" },
+  { name: "unregistered provider remains unreachable", status: "not-run" },
+  { name: "shared eligibility survives Home rebuild and disposal", status: "not-run" },
+] };
+function trackCase(index: number): void {
+  onTestFinished(({ task }) => {
+    const state = task.result?.state;
+    report.cases[index]!.status = state === "pass" ? "passed" : state === "fail" ? "failed" : "not-run";
+  });
+}
+afterAll(async () => {
+  await mkdir(join(GATEWAY_ROOT, "test-results/home-provider-runtime"), { recursive: true });
+  await writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+});
+
+const cleanups: Array<() => Promise<void>> = [];
+afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+
+async function fixture(options: { shareGatewayRuntime: boolean }) {
+  const root = await mkdtemp(join(tmpdir(), "tron-home-provider-"));
+  cleanups.push(async () => { await rm(root, { recursive: true, force: true }); });
+  const agentDir = join(root, "agent");
+  const tronHome = join(root, "tron");
+  await mkdir(agentDir, { recursive: true });
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: BUILTIN.provider, defaultModel: BUILTIN.id }));
+  const packaged = fauxProvider({ provider: PACKAGE.provider, models: [{ id: PACKAGE.id, reasoning: false }] });
+  const builtinProvider = () => fauxProvider({ provider: BUILTIN.provider, models: [{ id: BUILTIN.id, reasoning: false }] });
+  const builtins: Array<ReturnType<typeof builtinProvider>> = [];
+  const create = async () => {
+    const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    const builtin = builtinProvider();
+    builtin.setResponses(Array.from({ length: 4 }, () => fauxAssistantMessage("ordinary reply")));
+    builtins.push(builtin);
+    runtime.registerNativeProvider(builtin.provider);
+    return runtime;
+  };
+  // The Gateway-wide runtime: built-ins plus the user's package provider.
+  const gateway = await create();
+  gateway.registerNativeProvider(packaged.provider);
+  const registry = new RuntimeRegistry({
+    agentDir, tronHome, idleRuntimeMs: 60_000,
+    modelRuntimeFactory: create,
+    ...(options.shareGatewayRuntime ? { gatewayModelRuntime: gateway } : {}),
+    trust: new TrustService(agentDir),
+    broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    homeMemorySummarizer: () => ({ summarizer }),
+  });
+  cleanups.push(async () => { await registry.dispose(); });
+  const service = new GatewayService({
+    config: { tronHome } as unknown as GatewayConfig, modelRuntime: gateway, sessions: registry, home: registry.homeOwner(),
+    receipts: new CommandReceiptStore(join(tronHome, "receipts")), settings: new SettingsService(agentDir, gateway),
+    trust: new TrustService(agentDir), sessionDeleted: () => {}, uploads: { removeSession: async () => {} },
+  } as unknown as GatewayServiceDependencies);
+  await registry.initialize();
+  return { root, gateway, packaged, registry, service };
+}
+
+const sessionOf = (slot: unknown) => (slot as { runtime: { session: AgentSession } }).runtime.session;
+
+function lastAssistant(session: AgentSession): AssistantMessage | undefined {
+  return session.messages.filter((message): message is AssistantMessage => message.role === "assistant").at(-1);
+}
+
+async function homeTurn(f: Awaited<ReturnType<typeof fixture>>, text: string): Promise<AssistantMessage | undefined> {
+  const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+  const home = await f.registry.acquire(status.sessionId!);
+  await home.prompt(text);
+  await waitFor(() => home.snapshot().configurationBlocker === null, `the Home turn "${text}"`);
+  return lastAssistant(sessionOf(home));
+}
+
+describe.sequential("Home's chat runtime", () => {
+  // A1, A2, A3.
+  it("reaches a provider only the Gateway-wide runtime has, through every Home lifecycle step", async () => {
+    trackCase(0);
+    const f = await fixture({ shareGatewayRuntime: true });
+    f.packaged.setResponses(Array.from({ length: 3 }, (_unused, index) => fauxAssistantMessage(`package reply ${index}`)));
+    await f.service.invoke(client, "home.designate", { commandId: "provider-designate", model: PACKAGE });
+    await f.service.invoke(client, "home.configureMemory", { commandId: "provider-memory", model: PACKAGE });
+    const first = await homeTurn(f, "first");
+    expect(first?.stopReason).toBe("stop");
+    expect(first?.provider).toBe(PACKAGE.provider);
+
+    // Disable and re-enable replace Home's runtime in place; the shared runtime stays usable.
+    await f.service.invoke(client, "home.disable", { commandId: "provider-disable" });
+    await f.service.invoke(client, "home.designate", { commandId: "provider-redesignate", model: PACKAGE });
+    const second = await homeTurn(f, "second");
+    // An ordinary session keeps a runtime of its own.
+    const ordinary = await f.registry.create(f.root);
+    const ordinaryHasPackage = sessionOf(ordinary).modelRuntime.getModel(PACKAGE.provider, PACKAGE.id) !== undefined;
+    report.cases[0]!.observations = {
+      firstProvider: first?.provider ?? null,
+      secondProvider: second?.provider ?? null,
+      gatewayHasPackage: f.gateway.getModel(PACKAGE.provider, PACKAGE.id) !== undefined,
+      ordinaryHasPackage,
+    };
+    expect(second?.stopReason).toBe("stop");
+    expect(f.gateway.getModel(PACKAGE.provider, PACKAGE.id)).toBeDefined();
+    expect(sessionOf(ordinary).modelRuntime).not.toBe(f.gateway);
+    expect(ordinaryHasPackage).toBe(false);
+  });
+
+  // Home's session-local context-window override must stay session-local.
+  // SessionContextWindowPolicy replaces `getModel` on the runtime it is given, so a
+  // shared runtime would leak the override into Gateway-wide lookups and stack each
+  // replaced runtime's lookup under the next.
+  it("keeps a Home context-window override out of the shared runtime, across runtime replacement", async () => {
+    trackCase(1);
+    const f = await fixture({ shareGatewayRuntime: true });
+    const catalogWindow = f.gateway.getModel(PACKAGE.provider, PACKAGE.id)!.contextWindow;
+    await f.service.invoke(client, "home.designate", { commandId: "window-designate", model: PACKAGE });
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const home = await f.registry.acquire(status.sessionId!);
+    const before = home.snapshot();
+    await home.setContextWindow(PACKAGE.provider, PACKAGE.id, 60_000, before.revision, before.runtimeGeneration);
+    const homeWindow = sessionOf(home).model?.contextWindow ?? null;
+    const sharedWindowAfterOverride = f.gateway.getModel(PACKAGE.provider, PACKAGE.id)!.contextWindow;
+    report.cases[1]!.observations = { catalogWindow, homeWindow, sharedWindowAfterOverride };
+    expect(homeWindow).toBe(60_000);
+    expect(sharedWindowAfterOverride).toBe(catalogWindow);
+
+    await f.service.invoke(client, "home.disable", { commandId: "window-disable" });
+    await f.service.invoke(client, "home.designate", { commandId: "window-redesignate", model: PACKAGE });
+    const replaced = await f.registry.acquire(status.sessionId!);
+    expect(sessionOf(replaced).model?.contextWindow).toBe(60_000);
+    const current = replaced.snapshot();
+    await replaced.setContextWindow(PACKAGE.provider, PACKAGE.id, null, current.revision, current.runtimeGeneration);
+    const restoredWindow = sessionOf(replaced).model?.contextWindow ?? null;
+    const sharedWindowAfterRestore = f.gateway.getModel(PACKAGE.provider, PACKAGE.id)!.contextWindow;
+    report.cases[1]!.observations = { ...report.cases[1]!.observations, restoredWindow, sharedWindowAfterRestore };
+    expect(restoredWindow).toBe(catalogWindow);
+    expect(sharedWindowAfterRestore).toBe(catalogWindow);
+  });
+
+  it("borrows shared model eligibility without replacing filters across Home rebuild and disposal", async () => {
+    trackCase(3);
+    const f = await fixture({ shareGatewayRuntime: true });
+    const eligibility = installOpenAIModelEligibility(f.gateway);
+    const provider = f.gateway.getProvider("openai")!;
+    expect(provider.filterModels).toBeTypeOf("function");
+    await f.service.invoke(client, "home.designate", { commandId: "eligibility-designate", model: PACKAGE });
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    for (let rebuild = 0; rebuild < 3; rebuild += 1) {
+      const home = await f.registry.acquire(status.sessionId!);
+      expect(f.gateway.getProvider("openai")).toBe(provider);
+      expect(openAIModelEligibility(sessionOf(home).modelRuntime)).toBe(eligibility);
+      await f.service.invoke(client, "home.disable", { commandId: `eligibility-disable-${rebuild}` });
+      await f.service.invoke(client, "home.designate", { commandId: `eligibility-redesignate-${rebuild}`, model: PACKAGE });
+    }
+    const ordinary = await f.registry.create(f.root);
+    const ordinaryRuntime = sessionOf(ordinary).modelRuntime;
+    expect(openAIModelEligibility(ordinaryRuntime)).toBeDefined();
+    await ordinary.setModel(BUILTIN.provider, BUILTIN.id);
+    expect(ordinary.snapshot().model).toMatchObject(BUILTIN);
+    await f.registry.dispose();
+    expect(openAIModelEligibility(f.gateway)).toBe(eligibility);
+    expect(f.gateway.getProvider("openai")).toBe(provider);
+    expect(openAIModelEligibility(ordinaryRuntime)).toBeUndefined();
+    report.cases[3]!.observations = { rebuilds: 3, sharedProviderUnchanged: true, sharedEligibilitySurvived: true, ordinaryDetached: true };
+  });
+
+  // A1's negative control: the same Home on a runtime without the package provider cannot reach it.
+  it("cannot reach that provider from a runtime the package never registered in", async () => {
+    trackCase(2);
+    const f = await fixture({ shareGatewayRuntime: false });
+    f.packaged.setResponses([fauxAssistantMessage("never sent")]);
+    const outcome = await f.service.invoke(client, "home.designate", { commandId: "isolated-designate", model: PACKAGE })
+      .then(async () => {
+        await f.service.invoke(client, "home.configureMemory", { commandId: "isolated-memory", model: PACKAGE });
+        return await homeTurn(f, "first");
+      })
+      .catch((error: Error) => error);
+    report.cases[2]!.observations = {
+      outcomeKind: outcome instanceof Error ? "error" : "assistant-reply",
+      outcomeProvider: outcome instanceof Error ? null : outcome?.provider ?? null,
+    };
+    if (outcome instanceof Error) expect(outcome.message).toMatch(/not registered|not found|model/iu);
+    else expect(outcome?.provider).not.toBe(PACKAGE.provider);
+  });
+});

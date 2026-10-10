@@ -8964,8 +8964,10 @@ export default function (pi) {
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     let release!: () => void;
     const responseBarrier = new Promise<void>((resolve) => { release = resolve; });
+    let agentEntered!: () => void;
+    const agentAdmitted = new Promise<void>((resolve) => { agentEntered = resolve; });
     const faux = fauxProvider({ provider: "tron-abort-invocation", tokensPerSecond: 10_000 });
-    faux.setResponses([async () => { await responseBarrier; return fauxAssistantMessage("should not complete"); }]);
+    faux.setResponses([async () => { agentEntered(); await responseBarrier; return fauxAssistantMessage("should not complete"); }]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     const registry = new RuntimeRegistry({
@@ -8979,7 +8981,8 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompt = slot.prompt("interrupt me");
-    await waitFor(() => slot.isBusy, "the slot to take work");
+    // Stop only after the SDK admitted the run; see the failed-Stop case below.
+    await agentAdmitted;
     const aborting = slot.abort("agent");
     release();
     await aborting;
@@ -8988,6 +8991,82 @@ export default function (pi) {
     const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
     const terminal = entries.find(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.receiptKind === "terminal");
     expect(terminal?.data).toMatchObject({ lifecycle: "interrupted" });
+  });
+
+  it("keeps main's interrupted receipt when a Stop fails and the run then completes on its own", async () => {
+    const root = await temporaryRoot("tron-abort-failed-stop-");
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let release!: () => void;
+    const responseBarrier = new Promise<void>((resolve) => { release = resolve; });
+    let agentEntered!: () => void;
+    const agentAdmitted = new Promise<void>((resolve) => { agentEntered = resolve; });
+    const faux = fauxProvider({ provider: "tron-abort-failed-stop", tokensPerSecond: 10_000 });
+    faux.setResponses([async () => { agentEntered(); await responseBarrier; return fauxAssistantMessage("completed on its own"); }]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const prompt = slot.prompt("finish on its own");
+    // `isBusy` turns true at slot admission, before the SDK admits the run; a Stop
+    // in that window revokes the prompt and never reaches `session.abort`.
+    await agentAdmitted;
+    const session = (slot as unknown as { runtime: { session: { abort(): Promise<void> } } }).runtime.session;
+    const sdkAbort = session.abort.bind(session);
+    session.abort = async () => { throw new Error("abort refused"); };
+    try {
+      await expect(slot.abort("agent")).rejects.toThrow(/did not stop/);
+    } finally {
+      session.abort = sdkAbort;
+    }
+    release();
+    await prompt;
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
+    const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
+    const terminals = entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.receiptKind === "terminal");
+    // The user Stop intent outlives the failed attempt. This matches main, which
+    // records the same receipt; whether a failed Stop should instead record
+    // completed is a separate main-branch decision.
+    expect(terminals).toHaveLength(1);
+    expect(terminals[0]?.data).toMatchObject({ lifecycle: "interrupted", errorCode: "user-abort" });
+  });
+
+  it("records a completed receipt for a Stop that arrives after a natural completion", async () => {
+    const root = await temporaryRoot("tron-abort-after-completion-");
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const faux = fauxProvider({ provider: "tron-abort-after-completion", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("finished before Stop")]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const { operationId } = await slot.prompt("finish first");
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
+    await slot.abort("agent");
+    const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
+    const terminals = entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.receiptKind === "terminal" && entry.data.operationId === operationId);
+    expect(terminals).toHaveLength(1);
+    expect(terminals[0]?.data).toMatchObject({ lifecycle: "completed" });
+    expect(terminals[0]?.data).not.toHaveProperty("errorCode");
   });
 
   it("projects and atomically manages multiple queued messages by stable identity", async () => {
@@ -11551,7 +11630,7 @@ export default function (pi) {
       expect.soft(existsSync(sentinel)).toBe(false);
       expect.soft(work.size).toBe(0);
       expect.soft(slot.isEvictionProtected).toBe(false);
-      expect((await registry.automationRecoveryEvidence(slot.id, run.operationId!)).marker).toBeUndefined();
+      expect((await registry.ownedOperationRecoveryEvidence(slot.id, run.operationId!)).marker).toBeUndefined();
 
       // The same installed command remains available to an explicit user.
       await slot.prompt(action.text);

@@ -28,6 +28,70 @@ afterEach(() => {
 });
 
 describe("GatewayLogger", () => {
+  it("retains Home crossing and settlement evidence across persisted-tail reload", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    const evidence = { chapterOrdinal: 2, boundary: "hard-entries", crossingBytes: 800_000,
+      crossingEntries: 100_000, settledBytes: 800_512, settledEntries: 100_003 };
+    logger.log("warning", "Tron Home chapter-limit-stop", {
+      event: "home.chapter-limit-stop", source: "home", ...evidence,
+    });
+    expect(lines(path)[0]).toMatchObject(evidence);
+    expect(new GatewayLogger(path).recent(1)[0]).toMatchObject(evidence);
+  });
+
+  it("persists the home.task fields the observability catalog names, bounded by kind", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    const taskHash = "a1b2c3d4e5f60718";
+    const operationHash = "0f1e2d3c4b5a6978";
+    logger.log("info", "Home task lifecycle", { event: "home.task.transition", source: "home", taskHash, operationHash,
+      revision: 3, transition: "active", reason: "operation-bound" });
+    logger.log("info", "Home task lifecycle", { event: "home.task.spend", source: "home", taskHash, spendReference: "9a8b7c6d5e4f3a2b",
+      inputTokens: 1200, outputTokens: 40 });
+    logger.log("warning", "Home task lifecycle", { event: "home.task.runaway-stop", source: "home", taskHash, operationHash,
+      elapsedMs: 86_400_123.4, cancelAndJoin: "failed", spendReference: "9a8b7c6d5e4f3a2b" });
+    logger.log("info", "Home task lifecycle", { event: "home.task.inbox", source: "home", eventHash: "1122334455667788",
+      state: "admitted", reason: "canonical-admission" });
+    logger.log("info", "Home task lifecycle", { event: "home.task.control", source: "home", taskHash, operationHash,
+      action: "stop", disposition: "persisted" });
+    logger.log("info", "Home task lifecycle", { event: "home.task.authorization", source: "home", outcome: "refused",
+      reason: "grant-required", referenceHash: "5566778899aabbcc" });
+    logger.log("info", "Home task lifecycle", { event: "home.task.spend", source: "home", taskHash: "x".repeat(400),
+      revision: -1, inputTokens: 1.5, outputTokens: Number.MAX_SAFE_INTEGER + 1 });
+    const [transition, spend, stop, inbox, control, authorization, unbounded] = lines(path);
+    expect(transition).toMatchObject({ taskHash, operationHash, revision: 3, transition: "active", reason: "operation-bound" });
+    expect(spend).toMatchObject({ taskHash, spendReference: "9a8b7c6d5e4f3a2b", inputTokens: 1200, outputTokens: 40 });
+    expect(stop).toMatchObject({ elapsedMs: 86_400_123, cancelAndJoin: "failed" });
+    expect(inbox).toMatchObject({ eventHash: "1122334455667788", state: "admitted" });
+    expect(control).toMatchObject({ action: "stop", disposition: "persisted" });
+    expect(authorization).toMatchObject({ referenceHash: "5566778899aabbcc" });
+    expect(unbounded.taskHash).toHaveLength(64);
+    expect(unbounded).not.toHaveProperty("revision");
+    expect(unbounded).not.toHaveProperty("inputTokens");
+    expect(unbounded).not.toHaveProperty("outputTokens");
+  });
+
+  it("does not persist invalid Home counters or unbounded category values", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    logger.log("info", "Tron Home route-bound", {
+      event: "home.route-bound", category: "replay", boundary: "hard-bytes",
+      chapterOrdinal: -1, crossingBytes: Infinity, crossingEntries: 2.5,
+      settledBytes: Number.MAX_SAFE_INTEGER + 1, settledEntries: -2,
+    });
+    logger.log("info", "Tron Home route-bound", {
+      event: "home.route-bound", category: "private-transcript", boundary: "/private/path",
+    });
+    const [valid, invalid] = lines(path);
+    expect(valid).toMatchObject({ category: "replay", boundary: "hard-bytes" });
+    for (const key of ["chapterOrdinal", "crossingBytes", "crossingEntries", "settledBytes", "settledEntries"]) {
+      expect(valid).not.toHaveProperty(key);
+    }
+    expect(invalid).not.toHaveProperty("category");
+    expect(invalid).not.toHaveProperty("boundary");
+  });
+
   it("stamps process identity and bounded correlation fields in the shared record format", () => {
     const path = logPath();
     const logger = new GatewayLogger(path, { runtimeEpoch: "epoch-1", payloadVersion: "1.2.3" });
@@ -40,6 +104,16 @@ describe("GatewayLogger", () => {
       code: "busy", reason: "viewer_capacity", outcome: "failure", durationMs: 1542,
     });
     expect(new GatewayLogger(path).recent(1)[0]).toMatchObject({ runtimeEpoch: "epoch-1", commandId: "command_1" });
+  });
+
+  it("persists workspace unavailability causes as bounded diagnostic fields", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    logger.log("warning", "Tron internal workspace is unavailable", {
+      event: "workspace.unavailable", source: "workspace", cause: "x".repeat(200),
+    });
+
+    expect(lines(path)[0]).toMatchObject({ event: "workspace.unavailable", source: "workspace", cause: "x".repeat(64) });
   });
 
   it("keeps the request span breakdown beside the request it explains", () => {

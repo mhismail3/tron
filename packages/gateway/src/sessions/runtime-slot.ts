@@ -1,3 +1,4 @@
+import { HOME_OPERATING_CONTEXT } from "../home/tron-home-extension.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
@@ -9,11 +10,12 @@ import {
   DELEGATED_SUPERVISOR_TOOL_NAME,
   delegatedArtifactPathAllowed,
   delegatedProviderOrigin,
+  delegatedProviderToolVersion,
   isInstalledDelegatedTool,
   trustedDelegatedController,
 } from "./delegated-provider.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -37,10 +39,18 @@ import {
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
+import type { HomeRequestPolicy } from "../home/home-request-policy.js";
+import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
+import type { HomeMemoryPort } from "../home/home-owner.js";
+import type { HomeHardBoundary } from "../home/home-diagnostic.js";
+import type { HomeMemoryToolAccess } from "../home/home-memory.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
-import { tronModuleFactories } from "../extensions/tron-modules.js";
+import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
+import { HOME_TASK_MARKER, HOME_TASK_REPORT, type HomeTaskReportOwner } from "../home/home-task-report.js";
+import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
+import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
 import type {
@@ -156,6 +166,7 @@ import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from 
 // named `lifecycleProjection` is presentation data until this private marker is
 // attached, so tool results cannot nominate a fresh child-session owner.
 const EMBEDDED_LIFECYCLE_ARTIFACT = Symbol("embedded-lifecycle-artifact");
+const canonicalAppendOwner = Symbol("canonical-append-owner");
 type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE_ARTIFACT]?: true };
 // Disposable exact child subscriptions travel with the admitted read, never
 // with canonical activity data or a separate slot-wide child registry.
@@ -176,6 +187,12 @@ function preserveEmbeddedLifecycleMarker(source: unknown, value: Record<string, 
 }
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
+
+/** The curated runtime a session is built with. Decided at runtime creation:
+ * `home` is passed explicitly by the Home owner for a brand-new Home session,
+ * and every other creation asks the Home owner whether this session id is the
+ * enabled Home. */
+export type RuntimeProfile = "ordinary" | "home";
 
 type QueueBehavior = QueuedMessageState["behavior"];
 
@@ -210,6 +227,14 @@ type PromptQueueDisplay = {
 };
 
 type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";
+
+type HomeMaterializationAuthority = Readonly<{
+  homeId: string;
+  ordinal: number;
+  sessionId: string;
+  attemptId: string;
+  expectedPath: string;
+}>;
 
 type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal"> & {
   redelivery?: boolean;
@@ -338,6 +363,9 @@ export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "trans
 
 export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
 
+/** Volatile cancellation attribution shares the invocation's receipt lifetime. */
+type LiveInvocation = InvocationProjection & { stopReason?: string };
+
 interface OperationObservation {
   cursor?: { entryIndex: number; branchId: string };
   observedCompletionId?: string;
@@ -380,7 +408,7 @@ export function completionOwnedByMarker(
   return completion ? { ...completion, operationId: marker.operationId } : undefined;
 }
 
-export interface AutomationOperationTerminal {
+export interface OwnedOperationTerminal {
   lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown";
   operationId: string;
   invocationId: string;
@@ -393,6 +421,17 @@ interface RuntimeSlotHooks {
   summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
+  /** A completed, quiescent Home turn may durably seal its chapter before the next admission. */
+  homeQuiescent: (sessionId: string) => Promise<void>;
+  homeChapterRefused: (reason: "sealed-write") => void;
+  homeChapterLimitStopped: (details: {
+    chapterOrdinal: number;
+    boundary: HomeHardBoundary;
+    crossingBytes: number;
+    crossingEntries: number;
+    settledBytes: number;
+    settledEntries: number;
+  }) => void;
   /** Fire-and-forget canonical observation admission after Pi has appended the
    * terminal turn. Implementations must never delay foreground settlement. */
   turnSettled?: (sessionId: string, entries: readonly FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => void;
@@ -415,15 +454,17 @@ interface RuntimeSlotHooks {
 interface AutomationPromptOwnership {
   kind?: never;
   operationId: string;
+  taskFence?: import("../home/home-task-dispatcher.js").HomeTaskControlRequest;
   /** Exact scheduler admission cancellation, fenced again at SDK preflight. */
   signal?: AbortSignal;
   origin: ChatOrigin;
   onAdmitted?: (invocationId: string) => void;
-  onTerminal: (terminal: AutomationOperationTerminal) => Promise<void> | void;
+  onTerminal: (terminal: OwnedOperationTerminal) => Promise<void> | void;
 }
 
 type PromptOwnership = AutomationPromptOwnership | {
   kind: "subagentWake";
+  taskFence?: never;
   expandPromptTemplates: boolean;
   operationId: string;
   origin: ChatOrigin;
@@ -434,11 +475,19 @@ type PromptOwnership = AutomationPromptOwnership | {
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
+  homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
+  homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
+  validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
+  homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
   managedSubagents?: ManagedSubagents;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
   createModelRuntime: () => Promise<ModelRuntime>;
+  /** A Home session's chat runtime: a session-local view of the Gateway-wide
+   * runtime, so the model `home.designate` admitted resolves through the same
+   * providers, while the session's own lookup projections stay with it. */
+  homeModelRuntime: () => Promise<{ runtime: ModelRuntime; ownership: "owned" | "borrowed" }>;
   openAIModelEligibility: OpenAIModelEligibility;
   trust: TrustService;
   blobs: BlobStore;
@@ -483,10 +532,38 @@ export interface RuntimeSlotDependencies {
    * begins; a rejection aborts the run retryably. It must be a no-op with no
    * I/O while the session is not archived. */
   beforeRunAdmission: (sessionId: string) => Promise<void>;
+  /** HomeOwner policy, revalidated synchronously after prompt admission awaits. */
+  homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => void;
   /** Gateway-owned archive projection for one session, read at snapshot time.
    * Archive state is registry-owned display state, so a slot neither writes nor
    * caches it: the value is absent while the session is visible. */
   archivedAt: (sessionId: string) => string | undefined;
+  /** What the Home record says about this session id. Read once per runtime
+   * creation, so a profile change is never cached past the runtime it applies
+   * to. `unnamed` is the only state in which the explicit creation profile
+   * applies. */
+  homeProfile: (sessionId: string, cwd: string) => "home" | "ordinary" | "unnamed";
+  /** Recorded chat model for an enabled Home, applied when reconstructing an
+   * unloaded runtime instead of restoring the transcript's incidental model. */
+  homeModel: (sessionId: string) => { provider: string; id: string } | undefined;
+  /** Tron Home's request seam for one session id. Asked once per runtime
+   * creation, never for a fork or an ordinary session. */
+  homeRequestPolicy: (sessionId: string) => HomeRequestPolicy | undefined;
+  homeInboxAdmission: (sessionId: string, operationId: string, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => Promise<void>;
+  homeInboxSettlement: (sessionId: string, operationId: string) => Promise<void>;
+  /** Tron Home's memory. The slot only reports that canonical entries changed;
+   * the memory owns what it reads, how long it waits and how much it spends. */
+  homeMemory: HomeMemoryPort;
+  /** Tron Home's memory tools for one session id, for the `zoom`, `date` and
+   * `memory_search` tools the tron-home module registers. It answers undefined
+   * for any session that is not the enabled Home. */
+  homeMemoryTools: (sessionId: string) => HomeMemoryToolAccess | undefined;
+  /** One model applied to a live Home session, so the Home record keeps the
+   * single source of truth for the model a re-enable restores. */
+  homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => Promise<void>;
+  /** Physical chapter state is consulted only by mutation owners. The registry
+   * answers it from the Home chapter ledger; any other session is unsealed. */
+  homeChapterState: (sessionId: string) => HomeChapterState;
 }
 
 class CanonicalCustomEntryConflictError extends Error {}
@@ -559,6 +636,10 @@ function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefin
 export class RuntimeSlot {
   private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
   private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
+  /** The open Home activation of the live runtime, undefined for every ordinary
+   * runtime. Re-resolved in `runtimeFactory`, so a profile change takes effect
+   * with the runtime it applies to. */
+  private homeRequestPolicy: HomeRequestPolicy | undefined;
   private detachOpenAIEligibility: (() => void) | undefined;
   private runtime!: AgentSessionRuntime;
   private unsubscribe: (() => void) | undefined;
@@ -590,7 +671,7 @@ export class RuntimeSlot {
   private stopRecoveryQueueClosed = false;
   private stopSteeringContinuation: { operationId?: string; queuedSteerCount: number } | undefined;
   private retainedLeaseCount = 0;
-  private readonly automationTerminalObservers = new Map<string, (terminal: AutomationOperationTerminal) => Promise<void> | void>();
+  private readonly ownedTerminalObservers = new Map<string, (terminal: OwnedOperationTerminal) => Promise<void> | void>();
   private snapshotTimer: NodeJS.Timeout | undefined;
   private progressFlushTimer: NodeJS.Timeout | undefined;
   /** The latest cumulative SDK message is projected only at the wire flush boundary. */
@@ -656,7 +737,7 @@ export class RuntimeSlot {
   private pendingExtensionCommand: SessionOperationState | undefined;
   /** Gateway-owned causal graph. Canonical receipts remain the durable source;
    * these bounded maps are only the live projection used by snapshots. */
-  private readonly invocations = new Map<string, InvocationProjection>();
+  private readonly invocations = new Map<string, LiveInvocation>();
   private readonly invocationFailures = new Map<string, string>();
   private retry: RetryState | undefined;
   private resourceReloadOptions: { resolveProjectTrust: () => Promise<boolean> } | undefined;
@@ -825,16 +906,35 @@ export class RuntimeSlot {
   private suppressQueueEvents = false;
   /** Abort intent is recorded before SDK cancellation can synchronously settle. */
   private readonly abortedOperations = new Set<string>();
+  /** Retirement waiters parked until this slot may have settled. */
+  private readonly settleWaiters = new Set<() => void>();
   /** Exact process ownership for the built-in foreground bash tool only.
    * Extension-managed detached subagents remain outside this stop boundary. */
   private directBashProcesses: DirectBashProcessOwner | undefined;
+  /** The one session id whose first runtime was created with the explicit Home
+   * profile, before the Home record named it. One-shot: cleared by that first
+   * runtime creation. */
+  private explicitHomeSessionId: string | undefined;
+  private readonly homeMaterializationAuthority: HomeMaterializationAuthority | undefined;
+  private homeLimitStop?: { operationId: string; boundary: HomeHardBoundary; crossingBytes: number; crossingEntries: number };
+  /** The curated profile each live runtime was built with. `setModel` and
+   * `compact` read this, never the record, so a policy is never applied to a
+   * runtime that did not load it. */
+  private readonly runtimeProfiles = new WeakMap<AgentSession, RuntimeProfile>();
 
   private constructor(
     private sessionManager: SessionManager,
     private readonly dependencies: RuntimeSlotDependencies,
     private readonly hooks: RuntimeSlotHooks,
     interrupted: boolean,
+    creationProfile: RuntimeProfile = "ordinary",
+    homeMaterializationAuthority?: HomeMaterializationAuthority,
+    private readonly taskWorker?: HomeTaskReportOwner,
   ) {
+    this.explicitHomeSessionId = creationProfile === "home" ? sessionManager.getSessionId() : undefined;
+    this.homeMaterializationAuthority = homeMaterializationAuthority
+      ? Object.freeze({ ...homeMaterializationAuthority })
+      : undefined;
     this.phase = interrupted ? "interrupted" : "idle";
     this.unregisterConfigurationWork = dependencies.workRegistry.observeSessions((sessionId) => {
       if (this.published && !this.disposed && sessionId === this.id) this.publishConfiguration();
@@ -844,6 +944,29 @@ export class RuntimeSlot {
     this.lifecycle = new ExtensionLifecycleCoordinator(this.ui.presentation, () => this.hasRuntimeWork());
     this.unregisterExtensionExpiry = dependencies.extensionActivityRecency.registerExpiryCallback((frame) => this.onExtensionActivityExpiry(frame));
     this.unregisterProcessExpiry = dependencies.processActivityRecency.registerExpiryCallback((frame) => this.onProcessActivityExpiry(frame));
+  }
+
+  private installCanonicalWriteGuard(sessionManager: SessionManager): void {
+    const manager = sessionManager as unknown as {
+      _appendEntry: ((entry: FileEntry) => void) & { [canonicalAppendOwner]?: RuntimeSlot };
+    };
+    // The guarded method belongs to the manager, not a runtime rebuild. Its
+    // immutable owner also rejects sharing one writer instance across slots.
+    const owner = manager._appendEntry[canonicalAppendOwner];
+    if (owner === this) return;
+    if (owner) throw new GatewayError("conflict", "Canonical session manager already has a runtime owner");
+    const appendEntry = manager._appendEntry.bind(manager);
+    const guardedAppend = (entry: FileEntry) => {
+      if (this.isHomeProfile(sessionManager)) {
+        const path = sessionManager.getSessionFile();
+        const fileExists = path ? existsSync(path) : false;
+        if (this.activeOperationId !== undefined || fileExists) this.assertChapterWritable(sessionManager);
+      }
+      appendEntry(entry);
+      if (sessionManager === this.sessionManager) this.observeHomeChapterGrowth();
+    };
+    Object.defineProperty(guardedAppend, canonicalAppendOwner, { value: this });
+    manager._appendEntry = guardedAppend;
   }
 
   private createSemanticBroker(): SemanticUIBroker {
@@ -1010,8 +1133,11 @@ export class RuntimeSlot {
     dependencies: RuntimeSlotDependencies,
     hooks: RuntimeSlotHooks,
     interrupted: boolean,
+    creationProfile: RuntimeProfile = "ordinary",
+    homeMaterializationAuthority?: HomeMaterializationAuthority,
+    taskWorker?: HomeTaskReportOwner,
   ): Promise<RuntimeSlot> {
-    const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted);
+    const slot = new RuntimeSlot(sessionManager, dependencies, hooks, interrupted, creationProfile, homeMaterializationAuthority, taskWorker);
     try {
       await slot.initialize();
       return slot;
@@ -1028,6 +1154,24 @@ export class RuntimeSlot {
   }
   hasBuiltinMcpCommand(): boolean {
     return isBuiltinMcpCommand(this.runtime.session.extensionRunner.getCommand("mcp"));
+  }
+
+  /** Immutable task addresses are file-wide evidence, not the selected model
+   * branch. Harmless tree viewing must never lose an already sealed result. */
+  canonicalTaskEvidence(): FileEntry[] {
+    return this.sessionManager.getEntries().filter(entry => entry.type === "custom"
+      && (entry.customType === HOME_TASK_MARKER || entry.customType === HOME_TASK_REPORT));
+  }
+
+  /** Live task settlement enters from outside the lane after terminal/Stop
+   * joining. Keep late steering receipt writes out of its durable file cut.
+   * Never await this seam from work already running on the session lane. */
+  async inspectTaskSettlement<T>(operationId: string, inspect: (settled: boolean) => Promise<T>): Promise<T> {
+    return this.lane.run(() => {
+      this.assertUsable();
+      if (this.taskWorker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
+      return inspect(!this.hasActiveAgentRun && !this.isAgentAdmissionSettling && this.operation === undefined);
+    });
   }
 
   /** Read-only owner seam for bounded derived projections; callers never
@@ -1084,7 +1228,10 @@ export class RuntimeSlot {
     return this.runtime.session.modelRuntime;
   }
 
-  /** Actionable work only; decorative presentation must not block trust/delete. */
+  /** Actionable work only; decorative presentation must not block trust/delete.
+   * True from slot admission, which precedes the SDK's agent admission: a Stop in
+   * that window revokes the prompt. A test that Stops a run waits for the run's own
+   * entry, not for this. */
   get isBusy(): boolean {
     return this.isBusyExceptWorkToken();
   }
@@ -1138,6 +1285,7 @@ export class RuntimeSlot {
   async commitArchiveWhileIdle<T>(exceptWorkToken: string | undefined, commit: () => Promise<T>): Promise<T> {
     return this.lane.run(async () => {
       this.assertUsable();
+      this.assertChapterWritable();
       this.assertArchivable(exceptWorkToken);
       return commit();
     });
@@ -1236,6 +1384,7 @@ export class RuntimeSlot {
   }
 
   private settleOperationWork(operationId: string | undefined): void {
+    this.releaseSettleWaiters();
     if (!operationId) return;
     this.lifecycle.cancelPreflight(operationId);
     // PendingPrompt is a provisional projection, not independent ownership.
@@ -1513,6 +1662,15 @@ export class RuntimeSlot {
     return this.runtime.session.sessionFile;
   }
 
+  get canonicalEntryCount(): number {
+    return this.runtime.session.sessionManager.getEntries().length;
+  }
+
+  get hasConversationMessage(): boolean {
+    return this.runtime.session.sessionManager.getEntries().some(entry => entry.type === "message"
+      && (entry.message.role === "user" || entry.message.role === "assistant"));
+  }
+
   /** Pi may reserve a future JSONL path before writing its first user or
    * assistant message. Catalog membership treats only an existing file as persisted. */
   get persistedSessionFile(): string | undefined {
@@ -1581,15 +1739,45 @@ export class RuntimeSlot {
     this.lastTouchedAt = Date.now();
   }
 
+  /** Whether one runtime of this slot carries the curated Home profile. The
+   * record decides for every session it names; the explicit creation profile
+   * covers only the first runtime of a brand-new Home session, before the record
+   * names it, and never a fork or a reset (which produce a new session id). */
+  private isHomeProfile(sessionManager: SessionManager): boolean {
+    const sessionId = sessionManager.getSessionId();
+    const decision = this.dependencies.homeProfile(sessionId, sessionManager.getCwd());
+    if (decision === "home") return true;
+    if (decision === "ordinary") return false;
+    return this.explicitHomeSessionId === sessionId;
+  }
+
+  /** The profile the live runtime was built with. */
+  private liveProfile(): RuntimeProfile {
+    return this.runtimeProfiles.get(this.runtime.session) ?? "ordinary";
+  }
+
   private runtimeFactory(): CreateAgentSessionRuntimeFactory {
     return async ({ cwd, sessionManager, sessionStartEvent }) => {
+      this.installCanonicalWriteGuard(sessionManager);
       const trust = await this.dependencies.trust.requireResolved(cwd);
       // A ModelRuntime is scoped to one Pi session runtime. Extension provider
       // registration is mutable, so sharing one instance across projects would
       // leak project providers between concurrent Tron sessions. Credentials and
       // model files remain canonical through their shared file paths.
-      const modelRuntime = await this.dependencies.createModelRuntime();
-      const detachOpenAIEligibility = this.dependencies.openAIModelEligibility.attachRuntime(modelRuntime);
+      // Home is the exception: it loads no project or package code, so nothing
+      // can register a provider into its runtime, and it runs on the Gateway-wide
+      // runtime where `home.designate` admitted its model and user provider
+      // packages such as CortexKit's are registered (#480).
+      const home = this.isHomeProfile(sessionManager);
+      const binding = home
+        ? await this.dependencies.homeModelRuntime()
+        : { runtime: await this.dependencies.createModelRuntime(), ownership: "owned" as const };
+      const modelRuntime = binding.runtime;
+      // Only the ModelRuntime owner installs filters. Home's borrowed view reads
+      // the Gateway's installation without wrapping its providers on rebuild.
+      const detachOpenAIEligibility = binding.ownership === "owned"
+        ? this.dependencies.openAIModelEligibility.attachRuntime(modelRuntime)
+        : undefined;
       this.detachOpenAIEligibility?.();
       this.detachOpenAIEligibility = detachOpenAIEligibility;
       let contextPolicy: SessionContextWindowPolicy | undefined;
@@ -1599,17 +1787,50 @@ export class RuntimeSlot {
         // runtime creation would leave project code loaded after trust changes.
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
-      const settingsManager = SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
-      const managedLoaderOptions = await this.dependencies.managedSubagents?.loaderOptions(settingsManager,
-        (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages));
-      const services = await createAgentSessionServices({
-        settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager,
-        cwd: trust.cwd,
-        agentDir: this.dependencies.agentDir,
-        modelRuntime,
-        resourceLoaderOptions: {
-          ...(managedLoaderOptions ?? {}),
-          extensionFactories: [
+      // One-shot: a brand-new Home session's first runtime carries the explicit
+      // profile; every later runtime asks the record.
+      this.explicitHomeSessionId = undefined;
+      const tronModuleHost: TronModuleHost = {
+        sessionId: () => this.id,
+        cwd: () => this.cwd,
+        workspace: this.dependencies.workspace,
+        displayArtifacts: this.dependencies.displayArtifacts,
+        notificationTitle: () => this.notificationTitle(),
+        // The notify tool samples the same foreground lease automatic
+        // alerts use, at its own admission boundary.
+        isSessionPresented: () => this.dependencies.isSessionPresented(this.id),
+        contextPolicy: () => contextPolicy,
+        compactionPolicy: () => compactionPolicy,
+        // Summary auth can finish after Stop but before compaction_start
+        // rotates the display ID. Automatic work retains its prompt fence.
+        compactionStopped: (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
+          || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
+        compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
+        joinTerminalReceiptWrites: () => this.joinTerminalReceiptWrites(),
+        ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
+        jev: new JevDecisionClient(modelRuntime),
+        ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
+        ...(this.dependencies.browserLiveViews ? { browserLiveViews: this.dependencies.browserLiveViews } : {}),
+        ...(this.dependencies.notifications ? { notifications: this.dependencies.notifications } : {}),
+        ...(this.dependencies.scheduleToolOperations ? { scheduleToolOperations: this.dependencies.scheduleToolOperations } : {}),
+        ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
+        // Home's memory tools are answered per call, because the memory a
+        // running Home reads can be reconfigured, blocked or released.
+        homeMemoryTools: (sessionId: string) => this.dependencies.homeMemoryTools(sessionId),
+        homeDelegate: this.dependencies.homeDelegate,
+        homeTask: this.dependencies.homeTask,
+      };
+      // Tron Home's curated profile: no agent-directory or project discovery,
+      // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
+      // Tron modules plus tron-home.
+      // Home delegates only through Home tasks, never through managed pi-subagents.
+      const managedSubagents = home ? undefined : this.dependencies.managedSubagents;
+      const settingsManager = home ? undefined : SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
+      const managedLoaderOptions = settingsManager ? await managedSubagents?.loaderOptions(settingsManager,
+        (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages)) : undefined;
+      const extensionFactories = home
+        ? homeModuleFactories(tronModuleHost)
+        : [
             ...(managedLoaderOptions?.extensionFactories ?? []),
             ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
               const operationId = currentMcpAuthOperationId();
@@ -1622,54 +1843,64 @@ export class RuntimeSlot {
               }
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
             }),
-            ...tronModuleFactories({
-              sessionId: () => this.id,
-              cwd: () => this.cwd,
-              workspace: this.dependencies.workspace,
-              displayArtifacts: this.dependencies.displayArtifacts,
-              notificationTitle: () => this.notificationTitle(),
-              // The notify tool samples the same foreground lease automatic
-              // alerts use, at its own admission boundary.
-              isSessionPresented: () => this.dependencies.isSessionPresented(this.id),
-              contextPolicy: () => contextPolicy,
-              compactionPolicy: () => compactionPolicy,
-              // Summary auth can finish after Stop but before compaction_start
-              // rotates the display ID. Automatic work retains its prompt fence.
-              compactionStopped: (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
-                || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
-              compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
-              joinTerminalReceiptWrites: () => this.joinTerminalReceiptWrites(),
-              ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
-              jev: new JevDecisionClient(modelRuntime),
-              ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
-              ...(this.dependencies.browserLiveViews ? { browserLiveViews: this.dependencies.browserLiveViews } : {}),
-              ...(this.dependencies.notifications ? { notifications: this.dependencies.notifications } : {}),
-              ...(this.dependencies.scheduleToolOperations ? { scheduleToolOperations: this.dependencies.scheduleToolOperations } : {}),
-              ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
-            }),
-          ],
+            ...tronModuleFactories(tronModuleHost),
+            ...(this.taskWorker ? [{ name: "tron-home-task-worker", factory: createHomeTaskWorkerExtension({
+              providerVersion: toolName => delegatedProviderToolVersion(this.runtime?.session.resourceLoader.getExtensions().extensions ?? [], toolName),
+              refused: reason => this.dependencies.homeTaskDiagnostic?.({ event: "home.task.producer-refused",
+                taskHash: createHash("sha256").update(this.taskWorker!.identity.taskId).digest("hex").slice(0, 16), reason }),
+            }) }] : []),
+          ];
+      const services = await createAgentSessionServices({
+        ...(settingsManager ? { settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager } : {}),
+        cwd: trust.cwd,
+        agentDir: this.dependencies.agentDir,
+        modelRuntime,
+        resourceLoaderOptions: {
+          ...(managedLoaderOptions ?? {}),
+          ...(home ? {
+            noExtensions: true,
+            noSkills: true,
+            noPromptTemplates: true,
+            noContextFiles: true,
+            // The agent directory's SYSTEM.md and APPEND_SYSTEM.md are not gated
+            // by any `no*` option, so Home drops them at the two overrides the
+            // loader exposes. Nothing from outside the curated profile reaches
+            // Home's system prompt.
+            systemPromptOverride: () => undefined,
+            appendSystemPromptOverride: () => [],
+          } : {}),
+          extensionFactories,
           extensionsOverride: (base) => attributeExtensions(base, this.dependencies.browserLiveViews ? {
             views: this.dependencies.browserLiveViews,
             sessionId: sessionManager.getSessionId(),
             runtimeGeneration: this.runtimeGeneration,
-          } : undefined, { requireTronAskUser: true, ...(this.dependencies.managedSubagents ? { managedSubagents: this.dependencies.managedSubagents } : {}) }),
+          } : undefined, { requireTronAskUser: true, ...(managedSubagents ? { managedSubagents } : {}) }),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });
       // Only the loader keeps the read-only package view. Session settings
       // mutations keep their canonical owner, never the filtered projection.
-      services.settingsManager = settingsManager;
-      await this.dependencies.managedSubagents?.completeLoad(settingsManager, this.cwd, this.dependencies.agentDir, services.resourceLoader.getExtensions().extensions);
+      if (settingsManager) {
+        services.settingsManager = settingsManager;
+        await managedSubagents?.completeLoad(settingsManager, this.cwd, this.dependencies.agentDir, services.resourceLoader.getExtensions().extensions);
+      }
       // A runtime replacement must never strand a process owned by the outgoing
       // tool registry. Session replacement normally aborts Pi first; this exact
       // owner handoff is the independent fail-safe when that signal was stale.
       if (this.directBashProcesses?.hasActiveProcesses) {
         await this.directBashProcesses.abortAll();
       }
-      const directBashProcesses = new DirectBashProcessOwner(services.settingsManager, sessionManager.getSessionId());
+      const directBashProcesses = home ? undefined : new DirectBashProcessOwner(services.settingsManager, sessionManager.getSessionId());
       this.directBashProcesses = directBashProcesses;
+      const recordedHomeModel = home ? this.dependencies.homeModel(sessionManager.getSessionId()) : undefined;
+      const homeModel = recordedHomeModel
+        ? modelRuntime.getPhysicalModel(recordedHomeModel.provider, recordedHomeModel.id)
+        : undefined;
+      if (recordedHomeModel && !homeModel) {
+        throw new GatewayError("conflict", "Tron Home's recorded model is unavailable or virtual");
+      }
       let initialModel: Model<never> | undefined;
-      if (sessionManager.getEntryCount() === 0) {
+      if (!homeModel && sessionManager.getEntryCount() === 0) {
         const eligibility = openAIModelEligibility(modelRuntime);
         await eligibility?.refresh();
         const defaultProvider = services.settingsManager.getDefaultProvider();
@@ -1694,9 +1925,25 @@ export class RuntimeSlot {
         sessionManager,
         ...(initialModel ? { model: initialModel } : {}),
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
+        ...(homeModel ? { model: homeModel } : {}),
+        // The allowlist is Home's executable ceiling. MCP tools cannot appear
+        // under it because no MCP extension is loaded, and Tron's direct bash
+        // tool is not registered at all for Home.
+        ...(home ? { tools: [...HOME_TOOL_NAMES] } : {}),
         // Pi's generic ToolDefinition render state is invariant; the concrete
         // bash schema is nevertheless the exact SDK definition registered here.
-        customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition],
+        ...(directBashProcesses ? { customTools: [
+          directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition,
+          ...(this.taskWorker ? [this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.activeOperationId : undefined,
+            async report => {
+              await this.persistCanonicalCustomEntry(HOME_TASK_REPORT, JSON.parse(JSON.stringify(report)), report.receiptId,
+                this.operationWork.get(report.operationId));
+              const entry = this.sessionManager.getBranch().find(candidate => candidate.type === "custom"
+                && candidate.customType === HOME_TASK_REPORT && (candidate.data as { receiptId?: string }).receiptId === report.receiptId);
+              if (!entry) throw new GatewayError("conflict", "Canonical task report is missing");
+              return entry.id;
+            }, () => this.taskWorker!.requestStop(() => this.abort("agent", this.taskWorker!.identity.operationId, "task-report")))] : []),
+        ] } : {}),
       });
       // The transcript owns a chat's tool loadout. Pi's createAgentSession always
       // passes its configured defaults, which skips AgentSession's own transcript
@@ -1705,8 +1952,32 @@ export class RuntimeSlot {
       // declared loadout here; a session without one keeps the defaults.
       const declared = getCurrentSystemMessage(sessionManager.buildSessionContext().messages);
       if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
-      compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir);
-      created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(created.session.agent.streamFunction));
+      this.runtimeProfiles.set(created.session, home ? "home" : "ordinary");
+      this.homeRequestPolicy = home
+        ? this.dependencies.homeRequestPolicy(sessionManager.getSessionId())
+        : undefined;
+      const homeRequestPolicy = this.homeRequestPolicy;
+      compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir, home ? { disabled: true } : {});
+      const baseStream = created.session.agent.streamFunction;
+      // The guard is INNERMOST, so it validates the exact request the
+      // provider-facing base stream receives: after `abortAwareStream` and after
+      // the compaction policy's summary-focus rewrite. Installed outermost, it
+      // would run before both and never see them.
+      created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(
+        homeRequestPolicy ? homeRequestPolicy.wrapStreamFunction(baseStream) : baseStream,
+      ));
+      if (homeRequestPolicy) {
+        // Outermost on both: the request is cut after the SDK's own projection,
+        // and the digest expectation is recorded after every SDK context stage.
+        created.session.agent.transformContext = homeRequestPolicy.wrapTransformContext(
+          created.session.agent.transformContext,
+          created.session.agent.convertToLlm,
+        );
+        created.session.agent.prepareRequest = homeRequestPolicy.wrapPrepareRequest(
+          created.session,
+          created.session.agent.prepareRequest,
+        );
+      }
       this.compactionPolicies.set(created.session, compactionPolicy);
       contextPolicy = new SessionContextWindowPolicy(created.session);
       this.contextPolicies.set(created.session, contextPolicy);
@@ -1715,6 +1986,13 @@ export class RuntimeSlot {
   }
 
   private async initialize(): Promise<void> {
+    const markers = this.canonicalTaskEvidence().filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
+    if (markers.length > 1) throw new GatewayError("conflict", "Conflicting canonical task markers");
+    if (markers.length) {
+      const marker = markers[0];
+      if (marker?.type !== "custom") throw new GatewayError("conflict", "Task authority is unavailable");
+      await this.dependencies.validateTaskMarker(this.id, marker.data);
+    }
     this.runtime = await createAgentSessionRuntime(this.runtimeFactory(), {
       cwd: this.sessionManager.getCwd(),
       agentDir: this.dependencies.agentDir,
@@ -1733,7 +2011,7 @@ export class RuntimeSlot {
   }
 
   private assertAutomationMayNotReplaceSession(): void {
-    if (currentInvocationContext()?.operationId?.startsWith("automation:")) {
+    if (this.taskWorker || currentInvocationContext()?.operationId?.startsWith("automation:")) {
       throw new GatewayError("conflict", "Scheduled automation turns cannot replace or navigate their target session");
     }
   }
@@ -1742,24 +2020,32 @@ export class RuntimeSlot {
     return {
       waitForIdle: () => this.runtime.session.waitForIdle(),
       newSession: (options) => {
+        this.assertChapterWritable();
         this.assertAutomationMayNotReplaceSession();
         return this.replaceFromCommand("reset", () => this.runtime.newSession(options));
       },
       fork: (entryId, options) => {
+        this.assertChapterWritable();
         this.assertAutomationMayNotReplaceSession();
         return this.replaceFromCommand("reset", () => this.runtime.fork(entryId, options));
       },
       navigateTree: async (targetId, options) => {
+        this.assertChapterWritable();
         this.assertAutomationMayNotReplaceSession();
         const result = await this.runtime.session.navigateTree(targetId, options);
-        if (!result.cancelled) this.forkBoundary = await this.dependencies.resolveForkBoundary?.(this.sessionManager);
+        if (!result.cancelled) {
+          this.forkBoundary = await this.dependencies.resolveForkBoundary?.(this.sessionManager);
+          this.noteCanonicalEntriesCommitted();
+        }
         return result;
       },
       switchSession: (sessionPath, options) => {
+        this.assertChapterWritable();
         this.assertAutomationMayNotReplaceSession();
         return this.replaceFromCommand("preserve", () => this.runtime.switchSession(sessionPath, options));
       },
       reload: async () => {
+        this.assertChapterWritable();
         this.assertAutomationMayNotReplaceSession();
         await this.reloadBoundSession();
         if (this.projectTrustReloadOverride === undefined) this.commitReload();
@@ -1782,7 +2068,9 @@ export class RuntimeSlot {
   private async reloadBoundSession(): Promise<void> {
     const session = this.runtime.session;
     await session.resourceLoader.reload(this.effectiveResourceReloadOptions());
-    await this.dependencies.managedSubagents?.completeLoad(session.settingsManager, this.cwd, this.dependencies.agentDir, session.resourceLoader.getExtensions().extensions);
+    if (this.liveProfile() === "ordinary") {
+      await this.dependencies.managedSubagents?.completeLoad(session.settingsManager, this.cwd, this.dependencies.agentDir, session.resourceLoader.getExtensions().extensions);
+    }
     await session.reload({ beforeSessionStart: () => this.rotateSemanticHost() });
   }
 
@@ -1851,6 +2139,13 @@ export class RuntimeSlot {
     disposition: SessionAttentionRebindDisposition,
     operation: () => Promise<T>,
   ): Promise<T> {
+    this.assertChapterWritable();
+    if (this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)) {
+      throw new GatewayError("conflict", "Task worker session identity cannot be replaced");
+    }
+    if (this.dependencies.homeChapterState(this.id).homeId || this.liveProfile() === "home") {
+      throw new HomeChapterIdentityReplacementError(this.id);
+    }
     const previous = this.rebindAttentionDisposition;
     this.rebindAttentionDisposition = disposition;
     try {
@@ -1950,15 +2245,51 @@ export class RuntimeSlot {
   }
 
   private async restorePreviousRuntime(previousManager: SessionManager): Promise<void> {
+    await this.replaceRuntime(previousManager);
+  }
+
+  /** Rebuild this slot's runtime over the same session manager, keeping the
+   * session identity, its subscribers and its presentation. The factory decides
+   * the profile from the record, so this is also how a profile change takes
+   * effect. */
+  private async replaceRuntime(sessionManager: SessionManager = this.sessionManager): Promise<void> {
     await this.runtime.dispose().catch(() => {});
     this.runtime = await createAgentSessionRuntime(this.runtimeFactory(), {
-      cwd: previousManager.getCwd(),
+      cwd: sessionManager.getCwd(),
       agentDir: this.dependencies.agentDir,
-      sessionManager: previousManager,
+      sessionManager,
       sessionStartEvent: { type: "session_start", reason: "resume" },
     });
     this.installRuntimeHooks();
     await this.bindSession();
+  }
+
+  /**
+   * Replace this slot's runtime in place after `commit` changes the profile
+   * decision for its session. The whole sequence runs in the slot's lane, which
+   * is also the lane prompt admission uses, so no prompt can be admitted between
+   * the idle check, the durable commit and the rebuild: the next prompt always
+   * sees the new profile. A busy slot refuses retryably and changes nothing.
+   */
+  async replaceRuntimeForProfile(commit: () => Promise<void>): Promise<void> {
+    await this.lane.run(async () => {
+      this.assertUsable();
+      this.assertProfileChangeIdle();
+      const work = this.dependencies.workRegistry.begin({
+        kind: "administrative-provider-package-operation",
+        sessionId: this.id,
+        hostEpoch: this.ui.hostEpoch,
+      });
+      try {
+        await commit();
+        await this.replaceRuntime();
+        this.revision += 1;
+        this.emit("session.resourcesChanged", {});
+        this.publishSnapshot();
+      } finally {
+        work.settle();
+      }
+    });
   }
 
   private childSessionReferences(
@@ -2854,6 +3185,8 @@ export class RuntimeSlot {
   }
 
   private async notifyAgentTerminal(sourceId: string, outcome: AgentTerminalOutcome): Promise<void> {
+    // A task's durable result owner, never generic chat completion, decides push.
+    if (this.taskWorker) return;
     const notifications = this.dependencies.notifications;
     if (!notifications) return;
     try {
@@ -3026,9 +3359,11 @@ export class RuntimeSlot {
     this.pendingReceiptWrites.add(write);
     void write.then(() => {
       this.pendingReceiptWrites.delete(write);
+      this.releaseSettleWaiters();
       if (derived) work.settle();
     }, error => {
       this.pendingReceiptWrites.delete(write);
+      this.releaseSettleWaiters();
       // A confirmed contradictory identity rejects before any new write. Only
       // an unresolved persistence outcome keeps the derived owner admitted.
       if (derived && !isUncertainOutcome(error)) work.settle();
@@ -3074,6 +3409,7 @@ export class RuntimeSlot {
           if (owner.blocked || performance.now() >= deadline
             || error instanceof RunMarkerCompletionConflictError
             || error instanceof CanonicalCustomEntryConflictError
+            || error instanceof SealedChapterMutationError
             || isUncertainOutcome(error)) throw error;
           attempt += 1;
           if (attempt === 1) this.emitPersistenceDiagnostic("canonical-ownership-persistence-retrying");
@@ -3085,7 +3421,8 @@ export class RuntimeSlot {
     owner.waiter = Promise.race([completion, expired]).then(() => {
       if (this.durableWrites.get(key) === owner) this.durableWrites.delete(key);
     }, error => {
-      if (!owner.blocked && (error instanceof RunMarkerCompletionConflictError || error instanceof CanonicalCustomEntryConflictError)) {
+      if (!owner.blocked && (error instanceof RunMarkerCompletionConflictError
+        || error instanceof CanonicalCustomEntryConflictError || error instanceof SealedChapterMutationError)) {
         // These owner-validated conflicts reject before a new effect. Existing
         // canonical evidence remains authoritative; no unresolved write exists.
         if (this.durableWrites.get(key) === owner) this.durableWrites.delete(key);
@@ -3133,6 +3470,7 @@ export class RuntimeSlot {
       throw new CanonicalCustomEntryConflictError("Canonical custom entry identity is contradictory");
     }
     if (state === "matching") return;
+    this.assertChapterWritable();
     try {
       options.append();
     } catch (error) {
@@ -3177,12 +3515,20 @@ export class RuntimeSlot {
     );
   }
 
-  private persistInvocationReceipt(receipt: ReturnType<typeof makeInvocationReceipt>, owner?: GatewayWorkHandle): Promise<void> {
-    if (this.handedOffInvocations.has(receipt.invocationId)) return Promise.resolve();
-    return this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
+  private async persistInvocationReceipt(receipt: ReturnType<typeof makeInvocationReceipt>, owner?: GatewayWorkHandle): Promise<void> {
+    if (this.handedOffInvocations.has(receipt.invocationId)) return;
+    await this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
+    if (receipt.receiptKind === "terminal" && this.homeRequestPolicy) {
+      // The terminal receipt is already canonical. A failed settlement leaves its
+      // delivery admitted for the next activation to re-prove; it must not strand
+      // this operation's work entry or its terminal observers.
+      await this.dependencies.homeInboxSettlement(this.id, receipt.operationId).catch(error => {
+        this.emit("session.diagnostic", { code: "home-inbox-settlement-failed", message: String(error).slice(0, 256) });
+      });
+    }
   }
 
-  private invocationForOperation(operationId: string | undefined): InvocationProjection | undefined {
+  private invocationForOperation(operationId: string | undefined): LiveInvocation | undefined {
     if (!operationId) return undefined;
     const live = [...this.invocations.values()]
       .filter(invocation => invocation.operationId === operationId)
@@ -3196,10 +3542,10 @@ export class RuntimeSlot {
     return canonical;
   }
 
-  private async notifyAutomationTerminal(terminal: AutomationOperationTerminal): Promise<void> {
-    const observer = this.automationTerminalObservers.get(terminal.operationId);
+  private async notifyOwnedTerminal(terminal: OwnedOperationTerminal): Promise<void> {
+    const observer = this.ownedTerminalObservers.get(terminal.operationId);
     if (!observer) return;
-    this.automationTerminalObservers.delete(terminal.operationId);
+    this.ownedTerminalObservers.delete(terminal.operationId);
     await observer(terminal);
   }
 
@@ -3211,7 +3557,7 @@ export class RuntimeSlot {
     assistantCompletionId?: string,
   ): Promise<void> {
     const terminal = await this.persistInvocationTerminal(operationId, lifecycle, errorCode, owner, assistantCompletionId);
-    if (terminal) await this.notifyAutomationTerminal(terminal);
+    if (terminal) await this.notifyOwnedTerminal(terminal);
   }
 
   private async persistInvocationTerminal(
@@ -3220,7 +3566,7 @@ export class RuntimeSlot {
     errorCode?: string,
     owner?: GatewayWorkHandle,
     assistantCompletionId?: string,
-  ): Promise<AutomationOperationTerminal | undefined> {
+  ): Promise<OwnedOperationTerminal | undefined> {
     if (operationId) {
       this.consumedSteeringOperationIDs.delete(operationId);
       for (let index = this.dequeuedSteeringOwners.indexOf(operationId);
@@ -3232,6 +3578,12 @@ export class RuntimeSlot {
     this.assertOwnershipPersistence();
     const invocation = this.invocationForOperation(operationId);
     if (!invocation || ["completed", "failed", "interrupted", "outcomeUnknown"].includes(invocation.lifecycle)) return;
+    // Stop records attribution before cancellation yields. All terminal
+    // observers, including successful completion, publish that same fact.
+    if (invocation.stopReason) {
+      lifecycle = "interrupted";
+      errorCode = invocation.stopReason;
+    }
     // SDK append is synchronous, but receipt acknowledgement and live-map
     // retirement yield. A second terminal observer must join the first exact
     // receipt, not manufacture a second timestamp/lifecycle while that live map
@@ -3282,7 +3634,7 @@ export class RuntimeSlot {
       this.operationWork.get(operationId), completionId,
     ).then(async terminal => {
       if (attention) await attention;
-      if (terminal) await this.notifyAutomationTerminal(terminal);
+      if (terminal) await this.notifyOwnedTerminal(terminal);
       this.abortedOperations.delete(operationId);
     }).catch(() => {});
   }
@@ -3403,6 +3755,7 @@ export class RuntimeSlot {
       this.startPendingManualCompaction();
     })().finally(() => {
       this.pendingReceiptWrites.delete(operation);
+      this.releaseSettleWaiters();
       if (this.attentionBarrier === operation) this.attentionBarrier = undefined;
       this.settleRetiredOperationWork();
     });
@@ -3491,7 +3844,7 @@ export class RuntimeSlot {
         }
       }
       if (lastError !== undefined) throw lastError;
-      if (!completion.operationId?.startsWith("automation:")) {
+      if (!completion.operationId?.startsWith("automation:") && completion.operationId !== this.taskWorker?.identity.operationId) {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
       this.admitCompletionObservation(item);
@@ -3517,6 +3870,7 @@ export class RuntimeSlot {
         return;
       }
       this.hooks.settled(this.id);
+      await this.hooks.homeQuiescent(this.id);
       this.phase = this.compactionOperation ? "compacting" : "idle";
       this.operation ??= this.compactionOperation;
       this.revision += 1;
@@ -3767,6 +4121,7 @@ export class RuntimeSlot {
         // path below settles; before that point canonical durability is still
         // provisional and must not be projected as memory coverage.
         this.activeOperationId = undefined;
+        this.homeRequestPolicy?.settle(settledOperationId);
         this.ownToolSegment(undefined);
         this.operation = this.compactionOperation;
         this.retry = undefined;
@@ -3798,7 +4153,7 @@ export class RuntimeSlot {
                 settledOperationId === completion.operationId ? completion.id : undefined,
               );
               await this.beginAttentionSettlement(completion);
-              if (terminal) await this.notifyAutomationTerminal(terminal);
+              if (terminal) await this.notifyOwnedTerminal(terminal);
               const completionOperationId = completion.operationId ?? this.completionOperationId(completion.id);
               if (completionOperationId) this.retireOperationObservation(completionOperationId);
               // A successful earlier completion is admitted by its exact
@@ -4104,6 +4459,7 @@ export class RuntimeSlot {
                 this.retireOperationObservation(displacedOwner);
               }
               this.activeOperationId = reclassifiedAdmission.id;
+              this.homeRequestPolicy?.transferOperation(displacedOwner, reclassifiedAdmission.id);
               const invocation = this.invocationForOperation(reclassifiedAdmission.id);
               this.operation = {
                 id: reclassifiedAdmission.id,
@@ -4408,6 +4764,9 @@ export class RuntimeSlot {
       }
       case "entry_appended":
         this.summaryContentDirty = true;
+        // Custom entries — context edits, extension callbacks — reach the log
+        // only here, and they change what the memory projects just as messages do.
+        this.noteCanonicalEntriesCommitted();
         if (event.entry.type === "message" && event.entry.message.role === "toolResult") {
           // Keep this compatibility path for extension/custom persistence, but
           // ordinary Pi tool results arrive through message_end below.
@@ -4424,6 +4783,7 @@ export class RuntimeSlot {
         // new session's first prompt updates its title without a Gateway restart.
         this.summaryContentDirty = true;
         this.scheduleSnapshot();
+        this.noteCanonicalEntriesCommitted();
         if (event.message.role === "toolResult") {
           // Pi invokes listeners immediately before appending this exact
           // object. Verify canonical call-ID ownership in the next microtask;
@@ -6170,6 +6530,20 @@ export class RuntimeSlot {
     return canonicalToolResultCallIDs(this.runtime.session.sessionManager).has(toolCallId);
   }
 
+  /**
+   * Tron Home's memory follows the canonical log, not the slot's lane: the owner
+   * re-reads what a commit appended and drains its pump under its own bounds, so
+   * nothing here waits on it. Pi emits `message_end` immediately before the
+   * canonical append, so the report is deferred one microtask; the read is
+   * idempotent and the request path re-reads before it renders, so a report that
+   * lands early costs one incremental read and nothing else.
+   */
+  private noteCanonicalEntriesCommitted(): void {
+    if (this.liveProfile() !== "home") return;
+    const homeMemory = this.dependencies.homeMemory;
+    queueMicrotask(() => { homeMemory.entriesCommitted(this.id); });
+  }
+
   private observeCanonicalToolResultHandoff(
     message: Extract<AgentMessage, { role: "toolResult" }>,
   ): void {
@@ -6459,6 +6833,10 @@ export class RuntimeSlot {
           this.terminalizeTransferredOperation(syntheticOwner);
           if (syntheticOwner !== item.id) this.retireOperationObservation(syntheticOwner);
           this.activeOperationId = item.id;
+          // The follow-up is part of the same activation: its boundary entry and
+          // its frozen memory view must not change, only the operation identity
+          // Tron now reports.
+          this.homeRequestPolicy?.transferOperation(syntheticOwner, item.id);
           this.operation = {
             id: item.id,
             kind: "prompt",
@@ -7013,6 +7391,7 @@ export class RuntimeSlot {
   }
 
   publishSnapshot(): void {
+    this.releaseSettleWaiters();
     if (this.disposed || this.trustReloadPending) return;
     // This publication already carries every change a pending coalesced frame
     // was scheduled for; letting that timer fire would rebroadcast the same
@@ -7065,6 +7444,29 @@ export class RuntimeSlot {
     }
   }
 
+  async steerHomeTask(control: import("../home/home-task-dispatcher.js").HomeTaskControlRequest, text: string) {
+    return this.prompt(text, [], "steer", undefined, undefined, {
+      operationId: randomUUID(), taskFence: structuredClone(control),
+      origin: { kind: "gateway", ownerId: control.taskId, title: "Home steering", confidence: "boundary" }, onTerminal: () => {},
+    });
+  }
+
+  async stopHomeTask(control: import("../home/home-task-dispatcher.js").HomeTaskControlRequest): Promise<void> {
+    if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
+      || this.taskWorker.identity.operationId !== control.operationId) {
+      throw new GatewayError("conflict", "Task operation changed before Stop");
+    }
+    await this.taskWorker.stop();
+  }
+
+  /** Task cancellation follows the root prompt owner, not its disposable
+   * presentation primitive (automatic compaction/retry may have another ID). */
+  async cancelHomeTaskOperation(operationId: string, reason: string): Promise<void> {
+    if (!this.taskWorker || this.taskWorker.identity.operationId !== operationId) throw new GatewayError("conflict", "Task cancellation owner changed");
+    if (this.activeOperationId !== operationId && this.operation?.id !== operationId) return;
+    await this.abort("agent", operationId, reason);
+  }
+
   /** The managed provider uses user input to run Pi's normal before-agent-start
    * lifecycle. Admit it through the prompt owner, never the SDK's unowned wake
    * path: queued consumption and canonical binding retain this exact invocation. */
@@ -7099,7 +7501,8 @@ export class RuntimeSlot {
     }
     // Automation owns its own dispatch and terminal observers, so only client
     // prompts join the Gateway-owned compaction queue.
-    if (!ownership && this.holdsPromptsForCompaction(text, queueDisplay)) {
+    this.assertHomePromptAdmission();
+    if (!ownership && !this.taskWorker && this.holdsPromptsForCompaction(text, queueDisplay)) {
       const result = this.holdPrompt(text, images, behavior, queueDisplay);
       onAdmitted?.(result);
       return result;
@@ -7276,6 +7679,7 @@ export class RuntimeSlot {
       acquired();
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
+      this.assertHomePromptAdmission();
       if (!ownership && this.stopRecoveryQueueClosed && !held && !redelivery) {
         const heldAdmission = this.holdPrompt(text, images, behavior, queueDisplay, true);
         onAdmitted?.(heldAdmission);
@@ -7291,6 +7695,21 @@ export class RuntimeSlot {
       }
       if (this.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
       const session = this.runtime.session;
+      if (this.taskWorker) {
+        const trust = await this.dependencies.trust.requireResolved(this.cwd);
+        if (!trust.trusted) throw new GatewayError("trust_required", "Home task target is no longer trusted");
+        if (ownership?.operationId === this.taskWorker.identity.operationId) {
+          await this.persistCanonicalCustomEntry(HOME_TASK_MARKER,
+            JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...this.taskWorker.identity, sessionId: this.id })), `task:${operationId}`);
+        } else {
+          const fence = ownership?.taskFence;
+          if (behavior !== "steer" || this.activeOperationId !== this.taskWorker.identity.operationId
+            || !session.isStreaming || !this.taskWorker.acceptsSteering
+            || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.activeOperationId))) {
+            throw new GatewayError("conflict", "Stale or settled task operation cannot accept steering");
+          }
+        }
+      }
       while (this.isAgentAdmissionSettling) {
         await this.waitForStateChange();
         this.assertUsable();
@@ -7338,7 +7757,7 @@ export class RuntimeSlot {
         this.contextPolicies.get(session)?.apply();
       }
       let queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
-      if (ownership && this.automationTerminalObservers.has(operationId)) {
+      if (ownership && this.ownedTerminalObservers.has(operationId)) {
         throw new GatewayError("conflict", "Automation operation is already registered", true);
       }
       const existingInvocation = redelivery ? this.invocationForOperation(operationId) : undefined;
@@ -7352,7 +7771,7 @@ export class RuntimeSlot {
       const invocationName = existingInvocation?.name ?? (isExactExtensionCommand
         ? extensionCommandName
         : queueDisplay?.resourceInvocation?.name);
-      const invocation: InvocationProjection = existingInvocation ?? {
+      const invocation: LiveInvocation = existingInvocation ?? {
         version: 1,
         invocationId,
         operationId,
@@ -7397,7 +7816,7 @@ export class RuntimeSlot {
       };
       if (queuesIntoActiveRun) validateQueueAdmission();
 
-      if (ownership && ownership.kind !== "subagentWake") this.automationTerminalObservers.set(operationId, ownership.onTerminal);
+      if (ownership && ownership.kind !== "subagentWake") this.ownedTerminalObservers.set(operationId, ownership.onTerminal);
       let operationWork!: GatewayWorkHandle;
       let preflightStarted = false;
       let acceptedResolve!: (accepted: boolean) => void;
@@ -7415,6 +7834,9 @@ export class RuntimeSlot {
         // above. A prompt can therefore never start while the session is hidden
         // from the dashboard, and a store failure rejects the prompt retryably.
         await this.dependencies.beforeRunAdmission(this.id);
+        // Attention, settings and archive I/O can yield to canonical writes or
+        // a seal. Recheck the physical target before invocation/SDK effects.
+        this.assertHomePromptAdmission();
         this.invocations.set(invocationId, invocation);
         while (this.invocations.size > 128) this.invocations.delete(this.invocations.keys().next().value!);
         operationWork = this.beginOperationWork(operationId);
@@ -7449,6 +7871,7 @@ export class RuntimeSlot {
         // never emit output before Gateway has recorded its invocation owner.
         if (!redelivery) await this.persistInvocationReceipt(startReceipt, operationWork);
         startPersisted = true;
+        this.assertHomePromptAdmission();
 
         // Receipt persistence and extension hooks may outlive the run that was
         // active at RPC entry. Re-evaluate at the last Gateway-owned boundary,
@@ -7505,6 +7928,10 @@ export class RuntimeSlot {
           this.publishSnapshot();
         } else if (!queuesIntoActiveRun) {
           this.activeOperationId = operationId;
+          // The canonical leaf immediately before Pi sees the input is the exact
+          // activation start: the input's own entry is appended inside
+          // `session.prompt` below, and steering later inserts entries after it,
+          // never before it.
           // Gateway owns preflight even before Pi creates an Agent controller
           // (including auth and compaction preparation). It is not idle work.
           this.phase = "running";
@@ -7518,6 +7945,27 @@ export class RuntimeSlot {
           // Publish before entering Pi preflight. Automatic compaction can begin
           // inside that call before the RPC receives its admission result.
           this.publishSnapshot();
+          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null);
+          if (this.homeRequestPolicy) {
+            await this.dependencies.homeInboxAdmission(this.id, operationId, async message => {
+              await session.sendCustomMessage(message, { triggerTurn: false });
+              const entry = session.sessionManager.getLeafEntry();
+              if (entry?.type !== "custom_message" || entry.customType !== message.customType
+                || (entry.details as { eventId?: string })?.eventId !== message.details.eventId) throw new GatewayError("conflict", "Home task message lost its exact canonical identity");
+              await this.persistCanonicalCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE,
+                safeJson(makeContextDeliveryReceipt(entry.id, "stored", { source: "gateway:home-task",
+                  owner: { id: message.details.taskId, title: "Home task", source: "gateway:home-task" } })), entry.id);
+            }, async () => {
+              const headroom = await this.homeRequestPolicy!.deliveryHeadroom(session, { role: "user", content: [{ type: "text", text }, ...(images ?? [])], timestamp: Date.now() }, `${session.systemPrompt}\n\n${HOME_OPERATING_CONTEXT}`, ownership?.signal);
+              let chapterBytes = 0;
+              if (this.sessionFile) {
+                try { chapterBytes = statSync(this.sessionFile).size; }
+                catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+              }
+              return { ...headroom, bytes: Math.max(0, HOME_HARD_BYTES - chapterBytes - Buffer.byteLength(JSON.stringify({ text, images })) * 4),
+                entries: Math.max(0, HOME_HARD_ENTRIES - this.canonicalEntryCount) };
+            });
+          }
         }
 
         ownership?.signal?.throwIfAborted();
@@ -7534,7 +7982,9 @@ export class RuntimeSlot {
             // Pi has no active Agent signal during pre-prompt compaction. Stop
             // must also revoke this exact pending prompt at SDK admission; an
             // aborted summary alone does not prevent Agent.prompt() starting.
-            if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)) {
+            if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)
+              || (this.taskWorker && operationId !== this.taskWorker.identity.operationId
+                && (!this.taskWorker.acceptsSteering || this.activeOperationId !== this.taskWorker.identity.operationId))) {
               preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
             } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
               preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);
@@ -7545,7 +7995,14 @@ export class RuntimeSlot {
             }
             // agent_start can fire synchronously before this Gateway promise
             // resumes. Record the SDK's disposition now, not one turn later.
-            this.invocations.set(invocationId, { ...invocation, lifecycle: "accepted" });
+            invocation.lifecycle = "accepted";
+            this.invocations.set(invocationId, invocation);
+            if (this.taskWorker && operationId !== this.taskWorker.identity.operationId) {
+              this.dependencies.homeTaskDiagnostic?.({ event: "home.task.control",
+                taskHash: createHash("sha256").update(this.taskWorker.identity.taskId).digest("hex").slice(0, 16),
+                operationHash: createHash("sha256").update(this.taskWorker.identity.operationId).digest("hex").slice(0, 16),
+                action: "steer", disposition: "accepted" });
+            }
             acceptedResolve(true);
           },
         }));
@@ -7561,6 +8018,7 @@ export class RuntimeSlot {
         if (preflightStarted) this.lifecycle.cancelPreflight(operationId);
         this.pendingQueueAdmission = undefined;
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
+        if (this.activeOperationId === undefined) this.homeRequestPolicy?.settle(operationId);
         if (this.operation?.id === operationId) this.operation = undefined;
         if (this.pendingPrompt?.id === operationId) {
           this.pendingPrompt = undefined;
@@ -7582,7 +8040,7 @@ export class RuntimeSlot {
             sequence: this.revision + 1,
             createdAt: new Date().toISOString(),
           }), operationWork);
-          await this.notifyAutomationTerminal({
+          await this.notifyOwnedTerminal({
             lifecycle: "outcomeUnknown",
             operationId,
             invocationId,
@@ -7590,7 +8048,7 @@ export class RuntimeSlot {
         }
         this.invocations.delete(invocationId);
         this.settleOperationWork(operationId);
-        if (!startPersisted) this.automationTerminalObservers.delete(operationId);
+        if (!startPersisted) this.ownedTerminalObservers.delete(operationId);
         // Once the canonical start receipt is durable the prompt may already
         // have reached extension hooks or the provider. Report its failure as an
         // unknown outcome so the idempotency receipt cannot be replayed, matching
@@ -7635,12 +8093,13 @@ export class RuntimeSlot {
           terminalLifecycle === "failed" ? "runtime-prompt-failed" : undefined,
         );
         this.lifecycle.cancelPreflight(operationId);
-        if (!operationId.startsWith("automation:")) {
+        if (!operationId.startsWith("automation:") && operationId !== this.taskWorker?.identity.operationId) {
           await this.clearMarkerOwnership(operationId);
         }
         // Marker I/O may suspend behind a newer run. Clear only this run's live
         // projection; conditional marker deletion already protects its successor.
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
+        if (this.activeOperationId === undefined) this.homeRequestPolicy?.settle(operationId);
         if (this.operation?.id === operationId) this.operation = undefined;
         this.settleOperationWork(operationId);
         if (terminalLifecycle === "failed") {
@@ -7760,7 +8219,7 @@ export class RuntimeSlot {
           sequence: this.revision + 1,
           createdAt: new Date().toISOString(),
         }), operationWork);
-        await this.notifyAutomationTerminal({
+        await this.notifyOwnedTerminal({
           lifecycle: terminalLifecycle,
           operationId,
           invocationId,
@@ -7768,6 +8227,7 @@ export class RuntimeSlot {
         });
         this.invocations.delete(invocationId);
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
+        if (this.activeOperationId === undefined) this.homeRequestPolicy?.settle(operationId);
         if (this.operation?.id === operationId) this.operation = undefined;
         if (this.pendingPrompt?.id === operationId) {
           this.pendingPrompt = undefined;
@@ -7811,11 +8271,11 @@ export class RuntimeSlot {
           message: error instanceof Error ? error.message : String(error),
         }));
       }
-      this.invocations.set(invocationId, {
-        ...invocation,
-        lifecycle: queuesIntoActiveRun ? "queued" : "accepted",
-        updatedAt: new Date().toISOString(),
-      });
+      // Admission and Stop retain the same invocation object across receipt
+      // awaits; a late accepted transition cannot replace its recorded reason.
+      invocation.lifecycle = queuesIntoActiveRun ? "queued" : "accepted";
+      invocation.updatedAt = new Date().toISOString();
+      this.invocations.set(invocationId, invocation);
       finalizeAdmission();
       if (isExactExtensionCommand) operationWork.transition("extension-command-prompt-ui");
       else if (queuesIntoActiveRun) operationWork.transition("queued-mutation");
@@ -7949,9 +8409,12 @@ export class RuntimeSlot {
   async abort(
     kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash" = "agent",
     expectedOperationId?: string,
+    terminalErrorCode = "user-abort",
   ): Promise<void> {
     let queuedAtStop: RuntimeQueuedMessage[] | undefined;
-    if ((this.queuedMessages.some((item) => item.behavior === "steer")
+    // Finite task cancellation belongs to its report/controller, not the
+    // ordinary Stop continuation. A sealed task can never admit another turn.
+    if (!this.taskWorker && (this.queuedMessages.some((item) => item.behavior === "steer")
       || this.pendingQueueAdmission?.behavior === "steer")
       && this.stopSteeringContinuation === undefined) {
       queuedAtStop = await this.lane.run(() => {
@@ -7972,7 +8435,7 @@ export class RuntimeSlot {
         return accepted;
       });
     }
-    const recovered = await this.abortSerialized(kind, expectedOperationId, queuedAtStop);
+    const recovered = await this.abortSerialized(kind, expectedOperationId, terminalErrorCode, queuedAtStop);
     if (recovered.length > 0) {
       await this.lane.run(() => this.redeliverStoppedSteering(recovered, true));
     }
@@ -7980,14 +8443,25 @@ export class RuntimeSlot {
 
   private async abortSerialized(
     kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash",
-    expectedOperationId?: string,
+    expectedOperationId: string | undefined,
+    terminalErrorCode: string,
     queuedAtStop?: RuntimeQueuedMessage[],
   ): Promise<RuntimeQueuedMessage[]> {
     // A persistence blocker must not disable the owner's Stop route. Stop still
     // proves exact operation identity and reports any unresolved receipt after
     // cancellation instead of clearing the persistence fence.
     this.assertAvailable();
-    if (expectedOperationId !== undefined && this.operation?.id !== expectedOperationId) {
+    const taskOperationId = this.taskWorker?.identity.operationId;
+    const taskOwnsForeground = taskOperationId !== undefined && this.activeOperationId === taskOperationId;
+    const targetsTask = expectedOperationId === taskOperationId
+      || (expectedOperationId === undefined && (taskOwnsForeground || !this.operation))
+      || (taskOwnsForeground && expectedOperationId === this.operation?.id);
+    if (this.taskWorker?.controlsActive && terminalErrorCode === "user-abort" && targetsTask) {
+      await this.taskWorker.stop();
+      return [];
+    }
+    if (expectedOperationId !== undefined && this.operation?.id !== expectedOperationId
+      && !(taskOwnsForeground && expectedOperationId === taskOperationId)) {
       throw new GatewayError("conflict", "The active operation changed before it could be stopped", true);
     }
 
@@ -7999,11 +8473,34 @@ export class RuntimeSlot {
     void kind;
     const target = this.operation ? { ...this.operation } : undefined;
     const agentOperationId = this.activeOperationId;
+    this.homeRequestPolicy?.cancel(agentOperationId);
     const invocationOperationId = agentOperationId
       ?? (target?.kind === "prompt" || target?.kind === "command" ? target.id : undefined);
-    if (invocationOperationId) this.abortedOperations.add(invocationOperationId);
+    if (invocationOperationId) {
+      const invocation = this.invocationForOperation(invocationOperationId);
+      // Only a Gateway-owned stop is attributed on the invocation; it outranks the
+      // SDK's own outcome. A user Stop stays an intent (`abortedOperations`), so
+      // the settled SDK outcome decides the receipt exactly as it does on main.
+      if (invocation && terminalErrorCode !== "user-abort") {
+        // A limit crossing is authoritative even if another Gateway stop races it.
+        if (!invocation.stopReason || terminalErrorCode === "chapter-limit") invocation.stopReason = terminalErrorCode;
+      }
+      this.abortedOperations.add(invocationOperationId);
+    }
     if (target?.kind === "compaction" && target.id) this.abortedOperations.add(target.id);
 
+    // Retire accepted queue ownership before abort emits queue_update: those
+    // entries were not consumed. Keep their exact owners on this cancellation
+    // frame until their not-delivered receipts are persisted below.
+    const stoppedTaskQueue = this.taskWorker ? this.queuedMessages : [];
+    if (this.taskWorker) {
+      this.suppressQueueEvents = true;
+      try { this.runtime.session.clearQueue(); }
+      finally { this.suppressQueueEvents = false; }
+      this.sdkQueuedSteeringIDs.clear();
+      this.queuedMessages = [];
+      this.queueRevision += 1;
+    }
     const queuedSteerCount = queuedAtStop?.filter((item) => item.behavior === "steer").length ?? 0;
     const redeliver = queuedAtStop !== undefined && queuedSteerCount > 0;
     const session = this.runtime.session;
@@ -8019,6 +8516,10 @@ export class RuntimeSlot {
       session.abort(),
       this.directBashProcesses?.abortAll() ?? Promise.resolve(),
     ]);
+    for (const item of stoppedTaskQueue) {
+      await this.terminalizeInvocation(item.id, "interrupted", "task-stopped-before-delivery");
+      this.settleOperationWork(item.id);
+    }
     const settled = await this.waitForForegroundAbortSettlement(target, agentOperationId);
     if (!settled || this.directBashProcesses?.hasActiveProcesses
       || abortResults.some((result) => result.status === "rejected")) {
@@ -8027,7 +8528,7 @@ export class RuntimeSlot {
 
     let interruptionPersisted = false;
     if (invocationOperationId && !redeliver) {
-      await this.terminalizeInvocation(invocationOperationId, "interrupted", "user-abort");
+      await this.terminalizeInvocation(invocationOperationId, "interrupted", terminalErrorCode);
       interruptionPersisted = true;
     }
     if (invocationOperationId && interruptionPersisted) this.abortedOperations.delete(invocationOperationId);
@@ -8416,10 +8917,22 @@ export class RuntimeSlot {
   async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<number> {
     return this.lane.run(async () => {
       this.assertConfigurationIdle(initiatingWorkToken);
+      this.assertChapterWritable();
       if (expectation) this.assertConfigurationExpectation(expectation);
       const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
       if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
+      // Home must stay on a fixed physical model: a virtual model routes on the
+      // canonical transcript, which Home's profile does not own. The live
+      // runtime's profile decides, so an ordinary session keeps the choice.
+      if (this.liveProfile() === "home" && model.api === VIRTUAL_MODEL_API) {
+        throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
+      }
       await this.runtime.session.setModel(model as Model<never>);
+      // The Home record is the single source of truth for the model a re-enable
+      // restores, and only an enabled Home's change belongs to it.
+      if (this.liveProfile() === "home") {
+        await this.dependencies.homeModelChanged(this.id, { provider, id: modelId });
+      }
       this.revision += 1;
       this.publishSnapshot();
       return this.revision;
@@ -8429,6 +8942,7 @@ export class RuntimeSlot {
   async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string): Promise<number> {
     return this.lane.run(() => {
       this.assertConfigurationIdle(initiatingWorkToken);
+      this.assertChapterWritable();
       if (expectedRuntimeGeneration !== this.runtimeGeneration || expectedRevision !== this.revision) {
         throw new GatewayError("conflict", "Session changed; refresh before changing its context window");
       }
@@ -8450,6 +8964,7 @@ export class RuntimeSlot {
   async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<number> {
     return this.lane.run(() => {
       this.assertConfigurationIdle(initiatingWorkToken);
+      this.assertChapterWritable();
       if (expectation) this.assertConfigurationExpectation(expectation);
       this.runtime.session.setThinkingLevel(level);
       this.revision += 1;
@@ -8476,6 +8991,11 @@ export class RuntimeSlot {
 
   async compact(instructions?: string): Promise<{ queued: boolean }> {
     this.assertUsable();
+    // Refused at admission: Home keeps its own history, and the SDK would only
+    // refuse this later, after the command was already accepted.
+    if (this.liveProfile() === "home") {
+      throw new GatewayError("conflict", "Tron Home keeps its own history; manual compaction is unavailable");
+    }
     if (this.manualCompactionClaim) {
       throw new GatewayError("busy", "A manual compaction is already pending for this session");
     }
@@ -8715,6 +9235,7 @@ export class RuntimeSlot {
   async rename(name: string): Promise<void> {
     await this.lane.run(() => {
       this.assertUsable();
+      this.assertChapterWritable();
       this.runtime.session.setSessionName(name);
       this.summaryContentDirty = true;
       this.revision += 1;
@@ -8776,6 +9297,9 @@ export class RuntimeSlot {
           ...(options.label ? { label: options.label } : {}),
         });
         if (result.cancelled) throw new GatewayError("cancelled", "Tree navigation was cancelled by an extension");
+        // Navigation rewrites the branch the memory projects: entries the branch
+        // no longer holds become omitted, and the view is folded again.
+        this.noteCanonicalEntriesCommitted();
         this.forkBoundary = await this.dependencies.resolveForkBoundary?.(this.sessionManager);
         this.summaryContentDirty = true;
         completed = true;
@@ -8948,6 +9472,7 @@ export class RuntimeSlot {
   /** Failure-soft and uncached: every call re-runs the package's own discovery,
    * and an unavailable package yields an empty list plus one diagnostic. */
   private async loadSubagents(): Promise<SubagentCatalog> {
+    if (this.liveProfile() === "home") return { subagents: [] };
     return loadSubagentCatalog({
       agentDir: this.dependencies.agentDir,
       cwd: this.cwd,
@@ -9242,6 +9767,40 @@ export class RuntimeSlot {
     }
   }
 
+  /** Queue a retirement barrier behind admitted lane work without disposing the
+   * slot, then wait (bounded by the ownership grace) until the admitted operation
+   * has settled. The lane alone releases while a run is still in flight, and the
+   * Gateway settles its terminal after the SDK idles, so eligibility checked
+   * earlier would refuse a runtime about to become idle. On timeout the caller's
+   * own eligibility check still refuses retryably. The Registry remains the sole
+   * owner of disposal and publication. Work running on this lane must never await
+   * this barrier. */
+  async retireAfterSettled(): Promise<void> {
+    const deadline = performance.now() + DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS;
+    for (;;) {
+      await this.lane.run(() => {});
+      // The same predicate disposeIf enforces: canonical receipt writes gate
+      // disposal as well as busy state.
+      if (!this.isBusy && this.pendingReceiptWrites.size === 0) return;
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) return;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => wake(), remaining);
+        const wake = () => {
+          clearTimeout(timer);
+          this.settleWaiters.delete(wake);
+          resolve();
+        };
+        this.settleWaiters.add(wake);
+      });
+    }
+  }
+
+  /** Wakes `retireAfterSettled` waiters so each rechecks settled state. */
+  private releaseSettleWaiters(): void {
+    for (const wake of [...this.settleWaiters]) wake();
+  }
+
   async dispose(exceptWorkToken?: string): Promise<void> {
     if (this.disposed) return;
     this.assertOwnershipPersistence();
@@ -9357,6 +9916,8 @@ export class RuntimeSlot {
 
   private async disposeRuntime(): Promise<void> {
     this.operationObservations.clear();
+    // Borrowed Home views have no attachment to detach; the shared Gateway
+    // installation outlives this slot and is retired by its own runtime owner.
     this.detachOpenAIEligibility?.();
     this.detachOpenAIEligibility = undefined;
     this.dependencies.browserLiveViews?.retireSession(this.id);
@@ -9398,12 +9959,12 @@ export class RuntimeSlot {
     // An admitted automation must never lose its terminal waiter when runtime
     // teardown wins a callback race. Persist uncertainty while the canonical
     // manager is still writable; recovery can then block instead of replaying.
-    for (const operationId of [...this.automationTerminalObservers.keys()]) {
+    for (const operationId of [...this.ownedTerminalObservers.keys()]) {
       const invocation = this.invocationForOperation(operationId);
       if (invocation) {
         await this.terminalizeInvocation(operationId, "outcomeUnknown", "runtime-disposed");
       } else {
-        await this.notifyAutomationTerminal({
+        await this.notifyOwnedTerminal({
           lifecycle: "outcomeUnknown",
           operationId,
           invocationId: operationId,
@@ -9543,13 +10104,106 @@ export class RuntimeSlot {
     }
   }
 
+  private assertChapterWritable(manager: SessionManager = this.sessionManager): void {
+    const state = this.dependencies.homeChapterState(manager.getSessionId());
+    const authority = this.homeMaterializationAuthority;
+    const ownsMaterialization = Boolean(authority
+      && state.materializing
+      && state.homeId === authority.homeId
+      && state.ordinal === authority.ordinal
+      && state.sessionId === authority.sessionId
+      && state.attemptId === authority.attemptId
+      && state.expectedPath === authority.expectedPath
+      && manager.getSessionId() === authority.sessionId
+      && manager.getSessionFile() === authority.expectedPath);
+    try { assertChapterWritable(state, ownsMaterialization); }
+    catch (error) {
+      if (error instanceof SealedChapterMutationError) this.hooks.homeChapterRefused("sealed-write");
+      throw error;
+    }
+  }
+
+  private assertHomePromptAdmission(): void {
+    this.assertHomeLimitNotStopping();
+    this.assertChapterWritable();
+    if (!this.dependencies.homeChapterState(this.id).homeId) return;
+    const path = this.sessionFile;
+    let bytes = 0;
+    if (path) {
+      try { bytes = statSync(path).size; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    }
+    this.dependencies.homeChapterAdmission(this.id, { bytes, entries: this.canonicalEntryCount });
+  }
+
+  private assertHomeLimitNotStopping(): void {
+    if (this.homeLimitStop) throw new GatewayError("conflict", "Home stopped this activation at its chapter limit", true, {
+      reason: "chapter-limit-stop",
+    });
+  }
+
+  private observeHomeChapterGrowth(): void {
+    if (!this.isHomeProfile(this.sessionManager) || this.homeLimitStop) return;
+    const operationId = this.activeOperationId;
+    if (!operationId) return;
+    const path = this.sessionManager.getSessionFile();
+    let bytes = 0;
+    if (path) {
+      try { bytes = statSync(path).size; } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
+      }
+    }
+    const entries = this.canonicalEntryCount;
+    const boundary = bytes >= HOME_HARD_BYTES ? "hard-bytes"
+      : entries >= HOME_HARD_ENTRIES ? "hard-entries" : undefined;
+    if (!boundary) return;
+    const crossing = { operationId, boundary, crossingBytes: bytes, crossingEntries: entries } as const;
+    this.homeLimitStop = crossing;
+    void this.abort("agent", operationId, "chapter-limit").then(() => {
+      try {
+        const settledBytes = path ? statSync(path).size : 0;
+        const settledEntries = this.canonicalEntryCount;
+        this.hooks.homeChapterLimitStopped({
+          chapterOrdinal: this.dependencies.homeChapterState(this.id).ordinal ?? 0,
+          boundary,
+          crossingBytes: crossing.crossingBytes,
+          crossingEntries: crossing.crossingEntries,
+          settledBytes,
+          settledEntries,
+        });
+      } finally {
+        // The Stop has settled, so the fence is no longer needed even if the
+        // crossing record could not be read.
+        if (this.homeLimitStop === crossing) delete this.homeLimitStop;
+      }
+    }, error => {
+      // If exact-operation Stop could not settle, preserve the admission fence.
+      this.emit("session.diagnostic", { code: "home-chapter-limit-stop-failed", message: String(error).slice(0, 256) });
+    }).catch(error => {
+      // A failure after the Stop settled must not be an unhandled rejection.
+      this.emit("session.diagnostic", { code: "home-chapter-limit-stop-failed", message: String(error).slice(0, 256) });
+    });
+  }
+
   /** `exceptWorkToken` is the initiating request's own work entry, which is not
    * the session running. Every other entry, including a different request's,
    * still makes this busy. */
   private assertIdle(allowTrustReload = false, exceptWorkToken?: string): void {
     this.assertUsable(allowTrustReload);
-    if (this.runtime.session.isStreaming || this.drainBusyExcept(exceptWorkToken)) {
-      throw new GatewayError("busy", "Session must be idle for this operation");
+    this.assertChapterWritable();
+    if (this.isRunningWork(exceptWorkToken)) throw new GatewayError("busy", "Session must be idle for this operation");
+  }
+
+  /** The same idle predicate `assertIdle` applies, classified retryably because
+   * a profile change is safe to retry once the run settles. */
+  private assertProfileChangeIdle(): void {
+    this.assertUsable();
+    if (this.isRunningWork()) {
+      throw new GatewayError("busy", "Tron Home's session is running; retry when it is idle", true);
     }
+  }
+
+  private isRunningWork(exceptWorkToken?: string): boolean {
+    return this.runtime.session.isStreaming || this.drainBusyExcept(exceptWorkToken);
   }
 }

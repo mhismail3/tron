@@ -83,10 +83,552 @@ struct HostedChatDisplayFixture: View {
                     return target.generation
                 }
                 ready = true
-
             } catch { self.error = String(describing: error) }
         }
     }
+}
+
+/// Retains the actual mounted menu action to exercise a callback after route replacement.
+@MainActor
+final class HostedHomeHeaderActionProbe {
+    var pause: (() -> Void)?
+}
+
+extension EnvironmentValues {
+    @Entry var hostedHomeHeaderActionProbe: HostedHomeHeaderActionProbe? = nil
+}
+
+@MainActor
+struct HostedHomeDashboardFixture: View {
+    @State private var model: AppModel
+    @State private var ready = false
+    @State private var error: String?
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var homeStatusCount = 0
+    @State private var taskListReads = 0
+    @State private var reconnectRequested = false
+    @State private var configuredModel = "none"
+    @State private var controlCount = 0
+    @State private var abortCount = 0
+    @State private var staleActionFinished = false
+    @State private var promptRoute = "none"
+    @State private var openedSession = "none"
+    private let actionProbe = HostedHomeHeaderActionProbe()
+    private let arguments = ProcessInfo.processInfo.arguments
+    private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
+    private let gateway: HostedHomeShellGateway
+    private let homeActivity = PresentationActivityCoordinator()
+
+    init() {
+        let arguments = ProcessInfo.processInfo.arguments
+        let capabilityEnabled = !arguments.contains("-home-capability-absent")
+        let initialState = arguments.first(where: { $0.hasPrefix("-home-shell-") })?.replacingOccurrences(of: "-home-shell-", with: "") ?? "undesignated"
+        let gateway = HostedHomeShellGateway(capabilityEnabled: capabilityEnabled, initialState: initialState,
+            headerState: arguments.first(where: { $0.hasPrefix("-home-header-state-") })?.replacingOccurrences(of: "-home-header-state-", with: ""),
+            unresolved: arguments.contains("-home-control-unresolved"),
+            delayed: arguments.contains("-home-control-delayed"),
+            browserState: arguments.first(where: { $0.hasPrefix("-home-browser-") })?.replacingOccurrences(of: "-home-browser-", with: ""),
+            emptyContext: arguments.contains("-home-context-empty"),
+            sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""),
+            chatBeforeStatus: arguments.contains("-home-chat-before-status"))
+        self.gateway = gateway
+        let store = AutomationFixtureProfileStore()
+        let profiles = GatewayProfileStore(metadata: store, tokens: store)
+        try! profiles.save(GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture"), token: "fixture-token")
+        try! profiles.save(GatewayProfile(id: "competing-profile", label: "Other Mac", host: "other.example.test", port: 9847, machineId: "other-machine"), token: "other-fixture-token", selecting: false)
+        let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in HostedHomeShellSocket(gateway: gateway) })
+        _model = State(initialValue: AppModel(client: client, profiles: profiles,
+            cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "home-shell-fixture"))))
+    }
+
+    var body: some View {
+        Group {
+            if ready {
+                SessionShellView()
+                    .environment(model)
+                    .environment(\.hostedHomeHeaderActionProbe, actionProbe)
+                    .environment(\.tronPresentationActivityCoordinator, homeActivity)
+                    .tronPresentation()
+                    .tronSettingsLayout()
+                    .overlay(alignment: .top) {
+                        VStack {
+                            if staleActionFinished {
+                                Text("Stale action finished").accessibilityIdentifier("fixture.stale-action-finished")
+                            }
+                            Text(model.homeMutations.isRunning(profileID: profile.id) ? "running" : model.homeMutations.ownsUnresolvedCommand(profileID: profile.id) ? "unresolved" : "idle")
+                                .accessibilityIdentifier("fixture.home-command-state")
+                            Text("control-count:\(controlCount)").accessibilityIdentifier("fixture.home-control-count")
+                            Text("prompt-route:\(promptRoute)").accessibilityIdentifier("fixture.home-prompt-route")
+                            Text("opened-session:\(openedSession)").accessibilityIdentifier("fixture.home-opened-session")
+                            Text(configuredModel).accessibilityIdentifier("fixture.home-configured-model")
+                            Text("abort-count:\(abortCount)").accessibilityIdentifier("fixture.home-abort-count")
+                            Text("home-status-count:\(homeStatusCount)")
+                                .accessibilityIdentifier("fixture.home-status-count")
+                            Text("task-list-reads:\(taskListReads)")
+                                .accessibilityIdentifier("fixture.home-task-list-reads")
+                            Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.capabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
+                                .accessibilityIdentifier("fixture.home-diagnostics")
+                        }
+                        .font(.system(size: 1)).opacity(0.01)
+                    }
+                    .overlay(alignment: .center) {
+                        if arguments.contains("-home-stale-route") {
+                            Button("Invoke stale Home action") {
+                                let callback = actionProbe.pause
+                                Task { @MainActor in
+                                    do {
+                                        let other = GatewayProfile(id: "competing-profile", label: "Other Mac", host: "other.example.test", port: 9847, machineId: profile.machineId)
+                                        try model.profiles.save(other, token: "other-fixture-token")
+                                        try await model.connectHostedGateway(profile: other, token: "other-fixture-token")
+                                        callback?()
+                                        // Allow the menu's task and fixture count observer to settle.
+                                        try await Task.sleep(for: .seconds(1))
+                                        staleActionFinished = true
+                                    } catch { self.error = error.localizedDescription }
+                                }
+                            }
+                            .accessibilityIdentifier("fixture.invoke-stale-home-action")
+                        }
+                    }
+            } else if let error {
+                Text(error)
+            } else {
+                ProgressView()
+            }
+        }
+        .preferredColorScheme(arguments.contains("-home-dark") ? .dark : .light)
+        .dynamicTypeSize(arguments.contains("-home-accessibility-type") ? .accessibility3 : .large)
+        // Forward scene transitions as production does: background retires the
+        // connection that a mounted Home sheet's identity names, and foreground reconnects.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .inactive: model.becameInactive()
+            case .background: model.enteredBackground()
+            case .active: model.becameActive()
+            @unknown default: break
+            }
+        }
+        .task {
+            do {
+                try await model.connectHostedGateway(profile: profile, token: "fixture-token")
+                model.sessions = [SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace",
+                    parentSessionId: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
+                    messageCount: 0, firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1,
+                    gatewayProfileID: profile.id, gatewayProfileLabel: profile.label)]
+                if arguments.contains("-home-chat-before-status") {
+                    model.sessions.append(SessionSummary(id: "home-session", name: "Home fixture chat", cwd: "/workspace",
+                        parentSessionId: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
+                        messageCount: 0, firstMessage: "Home fixture chat", phase: .idle, summaryRevision: 1,
+                        gatewayProfileID: profile.id, gatewayProfileLabel: profile.label))
+                }
+                ready = true
+            } catch { self.error = error.localizedDescription }
+        }
+        .task(id: ready) {
+            guard ready else { return }
+            while !Task.isCancelled {
+                homeStatusCount = await gateway.statusCount()
+                taskListReads = await gateway.taskListReadCount()
+                (controlCount, abortCount) = await gateway.controlCounts()
+                configuredModel = await gateway.configuredModelIdentity()
+                promptRoute = await gateway.lastPromptRoute()
+                openedSession = await gateway.lastOpenedSession()
+                // Requested once. A hosted reconnect is a new connection identity, which the mounted
+                // sheet must observe by re-reading, so it fires after the first read. A profile switch
+                // fires after the second, so a test can observe the presented sheet first (its reload).
+                if !reconnectRequested {
+                    if arguments.contains("-home-switch-profile-after-task-list"), taskListReads >= 2 {
+                        reconnectRequested = true
+                        let other = GatewayProfile(id: "competing-profile", label: "Other Mac", host: "other.example.test", port: 9847, machineId: profile.machineId)
+                        do {
+                            try model.profiles.save(other, token: "other-fixture-token", selecting: false)
+                            await model.switchGateway(other)
+                        } catch { self.error = error.localizedDescription }
+                    } else if arguments.contains("-home-reconnect-after-task-list"), taskListReads >= 1 {
+                        reconnectRequested = true
+                        do { try await model.connectHostedGateway(profile: profile, token: "fixture-token") }
+                        catch { self.error = error.localizedDescription }
+                    }
+                }
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            }
+        }
+    }
+}
+
+private actor HostedHomeShellGateway {
+    private let capabilityEnabled: Bool
+    private let initialState: String
+    private var designated: Bool
+    private var homeStatusCount = 0
+    private var controlCount = 0
+    private var abortCount = 0
+    private var phase: String
+    private var paused = false
+    private var configured = true
+    private let unresolved: Bool
+    private let delayed: Bool
+    private var acceptedControl: JSONValue?
+    private var receiptChecks = 0
+    private let browserState: String?
+    private let emptyContext: Bool
+    private let sheetState: String?
+    private var browserReads = 0
+    private var taskListReads = 0
+    private var configuredModel: ModelRef?
+    private let chatBeforeStatus: Bool
+    private var taskStopped = false
+    private var taskRedelivered = false
+    private var scopeRevoked = false
+    private var grantRevoked = false
+    private var taskDecisions: [String: JSONValue] = [:]
+    private var materialized = false
+    private var promptRoutes: [String] = []
+    private var openedSessions: [String] = []
+    init(capabilityEnabled: Bool, initialState: String, headerState: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, chatBeforeStatus: Bool = false) {
+        self.chatBeforeStatus = chatBeforeStatus
+        self.sheetState = sheetState
+        self.browserState = browserState
+        self.emptyContext = emptyContext
+        self.capabilityEnabled = capabilityEnabled
+        self.initialState = initialState
+        designated = initialState == "ready" || initialState == "rollover"
+        phase = headerState ?? "ready"
+        paused = headerState == "paused"
+        configured = headerState != "unconfigured"
+        self.unresolved = unresolved
+        self.delayed = delayed
+    }
+    func statusCount() -> Int { homeStatusCount }
+    func taskListReadCount() -> Int { taskListReads }
+    func controlCounts() -> (Int, Int) { (controlCount, abortCount) }
+    func configuredModelIdentity() -> String { configuredModel.map { "\($0.provider)/\($0.id)" } ?? "none" }
+    func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
+    func lastOpenedSession() -> String { openedSessions.last ?? "none" }
+    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
+
+    func handle(_ method: String, _ params: [String: JSONValue]) async throws -> (JSONValue?, JSONValue?) {
+        switch method {
+        case "session.list":
+            let row = SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace", parentSessionId: nil,
+                createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z", messageCount: 0,
+                firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1)
+            var rows = [try! JSONValue.encode(row)]
+            if chatBeforeStatus {
+                let home = SessionSummary(id: "home-session", name: "Home fixture chat", cwd: "/workspace", parentSessionId: nil,
+                    createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z", messageCount: 0,
+                    firstMessage: "Home fixture chat", phase: .idle, summaryRevision: 1)
+                rows.append(try! JSONValue.encode(home))
+            }
+            return (.object(["sessions": .array(rows), "nextCursor": .null,
+                "listRevision": .number(1), "projectionToken": .string("home-shell-fixture:1"), "archivedCount": .number(0)]), nil)
+        case "provider.list":
+            return (.object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),
+                "configured": .bool(true), "authMethods": .array([]), "modelCount": .number(3)])])]), nil)
+        case "model.list":
+            return (.object(["models": .array(sheetState == "empty-models" ? [] : [model("memory-a", name: "Memory Model A"), model("memory-b", name: "Memory Model B"),
+                model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
+        case "model.recent": return (.object(["models": .array([])]), nil)
+        case "home.taskList":
+            taskListReads += 1
+            return (.object(["items": .array(sheetState == "tasks-empty" ? [] : [taskSummary("active"), taskSummary("terminal")])]), nil)
+        case "home.taskStatus":
+            guard let id = params["taskId"]?.stringValue, ["active", "terminal"].contains(id) else { return taskRefusal() }
+            return (taskRecord(id), nil)
+        case "home.taskPermissions":
+            if sheetState == "tasks-empty" {
+                return (nil, .object(["code": .string("conflict"), "message": .string("Home task namespace refused: not-initialized"), "retryable": .bool(false)]))
+            }
+            return (taskPermissions(), nil)
+        case "home.stopTask", "home.steerTask":
+            guard params["commandId"]?.stringValue != nil, params["taskId"]?.stringValue == "active",
+                  params["operationId"]?.stringValue == "task-operation", params["controllerGeneration"] == nil,
+                  !taskStopped, method != "home.steerTask" || params["text"]?.stringValue == "Use the exact task" else { return taskRefusal() }
+            controlCount += 1
+            if method == "home.stopTask" { taskStopped = true }
+            return (.object(["accepted": .bool(true)]), nil)
+        case "home.redeliverTaskResult":
+            guard params["commandId"]?.stringValue != nil, params["taskId"]?.stringValue == "terminal",
+                  params["homeId"]?.stringValue == "home-fixture", params["routeGeneration"]?.intValue == 2 else { return taskRefusal() }
+            taskRedelivered = true; controlCount += 1; return (.object(["accepted": .bool(true)]), nil)
+        case "home.revokeTaskScope", "home.revokeTaskGrant", "home.reconfirmPermissions":
+            guard params["commandId"]?.stringValue != nil else { return taskRefusal() }
+            if method == "home.revokeTaskScope" {
+                guard params["scopeId"]?.stringValue == "scope-one" else { return taskRefusal() }; scopeRevoked = true
+            }
+            if method == "home.revokeTaskGrant" {
+                guard params["grantId"]?.stringValue == "grant-one" else { return taskRefusal() }; grantRevoked = true
+            }
+            controlCount += 1; return (.object(["accepted": .bool(true)]), nil)
+        case "home.decideTaskGrant":
+            guard params["commandId"]?.stringValue != nil, let id = params["requestId"]?.stringValue,
+                  ["request-approve", "request-deny"].contains(id), taskDecisions[id] == nil,
+                  let approved = params["approved"]?.boolValue, let expires = params["expiresAt"]?.intValue,
+                  Double(expires) > Date.now.timeIntervalSince1970 * 1000 else { return taskRefusal() }
+            let decision: JSONValue = .object(["id": params["commandId"]!, "requestId": .string(id), "approved": .bool(approved),
+                "decidedAt": .number(Double(Int(Date.now.timeIntervalSince1970 * 1000))), "expiresAt": .number(Double(expires))])
+            var grant = taskBinding().objectValue!
+            grant["id"] = .string("grant-\(id)"); grant["decisionId"] = params["commandId"]!
+            grant["expiresAt"] = .number(Double(expires)); grant["state"] = .string("available")
+            let result: JSONValue = .object(["decision": decision, "grant": approved ? .object(grant) : .null])
+            taskDecisions[id] = result; controlCount += 1
+            return (result, nil)
+        case "home.memory.page":
+            browserReads += 1
+            if browserState == "loading", browserReads == 1 { try? await Task.sleep(for: .seconds(4)) }
+            if browserState == "error", browserReads == 1 {
+                return (nil, .object(["code": .string("busy"), "message": .string("Canonical source unavailable"), "retryable": .bool(true)]))
+            }
+            return (memoryPage(next: params["cursor"] != nil, empty: browserState == "empty"), nil)
+        case "home.memory.evidence":
+            let offset = params["offset"]?.intValue ?? 0
+            let first = "Canonical original, not the memory projection"
+            let second = "Canonical continuation"
+            let text = offset == 0 ? first : second
+            var result: [String: JSONValue] = ["format": .string("canonical-history"), "evidence": evidence(),
+                "text": .string(text), "offset": .number(Double(offset)),
+                "totalCharacters": .number(Double(first.utf16.count + second.utf16.count)), "metadata": .object(["role": .string("user")])]
+            if offset == 0 { result["nextOffset"] = .number(Double(first.utf16.count)) }
+            else { result["previousOffset"] = .number(0) }
+            return (.object(result), nil)
+        case "home.prompt":
+            // The rollover journey: the logical route materializes the reserved
+            // successor, and only the route's text is admitted.
+            promptRoutes.append("home.prompt")
+            guard params["commandId"]?.stringValue != nil, params["text"]?.stringValue == "After rollover" else { return taskRefusal() }
+            materialized = true
+            return (.object(["logicalSessionId": .string("home"), "homeId": .string("home-fixture"), "bindingRevision": .number(2),
+                "sessionId": .string("home-successor"), "operationId": .string("successor-operation")]), nil)
+        case "session.prompt":
+            promptRoutes.append("session.prompt:\(params["sessionId"]?.stringValue ?? "none")")
+            return (nil, .object(["code": .string("conflict"), "message": .string("Sealed chapter refused"), "retryable": .bool(false)]))
+        case "home.status":
+            homeStatusCount += 1
+            // The dashboard's first read is held so a chat opened now claims the status surface before any answer.
+            // Only the client's cancellation ends the hold early, as a CancellationError: the
+            // cancelled request then gets no answer, as the Gateway would give none.
+            if chatBeforeStatus, homeStatusCount == 1 { try await Task.sleep(for: .seconds(30)) }
+            if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
+            return (homeStatus(), nil)
+        case "home.designate":
+            if delayed { try? await Task.sleep(for: .seconds(6)) }
+            designated = true
+            return (.object(["homeId": .string("home-fixture"), "sessionId": .string("home-session"), "generation": .number(1)]), nil)
+        case "home.pauseMemory", "home.resumeMemory", "home.configureMemory", "home.disable":
+            controlCount += 1
+            if method == "home.configureMemory", sheetState == "configure-refused" {
+                return (nil, .object(["code": .string("conflict"), "message": .string("Memory configuration refused"), "retryable": .bool(false)]))
+            }
+            if method == "home.pauseMemory" { paused = true; if phase != "active" { phase = "paused" } }
+            if method == "home.resumeMemory" { paused = false; phase = "ready" }
+            if method == "home.configureMemory" {
+                configured = true; phase = "ready"
+                configuredModel = try? params["model"]?.decode(ModelRef.self)
+            }
+            if method == "home.disable" { designated = false; phase = "disabled" }
+            let result = JSONValue.object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused)])
+            if delayed {
+                acceptedControl = result
+                try? await Task.sleep(for: .seconds(6))
+            }
+            if unresolved {
+                acceptedControl = result
+                return (nil, .object(["code": .string("response_too_large"), "message": .string("Completion unavailable"), "retryable": .bool(false)]))
+            }
+            return (result, nil)
+        case "command.status":
+            receiptChecks += 1
+            if unresolved && receiptChecks == 1 { return (.object(["status": .string("pending")]), nil) }
+            return (.object(["status": .string("completed"), "result": acceptedControl ?? .null]), nil)
+        case "session.abort":
+            if params["sessionId"]?.stringValue == "home-session", params["operationId"]?.stringValue == "home-operation",
+               params["kind"]?.stringValue == "agent", params["commandId"]?.stringValue != nil {
+                abortCount += 1
+                phase = paused ? "paused" : "ready"
+            }
+            return (.object(["aborted": .bool(abortCount > 0)]), nil)
+        case "session.open":
+            let sessionID = params["sessionId"]?.stringValue ?? "home-session"
+            openedSessions.append(sessionID)
+            let snapshot = SessionSnapshot(sessionId: sessionID, runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
+                phase: phase == "active" ? .running : .idle, name: sessionID.hasPrefix("home-") ? "Home fixture chat" : "Ordinary session chat", cwd: "/workspace",
+                parentSessionId: nil, model: nil, thinkingLevel: "medium", availableThinkingLevels: [], contextUsage: nil,
+                stats: SessionStats(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
+                    tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), latestCacheHitRate: nil, cost: 0),
+                queueRevision: 0, queuedItems: [], automaticCompactionEnabled: true, transcript: [], transcriptStart: nil,
+                transcriptTotal: nil, streaming: nil, leafEntryId: nil,
+                operation: phase == "active" ? try! JSONValue.object(["id": .string("home-operation"), "kind": .string("prompt"),
+                    "startedAt": .string("2026-01-01T00:00:00Z"), "lifecycle": .string("running")]).decode(SessionOperationState.self) : nil,
+                retry: nil, toolExecutions: [],
+                extensionPresentation: ExtensionPresentationState(version: 3, hostEpoch: "fixture", revision: 1, capabilities: [], diagnostics: [],
+                    semanticState: .init(statuses: [:], working: .init(message: nil, visible: false), hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
+                    surfaces: [], pendingInteractions: []), diagnostics: [])
+            return (.object(["session": try! JSONValue.encode(snapshot), "syncToken": .string("fixture-sync"),
+                "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(0)]), nil)
+        case "session.sync": return (.object(["synchronized": .bool(true)]), nil)
+        case "session.close": return (.object(["closed": .bool(true)]), nil)
+        case "session.commands": return (.object(["commands": .array([])]), nil)
+        case "session.attention.read": return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil)
+        default: return (nil, .object(["code": .string("not_found"), "message": .string("Not part of this fixture"), "retryable": .bool(false)]))
+        }
+    }
+
+    private func taskRefusal() -> (JSONValue?, JSONValue?) {
+        (nil, .object(["code": .string("conflict"), "message": .string("Task fixture binding refused"), "retryable": .bool(false)]))
+    }
+    private func taskSpend() -> JSONValue {
+        .object(["sourceDigest": .string(String(repeating: "a", count: 64)), "inputTokens": .number(12), "outputTokens": .number(3)])
+    }
+    private func taskSummary(_ id: String) -> JSONValue {
+        let terminal = id == "terminal" || taskStopped
+        return .object(["taskId": .string(id), "createdAt": .number(id == "active" ? 2000 : 1000), "updatedAt": .number(3000),
+            "title": .string(id == "active" ? "Active finite work" : "Finished finite work"), "target": .string("/trusted/project"),
+            "lifecycle": .string(terminal ? "terminal" : "active"), "outcome": terminal ? .string(id == "active" ? "interrupted" : "final") : .null,
+            "spend": taskSpend(), "attention": .bool(false), "pendingGrant": .bool(false)])
+    }
+    private func taskRecord(_ id: String) -> JSONValue {
+        var record = taskSummary(id).objectValue!
+        record["version"] = .number(1); record["revision"] = .number(1)
+        record["homeId"] = .string("home-fixture"); record["generation"] = .number(1); record["routeGeneration"] = .number(1)
+        record["intentDigest"] = .string(String(repeating: "a", count: 64)); record["grantRef"] = .null; record["scopeRef"] = .string("scope-one")
+        record["sessionId"] = .string("worker-session"); record["stopIntent"] = .null
+        record["reportRef"] = id == "terminal" ? .object(["resultId": .string("report-one"), "sessionId": .string("worker-session"),
+            "entryId": .string("report-entry"), "digest": .string(String(repeating: "b", count: 64))]) : .null
+        record["intent"] = .object(["text": .string(id == "active" ? "Active finite work" : "Finished finite work")])
+        record["operationId"] = .string("task-operation")
+        let terminal = id == "terminal" || taskStopped
+        record["terminalEvidence"] = terminal ? .object(["outcome": .string(id == "active" ? "interrupted" : "final"), "reason": .string("explicit-report"), "sessionId": .string("worker-session"), "entryIds": .array([.string("terminal-entry")])]) : .null
+        record["wake"] = terminal ? .object(["state": .string(id == "terminal" && !taskRedelivered ? "blocked" : "pending"),
+            "routeGeneration": .number(taskRedelivered ? 2 : 1), "delivery": .null,
+            "eventId": .string("task-result-" + String(repeating: "b", count: 64)), "createdAt": .string("2026-01-01T00:00:00Z"),
+            "push": .string("decided"), "acknowledgedAt": .null, "redeliveries": .array([])]) : .null
+        for key in ["title", "outcome", "attention", "pendingGrant"] { record.removeValue(forKey: key) }
+        return .object(record)
+    }
+    private func taskBinding() -> JSONValue {
+        .object(["intentDigest": .string(String(repeating: "a", count: 64)),
+            "target": .string("/trusted/project"), "authorizationScope": .string("full-work"), "restoreEpoch": .string("fixture-epoch")])
+    }
+    private func taskPermissions() -> JSONValue {
+        let ids = ["request-existing", "request-approve", "request-deny"]
+        let binding = taskBinding()
+        var decisions: [JSONValue] = [.object(["id": .string("existing-decision"), "requestId": .string("request-existing"),
+            "decidedAt": .number(1000), "approved": .bool(true), "expiresAt": .number(4102444800000)])]
+        decisions += taskDecisions.keys.sorted().map { taskDecisions[$0]!.objectValue!["decision"]! }
+        var grant = binding.objectValue!
+        grant["id"] = .string("grant-one"); grant["decisionId"] = .string("existing-decision")
+        grant["expiresAt"] = .number(4102444800000); grant["state"] = .string(grantRevoked ? "revoked" : "available")
+        var scope: [String: JSONValue] = ["id": .string("scope-one"), "kind": .string("all-trusted-projects"),
+            "active": .bool(!scopeRevoked), "restoreEpoch": .string("fixture-epoch"), "createdAt": .number(1000)]
+        if scopeRevoked { scope["revokedAt"] = .number(2000) }
+        return .object(["revision": .number(Double(controlCount + 1)), "scopes": .array([.object(scope)]),
+            "requests": .array(ids.map { .object(["id": .string($0), "request": binding]) }), "decisions": .array(decisions), "grants": .array([.object(grant)] + taskDecisions.keys.sorted().compactMap { taskDecisions[$0]!.objectValue!["grant"].flatMap { $0 == .null ? nil : $0 } })])
+    }
+
+    private func model(_ id: String, name: String, virtual: Bool = false) -> JSONValue {
+        .object(["provider": .string("fixture"), "id": .string(id), "name": .string(name), "reasoning": .bool(false),
+                 "input": .array([.string("text")]), "contextWindow": .number(8192), "maxTokens": .number(1024),
+                 "available": .bool(true), "virtual": .bool(virtual)])
+    }
+    private func evidence(index: Int = 0) -> JSONValue {
+        .object(["index": .number(Double(index)), "sessionId": .string("source-session"), "entryId": .string("source-entry"),
+                 "sourceDigest": .string(String(repeating: "a", count: 64))])
+    }
+    private func memoryPage(next: Bool, empty: Bool) -> JSONValue {
+        let index = next ? 1 : 0
+        let item: JSONValue = .object(["index": .number(Double(index)), "kind": .string(next ? "talk" : "user"),
+            "attribution": .string(next ? "assistant" : "user"), "timestamp": .string("2026-01-01T00:00:00Z"),
+            "evidence": evidence(index: index), "projection": .object(["format": .string("memory-projection"),
+                "text": .string(next ? "Projected assistant memory" : "Projected user memory"), "omitted": .bool(false),
+                "omissions": .array([.string("browser-cap")])]), "summary": next ? .null : .object([
+                    "format": .string("memory-summary"), "text": .string("Condensed memory summary"), "truncated": .bool(true)])])
+        var page: [String: JSONValue] = ["homeId": .string("home-fixture"), "revision": .string(String(repeating: "a", count: 64)),
+            "totalItems": .number(empty ? 0 : 2), "items": .array(empty ? [] : [item])]
+        if !next && !empty { page["nextCursor"] = .string("fixture-next") }
+        return .object(page)
+    }
+
+    /// The Gateway's rollover shape: the reserved successor is named but absent.
+    /// The sealed predecessor is the openable route until a logical prompt
+    /// materializes the successor.
+    private func rolloverStatus() -> JSONValue {
+        .object(["taskRecovery": .object(["available": .bool(true)]), "routeGeneration": .number(2),
+            "phase": .string(materialized ? "ready" : "rollover-pending"),
+            "activation": .object(["available": .bool(true), "activationOpen": .bool(false), "effectiveTokens": .number(320),
+                "contextWindow": .number(8192), "viewLines": .number(12), "viewBytes": .number(480)]),
+            "readiness": .object(["ready": .bool(materialized), "gaps": .array(materialized ? [] : [.string("session-missing")])]),
+            "recovery": .object(["action": .string(materialized ? "none" : "designate")]),
+            "available": .bool(true), "enabled": .bool(true), "homeId": .string("home-fixture"),
+            "sessionId": .string("home-successor"), "openSessionId": .string(materialized ? "home-successor" : "home-session"),
+            "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(materialized),
+            "memory": .object(["configured": .bool(true), "open": .bool(true), "paused": .bool(false),
+                "spentTokens": .number(42), "model": .null])])
+    }
+
+    private func homeStatus() -> JSONValue {
+        if initialState == "rollover" { return rolloverStatus() }
+        let phase = designated ? (phase == "unconfigured" ? "blocked" : phase) : self.phase == "disabled" || initialState == "disabled" ? "disabled"
+            : initialState == "missing-session" ? "missing-session" : "undesignated"
+        let sessionPresent = designated || initialState == "disabled" || phase == "disabled"
+        let enabled = designated || initialState == "missing-session"
+        return .object(["taskRecovery": .object(["available": .bool(sheetState != "task-fenced"), "reason": .string("unsafe-state")]),
+            "routeGeneration": .number(2), "phase": .string(phase),
+            "activation": emptyContext ? .object(["available": .bool(false)]) : .object(["available": .bool(true), "activationOpen": .bool(phase == "active"),
+                "effectiveTokens": .number(320), "contextWindow": .number(8192), "viewLines": .number(12), "viewBytes": .number(480)]),
+            "readiness": .object(["ready": .bool(designated && phase == "ready"), "gaps": .array([])]),
+            "recovery": .object(["action": .string(designated ? "none" : "designate")]),
+            "available": .bool(true), "enabled": .bool(enabled),
+            "homeId": designated || initialState == "disabled" || initialState == "missing-session" ? .string("home-fixture") : .null,
+            "sessionId": sessionPresent ? .string("home-session") : .null,
+            "openSessionId": sessionPresent ? .string("home-session") : .null,
+            "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(sessionPresent),
+            "memory": .object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused),
+                "blocked": phase == "blocked" && configured ? .string("source-unavailable") : .null,
+                "spentTokens": .number(42), "model": configuredModel.map { try! JSONValue.encode($0) } ?? .null])])
+    }
+}
+
+private actor HostedHomeShellSocket: GatewaySocketConnection {
+    private let gateway: HostedHomeShellGateway
+    private var inbound: [Data]
+    private var receivers: [CheckedContinuation<Data, Error>] = []
+    private var closed = false
+    init(gateway: HostedHomeShellGateway) {
+        self.gateway = gateway
+        inbound = []
+        Task {
+            let caps = await gateway.capabilities()
+            let data = try! JSONEncoder.gateway.encode(JSONValue.object(["type": .string("hello"), "gatewayVersion": .string("fixture"),
+                "piVersion": .string("fixture"), "protocolVersion": .number(7), "minProtocolVersion": .number(7),
+                "machineId": .string("home-shell-fixture"), "machineName": .string("Home fixture"),
+                "gatewayChannel": .string("stable"), "capabilities": .array(caps.map(JSONValue.string))]))
+            await deliver(data)
+        }
+    }
+    func send(_ data: Data) async throws {
+        guard !closed else { throw CancellationError() }
+        let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue ?? [:]
+        guard frame["type"]?.stringValue == "request", let id = frame["id"]?.stringValue,
+              let method = frame["method"]?.stringValue else { return }
+        let result: (JSONValue?, JSONValue?)
+        do {
+            result = try await gateway.handle(method, frame["params"]?.objectValue ?? [:])
+        } catch is CancellationError {
+            return
+        }
+        var response: [String: JSONValue] = ["type": .string("response"), "id": .string(id), "ok": .bool(result.1 == nil)]
+        if let body = result.0 { response["result"] = body }
+        if let failure = result.1 { response["error"] = failure }
+        await deliver(try JSONEncoder.gateway.encode(JSONValue.object(response)))
+    }
+    func ping() async throws { if closed { throw CancellationError() } }
+    func receive() async throws -> Data {
+        guard !closed else { throw CancellationError() }
+        if !inbound.isEmpty { return inbound.removeFirst() }
+        return try await withCheckedThrowingContinuation { receivers.append($0) }
+    }
+    func close() async { closed = true; let pending = receivers; receivers.removeAll(); pending.forEach { $0.resume(throwing: CancellationError()) } }
+    private func deliver(_ data: Data) { if receivers.isEmpty { inbound.append(data) } else { receivers.removeFirst().resume(returning: data) } }
 }
 
 private actor HostedChatDisplaySocket: GatewaySocketConnection {

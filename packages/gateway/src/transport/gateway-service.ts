@@ -9,11 +9,13 @@ import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog
 import type { GatewayConfig } from "../config.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
-import type { JsonValue } from "../protocol/types.js";
+import { HOME_CAPABILITY, HOME_MEMORY_BROWSER_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
+import { admitHomeMemoryPage, admitHomeMemoryEvidence } from "../home/home-memory-browser.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { RuntimeSlot } from "../sessions/runtime-slot.js";
 import type { SessionSearchService } from "../sessions/session-search-service.js";
 import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-activity-history.js";
 import { SESSION_ARCHIVE_CAPABILITY } from "../sessions/session-archive-store.js";
@@ -32,7 +34,7 @@ import {
   type WorkspaceHistoryScope,
 } from "../machine/workspace-inspection-service.js";
 import { GitWorktreeService, type SessionSourceControlRequest } from "../machine/git-worktree-service.js";
-import type { UploadStore } from "../machine/upload-store.js";
+import { MAXIMUM_PROMPT_ATTACHMENTS, type UploadStore } from "../machine/upload-store.js";
 import { DISPLAY_CAPABILITY, DISPLAY_LIVE_VIEW_CAPABILITY, NATIVE_LIVE_VIEW_CAPABILITY } from "../display/display-contract.js";
 import type { TerminalService } from "../machine/terminal-service.js";
 import type { TrustService } from "../admin/trust-service.js";
@@ -50,7 +52,7 @@ import {
   projectIosDeviceInstallConfig,
 } from "../admin/ios-device-install-service.js";
 import type { GatewayLogger } from "./logger.js";
-import type { CommandReceiptStore } from "./command-receipts.js";
+import type { CommandReceiptBinding, CommandReceiptStore } from "./command-receipts.js";
 import { fitSessionSnapshot, safeJson } from "../sessions/projection.js";
 import { ModelCatalogPager } from "./model-pagination.js";
 import { exportDiagnosticSnapshot } from "./diagnostic-export.js";
@@ -73,6 +75,8 @@ import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ConnectionAction } from "../integrations/connection-contract.js";
 import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
+import type { HomeOwner } from "../home/home-owner.js";
+import { isVirtualModel } from "../providers/virtual-model.js";
 import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
 
 const KNOWLEDGE_OBJECT_CHUNK_BYTES = 512_000;
@@ -206,7 +210,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "home.status", "home.context", "home.open", "home.taskStatus", "home.taskList", "home.stopTask", "home.memory.page", "home.memory.evidence",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -292,6 +296,8 @@ export interface GatewayServiceDependencies {
   knowledge?: KnowledgeService;
   /** Generic account-envelope owner. Provider progress/evidence remains with its adapter. */
   connections?: ConnectionOwner;
+  /** Tron Home's designation owner; absent only in a Gateway without one. */
+  home?: HomeOwner;
   sessionSearch?: SessionSearchService;
   /** Bounded account-usage owner; injectable for fixture transport tests. */
   providerUsage?: ProviderUsageOwner;
@@ -446,6 +452,7 @@ export class GatewayService {
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
         ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1", "knowledge-library-rows.v1", "knowledge-curation.v1"] : []),
         ...(this.dependencies.connections ? ["connections.v1"] : []),
+        ...(this.dependencies.home ? [HOME_CAPABILITY, HOME_MEMORY_BROWSER_CAPABILITY] : []),
         ...(this.dependencies.sessionSearch ? ["session-search.v1"] : []),
       ],
     };
@@ -459,6 +466,113 @@ export class GatewayService {
     switch (method) {
       case "system.info":
         return this.info();
+      case "home.status": {
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home status accepts no parameters");
+        return safeJson(await this.requireHome().status());
+      }
+      case "home.taskList": {
+        rejectUnknownFields(params, ["limit", "cursor"], method);
+        if (params.limit !== undefined && (!Number.isSafeInteger(params.limit) || (params.limit as number) < 1 || (params.limit as number) > 50)) throw new GatewayError("invalid_request", "Invalid task page limit");
+        return safeJson(await this.requireHome().taskList({ ...(params.limit === undefined ? {} : { limit: params.limit as number }),
+          ...(params.cursor === undefined ? {} : { cursor: string(params.cursor, "cursor", { max: 1024 }) }) }));
+      }
+      case "home.taskStatus": {
+        rejectUnknownFields(params, ["taskId"], method);
+        return safeJson(await this.requireHome().taskResult(string(params.taskId, "taskId", { max: 160 })));
+      }
+      case "home.redeliverTaskResult":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "taskId", "homeId", "routeGeneration"], method);
+          if (!Number.isSafeInteger(params.routeGeneration) || (params.routeGeneration as number) < 1) throw new GatewayError("invalid_request", "Invalid routeGeneration");
+          return safeJson(await this.requireHome().redeliverTaskResult(string(params.taskId, "taskId", { max: 160 }), {
+            homeId: string(params.homeId, "homeId", { max: 200 }), routeGeneration: params.routeGeneration as number,
+          }));
+        });
+      case "home.taskPermissions": {
+        rejectUnknownFields(params, [], method);
+        return safeJson(await this.requireHome().taskPermissions());
+      }
+      case "home.revokeTaskScope":
+      case "home.revokeTaskGrant":
+        return this.mutation(client, method, params, async () => {
+          const field = method === "home.revokeTaskScope" ? "scopeId" : "grantId";
+          rejectUnknownFields(params, ["commandId", field], method);
+          const id = string(params[field], field, { max: 160 });
+          return safeJson(method === "home.revokeTaskScope" ? await this.requireHome().revokeTaskScope(id) : await this.requireHome().revokeTaskGrant(id));
+        });
+      case "home.decideTaskGrant":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "requestId", "approved", "expiresAt"], method);
+          if (typeof params.approved !== "boolean" || !Number.isSafeInteger(params.expiresAt)) throw new GatewayError("invalid_request", "Decision requires approved and an integer expiresAt");
+          return safeJson(await this.requireHome().decideTaskGrant(string(params.requestId, "requestId", { max: 160 }), {
+            decisionId: string(params.commandId, "commandId", { max: 160 }), approved: params.approved, expiresAt: params.expiresAt as number,
+          }));
+        });
+      case "home.reconfirmPermissions":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId"], method);
+          return safeJson(await this.requireHome().reconfirmTaskPermissions());
+        });
+      case "home.steerTask":
+      case "home.stopTask":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, method === "home.steerTask" ? ["commandId", "taskId", "operationId", "text"] : ["commandId", "taskId", "operationId"], method);
+          const control = { taskId: string(params.taskId, "taskId", { max: 160 }), operationId: string(params.operationId, "operationId", { max: 160 }) };
+          if (method === "home.steerTask") await this.requireHome().maintainTask({ ...control, text: string(params.text, "text", { max: 65536 }) });
+          else await this.requireHome().stopTask(control);
+          return safeJson({ accepted: true });
+        }, method === "home.stopTask");
+      case "home.open": {
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home open accepts no parameters");
+        const home = this.requireHome();
+        const binding = home.open();
+        home.noteRouteBound("open");
+        return safeJson(binding);
+      }
+      case "home.designate":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "model"], method);
+          const model = this.admitNamedHomeModel(params.model);
+          // The owner falls back to the recorded model when re-enabling an
+          // existing Home, and only a fresh session uses the default.
+          return safeJson(await this.requireHome().designate(
+            model ? { model } : {},
+            () => this.defaultHomeModel(),
+          ));
+        });
+      case "home.disable":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId"], method);
+          return safeJson(await this.requireHome().disable());
+        });
+      case "home.configureMemory":
+        return this.mutation(client, method, params, async () => {
+          // The memory's model and nothing else: spend regulates itself (#493).
+          rejectUnknownFields(params, ["commandId", "model"], method);
+          const model = this.admitNamedHomeModel(params.model);
+          if (!model) throw new GatewayError("invalid_request", "home.configureMemory requires model");
+          return safeJson(await this.requireHome().configureMemory({ model }));
+        });
+      case "home.pauseMemory":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId"], method);
+          return safeJson(await this.requireHome().pauseMemory());
+        });
+      case "home.resumeMemory":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId"], method);
+          return safeJson(await this.requireHome().resumeMemory());
+        });
+      case "home.memory.page":
+        return safeJson(await this.requireHome().memoryPage(admitHomeMemoryPage(params), client.signal));
+      case "home.memory.evidence": {
+        const { evidence, offset } = admitHomeMemoryEvidence(params);
+        return safeJson(await this.requireHome().memoryEvidence(evidence, offset, client.signal));
+      }
+      case "home.context": {
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home context accepts no parameters");
+        return safeJson(this.requireHome().contextStatus());
+      }
       case "knowledge.status":
       case "knowledge.observation.coverage":
       case "knowledge.list":
@@ -1451,6 +1565,41 @@ export class GatewayService {
           }
           return { deleted: true };
         });
+      case "home.prompt": {
+        // The logical route accepts the composer's whole prompt contract; the
+        // shared admission below validates it against the slot it resolves to.
+        rejectUnknownFields(params, ["commandId", "text", "uploadIds", "behavior", "resourceInvocation"], method);
+        let binding: CommandReceiptBinding | undefined;
+        return this.mutation(client, method, params, async () => {
+          if (!binding) throw new GatewayError("internal", "Home route binding was not persisted before dispatch");
+          this.requireHome().assertRouteBinding({
+            homeId: binding.homeId,
+            bindingRevision: binding.bindingRevision,
+            physicalSessionId: binding.physicalSessionId,
+          });
+          const reserved = this.requireHome().reservedChapter(binding.physicalSessionId);
+          const slot = reserved
+            ? await this.dependencies.sessions.materializeReservedHome(binding.physicalSessionId)
+            : await this.dependencies.sessions.acquire(binding.physicalSessionId);
+          if (reserved) await this.dependencies.sessions.assertReservedHomeAttempt(binding.physicalSessionId);
+          this.requireHome().assertRouteBinding({
+            homeId: binding.homeId,
+            bindingRevision: binding.bindingRevision,
+            physicalSessionId: binding.physicalSessionId,
+          });
+          const accepted = await this.admitPrompt(slot, params);
+          return safeJson({
+            logicalSessionId: "home", homeId: binding.homeId, bindingRevision: binding.bindingRevision,
+            sessionId: binding.physicalSessionId, operationId: accepted.operationId,
+          });
+        }, false, true, async () => {
+          const home = this.requireHome();
+          await home.ensureChapterBelowHardLimit();
+          const route = home.routeBinding();
+          binding = { homeId: route.homeId, bindingRevision: route.bindingRevision, physicalSessionId: route.physicalSessionId };
+          return binding;
+        });
+      }
       case "session.prompt": {
         // Pin before receipt I/O, but defer rejection to its operation callback:
         // an existing receipt remains readable without a live subscription.
@@ -1459,70 +1608,7 @@ export class GatewayService {
         return this.mutation(client, method, params, async () => {
           this.requireRetainedSession(client, params, releaseSession);
           const slot = await this.openedSlot(client, params);
-          if (params.text !== undefined && typeof params.text !== "string") {
-            throw new GatewayError("invalid_request", "text must be a string");
-          }
-          const text = params.text === undefined ? "" : admitPromptText(params.text);
-          const uploadIds = params.uploadIds === undefined ? [] : arrayOfStrings(params.uploadIds, "uploadIds", 10);
-          const resourceInvocation = params.resourceInvocation === undefined || params.resourceInvocation === null
-            ? undefined : admitResourceInvocation(params.resourceInvocation);
-          const resourceSource = resourceInvocation?.source;
-          const resourceName = resourceInvocation?.name;
-          const resourceArguments = resourceInvocation?.arguments;
-          if (resourceInvocation === undefined && !text.trim() && uploadIds.length === 0) {
-            throw new GatewayError("invalid_request", "Prompt text or attachments are required");
-          }
-          if (resourceInvocation !== undefined && resourceArguments !== text) {
-            throw new GatewayError("invalid_request", "Prompt text must exactly match resourceInvocation.arguments");
-          }
-          const catalogResourceName = resourceSource === undefined
-            ? undefined : canonicalResourceName(resourceSource, resourceName!);
-          if (resourceSource !== undefined) {
-            const commands = slot.commands();
-            if (resourceSource === "extension" && uploadIds.length > 0) {
-              throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
-            }
-            const matches = commands.filter(
-              (command) => command.source === resourceSource && command.name === catalogResourceName,
-            );
-            const shadowed = resourceSource !== "extension" && commands.some(
-              (command) => command.source === "extension" && command.name === catalogResourceName,
-            );
-            if (matches.length !== 1 || shadowed) {
-              throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
-            }
-          }
-          const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
-          const visiblePrompt = [resourceArguments ?? text, attachments.envelope].filter(Boolean).join("\n\n");
-          const prompt = resourceSource === undefined
-            ? visiblePrompt
-            : `/${catalogResourceName!}${visiblePrompt ? ` ${visiblePrompt}` : ""}`;
-          const behavior = params.behavior === undefined ? undefined : oneOf(params.behavior, "behavior", ["steer", "followUp"] as const);
-          let resolveAdmission!: (result: { operationId: string }) => void;
-          let rejectAdmission!: (error: unknown) => void;
-          const admission = new Promise<{ operationId: string }>((resolve, reject) => {
-            resolveAdmission = resolve;
-            rejectAdmission = reject;
-          });
-          const execution = slot.prompt(prompt, attachments.images, behavior, {
-            text,
-            inputSource: "rpc",
-            commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
-            ...(resourceSource === undefined ? {} : {
-              resourceInvocation: {
-                source: resourceSource,
-                name: resourceName!,
-                arguments: resourceArguments!,
-              },
-            }),
-            attachmentEnvelope: attachments.envelope,
-            attachmentCount: uploadIds.length,
-            ...(attachments.photoCount > 0 ? { photoCount: attachments.photoCount } : {}),
-            ...(attachments.fileAttachmentCount > 0 ? { fileAttachmentCount: attachments.fileAttachmentCount } : {}),
-            ...(attachments.attachments.length > 0 ? { attachments: attachments.attachments } : {}),
-          }, resolveAdmission);
-          void execution.then(resolveAdmission, rejectAdmission);
-          return safeJson(await admission);
+          return safeJson(await this.admitPrompt(slot, params));
         }, false, true).finally(releaseSession);
       }
       case "session.abort":
@@ -2156,6 +2242,78 @@ export class GatewayService {
     return { runtimeGeneration, model };
   }
 
+  /** The composer's prompt admission, shared by `session.prompt` and
+   * `home.prompt`. A logical Home route accepts exactly the physical prompt
+   * contract: text, attachments, resource invocations and steering behavior are
+   * all validated against the slot the prompt will run in, before any attachment
+   * is materialized. */
+  private async admitPrompt(slot: RuntimeSlot, params: Record<string, unknown>): Promise<{ operationId: string }> {
+    if (params.text !== undefined && typeof params.text !== "string") {
+      throw new GatewayError("invalid_request", "text must be a string");
+    }
+    const text = params.text === undefined ? "" : admitPromptText(params.text);
+    const uploadIds = params.uploadIds === undefined ? [] : arrayOfStrings(params.uploadIds, "uploadIds", MAXIMUM_PROMPT_ATTACHMENTS);
+    const resourceInvocation = params.resourceInvocation === undefined || params.resourceInvocation === null
+      ? undefined : admitResourceInvocation(params.resourceInvocation);
+    const resourceSource = resourceInvocation?.source;
+    const resourceName = resourceInvocation?.name;
+    const resourceArguments = resourceInvocation?.arguments;
+    if (resourceInvocation === undefined && !text.trim() && uploadIds.length === 0) {
+      throw new GatewayError("invalid_request", "Prompt text or attachments are required");
+    }
+    if (resourceInvocation !== undefined && resourceArguments !== text) {
+      throw new GatewayError("invalid_request", "Prompt text must exactly match resourceInvocation.arguments");
+    }
+    const catalogResourceName = resourceSource === undefined
+      ? undefined : canonicalResourceName(resourceSource, resourceName!);
+    if (resourceSource !== undefined) {
+      const commands = slot.commands();
+      if (resourceSource === "extension" && uploadIds.length > 0) {
+        throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
+      }
+      const matches = commands.filter(
+        (command) => command.source === resourceSource && command.name === catalogResourceName,
+      );
+      const shadowed = resourceSource !== "extension" && commands.some(
+        (command) => command.source === "extension" && command.name === catalogResourceName,
+      );
+      if (matches.length !== 1 || shadowed) {
+        throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
+      }
+    }
+    const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
+    const visiblePrompt = [resourceArguments ?? text, attachments.envelope].filter(Boolean).join("\n\n");
+    const prompt = resourceSource === undefined
+      ? visiblePrompt
+      : `/${catalogResourceName!}${visiblePrompt ? ` ${visiblePrompt}` : ""}`;
+    const behavior = params.behavior === undefined ? undefined : oneOf(params.behavior, "behavior", ["steer", "followUp"] as const);
+    let resolveAdmission!: (result: { operationId: string }) => void;
+    let rejectAdmission!: (error: unknown) => void;
+    const admission = new Promise<{ operationId: string }>((resolve, reject) => {
+      resolveAdmission = resolve;
+      rejectAdmission = reject;
+    });
+    const execution = slot.prompt(prompt, attachments.images, behavior, {
+      text,
+      inputSource: "rpc",
+      commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
+      ...(resourceSource === undefined ? {} : {
+        resourceInvocation: {
+          source: resourceSource,
+          name: resourceName!,
+          arguments: resourceArguments!,
+        },
+      }),
+      attachmentEnvelope: attachments.envelope,
+      attachmentCount: uploadIds.length,
+      ...(attachments.photoCount > 0 ? { photoCount: attachments.photoCount } : {}),
+      ...(attachments.fileAttachmentCount > 0 ? { fileAttachmentCount: attachments.fileAttachmentCount } : {}),
+      ...(attachments.attachments.length > 0 ? { attachments: attachments.attachments } : {}),
+    }, resolveAdmission);
+    void execution.then(resolveAdmission, rejectAdmission);
+    return admission;
+  }
+
   private async openedSlot(client: ClientContext, params: Record<string, unknown>) {
     const sessionId = string(params.sessionId, "sessionId", { max: 200 });
     if (!client.isSubscribed(sessionId)) {
@@ -2191,6 +2349,45 @@ export class GatewayService {
     if (["starting", "building", "staging", "draining", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].includes(status.state)) {
       throw new GatewayError("busy", "Wait for the active Gateway update or rollback to finish before installing iOS", true);
     }
+  }
+
+  private requireHome(): HomeOwner {
+    if (!this.dependencies.home) throw new GatewayError("unsupported", "Tron Home is unavailable in this Gateway build");
+    return this.dependencies.home;
+  }
+
+  /** Admit the model a request named, or undefined when it named none. A
+   * virtual model is refused here because Home must not route on the canonical
+   * transcript. */
+  private admitNamedHomeModel(input: unknown): ModelRef | undefined {
+    if (input === undefined || input === null) return undefined;
+    const model = object(input, "model");
+    if (Object.keys(model).some((key) => key !== "provider" && key !== "id")) {
+      throw new GatewayError("invalid_request", "model accepts only provider and id");
+    }
+    return this.admitHomeModel(
+      string(model.provider, "model.provider", { max: 120 }),
+      string(model.id, "model.id", { max: 300 }),
+    );
+  }
+
+  /** This Gateway's default model for a new session, admitted the same way. */
+  private defaultHomeModel(): ModelRef {
+    const defaults = this.dependencies.settings.get(this.dependencies.config.tronHome, false) as {
+      effective?: { defaultModel?: ModelRef | null };
+    };
+    const fallback = defaults.effective?.defaultModel;
+    if (!fallback) throw new GatewayError("invalid_request", "Tron Home needs a model: set a default model or name one");
+    return this.admitHomeModel(fallback.provider, fallback.id);
+  }
+
+  private admitHomeModel(provider: string, id: string): ModelRef {
+    const model = this.dependencies.modelRuntime.getModel(provider, id);
+    if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
+    if (isVirtualModel(model)) {
+      throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
+    }
+    return { provider, id };
   }
 
   private requireKnowledge(): KnowledgeService {
@@ -2286,6 +2483,7 @@ export class GatewayService {
     operation: (workToken?: string) => Promise<JsonValue>,
     settlementDuringDrain = false,
     respondBeforeReceiptCompletion = false,
+    resolveBinding?: () => CommandReceiptBinding | Promise<CommandReceiptBinding>,
   ): Promise<JsonValue> {
     const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
     // The entry spans the whole receipt-backed operation (a compaction or a
@@ -2320,7 +2518,11 @@ export class GatewayService {
         knowledgeMutation
           ? async () => this.knowledgeReceiptSafe(await offLoop(operation))
           : () => offLoop(() => operation(work?.token)),
-        respondBeforeReceiptCompletion ? {
+        (respondBeforeReceiptCompletion || resolveBinding) ? {
+          ...(resolveBinding ? { resolveBinding,
+            onRouteBound: category => this.requireHome().noteRouteBound(category),
+          } : {}),
+          ...(respondBeforeReceiptCompletion ? {
           respondBeforeCompletion: true,
           onCompletion: completion => {
             if (!work) return;
@@ -2339,6 +2541,7 @@ export class GatewayService {
               },
             );
           },
+          } : {}),
         } : undefined,
       );
       return knowledgeMutation ? this.knowledgeReceiptResult(result) : result;

@@ -10,6 +10,9 @@ struct ChatView: View {
     private let initialModel: ModelRef?
     private let initialHistoryEntryID: String?
     private let initialSearchResult: SessionSearchResult?
+    /// The Home conversation's logical route: sends go through `home.prompt`,
+    /// and the Home header belongs to this chat whichever chapter it opens.
+    private let isHomeRoute: Bool
     private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     private let displayFrameScheduler: DisplayFrameScheduler
     private let performanceSignposts: any PerformanceSignposting
@@ -61,6 +64,7 @@ struct ChatView: View {
     /// reconciliation callbacks. They share this identity so physical evidence
     /// is rebased exactly once for the replacement tree.
     @State private var viewportActivation = 0
+    @State private var homeSheet: HomeSheetRoute?
 
     #if HOSTED_TEST
     init(
@@ -69,6 +73,7 @@ struct ChatView: View {
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
         initialSearchResult: SessionSearchResult? = nil,
+        isHomeRoute: Bool = false,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         hostedProbe: ChatHostedProbe? = nil,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
@@ -80,6 +85,7 @@ struct ChatView: View {
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
         self.initialSearchResult = initialSearchResult
+        self.isHomeRoute = isHomeRoute
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
         self.hostedProbe = hostedProbe
@@ -105,6 +111,7 @@ struct ChatView: View {
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
         initialSearchResult: SessionSearchResult? = nil,
+        isHomeRoute: Bool = false,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
@@ -115,6 +122,7 @@ struct ChatView: View {
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
         self.initialSearchResult = initialSearchResult
+        self.isHomeRoute = isHomeRoute
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
         self.displayFrameScheduler = displayFrameScheduler
@@ -145,6 +153,22 @@ struct ChatView: View {
                     route: $sessionPresentation.floatingDisplay,
                     onOpenSheet: { sessionPresentation.presentDisplay(.showSheet($0)) }
                 )
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let profileID = composerScope?.profileID,
+                   profileID == model.profiles.selected?.id,
+                   model.homeStatus.capabilityEnabled,
+                   let status = model.homeStatus.status,
+                   HomeChatRouteKey.forChat(sessionID: sessionID, isHome: isHomeRoute).matches(status),
+                   status.enabled || model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
+                    HomeChatHeader(
+                        status: status,
+                        profileID: profileID,
+                        canStop: admitsLiveSessionCommands && selectedAuthoritativeSnapshot?.operation != nil,
+                        onStop: abortCurrentOperation,
+                        onPresent: { homeSheet = HomeSheetRoute(profileID: profileID, destination: $0) }
+                    )
+                }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // The complete composer is the sole structural inset owner, so
@@ -214,7 +238,8 @@ struct ChatView: View {
             onKeepEditorRequest: { request in
                 guard let target = presentationTarget else { return }
                 model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
-            }
+            },
+            homeSheet: $homeSheet
         ))
         .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in
@@ -2753,18 +2778,7 @@ struct ChatView: View {
             onDismissResourcePicker: dismissComposerResourcePicker,
             onShowContext: { sessionPresentation.showContext = true },
             onSend: { behavior in send(behavior: behavior) },
-            onAbort: {
-                // Command identity is canonical authority, not delayed render state.
-                let operation = selectedAuthoritativeSnapshot?.operation
-                let kind = ChatComposerPolicy.abortKind(operation: operation)
-                Task {
-                    await model.abort(
-                        sessionID: sessionID,
-                        kind: kind,
-                        operationID: operation?.id
-                    )
-                }
-            },
+            onAbort: abortCurrentOperation,
             onSelectAttachmentDestination: requestAttachmentPresentation,
             onPasteImages: importPastedImages,
             onCatchUp: catchUpToTail,
@@ -2772,6 +2786,14 @@ struct ChatView: View {
             onComposerHeightSettled: composerHeightSettled
         )
         .environment(\.chatOwnsStatusBar, true)
+    }
+
+    private func abortCurrentOperation() {
+        // Both Home's menu and the composer stop the current authoritative
+        // operation, never an ID captured by a delayed render or Home status.
+        let operation = selectedAuthoritativeSnapshot?.operation
+        let kind = ChatComposerPolicy.abortKind(operation: operation)
+        Task { await model.abort(sessionID: sessionID, kind: kind, operationID: operation?.id) }
     }
 
     private var composerTrailingMode: ComposerTrailingMode? {
@@ -3398,6 +3420,7 @@ struct ChatView: View {
                     target: target,
                     behavior: behavior,
                     resourceInvocation: resourceInvocation,
+                    route: isHomeRoute ? .home : .session,
                     canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
                     queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? [],
                     runtimeGeneration: selectedAuthoritativeSnapshot?.runtimeGeneration

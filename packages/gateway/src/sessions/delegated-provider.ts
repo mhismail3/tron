@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Extension, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ExtensionToolOrigin } from "../protocol/types.js";
-import { isManagedSubagentExtension } from "./managed-subagents.js";
+import { isManagedSubagentExtension, MANAGED_SUBAGENTS_VERSION } from "./managed-subagents.js";
 import { attributedToolOwner } from "../extensions/owner-attribution.js";
 
 /**
@@ -169,6 +169,13 @@ export function delegatedProviderOrigin(extensions: readonly Extension[]): Exten
     if (owner) return { source: owner.source, owner };
   }
   return { source: DELEGATED_PROVIDER_SOURCE };
+}
+
+/** Version belongs to the verified managed closure, never a same-named user
+ * package or project extension. Task policy fails closed for any other owner. */
+export function delegatedProviderToolVersion(extensions: readonly Extension[], toolName: string): string | undefined {
+  const extension = extensions.find(candidate => isManagedSubagentExtension(candidate) && candidate.tools.has(toolName));
+  return extension ? MANAGED_SUBAGENTS_VERSION : undefined;
 }
 
 /** True only for the exact installed provider owner, never a same-named tool. */

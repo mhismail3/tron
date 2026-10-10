@@ -56,11 +56,15 @@ struct ChatRoutes: ViewModifier {
     @Binding var displaySheet: DisplayRoute?
     let onUseEditorRequest: (ComposerEditorRequest) -> Void
     let onKeepEditorRequest: (ComposerEditorRequest) -> Void
+    @Binding var homeSheet: HomeSheetRoute?
     @Environment(AppModel.self) private var model
     @State private var forkNavigation = ChatForkNavigationOwner()
 
     func body(content: Content) -> some View {
         content
+            .tronManagedSheet(item: $homeSheet, identity: { $0.id }) { route in
+                HomeSheet(destination: route.destination, profileID: route.profileID)
+            }
             .tronManagedSheet(
                 isPresented: $showContext,
                 identity: "chat.\(sessionID).context",

@@ -91,6 +91,8 @@ const DISPOSABLE_READ_METHODS: ReadonlySet<string> = new Set([
   "session.transcript",
   "session.history.list",
   "session.history.entry",
+  "home.memory.page",
+  "home.memory.evidence",
   "session.search",
   "model.list",
   "provider.list",
@@ -127,6 +129,8 @@ export const DISPOSABLE_READ_DEADLINES_MS: ReadonlyMap<string, number> = new Map
   ["session.transcript", DISPOSABLE_READ_DEADLINE_MS],
   ["session.history.list", DISPOSABLE_READ_DEADLINE_MS],
   ["session.history.entry", DISPOSABLE_READ_DEADLINE_MS],
+  ["home.memory.page", DISPOSABLE_READ_DEADLINE_MS],
+  ["home.memory.evidence", DISPOSABLE_READ_DEADLINE_MS],
 ]);
 /** An upgrade that reaches hello within this bound is debug detail; every
  * abandoned or rejected upgrade, and any slower one, warns. */

@@ -292,6 +292,44 @@ struct AppModelLifecycleTests {
         }
     }
 
+    @Test("profile switch retires mounted Home status before replacement admission")
+    func profileSwitchRetiresMountedHomeStatus() async throws {
+        try await withFixture(socketCount: 2) { fixture in
+            let mount = try await mountHomeStatus(fixture)
+            defer { fixture.model.homeStatus.retireSurface(mount.token) }
+
+            let switching = Task { await fixture.model.switchGateway(fixture.replacementProfile) }
+            defer { switching.cancel() }
+            try await fixture.sockets[0].waitUntilSent(count: 1)
+            #expect(fixture.model.homeStatus.status == nil)
+
+            await fixture.sockets[0].enqueue(helloFrame())
+            await switching.value
+        }
+    }
+
+    @Test("forget retires mounted Home status without waiting for replacement connection")
+    func forgetRetiresMountedHomeStatus() async throws {
+        try await withFixture(socketCount: 1) { fixture in
+            let mount = try await mountHomeStatus(fixture)
+            defer { fixture.model.homeStatus.retireSurface(mount.token) }
+
+            await fixture.model.forgetCurrentGateway()
+            #expect(fixture.model.homeStatus.status == nil)
+        }
+    }
+
+    @Test("teardown retires mounted Home status")
+    func teardownRetiresMountedHomeStatus() async throws {
+        try await withFixture(socketCount: 1) { fixture in
+            let mount = try await mountHomeStatus(fixture)
+            defer { fixture.model.homeStatus.retireSurface(mount.token) }
+
+            await fixture.model.teardown()
+            #expect(fixture.model.homeStatus.status == nil)
+        }
+    }
+
     @Test("switch closes the previous transport before the replacement connect starts")
     func switchSerializesProfileReplacement() async throws {
         try await withFixture(socketCount: 2) { fixture in
@@ -505,6 +543,47 @@ struct AppModelLifecycleTests {
         }
         Issue.record("timed out waiting for \(count) scene record(s)")
         return await log.snapshot().filter { $0.event.hasPrefix("scene.") }
+    }
+
+    private func startConnected(_ fixture: LifecycleFixture) async throws {
+        let start = Task { await fixture.model.start() }
+        try await fixture.sockets[0].waitUntilSent(count: 1)
+        await fixture.sockets[0].enqueue(helloFrame())
+        await start.value
+    }
+
+    private func mountHomeStatus(_ fixture: LifecycleFixture) async throws -> (token: PresentationSurfaceToken, coordinator: PresentationActivityCoordinator) {
+        let coordinator = PresentationActivityCoordinator()
+        let token = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+        coordinator.register(token, parent: nil)
+        let owner = fixture.model.homeStatus
+        owner.mountSurface(token: token, coordinator: coordinator, fetch: { _ in throw CancellationError() })
+        guard let fence = owner.beginRead(
+            profileID: fixture.initialProfile.id,
+            connectionID: "mounted-connection",
+            capabilityEnabled: true,
+            token: token,
+            coordinator: coordinator
+        ) else {
+            Issue.record("mounted Home owner rejected its initial read")
+            return (token, coordinator)
+        }
+        #expect(owner.publish(try Self.homeStatusFixture(), for: fence))
+        #expect(owner.status?.phase == .ready)
+        return (token, coordinator)
+    }
+
+    private static func homeStatusFixture() throws -> HomeStatusDTO {
+        try HomeStatusDTO.decode(.object([
+            "phase": .string("ready"),
+            "activation": .object(["available": .bool(false)]),
+            "readiness": .object(["ready": .bool(true), "gaps": .array([])]),
+            "recovery": .object(["action": .string("none")]),
+            "available": .bool(true), "enabled": .bool(true),
+            "homeId": .string("home"), "sessionId": .string("home-session"), "openSessionId": .string("home-session"),
+            "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(true),
+            "memory": .object(["configured": .bool(true), "open": .bool(true)]),
+        ]))
     }
 
     private func withFixture(

@@ -1043,3 +1043,201 @@ export interface PackageProvides {
 /** `hooks.list`: exactly the hook fields `session.resources` returns, for one
  * scope and without a session. */
 export type HooksProjection = HookRegistrationProjection;
+
+/** The capability string `hello`/`system.info` advertise for Tron Home. */
+export const HOME_CAPABILITY = "home.v1";
+/** Native browser reads are separately gated; older home.v1 servers lack them. */
+export const HOME_MEMORY_BROWSER_CAPABILITY = "home-memory-browser.v1";
+
+/** Physical canonical identity, never a projected memory line address. */
+export interface HomeMemoryEvidence {
+  index: number;
+  sessionId: string;
+  entryId: string;
+  sourceDigest: string;
+}
+
+export interface HomeMemoryItem {
+  index: number;
+  kind: "user" | "talk" | "echo" | "event";
+  attribution: "user" | "assistant" | "tool" | "event";
+  timestamp?: string;
+  evidence: HomeMemoryEvidence;
+  projection: { format: "memory-projection"; text: string; omitted: boolean; omissions: string[] };
+  /** A leaf summary, not canonical evidence; null while unbuilt/invalidated. */
+  summary: { format: "memory-summary"; text: string; truncated: boolean } | null;
+}
+
+/** home.memory.page: at most 50 rows and 128 KiB encoded JSON. */
+export interface HomeMemoryPage {
+  homeId: string;
+  revision: string;
+  totalItems: number;
+  items: HomeMemoryItem[];
+  nextCursor?: string;
+}
+
+/** home.memory.evidence: the shared history owner's bounded content rendering.
+ * Not raw JSONL or attachment bytes. Off-branch/context-edited originals remain
+ * canonical facts; their projected exclusions do not erase the source. */
+export interface HomeMemoryEvidencePage {
+  format: "canonical-history";
+  evidence: HomeMemoryEvidence;
+  text: string;
+  offset: number;
+  nextOffset?: number;
+  previousOffset?: number;
+  totalCharacters: number;
+  metadata: Record<string, JsonValue>;
+}
+
+/** `home.open`: a logical route and its current physical binding. It does not
+ * materialize a reserved chapter; clients attach physically only when an active
+ * chapter exists. */
+export interface HomeOpen {
+  logicalSessionId: "home";
+  homeId: string;
+  bindingRevision: number;
+  sessionId: string;
+  generation: number;
+  chapterState: "active" | "sealed" | "reserved" | "materializing";
+}
+
+/** `home.status`: the one bounded Home projection. It is a read and performs no
+ * inference. `available` is false only when a stored record exists but cannot be
+ * used, which `reason` explains; the preserved record is never overwritten.
+ * `live` is whether the session holds a runtime right now; `sessionPresent` is
+ * whether it exists at all, live or still on disk. */
+export interface HomeStatus {
+  /** Process-owned task recovery projection; refusal fences only task surfaces
+   * until the next Gateway start, never ordinary session readiness. */
+  taskRecovery: { available: true } | { available: false; reason: string };
+  /** Derived from the durable designation, runtime presence, memory and current/last activation. */
+  phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "rollover-pending" | "blocked" | "paused" | "active" | "ready";
+  /** Current or last activation evidence; never includes message or memory-view bodies. */
+  activation: HomeContextProjection;
+  readiness: { ready: boolean; gaps: string[] };
+  recovery: { action: "inspect-record" | "designate" | "configure-memory" | "resume-memory" | "none"; reason?: string };
+  available: boolean;
+  reason?: string;
+  enabled: boolean;
+  homeId?: string;
+  sessionId?: string;
+  /** The newest chapter a client may open: `sessionId` when it is present, or the
+   * sealed predecessor while `rollover-pending`. Absent when nothing is openable.
+   * Sends from it still go through `home.prompt`, which materializes the successor. */
+  openSessionId?: string;
+  bindingRevision?: number;
+  generation?: number;
+  routeGeneration?: number;
+  model?: ModelRef;
+  chapter?: {
+    count: number;
+    currentBytes?: number;
+    currentEntries?: number;
+    recoveryDecision: "none" | "reserved" | "materializing";
+  };
+  live: boolean;
+  sessionPresent: boolean;
+  /** Home's memory, once a record names one. There are no memory defaults
+   * (decision D4), so a Home whose memory is unconfigured refuses its
+   * activations until `home.configureMemory`. */
+  memory: HomeMemoryStatus;
+}
+
+/**
+ * `home.status`'s memory part. `configured` is the record's decision, `open` is
+ * whether the memory's store is serving, `episodic` is the memory owner's own
+ * bounded status (view sizes, coverage, pump, blocked state, token spend) and is
+ * absent until that store is open, and `blocked` is the block's reason, reported
+ * even when the store is not open.
+ */
+export interface HomeMemoryStatus {
+  /** Durable operator suspension. Independent of a compactor/source block. */
+  paused?: boolean;
+  configured: boolean;
+  open: boolean;
+  model?: ModelRef;
+  /** Tokens this memory has spent over its life, read from its persisted state;
+   * present whenever a store exists, open or not, because a restart restores it.
+   * Reported, never a ceiling: the memory regulates its own spend (#493). */
+  spentTokens?: number;
+  episodic?: {
+    sourceSessionId: string;
+    generation: number;
+    messages: number;
+    nodes: { total: number; free: number; summary: number; byLevel: Array<{ level: number; count: number }> };
+    view: {
+      parts: Array<{ address: string; start: number; messages: number; bytes: number; built: boolean }>;
+      truncatedParts: number;
+      bytes: number;
+      budgetBytes: number;
+      built: number;
+      unbuilt: number;
+    };
+    coverage: { admitted: number; summarized: number };
+    pump: { busy: number };
+    blocked: { reason: string; detail?: string } | null;
+    /** Spend, reported and never a ceiling (#493). */
+    tokens: {
+      used: number;
+      sinceOpen: { input: number; output: number; cacheRead: number; cacheWrite: number };
+    };
+  };
+  blocked?: string;
+  reason?: string;
+}
+
+/**
+ * `home.context`: the bounded request context of Home's current or last
+ * activation, and nothing else. It carries no message body: the activation's
+ * start entry is named by id, the memory view only by its line and byte counts,
+ * and the refusal only by its reason and detail. A caller that needs the
+ * conversation reads the transcript, and the view text never leaves the request
+ * that carried it.
+ */
+export type HomeContextProjection =
+  | { available: false }
+  | {
+    available: true;
+    /** The canonical entry the activation's input followed; null when nothing
+     * preceded it (the first activation of an empty Home). */
+    activationStartEntryId: string | null;
+    /** Whether that activation is still open (its run has not settled). */
+    activationOpen: boolean;
+    /** The sizes of the request that activation prepared. Absent when it was
+     * refused before it prepared one: the start entry and the refusal below are
+     * still this activation's, never another's. */
+    viewLines?: number;
+    viewBytes?: number;
+    effectiveTokens?: number;
+    contextWindow?: number;
+    /** This activation's own refusal, when it was refused. */
+    lastRefusalReason?: string;
+    lastRefusalDetail?: string;
+  };
+
+export interface HomeDesignation {
+  homeId: string;
+  sessionId: string;
+  generation: number;
+}
+
+/** home.taskList: bounded newest-first task metadata; no canonical reports. */
+export interface HomeTaskSummary {
+  taskId: string;
+  createdAt: number;
+  updatedAt: number;
+  /** At most 160 Unicode code points from the immutable intent. */
+  title: string;
+  target: string;
+  lifecycle: "pending" | "active" | "terminal";
+  outcome: "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown" | null;
+  spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
+  attention: boolean;
+  pendingGrant: boolean;
+}
+export interface HomeTaskPage {
+  items: HomeTaskSummary[];
+  nextCursor?: string;
+}

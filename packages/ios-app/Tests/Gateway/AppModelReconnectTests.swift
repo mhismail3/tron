@@ -1610,6 +1610,1004 @@ struct AppModelReconnectTests {
         await client.close()
     }
 
+    @Test("Home status retires on disconnect and reads the replacement connection")
+    func homeStatusRebindsAfterDisconnect() async throws {
+        let suite = "AppModelHomeStatusReconnectTests.\\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let profile = GatewayProfile(
+            id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"
+        )
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let first = ScriptedGatewaySocket()
+        let replacement = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [first, replacement]).factory)
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: suite)
+        defer { try? FileManager.default.removeItem(at: cacheRoot) }
+        let model = AppModel(
+            client: client,
+            profiles: GatewayProfileStore(defaults: defaults),
+            cache: SnapshotCache(root: cacheRoot),
+            profileTokenLookup: { _ in "token" }
+        )
+        let presentation = PresentationActivityCoordinator()
+        let surface = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+        presentation.register(surface, parent: nil)
+        var foregroundTask: Task<Void, Never>?
+
+        do {
+            await first.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await model.connectHostedGateway(profile: profile, token: "token")
+            model.mountHomeStatus(surfaceToken: surface, activityCoordinator: presentation)
+            let firstRead = try await waitForMethod("home.status", on: first)
+            await first.enqueue(successResponse(id: firstRead.id, result: homeStatusResult()))
+            for _ in 0..<100 where model.homeStatus.status == nil { await Task.yield() }
+            #expect(model.homeStatus.status?.phase == .ready)
+
+            await model.enteredBackground().value
+            #expect(model.homeStatus.status == nil)
+            foregroundTask = model.becameActive()
+            try await replacement.waitUntilSent(count: 1)
+            await replacement.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            for _ in 0..<300 where model.connectionState != .connected { await Task.yield() }
+            #expect(model.connectionState == .connected)
+            let identity = model.knowledgePresentationIdentity
+            #expect(identity.lifecycleGeneration != nil)
+            #expect(identity.connectionID != nil)
+            let replacementRead = try await waitForMethod("home.status", on: replacement)
+            #expect(replacementRead.index >= 1)
+            await replacement.enqueue(successResponse(id: replacementRead.id, result: homeStatusResult()))
+            for _ in 0..<100 where model.homeStatus.status == nil { await Task.yield() }
+            #expect(model.homeStatus.status?.phase == .ready)
+            #expect(model.homeStatus.status?.sessionId == "home-session")
+        } catch {
+            foregroundTask?.cancel()
+            await model.teardown()
+            await client.close()
+            throw error
+        }
+        foregroundTask?.cancel()
+        model.unmountHomeStatus(surfaceToken: surface)
+        await model.teardown()
+        await client.close()
+    }
+
+    @Test("a chat opened before Home status claims one read and then owns the status it reads")
+    func chatOpenedBeforeHomeStatusClaimsOneRead() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let chat = PresentationSurfaceToken(id: "chat.home-session", generation: UUID())
+            presentation.register(chat, parent: nil)
+
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .home))
+            let read = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: read.id, result: homeStatusResult()))
+            try await waitForHomePhase(.ready, model: fixture.model)
+            #expect(fixture.model.homeStatus.status?.sessionId == "home-session")
+            for _ in 0..<20 { await Task.yield() }
+            #expect(try await rpcMethods(on: socket).filter { $0 == "home.status" }.count == 1)
+            fixture.model.unmountHomeStatus(surfaceToken: chat)
+        }
+    }
+
+    @Test("a known Home status for another session makes an ordinary chat read nothing")
+    func knownHomeStatusForAnotherSessionDoesNotRead() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let dashboard = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+            presentation.register(dashboard, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: dashboard, activityCoordinator: presentation)
+            let read = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: read.id, result: homeStatusResult()))
+            try await waitForHomePhase(.ready, model: fixture.model)
+
+            let chat = PresentationSurfaceToken(id: "chat.ordinary-session", generation: UUID())
+            presentation.register(chat, parent: nil)
+            #expect(!fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .ordinary(sessionID: "ordinary-session")))
+            for _ in 0..<20 { await Task.yield() }
+            #expect(try await rpcMethods(on: socket).filter { $0 == "home.status" }.count == 1)
+            fixture.model.unmountHomeStatus(surfaceToken: dashboard)
+        }
+    }
+
+    @Test("a matching chat claim promotes to the mounted cadence and refreshes on its session's summary")
+    func matchingChatClaimPromotesToMountedCadence() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let chat = PresentationSurfaceToken(id: "chat.home-session", generation: UUID())
+            presentation.register(chat, parent: nil)
+
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .home))
+            let claim = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: claim.id, result: homeStatusResult()))
+            try await waitForHomePhase(.ready, model: fixture.model)
+
+            await fixture.model.handle(GatewayEvent(type: "event", topic: "session.summary", sessionId: "home-session", payload: .object([:])))
+            let refresh = try await waitForMethod("home.status", on: socket, afterIndex: claim.index + 1)
+            await socket.enqueue(successResponse(id: refresh.id, result: homeStatusResult()))
+            fixture.model.unmountHomeStatus(surfaceToken: chat)
+        }
+    }
+
+    @Test("a chat opened on the sealed predecessor during rollover claims the status it opens, not the reserved successor")
+    func rolloverPredecessorChatClaimsStatus() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let chat = PresentationSurfaceToken(id: "chat.predecessor-session", generation: UUID())
+            presentation.register(chat, parent: nil)
+            let rollover = homeStatusResult(sessionID: "successor-session", openSessionID: "predecessor-session")
+
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .home))
+            let claim = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: claim.id, result: rollover))
+            try await waitForHomePhase(.ready, model: fixture.model)
+            #expect(fixture.model.homeStatus.status?.openSessionId == "predecessor-session")
+
+            await fixture.model.handle(GatewayEvent(type: "event", topic: "session.summary", sessionId: "predecessor-session", payload: .object([:])))
+            let refresh = try await waitForMethod("home.status", on: socket, afterIndex: claim.index + 1)
+            await socket.enqueue(successResponse(id: refresh.id, result: rollover))
+            fixture.model.unmountHomeStatus(surfaceToken: chat)
+        }
+    }
+
+    @Test("an ordinary chat on the sealed predecessor during rollover neither claims the status nor reads it")
+    func ordinaryChatOnRolloverPredecessorNeitherClaimsNorReads() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            // The dashboard holds the rollover status, so the chat sees a known status.
+            let dashboard = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+            presentation.register(dashboard, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: dashboard, activityCoordinator: presentation)
+            let read = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: read.id, result: homeStatusResult(sessionID: "successor-session", openSessionID: "predecessor-session")))
+            try await waitForHomePhase(.ready, model: fixture.model)
+
+            let ordinaryChat = PresentationSurfaceToken(id: "chat.predecessor-session", generation: UUID())
+            presentation.register(ordinaryChat, parent: nil)
+            #expect(!fixture.model.mountHomeStatusForChat(surfaceToken: ordinaryChat, activityCoordinator: presentation, route: .ordinary(sessionID: "predecessor-session")))
+            for _ in 0..<20 { await Task.yield() }
+            #expect(try await rpcMethods(on: socket).filter { $0 == "home.status" }.count == 1, "an ordinary chat on the sealed predecessor reads nothing")
+            #expect(fixture.model.homeStatus.status?.openSessionId == "predecessor-session", "the dashboard keeps the status it already read")
+            fixture.model.unmountHomeStatus(surfaceToken: dashboard)
+        }
+    }
+
+    @Test("a Home follow carries the sealed chapter's unsent text to the successor route")
+    func homeFollowCarriesUnsentTextToSuccessor() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let dashboard = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+            presentation.register(dashboard, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: dashboard, activityCoordinator: presentation)
+            let read = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: read.id, result: homeStatusResult(sessionID: "successor-session", openSessionID: "predecessor-session")))
+            try await waitForHomePhase(.ready, model: fixture.model)
+
+            let sealedRoute = try fixture.model.navigationRouteForHome(profileID: profile.id, status: try #require(fixture.model.homeStatus.status))
+            #expect(sealedRoute.sessionID == "predecessor-session")
+            let sealedDraft = ComposerDraftScope(profileID: profile.id, sessionID: "predecessor-session")
+            fixture.model.composerDrafts.setText("typed after the send", for: sealedDraft)
+
+            // Home names the successor once the logical prompt materializes it.
+            await fixture.model.handle(GatewayEvent(type: "event", topic: "session.summary", sessionId: "predecessor-session", payload: .object([:])))
+            let refresh = try await waitForMethod("home.status", on: socket, afterIndex: read.index + 1)
+            await socket.enqueue(successResponse(id: refresh.id, result: homeStatusResult(sessionID: "successor-session", openSessionID: "successor-session")))
+            for _ in 0..<200 where fixture.model.homeStatus.status?.openSessionId != "successor-session" {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            let materialized = try #require(fixture.model.homeStatus.status)
+            #expect(materialized.openSessionId == "successor-session")
+
+            let followed = try #require(try fixture.model.followedHomeRoute(from: sealedRoute, profileID: profile.id, status: materialized))
+            #expect(followed.sessionID == "successor-session")
+            #expect(followed.isHome)
+            let successorDraft = ComposerDraftScope(profileID: profile.id, sessionID: "successor-session")
+            #expect(fixture.model.composerDrafts.text(for: successorDraft) == "typed after the send",
+                    "the successor composer opens with the unsent text the Home route carried")
+            #expect(fixture.model.composerDrafts.text(for: sealedDraft) == "typed after the send", "the sealed chapter keeps its own draft")
+            #expect(try fixture.model.followedHomeRoute(from: followed, profileID: profile.id, status: materialized) == nil,
+                    "a route that already opens the named chapter does not follow")
+            fixture.model.unmountHomeStatus(surfaceToken: dashboard)
+        }
+    }
+
+    @Test("a chat claim that finds another session releases Home reads, including on session invalidations")
+    func nonMatchingChatClaimReadsNoMoreAfterInvalidation() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let chat = PresentationSurfaceToken(id: "chat.ordinary-session", generation: UUID())
+            presentation.register(chat, parent: nil)
+
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .ordinary(sessionID: "ordinary-session")))
+            let claim = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: claim.id, result: homeStatusResult()))
+            try await waitForHomePhase(.ready, model: fixture.model)
+            #expect(fixture.model.homeStatus.status?.sessionId == "home-session")
+
+            await fixture.model.handle(GatewayEvent(type: "event", topic: "session.summary", sessionId: "home-session", payload: .object([:])))
+            await fixture.model.handle(GatewayEvent(type: "event", topic: "session.listChanged", sessionId: nil, payload: .object([:])))
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(try await rpcMethods(on: socket).filter { $0 == "home.status" }.count == 1)
+            #expect(fixture.model.homeStatus.status?.sessionId == "home-session", "the released status stays for the dashboard")
+            fixture.model.unmountHomeStatus(surfaceToken: chat)
+        }
+    }
+
+    @Test("a claimed chat's status read cannot publish after the chat retires")
+    func claimedChatStatusReadCannotPublishAfterRetirement() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let chat = PresentationSurfaceToken(id: "chat.home-session", generation: UUID())
+            presentation.register(chat, parent: nil)
+            #expect(fixture.model.mountHomeStatusForChat(surfaceToken: chat, activityCoordinator: presentation, route: .home))
+            let read = try await waitForMethod("home.status", on: socket)
+
+            presentation.retire(chat)
+            fixture.model.unmountHomeStatus(surfaceToken: chat)
+            await socket.enqueue(successResponse(id: read.id, result: homeStatusResult()))
+            for _ in 0..<100 { await Task.yield() }
+            #expect(fixture.model.homeStatus.status == nil)
+        }
+    }
+
+    @Test("Home designation initial connection wait expiry leaves no receipt and permits a fresh command")
+    func homeMutationsConnectionWaitExpiryReleasesOwnership() async throws {
+        let first = ScriptedGatewaySocket()
+        let replacement = ScriptedGatewaySocket()
+        let clock = ManualClock()
+        try await withFixture(sockets: [first, replacement], clock: clock, units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await first.waitUntilSent(count: 1)
+            await first.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+
+            fixture.model.lifecycleNotePathHint(satisfied: false)
+            await first.failPendingReceivers(URLError(.networkConnectionLost))
+            try await first.waitUntilClosed()
+            try await waitForConnectionState(.reconnecting, model: fixture.model)
+            let expiredAttempt = Task {
+                try await fixture.model.homeMutations.designate(authority: fixture.model.homeMutations.authority(profileID: profile.id))
+            }
+            try await waitForHomeCommandState(isRunning: true, model: fixture.model)
+            for _ in 0..<80 where fixture.model.homeMutations.isRunning(profileID: profile.id) {
+                try await clock.waitUntilSleeping(count: 1, duration: .milliseconds(100))
+                clock.advance(by: .milliseconds(100))
+                await Task.yield()
+            }
+            do {
+                _ = try await expiredAttempt.value
+                Issue.record("an offline Home designation unexpectedly completed")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "disconnected")
+                #expect(failure.message.contains("was not sent"))
+            }
+            let retainedAfterExpiry = fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id)
+            #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+            #expect(!retainedAfterExpiry)
+            guard !retainedAfterExpiry else { return }
+            let beforeReconnect = try await rpcMethods(on: first)
+            #expect(!beforeReconnect.contains("home.designate"))
+
+            fixture.model.lifecycleNotePathHint(satisfied: true)
+            try await replacement.waitUntilSent(count: 1)
+            await replacement.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+
+            try await waitForConnectionState(.connected, model: fixture.model)
+            let retry = Task { try await fixture.model.homeMutations.designate(authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let mutation = try await waitForMethod("home.designate", on: replacement)
+            let mutationFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await replacement.sentFrames()[mutation.index])
+            let newCommandID = try #require(mutationFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue)
+            #expect(!newCommandID.isEmpty)
+            await replacement.enqueue(successResponse(id: mutation.id, result: .object([
+                "homeId": .string("home"), "sessionId": .string("home-session"), "generation": .number(1),
+            ])))
+            #expect(try await retry.value.sessionId == "home-session")
+            #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+        }
+    }
+
+    @Test("Home designation cancellation while the client request is queued leaves no receipt")
+    func homeMutationsQueuedCancellationReleasesOwnership() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+
+            let gate = TestReadGate()
+            defer { Task { await gate.release() } }
+            let cancelledAttempt = Task {
+                try await GatewayClient.$hostedQueuedSendGate.withValue({ await gate.wait() }) {
+                    try await fixture.model.homeMutations.designate(authority: fixture.model.homeMutations.authority(profileID: profile.id))
+                }
+            }
+            try await gate.waitForEntry()
+            #expect(fixture.model.homeMutations.isRunning(profileID: profile.id))
+            #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+            #expect(!(try await rpcMethods(on: socket)).contains("home.designate"))
+            cancelledAttempt.cancel()
+            do {
+                _ = try await cancelledAttempt.value
+                Issue.record("a canceled queued Home command unexpectedly completed")
+            } catch is CancellationError {
+                // GatewayClient reports CancellationError only while transmission is still queued.
+            }
+            await gate.release()
+            #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+
+            let retry = Task { try await fixture.model.homeMutations.designate(authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let mutation = try await waitForMethod("home.designate", on: socket)
+            let mutationFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[mutation.index])
+            let retryCommandID = try #require(mutationFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue)
+            await socket.enqueue(successResponse(id: mutation.id, result: .object([
+                "homeId": .string("home"), "sessionId": .string("home-session"), "generation": .number(1),
+            ])))
+            #expect(try await retry.value.sessionId == "home-session")
+            #expect(!retryCommandID.isEmpty)
+            #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+        }
+    }
+
+    @Test("Home designation retains one possibly-sent command through missing, pending, and completion")
+    func homeMutationsReceiptOwnership() async throws {
+        let first = ScriptedGatewaySocket()
+        let replacement = ScriptedGatewaySocket()
+        let clock = ManualClock()
+        try await withFixture(sockets: [first, replacement], clock: clock, units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await first.waitUntilSent(count: 1)
+            await first.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+
+            let designation = Task {
+                try await fixture.model.homeMutations.designate(authority: fixture.model.homeMutations.authority(profileID: profile.id))
+            }
+            let mutation = try await waitForMethod("home.designate", on: first)
+            let mutationFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await first.sentFrames()[mutation.index])
+            let commandID = try #require(mutationFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue)
+            await first.failPendingReceivers(URLError(.networkConnectionLost))
+            try await first.waitUntilClosed()
+            try await waitForConnectionState(.reconnecting, model: fixture.model)
+            let foreground = fixture.model.becameActive()
+            try await replacement.waitUntilSent(count: 1)
+            await replacement.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await waitForConnectionState(.connected, model: fixture.model)
+
+            let presentation = PresentationActivityCoordinator()
+            let token = PresentationSurfaceToken(id: "home-receipt-dashboard", generation: UUID())
+            presentation.register(token, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentation)
+            let currentStatus = try await waitForMethod("home.status", on: replacement)
+            await replacement.enqueue(successResponse(id: currentStatus.id, result: homeStatusResult()))
+            try await waitForHomePhase(.ready, model: fixture.model)
+            let readyStatus = try #require(fixture.model.homeStatus.status)
+            #expect(HomePinnedRowPolicy.action(for: readyStatus) == .open(sessionID: "home-session"))
+            let missing = try await waitForMethodAdvancingClock("command.status", on: replacement, clock: clock)
+            let missingFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await replacement.sentFrames()[missing.index])
+            #expect(missingFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue == commandID)
+            let unexpectedReplay = Task { () -> Bool in
+                do {
+                    let replay = try await waitForMethod("home.designate", on: replacement)
+                    await replacement.enqueue(successResponse(id: replay.id, result: .object([
+                        "homeId": .string("home"), "sessionId": .string("home-session"), "generation": .number(1),
+                    ])))
+                    return true
+                } catch {
+                    return false
+                }
+            }
+            await replacement.enqueue(successResponse(id: missing.id, result: .object(["status": .string("missing")])))
+            do {
+                _ = try await designation.value
+                Issue.record("missing receipt unexpectedly returned a designation")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "outcome_unknown")
+            }
+            unexpectedReplay.cancel()
+            let didReplay = await unexpectedReplay.value
+            #expect(!didReplay, "missing receipt must not send a replacement designation")
+            let retainedAfterMissing = fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id)
+            #expect(retainedAfterMissing)
+            guard retainedAfterMissing else { return }
+            #expect(HomePinnedRowPolicy.action(
+                for: readyStatus,
+                hasUnresolvedCommand: fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id)
+            ) == .checkReceipt)
+
+            let pendingResolution = Task { try await fixture.model.homeMutations.designate(authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let pending = try await waitForMethod("command.status", on: replacement, afterIndex: missing.index + 1)
+            let pendingFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await replacement.sentFrames()[pending.index])
+            #expect(pendingFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue == commandID)
+            await replacement.enqueue(successResponse(id: pending.id, result: .object(["status": .string("pending")])))
+            do {
+                _ = try await pendingResolution.value
+                Issue.record("pending receipt unexpectedly returned a designation")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "outcome_unknown")
+            }
+            let retainedAfterPending = fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id)
+            #expect(retainedAfterPending)
+            guard retainedAfterPending else { return }
+
+            let completedResolution = Task { try await fixture.model.designateHomeAndRefreshStatus(authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let completed = try await waitForMethod("command.status", on: replacement, afterIndex: pending.index + 1)
+            let completedFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await replacement.sentFrames()[completed.index])
+            #expect(completedFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue == commandID)
+            let receipt: JSONValue = .object(["homeId": .string("home"), "sessionId": .string("home-session"), "generation": .number(1)])
+            await replacement.enqueue(successResponse(id: completed.id, result: .object(["status": .string("completed"), "result": receipt])))
+            let refreshed = try await waitForMethod("home.status", on: replacement, afterIndex: completed.index + 1)
+            await replacement.enqueue(successResponse(id: refreshed.id, result: homeStatusResult()))
+            let status = try await completedResolution.value
+            #expect(status.sessionId == "home-session")
+            #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+            let route = try fixture.model.navigationRouteForHome(profileID: profile.id, status: status)
+            #expect(route.sessionID == "home-session")
+            #expect(route.isHome)
+            #expect(route.id == "\(profile.id):home-session:home")
+
+            let oldFrames = await first.sentFrames()
+            let newFrames = await replacement.sentFrames()
+            let frames = try (oldFrames + newFrames).map { try JSONDecoder.gateway.decode(JSONValue.self, from: $0) }
+            #expect(frames.filter { $0.objectValue?["method"]?.stringValue == "home.designate" }.count == 1)
+            #expect(frames.filter { $0.objectValue?["method"]?.stringValue == "command.status" }.count == 3)
+            foreground?.cancel()
+            fixture.model.unmountHomeStatus(surfaceToken: token)
+        }
+    }
+
+    @Test("task stop and steer fence on the operation alone, with no controller generation")
+    func homeTaskControlSendsOperationWithoutGeneration() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let control = Task { try await fixture.model.performHomeControl(.steerTask(taskID: "task-one", operationID: "operation-one", text: "Use the exact task"), authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let sent = try await waitForMethod("home.steerTask", on: socket)
+            let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[sent.index])
+            let params = try #require(frame.objectValue?["params"]?.objectValue)
+            #expect(Set(params.keys) == ["commandId", "taskId", "operationId", "text"])
+            await socket.enqueue(successResponse(id: sent.id, result: .object(["accepted": .bool(true)])))
+            try await control.value
+        }
+    }
+
+    /// Route admission has one owner, the row's policy. A status the row does not open
+    /// forms no route, even when the Gateway also names an openable chapter.
+    @Test("a Home status the row would not open forms no route, even with an openable chapter")
+    func homeRouteRefusesStatusThatRowDoesNotOpen() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let dashboard = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+            presentation.register(dashboard, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: dashboard, activityCoordinator: presentation)
+            let read = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: read.id, result: homeStatusResult(phase: "unavailable")))
+            try await waitForHomePhase(.unavailable, model: fixture.model)
+            let status = try #require(fixture.model.homeStatus.status)
+            #expect(HomePinnedRowPolicy.action(for: status) == .unavailable)
+            #expect(throws: CancellationError.self) {
+                try fixture.model.navigationRouteForHome(profileID: profile.id, status: status)
+            }
+            fixture.model.unmountHomeStatus(surfaceToken: dashboard)
+        }
+    }
+
+    @Test("unresolved Home controls retain their original method and ID without resubmission")
+    func homeControlUnresolvedReceipt() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let control = Task { try await fixture.model.performHomeControl(.pauseMemory, authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let sent = try await waitForMethod("home.pauseMemory", on: socket)
+            let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[sent.index])
+            let commandID = try #require(frame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(sent.id), "ok": .bool(false),
+                "error": .object(["code": .string("response_too_large"), "message": .string("Completion is unavailable"), "retryable": .bool(false)])
+            ])))
+            do { try await control.value; Issue.record("unknown completion claimed success") }
+            catch let failure as GatewayFailure { #expect(failure.code == "outcome_unknown") }
+            let retained = fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id)
+            #expect(retained)
+            guard retained else { return }
+            do { try await fixture.model.performHomeControl(.disable, authority: fixture.model.homeMutations.authority(profileID: profile.id)); Issue.record("unresolved command replaced") }
+            catch let failure as GatewayFailure { #expect(failure.code == "conflict") }
+            var lastIndex = sent.index
+            for state in ["pending", "completed"] {
+                let check = Task { try await fixture.model.checkHomeControlCompletion(authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+                let request = try await waitForMethod("command.status", on: socket, afterIndex: lastIndex + 1)
+                lastIndex = request.index
+                let checkFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[request.index])
+                #expect(checkFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue == commandID)
+                #expect(checkFrame.objectValue?["params"]?.objectValue?["method"]?.stringValue == "home.pauseMemory")
+                await socket.enqueue(successResponse(id: request.id, result: .object([
+                    "status": .string(state), "result": .object(["configured": .bool(true), "open": .bool(true), "paused": .bool(true)])
+                ])))
+                if state == "completed" { try await check.value; #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id)) }
+                else {
+                    do { try await check.value; Issue.record("uncompleted receipt claimed success") }
+                    catch let failure as GatewayFailure { #expect(failure.code == "outcome_unknown") }
+                    #expect(fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+                }
+            }
+            let frames = try await socket.sentFrames().map { try JSONDecoder.gateway.decode(JSONValue.self, from: $0) }
+            #expect(frames.filter { $0.objectValue?["method"]?.stringValue == "home.pauseMemory" }.count == 1)
+            let disableFrames = frames.filter { $0.objectValue?["method"]?.stringValue == "home.disable" }
+            #expect(disableFrames.isEmpty)
+        }
+    }
+
+    @Test("a missing receipt at completion retires the Home change without replay and reloads status")
+    func homeControlMissingCompletionRetiresWithoutReplay() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let token = PresentationSurfaceToken(id: "home-missing-dashboard", generation: UUID())
+            presentation.register(token, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentation)
+            let initialStatus = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: initialStatus.id, result: homeStatusResult()))
+            try await waitForHomePhase(.ready, model: fixture.model)
+
+            let control = Task { try await fixture.model.performHomeControl(.pauseMemory, authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let sent = try await waitForMethod("home.pauseMemory", on: socket, afterIndex: initialStatus.index + 1)
+            let sentFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[sent.index])
+            let commandID = try #require(sentFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(sent.id), "ok": .bool(false),
+                "error": .object(["code": .string("response_too_large"), "message": .string("Completion is unavailable"), "retryable": .bool(false)])
+            ])))
+            do { try await control.value; Issue.record("unknown completion claimed success") }
+            catch let failure as GatewayFailure { #expect(failure.code == "outcome_unknown") }
+            #expect(fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+
+            let check = Task { try await fixture.model.checkHomeControlCompletion(authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let receiptCheck = try await waitForMethod("command.status", on: socket, afterIndex: sent.index + 1)
+            let checkFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[receiptCheck.index])
+            #expect(checkFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue == commandID)
+            await socket.enqueue(successResponse(id: receiptCheck.id, result: .object(["status": .string("missing")])))
+            let statusRefresh = try await waitForMethod("home.status", on: socket, afterIndex: receiptCheck.index + 1)
+            await socket.enqueue(successResponse(id: statusRefresh.id, result: homeStatusResult()))
+            do { try await check.value; Issue.record("a missing receipt claimed a completed Home change") }
+            catch let failure as GatewayFailure { #expect(failure.code == HomeMutationCoordinator.notAppliedCode) }
+
+            #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+            #expect(!fixture.model.homeMutations.isRunning(profileID: profile.id))
+            let methods = try await rpcMethods(on: socket)
+            #expect(methods.filter { $0 == "home.pauseMemory" }.count == 1, "a missing receipt must not replay the change")
+            fixture.model.unmountHomeStatus(surfaceToken: token)
+        }
+    }
+
+    @Test("a profile's unresolved Home receipt neither blocks another profile nor follows a switch")
+    func homeReceiptStaysWithItsProfileAcrossSwitch() async throws {
+        let original = ScriptedGatewaySocket()
+        let other = ScriptedGatewaySocket()
+        let returned = ScriptedGatewaySocket()
+        try await withFixture(sockets: [original, other, returned], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let otherProfile = GatewayProfile(id: "other", label: "Other Mac", host: "other.gateway.test", port: 9_847, machineId: "other-machine", deviceId: "other-device")
+            try fixture.model.profiles.save(otherProfile, token: "other-token", selecting: false)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await original.waitUntilSent(count: 1)
+            await original.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+
+            let control = Task { try await fixture.model.performHomeControl(.pauseMemory, authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let sent = try await waitForMethod("home.pauseMemory", on: original)
+            let sentFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await original.sentFrames()[sent.index])
+            let commandID = try #require(sentFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue)
+            await original.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(sent.id), "ok": .bool(false),
+                "error": .object(["code": .string("response_too_large"), "message": .string("Completion is unavailable"), "retryable": .bool(false)])
+            ])))
+            do { try await control.value; Issue.record("unknown completion claimed success") }
+            catch let failure as GatewayFailure { #expect(failure.code == "outcome_unknown") }
+            #expect(fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+
+            let switching = Task { await fixture.model.switchGateway(otherProfile) }
+            try await original.waitUntilClosed()
+            try await other.waitUntilSent(count: 1)
+            await other.enqueue(helloFrame(machineID: "other-machine", capabilities: ["sessions.v1", "home.v1"]))
+            await switching.value
+            try await waitForConnectionState(.connected, model: fixture.model)
+            #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: otherProfile.id))
+            #expect(!fixture.model.homeMutations.isRunning(profileID: otherProfile.id))
+            #expect(fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+
+            let otherControl = Task { try await fixture.model.performHomeControl(.pauseMemory, authority: fixture.model.homeMutations.authority(profileID: otherProfile.id)) }
+            let otherSent = try await waitForMethod("home.pauseMemory", on: other)
+            await other.enqueue(successResponse(id: otherSent.id, result: .object(["configured": .bool(true), "open": .bool(true), "paused": .bool(true)])))
+            try await otherControl.value
+            #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: otherProfile.id))
+            #expect(fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+
+            let returning = Task { await fixture.model.switchGateway(profile) }
+            try await other.waitUntilClosed()
+            try await returned.waitUntilSent(count: 1)
+            await returned.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            await returning.value
+            try await waitForConnectionState(.connected, model: fixture.model)
+            #expect(fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+
+            let check = Task { try await fixture.model.checkHomeControlCompletion(authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let receiptCheck = try await waitForMethod("command.status", on: returned)
+            let checkFrame = try JSONDecoder.gateway.decode(JSONValue.self, from: await returned.sentFrames()[receiptCheck.index])
+            #expect(checkFrame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue == commandID)
+            await returned.enqueue(successResponse(id: receiptCheck.id, result: .object([
+                "status": .string("completed"),
+                "result": .object(["configured": .bool(true), "open": .bool(true), "paused": .bool(true)]),
+            ])))
+            try await check.value
+            #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+        }
+    }
+
+    @Test("a terminal Home mutation retires without publishing success into a different profile")
+    func homeControlProfileFence() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+
+            let authority = try fixture.model.homeMutations.authority(profileID: profile.id)
+            let staleControl = Task { try await fixture.model.performHomeControl(.disable, authority: authority) }
+            let disabling = try await waitForMethod("home.disable", on: socket)
+            try fixture.model.profiles.save(GatewayProfile(id: "replacement", label: "Other Mac", host: "other.test", port: 9847, machineId: "other-machine"), token: "fixture-token")
+            await socket.enqueue(successResponse(id: disabling.id, result: .object(["enabled": .bool(false)])))
+            do { try await staleControl.value; Issue.record("old profile mutation published success") }
+            catch is CancellationError { }
+            do { try await fixture.model.performHomeControl(.pauseMemory, authority: authority); Issue.record("stale user action admitted") }
+            catch is CancellationError { }
+            #expect(!fixture.model.homeMutations.isRunning(profileID: profile.id))
+            #expect(!fixture.model.homeMutations.ownsUnresolvedCommand(profileID: profile.id))
+        }
+    }
+
+    @Test("captured Home authority cannot send a delayed action after profile replacement")
+    func homeControlStaleAdmissionDoesNotSend() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let authority = try fixture.model.homeMutations.authority(profileID: profile.id)
+            try fixture.model.profiles.save(GatewayProfile(id: "replacement", label: "Other Mac", host: "other.test", port: 9847, machineId: "other-machine"), token: "fixture-token")
+            var finished = false
+            let delayed = Task {
+                defer { finished = true }
+                do { try await fixture.model.performHomeControl(.pauseMemory, authority: authority); Issue.record("stale action claimed completion") }
+                catch is CancellationError { }
+                catch { Issue.record("unexpected stale admission error: \(error)") }
+            }
+            defer { delayed.cancel() }
+            var mutationSent = false
+            // A bounded response driver also settles an incorrectly admitted
+            // command in the negative control; a failed assertion cannot hang.
+            for _ in 0..<100 {
+                let frames = try await socket.sentFrames().map { try JSONDecoder.gateway.decode(JSONValue.self, from: $0) }
+                if let frame = frames.first(where: { $0.objectValue?["method"]?.stringValue == "home.pauseMemory" }) {
+                    mutationSent = true
+                    let id = try #require(frame.objectValue?["id"]?.stringValue)
+                    await socket.enqueue(successResponse(id: id, result: .object(["paused": .bool(true)])))
+                    break
+                }
+                if finished { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            #expect(!mutationSent)
+            #expect(finished || mutationSent)
+            guard finished || mutationSent else { return }
+            await delayed.value
+            #expect(!fixture.model.homeMutations.isRunning(profileID: profile.id))
+        }
+    }
+
+    @Test("Home controls carry receipts, refuse duplicate admission and refresh only on completion")
+    func homeControlsRefreshAfterReceipt() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let token = PresentationSurfaceToken(id: "home-controls", generation: UUID())
+            presentation.register(token, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentation)
+            var latest = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: latest.id, result: homeStatusResult()))
+            try await waitForHomePhase(.ready, model: fixture.model)
+            for command in [HomeMutationCoordinator.Command.pauseMemory, .resumeMemory,
+                            .configureMemory(ModelRef(provider: "fixture", id: "memory")), .disable] {
+                let task = Task { try await fixture.model.performHomeControl(command, authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+                let sent = try await waitForMethod(command.method, on: socket, afterIndex: latest.index + 1)
+                let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[sent.index])
+                #expect(frame.objectValue?["params"]?.objectValue?["commandId"]?.stringValue?.isEmpty == false)
+                if case .configureMemory = command {
+                    #expect(frame.objectValue?["params"]?.objectValue?["model"]?.objectValue?["id"]?.stringValue == "memory")
+                }
+                var duplicateFinished = false
+                let duplicate = Task {
+                    defer { duplicateFinished = true }
+                    do {
+                        try await fixture.model.performHomeControl(.disable, authority: fixture.model.homeMutations.authority(profileID: profile.id))
+                        Issue.record("duplicate Home mutation admitted")
+                    } catch let failure as GatewayFailure { #expect(failure.code == "conflict") }
+                }
+                defer { duplicate.cancel() }
+                var answered = Set<String>()
+                for _ in 0..<100 {
+                    let frames = try await socket.sentFrames().dropFirst(sent.index + 1).map { try JSONDecoder.gateway.decode(JSONValue.self, from: $0) }
+                    for frame in frames {
+                        guard let id = frame.objectValue?["id"]?.stringValue, answered.insert(id).inserted else { continue }
+                        let method = frame.objectValue?["method"]?.stringValue
+                        #expect(method != "home.disable", "duplicate command reached transport")
+                        // Settle an erroneously admitted command and its refresh
+                        // too, so this regression has a bounded negative control.
+                        await socket.enqueue(successResponse(id: id, result: method == "home.status" ? homeStatusResult() : .object(["enabled": .bool(false)])))
+                    }
+                    if duplicateFinished { break }
+                    try await Task.sleep(for: .milliseconds(5))
+                }
+                #expect(duplicateFinished)
+                guard duplicateFinished else { return }
+                try await duplicate.value
+                let afterDuplicate = await socket.sentFrames().count
+                await socket.enqueue(successResponse(id: sent.id, result: .object(["configured": .bool(true), "open": .bool(true)])))
+                latest = try await waitForMethod("home.status", on: socket, afterIndex: afterDuplicate)
+                await socket.enqueue(successResponse(id: latest.id, result: homeStatusResult()))
+                try await task.value
+                #expect(!fixture.model.homeMutations.isRunning(profileID: profile.id))
+            }
+            fixture.model.unmountHomeStatus(surfaceToken: token)
+        }
+    }
+
+    @Test("Home control completion cannot refresh a replacement surface and old reads cannot win")
+    func homeControlReadAndSurfaceRace() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let token = PresentationSurfaceToken(id: "home-old-chat", generation: UUID())
+            presentation.register(token, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentation)
+            let initial = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: initial.id, result: homeStatusResult()))
+            try await waitForHomePhase(.ready, model: fixture.model)
+            let control = Task { try await fixture.model.performHomeControl(.pauseMemory, authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let mutation = try await waitForMethod("home.pauseMemory", on: socket)
+            let oldRead = Task { await fixture.model.homeStatus.refreshMounted() }
+            let older = try await waitForMethod("home.status", on: socket, afterIndex: initial.index + 1)
+            await socket.enqueue(successResponse(id: mutation.id, result: .object(["configured": .bool(true), "open": .bool(true), "paused": .bool(true)])))
+            let fresh = try await waitForMethod("home.status", on: socket, afterIndex: older.index + 1)
+            var paused = try #require(homeStatusResult().objectValue)
+            paused["phase"] = .string("paused")
+            await socket.enqueue(successResponse(id: fresh.id, result: .object(paused)))
+            try await control.value
+            await socket.enqueue(successResponse(id: older.id, result: homeStatusResult()))
+            await oldRead.value
+            #expect(fixture.model.homeStatus.status?.phase == .paused)
+
+            let next = Task { try await fixture.model.performHomeControl(.resumeMemory, authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let resume = try await waitForMethod("home.resumeMemory", on: socket)
+            fixture.model.unmountHomeStatus(surfaceToken: token)
+            await socket.enqueue(successResponse(id: resume.id, result: .object(["configured": .bool(true), "open": .bool(true)])))
+            try await next.value
+            #expect(fixture.model.homeStatus.status == nil)
+            #expect(!fixture.model.homeMutations.isRunning(profileID: profile.id))
+
+        }
+    }
+
+    @Test("Home designation resolves its receipt before refreshing and routing the exact session")
+    func homeMutationsReceiptRefreshesExactRoute() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let token = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+            presentation.register(token, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentation)
+            let initialStatus = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: initialStatus.id, result: homeUndesignatedResult()))
+            for _ in 0..<100 where fixture.model.homeStatus.status == nil { await Task.yield() }
+            #expect(fixture.model.homeStatus.status?.phase == .undesignated)
+
+            let designation = Task { try await fixture.model.designateHomeAndRefreshStatus(authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let mutation = try await waitForMethod("home.designate", on: socket, afterIndex: initialStatus.index + 1)
+            let mutationValue = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[mutation.index])
+            let commandID = try #require(mutationValue.objectValue?["params"]?.objectValue?["commandId"]?.stringValue)
+            #expect(!commandID.isEmpty)
+            await socket.enqueue(successResponse(id: mutation.id, result: .object([
+                "homeId": .string("home"), "sessionId": .string("home-session"), "generation": .number(1),
+            ])))
+            let refreshed = try await waitForMethod("home.status", on: socket, afterIndex: mutation.index + 1)
+            await socket.enqueue(successResponse(id: refreshed.id, result: homeStatusResult()))
+            let status = try await designation.value
+            #expect(status.phase == .ready)
+            #expect(status.sessionId == "home-session")
+
+            let route = try fixture.model.navigationRouteForHome(profileID: profile.id, status: status)
+            #expect(route.sessionID == "home-session")
+            #expect(route.isHome)
+            #expect(route.id == "\(profile.id):home-session:home")
+            #expect(fixture.model.ownsNavigationRoute(route))
+            fixture.model.unmountHomeStatus(surfaceToken: token)
+        }
+    }
+
+    @Test("duplicate Home designation admission sends only one mutation")
+    func duplicateHomeDesignationIsRejectedBeforeTransmission() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let token = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+            presentation.register(token, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentation)
+            let initialStatus = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: initialStatus.id, result: homeUndesignatedResult()))
+            for _ in 0..<100 where fixture.model.homeStatus.status == nil { await Task.yield() }
+
+            let first = Task { try await fixture.model.designateHomeAndRefreshStatus(authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let mutation = try await waitForMethod("home.designate", on: socket, afterIndex: initialStatus.index + 1)
+            let duplicate = Task { try await fixture.model.designateHomeAndRefreshStatus(authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            do {
+                _ = try await duplicate.value
+                Issue.record("duplicate Home designation unexpectedly admitted")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "conflict")
+            }
+            let methods = try await socket.sentFrames().compactMap { frame in
+                try JSONDecoder.gateway.decode(JSONValue.self, from: frame).objectValue?["method"]?.stringValue
+            }
+            #expect(methods.filter { $0 == "home.designate" }.count == 1)
+
+            await socket.enqueue(successResponse(id: mutation.id, result: .object([
+                "homeId": .string("home"), "sessionId": .string("home-session"), "generation": .number(1),
+            ])))
+            let refreshed = try await waitForMethod("home.status", on: socket, afterIndex: mutation.index + 1)
+            await socket.enqueue(successResponse(id: refreshed.id, result: homeStatusResult()))
+            let result = try await first.value
+            #expect(result.sessionId == "home-session")
+            fixture.model.unmountHomeStatus(surfaceToken: token)
+        }
+    }
+
+    @Test("Home designation refusal remains a refusal and does not route or reread status")
+    func homeMutationsRefusalDoesNotRoute() async throws {
+        let socket = ScriptedGatewaySocket()
+        try await withFixture(sockets: [socket], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let profile = try #require(fixture.model.profiles.selected)
+            let connecting = Task { try await fixture.model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(helloFrame(capabilities: ["sessions.v1", "home.v1"]))
+            try await connecting.value
+            let presentation = PresentationActivityCoordinator()
+            let token = PresentationSurfaceToken(id: "home-dashboard", generation: UUID())
+            presentation.register(token, parent: nil)
+            fixture.model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentation)
+            let initialStatus = try await waitForMethod("home.status", on: socket)
+            await socket.enqueue(successResponse(id: initialStatus.id, result: homeUndesignatedResult()))
+            for _ in 0..<100 where fixture.model.homeStatus.status == nil { await Task.yield() }
+
+            let designation = Task { try await fixture.model.designateHomeAndRefreshStatus(authority: fixture.model.homeMutations.authority(profileID: profile.id)) }
+            let mutation = try await waitForMethod("home.designate", on: socket, afterIndex: initialStatus.index + 1)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(mutation.id), "ok": .bool(false),
+                "error": .object([
+                    "code": .string("conflict"), "message": .string("designation refused"),
+                    "retryable": .bool(false), "details": .null,
+                ]),
+            ])))
+            do {
+                _ = try await designation.value
+                Issue.record("refused Home designation unexpectedly produced a routeable status")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "conflict")
+            }
+            let methods = try await socket.sentFrames().compactMap { frame in
+                try JSONDecoder.gateway.decode(JSONValue.self, from: frame).objectValue?["method"]?.stringValue
+            }
+            #expect(methods.filter { $0 == "home.designate" }.count == 1)
+            #expect(methods.filter { $0 == "home.status" }.count == 1)
+            #expect(fixture.model.homeStatus.status?.phase == .undesignated)
+            fixture.model.unmountHomeStatus(surfaceToken: token)
+        }
+    }
+
     @Test("recovery warning timer uses its injected clock and never grants Send authority")
     func recoveryWarningTimerAndAuthorityFence() async throws {
         let suite = "GatewayRecoveryWarningTests.\(UUID().uuidString)"
@@ -1923,10 +2921,130 @@ struct AppModelReconnectTests {
         )
     }
 
+    private func homeUndesignatedResult() -> JSONValue {
+        .object([
+            "phase": .string("undesignated"),
+            "activation": .object(["available": .bool(false)]),
+            "readiness": .object(["ready": .bool(false), "gaps": .array([])]),
+            "recovery": .object(["action": .string("designate")]),
+            "available": .bool(true), "enabled": .bool(false),
+            "live": .bool(false), "sessionPresent": .bool(false),
+            "memory": .object(["configured": .bool(false), "open": .bool(false)]),
+        ])
+    }
+
+    /// `sessionId` is the reserved successor and `openSessionID` the chapter a route
+    /// opens; they differ only while a rollover is pending.
+    private func homeStatusResult(phase: String = "ready", sessionID: String = "home-session", openSessionID: String = "home-session") -> JSONValue {
+        .object([
+            "phase": .string(phase),
+            "activation": .object(["available": .bool(false)]),
+            "readiness": .object(["ready": .bool(true), "gaps": .array([])]),
+            "recovery": .object(["action": .string("none")]),
+            "available": .bool(true), "enabled": .bool(true), "homeId": .string("home"),
+            "sessionId": .string(sessionID), "openSessionId": .string(openSessionID), "generation": .number(1),
+            "live": .bool(false), "sessionPresent": .bool(true),
+            "memory": .object(["configured": .bool(true), "open": .bool(true)]),
+        ])
+    }
+
+    private func waitForHomePhase(
+        _ phase: HomeStatusDTO.Phase,
+        model: AppModel
+    ) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while ContinuousClock.now < deadline {
+            if model.homeStatus.status?.phase == phase { return }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        throw GatewayFailure(code: "test_timeout", message: "Expected Home status phase \\(phase)", retryable: false, details: nil)
+    }
+
+    private func waitForHomeCommandState(
+        isRunning: Bool,
+        model: AppModel
+    ) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while ContinuousClock.now < deadline {
+            if model.homeMutations.isRunning(profileID: model.profiles.selected?.id ?? "") == isRunning { return }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        throw GatewayFailure(code: "test_timeout", message: "Expected Home command running state \\(isRunning)", retryable: false, details: nil)
+    }
+
+    private func waitForConnectionState(
+        _ state: GatewayConnectionState,
+        model: AppModel
+    ) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while ContinuousClock.now < deadline {
+            if model.connectionState == state { return }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        throw GatewayFailure(code: "test_timeout", message: "Expected connection state \\(state)", retryable: false, details: nil)
+    }
+
+    private func waitForMethod(
+        _ method: String,
+        on socket: ScriptedGatewaySocket,
+        afterIndex: Int = 0
+    ) async throws -> (id: String, index: Int) {
+        while true {
+            let frames = await socket.sentFrames()
+            if afterIndex < frames.count {
+                for index in afterIndex..<frames.count {
+                    guard let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: frames[index]),
+                          let object = value.objectValue,
+                          object["method"]?.stringValue == method,
+                          let id = object["id"]?.stringValue else { continue }
+                    return (id, index)
+                }
+            }
+            guard await socket.waitUntilSent(count: frames.count + 1, within: .seconds(2)) else {
+                throw GatewayFailure(code: "test_timeout", message: "Expected Gateway method \\(method)", retryable: false, details: nil)
+            }
+        }
+    }
+
+    private func waitForMethodAdvancingClock(
+        _ method: String,
+        on socket: ScriptedGatewaySocket,
+        clock: ManualClock,
+        afterIndex: Int = 0
+    ) async throws -> (id: String, index: Int) {
+        for _ in 0..<100 {
+            let frames = await socket.sentFrames()
+            if afterIndex < frames.count {
+                for index in afterIndex..<frames.count {
+                    guard let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: frames[index]),
+                          let object = value.objectValue,
+                          object["method"]?.stringValue == method,
+                          let id = object["id"]?.stringValue else { continue }
+                    return (id, index)
+                }
+            }
+            if clock.activeSleeperCount() > 0 {
+                _ = clock.advanceToNextDeadline()
+                await Task.yield()
+            } else {
+                try await Task.sleep(for: .milliseconds(1))
+            }
+        }
+        throw GatewayFailure(code: "test_timeout", message: "Expected Gateway method \\(method) while advancing its owner clock", retryable: false, details: nil)
+    }
+
+    private func rpcMethods(on socket: ScriptedGatewaySocket) async throws -> [String] {
+        let frames = await socket.sentFrames()
+        return try frames.compactMap { frame in
+            try JSONDecoder.gateway.decode(JSONValue.self, from: frame).objectValue?["method"]?.stringValue
+        }
+    }
+
     private func helloFrame(
         runtimeEpoch: String? = nil,
         machineID: String = "machine",
-        gatewayChannel: String = "stable"
+        gatewayChannel: String = "stable",
+        capabilities: [String] = ["sessions.v1"]
     ) -> Data {
         var value: [String: JSONValue] = [
             "type": .string("hello"),
@@ -1936,7 +3054,7 @@ struct AppModelReconnectTests {
             "minProtocolVersion": .number(7),
             "machineId": .string(machineID),
             "machineName": .string("Mac"),
-            "capabilities": .array([.string("sessions.v1")]),
+            "capabilities": .array(capabilities.map(JSONValue.string)),
             "gatewayChannel": .string(gatewayChannel),
         ]
         if let runtimeEpoch { value["runtimeEpoch"] = .string(runtimeEpoch) }
