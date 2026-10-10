@@ -6,7 +6,7 @@ import TronMobileCore
 struct HomeChatRouteKeyTests {
     /// An ordinary chat presents only the chapter it is (`sessionId`). During a
     /// rollover the sealed predecessor is openable but is not that chapter, so the
-    /// ordinary chat on it neither claims the status nor shows the Home header.
+    /// ordinary chat on it neither claims the status nor manages Home.
     @Test("an ordinary chat claims only the chapter it is")
     func ordinaryChatClaimsOnlyItsChapter() throws {
         let normal = try status(phase: "ready", sessionPresent: true, sessionId: "chapter", openSessionId: "chapter")

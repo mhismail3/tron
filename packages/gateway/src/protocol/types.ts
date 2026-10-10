@@ -1048,6 +1048,36 @@ export type HooksProjection = HookRegistrationProjection;
 export const HOME_CAPABILITY = "home.v1";
 /** Native browser reads are separately gated; older home.v1 servers lack them. */
 export const HOME_MEMORY_BROWSER_CAPABILITY = "home-memory-browser.v1";
+/** The full chapter-list read (#740); older home.v1 servers lack it. */
+export const HOME_CHAPTER_LIST_CAPABILITY = "home-chapter-list.v1";
+
+/** One ledger chapter as `home.chapterList` answers it. Sealed chapters carry
+ * exactly their recorded seal metrics (a disable-sealed chapter has none); the
+ * active chapter is measured live only while its session is present, so absent
+ * sizes mean "not measured", never zero. */
+export interface HomeChapterSummary {
+  sessionId: string;
+  ordinal: number;
+  state: "active" | "sealed" | "reserved" | "materializing";
+  createdAt: string;
+  activationStarted: boolean;
+  /** Whether the chapter's session exists right now, live or on disk. */
+  sessionPresent: boolean;
+  sealedAt?: string;
+  bytes?: number;
+  entries?: number;
+}
+
+/** `home.chapterList`: the whole chapter ledger in ledger (ordinal) order, with
+ * the shared soft and hard rollover limits. A bounded read: at most the ledger's
+ * chapters, and one live measurement for the active chapter. */
+export interface HomeChapterList {
+  homeId: string;
+  generation: number;
+  enabled: boolean;
+  limits: { softBytes: number; softEntries: number; hardBytes: number; hardEntries: number };
+  chapters: HomeChapterSummary[];
+}
 
 /** Physical canonical identity, never a projected memory line address. */
 export interface HomeMemoryEvidence {
