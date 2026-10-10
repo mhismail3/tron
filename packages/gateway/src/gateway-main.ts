@@ -25,6 +25,7 @@ import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { logHomeDiagnostic } from "./home/home-diagnostic.js";
+import { homeChapterObservationExcluded } from "./home/home-owner.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
@@ -462,10 +463,9 @@ const knowledge = new KnowledgeService(
       `Prospective knowledge observation cuts were not retained (${dropped} cut(s); ${queued} queued); no durable coverage is claimed`,
       { event: code, source: "knowledge" },
     ),
-    // Tron Home is one private conversation whose memory is its own: automatic
-    // Knowledge observation never sees it. The Home owner's designation is the
-    // predicate, so a fork (an ordinary session) is observed normally.
-    (sessionId) => sessions.homeOwner().profileFor(sessionId) === "home",
+    // Tron Home's own chapters are never observed automatically; a fork (an
+    // ordinary session) is observed normally. See homeChapterObservationExcluded.
+    homeChapterObservationExcluded(() => sessions.homeOwner()),
   ),
   {
     connector: (action, signal) => knowledgeConnector.invoke(action, signal),

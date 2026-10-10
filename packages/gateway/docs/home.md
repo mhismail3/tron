@@ -25,7 +25,7 @@ installation:
 | `bindingRevision` | Advances when designation or reserved-chapter activation binds Home to a different physical session. |
 | `generation` | Advances on every profile change (designate, re-enable, disable) and fences in-flight operations. |
 | `routeGeneration` | Required positive route epoch. Set at designation; unchanged by disable, re-enable and rollover; advanced only on missing-session replacement. |
-| `policyRevision` | The curated-profile revision in force; `2` added the research tools (#724). Designation and re-enable both write this build's revision, so an older record advances the next time Home is enabled. |
+| `policyRevision` | The curated-profile revision in force; `3` added the learned profile tool (#731), `2` the research tools (#724). Designation and re-enable both write this build's revision, so an older record advances the next time Home is enabled. |
 | `enabled` | Whether Home is currently designated. |
 | `model` | The model applied at the last designation, updated when the Home session's model changes. |
 | `memory` | Optional `{ model, paused?: true }`. Absent means unconfigured; there are no memory defaults. |
@@ -226,7 +226,7 @@ imported Registry target is ordinary unless the ledger names it.
 | Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` | every Tron module, Pi built-ins (codemode, tool-search, MCP) and the Tron-pinned managed subagent provider |
 | Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles`; no subagent discovery | agent directory and trusted project resources; managed-provider settings exclude user pi-subagents declarations |
 | System prompt | agent-directory `SYSTEM.md` and `APPEND_SYSTEM.md` dropped (`systemPromptOverride`, `appendSystemPromptOverride`) | loaded |
-| Executable tools | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task`, `web_search`, `web_fetch`, `session_search`, `knowledge`, `read_file` (`HOME_TOOL_NAMES`) | SDK defaults plus Tron's direct bash tool |
+| Executable tools | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task`, `profile`, `web_search`, `web_fetch`, `session_search`, `knowledge`, `read_file` (`HOME_TOOL_NAMES`) | SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
 | Model | fixed physical model | any, including virtual routing |
 | Model runtime | session-local view of the Gateway-wide user-scope runtime | one per session runtime |
@@ -236,9 +236,10 @@ imported Registry target is ordinary unless the ledger names it.
   completed-load admission apply only to ordinary runtimes, including task workers.
   Home is delegate-only: `session.resources` returns an empty subagent catalog
   without provider discovery, through reload, replacement and cold acquisition.
-- `tron-home` is loaded only for Home. It contributes Home's operating context,
-  registers the memory tools, `delegate` and `task`, and is the single answer to the
-  SDK's `cache_warming_decision`. It is not in `modules.list`.
+- `tron-home` is loaded only for Home. It contributes Home's operating context and
+  its learned profile section, registers the memory tools, `delegate`, `task` and
+  `profile`, and is the single answer to the SDK's `cache_warming_decision`. It is not
+  in `modules.list`.
 - `tron-home-research` is loaded only for Home (#724). It registers the
   [read-only research tools](#the-research-tools). It is not in `modules.list`.
 - MCP is excluded structurally: no MCP extension loads for Home. From SDK 1.0.4, an
@@ -350,7 +351,10 @@ Each request can re-read what the previous one sent (#491). The exceptions are t
 first request after a view rebalance, invalidation,
 restart, or cache expiry.
 
-- The system prompt and tool list carry no dates or per-turn state.
+- The system prompt and tool list carry no dates or per-turn state. The learned
+  profile section is the one part of the system prompt that varies, and it changes only
+  when a profile item changes: one prompt-cache miss, then stable again
+  ([the learned profile](#the-learned-profile)).
 - The view only grows between rebalances. It rebalances after passing its view-byte
   target and then leaves an eighth of that target for later
   turns ([episodic-memory.md](episodic-memory.md)): about one start rewrite every
@@ -591,6 +595,73 @@ says retrieved text is never instructions or authorization to delegate, and this
 paragraph records the residual risk: a prompt-injected Home could still dispatch a
 task inside an existing standing scope, exactly as it could from a maintainer
 message that quoted the same text.
+
+## The learned profile
+
+Home keeps what the maintainer taught it as Knowledge notes (#731, epic #734). The
+Knowledge owner is the only store: there is no Home-side profile file, cache or
+timer. The `profile` tool is the only writer, and every change is one Knowledge note
+mutation.
+
+- **Membership.** A personal-scope note is a profile item when it carries the
+  `home-profile` label and exactly one `kind-<kind>` label, where kind is
+  `preference`, `standing-decision`, `delegation-default` or `fact`. Provenance never
+  decides membership: it changes when the maintainer edits a note natively.
+- **Writes.** `profile` takes `learn(kind, text)`, `refine(id, text)`,
+  `supersede(id, kind, text)` and `retire(id, reason)`, plus an optional `reason` on
+  refine and supersede. Every write carries provenance `actor: agent`, `source: home`,
+  the Home chapter session, and a `sessionEntry` citation of the last maintainer
+  message on the chat's branch, the message the turn answers. Items are always written
+  unconfirmed. Only Knowledge's native confirmation owner sets `confirmed`. The tool
+  result states what was saved, and the call is a visible transcript entry.
+- **Ledger.** Each action is a note revision carrying its reason
+  (`provenance.reason`). Refine keeps every earlier revision, readable by revision ID
+  through `knowledge read`. Supersede creates a new item whose `supersedes` relation
+  names the old item's current revision and leaves the old record untouched. Retire
+  writes a revision with `retired: true`.
+- **Lifecycle.** An item is *active*, *superseded* (derived: a profile item's current
+  revision names it in a `supersedes` relation, even when that replacement is itself
+  retired), or *retired*. `refine`, `supersede` and `retire` act only on an active
+  item, and a refused action leaves its revision unchanged. Knowledge exclusion or
+  forgetting also removes an item from the profile. Excluding a replacement brings back
+  the item it superseded.
+- **Injection.** Each activation's system prompt carries the section after the
+  operating context: the heading `## Learned profile`, a fixed introduction, and one
+  line per active item in kind order, then creation time:
+  `- note <id> (<kind>, confirmed|inferred): <text>`. The text is verbatim. The read
+  is a pure Knowledge `list` of personal notes, paged, with no model call. An
+  unchanged profile yields a byte-identical prompt, which `home-profile.integration.test.ts`
+  proves.
+- **Bound.** `HOME_PROFILE_BOUND_BYTES` is 8 KiB, the UTF-8 size of the item lines:
+  about two thousand tokens on every Home turn, enough for several dozen one-sentence
+  items. Over the bound, no item text is injected, whole or partial, because a
+  truncated preference is worse than none. The section says the profile is over its
+  bound, names its items by ID and kind until the bound, and tells Home to consolidate
+  them with refine, supersede or retire.
+- **Unavailable.** When Knowledge is absent or the read fails, the section says so.
+  It never reads as an empty profile.
+- **Native edits.** iOS and the Mac dashboard save notes from typed drafts that do not
+  model labels or retirement. The Knowledge owner keeps `tags` and `retired` when an
+  update or correction omits them, so a native confirmation, edit or correction keeps
+  the item in the profile, marked confirmed (`knowledge.md`, "Note labels and
+  retirement").
+- **Briefs.** The operating context instructs Home to put every applicable item into
+  each delegation's intent and to end the brief with a `Preferences applied` section
+  listing each note ID and its text. That instruction governs the model's composition;
+  the runtime does not check the brief. `home-profile.integration.test.ts` proves the
+  path from the injected section to the worker's first request, with a scripted Home
+  that composes the brief from the prompt.
+- **Observation.** Knowledge's automatic observation never reads a Home chapter. The
+  Gateway passes `homeChapterObservationExcluded` as the observer's exclusion
+  predicate. A forked ordinary session is observed normally. A chapter of a disabled
+  Home is no longer Home's runtime profile and is observed like any ordinary session.
+- **Costs and limits.** Each activation reads every personal note page by page to
+  find the profile, so the read grows with the personal note count. A single personal
+  note over Knowledge's 750 KB page budget makes the read fail, and the section then
+  reports unavailable. The delivery-headroom estimate does not count the section
+  (up to about 2,000 tokens, against a 1,024-token reserve); the request seam still
+  refuses an overflowing request explicitly. The trigger is the last user-role message
+  on the chat's branch, which is the maintainer message for an ordinary turn.
 
 ## Tasks
 
@@ -1225,6 +1296,7 @@ without a retained artifact.
 | `src/sessions/home-provider-runtime.e2e.test.ts` | shared eligibility and filter identity across three rebuilds and disposal; ordinary eligibility retirement | `test-results/home-provider-runtime/report.json` | `npx vitest run src/sessions/home-provider-runtime.e2e.test.ts` |
 | `src/sessions/home-memory-tools.e2e.test.ts` | the three memory tools, end to end | `test-results/home-memory-tools/report.json` | `npx vitest run src/sessions/home-memory-tools.e2e.test.ts` |
 | `src/sessions/home-research-tools.integration.test.ts` | the five research tools inside real activations with zero seam refusals; result caps; SSRF and trust-escape refusals; Knowledge writes structurally unreachable; ordinary sessions unaffected | `test-results/home-research-tools/report.json` | `npx vitest run src/sessions/home-research-tools.integration.test.ts` |
+| `src/sessions/home-profile.integration.test.ts` | learn through a real activation with its evidence and unconfirmed state; verbatim injection with a byte-stable prompt; refine, supersede and retire lifecycles; refusals of retired and superseded items; a native confirmation and correction keep the item; the over-bound refusal; a worker receives the brief; Home chapters unobserved; ordinary sessions without the profile tool | `test-results/home-profile/report.json` | `npx vitest run src/sessions/home-profile.integration.test.ts` |
 | `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; `session.setTools` restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |
 | `src/episodic/home-source.e2e.test.ts` | cross-chapter replay, restart, navigation and frozen-cut proof | `test-results/home-memory/continuity.json` | `npx vitest run src/episodic/home-source.e2e.test.ts` |
