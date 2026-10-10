@@ -14,7 +14,17 @@ import { clearTimeout as realClearTimeout, setTimeout as realSetTimeout } from "
  * reports its own label; a wait that outlived the test would be cut off with
  * only "Test timed out" and no condition.
  */
-export const WAIT_HANG_BOUND_MS = 12_000;
+export const WAIT_HANG_BOUND_MS = waitHangBoundMs();
+
+/**
+ * 12 s in the main pass. The nested pass (vitest.nested.config.ts), whose files wait
+ * on real child processes under a 60 s test timeout, declares a larger bound through
+ * TRON_TEST_WAIT_HANG_BOUND_MS; a bound below its own test timeout keeps the label.
+ */
+function waitHangBoundMs(): number {
+  const declared = Number(process.env.TRON_TEST_WAIT_HANG_BOUND_MS);
+  return Number.isInteger(declared) && declared > 0 ? declared : 12_000;
+}
 
 /**
  * The bound for a wait a hook body runs (`beforeEach`/`afterEach`/`afterAll`, and
