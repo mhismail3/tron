@@ -206,7 +206,7 @@ merges and silently drop the work.
 
 ### Base failure modes
 
-`test_claim.py`, `test_land.py`, `test_cleanup.py` and `test_verify.py` check these against real
+`test_claim.py`, `test_land*.py`, `test_cleanup.py` and `test_verify.py` check these against real
 repositories, local bare remotes and the fake `gh`. Each module builds its repository
 history once and every test copies it (`repo_template.py`), so setup costs no per-test Git
 processes while each test keeps its own repositories. The land fixtures disable
@@ -533,6 +533,14 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   CI-workflow, unknown and empty path sets run the infrastructure suite. If the
   base commit cannot be resolved or path classification fails, the workflow
   runs it. This does not change CI's hosted iOS unit suite.
+- **Work tooling** (`work-tooling`, and CI's "Test the work tooling" step) runs
+  `tools/work/run_tests.py`: one `python3 -m unittest` process per `test*.py`
+  module, `min(4, CPUs)` at a time (`WORK_TEST_JOBS` overrides). It prints each
+  module's result in name order, shows the full output of a failing module, and
+  exits non-zero if any module failed. The check is not `heavy`: its modules
+  spawn Python and Git processes, not a native build or simulator, so they hold
+  no `verify.heavySlots` slot. `test_run_tests.py` covers the failure report and
+  interrupt retirement.
 - **The related-issue check** (`.agents/skills/tron-work/related-issues.js`)
   has its own `work-related-issues` check, a Node test that runs the script as
   codemode does against a Jev stand-in enforcing Jev's request bounds.
@@ -652,7 +660,7 @@ unrelated Gateway source does not.
     changed/missing/symlink snapshots. Public evidence repositories and upload
     errors leave no media comment or success status. The fake-gh boundary is not
     live GitHub upload proof. Repeat with
-    `python3 -m unittest discover -s tools/work`; retain its output alongside the
+    `python3 tools/work/run_tests.py`; retain its output alongside the
     verify receipt/logs for the tested commit.
 
 ## `dashboard`
@@ -1226,7 +1234,7 @@ resumed by a session that claims it.
 
 ### Failure modes
 
-`test_land.py` checks these against real temporary repositories, local bare
+The `test_land*.py` modules check these against real temporary repositories, local bare
 remotes and a fake `gh` (`WORK_GH`) that keeps pull request, check, issue and
 Project state and records every call. The live E2E covers GitHub itself.
 
@@ -1320,7 +1328,7 @@ Project state and records every call. The live E2E covers GitHub itself.
     irreducible part and then the check, and the handoff comment carries both;
     a resumed land compares that whole section with the merged body, so a
     resume cannot quietly drop or change the irreducible part.
-79. **A malformed bug summary is published or merged.** `test_land.py` runs
+79. **A malformed bug summary is published or merged.** `test_land_pull_body.py` runs
     the real `cli.py land` process against its isolated Git/fake-GitHub fixture.
     It refuses missing or empty sections (including headings/content hidden in
     comments, a sibling heading with no section body, empty fenced blocks,
