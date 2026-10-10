@@ -183,6 +183,11 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
                   + (f" and close #{number} as completed with Status Done" if number else ""))
             return 0
 
+        # A commit already merged from this branch is not landed again: a second pull request would duplicate it.
+        landed = [p["number"] for p in merged_pulls(gh, branch) if p["headRefOid"] == head]
+        if landed:
+            raise LandError(f"#{landed[0]} already merged {head[:12]}; nothing to land. "
+                            "Run work cleanup from this worktree.")
         if _remote_head(root, remote, branch) != head:
             _git(root, "push", remote, f"HEAD:refs/heads/{branch}")
         repository = _repository(gh)
