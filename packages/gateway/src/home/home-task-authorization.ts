@@ -2,12 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { AsyncMutex } from "../util/async-mutex.js";
 
 export interface HomeTaskAuthorizationRequest {
-  intentRevision: number;
   intentDigest: string;
   target: string;
   authorizationScope: string;
-  workerProfile: string;
-  policyRevision: number;
   /** Supplied by the restore authority; this owner never creates or advances it. */
   restoreEpoch: string;
 }
@@ -32,12 +29,9 @@ export interface HomeTaskAuthorizationDecision {
 export interface HomeTaskOneUseGrant {
   id: string;
   decisionId: string;
-  intentRevision: number;
   intentDigest: string;
   target: string;
   authorizationScope: string;
-  workerProfile: string;
-  policyRevision: number;
   restoreEpoch: string;
   expiresAt: number;
   state: "available" | "consumed" | "revoked";
@@ -184,12 +178,9 @@ export class HomeTaskAuthorization {
       if (scope) return { kind: "standing-scope", scopeId: scope.id };
       const grant = state.grants.find((candidate) => candidate.state === "available"
         && candidate.expiresAt > this.now()
-        && candidate.intentRevision === request.intentRevision
         && candidate.intentDigest === request.intentDigest
         && candidate.target === target
         && candidate.authorizationScope === request.authorizationScope
-        && candidate.workerProfile === request.workerProfile
-        && candidate.policyRevision === request.policyRevision
         && candidate.restoreEpoch === request.restoreEpoch);
       if (!grant) {
         if (state.scopes.some(candidate => candidate.active && candidate.restoreEpoch !== request.restoreEpoch)
@@ -243,6 +234,6 @@ export class HomeTaskAuthorization {
 
 /** Explicit key order makes identity independent of transport object order. */
 export function authorizationRequestId(request: HomeTaskAuthorizationRequest): string {
-  return createHash("sha256").update(JSON.stringify([request.intentRevision, request.intentDigest, request.target,
-    request.authorizationScope, request.workerProfile, request.policyRevision, request.restoreEpoch])).digest("hex");
+  return createHash("sha256").update(JSON.stringify([request.intentDigest, request.target,
+    request.authorizationScope, request.restoreEpoch])).digest("hex");
 }

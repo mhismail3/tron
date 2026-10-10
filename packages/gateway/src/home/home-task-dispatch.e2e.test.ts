@@ -4,7 +4,7 @@ import { chmod, cp, readdir, readFile, rename, rm, writeFile } from "node:fs/pro
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { HomeTaskStore } from "./home-task-store.js";
+import { HomeTaskStore, taskIntentDigest } from "./home-task-store.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -22,7 +22,6 @@ const evidence: Array<Record<string, unknown>> = [];
 afterEach(async () => {
   vi.restoreAllMocks();
   await disposeFixtures();
-  vi.unstubAllEnvs();
 });
 afterAll(async () => {
   if (process.env.HOME_TASK_REPORT) await writeFile(process.env.HOME_TASK_REPORT, JSON.stringify({ suite: "home-task-dispatch", evidence }, null, 2));
@@ -103,7 +102,7 @@ describe("Home task authorization RPC", () => {
     const requestId = await refused(f, "scope-refused");
     const permissions = await list();
     expect(permissions.scopes).toMatchObject([{ id: scope.id, active: false }]);
-    expect(permissions.requests).toMatchObject([{ id: requestId, request: { target: await fileSystem.realpath(f.cwd), authorizationScope: "full-work", workerProfile: "home-task-v1", policyRevision: 1 } }]);
+    expect(permissions.requests).toMatchObject([{ id: requestId, request: { target: await fileSystem.realpath(f.cwd), authorizationScope: "full-work" } }]);
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.authorization", outcome: "request-recorded", referenceHash: expect.any(String) }));
     const model = f.faux.getModel();
     await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
@@ -381,7 +380,7 @@ describe("Home task bounded backlogs", () => {
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const base = await (await dispatch(f)).completion;
     const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
-    for (let i = 0; i < 24; i++) await store.put({ ...base, taskId: `abandoned-${i}`, revision: 1, lifecycle: "pending", sessionId: null, operationId: null, controllerGeneration: null, reportRefs: null, terminalEvidence: null, wake: null, spend: null }, null);
+    for (let i = 0; i < 24; i++) await store.put({ ...base, taskId: `abandoned-${i}`, revision: 1, lifecycle: "pending", sessionId: null, operationId: null, reportRef: null, terminalEvidence: null, wake: null, spend: null }, null);
     const retained = new Set<string>(); let peak = 0;
     const observe = (task: any) => { if (task.lifecycle !== "terminal") { retained.add(task.taskId); peak = Math.max(peak, retained.size); } };
     const records = HomeTaskStore.prototype.records;
@@ -402,8 +401,8 @@ describe("Home task cold reconciliation", () => {
     const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
     const authorization = (f.registry.homeOwner() as any).tasks.authorization;
     await store.initialize();
-    await issueGrant(authorization, { intentRevision: 1, intentDigest: "a".repeat(64), target: f.cwd,
-      authorizationScope: "full-work", workerProfile: "home-task-v1", policyRevision: 1, restoreEpoch: await store.restoreEpoch() },
+    await issueGrant(authorization, { intentDigest: "a".repeat(64), target: f.cwd,
+      authorizationScope: "full-work", restoreEpoch: await store.restoreEpoch() },
       { decisionId: "unspent", expiresAt: Date.now() + 60_000 });
     await authorization.enableInitialScope(await store.restoreEpoch());
     const authorizationPath = join(f.tronHome, "gateway/home/tasks/authorization.json");
@@ -523,7 +522,7 @@ describe("Home task cold reconciliation", () => {
     const cold = await f.restart();
     const owner = cold.homeOwner();
     expect(await owner.status()).toMatchObject({ taskRecovery: { available: false, reason: "unsafe-state" } });
-    const control = { taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1, text: "Steer" };
+    const control = { taskId: run.taskId, operationId: run.operationId, text: "Steer" };
     const operations: Array<[string, () => Promise<unknown>]> = [
       ["dispatch", () => owner.dispatchTask(f.home.sessionId, { taskId: "new-task", intent: "Finite", target: f.cwd })],
       ["status", () => owner.taskResult(run.taskId)],
@@ -745,10 +744,8 @@ describe("Home task cold reconciliation", () => {
     const store = tasks.store as HomeTaskStore;
     await store.initialize();
     const epoch = await store.restoreEpoch();
-    const intent = { revision: 1, text: "Finite work" };
-    const { createHash } = await import("node:crypto");
-    await issueGrant(tasks.authorization, { intentRevision: 1, intentDigest: createHash("sha256").update(JSON.stringify(intent)).digest("hex"),
-      target: f.cwd, authorizationScope: "full-work", workerProfile: "home-task-v1", policyRevision: 1, restoreEpoch: epoch },
+    await issueGrant(tasks.authorization, { intentDigest: taskIntentDigest("Finite work"),
+      target: f.cwd, authorizationScope: "full-work", restoreEpoch: epoch },
       { decisionId: "single-use", expiresAt: Date.now() + 60_000 });
     const put = store.put.bind(store);
     let frozen = false;
@@ -789,14 +786,13 @@ describe("Home task list RPC", () => {
     await store.initialize();
     const service = new GatewayService({ sessions: f.registry, home: owner } as unknown as GatewayServiceDependencies);
     const client = { clientId: "task-list-reader" } as ClientContext;
-    const intent = { revision: 1, text: "Finite work" };
-    const { createHash } = await import("node:crypto");
+    const intent = { text: "Finite work" };
     for (let i = 0; i < 5; i++) {
       await store.put({ version: 1, taskId: `list-${i}`, revision: 1, homeId: f.home.homeId, generation: 1, routeGeneration: 1,
-        intent, intentDigest: createHash("sha256").update(JSON.stringify(intent)).digest("hex"), target: f.cwd,
-        workerProfile: "home-task-v1", policyRevision: 1, grantRef: null, scopeRef: null, lifecycle: "pending",
-        sessionId: null, operationId: null, controllerGeneration: null, stopIntent: null, spend: null,
-        reportRefs: null, terminalEvidence: null, wake: null }, null);
+        intent, intentDigest: taskIntentDigest(intent.text), target: f.cwd,
+        grantRef: null, scopeRef: null, lifecycle: "pending",
+        sessionId: null, operationId: null, stopIntent: null, spend: null,
+        reportRef: null, terminalEvidence: null, wake: null }, null);
       await new Promise(resolve => setTimeout(resolve, 2));
     }
     const first = await service.invoke(client, "home.taskList", { limit: 2 }) as any;
@@ -851,7 +847,7 @@ describe("Home task production dispatch", () => {
       release();
       const completion = await run.completion.then(() => "published", error => String(error));
       const frozen = await store.read(run.taskId);
-      expect(frozen).toMatchObject({ lifecycle: "active", reportRefs: null, terminalEvidence: null, wake: null });
+      expect(frozen).toMatchObject({ lifecycle: "active", reportRef: null, terminalEvidence: null, wake: null });
       expect(completion).toContain("live canonical sync refused");
       expect(failedSync).toBe(true);
       expect(acknowledge).not.toHaveBeenCalled();
@@ -860,7 +856,7 @@ describe("Home task production dispatch", () => {
       const recovered = await f.restart();
       const task = await recovered.homeOwner().taskResult(run.taskId);
       expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" }, wake: { state: "pending", push: "decided" } });
-      expect(task.reportRefs).toHaveLength(1);
+      expect(task.reportRef).not.toBeNull();
       expect(providers).toBe(1);
       expect(f.notifications).toHaveLength(1);
       evidence.push({ case: `live-canonical-${target}-sync-before-settlement`, frozen, completion, task, providers });
@@ -881,7 +877,7 @@ describe("Home task production dispatch", () => {
     await expect(run.completion).rejects.toThrow("Task canonical evidence is unavailable");
     const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
     const frozen = await store.read(run.taskId);
-    expect(frozen).toMatchObject({ lifecycle: "active", stopIntent: null, terminalEvidence: null, reportRefs: null, wake: null });
+    expect(frozen).toMatchObject({ lifecycle: "active", stopIntent: null, terminalEvidence: null, reportRef: null, wake: null });
     expect(f.notifications).toHaveLength(0);
     vi.restoreAllMocks();
     const recovered = await f.restart();
@@ -1091,7 +1087,7 @@ describe("Home task production dispatch", () => {
     const home = await f.registry.acquire(f.home.sessionId);
     try {
       await waitFor(() => entered, "worker provider barrier");
-      f.faux.setResponses([fauxAssistantMessage([fauxToolCall("task", { action: "steer", taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1, text: "Home tool instruction" })], { stopReason: "toolUse" }), fauxAssistantMessage("shared steering accepted")]);
+      f.faux.setResponses([fauxAssistantMessage([fauxToolCall("task", { action: "steer", taskId: run.taskId, operationId: run.operationId, text: "Home tool instruction" })], { stopReason: "toolUse" }), fauxAssistantMessage("shared steering accepted")]);
       await home.prompt("Steer the active task");
       await waitFor(() => home.snapshot().configurationBlocker === null, "Home task tool terminal");
       expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["Home tool instruction"]);
@@ -1117,7 +1113,7 @@ describe("Home task production dispatch", () => {
     const slot = await f.registry.acquire(run.sessionId);
     try {
       await waitFor(() => entered, "task provider active");
-      const control = { taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1 };
+      const control = { taskId: run.taskId, operationId: run.operationId };
       const session = (slot as any).runtime.session;
       const prompt = session.prompt.bind(session);
       let steeringEntered = false;
@@ -1146,8 +1142,14 @@ describe("Home task production dispatch", () => {
       expect(called).toEqual(["Home first", "Maintainer second"]);
       expect(f.signals.filter(record => record.event === "home.task.control" && record.action === "steer")).toHaveLength(2);
       expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["Home first", "Maintainer second"]);
-      await expect(f.registry.homeOwner().steerTask(f.home.sessionId, { ...control, controllerGeneration: 2, text: "stale" })).rejects.toThrow(/stale|changed|conflict/i);
-      await expect(slot.steerHomeTask({ ...control, controllerGeneration: 2 }, "stale slot control")).rejects.toThrow(/stale|changed|conflict/i);
+      await expect(f.registry.homeOwner().steerTask(f.home.sessionId, { ...control, operationId: "stale-operation", text: "stale" })).rejects.toThrow(/stale|changed|conflict/i);
+      await expect(slot.steerHomeTask({ ...control, operationId: "stale-operation" }, "stale slot control")).rejects.toThrow(/stale|changed|conflict/i);
+      // The removed controller generation is an unknown RPC parameter, refused before any Stop intent is written.
+      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+        receipts: new CommandReceiptStore(join(f.root, "control-receipts")) } as unknown as GatewayServiceDependencies);
+      const client = { id: "control-terminal", identity: "device:control-test", isLocal: true } as unknown as ClientContext;
+      await expect(service.invoke(client, "home.stopTask",
+        { commandId: "stop-with-removed-fence", taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1 })).rejects.toThrow(/unknown fields/);
       release();
       const result = await run.completion;
       expect(result.terminalEvidence?.outcome).toBe("final");
@@ -1193,7 +1195,7 @@ describe("Home task production dispatch", () => {
     const slot = await f.registry.acquire(run.sessionId);
     try {
       await waitFor(() => entered, "SDK preflight barrier");
-      const control = { taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1 };
+      const control = { taskId: run.taskId, operationId: run.operationId };
       await expect(f.registry.homeOwner().stopTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
       await expect(slot.stopHomeTask({ ...control, operationId: "stale-operation" })).rejects.toThrow(/changed|stale|conflict/i);
       expect(cancelled).toBe(false);
@@ -1221,9 +1223,9 @@ describe("Home task production dispatch", () => {
       if (surface === "taskRPC") expect(await service.invoke(client, "home.stopTask", stopParams)).toEqual({ accepted: true });
       expect(await f.registry.homeOwner().taskResult(run.taskId)).toEqual(result);
       expect(providerCalls).toBe(0);
-      expect(result.stopIntent).toMatchObject({ operationId: run.operationId, controllerGeneration: 1 });
+      expect(result.stopIntent).toMatchObject({ operationId: run.operationId });
       expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "stopped-before-conversation", entryIds: [] });
-      expect(result.reportRefs).toBeNull();
+      expect(result.reportRef).toBeNull();
       expect(result.wake).toMatchObject({ state: "pending", push: "decided" });
       expect(f.notifications).toHaveLength(1);
       await expect(fileSystem.stat(slot.sessionFile!)).rejects.toMatchObject({ code: "ENOENT" });
@@ -1261,10 +1263,10 @@ describe("Home task production dispatch", () => {
     const slot = await f.registry.acquire(run.sessionId);
     try {
       await waitFor(() => entered, "task provider running before queued Stop");
-      const first = await slot.steerHomeTask({ taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1 }, "not delivered Home steer");
+      const first = await slot.steerHomeTask({ taskId: run.taskId, operationId: run.operationId }, "not delivered Home steer");
       const second = await slot.prompt("not delivered maintainer steer", [], "steer");
       expect(slot.snapshot().queuedItems.map(item => item.id)).toEqual([first.operationId, second.operationId]);
-      if (surface === "taskRPC") await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId, controllerGeneration: 1 });
+      if (surface === "taskRPC") await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId });
       else if (surface === "sessionStop") await slot.abort("agent", run.operationId);
       else { expect(expire).toBeDefined(); expire!(); }
       const result = await run.completion;
@@ -1357,18 +1359,17 @@ describe("Home task production dispatch", () => {
       const two = await f.registry.homeOwner().taskResult(run.taskId);
       const canonical = entries().find(value => value.type === "message" && value.message.role === "assistant")!;
       const usage = (canonical as any).message.usage;
-      expect(one.spend).toMatchObject({ inputTokens: usage.input + usage.cacheRead + usage.cacheWrite, outputTokens: usage.output, knownCostUSD: null, unpriced: true });
+      expect(one.spend).toMatchObject({ inputTokens: usage.input + usage.cacheRead + usage.cacheWrite, outputTokens: usage.output });
       expect(two).toEqual(one);
       const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
       const terminal = { request: (_method: string, params: any) => f.registry.homeOwner().taskResult(params.taskId) };
       await runHomeInput(terminal as any, `/home task ${run.taskId}`);
-      expect(output).toHaveBeenCalledWith(expect.stringContaining(`${one.spend!.inputTokens} input/cache + ${one.spend!.outputTokens} output tokens; unpriced`));
+      expect(output).toHaveBeenCalledWith(expect.stringContaining(`${one.spend!.inputTokens} input/cache + ${one.spend!.outputTokens} output tokens.`));
       output.mockRestore();
       release();
       const final = await run.completion;
       expect(final.spend!.inputTokens).toBeGreaterThanOrEqual(one.spend!.inputTokens);
       expect(final.spend!.outputTokens).toBeGreaterThanOrEqual(one.spend!.outputTokens);
-      expect(final.spend!.unpriced).toBe(true);
       evidence.push({ case: "live-spend", live: one.spend, final: final.spend });
     } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
   }, 20_000);
@@ -1432,7 +1433,7 @@ describe("Home task production dispatch", () => {
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("codemode", { code: `await tools.report({resultId:"nested-result",outcome:"final",text:"Verified",evidence:[]}); await tools.write({path:${JSON.stringify(later)},content:"forbidden"});` })], { stopReason: "toolUse" }), fauxAssistantMessage("must not continue")]);
     const result = await (await dispatch(f)).completion;
     expect(result.terminalEvidence?.outcome).toBe("final");
-    expect(result.reportRefs?.[0]?.resultId).toBe("nested-result");
+    expect(result.reportRef?.resultId).toBe("nested-result");
     expect(existsSync(later)).toBe(false);
     evidence.push({ case: "nested-report-stop", postReportEffect: false });
   }, 20_000);
@@ -1503,12 +1504,12 @@ describe("Home task production dispatch", () => {
     const run = await dispatch(f);
     const result = await run.completion;
     expect(result.terminalEvidence.outcome).toBe("final");
-    expect(result.reportRefs).toHaveLength(1);
+    expect(result.reportRef).not.toBeNull();
     const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
-    const ref = result.reportRefs![0];
+    const ref = result.reportRef!;
     const canonical = entries.find(entry => entry.id === ref.entryId) as any;
     expect(canonical).toMatchObject({ type: "custom", customType: "tron-home-task-report", data: {
-      resultId: "report-one", taskId: "task-one", intentRevision: 1,
+      resultId: "report-one", taskId: "task-one",
       homeId: f.home.homeId, generation: f.home.generation, sessionId: run.sessionId,
       operationId: run.operationId, outcome: "final", text: "Verified result", evidence: ["focused check passed"],
     } });
@@ -1531,7 +1532,7 @@ describe("Home task production dispatch", () => {
     expect(await f.registry.homeOwner().taskResult("task-one")).toEqual(result);
     await expect(worker.fork(inputEntry.id)).rejects.toThrow(/task|identity/);
     expect(f.signals.filter(record => record.event === "home.task.transition").map(record => record.transition)).toEqual(["pending", "active", "terminal"]);
-    expect(f.signals.find(record => record.event === "home.task.spend")).toMatchObject({ inputTokens: expect.any(Number), unpriced: true });
+    expect(f.signals.find(record => record.event === "home.task.spend")).toMatchObject({ inputTokens: expect.any(Number) });
     evidence.push({ case: "explicit-report", ref, canonicalReport: canonical.data, outcome: result.terminalEvidence.outcome, postReport });
   }, 20_000);
 
@@ -1564,7 +1565,7 @@ describe("Home task production dispatch", () => {
     const run = await dispatch(f);
     const result = await run.completion;
     expect(result.terminalEvidence.outcome).toBe(stopReason === "length" ? "limited" : "unknown");
-    expect(result.reportRefs).toBeNull();
+    expect(result.reportRef).toBeNull();
     const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
     const last = entries.find(entry => entry.id === result.terminalEvidence.entryIds[0]) as any;
     expect(last.message.role).toBe("assistant");
@@ -1634,7 +1635,11 @@ describe("Home task production dispatch", () => {
     if (scenario === "foreground-process") {
       expect(existsSync(pidPath)).toBe(true);
       const pid = Number(await readFile(pidPath, "utf8"));
-      expect(() => process.kill(pid, 0)).toThrow();
+      // The stop SIGKILLs the shell's process group and joins the shell. The
+      // background child is killed too, but the OS reaps the orphaned zombie
+      // asynchronously, and `kill(pid, 0)` succeeds on a zombie, so wait for
+      // the reap within the hang bound instead of sampling once.
+      await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, "the killed background child to be reaped");
     } else if (scenario !== "blocked-provider") expect(turns).toBeGreaterThanOrEqual(3);
     const signal = f.signals.find(record => record.event === "home.task.runaway-stop");
     expect(signal).toMatchObject({ taskHash: expect.stringMatching(/^[a-f0-9]{16}$/), spendReference: expect.any(String), cancelAndJoin: "joined", elapsedMs: expect.any(Number) });

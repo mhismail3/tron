@@ -29,6 +29,6 @@ export function homeTaskSpend(entries: readonly FileEntry[]): NonNullable<HomeTa
   }
   const sourceDigest = createHash("sha256").update(JSON.stringify([...usage])).digest("hex");
   // Pi's usage.cost is model-price arithmetic, not authoritative billing
-  // provenance. No current provider contract supplies such monetary evidence.
-  return { inputTokens, outputTokens, sourceDigest, knownCostUSD: null, pricingProvenance: null, unpriced: true };
+  // evidence, so no cost is recorded: spend is tokens only.
+  return { inputTokens, outputTokens, sourceDigest };
 }

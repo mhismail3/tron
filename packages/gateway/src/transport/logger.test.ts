@@ -48,23 +48,23 @@ describe("GatewayLogger", () => {
     logger.log("info", "Home task lifecycle", { event: "home.task.transition", source: "home", taskHash, operationHash,
       revision: 3, transition: "active", reason: "operation-bound" });
     logger.log("info", "Home task lifecycle", { event: "home.task.spend", source: "home", taskHash, spendReference: "9a8b7c6d5e4f3a2b",
-      inputTokens: 1200, outputTokens: 40, unpriced: true });
+      inputTokens: 1200, outputTokens: 40 });
     logger.log("warning", "Home task lifecycle", { event: "home.task.runaway-stop", source: "home", taskHash, operationHash,
       elapsedMs: 86_400_123.4, cancelAndJoin: "failed", spendReference: "9a8b7c6d5e4f3a2b" });
     logger.log("info", "Home task lifecycle", { event: "home.task.inbox", source: "home", eventHash: "1122334455667788",
       state: "admitted", reason: "canonical-admission" });
     logger.log("info", "Home task lifecycle", { event: "home.task.control", source: "home", taskHash, operationHash,
-      action: "stop", disposition: "persisted", controllerGeneration: 2 });
+      action: "stop", disposition: "persisted" });
     logger.log("info", "Home task lifecycle", { event: "home.task.authorization", source: "home", outcome: "refused",
       reason: "grant-required", referenceHash: "5566778899aabbcc" });
     logger.log("info", "Home task lifecycle", { event: "home.task.spend", source: "home", taskHash: "x".repeat(400),
       revision: -1, inputTokens: 1.5, outputTokens: Number.MAX_SAFE_INTEGER + 1 });
     const [transition, spend, stop, inbox, control, authorization, unbounded] = lines(path);
     expect(transition).toMatchObject({ taskHash, operationHash, revision: 3, transition: "active", reason: "operation-bound" });
-    expect(spend).toMatchObject({ taskHash, spendReference: "9a8b7c6d5e4f3a2b", inputTokens: 1200, outputTokens: 40, unpriced: true });
+    expect(spend).toMatchObject({ taskHash, spendReference: "9a8b7c6d5e4f3a2b", inputTokens: 1200, outputTokens: 40 });
     expect(stop).toMatchObject({ elapsedMs: 86_400_123, cancelAndJoin: "failed" });
     expect(inbox).toMatchObject({ eventHash: "1122334455667788", state: "admitted" });
-    expect(control).toMatchObject({ action: "stop", disposition: "persisted", controllerGeneration: 2 });
+    expect(control).toMatchObject({ action: "stop", disposition: "persisted" });
     expect(authorization).toMatchObject({ referenceHash: "5566778899aabbcc" });
     expect(unbounded.taskHash).toHaveLength(64);
     expect(unbounded).not.toHaveProperty("revision");

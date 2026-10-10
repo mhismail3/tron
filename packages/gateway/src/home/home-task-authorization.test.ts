@@ -18,12 +18,9 @@ function fixture() {
     diagnostic: (record) => diagnostics.push(record),
   });
   const request = {
-    intentRevision: 1,
     intentDigest: "intent-digest-1",
     target: "/trusted/project",
     authorizationScope: "project-work",
-    workerProfile: "home-task-v1",
-    policyRevision: 1,
     restoreEpoch: "epoch-1",
   };
   return { owner, store, request, diagnostics, advance: (delta: number) => { now += delta; }, revokeTrust: (path: string) => trusted.delete(path) };
@@ -117,6 +114,18 @@ describe("HomeTaskAuthorization", () => {
     expect(diagnostics).toContainEqual({
       event: "home.task.authorization", outcome: "decision-recorded", referenceHash: expect.any(String),
     });
+  });
+
+  // FM4: removing the task-level dimensions must not widen the remaining match.
+  it("consumes a one-use grant only for its exact binding, and only once", async () => {
+    const { owner, request } = fixture();
+    await issueGrant(owner, request, { decisionId: "exact", expiresAt: 2_000 });
+    await expect(owner.authorize({ ...request, intentDigest: "other-intent" })).rejects.toMatchObject({ code: "grant-required" });
+    await expect(owner.authorize({ ...request, target: "/trusted/other" })).rejects.toMatchObject({ code: "grant-required" });
+    await expect(owner.authorize({ ...request, authorizationScope: "read-only" })).rejects.toMatchObject({ code: "grant-required" });
+    await expect(owner.authorize({ ...request, restoreEpoch: "epoch-2" })).rejects.toMatchObject({ code: "scope-reconfirmation-required" });
+    await expect(owner.authorize(request)).resolves.toMatchObject({ kind: "one-use-grant" });
+    await expect(owner.authorize(request)).rejects.toMatchObject({ code: "grant-required" });
   });
 
   it("rejects expired, mismatched, revoked, spent and restore-epoch-stale grants", async () => {

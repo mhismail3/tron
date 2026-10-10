@@ -88,7 +88,7 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
     const endBytes = exact ? previous!.completeBytes : start.size;
     const entries = new Map<string, CompactEntry>();
     let selected: EpisodicCanonicalEntry | undefined;
-    let prefix = incremental ? previous!.completePrefixDigest! : COMPLETE_PREFIX_SEED;
+    let prefix = incremental ? previous!.completePrefixDigest : COMPLETE_PREFIX_SEED;
     let completeBytes = offset;
     let leaf = incremental ? previous!.leafEntryId : null;
     let leafDigest = incremental ? previous!.leafLineDigest : null;
@@ -181,8 +181,8 @@ async function validateSnapshot(snapshot: HomeSourceSnapshot, cursor: EpisodicSo
   if (!snapshot.chapters.length || snapshot.chapters.length > HOME_MAX_CHAPTERS
     || !Number.isSafeInteger(snapshot.ledgerRevision) || snapshot.ledgerRevision < 1) fail("Home source has no admitted ledger");
   const ids = new Set<string>();
-  const prior = cursor?.home?.chapters ?? [];
-  if (cursor && (!cursor.home || cursor.home.version !== 2)) fail("Home source cursor format is unsupported");
+  const prior = cursor?.home.chapters ?? [];
+  if (cursor && cursor.home.version !== 2) fail("Home source cursor format is unsupported");
   if (prior.length > snapshot.chapters.length) fail("Home source lost an ingested chapter");
   const stats: Stats[] = [];
   for (const [index, chapter] of snapshot.chapters.entries()) {
@@ -199,8 +199,7 @@ async function validateSnapshot(snapshot: HomeSourceSnapshot, cursor: EpisodicSo
 function aggregate(snapshot: HomeSourceSnapshot, chapters: EpisodicChapterSourceCursor[]): EpisodicSourceCursor {
   const last = chapters.at(-1)!;
   const completeBytes = chapters.reduce((sum, chapter) => sum + chapter.completeBytes, 0);
-  return { dev: last.dev, ino: last.ino, size: completeBytes, completeBytes,
-    leafEntryId: last.leafEntryId, leafLineDigest: last.leafLineDigest,
+  return { completeBytes, leafEntryId: last.leafEntryId,
     completePrefixDigest: episodicDigest(JSON.stringify(chapters)),
     home: { version: 2, ledgerRevision: snapshot.ledgerRevision, chapters: [...chapters] },
   };
@@ -210,7 +209,7 @@ function aggregate(snapshot: HomeSourceSnapshot, chapters: EpisodicChapterSource
  * cross the await into EpisodicMemory; old sealed JSONL is never reopened. */
 export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<EpisodicSourceDelta> {
   const stats = await validateSnapshot(snapshot, cursor);
-  const chapters = [...(cursor?.home?.chapters ?? [])];
+  const chapters = [...(cursor?.home.chapters ?? [])];
   let acknowledged = cursor;
   for (const [index, chapter] of snapshot.chapters.entries()) {
     const previous = chapters[index];
@@ -231,7 +230,7 @@ export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cur
   // Even no-op ingestion acknowledges a ledger-only transition (seal/roll).
   const next = aggregate(snapshot, chapters);
   if (acknowledged?.completePrefixDigest === next.completePrefixDigest
-    && acknowledged?.home?.ledgerRevision === next.home!.ledgerRevision) return;
+    && acknowledged?.home.ledgerRevision === next.home.ledgerRevision) return;
   yield { sessionId: snapshot.homeId, projected: [], cursor: next, incremental: true };
 }
 
@@ -240,7 +239,7 @@ export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cur
 export async function* readCanonicalHomeIndex(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor, limits: EpisodicLimits, signal?: AbortSignal): AsyncIterable<{ id: string; sourceSessionId: string }> {
   await validateSnapshot(snapshot, cursor);
   const ids = new Set<string>();
-  for (const [index, chapterCursor] of cursor.home!.chapters.entries()) {
+  for (const [index, chapterCursor] of cursor.home.chapters.entries()) {
     const chapter = snapshot.chapters[index]!;
     signal?.throwIfAborted();
     const cut = await compactChapter(chapter, limits, chapterCursor, true, undefined, signal);
@@ -258,9 +257,9 @@ export async function* readCanonicalHomeIndex(snapshot: HomeSourceSnapshot, curs
  * caller's read boundary; this second pass proves the selected line at use. */
 export async function readCanonicalHomeEvidence(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor,
   evidence: HomeMemoryEvidence, limits: EpisodicLimits, signal?: AbortSignal): Promise<EpisodicCanonicalEntry> {
-  const index = cursor.home?.chapters.findIndex(chapter => chapter.sessionId === evidence.sessionId) ?? -1;
+  const index = cursor.home.chapters.findIndex(chapter => chapter.sessionId === evidence.sessionId);
   const chapter = snapshot.chapters[index];
-  const admitted = cursor.home?.chapters[index];
+  const admitted = cursor.home.chapters[index];
   if (!chapter || !admitted || chapter.sessionId !== evidence.sessionId) fail("Home evidence has no admitted chapter");
   const cut = await compactChapter(chapter, limits, admitted, true, evidence, signal);
   if (!cut.evidence) fail("Home evidence entry is unavailable");

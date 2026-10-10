@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { HomeTaskAuthorization } from "./home-task-authorization.js";
+import { HomeTaskAuthorization, HomeTaskAuthorizationError } from "./home-task-authorization.js";
 import { WakeInboxOwner } from "./home-wake-inbox.js";
-import { HomeTaskStore, type HomeTaskRecord, type HomeTaskWrite, type HomeTaskStoreDiagnostic } from "./home-task-store.js";
+import { HomeTaskStore, taskIntentDigest, type HomeTaskRecord, type HomeTaskWrite, type HomeTaskStoreDiagnostic } from "./home-task-store.js";
 import { issueGrant } from "../../test-support/home-task-grant.js";
 
 // Counts the task-directory files the store reads. The wrapper is transparent;
@@ -73,13 +73,13 @@ async function fixture() {
 }
 
 function task(): HomeTaskWrite {
-  const intent = { revision: 1, text: "Investigate a trusted project" };
+  const intent = { text: "Investigate a trusted project" };
   return {
     version: 1, taskId: "task-1", revision: 1, homeId: "home-1", generation: 1, routeGeneration: 1,
-    intent, intentDigest: createHash("sha256").update(JSON.stringify(intent)).digest("hex"),
-    target: "/trusted/project", workerProfile: "home-task-v1", policyRevision: 1,
+    intent, intentDigest: taskIntentDigest(intent.text),
+    target: "/trusted/project",
     grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
-    controllerGeneration: null, stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null, wake: null,
+    stopIntent: null, spend: null, reportRef: null, terminalEvidence: null, wake: null,
   };
 }
 
@@ -89,10 +89,7 @@ function authorization(store: HomeTaskStore) {
     resolveTrustedTarget: async target => target === "/trusted/project" ? target : undefined,
   });
 }
-const request = {
-  intentRevision: 1, intentDigest: "digest", target: "/trusted/project", authorizationScope: "project-work",
-  workerProfile: "home-task-v1", policyRevision: 1, restoreEpoch: "epoch-1",
-};
+const request = { intentDigest: "digest", target: "/trusted/project", authorizationScope: "project-work", restoreEpoch: "epoch-1" };
 
 async function bytes(directory: string): Promise<Record<string, string>> {
   const result: Record<string, string> = {};
@@ -132,7 +129,7 @@ describe("HomeTaskStore durable namespace", () => {
     expect(await restarted.restoreEpoch()).toBe(epoch);
     await expect(authorization(restarted).authorize(current)).resolves.toMatchObject({ kind: "standing-scope" });
     await f.store.put(task(), null);
-    await f.store.put({ ...task(), revision: 2, controllerGeneration: 1 }, 1);
+    await f.store.put({ ...task(), revision: 2 }, 1);
     expect(await f.store.restoreEpoch()).toBe(epoch);
     await owner.revokeScope(scope.id);
     await issueGrant(owner, current, { decisionId: "physical-grant", expiresAt: 2_000 });
@@ -175,16 +172,16 @@ describe("HomeTaskStore durable namespace", () => {
     const f = await fixture();
     await f.store.initialize();
     await f.store.put(task(), null);
-    const next = { ...task(), revision: 2, controllerGeneration: 1 };
-    const results = await Promise.allSettled([f.store.put(next, 1), f.store.put({ ...next, controllerGeneration: 2 }, 1)]);
+    const next = { ...task(), revision: 2 };
+    const results = await Promise.allSettled([f.store.put(next, 1), f.store.put(structuredClone(next), 1)]);
     expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter(result => result.status === "rejected")).toHaveLength(1);
     const restarted = new HomeTaskStore(f.root, f.workspace);
     expect(await collectRecords(restarted)).toMatchObject([next]);
     const before = await readFile(await f.taskPath(), "utf8");
-    const changedIntent = { revision: 2, text: "Changed intent" };
+    const changedIntent = { text: "Changed intent" };
     await expect(restarted.put({ ...next, revision: 3, intent: changedIntent,
-      intentDigest: createHash("sha256").update(JSON.stringify(changedIntent)).digest("hex") }, 2)).rejects.toMatchObject({ code: "invalid-record" });
+      intentDigest: taskIntentDigest(changedIntent.text) }, 2)).rejects.toMatchObject({ code: "invalid-record" });
     await expect(restarted.put({ ...next, revision: 2 }, 2)).rejects.toMatchObject({ code: "revision-conflict" });
     expect(await readFile(await f.taskPath(), "utf8")).toBe(before);
   });
@@ -249,12 +246,23 @@ describe("HomeTaskStore durable namespace", () => {
       { ...task(), lifecycle: "active" },
       { ...task(), lifecycle: "terminal" },
       { ...task(), lifecycle: "terminal", terminalEvidence: { outcome: "final", sessionId: "session-1", entryIds: [], reason: "report" } },
-      { ...task(), reportRefs: [{ resultId: "result-1", sessionId: "session-1", entryId: "entry-1", surprise: true }] },
-      { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: -1, outputTokens: 0, knownCostUSD: null, pricingProvenance: null, unpriced: true } },
-      { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: 1, outputTokens: 0, knownCostUSD: 1, pricingProvenance: null, unpriced: false } },
+      { ...task(), reportRef: { resultId: "result-1", sessionId: "session-1", entryId: "entry-1", digest: "a".repeat(64), surprise: true } },
+      { ...task(), reportRef: [{ resultId: "result-1", sessionId: "session-1", entryId: "entry-1", digest: "a".repeat(64) }] },
+      { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: -1, outputTokens: 0 } },
+      { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: 1, outputTokens: 0, unpriced: true } },
     ];
     for (const record of invalid) await expect(f.store.put(record as HomeTaskRecord, null)).rejects.toMatchObject({ code: "invalid-record" });
     expect(await bytes(f.directory)).toEqual(before);
+  });
+
+  // FM7: a final result is only a result with its one report reference; the rest of
+  // the record is valid, so the reference is the only thing refused.
+  it("refuses a final terminal result without its single report reference", async () => {
+    const f = await fixture(); await f.store.initialize();
+    const final = { ...terminalTask("task-final"), terminalEvidence: { outcome: "final" as const, sessionId: "session-1", entryIds: ["entry-1"], reason: "explicit-report" } };
+    await expect(f.store.put(final, null)).rejects.toMatchObject({ code: "invalid-record" });
+    const reportRef = { resultId: "result-1", sessionId: "session-1", entryId: "entry-1", digest: "a".repeat(64) };
+    await expect(f.store.put({ ...final, reportRef }, null)).resolves.toMatchObject({ lifecycle: "terminal", reportRef });
   });
 
   it("refuses a wake state the inbox no longer writes, so no record can carry it", async () => {
@@ -263,6 +271,67 @@ describe("HomeTaskStore durable namespace", () => {
     await expect(f.store.put({ ...terminal, wake: { ...terminal.wake!, state: "cancelled-before-admission" as never } }, null))
       .rejects.toMatchObject({ code: "invalid-record" });
     expect(await f.store.read("task-terminal")).toBeUndefined();
+  });
+
+  // FM1/FM2/FM6: a deleted field is refused on both paths, never read as current.
+  it("refuses a task record that carries a deleted field, on write and on read", async () => {
+    const f = await fixture(); await f.store.initialize();
+    await f.store.put(task(), null);
+    const path = await f.taskPath();
+    const valid = await readFile(path, "utf8");
+    const current = JSON.parse(valid) as Record<string, unknown>;
+    const deleted = {
+      workerProfile: { workerProfile: "home-task-v1" },
+      policyRevision: { policyRevision: 1 },
+      controllerGeneration: { controllerGeneration: null },
+      "intent.revision": { intent: { revision: 1, text: task().intent.text } },
+    } as const;
+    for (const [name, extra] of Object.entries(deleted)) {
+      await expect(f.store.put({ ...task(), revision: 2, ...extra } as HomeTaskWrite, 1), `put ${name}`).rejects.toMatchObject({ code: "invalid-record" });
+      await writeFile(path, JSON.stringify({ ...current, ...extra }), { mode: 0o600 });
+      await expect(collectRecords(f.store), `read ${name}`).rejects.toMatchObject({ code: "invalid-record" });
+    }
+    // The positive control: the unmodified current-shape record still reads.
+    await writeFile(path, valid, { mode: 0o600 });
+    expect(await collectRecords(f.store)).toHaveLength(1);
+  });
+
+  it("refuses an authorization request or grant that carries a deleted binding field", async () => {
+    const f = await fixture(); await f.store.initialize();
+    const epoch = await f.store.restoreEpoch();
+    await issueGrant(authorization(f.store), { ...request, restoreEpoch: epoch }, { decisionId: "decision-1", expiresAt: 2_000 });
+    const valid = await readFile(f.authPath, "utf8");
+    const current = JSON.parse(valid) as { requests: Array<{ request: Record<string, unknown> }>; grants: Array<Record<string, unknown>> };
+    const deleted = ["workerProfile", "policyRevision", "intentRevision"] as const;
+    for (const field of deleted) {
+      const badRequest = { ...current, requests: current.requests.map(pending => ({ ...pending, request: { ...pending.request, [field]: 1 } })) };
+      await writeFile(f.authPath, JSON.stringify(badRequest), { mode: 0o600 });
+      await expect(f.store.authorization.load(), `request ${field}`).rejects.toMatchObject({ code: "invalid-record" });
+      const badGrant = { ...current, grants: current.grants.map(candidate => ({ ...candidate, [field]: 1 })) };
+      await writeFile(f.authPath, JSON.stringify(badGrant), { mode: 0o600 });
+      await expect(f.store.authorization.load(), `grant ${field}`).rejects.toMatchObject({ code: "invalid-record" });
+    }
+    await writeFile(f.authPath, valid, { mode: 0o600 });
+    expect(await f.store.authorization.load()).toMatchObject({ grants: [{ decisionId: "decision-1" }] });
+  });
+
+  it("lists pendingGrant only for the undecided request matching the task's intent digest and target", async () => {
+    const f = await fixture(); await f.store.initialize();
+    const epoch = await f.store.restoreEpoch();
+    const owner = authorization(f.store);
+    await f.store.put(task(), null);
+    const other = { ...task(), taskId: "task-2", intent: { text: "A different intent" }, intentDigest: taskIntentDigest("A different intent") };
+    await f.store.put(other, null);
+    // Same intent digest as the requested task, different target: the target dimension alone must exclude it.
+    await f.store.put({ ...task(), taskId: "task-3", target: "/trusted/other" }, null);
+    const binding = { intentDigest: task().intentDigest, target: "/trusted/project", authorizationScope: "full-work", restoreEpoch: epoch };
+    const refused = await owner.authorize(binding).then(() => { throw new Error("authorized without a grant"); },
+      error => error as HomeTaskAuthorizationError);
+    expect(refused).toMatchObject({ code: "grant-required" });
+    const rows = async () => Object.fromEntries((await f.store.page({})).items.map(row => [row.taskId, row.pendingGrant]));
+    expect(await rows()).toEqual({ "task-1": true, "task-2": false, "task-3": false });
+    await owner.recordDecisionAndGrant(refused.requestId!, { decisionId: "decision-1", approved: false, expiresAt: 2_000, restoreEpoch: epoch });
+    expect(await rows()).toEqual({ "task-1": false, "task-2": false, "task-3": false });
   });
 
   const corruptions = [
@@ -410,7 +479,7 @@ describe("Home task recency pages", () => {
     expect(original.createdAt).toBeGreaterThan(0);
     const name = (await readdir(f.directory)).find(name => name.endsWith("-page-5.json"))!;
     expect(name).toBe(`${String(original.createdAt).padStart(13, "0")}-page-5.json`);
-    await f.store.put({ ...original, revision: 2, controllerGeneration: 1 }, 1);
+    await f.store.put({ ...original, revision: 2 }, 1);
     expect((await readdir(f.directory)).filter(name => name.endsWith("-page-5.json"))).toEqual([name]);
     expect(await f.store.read("page-5")).toMatchObject({ createdAt: original.createdAt, updatedAt: expect.any(Number), revision: 2 });
     const reopened = new HomeTaskStore(f.root, f.workspace);
@@ -558,7 +627,7 @@ describe("HomeTaskStore operation cost", () => {
         read: await fileReadsDuring(() => f.store.read("task-1")),
         put: await fileReadsDuring(() => f.store.put({ ...write, revision: current.revision + 1 }, current.revision)),
         update: await fileReadsDuring(() => f.store.update("task-1", record => ({ ...record,
-          spend: { sourceDigest: "a".repeat(64), inputTokens: ++tokens, outputTokens: 0, knownCostUSD: null, pricingProvenance: null, unpriced: true } }))),
+          spend: { sourceDigest: "a".repeat(64), inputTokens: ++tokens, outputTokens: 0 } }))),
         updateWake: await fileReadsDuring(() => f.store.updateWake("task-terminal", wake => ({ ...wake, push: "decided" }))),
         authorityLoad: await fileReadsDuring(() => f.store.authorization.load()),
         authoritySave: await fileReadsDuring(() => f.store.authorization.save(state)),

@@ -12,7 +12,7 @@ describe("homeTaskSpend", () => {
   it("deduplicates canonical usage identities, counts all tokens and ignores unproven SDK costs", () => {
     const one = entry("entry-one");
     const spend = homeTaskSpend([one, structuredClone(one), entry("entry-two", 5)] as any);
-    expect(spend).toMatchObject({ inputTokens: 18, outputTokens: 6, knownCostUSD: null, pricingProvenance: null, unpriced: true });
+    expect(spend).toEqual({ inputTokens: 18, outputTokens: 6, sourceDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) });
     expect(homeTaskSpend([one, entry("entry-two", 5)] as any)).toEqual(spend);
   });
   it("refuses contradictory usage for the same canonical event identity", () => {

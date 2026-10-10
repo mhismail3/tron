@@ -28,28 +28,19 @@ export interface HomeTaskRecord {
   generation: number;
   routeGeneration: number;
   wake: HomeWakeEvent | null;
-  intent: { revision: number; text: string };
-  /** SHA-256 of JSON.stringify({ revision, text }), in that key order. */
+  intent: { text: string };
+  /** `taskIntentDigest(intent.text)`: the grant binding's identity of the intent. */
   intentDigest: string;
   target: string;
-  workerProfile: string;
-  policyRevision: number;
   grantRef: string | null;
   scopeRef: string | null;
   lifecycle: "pending" | "active" | "terminal";
   sessionId: string | null;
   operationId: string | null;
-  controllerGeneration: number | null;
-  stopIntent: { operationId: string; controllerGeneration: number; requestedAt: string } | null;
-  spend: {
-    sourceDigest: string;
-    inputTokens: number;
-    outputTokens: number;
-    knownCostUSD: number | null;
-    pricingProvenance: string | null;
-    unpriced: boolean;
-  } | null;
-  reportRefs: Array<{ resultId: string; sessionId: string; entryId: string; digest: string }> | null;
+  stopIntent: { operationId: string; requestedAt: string } | null;
+  spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
+  /** The one canonical report this task sealed, pinned by entry ID and payload digest. */
+  reportRef: { resultId: string; sessionId: string; entryId: string; digest: string } | null;
   terminalEvidence: {
     outcome: typeof OUTCOMES[number];
     sessionId: string | null;
@@ -59,6 +50,11 @@ export interface HomeTaskRecord {
 }
 
 export type HomeTaskWrite = Omit<HomeTaskRecord, "createdAt" | "updatedAt">;
+
+/** The intent's identity: SHA-256 of its UTF-8 text. */
+export function taskIntentDigest(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
 
 export type HomeTaskStoreCode = "not-initialized" | "missing-state" | "unsafe-state" | "invalid-record"
   | "revision-conflict" | "write-failed" | "publication-uncertain";
@@ -230,7 +226,6 @@ export class HomeTaskStore {
       validateAuthorityReferences(next, authorization);
       if (current.lifecycle === "terminal" || immutableTask(current) !== immutableTask(next)
         || current.operationId !== next.operationId || current.sessionId !== next.sessionId
-        || current.controllerGeneration !== next.controllerGeneration
         || current.grantRef !== next.grantRef || current.scopeRef !== next.scopeRef
         || (current.spend !== null && (next.spend === null || next.spend.inputTokens < current.spend.inputTokens || next.spend.outputTokens < current.spend.outputTokens))
         || (current.stopIntent !== null && JSON.stringify(current.stopIntent) !== JSON.stringify(next.stopIntent))) throw new HomeTaskStoreError("invalid-record");
@@ -426,9 +421,7 @@ export class HomeTaskStore {
           outcome: task.terminalEvidence?.outcome ?? null, spend: task.spend,
           attention: task.terminalEvidence?.outcome === "needs-input" || task.terminalEvidence?.outcome === "unknown",
           pendingGrant: task.lifecycle === "pending" && authority.requests.some(pending => pending.request.intentDigest === task.intentDigest
-            && pending.request.intentRevision === task.intent.revision && pending.request.target === task.target
-            && pending.request.workerProfile === task.workerProfile && pending.request.policyRevision === task.policyRevision
-            && !authority.decisions.some(decision => decision.requestId === pending.id)) });
+            && pending.request.target === task.target && !authority.decisions.some(decision => decision.requestId === pending.id)) });
       }
       const last = selected[Math.min(limit, selected.length) - 1];
       return { items, ...(selected.length > limit && last
@@ -472,8 +465,7 @@ function timestamp(value: unknown): boolean { return typeof value === "number" &
 function unique(records: Record<string, unknown>[]): boolean { return new Set(records.map(record => record.id)).size === records.length; }
 function invalid(): never { throw new HomeTaskStoreError("invalid-record"); }
 function immutableTask(task: HomeTaskRecord): string {
-  return JSON.stringify([task.createdAt, task.taskId, task.homeId, task.generation, task.routeGeneration, task.intent.revision, task.intent.text, task.intentDigest,
-    task.target, task.workerProfile, task.policyRevision]);
+  return JSON.stringify([task.createdAt, task.taskId, task.homeId, task.generation, task.routeGeneration, task.intent.text, task.intentDigest, task.target]);
 }
 
 function authorityReferencesResolve(task: HomeTaskRecord, authorization: HomeTaskAuthorizationState): boolean {
@@ -486,41 +478,37 @@ function validateAuthorityReferences(task: HomeTaskRecord, authorization: HomeTa
 }
 
 function validateTask(value: unknown): HomeTaskRecord {
-  if (!keys(value, ["version", "taskId", "revision", "createdAt", "updatedAt", "homeId", "generation", "intent", "intentDigest", "target", "workerProfile",
-    "policyRevision", "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "controllerGeneration", "stopIntent", "spend", "reportRefs", "terminalEvidence", "routeGeneration", "wake"])
+  if (!keys(value, ["version", "taskId", "revision", "createdAt", "updatedAt", "homeId", "generation", "intent", "intentDigest", "target",
+    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"])
     || value.version !== 1 || !identifier(value.taskId) || value.taskId === "authorization" || !positive(value.revision)
     || !timestamp(value.createdAt) || (value.createdAt as number) > 9_999_999_999_999
     || !timestamp(value.updatedAt) || (value.updatedAt as number) < (value.createdAt as number)
     || !identifier(value.homeId) || !positive(value.generation) || !positive(value.routeGeneration)
-    || !keys(value.intent, ["revision", "text"]) || !positive(value.intent.revision) || !text(value.intent.text, 64 * 1_024)
-    || value.intentDigest !== createHash("sha256").update(JSON.stringify({ revision: value.intent.revision, text: value.intent.text })).digest("hex")
-    || !text(value.target, 4_096) || !isAbsolute(value.target) || !identifier(value.workerProfile) || !positive(value.policyRevision)
+    || !keys(value.intent, ["text"]) || !text(value.intent.text, 64 * 1_024)
+    || value.intentDigest !== taskIntentDigest(value.intent.text)
+    || !text(value.target, 4_096) || !isAbsolute(value.target)
     || !nullableId(value.grantRef) || !nullableId(value.scopeRef) || (value.grantRef !== null && value.scopeRef !== null)
     || !["pending", "active", "terminal"].includes(value.lifecycle as string)
-    || !nullableId(value.sessionId) || !nullableId(value.operationId)
-    || (value.controllerGeneration !== null && !positive(value.controllerGeneration))) invalid();
-  if (value.stopIntent !== null && (!keys(value.stopIntent, ["operationId", "controllerGeneration", "requestedAt"])
-    || !identifier(value.stopIntent.operationId) || !positive(value.stopIntent.controllerGeneration)
-    || value.stopIntent.operationId !== value.operationId || value.stopIntent.controllerGeneration !== value.controllerGeneration
+    || !nullableId(value.sessionId) || !nullableId(value.operationId)) invalid();
+  if (value.stopIntent !== null && (!keys(value.stopIntent, ["operationId", "requestedAt"])
+    || !identifier(value.stopIntent.operationId)
+    || value.stopIntent.operationId !== value.operationId
     || !text(value.stopIntent.requestedAt, 64) || !Number.isFinite(Date.parse(value.stopIntent.requestedAt)))) invalid();
-  if (value.spend !== null && (!keys(value.spend, ["sourceDigest", "inputTokens", "outputTokens", "knownCostUSD", "pricingProvenance", "unpriced"])
+  if (value.spend !== null && (!keys(value.spend, ["sourceDigest", "inputTokens", "outputTokens"])
     || typeof value.spend.sourceDigest !== "string" || !/^[a-f0-9]{64}$/u.test(value.spend.sourceDigest)
-    || !count(value.spend.inputTokens) || !count(value.spend.outputTokens) || typeof value.spend.unpriced !== "boolean"
-    || (value.spend.knownCostUSD !== null && (typeof value.spend.knownCostUSD !== "number" || !Number.isFinite(value.spend.knownCostUSD) || value.spend.knownCostUSD < 0))
-    || (value.spend.pricingProvenance !== null && !text(value.spend.pricingProvenance, 512))
-    || ((value.spend.knownCostUSD === null) !== (value.spend.pricingProvenance === null)))) invalid();
-  if (value.reportRefs !== null && (!Array.isArray(value.reportRefs) || value.reportRefs.length > 256
-    || value.reportRefs.some(ref => !keys(ref, ["resultId", "sessionId", "entryId", "digest"]) || !identifier(ref.resultId) || !identifier(ref.sessionId) || !identifier(ref.entryId) || typeof ref.digest !== "string" || !/^[a-f0-9]{64}$/u.test(ref.digest))
-    || new Set(value.reportRefs.map(ref => ref.resultId)).size !== value.reportRefs.length)) invalid();
+    || !count(value.spend.inputTokens) || !count(value.spend.outputTokens))) invalid();
+  const reportRef = value.reportRef;
+  if (reportRef !== null && (!keys(reportRef, ["resultId", "sessionId", "entryId", "digest"]) || !identifier(reportRef.resultId)
+    || !identifier(reportRef.sessionId) || !identifier(reportRef.entryId) || typeof reportRef.digest !== "string" || !/^[a-f0-9]{64}$/u.test(reportRef.digest))) invalid();
   const evidence = value.terminalEvidence;
   if (evidence !== null && (!keys(evidence, ["outcome", "sessionId", "entryIds", "reason"])
     || !OUTCOMES.includes(evidence.outcome as typeof OUTCOMES[number]) || !nullableId(evidence.sessionId)
     || !Array.isArray(evidence.entryIds) || evidence.entryIds.length > 256 || evidence.entryIds.some(id => !identifier(id))
     || new Set(evidence.entryIds).size !== evidence.entryIds.length || !identifier(evidence.reason))) invalid();
   if ((value.lifecycle === "terminal") !== (evidence !== null)
-    || (value.lifecycle === "active" && (value.sessionId === null || value.operationId === null || value.controllerGeneration === null
+    || (value.lifecycle === "active" && (value.sessionId === null || value.operationId === null
       || (value.grantRef === null && value.scopeRef === null)))
-    || (evidence !== null && evidence.outcome === "final" && (value.reportRefs === null || value.reportRefs.length === 0))) invalid();
+    || (evidence !== null && evidence.outcome === "final" && reportRef === null)) invalid();
   const wake = value.wake;
   if ((value.lifecycle === "terminal") !== (wake !== null)) invalid();
   if (wake !== null) {
@@ -555,7 +543,7 @@ function validateAuthorization(value: unknown): HomeTaskAuthorizationState {
   if (value.scopes.filter(scope => scope.active).length > 1) invalid();
   for (const pending of value.requests) {
     if (!keys(pending, ["id", "request"]) || !identifier(pending.id)
-      || !keys(pending.request, ["intentRevision", "intentDigest", "target", "authorizationScope", "workerProfile", "policyRevision", "restoreEpoch"])
+      || !keys(pending.request, ["intentDigest", "target", "authorizationScope", "restoreEpoch"])
       || !validAuthorizationBinding(pending.request)
       || pending.id !== authorizationRequestId(pending.request as unknown as import("./home-task-authorization.js").HomeTaskAuthorizationRequest)) invalid();
   }
@@ -567,10 +555,10 @@ function validateAuthorization(value: unknown): HomeTaskAuthorizationState {
   if (new Set(value.decisions.map(decision => decision.requestId)).size !== value.decisions.length) invalid();
   const approvedDecisions = new Set(value.decisions.filter(decision => decision.approved).map(decision => decision.id));
   for (const grant of value.grants) {
-    if (!keys(grant, ["id", "decisionId", "intentRevision", "intentDigest", "target", "authorizationScope", "workerProfile", "policyRevision", "restoreEpoch", "expiresAt", "state"])
-      || !identifier(grant.id) || !identifier(grant.decisionId) || !positive(grant.intentRevision) || !text(grant.intentDigest, 128)
-      || !text(grant.target, 4_096) || !isAbsolute(grant.target) || !identifier(grant.authorizationScope) || !identifier(grant.workerProfile)
-      || !positive(grant.policyRevision) || !identifier(grant.restoreEpoch) || !timestamp(grant.expiresAt)
+    if (!keys(grant, ["id", "decisionId", "intentDigest", "target", "authorizationScope", "restoreEpoch", "expiresAt", "state"])
+      || !identifier(grant.id) || !identifier(grant.decisionId) || !text(grant.intentDigest, 128)
+      || !text(grant.target, 4_096) || !isAbsolute(grant.target) || !identifier(grant.authorizationScope)
+      || !identifier(grant.restoreEpoch) || !timestamp(grant.expiresAt)
       || !["available", "consumed", "revoked"].includes(grant.state as string)
       || !approvedDecisions.has(grant.decisionId)) invalid();
     const decision = value.decisions.find(decision => decision.id === grant.decisionId)!;
@@ -584,8 +572,8 @@ function validateAuthorization(value: unknown): HomeTaskAuthorizationState {
 }
 
 function validAuthorizationBinding(value: Record<string, unknown>): boolean {
-  return positive(value.intentRevision) && text(value.intentDigest, 128) && text(value.target, 4_096) && isAbsolute(value.target as string)
-    && identifier(value.authorizationScope) && identifier(value.workerProfile) && positive(value.policyRevision) && identifier(value.restoreEpoch);
+  return text(value.intentDigest, 128) && text(value.target, 4_096) && isAbsolute(value.target as string)
+    && identifier(value.authorizationScope) && identifier(value.restoreEpoch);
 }
 
 interface TaskName { createdAt: number; taskId: string }

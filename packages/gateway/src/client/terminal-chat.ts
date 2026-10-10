@@ -391,11 +391,11 @@ export async function runHomeCommand(client: Pick<GatewayProtocolClient, "reques
       const task = await client.request("home.taskStatus", { taskId: command.taskId }) as unknown as import("../home/home-task-store.js").HomeTaskRecord;
       if (command.kind === "task") {
         const spend = task.spend;
-        process.stdout.write(`Task ${task.taskId}: ${task.lifecycle}${task.terminalEvidence ? ` (${task.terminalEvidence.outcome})` : ""}; ${spend?.inputTokens ?? 0} input/cache + ${spend?.outputTokens ?? 0} output tokens; ${spend?.knownCostUSD === null || !spend ? "unpriced" : `$${spend.knownCostUSD} (${spend.pricingProvenance})`}.\n`);
+        process.stdout.write(`Task ${task.taskId}: ${task.lifecycle}${task.terminalEvidence ? ` (${task.terminalEvidence.outcome})` : ""}; ${spend?.inputTokens ?? 0} input/cache + ${spend?.outputTokens ?? 0} output tokens.\n`);
       } else {
-        if (task.lifecycle !== "active" || !task.operationId || !task.controllerGeneration) throw new Error("Task is not active");
+        if (task.lifecycle !== "active" || !task.operationId) throw new Error("Task is not active");
         await client.request(command.kind === "stop-task" ? "home.stopTask" : "home.steerTask", { commandId: randomUUID(),
-          taskId: task.taskId, operationId: task.operationId, controllerGeneration: task.controllerGeneration,
+          taskId: task.taskId, operationId: task.operationId,
           ...(command.kind === "steer-task" ? { text: command.text } : {}) });
         process.stdout.write(`Task ${task.taskId}: ${command.kind === "stop-task" ? "Stop joined" : "steering accepted"}.\n`);
       }

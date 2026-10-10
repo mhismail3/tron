@@ -6,7 +6,6 @@ export const HOME_TASK_MARKER = "tron-home-task";
 export const HOME_TASK_REPORT = "tron-home-task-report";
 export interface HomeTaskWorkerIdentity {
   taskId: string;
-  intentRevision: number;
   homeId: string;
   generation: number;
   operationId: string;
@@ -47,10 +46,10 @@ function admit(value: unknown): HomeTaskReportRequest {
  * alone cannot qualify persisted evidence after restart. */
 export function parseHomeTaskReport(value: unknown): HomeTaskReport {
   const report = value as HomeTaskReport;
-  const identityKeys = ["version", "taskId", "intentRevision", "homeId", "generation", "operationId", "receiptId", "sessionId", "acceptedAt"];
+  const identityKeys = ["version", "taskId", "homeId", "generation", "operationId", "receiptId", "sessionId", "acceptedAt"];
   if (!report || typeof report !== "object" || Array.isArray(report)
     || Object.keys(report).sort().join(",") !== [...identityKeys, "resultId", "outcome", "text", "evidence"].sort().join(",")
-    || report.version !== 1 || !Number.isSafeInteger(report.intentRevision) || report.intentRevision < 1
+    || report.version !== 1
     || !Number.isSafeInteger(report.generation) || report.generation < 1
     || [report.taskId, report.homeId, report.operationId, report.sessionId].some(id => typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/u.test(id))
     || report.receiptId !== `report:${report.operationId}` || typeof report.acceptedAt !== "string" || !Number.isFinite(Date.parse(report.acceptedAt))) throw new Error("Invalid canonical task report");

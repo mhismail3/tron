@@ -8,7 +8,7 @@ import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/inv
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { HomeTaskAuthorization, HomeTaskAuthorizationError, type HomeTaskAuthorizationDiagnostic } from "./home-task-authorization.js";
-import { HomeTaskStore, HomeTaskStoreError, type HomeTaskRecord, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
+import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
 import { homeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
@@ -20,12 +20,12 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.producer-refused"; taskHash: string; reason: import("./home-task-worker-extension.js").HomeTaskProducerRefusal }
   | { event: "home.task.detached-work"; taskHash: string; operationHash: string; reason: "detached-work-outlived-task" }
   | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null }
-  | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; outputTokens: number; unpriced: true }
-  | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted"; controllerGeneration: number }
+  | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; outputTokens: number }
+  | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
 export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
 export interface HomeTaskDispatchRequest { taskId: string; intent: string; target: string }
-export interface HomeTaskControlRequest { taskId: string; operationId: string; controllerGeneration: number }
+export interface HomeTaskControlRequest { taskId: string; operationId: string }
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord> }
 const reportDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
@@ -94,7 +94,7 @@ export class HomeTaskDispatcher {
         }
         const final = await this.store.update(task.taskId, current => ({ ...current, lifecycle: "terminal", spend,
           wake: this.inbox.event(current),
-          reportRefs: report && entryId ? [{ resultId: report.resultId, sessionId: task.sessionId!, entryId, digest: reportDigest(report) }] : null,
+          reportRef: report && entryId ? { resultId: report.resultId, sessionId: task.sessionId!, entryId, digest: reportDigest(report) } : null,
           terminalEvidence: { outcome: report?.outcome ?? "unknown", sessionId: task.sessionId, entryIds, reason } }));
         this.transition(final, reason);
       }
@@ -113,7 +113,7 @@ export class HomeTaskDispatcher {
     const entry = reports[0];
     if (!entry || entry.type !== "custom") return undefined;
     const report = parseHomeTaskReport(entry.data);
-    if (entries.indexOf(entry) <= entries.indexOf(markers[0]) || report.taskId !== task.taskId || report.intentRevision !== task.intent.revision
+    if (entries.indexOf(entry) <= entries.indexOf(markers[0]) || report.taskId !== task.taskId
       || report.homeId !== task.homeId || report.generation !== task.generation || report.operationId !== task.operationId || report.sessionId !== task.sessionId) throw new GatewayError("conflict", "Task report reference is contradictory");
     return { report, entryId: entry.id };
   }
@@ -144,24 +144,24 @@ export class HomeTaskDispatcher {
     if (await this.store.read(input.taskId)) throw new GatewayError("conflict", "Task already exists; accepted work is never replayed");
     let task = await this.store.put({
       version: 1, taskId: input.taskId, revision: 1, homeId: identity.homeId, generation: identity.generation, routeGeneration: identity.routeGeneration, wake: null,
-      intent: { revision: 1, text: input.intent }, intentDigest: createHash("sha256").update(JSON.stringify({ revision: 1, text: input.intent })).digest("hex"),
-      target: await this.sessions.canonicalTaskTarget(input.target), workerProfile: "home-task-v1", policyRevision: 1,
-      grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null, controllerGeneration: null,
-      stopIntent: null, spend: null, reportRefs: null, terminalEvidence: null,
+      intent: { text: input.intent }, intentDigest: taskIntentDigest(input.intent),
+      target: await this.sessions.canonicalTaskTarget(input.target),
+      grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
+      stopIntent: null, spend: null, reportRef: null, terminalEvidence: null,
     }, null);
     this.transition(task, "created");
     let lease: Awaited<ReturnType<OwnedSessionDispatch["createWorker"]>> | undefined;
     try {
-      const authority = await this.authorization.authorize({ intentRevision: task.intent.revision, intentDigest: task.intentDigest,
-        target: task.target, authorizationScope: "full-work", workerProfile: task.workerProfile, policyRevision: task.policyRevision, restoreEpoch: epoch });
+      const authority = await this.authorization.authorize({ intentDigest: task.intentDigest,
+        target: task.target, authorizationScope: "full-work", restoreEpoch: epoch });
       if (epoch !== await this.store.restoreEpoch()) throw new GatewayError("conflict", "Task namespace identity changed during admission");
       const operationId = `task-${randomUUID()}`;
-      const reports = new HomeTaskReportOwner({ taskId: task.taskId, intentRevision: task.intent.revision, homeId: task.homeId, generation: task.generation, operationId }, async () => {
+      const reports = new HomeTaskReportOwner({ taskId: task.taskId, homeId: task.homeId, generation: task.generation, operationId }, async () => {
         await this.store.update(task.taskId, current => {
-          if (current.lifecycle !== "active" || current.operationId !== operationId || current.controllerGeneration !== 1) throw new GatewayError("conflict", "Task operation changed before Stop");
-          return current.stopIntent ? current : { ...current, stopIntent: { operationId, controllerGeneration: 1, requestedAt: new Date().toISOString() } };
+          if (current.lifecycle !== "active" || current.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before Stop");
+          return current.stopIntent ? current : { ...current, stopIntent: { operationId, requestedAt: new Date().toISOString() } };
         });
-        this.diagnostic?.({ event: "home.task.control", taskHash: hash(task.taskId), operationHash: hash(operationId), action: "stop", disposition: "persisted", controllerGeneration: 1 });
+        this.diagnostic?.({ event: "home.task.control", taskHash: hash(task.taskId), operationHash: hash(operationId), action: "stop", disposition: "persisted" });
         await cancellation("task-stop");
       });
       const dispatch = new OwnedSessionDispatch(this.sessions);
@@ -169,7 +169,7 @@ export class HomeTaskDispatcher {
       lease = await dispatch.createWorker(task.target, reports);
       const { slot } = lease;
       task = { ...task, revision: task.revision + 1, lifecycle: "active", sessionId: slot.id, operationId,
-        controllerGeneration: 1, grantRef: authority.kind === "one-use-grant" ? authority.grantId : null,
+        grantRef: authority.kind === "one-use-grant" ? authority.grantId : null,
         scopeRef: authority.kind === "standing-scope" ? authority.scopeId : null };
       task = await this.store.put(task, task.revision - 1);
       this.transition(task, "operation-bound");
@@ -230,7 +230,7 @@ export class HomeTaskDispatcher {
           throw new GatewayError("conflict", "Task canonical evidence is unavailable");
         }
         const final = await this.store.update(active.taskId, current => ({ ...current, lifecycle: "terminal", spend, wake: this.inbox.event(current),
-          reportRefs: report && evidence ? [{ resultId: report.resultId, sessionId: slot.id, entryId: evidence.entryId, digest: reportDigest(report) }] : null,
+          reportRef: report && evidence ? { resultId: report.resultId, sessionId: slot.id, entryId: evidence.entryId, digest: reportDigest(report) } : null,
           terminalEvidence: { outcome: stoppedBeforeConversation ? "interrupted" : detached || deadlineStopFailed || reportStopFailed ? "unknown" : report ? report.outcome : deadlineStopped || lastMessage?.stopReason === "length" ? "limited" : interrupted && current.stopIntent ? "interrupted" : "unknown",
             sessionId: slot.id, entryIds: evidence ? [evidence.entryId] : [...(interruption ? [interruption.id] : []), ...(last ? [last.id] : [])],
             reason: stoppedBeforeConversation ? "stopped-before-conversation" : detached ? "detached-work-outlived-task" : deadlineStopFailed ? "deadline-stop-failed" : reportStopFailed ? current.stopIntent ? "task-stop-failed" : "report-stop-failed" : report ? "explicit-report" : deadlineStopped ? "deadline" : lastMessage?.stopReason === "length" ? "length" : interrupted && current.stopIntent ? "task-stop" : "no-report" } }));
@@ -238,7 +238,7 @@ export class HomeTaskDispatcher {
         if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(final.taskId), operationHash: hash(operationId), reason: "detached-work-outlived-task" });
         const spendReference = `${hash(final.taskId)}:${final.revision}`;
         this.diagnostic?.({ event: "home.task.spend", taskHash: hash(final.taskId), spendReference,
-          inputTokens: spend.inputTokens, outputTokens: spend.outputTokens, unpriced: true });
+          inputTokens: spend.inputTokens, outputTokens: spend.outputTokens });
         if (outcome.state === "deadline-stopped" || outcome.state === "deadline-stop-failed") this.diagnostic?.({ event: "home.task.runaway-stop", taskHash: hash(final.taskId),
           operationHash: hash(operationId), elapsedMs: outcome.elapsedMs,
           cancelAndJoin: deadlineStopped ? "joined" : "failed", spendReference });
@@ -268,10 +268,10 @@ export class HomeTaskDispatcher {
 
   private async validateMarkerEvidence(sessionId: string, marker: unknown): Promise<void> {
     const value = marker as Record<string, unknown>;
-    if (!value || Object.keys(value).sort().join(",") !== "generation,homeId,intentRevision,operationId,receiptId,sessionId,taskId,version"
+    if (!value || Object.keys(value).sort().join(",") !== "generation,homeId,operationId,receiptId,sessionId,taskId,version"
       || value.version !== 1 || typeof value.taskId !== "string" || value.sessionId !== sessionId) throw new GatewayError("conflict", "Invalid task marker");
     const task = await this.store.read(value.taskId);
-    if (!task || task.sessionId !== sessionId || task.operationId !== value.operationId || task.intent.revision !== value.intentRevision
+    if (!task || task.sessionId !== sessionId || task.operationId !== value.operationId
       || task.homeId !== value.homeId || task.generation !== value.generation || value.receiptId !== `task:${task.operationId}`) throw new GatewayError("conflict", "Referenced task is missing or contradictory");
   }
 
@@ -316,7 +316,7 @@ export class HomeTaskDispatcher {
   private async activeControl(control: HomeTaskControlRequest): Promise<HomeTaskRecord> {
     await this.assertAvailable();
     const task = await this.store.read(control.taskId);
-    if (!task || task.lifecycle !== "active" || !task.sessionId || task.operationId !== control.operationId || task.controllerGeneration !== control.controllerGeneration) throw new GatewayError("conflict", "Stale or terminal task operation");
+    if (!task || task.lifecycle !== "active" || !task.sessionId || task.operationId !== control.operationId) throw new GatewayError("conflict", "Stale or terminal task operation");
     return task;
   }
 
@@ -337,14 +337,14 @@ export class HomeTaskDispatcher {
         return JSON.stringify(current.spend) === JSON.stringify(spend) ? current : { ...current, spend };
       });
       this.diagnostic?.({ event: "home.task.spend", taskHash: hash(task.taskId), spendReference: `${hash(task.taskId)}:${task.revision}`,
-        inputTokens: task.spend?.inputTokens ?? 0, outputTokens: task.spend?.outputTokens ?? 0, unpriced: true });
+        inputTokens: task.spend?.inputTokens ?? 0, outputTokens: task.spend?.outputTokens ?? 0 });
     }
-    if (task.reportRefs?.length) {
+    if (task.reportRef) {
       if (!task.sessionId || !task.operationId) throw new GatewayError("conflict", "Task evidence is missing");
       const entries = await this.sessions.readTaskEvidence(task.sessionId);
       const evidence = await this.reportEvidence(task, entries);
-      const ref = task.reportRefs[0]!;
-      if (!evidence || task.reportRefs.length !== 1 || evidence.entryId !== ref.entryId || evidence.report.resultId !== ref.resultId
+      const ref = task.reportRef;
+      if (!evidence || evidence.entryId !== ref.entryId || evidence.report.resultId !== ref.resultId
         || evidence.report.sessionId !== ref.sessionId || reportDigest(evidence.report) !== ref.digest) throw new GatewayError("conflict", "Task report reference is missing or contradictory");
     }
     return task;

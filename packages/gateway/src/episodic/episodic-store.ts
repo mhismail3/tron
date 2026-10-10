@@ -384,44 +384,38 @@ function validateState(value: unknown): EpisodicStoreState {
   const cursor = state.cursor;
   if (cursor !== null) {
     if (typeof cursor !== "object" || Array.isArray(cursor)
-      || !hasOnlyKeys(cursor as unknown as Record<string, unknown>, ["dev", "ino", "size", "completeBytes", "leafEntryId", "completePrefixDigest", "leafLineDigest", "home"])) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid cursor");
-    for (const field of ["dev", "ino", "size", "completeBytes"] as const) {
-      if (typeof cursor[field] !== "number" || !Number.isSafeInteger(cursor[field]) || cursor[field] < 0) {
-        throw new EpisodicMemoryError("invalid-store", `Episodic memory state cursor has no ${field}`);
-      }
+      || !hasOnlyKeys(cursor as unknown as Record<string, unknown>, ["completeBytes", "leafEntryId", "completePrefixDigest", "home"])) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid cursor");
+    if (typeof cursor.completeBytes !== "number" || !Number.isSafeInteger(cursor.completeBytes) || cursor.completeBytes < 0) {
+      throw new EpisodicMemoryError("invalid-store", "Episodic memory state cursor has no completeBytes");
     }
     if (cursor.leafEntryId !== null && typeof cursor.leafEntryId !== "string") throw new EpisodicMemoryError("invalid-store", "Episodic memory state cursor has an invalid leaf");
-    if (cursor.leafLineDigest !== null && typeof cursor.leafLineDigest !== "string") throw new EpisodicMemoryError("invalid-store", "Episodic memory state cursor has an invalid line digest");
-    if (cursor.completePrefixDigest !== undefined && cursor.completePrefixDigest !== null
-      && (typeof cursor.completePrefixDigest !== "string" || !/^[a-f0-9]{64}$/u.test(cursor.completePrefixDigest))) {
+    if (typeof cursor.completePrefixDigest !== "string" || !/^[a-f0-9]{64}$/u.test(cursor.completePrefixDigest)) {
       throw new EpisodicMemoryError("invalid-store", "Episodic memory state cursor has an invalid prefix digest");
     }
-    if (cursor.home !== undefined) {
-      const home = cursor.home as unknown as Record<string, unknown>;
-      if (!home || typeof home !== "object" || Array.isArray(home)
-        || !hasOnlyKeys(home, ["version", "ledgerRevision", "chapters"])
-        || home.version !== 2
-        || !Number.isSafeInteger(home.ledgerRevision) || (home.ledgerRevision as number) < 1
-        || !Array.isArray(home.chapters) || home.chapters.length === 0 || home.chapters.length > HOME_MAX_CHAPTERS) {
-        throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home source cursor");
+    const home = cursor.home as unknown as Record<string, unknown>;
+    if (!home || typeof home !== "object" || Array.isArray(home)
+      || !hasOnlyKeys(home, ["version", "ledgerRevision", "chapters"])
+      || home.version !== 2
+      || !Number.isSafeInteger(home.ledgerRevision) || (home.ledgerRevision as number) < 1
+      || !Array.isArray(home.chapters) || home.chapters.length === 0 || home.chapters.length > HOME_MAX_CHAPTERS) {
+      throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home source cursor");
+    }
+    for (const value of home.chapters) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home chapter cursor");
+      const chapter = value as Record<string, unknown>;
+      // Include the actual nested indentation in the per-cursor bound.
+      if (Buffer.byteLength(JSON.stringify({ cursor: { home: { chapters: [chapter] } } }, null, 2)) > EPISODIC_HOME_CURSOR_MAX_BYTES) {
+        throw new EpisodicMemoryError("invalid-store", "Home chapter cursor exceeds its byte limit");
       }
-      for (const value of home.chapters) {
-        if (!value || typeof value !== "object" || Array.isArray(value)) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home chapter cursor");
-        const chapter = value as Record<string, unknown>;
-        // Include the actual nested indentation in the per-cursor bound.
-        if (Buffer.byteLength(JSON.stringify({ cursor: { home: { chapters: [chapter] } } }, null, 2)) > EPISODIC_HOME_CURSOR_MAX_BYTES) {
-          throw new EpisodicMemoryError("invalid-store", "Home chapter cursor exceeds its byte limit");
-        }
-        if (!hasOnlyKeys(chapter, ["sessionId", "dev", "ino", "size", "completeBytes", "leafEntryId", "leafLineDigest", "completePrefixDigest", "mtimeMs", "ctimeMs", "sealed"])
-          || typeof chapter.sealed !== "boolean"
-          || ["mtimeMs", "ctimeMs"].some(field => typeof chapter[field] !== "number" || !Number.isFinite(chapter[field]) || (chapter[field] as number) < 0)
-          || typeof chapter.sessionId !== "string" || chapter.sessionId.length < 1 || chapter.sessionId.length > 200
-          || ["dev", "ino", "size", "completeBytes"].some(field => !Number.isSafeInteger(chapter[field]) || (chapter[field] as number) < 0)
-          || (chapter.leafEntryId !== null && typeof chapter.leafEntryId !== "string")
-          || (chapter.leafLineDigest !== null && (typeof chapter.leafLineDigest !== "string" || !/^[a-f0-9]{64}$/u.test(chapter.leafLineDigest)))
-          || typeof chapter.completePrefixDigest !== "string" || !/^[a-f0-9]{64}$/u.test(chapter.completePrefixDigest)) {
-          throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home chapter cursor");
-        }
+      if (!hasOnlyKeys(chapter, ["sessionId", "dev", "ino", "size", "completeBytes", "leafEntryId", "leafLineDigest", "completePrefixDigest", "mtimeMs", "ctimeMs", "sealed"])
+        || typeof chapter.sealed !== "boolean"
+        || ["mtimeMs", "ctimeMs"].some(field => typeof chapter[field] !== "number" || !Number.isFinite(chapter[field]) || (chapter[field] as number) < 0)
+        || typeof chapter.sessionId !== "string" || chapter.sessionId.length < 1 || chapter.sessionId.length > 200
+        || ["dev", "ino", "size", "completeBytes"].some(field => !Number.isSafeInteger(chapter[field]) || (chapter[field] as number) < 0)
+        || (chapter.leafEntryId !== null && typeof chapter.leafEntryId !== "string")
+        || (chapter.leafLineDigest !== null && (typeof chapter.leafLineDigest !== "string" || !/^[a-f0-9]{64}$/u.test(chapter.leafLineDigest)))
+        || typeof chapter.completePrefixDigest !== "string" || !/^[a-f0-9]{64}$/u.test(chapter.completePrefixDigest)) {
+        throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home chapter cursor");
       }
     }
   }

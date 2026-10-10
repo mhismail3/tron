@@ -1,9 +1,13 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
-/** Reviewed provider contract at a0ddb64531df574dedcda1686a7d8d2bb62bfbb2.
- * async:false is NOT a foreground guarantee: forceTopLevelAsync overrides it.
- * Do not enable execution until the provider has an operation-owned contract. */
-export const HOME_TASK_SUBAGENT_VERSION = "0.76.1-tron.5";
+/** Reviewed provider contract at fork commit 466f25763e9f55a3a42348e5bb395bd480b7c765
+ * (tron.6: tool and skill text, and per-child settlement as context only; the
+ * read-only actions, supervisor reads and blocking `bg_wait` are unchanged from
+ * tron.5). A pin bump must re-review this gate: until then every action of the new
+ * version is refused as unverified. async:false is NOT a foreground guarantee:
+ * forceTopLevelAsync overrides it. Do not enable execution until the provider has
+ * an operation-owned contract. */
+export const HOME_TASK_SUBAGENT_VERSION = "0.76.1-tron.6";
 export type HomeTaskProducerRefusal = "subagent-execution" | "subagent-mutation" | "unverified-provider" | "schedule" | "wake-subscription";
 const READ_ONLY_ACTIONS = new Set(["guide", "children.list", "status", "list", "get", "models"]);
 

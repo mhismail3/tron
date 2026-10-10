@@ -1233,7 +1233,7 @@ export interface HomeTaskSummary {
   target: string;
   lifecycle: "pending" | "active" | "terminal";
   outcome: "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown" | null;
-  spend: { sourceDigest: string; inputTokens: number; outputTokens: number; knownCostUSD: number | null; pricingProvenance: string | null; unpriced: boolean } | null;
+  spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
   attention: boolean;
   pendingGrant: boolean;
 }

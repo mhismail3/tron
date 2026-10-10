@@ -100,7 +100,7 @@ describe("episodic store checkpoint faults and reconciliation", () => {
         ...stateA,
         spend: 53,
         generation: Math.max(stateA.generation, before.highestGeneration) + 1,
-        cursor: stateA.cursor ? { ...stateA.cursor, size: stateA.cursor.size + 1 } : null,
+        cursor: stateA.cursor ? { ...stateA.cursor, completeBytes: stateA.cursor.completeBytes + 1 } : null,
         blocked: { reason: "source-unavailable", detail: "checkpoint tail transition" },
       };
       await baseStore.saveState(stateB);
@@ -190,7 +190,7 @@ describe("episodic store checkpoint faults and reconciliation", () => {
         ...stateB,
         spend: 61,
         generation: stateB.generation + 1,
-        cursor: stateB.cursor ? { ...stateB.cursor, size: stateB.cursor.size + 1 } : null,
+        cursor: stateB.cursor ? { ...stateB.cursor, completeBytes: stateB.cursor.completeBytes + 1 } : null,
         blocked: null,
       };
       const expectedState = pointerVisible ? stateC : stateB;
