@@ -482,9 +482,11 @@ enum SessionContextProgressPolicy {
 
 /// Historical session-owned context indicator. It remains mounted at zero
 /// while the authoritative chat opens, then animates to the canonical value.
-/// Tapping it opens Manage Session; it owns no runtime state or mutation path.
+/// Tapping it opens the chat's management sheet (Manage Session, or Manage Home
+/// in a chat that claims the Home status); it owns no runtime state or mutation path.
 struct SessionContextProgressButton: View {
     let presentation: SessionContextProgressPresentation
+    let opensManageHome: Bool
     let onTap: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -529,9 +531,11 @@ struct SessionContextProgressButton: View {
         .disabled(!presentation.isEnabled)
         .opacity(presentation.isEnabled ? 1 : 0.56)
         .accessibilityIdentifier("session-context-button")
-        .accessibilityLabel("Manage Session")
+        .accessibilityLabel(opensManageHome ? "Manage Home" : "Manage Session")
         .accessibilityValue(accessibilityValue)
-        .accessibilityHint("Shows context usage, model selection, and session actions")
+        .accessibilityHint(opensManageHome
+            ? "Shows Home's state, context, memory and tasks"
+            : "Shows context usage, model selection, and session actions")
         .animation(
             reduceMotion ? nil : ChatMotion.composerControlSpring,
             value: fraction
