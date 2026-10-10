@@ -276,10 +276,13 @@
         "paths": [
           "tools/work/**",
           ".github/work.json",
+          ".github/workflows/ci.yml",
           "scripts/ci_macos_scope.py",
-          ".github/workflows/ci.yml"
+          "packages/mac-app/.gitignore",
+          "packages/gateway/src/tron-home-environment-policy.mjs",
+          "packages/gateway/test-support/tron-home-environment-preflight.mjs"
         ],
-        "command": "python3 -m unittest discover -s tools/work"
+        "command": "python3 tools/work/run_tests.py"
       },
       {
         "name": "work-related-issues",
@@ -301,6 +304,7 @@
       },
       {
         "name": "gateway",
+        "heavy": true,
         "paths": [
           "packages/gateway/src/**/*.ts",
           "packages/gateway/test-support/**",
@@ -309,9 +313,12 @@
           "packages/gateway/tsconfig.json",
           "packages/gateway/tsconfig.test-support.json",
           "packages/gateway/vitest.config.ts",
+          "packages/gateway/vitest.nested.config.ts",
           "packages/gateway/vitest.scale.config.ts",
           "packages/gateway/vitest.corpus.config.ts",
           "packages/gateway/pi-sdk-baseline.json",
+          "packages/gateway/pi-subagents-pin.json",
+          "packages/gateway/artifacts/**",
           "packages/gateway/scripts/**",
           "packages/gateway/test-fixtures/**",
           "packages/gateway/src/**/*.json",
@@ -324,11 +331,12 @@
           "scripts/tron-ios-device-bind.test.mjs",
           "config/PushService.xcconfig"
         ],
-        "command": "cd packages/gateway && npm ci --no-audit --no-fund && npm run check:pi-sdk && npm run build && set -- {paths} && related=$# && for p in \"$@\"; do case \"$p\" in */packages/gateway/src/*.ts|*/packages/gateway/test-support/*) ;; *) related=0 ;; esac; done && if [ \"$related\" != 0 ] && git diff --quiet --no-renames --diff-filter=D {merge_base} HEAD -- . ../protocol-fixtures ../../config/GatewayProtocol.json ../../config/PushService.xcconfig ../../.node-version ../../scripts/tron-ios-device-bind.mjs ../../scripts/tron-ios-device-bind.test.mjs; then npx vitest related --run \"$@\"; else npm test; fi",
+        "command": "cd packages/gateway && npm ci --no-audit --no-fund && npm run check:pi-sdk && npm run build && set -- {paths} && related=$# && for p in \"$@\"; do case \"$p\" in */packages/gateway/src/*.ts|*/packages/gateway/test-support/*) ;; *) related=0 ;; esac; done && if [ \"$related\" != 0 ] && git diff --quiet --no-renames --diff-filter=D {merge_base} HEAD -- . ../protocol-fixtures ../../config/GatewayProtocol.json ../../config/PushService.xcconfig ../../.node-version ../../scripts/tron-ios-device-bind.mjs ../../scripts/tron-ios-device-bind.test.mjs; then npx vitest related --run --passWithNoTests \"$@\" && npx vitest related --config vitest.nested.config.ts --run --passWithNoTests \"$@\"; else npm test; fi",
         "exclusiveGroup": "gateway-source-tree"
       },
       {
         "name": "pi-subagents",
+        "heavy": true,
         "paths": [
           "packages/gateway/package.json",
           "packages/gateway/package-lock.json",
@@ -342,6 +350,7 @@
       },
       {
         "name": "gateway-scale",
+        "heavy": true,
         "paths": [
           "packages/gateway/src/knowledge/*.scale.test.ts",
           "packages/gateway/src/knowledge/knowledge-catalog.ts",
@@ -374,6 +383,7 @@
       },
       {
         "name": "ios",
+        "heavy": true,
         "paths": [
           "packages/ios-app/Configuration/**",
           "packages/ios-app/Core/**",
@@ -422,6 +432,7 @@
       },
       {
         "name": "mac",
+        "heavy": true,
         "paths": [
           "packages/mac-app/Configuration/**",
           "packages/mac-app/Sources/**",
@@ -451,15 +462,18 @@
           "scripts/gateway-install-inputs.mjs",
           "scripts/gateway-install-inputs.test.mjs",
           "scripts/gateway-payload-deploy.test.mjs",
+          "scripts/tron",
           "scripts/tron-dev",
+          "scripts/test-tron-npm-bytecode.sh",
           "scripts/hash-npm-runtime.py",
           "config/ci-toolchain.env",
           ".node-version"
         ],
-        "command": "node --test scripts/gateway-install-inputs.test.mjs && scripts/test-install-ci-tools-node.sh && packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh"
+        "command": "node --test scripts/gateway-install-inputs.test.mjs && scripts/test-install-ci-tools-node.sh && scripts/test-tron-npm-bytecode.sh && packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh"
       },
       {
         "name": "mac-bundle-rebuild",
+        "heavy": true,
         "paths": [
           "packages/mac-app/scripts/bundle-gateway.sh",
           "packages/mac-app/scripts/test-bundle-gateway-rebuild.sh",

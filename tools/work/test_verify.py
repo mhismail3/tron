@@ -7,6 +7,7 @@ Run: python3 -m unittest discover -s tools/work
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import io
 import importlib.util
 import json
@@ -24,6 +25,7 @@ from pathlib import Path
 
 import verify
 from gh import Gh
+from repo_template import clone_with_identity, copy_template
 
 REMOTE = "origin"
 BASE = "main"
@@ -51,6 +53,13 @@ FAKE_GH = textwrap.dedent(
         if fail and fail in path:
             print("gh: injected failure (HTTP 500)", file=sys.stderr)
             sys.exit(1)
+        # FAKE_GH_CONFLICT_ONCE: a marker path; the first contents PUT loses the
+        # evidence branch's compare-and-swap to a concurrent poster.
+        conflict = os.environ.get("FAKE_GH_CONFLICT_ONCE")
+        if conflict and method == "PUT" and "/contents/" in path and not os.path.exists(conflict):
+            open(conflict, "w").close()
+            print("gh: is at 1111111 but expected 2222222 (HTTP 409)", file=sys.stderr)
+            sys.exit(1)
         if method == "GET" and "/contents/" in path:
             print("gh: Not Found (HTTP 404)", file=sys.stderr)
             sys.exit(1)
@@ -69,14 +78,12 @@ def git(cwd: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-class VerifyFixture(unittest.TestCase):
-    def test_live_home_environment_fails_before_check_selection(self):
-        root = Path(__file__).resolve().parents[2]
-        live_home = Path.home() / ".tron"
-        with mock.patch.dict(os.environ, {"PI_SESSION_FILE": str(live_home / "sessions" / "guard.jsonl")}):
-            with self.assertRaisesRegex(verify.VerifyError, "Tron-home environment"):
-                verify.verify(root, {})
+def snapshot(root: Path) -> dict:
+    return {str(path.relative_to(root)): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
 
+
+class EnvironmentAndSelectorTests(unittest.TestCase):
+    # These need no fixture repository, so they run once rather than once per fixture subclass.
     def test_home_name_selector_fails_before_check_selection(self):
         root = Path(__file__).resolve().parents[2]
         node_bin = str(Path(subprocess.check_output(["which", "node"], text=True).strip()).parent)
@@ -84,26 +91,71 @@ class VerifyFixture(unittest.TestCase):
             with self.assertRaisesRegex(verify.VerifyError, "Tron-home environment"):
                 verify.verify(root, {})
 
-    def test_tron_home_path_entries_are_allowed_but_data_roots_are_rejected(self):
-        root = Path(__file__).resolve().parents[2]
-        user_home = self.tmp / "user-home"
-        agent_bin = user_home / ".tron" / "agent" / "bin"
-        policy = root / "packages/gateway/src/tron-home-environment-policy.mjs"
-        environment = {"HOME": str(user_home), "PATH": str(agent_bin)}
-        node = subprocess.check_output(["which", "node"], text=True).strip()
-        allowed = subprocess.run(
-            [node, str(policy)],
-            env=environment, capture_output=True, text=True,
-        )
-        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+    def test_live_home_paths_are_listed_for_removal_and_selectors_are_refused(self):
+        # Failure modes: PATH entries under ~/.tron are refused (they locate
+        # executables); an unrelated path is dropped (it is no home); a selector is
+        # dropped (removal would retarget the home), so it must be refused instead.
+        with tempfile.TemporaryDirectory() as scratch:
+            tmp = Path(scratch)
+            root = Path(__file__).resolve().parents[2]
+            user_home = tmp / "user-home"
+            agent_bin = user_home / ".tron" / "agent" / "bin"
+            policy = root / "packages/gateway/src/tron-home-environment-policy.mjs"
+            node = subprocess.check_output(["which", "node"], text=True).strip()
+            environment = {
+                "HOME": str(user_home),
+                "PATH": str(agent_bin),
+                "PI_CODING_AGENT_DIR": str(user_home / ".tron" / "agent"),
+                "GATEWAY_TEST_UNRELATED": str(tmp / "elsewhere"),
+            }
+            dropped = subprocess.run([node, str(policy)], env=environment, capture_output=True, text=True)
+            self.assertEqual(dropped.returncode, 0, dropped.stderr)
+            self.assertEqual(dropped.stdout, "PI_CODING_AGENT_DIR\n")
 
-        rejected = subprocess.run(
-            [allowed.args[0], str(policy)],
-            env={**environment, "PI_CODING_AGENT_DIR": str(user_home / ".tron" / "agent")},
-            capture_output=True, text=True,
-        )
-        self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
-        self.assertIn("PI_CODING_AGENT_DIR=", rejected.stderr)
+            refused = subprocess.run(
+                [node, str(policy)],
+                env={**environment, "TRON_DATA_DIR": str(user_home / ".tron")},
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(refused.returncode, 0, refused.stdout)
+            self.assertIn("TRON_DATA_DIR=", refused.stderr)
+
+    def test_gateway_test_entry_drops_inherited_home_paths_and_refuses_selectors(self):
+        # Failure modes: the --import preflight that node --test entry points load
+        # keeps an inherited live-home path (a test then reaches it), including one
+        # embedded in a JSON value; drops PATH or an unrelated variable; or accepts a
+        # selector that retargets the home.
+        with tempfile.TemporaryDirectory() as scratch:
+            tmp = Path(scratch)
+            root = Path(__file__).resolve().parents[2]
+            gateway = root / "packages/gateway"
+            user_home = tmp / "user-home"
+            live_home = user_home / ".tron"
+            node = subprocess.check_output(["which", "node"], text=True).strip()
+            entry = [node, "--import", "./test-support/tron-home-environment-preflight.mjs", "-e",
+                     "process.stdout.write(JSON.stringify(process.env))"]
+            inherited = {
+                "HOME": str(user_home),
+                "PATH": os.environ["PATH"],
+                "PI_CODING_AGENT_DIR": str(live_home / "agent"),
+                "PI_SESSION_FILE": str(live_home / "sessions" / "live.jsonl"),
+                "TRON_GATEWAY_PAYLOAD_ROOT": str(live_home / "gateway" / "payloads" / "stable"),
+                "JITI_ALIAS": json.dumps({"@earendil-works/pi-coding-agent":
+                                          str(live_home / "gateway" / "payloads" / "stable" / "app" / "index.js")}),
+                "GATEWAY_TEST_UNRELATED": "kept",
+            }
+            result = subprocess.run(entry, cwd=gateway, env=inherited, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            seen = json.loads(result.stdout)
+            for name in ("PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "TRON_GATEWAY_PAYLOAD_ROOT", "JITI_ALIAS"):
+                self.assertNotIn(name, seen)
+            self.assertEqual(seen["GATEWAY_TEST_UNRELATED"], "kept")
+            self.assertEqual(seen["PATH"], inherited["PATH"])
+
+            selector = subprocess.run(entry, cwd=gateway, env={**inherited, "TRON_DATA_DIR": str(live_home)},
+                                      capture_output=True, text=True)
+            self.assertNotEqual(selector.returncode, 0, selector.stdout)
+            self.assertIn("TRON_DATA_DIR=", selector.stderr)
 
     def test_node_test_runner_rejects_home_name_selector(self):
         root = Path(__file__).resolve().parents[2]
@@ -162,6 +214,33 @@ class VerifyFixture(unittest.TestCase):
                 self.assertTrue(scale.matches(path))
         self.assertFalse(scale.matches("packages/gateway/src/sessions/session-manager.ts"))
 
+def _build_verify_template(root: Path) -> None:
+    """The history every VerifyFixture copies: a remote whose base holds three files, and a clone on BRANCH."""
+    remote = root / "remote.git"
+    git(root, "init", "-q", "--bare", "-b", BASE, str(remote))
+    seed = clone_with_identity(remote, root / "seed")
+    for relative in ("app/a.txt", "lib/b.txt", "README.md"):
+        VerifyFixture.write(seed, relative, "one\n")
+    git(seed, "add", "-A")
+    git(seed, "commit", "-q", "-m", "base")
+    git(seed, "push", "-q", REMOTE, f"HEAD:{BASE}")
+    repo = clone_with_identity(remote, root / "repo")
+    git(repo, "checkout", "-q", "-b", BRANCH)
+
+
+_verify_template_root: Path
+
+
+def setUpModule():
+    # Built once per module; each VerifyFixture copies it.
+    global _verify_template_root
+    template = tempfile.TemporaryDirectory()
+    unittest.addModuleCleanup(template.cleanup)
+    _verify_template_root = Path(template.name).resolve()
+    _build_verify_template(_verify_template_root)
+
+
+class VerifyFixture(unittest.TestCase):
     def setUp(self):
         quiet = contextlib.redirect_stdout(io.StringIO())
         quiet.__enter__()
@@ -169,15 +248,9 @@ class VerifyFixture(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name).resolve()
         self.remote = self.tmp / "remote.git"
-        git(self.tmp, "init", "-q", "--bare", "-b", BASE, str(self.remote))
-        self.seed = self._clone("seed")
-        for relative in ("app/a.txt", "lib/b.txt", "README.md"):
-            self.write(self.seed, relative, "one\n")
-        git(self.seed, "add", "-A")
-        git(self.seed, "commit", "-q", "-m", "base")
-        git(self.seed, "push", "-q", REMOTE, f"HEAD:{BASE}")
-        self.repo = self._clone("repo")
-        git(self.repo, "checkout", "-q", "-b", BRANCH)
+        self.seed = self.tmp / "seed"
+        self.repo = self.tmp / "repo"
+        copy_template(_verify_template_root, self.tmp, [self.seed, self.repo], REMOTE, self.remote)
         self.counts = self.tmp / "counts"
         self.counts.mkdir()
         self.fail_flag = self.tmp / "fail-app"
@@ -201,13 +274,6 @@ class VerifyFixture(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
-
-    def _clone(self, name: str) -> Path:
-        path = self.tmp / name
-        git(self.tmp, "clone", "-q", str(self.remote), str(path))
-        git(path, "config", "user.name", "Agent")
-        git(path, "config", "user.email", "agent@example.invalid")
-        return path
 
     def _counting(self, name: str) -> str:
         return f"echo run >> {self.counts / name}"
@@ -255,6 +321,43 @@ class ReceiptBindingTests(VerifyFixture):
 class CheckSetTests(VerifyFixture):
     # Failure mode 13: the required set comes from the whole branch diff, and
     # carry-over keeps a check required without running it.
+    def test_agent_shell_live_home_paths_do_not_block_or_reach_checks(self):
+        # Failure modes: an agent shell's live-home paths refuse verify before any
+        # check runs; a check inherits them; a check writes into the live home
+        # through them; a JSON value that only embeds a live-home path (JITI_ALIAS)
+        # survives the filter. The fake live home is HOME/.tron, the policy's live home.
+        home = self.tmp / "agent-home"
+        live_home = home / ".tron"
+        (live_home / "sessions").mkdir(parents=True)
+        (live_home / "sessions" / "live.jsonl").write_text("live\n")
+        probe = self.tmp / "probe.py"
+        probe.write_text(textwrap.dedent("""\
+            import os, sys
+            if "PI_SESSION_FILE" in os.environ:
+                with open(os.environ["PI_SESSION_FILE"], "a") as session:
+                    session.write("probe\\n")
+            inherited = [name for name in ("PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "TRON_GATEWAY_PAYLOAD_ROOT",
+                                           "JITI_ALIAS")
+                         if name in os.environ]
+            sys.exit(f"inherited {inherited}" if inherited else 0)
+            """))
+        self.config["verify"]["checks"][0]["command"] = f"python3 {probe} && {self._counting('app')}"
+        self.commit(self.repo, "app/a.txt", "two\n")
+        before = snapshot(live_home)
+        agent_shell = {
+            "HOME": str(home),
+            "PI_CODING_AGENT_DIR": str(live_home / "agent"),
+            "PI_SESSION_FILE": str(live_home / "sessions" / "live.jsonl"),
+            "TRON_GATEWAY_PAYLOAD_ROOT": str(live_home / "gateway" / "payloads" / "stable"),
+            "JITI_ALIAS": json.dumps({"@earendil-works/pi-coding-agent":
+                                      str(live_home / "gateway" / "payloads" / "stable" / "app" / "index.js")}),
+        }
+        with mock.patch.dict(os.environ, agent_shell):
+            receipt = self.verify()
+        self.assertTrue(receipt["passed"], receipt["checks"]["app"])
+        self.assertEqual(self.runs("app"), 1)
+        self.assertEqual(snapshot(live_home), before)
+
     def test_later_commit_does_not_narrow_the_required_set(self):
         first = self.commit(self.repo, "app/a.txt", "two\n")
         self.verify()
@@ -286,6 +389,29 @@ class CheckSetTests(VerifyFixture):
         self.assertIsNone(receipt["checks"]["app"]["carriedFrom"])
         self.assertEqual(self.runs("app"), 2)
 
+    def test_rerun_after_one_failed_check_reruns_only_that_check(self):
+        # A failed receipt still proves each check that passed in it: a rerun
+        # of the same head, or of a descendant whose new paths miss that check,
+        # carries it rather than paying for it again.
+        first = self.commit(self.repo, "app/a.txt", "two\n")
+        self.commit(self.repo, "lib/b.txt", "two\n")
+        self.fail_flag.write_text("")
+        receipt = self.verify()
+        self.assertFalse(receipt["passed"])
+        head = receipt["head"]
+        self.fail_flag.unlink()
+        receipt = self.verify()
+        self.assertTrue(receipt["passed"])
+        self.assertEqual(receipt["checks"]["lib"]["carriedFrom"], head)
+        self.assertIsNone(receipt["checks"]["app"]["carriedFrom"])
+        self.assertEqual((self.runs("app"), self.runs("lib"), self.runs("policy")), (2, 1, 2))
+        # A descendant touching lib reruns lib, and carries app from the newer pass.
+        self.commit(self.repo, "lib/b.txt", "three\n")
+        receipt = self.verify()
+        self.assertEqual(receipt["checks"]["app"]["carriedFrom"], git(self.repo, "rev-parse", "HEAD~1"))
+        self.assertEqual(self.runs("lib"), 2)
+        self.assertNotEqual(first, head)
+
     def test_paths_placeholder_passes_every_matched_existing_file(self):
         out = self.tmp / "paths"
         config = json.loads(json.dumps(self.config))
@@ -309,11 +435,12 @@ class ParallelCheckTests(VerifyFixture):
     instead of hanging; a passing run never waits on them.
     """
 
-    def prepare_checks(self, groups=(None, None, None), codes=(0, 0, 0), peers=(1, 1, 1), hold=False):
+    def prepare_checks(self, groups=(None, None, None), codes=(0, 0, 0), peers=(1, 1, 1), hold=False,
+                       heavy=(False, False, False)):
         if (self.repo / "app/a.txt").read_text() != "two\n":
             self.commit(self.repo, "app/a.txt", "two\n")
         checks = []
-        for name, group, code, need in zip(("first", "second", "third"), groups, codes, peers):
+        for name, group, code, need, heavy_check in zip(("first", "second", "third"), groups, codes, peers, heavy):
             script = self.tmp / f"{name}.py"
             script.write_text(textwrap.dedent(f"""\
                 import os, pathlib, sys, time
@@ -344,6 +471,8 @@ class ParallelCheckTests(VerifyFixture):
                      "command": f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"}
             if group:
                 check["exclusiveGroup"] = group
+            if heavy_check:
+                check["heavy"] = True
             checks.append(check)
         self.config["verify"]["checks"] = checks
 
@@ -537,6 +666,27 @@ class ParallelCheckTests(VerifyFixture):
                     with contextlib.suppress(ProcessLookupError):
                         os.killpg(int(path.read_text()), signal.SIGKILL)
 
+    def test_waiting_heavy_check_does_not_stall_an_independent_check(self):
+        # F4: `second` is refused the only slot held by `first`; `third` (light) must still run alongside first.
+        self.prepare_checks(peers=(2, 1, 2), heavy=(True, True, False))
+        self.config["verify"]["heavySlots"] = 1
+        self.assertTrue(verify.verify(self.repo, self.config, jobs=3)["passed"])
+        self.assertTrue(self.before("first", "second"))
+
+    def test_invalid_heavy_settings_refuse_before_launch(self):
+        # F6: nothing starts when the pool size or a heavy flag is malformed.
+        self.prepare_checks()
+        for slots in (0, -1, True, "2", 1.5):
+            self.config["verify"]["heavySlots"] = slots
+            with self.subTest(heavySlots=slots), self.assertRaises(verify.VerifyError):
+                self.verify()
+        self.config["verify"]["heavySlots"] = 2
+        for heavy in ("yes", 1, None):
+            self.config["verify"]["checks"][0]["heavy"] = heavy
+            with self.subTest(heavy=heavy), self.assertRaises(verify.VerifyError):
+                self.verify()
+        self.assertEqual(list(self.counts.iterdir()), [])
+
     def test_carried_result_survives_unrelated_merge_with_original_provenance(self):
         first = self.commit(self.repo, "app/a.txt", "two\n")
         self.verify()
@@ -620,6 +770,180 @@ class ParallelCheckTests(VerifyFixture):
         self.assertIn("mac-bundle-rebuild", calls.read_text().splitlines())
 
 
+class HeavySlotTests(VerifyFixture):
+    """Host-wide heavy-check slots. Failure modes, enumerated before the change:
+
+    F1 heavy checks of two invocations (two worktrees of one repository) overlap beyond heavySlots;
+    F2 a slot is released before its check's process group is retired;
+    F3 a slot is never released (settlement or interruption), starving later verifies;
+    F4 a heavy check waiting for a slot stalls an independent check;
+    F5 a slot descriptor is inherited by a check child and outlives verify;
+    F6 an invalid heavySlots or heavy value launches checks;
+    F7 a heavy check gets the wrong CPU share, or a light check gets one;
+    F8 execution-only pool settings change the configuration hash and invalidate receipts.
+
+    Oracles are event logs, the waiting line verify prints, and flock state; never wall time.
+    Each bounded wait exists only so a broken scheduler fails instead of hanging.
+    """
+
+    def holder_script(self, name: str) -> str:
+        script = self.tmp / f"{name}-holder.py"
+        script.write_text(
+            "import os, pathlib, sys, time\n"
+            f"counts = pathlib.Path({str(self.counts)!r})\n"
+            f"name = {name!r}\n"
+            "(counts / f'{name}.group').write_text(str(os.getpgrp()))\n"
+            "def event(kind):\n"
+            "    fd = os.open(counts / 'events.log', os.O_WRONLY | os.O_APPEND | os.O_CREAT)\n"
+            "    os.write(fd, f'{kind} {name}\\n'.encode())\n"
+            "    os.close(fd)\n"
+            "event('start')\n"
+            "deadline = time.monotonic() + 60\n"
+            "while not (counts / 'release').exists():\n"
+            "    if time.monotonic() > deadline:\n"
+            "        sys.exit(99)\n"
+            "    time.sleep(0.01)\n"
+            "event('end')\n")
+        return f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
+
+    def setUp(self):
+        super().setUp()
+        self.invocations = []
+
+    def heavy_checks(self, *names: str) -> list:
+        return [{"name": name, "paths": ["app/**"], "heavy": True, "command": self.holder_script(name)}
+                for name in names]
+
+    def slot_is_free(self, index: int = 0) -> bool:
+        directory = Path(git(self.repo, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "work" / "slots"
+        descriptor = os.open(directory / f"{index}.lock", os.O_RDWR)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        finally:
+            os.close(descriptor)
+        return True
+
+    def spawn_invocation(self, repo: Path, tag: str, heavy_slots: int, names: tuple) -> subprocess.Popen:
+        """One verify in its own process, so two invocations really share only the host and the slot files."""
+        config = {**self.config, "verify": {**self.config["verify"], "heavySlots": heavy_slots,
+                                            "checks": self.heavy_checks(*names)}}
+        config_path = self.tmp / f"{tag}.json"
+        config_path.write_text(json.dumps(config))
+        code = (f"import sys, json; sys.path.insert(0, {str(Path(verify.__file__).parent)!r}); "
+                f"from pathlib import Path; import verify; "
+                f"verify.verify(Path({str(repo)!r}), json.loads(Path({str(config_path)!r}).read_text()), jobs=2)")
+        output = self.tmp / f"{tag}.out"
+        with output.open("w") as log:
+            process = subprocess.Popen([sys.executable, "-c", code], stdout=log, stderr=subprocess.STDOUT)
+        self.invocations.append(process)
+        return process
+
+    def tearDown(self):
+        # Before the temp tree goes: holders and invocations this test started must not outlive it.
+        for process in self.invocations:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=10)
+        for path in self.counts.glob("*.group"):
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(int(path.read_text()), signal.SIGKILL)
+        super().tearDown()
+
+    def run_two_invocations(self, heavy_slots: int) -> None:
+        """Start one check in each worktree, release the holder once the second shows its state, then settle."""
+        self.commit(self.repo, "app/a.txt", "two\n")
+        other = self.tmp / "other"
+        git(self.repo, "worktree", "add", "-q", "--detach", str(other))
+        processes = [self.spawn_invocation(self.repo, "a", heavy_slots, ("first",)),
+                     self.spawn_invocation(other, "b", heavy_slots, ("second",))]
+        deadline = time.monotonic() + 60
+        while True:
+            starts = [line for line in self.events_text() if line.startswith("start")]
+            waiting = any("waiting for a heavy slot" in path.read_text()
+                          for path in self.tmp.glob("[ab].out"))
+            if len(starts) == 2 or waiting:
+                break
+            self.assertLess(time.monotonic(), deadline, "neither overlap nor a heavy-slot wait was observed")
+            time.sleep(0.02)
+        (self.counts / "release").touch()
+        for process in processes:
+            self.assertEqual(process.wait(timeout=60), 0)
+
+    def events_text(self) -> list:
+        path = self.counts / "events.log"
+        return path.read_text().splitlines() if path.exists() else []
+
+    def test_two_worktrees_share_one_heavy_slot(self):
+        # F1 and F2: the second invocation's check starts only after the first's end event.
+        self.run_two_invocations(heavy_slots=1)
+        kinds = [tuple(line.split()) for line in self.events_text()]
+        self.assertEqual([kind for kind, _ in kinds], ["start", "end", "start", "end"])
+        self.assertEqual(kinds[0][1], kinds[1][1])
+        self.assertEqual(kinds[2][1], kinds[3][1])
+        self.assertNotEqual(kinds[0][1], kinds[2][1])
+        self.assertTrue(self.slot_is_free())
+
+    def test_negative_control_two_slots_let_the_invocations_overlap(self):
+        # The same harness with two slots must observe overlap; otherwise the test above proves nothing.
+        self.run_two_invocations(heavy_slots=2)
+        self.assertEqual([line.split()[0] for line in self.events_text()[:2]], ["start", "start"])
+
+    def test_interrupt_releases_the_heavy_slot(self):
+        # F3: the interrupted invocation's holder is retired, and its slot is free for the next verify.
+        self.commit(self.repo, "app/a.txt", "two\n")
+        self.config["verify"]["heavySlots"] = 1
+        self.config["verify"]["checks"] = self.heavy_checks("first", "second")
+        sleep, interrupted = time.sleep, False
+
+        def interrupt(seconds):
+            nonlocal interrupted
+            if not interrupted:
+                interrupted = True
+                raise KeyboardInterrupt
+            sleep(seconds)
+
+        with mock.patch.object(verify.time, "sleep", side_effect=interrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                verify.verify(self.repo, self.config, jobs=2)
+        self.assertTrue(self.slot_is_free())
+        self.assertEqual(list(self.receipts().glob("*.json")), [])
+
+    def test_slot_descriptor_is_not_inherited_by_checks(self):
+        # F5: a non-inheritable descriptor cannot keep the slot alive in a check child after verify exits.
+        (self.tmp / "slots").mkdir()
+        pool = verify.HeavyPool(self.tmp / "slots", 1)
+        descriptor = pool.acquire()
+        self.addCleanup(os.close, descriptor)
+        self.assertFalse(os.get_inheritable(descriptor))
+        self.assertIsNone(pool.acquire())
+
+    def test_heavy_checks_get_their_cpu_share_and_others_do_not(self):
+        # F7: with 18 CPUs and two slots, a heavy check sees 9; a light check sees nothing.
+        self.commit(self.repo, "app/a.txt", "two\n")
+        record = self.counts / "share.log"
+        self.config["verify"]["heavySlots"] = 2
+        self.config["verify"]["checks"] = [
+            {"name": "heavy", "paths": ["app/**"], "heavy": True,
+             "command": f"echo heavy=${{VERIFY_CPU_SHARE-unset}} >> {record}"},
+            {"name": "light", "paths": ["app/**"],
+             "command": f"echo light=${{VERIFY_CPU_SHARE-unset}} >> {record}"},
+        ]
+        with mock.patch.object(verify.os, "cpu_count", return_value=18):
+            self.assertTrue(self.verify()["passed"])
+        self.assertEqual(sorted(record.read_text().splitlines()), ["heavy=9", "light=unset"])
+
+    def test_pool_settings_do_not_invalidate_receipts(self):
+        # F8: heavy admission is an execution choice; changing the command is not.
+        before = verify.config_hash(self.config)
+        self.config["verify"]["heavySlots"] = 3
+        self.config["verify"]["checks"][0]["heavy"] = True
+        self.assertEqual(verify.config_hash(self.config), before)
+        self.config["verify"]["checks"][0]["command"] = "true"
+        self.assertNotEqual(verify.config_hash(self.config), before)
+
+
 class PostFixture(VerifyFixture):
     def setUp(self):
         super().setUp()
@@ -628,9 +952,9 @@ class PostFixture(VerifyFixture):
         fake.write_text(FAKE_GH.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
         fake.chmod(0o755)
         self._env = {k: os.environ.get(k) for k in ("WORK_GH", "FAKE_GH_LOG", "FAKE_GH_FAIL", "FAKE_GH_PR",
-                                                 "FAKE_GH_EVIDENCE_PUBLIC")}
+                                                 "FAKE_GH_EVIDENCE_PUBLIC", "FAKE_GH_CONFLICT_ONCE")}
         os.environ.update(WORK_GH=str(fake), FAKE_GH_LOG=str(self.gh_log))
-        for key in ("FAKE_GH_FAIL", "FAKE_GH_PR", "FAKE_GH_EVIDENCE_PUBLIC"):
+        for key in ("FAKE_GH_FAIL", "FAKE_GH_PR", "FAKE_GH_EVIDENCE_PUBLIC", "FAKE_GH_CONFLICT_ONCE"):
             os.environ.pop(key, None)
 
     def tearDown(self):
@@ -726,6 +1050,17 @@ class PostStatusTests(PostFixture):
         status_paths = {path for _, path, _ in self.api_calls() if "/statuses/" in path}
         self.assertEqual(status_paths, {f"repos/acme/widget/statuses/{head}"})
         self.assertIn(head, self.comment_bodies()[0])
+
+    def test_concurrent_evidence_commit_is_reapplied_not_fatal(self):
+        # Concurrent lands commit to the same evidence branch; losing its
+        # compare-and-swap (HTTP 409) re-reads and re-applies the upload.
+        self.commit(self.repo, "app/a.txt", "two\n")
+        self.push()
+        os.environ["FAKE_GH_CONFLICT_ONCE"] = str(self.tmp / "conflicted")
+        self.post(self.verify())
+        self.assertEqual(self.statuses(), ["pending", "success"])
+        puts = [path for method, path, _ in self.api_calls() if method == "PUT" and "/contents/" in path]
+        self.assertEqual(len(puts), len(set(puts)) + 1)
 
     def test_failing_receipt_posts_failure(self):
         self.commit(self.repo, "app/a.txt", "two\n")

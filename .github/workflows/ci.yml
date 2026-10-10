@@ -29,6 +29,8 @@ jobs:
       dev-lifecycle-state: ${{ steps.tooling-scope.outputs.dev-lifecycle-state }}
       profiler: ${{ steps.tooling-scope.outputs.profiler }}
       gateway-payload-deploy: ${{ steps.tooling-scope.outputs.gateway-payload-deploy }}
+      work-tooling: ${{ steps.tooling-scope.outputs.work-tooling }}
+      triage: ${{ steps.tooling-scope.outputs.triage }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -61,7 +63,7 @@ jobs:
           CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           set -euo pipefail
-          checks=(pi-subagents dev-lifecycle-state profiler gateway-payload-deploy)
+          checks=(pi-subagents dev-lifecycle-state profiler gateway-payload-deploy work-tooling triage)
           if ! python3 scripts/ci_verify_scope.py --base "$CI_BASE" --head HEAD --github-output "$GITHUB_OUTPUT" "${checks[@]}"; then
             echo "verify-check classifier failed; running every hosted tooling check"
             for check in "${checks[@]}"; do echo "$check=true" >> "$GITHUB_OUTPUT"; done
@@ -88,7 +90,11 @@ jobs:
           changed="$(node packages/gateway/scripts/compare-pi-sdk-graph.mjs "$base" HEAD "$GITHUB_WORKSPACE" | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["changed"]).lower())')"
           [[ "$changed" == true || "$changed" == false ]] || { echo "invalid graph comparison result" >&2; exit 1; }
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
+  # Policy waits for scope only to gate its slow tooling suites. `!cancelled()`
+  # keeps it running, and fail-open selection runs them, if scope fails.
   policy:
+    needs: scope
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -180,13 +186,16 @@ jobs:
         if: steps.ios-infrastructure-scope.outputs.run == 'true'
         run: python3 scripts/test-ios-test-infrastructure.py
       - name: Test profiler report and comparison policy
+        if: needs.scope.outputs.profiler != 'false'
         run: |
           python3 scripts/test-tron-profile-ios.py
           python3 scripts/test-tron-profile-attribution.py
       - name: Test the incident triage tool
+        if: needs.scope.outputs.triage != 'false'
         run: python3 scripts/test-tron-triage.py
       - name: Test the work tooling
-        run: python3 -m unittest discover -s tools/work
+        if: needs.scope.outputs.work-tooling != 'false'
+        run: python3 tools/work/run_tests.py
       - run: python3 scripts/check-documentation-policy.py
       - name: Check shell syntax
         run: |
@@ -310,7 +319,9 @@ jobs:
         working-directory: packages/push-relay
 
   ios:
-    needs: scope
+    # After the required gateway job, so it never queues for a macOS runner behind
+    # advisory work; !cancelled() still runs this when gateway fails or is skipped.
+    needs: [scope, gateway]
     if: ${{ !cancelled() && needs.scope.outputs.ios != 'false' }}
     runs-on: macos-26
     # The memory reserve protects a shared development Mac's Gateway. A hosted
@@ -357,7 +368,9 @@ jobs:
         run: scripts/ios-ci-test.sh cleanup
 
   pi-sdk-e2e:
-    needs: scope
+    # After the required gateway job, so it never queues for a macOS runner behind
+    # advisory work; !cancelled() still runs this when gateway fails or is skipped.
+    needs: [scope, gateway]
     if: ${{ !cancelled() && needs.scope.outputs['pi-sdk-e2e'] != 'false' }}
     # Source-level transport and native changes must exercise this boundary,
     # not only backing-SDK dependency upgrades.
@@ -422,7 +435,9 @@ jobs:
         run: scripts/ios-gateway-e2e-test clean
 
   mac:
-    needs: scope
+    # After the required gateway job, so it never queues for a macOS runner behind
+    # advisory work; !cancelled() still runs this when gateway fails or is skipped.
+    needs: [scope, gateway]
     if: ${{ !cancelled() && needs.scope.outputs.mac != 'false' }}
     runs-on: macos-26
     steps:

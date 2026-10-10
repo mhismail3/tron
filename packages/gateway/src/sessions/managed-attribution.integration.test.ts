@@ -561,4 +561,4 @@ it("attributes real workflow completion and supervisor delivery to their managed
       if (cleanupError) throw cleanupError;
     }
   }
-}, 60_000);
+});

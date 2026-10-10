@@ -67,7 +67,6 @@ enum ChatMotion {
     static let composerStructuralSpring = Animation.spring(response: 0.32, dampingFraction: 0.82)
     static let composerControlSpring = Animation.spring(response: 0.35, dampingFraction: 0.8)
     static let composerModeSpring = Animation.spring(response: 0.22, dampingFraction: 0.72)
-    static let keyboardControl = Animation.easeOut(duration: 0.22)
     static let composerTap = Animation.easeOut(duration: 0.08)
     static func composerMode(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .easeInOut(duration: 0.20)

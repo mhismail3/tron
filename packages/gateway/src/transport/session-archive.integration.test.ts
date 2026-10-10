@@ -376,6 +376,28 @@ const attentionRecord = async (root: string, sessionId: string): Promise<unknown
   return document.sessions[sessionId];
 };
 
+/** Holds every outbound write the Gateway has to this process's sockets until
+ * the returned release runs. The frame is still handed to the socket; only its
+ * completion waits, which is how a loaded host delays a write. The outbound
+ * queue then keeps later frames behind the held one, so a newer snapshot
+ * supersedes an unsent one and the client receives it as a rebaseline. */
+function stallOutboundWrites(server: GatewayServer): () => void {
+  const sockets = server as unknown as { localSockets: { clients: Set<WebSocket> }; pairedSockets: { clients: Set<WebSocket> } };
+  let stalled = true;
+  const held: Array<() => void> = [];
+  for (const socket of [...sockets.localSockets.clients, ...sockets.pairedSockets.clients]) {
+    const send = socket.send.bind(socket);
+    socket.send = ((data: string, complete: (error?: Error) => void) => send(data, (error) => {
+      if (stalled) held.push(() => complete(error));
+      else complete(error);
+    })) as WebSocket["send"];
+  }
+  return () => {
+    stalled = false;
+    for (const complete of held.splice(0)) complete();
+  };
+}
+
 /** Fails every durable archive-record removal from now on, modelling a full or
  * failing disk at the store's exact write boundary. */
 function failArchiveRemovals(registry: RuntimeRegistry): () => void {
@@ -408,6 +430,11 @@ const deliveredAuthorityFrames = (client: Client, sessionId: string) =>
     }
     return [];
   });
+
+/** The Gateway's published row phase. A held subscriber write cannot show the
+ * run yet, so the wait reads the registry to know the run's snapshot is queued. */
+const runningInRegistry = (registry: RuntimeRegistry, sessionId: string): boolean =>
+  (registry as unknown as { latestSummaries: Map<string, { phase?: string }> }).latestSummaries.get(sessionId)?.phase === "running";
 
 const latestSnapshot = (client: Client, sessionId: string) =>
   snapshotFrames(client, sessionId).at(-1)?.payload as { archivedAt?: string } | undefined;
@@ -1854,17 +1881,26 @@ describe("session archive over the real Gateway", () => {
       // active projection the commit rechecks can notice it. Its frames arrive
       // while the commit still holds the registry mutex, which is why this
       // waits on the subscription rather than on a catalog read.
+      // Held socket writes model a loaded host: the run's first running snapshot
+      // queues behind them, and the commit's own republish supersedes it.
+      const releaseSocketWrites = stallOutboundWrites(f.current().server);
       await writeFile(join(f.root, "wake-trigger"), "", "utf8");
       await waitWithStallState(() => existsSync(join(f.root, "wake-sent")), "external turn submitted");
-      await waitWithStallState(() => snapshotFrames(client, session.id).some(
-        (frame) => frame.payload?.phase === "running"), "externally started run");
+      await waitWithStallState(() => runningInRegistry(f.current().registry, session.id), "externally started run in the registry");
       releaseWrite();
+      // The restored row's republish is queued behind the held write before
+      // the backstop clears the record, so the release below delivers it.
+      await waitFor(() => f.archiveDiagnostic.mock.calls.some(
+        (call) => JSON.stringify(call[0]) === JSON.stringify({ outcome: "auto-unarchived", trigger: "backstop" })), "backstop diagnostic");
+      releaseSocketWrites();
+      // The running state reaches the client as a rebaseline when its snapshot
+      // was superseded while queued, so the oracle reads delivered authority.
+      await waitWithStallState(() => deliveredAuthorityFrames(client, session.id).some(
+        (frame) => frame.payload?.phase === "running"), "externally started run");
       const response = await archiving;
       expect(response.ok, JSON.stringify(response)).toBe(true);
       expect(response.result).toEqual({ archived: false });
       expect(await listedIds(client, "exclude")).toContain(session.id);
-      await waitFor(() => f.archiveDiagnostic.mock.calls.some(
-        (call) => JSON.stringify(call[0]) === JSON.stringify({ outcome: "auto-unarchived", trigger: "backstop" })), "backstop diagnostic");
       releaseRun();
       await waitFor(async () => (await archivedRecord(f.root, session.id)) === undefined, "record cleared behind the run");
       await waitFor(async () => (await list(client, "exclude")).sessions.some(
@@ -1960,6 +1996,12 @@ const replacingCommandExtension = (replace: string, afterReplace = "") => () => 
         }
       `;
 
+/** Holds a command handler after its replacement until the test creates the
+ * gate file, so the replacement's live state is observable as it stands. */
+const gateCall = (gate: string) => `const { existsSync: gateExists } = await import("node:fs");
+            const { setTimeout: gateDelay } = await import("node:timers/promises");
+            while (!gateExists(${JSON.stringify(gate)})) await gateDelay(5);`;
+
 /** Refuses every switch, the way a guarding extension would. */
 const refuseSwitchExtension = () => `
         export default function (pi) {
@@ -2020,7 +2062,10 @@ describe("command-driven session replacement over the real Gateway", () => {
     // replacement's authoritative state, whether the queue delivered it as the
     // snapshot itself or as the `session.rebaseline` covering a sequence a
     // newer snapshot superseded.
-    await waitFor(() => deliveredAuthorityFrames(r.client, r.replacementId).length > 0, "replacement snapshot delivered");
+    // Wait for the replacement's settled snapshot. An earlier frame, such as the
+    // rebind's, still carries the command's live state until the handler returns.
+    await waitFor(() => (deliveredAuthorityFrames(r.client, r.replacementId).at(-1)?.payload as { phase?: string } | undefined)?.phase === "idle",
+      "replacement settled snapshot delivered");
     // The command is settled: the replacement is idle and no row for it (a
     // fork inherits one) is projected as still running by the newest authority
     // the client received.
@@ -2052,6 +2097,44 @@ describe("command-driven session replacement over the real Gateway", () => {
 
   it("settles a forking command in its origin", async () => {
     await assertSettledInOrigin(await replace("fork"));
+  }, 30_000);
+
+  it("keeps a fork-inherited command row out of the running state while the replacement's handler is live", async () => {
+    // Failure modes: the replacement's snapshot marks the origin's command row
+    // running while the forked handler is still live, because the live-command
+    // overlay matches the inherited row by operation identity; the command never
+    // settles in the replacement; the settled snapshot still projects the row as
+    // running.
+    const forkCall = "await ctx.fork(ctx.sessionManager.getLeafId(), { position: \"at\" });";
+    const f = await fixture({ extensions: [{
+      name: "replace.ts",
+      source: (root) => replacingCommandExtension(forkCall, gateCall(join(root, "fork-gate")))(),
+    }] });
+    const client = await f.connect();
+    const origin = await f.coldSession("gated-origin");
+    await openSession(client, origin.id);
+    const registry = f.current().registry as unknown as { slots: Map<string, unknown> };
+    const response = await client.request("gated-fork", "session.prompt", {
+      commandId: "gated-fork-command", sessionId: origin.id, text: "/replace",
+    });
+    expect(response.ok, JSON.stringify(response)).toBe(true);
+    await waitFor(() => !registry.slots.has(origin.id) && registry.slots.size === 1, "fork landed");
+    const replacementId = [...registry.slots.keys()][0]!;
+    // Positive control: the origin's command is still live in the replacement.
+    await waitFor(() => f.current().registry.administrativeDrainSnapshot().blockerCount > 0, "forked command live");
+    await waitFor(() => deliveredAuthorityFrames(client, replacementId).length > 0, "replacement snapshot delivered while live");
+    const operationId = response.result.operationId as string;
+    for (const frame of deliveredAuthorityFrames(client, replacementId)) {
+      const transcript = (frame.payload as { transcript: Array<{ semantic?: { operationId?: string; lifecycle?: string } }> }).transcript;
+      expect(transcript.filter((item) => item.semantic?.operationId === operationId
+        && ["running", "waitingForInput"].includes(item.semantic.lifecycle ?? ""))).toEqual([]);
+    }
+    await writeFile(join(f.root, "fork-gate"), "");
+    await waitFor(() => f.current().registry.administrativeDrainSnapshot().blockerCount === 0, "forked command work settled");
+    await waitFor(() => (deliveredAuthorityFrames(client, replacementId).at(-1)?.payload as { phase?: string } | undefined)?.phase === "idle",
+      "replacement settled snapshot delivered");
+    expect((await invocationReceiptsIn(origin.file)).map((receipt) => [receipt.receiptKind, receipt.lifecycle]))
+      .toEqual([["start", "staged"], ["terminal", "completed"]]);
   }, 30_000);
 
   it("keeps a failure after the switch out of the replacement", async () => {

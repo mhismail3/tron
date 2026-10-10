@@ -48,7 +48,10 @@ command that replaces its own session (`ctx.switchSession`, `ctx.newSession`,
 `beforeSessionInvalidate`, after `session_before_switch` can no longer refuse it
 and while the origin is still bound, the Gateway writes its `completed` terminal
 receipt and clears its runtime marker in the origin. Nothing more is written for
-it under the replacement identity. Handler code after the call runs unowned in
+it under the replacement identity. A fork copies the command's `start` row, which
+the replacement projects with its stored lifecycle; the live-command overlay
+applies only to a start receipt the replacement itself wrote, so the inherited row
+is never shown as running while the replacement's handler is still live. Handler code after the call runs unowned in
 the replacement, as Pi's stale-context model implies, so a later failure surfaces
 as an extension error there. A replacement that fails after that boundary still
 records the command `completed`. Receipt and marker writes target the session
@@ -1799,10 +1802,12 @@ enter that owner and are not cancelled by foreground Stop. The same owner enforc
 tool's `timeout` (seconds, validated as Pi validates it): on expiry it terminates the owned
 tree the same way, and the call fails with Pi's "Command timed out after N seconds" and the
 output written so far. If the shell has already exited, its process group is still killed.
-After the shell exits, a call keeps reading output for as long as descendants write to the
-inherited pipe, as Pi does; once a timeout or Stop has asked for termination, that output can
-extend the call by at most two seconds, so a descendant that escaped the group cannot hold
-it open. Pi's tool only passes the timeout to the operations it runs on, so operations that
+After the shell exits, a call keeps reading output while descendants write to the inherited
+pipe, as Pi does (pi#5303). The pipe must stay busy: once it has been silent for 100 ms after
+the shell's exit, the call settles, so a quiet descendant that holds the pipe cannot hang it,
+and output that descendant writes after that silence is not read. Once a timeout or Stop has
+asked for termination, that output can extend the call by at most two seconds, so a
+descendant that escaped the group cannot hold it open. Pi's tool only passes the timeout to the operations it runs on, so operations that
 ignore it leave every command unbounded (#499).
 Stop is scoped to one invocation, not to an extension workflow. A stopped run's canonical
 assistant message carries Pi's `aborted` stop reason, so an extension that schedules its own
@@ -3215,9 +3220,11 @@ definitions, or workflow scripts to force-load
 arbitrary child. A public mutable `tool_call` hook prefixes direct model-facing
 `subagent` task/resume text with a bounded (2 KiB UTF-8) advisory handoff, preserving
 the task verbatim and never truncating it. Direct execution selects `agent` and
-excludes `workflow`. `workflow: true` runs the single fenced JavaScript workflow
-block in the same assistant reply; a string containing `/` names a script path
-relative to the request cwd, and other strings select a named workflow resource.
+excludes `workflow`. Tron's model guidance tells the model to write a workflow script
+to a git-ignored file under the request cwd and pass its relative path (a string
+containing `/`); absolute paths such as `/tmp` fail. Other strings select a named
+workflow resource. `workflow: true` (a script
+in the same assistant reply) is not recommended because the script prints in chat.
 The hook never rewrites workflow source or mixed `agent`/`workflow` requests. Native tasks above 8,000 UTF-16 code
 units use the launcher's private task-file delivery; that is not a task rejection
 limit. Workflow/structured delegation stage limits remain runner-owned (1 MiB
@@ -3266,6 +3273,16 @@ test's deadline before its owned work can finish. This is a test-runner resource
 bound, not a change to test selection, per-test concurrency assertions, or the
 15-second default timeout. Production scheduling is unchanged. Keep focused
 owners narrow while iterating and use the full configured suite for checkpoints.
+
+`npm test` runs two Vitest passes, in order. The main pass (`vitest.config.ts`) runs
+the parallel suite. The nested pass (`vitest.nested.config.ts`) runs the files that
+spawn nested Vitest or real pi children, one file at a time. That config's list is
+the single owner of which files are nested. Under parallel workers those children
+starve and miss their execFile or detached-process bounds, so they cannot share the
+parallel pass; the bounds are hang bounds only, and a passing run never reaches them.
+For the same reason the nested pass declares its own hang bounds (240 s waits under a
+300 s test timeout, owned by that config) instead of the main pass's 12 s under 15 s.
+Run one of them with `npx vitest run --config vitest.nested.config.ts <file>`.
 
 Tests own every remote boundary through injected fetchers, resolvers and HTTP
 stubs. `test-support/network-isolation.ts` refuses any non-loopback TCP
@@ -3738,7 +3755,10 @@ during and after an invalid definition. An idle real wake is gated before bindin
 a separate factory-API steering probe compares displayed queued input with ordinary
 maintainer input while retaining hidden wake authority in evidence.
 Execution-specific identities, temporary roots, timestamps and elapsed intervals are
-normalized; launch/child/widget order and authored text remain meaningful. Transport
+normalized; pi-subagents' versioned installation root and bundled `[worker eval]`
+frame positions change on every fork bump and are normalized on both legs (the
+committed OLD baseline is normalized at comparison). Launch/child/widget order and
+authored text remain meaningful. Transport
 revision counters are not presentation values. Finite label/delivery allowances and
 exact OLD/NEW upstream value pairs in `test-support/subagent-parity-approved.json`
 cover only the approved dependency changes (including notification guidance,

@@ -6,7 +6,7 @@ import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 /** Markers carried by every process a timeout test spawns. Cleanup kills by
@@ -43,19 +43,23 @@ describe("DirectBashProcessOwner", () => {
       const settings = SettingsManager.create(root, agentDir);
       const owner = new DirectBashProcessOwner(settings, testSessionId);
       const pidFile = join(root, "detached.pid");
-      await writeFile(join(root, "placeholder"), "ready");
 
       const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
         detached: true,
         stdio: "ignore",
       });
       const unrelatedPid = unrelated.pid!;
-      const childProgram = "setInterval(() => {}, 1000)";
+      // Marked so afterEach kills the detached process even when an assertion fails.
+      const marker = `tron-636-${randomUUID()}`;
+      markers.push(marker);
+      const childProgram = `/*${marker}*/ setInterval(() => {}, 1000)`;
+      const pidTempFile = `${pidFile}.tmp`;
       const parentProgram = [
-        "const { spawn } = require('node:child_process');",
-        "const { writeFileSync } = require('node:fs');",
+        `/*${marker}*/ const { spawn } = require('node:child_process');`,
+        "const { writeFileSync, renameSync } = require('node:fs');",
         `const child = spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(childProgram)}], { detached: true, stdio: 'ignore' });`,
-        `writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
+        // Renamed into place, so the reader sees the whole pid or no file.
+        `writeFileSync(${JSON.stringify(pidTempFile)}, String(child.pid)); renameSync(${JSON.stringify(pidTempFile)}, ${JSON.stringify(pidFile)});`,
         "setInterval(() => {}, 1000);",
       ].join(" ");
       const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(parentProgram)}`;
@@ -68,11 +72,14 @@ describe("DirectBashProcessOwner", () => {
         undefined,
       );
 
-      await waitFor(async () => {
-        try { return Number.isSafeInteger(Number(await readFile(pidFile, "utf8"))); }
-        catch { return false; }
-      }, "the async process id file");
-      const detachedPid = Number(await readFile(pidFile, "utf8"));
+      // An empty or missing file is not a process id: Number("") is 0, which would
+      // otherwise be probed as the process group 0.
+      const detachedPid = await waitFor(async () => {
+        try {
+          const pid = Number(await readFile(pidFile, "utf8"));
+          return Number.isSafeInteger(pid) && pid > 0 ? pid : false;
+        } catch { return false; }
+      }, "the detached process id file");
       expect(processExists(detachedPid)).toBe(true);
       expect(owner.hasActiveProcesses).toBe(true);
 
@@ -123,24 +130,30 @@ describe("DirectBashProcessOwner", () => {
     20_000,
   );
 
-  // #499 review: after the shell exits, a descendant holding the inherited pipe keeps
-  // the call reading for as long as it writes (Pi's rule, pi#5303), so its final
-  // output is not lost to a fixed deadline.
+  // #499 review: a descendant that keeps the inherited output pipe after the shell exits
+  // must not hang the call. Pi's rule (pi#5303) releases the call once that pipe has been
+  // silent for the post-exit grace. Output written after a longer silence is not read, and
+  // no test asserts it: whether a write lands inside the grace window is a load-dependent
+  // race (packages/gateway/README.md documents the limit).
   it.skipIf(process.platform === "win32")(
-    "keeps reading a descendant that writes after the shell exits until it finishes",
+    "settles when a quiet descendant keeps the output pipe after the shell exits",
     async () => {
       const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-timeout-"));
       roots.push(root);
       const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")), testSessionId);
       const marker = `tron-499-${randomUUID()}`;
       markers.push(marker);
-      const writer = `/*${marker}*/ const t = setInterval(() => process.stdout.write('tick\\n'), 20); setTimeout(() => { clearInterval(t); process.stdout.write('final-output\\n'); }, 3000)`;
-      const launcher = `/*${marker}*/ require('node:child_process').spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(writer)}], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] }).unref();`;
+      // Detached, holding the inherited stdout/stderr, and silent. The launcher waits for
+      // its ready message, so the pipe is provably held when the shell exits.
+      const quiet = `/*${marker}*/ process.send('ready'); setInterval(() => {}, 1000)`;
+      const launcher = `/*${marker}*/ const child = require('node:child_process').spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(quiet)}], { detached: true, stdio: ['ignore', 'inherit', 'inherit', 'ipc'] }); child.once('message', () => { child.disconnect(); child.unref(); });`;
       const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(launcher)}; echo started`;
-      const result = await owner.toolDefinition(root).execute("finite-writer", { command }, undefined, undefined, undefined);
+      const result = await awaitsWithin(
+        owner.toolDefinition(root).execute("quiet-descendant", { command }, undefined, undefined, undefined),
+        "the call to settle while a quiet descendant holds its output pipe",
+      );
       const text = result.content.flatMap(part => part.type === "text" ? [part.text] : []).join("");
       expect(text).toContain("started");
-      expect(text).toContain("final-output");
       expect(owner.hasActiveProcesses).toBe(false);
     },
     20_000,

@@ -2,6 +2,10 @@
 # Tron contributor entry point. Production deployment is intentionally absent;
 # releases are performed manually by the repository owner.
 set -euo pipefail
+# Subcommands here run the pinned npm, whose native builds start node-gyp's Python.
+# That Python must not write __pycache__ into the npm tree, which the npm digest
+# in config/ci-toolchain.env pins by content (#638).
+export PYTHONDONTWRITEBYTECODE=1
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GATEWAY="$ROOT/packages/gateway"
 
@@ -25,7 +29,7 @@ Commands:
   ios generate                      Regenerate iOS with pinned XcodeGen
   mac generate                      Regenerate macOS with pinned XcodeGen
   mac verify [--require-bundled]    Verify installed app, payload, LaunchAgent, and PID
-  mac reinstall --app <Release.app> [--select-bundled-offline|--confirm-offline|--verify|--status|--restart|--finish]
+  mac reinstall --app <Release.app> [--select-bundled-offline|--confirm-offline|--verify|--status|--restart|--abandon|--finish]
   mac reinstall --recovery-relocate --operation-id <id> --source <root>
   mac reinstall --recovery-verify --operation-id <id>
                                     Resumable preparation or archive-only recovery
