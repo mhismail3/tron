@@ -1428,7 +1428,7 @@ shutil.copytree(source, clone)
         Failure modes: a passing run, a run whose tests fail, and a run killed by
         its own process deadline could each leave the booted simulator behind.
         """
-        owner = ["--only-testing", "TronMobileTests/StubTests"]
+        owner = ["--only-testing", "TronMobileUITests/StubTests"]
         outcomes = (
             ("success", {}, 0),
             ("test failure", {"xcode_status": 7}, 65),
@@ -1452,7 +1452,7 @@ shutil.copytree(source, clone)
     def test_the_runner_keeps_the_admission_exit_and_boots_nothing(self) -> None:
         """Failure modes 1 and 2: exit 73 survives, and nothing was booted."""
         self.reader_value("free-percent", "5")
-        result = self.invoke(extra_args=["--only-testing", "TronMobileTests/StubTests"])
+        result = self.invoke(extra_args=["--only-testing", "TronMobileUITests/StubTests"])
         self.assertEqual(result.returncode, 73, result.stderr)
         self.assertIn("refusing to boot Tron iOS Tests", result.stderr)
         self.assertIn("lane default", result.stderr)
@@ -1466,7 +1466,7 @@ shutil.copytree(source, clone)
         asked to keep; a later run in the lane could boot a second simulator
         instead of reusing it; and a release could be skipped afterwards.
         """
-        owner = ["--only-testing", "TronMobileTests/StubTests"]
+        owner = ["--only-testing", "TronMobileUITests/StubTests"]
         first = self.invoke(extra_args=["--keep-booted", *owner])
         self.assertEqual(first.returncode, 0, first.stderr)
         udid = self.owned_udid()
@@ -1495,7 +1495,7 @@ shutil.copytree(source, clone)
         })
         self.simulator_inventory.write_text(json.dumps(document))
 
-        result = self.invoke(extra_args=["--only-testing", "TronMobileTests/StubTests"])
+        result = self.invoke(extra_args=["--only-testing", "TronMobileUITests/StubTests"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("shut down Tron iOS Tests (lane b)", result.stdout)
         self.assertEqual(self.device_entry("BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")["state"], "Shutdown")
@@ -1524,7 +1524,7 @@ shutil.copytree(source, clone)
         self.simulator_inventory.write_text(json.dumps(document))
 
         started = time.time()
-        owner = ["--only-testing", "TronMobileTests/StubTests"]
+        owner = ["--only-testing", "TronMobileUITests/StubTests"]
         result = self.invoke(lane="alpha", extra_args=owner)
         self.assertEqual(result.returncode, 0, result.stderr)
         lane = self.root / "ios-test-alpha"
@@ -1565,7 +1565,7 @@ shutil.copytree(source, clone)
     # so this case guards the outcome, not how the check compares paths.
     def test_a_lane_named_on_the_command_line_is_the_lane_that_provisions(self) -> None:
         """Failure mode 1: the holder's command keeps the lane it was given."""
-        owner = ["--only-testing", "TronMobileTests/StubTests"]
+        owner = ["--only-testing", "TronMobileUITests/StubTests"]
         # The default lane lives under this fixture's HOME; nothing may appear
         # there for a command that named another lane.
         default_state = self.root / "home/.tron/internal/ios-test"
@@ -1597,7 +1597,7 @@ shutil.copytree(source, clone)
         for spelling in spellings:
             with self.subTest(spelling=spelling):
                 result = self.invoke(
-                    extra_args=["--only-testing", "TronMobileTests/StubTests"],
+                    extra_args=["--only-testing", "TronMobileUITests/StubTests"],
                     override={"TRON_IOS_TEST_STATE_DIR": spelling},
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -1608,7 +1608,7 @@ shutil.copytree(source, clone)
         """Failure mode 2: a command never runs on a lane its lease does not hold."""
         other = self.root / "ios-test-other/lease.lock"
         result = self.invoke(
-            extra_args=["--only-testing", "TronMobileTests/StubTests"],
+            extra_args=["--only-testing", "TronMobileUITests/StubTests"],
             override={"TRON_IOS_TEST_LOCK_HELD": "1", "TRON_IOS_TEST_LEASE_LOCK": str(other)},
         )
         self.assertEqual(result.returncode, 74, result.stderr)
@@ -2482,7 +2482,7 @@ class SweepFixture(OwnedLaneFixture):
         )
         self.wait_for(started)
         command = subprocess.run(
-            [str(RUNNER), "run", "--only-testing", "TronMobileTests/StubTests"],
+            [str(RUNNER), "run", "--only-testing", "TronMobileUITests/StubTests"],
             env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
         )
         _, stderr = sweep.communicate(timeout=30)
@@ -3302,8 +3302,8 @@ if "build-for-testing" in arguments:
     products.mkdir(parents=True, exist_ok=True)
     scheme = arguments[arguments.index("-scheme") + 1]
     test_plan = arguments[arguments.index("-testPlan") + 1]
-    # Xcode's real shape: the unit target omits IsUITestBundle (#497).
-    targets = [{"BlueprintName": "TronMobileTests"}]
+    # Xcode's real shape: a hosted XCTest target omits IsUITestBundle (#497).
+    targets = [{"BlueprintName": "TronMobileE2ETests"}]
     if scheme == "Tron UI Validation":
         targets.append({"BlueprintName": "TronMobileUITests", "IsUITestBundle": True})
     record({"action": "build", "scheme": scheme, "test_plan": test_plan})
@@ -3488,7 +3488,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
 
     W-53 (issue #424): the real-UI lane reuses the same fixture, lane and lease.
 
-    17. `run-ui` patches the hosted unit target (or no target at all), so the UI
+    17. `run-ui` patches the hosted E2E target (or no target at all), so the UI
         runner never receives the fixture environment, every journey skips for a
         missing fixture, and the cross-layer receipt is green.
     18. `run-ui` runs something other than the journeys it owns, or loses the
@@ -3501,7 +3501,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         connection and a new one in the Gateway's own log, or a journey that
         never connects is reported as having reconnected.
     21. `run-ui` leaves the lane's simulator booted, leaves the Gateway fixture it
-        failed with running, or leaves the hosted app paired for the unit lane
+        failed with running, or leaves the hosted app paired for the E2E lane
         that shares this worktree's app.
 
     #445: the fixture and its fault proxy are not the parent Gateway's children.
@@ -3808,7 +3808,7 @@ exec "{real_node}" "$@"
         products = derived / "Build/Products"
         products.mkdir(parents=True)
         (derived / ".tron-ios-e2e-owned").write_text("tron.ios-e2e-derived.v1\n")
-        (products / "Tron Development_UnitTests_iOS.xctestrun").write_text("xctestrun\n")
+        (products / "Tron Development_GatewayE2E_iOS.xctestrun").write_text("xctestrun\n")
         if identity is not None:
             (derived / "build-identity.json").write_text(json.dumps(identity))
         return derived
@@ -3816,13 +3816,13 @@ exec "{real_node}" "$@"
     def runnable_products(self, worktree: Path = ROOT) -> Path:
         """One valid test target for exercising the actual E2E run path."""
         derived = self.built_products(self.source_identity(worktree))
-        xctestrun = derived / "Build/Products/Tron Development_UnitTests_iOS.xctestrun"
+        xctestrun = derived / "Build/Products/Tron Development_GatewayE2E_iOS.xctestrun"
         with xctestrun.open("wb") as handle:
             plistlib.dump({
                 "TestConfigurations": [{
                     "IsEnabled": True,
-                    # Xcode's real shape: the unit target omits IsUITestBundle (#497).
-                    "TestTargets": [{"BlueprintName": "TronMobileTests"}],
+                    # Xcode's real shape: a hosted XCTest target omits IsUITestBundle (#497).
+                    "TestTargets": [{"BlueprintName": "TronMobileE2ETests"}],
                 }],
             }, handle)
         return derived
@@ -3938,7 +3938,7 @@ exec "{real_node}" "$@"
         ).stdout.strip() not in ("", "Z")
 
     def test_run_ui_builds_the_ui_plan_and_patches_the_ui_target(self) -> None:
-        """Failure modes 17 and 18: the UI runner, not the hosted unit runner,
+        """Failure modes 17 and 18: the UI runner, not the hosted E2E runner,
         receives the fixture environment, and the command runs its own journeys."""
         environment = self.ui_environment()
         result = self.e2e("run-ui", environment=environment)
@@ -3952,7 +3952,7 @@ exec "{real_node}" "$@"
         self.assertEqual([entry["test_filter"] for entry in runs], self.owned_ui_journeys())
         for entry in runs:
             self.assertEqual(entry["targets"].get("TronMobileUITests"), XCTESTRUN_FIXTURE_KEYS)
-            self.assertEqual(entry["targets"].get("TronMobileTests"), [], "the unit target must carry no fixture environment")
+            self.assertEqual(entry["targets"].get("TronMobileE2ETests"), [], "the E2E target must carry no fixture environment")
 
     def test_run_ui_leaves_one_complete_evidence_bundle_per_journey(self) -> None:
         """Failure mode 19: every journey leaves the xcresult, the Gateway log,
@@ -4267,7 +4267,7 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
             self.assertIn("Fault proxy: stopped", status.stdout)
             lane_states = [device["state"] for devices in self.inventory().get("devices", {}).values() for device in devices]
             self.assertEqual(lane_states, ["Shutdown"])
-            self.assertTrue((derived / "Build/Products/Tron Development_UnitTests_iOS.xctestrun").is_file())
+            self.assertTrue((derived / "Build/Products/Tron Development_GatewayE2E_iOS.xctestrun").is_file())
         finally:
             self.e2e("stop", harness=harness, environment=environment)
 
@@ -4287,7 +4287,7 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
             result = self.e2e("run", harness=harness, environment=environment, timeout=120)
             self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
             self.assertEqual(calls.read_text().splitlines(), [
-                "TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
+                "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
             ])
             latest = self.root / "e2e-state/results/latest"
             self.assertTrue(latest.is_symlink())
@@ -4346,7 +4346,7 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
             self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
             self.assertIn("failure: nested assertion detail", result.stdout)
             self.assertEqual(calls.read_text().splitlines(), [
-                "TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
+                "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
             ])
         finally:
             self.e2e("stop", harness=harness, environment=environment)
@@ -4569,7 +4569,7 @@ exit 1
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
         )
         try:
-            products = self.root / "e2e-derived/Build/Products/Tron Development_UnitTests_iOS.xctestrun"
+            products = self.root / "e2e-derived/Build/Products/Tron Development_GatewayE2E_iOS.xctestrun"
             deadline = time.monotonic() + 30
             while not products.exists() and time.monotonic() < deadline and command.poll() is None:
                 time.sleep(0.05)
@@ -4679,7 +4679,7 @@ class InheritedLeaseFixture(LifecycleHarness, unittest.TestCase):
         """Failure modes 1 and 2: one refusal, 74, before any simulator is touched."""
         other = self.discovery_root / "ios-test-other/lease.lock"
         commands = (
-            (RUNNER, ("run", "--only-testing", "TronMobileTests/StubTests")),
+            (RUNNER, ("run", "--only-testing", "TronMobileUITests/StubTests")),
             (E2E, ("build",)),
             (E2E, ("clean",)),
             (PROFILER, ("--scenario", "control", "--no-build")),
@@ -4717,7 +4717,7 @@ class InheritedLeaseFixture(LifecycleHarness, unittest.TestCase):
             "TRON_IOS_TEST_LOCK_HELD": "1", "TRON_IOS_TEST_LEASE_LOCK": str(other),
         }
         for index, (tool, arguments) in enumerate((
-            (RUNNER, ("run", "--only-testing", "TronMobileTests/StubTests")),
+            (RUNNER, ("run", "--only-testing", "TronMobileUITests/StubTests")),
             (E2E, ("build",)),
             (E2E, ("clean",)),
             (PROFILER, ("--scenario", "control", "--no-build")),
@@ -5130,7 +5130,7 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
         )
 
     def focused_run(self, worktree: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
-        return self.tool(worktree, "tron-ios-test", "run", *arguments, "--only-testing", "TronMobileTests/StubTests")
+        return self.tool(worktree, "tron-ios-test", "run", *arguments, "--only-testing", "TronMobileUITests/StubTests")
 
     def completed_run(self, result: subprocess.CompletedProcess[str]) -> Path:
         """The run directory a successful runner command announced."""
@@ -5291,7 +5291,7 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
         # The default lane, created - and so attributed - by a worktree deleted below.
         default_run = self.tool(gone, "tron-ios-test", "run", "--lane", "default",
-                                "--only-testing", "TronMobileTests/StubTests")
+                                "--only-testing", "TronMobileUITests/StubTests")
         self.assertEqual(default_run.returncode, 0, default_run.stderr)
         default_lane = self.lane_root / "ios-test"
         self.assertEqual(self.lane_marker(default_lane)["worktree"], os.path.realpath(gone))

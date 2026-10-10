@@ -235,8 +235,7 @@ keeps today's uncompressed frames.
   compressed connection, bounded by the 32-socket cap.
 - **Measured (2026-09-27, Apple silicon Mac, host load about 10):** the real
   `GatewayServer` broadcasting to one paired client. Repository TypeScript,
-  Swift and Markdown filled the recorded snapshot-burst fixture's transcript
-  text (`packages/ios-app/Tests/Fixtures/gateway-real-burst.json.zlib`). Nine
+  Swift and Markdown filled a recorded snapshot-burst transcript. Nine
   600 KB `session.snapshot` frames went from 5,465,624 to 1,132,866 wire bytes
   (20.7%). 223 cumulative `session.progress` frames up to 24 KiB went from
   3,038,448 to 39,157 (1.3%). 200 small responses and summaries went from 51,199
