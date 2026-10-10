@@ -51,13 +51,21 @@ receipt and clears its runtime marker in the origin. Nothing more is written for
 it under the replacement identity. A fork copies the command's `start` row, which
 the replacement projects with its stored lifecycle; the live-command overlay
 applies only to a start receipt the replacement itself wrote, so the inherited row
-is never shown as running while the replacement's handler is still live. Handler code after the call runs unowned in
+is never shown as running while the replacement's handler is still live. Every
+extension-command row a fork inherits (its `start` receipt names the origin) is
+projected as settled in the origin, never as staged: with the origin's terminal
+lifecycle when the fork's history carries that receipt, otherwise `completed`,
+the only outcome the origin records for the forking command whose terminal is
+written after the copy. Such a row carries `settledInOriginSession: true` on its
+semantic metadata. Stored receipts are never rewritten, and a staged inherited
+row would otherwise block live composer commands. Handler code after the call runs unowned in
 the replacement, as Pi's stale-context model implies, so a later failure surfaces
 as an extension error there. A replacement that fails after that boundary still
 records the command `completed`. Receipt and marker writes target the session
 bound when they were requested, and a retry never follows a rebind. The
 command-driven replacement cases in
-`src/transport/session-archive.integration.test.ts` cover all three calls.
+`src/transport/session-archive.integration.test.ts` cover all three calls, and
+the fork-inherited settlement case there covers the projected rows across restart.
 
 Transcript order is canonical branch order, never timestamp or activity recency.
 The v7 projection separates inbound context, agent output/invocations, ambient
