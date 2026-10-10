@@ -125,7 +125,7 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
         return report;
       } catch (error) { throw new Error(`${label} failed: ${error.message}`, { cause: error }); }
     };
-    const executionGate = gate("offline real-Gateway execution gate", "src/sessions/managed-subagents.integration.test.ts", "activation.json", "TRON_SUBAGENTS_REPORT");
+    const executionGate = gate("offline real-Gateway execution gate", "src/sessions/managed-subagents.integration.test.ts", "activation.json", "TRON_SUBAGENTS_REPORT", NESTED_CONFIG);
     const rollbackProbe = gate("previous-candidate-previous rollback probe", "src/sessions/managed-subagents.rollback.integration.test.ts", "rollback.json", "TRON_SUBAGENTS_ROLLBACK_REPORT", NESTED_CONFIG);
     // Refusal of a verified build with an invalid extension entry: each case is its own
     // nested run and reports by exit status. A refusal regression must still block publication.
