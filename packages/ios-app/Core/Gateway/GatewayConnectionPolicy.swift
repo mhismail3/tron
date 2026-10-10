@@ -12,16 +12,3 @@ package enum GatewayConnectionPolicy {
     package static let requestInactivityTimeout: TimeInterval = 60
     package static let gracefulCloseLimit: Duration = .seconds(1)
 }
-
-struct GatewayConnectionContractFixture: Decodable {
-    struct Milliseconds: Decodable { let milliseconds: Int }
-    struct Count: Decodable { let count: Int }
-    let serverHeartbeatInterval: Milliseconds
-    let serverMissedHeartbeatLimit: Count
-    let serverHelloDeadline: Milliseconds
-    let clientPingInterval: Milliseconds
-    let clientPongDeadline: Milliseconds
-    let clientTransportOpenDeadline: Milliseconds
-    let clientHelloDeadline: Milliseconds
-    let perIdentitySocketCap: Count
-}

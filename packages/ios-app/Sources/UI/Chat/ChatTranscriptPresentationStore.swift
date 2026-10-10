@@ -1373,14 +1373,6 @@ final class ChatTranscriptPresentationStore {
         let continuation: CheckedContinuation<InstalledChatTranscript, Error>
     }
 
-    #if HOSTED_TEST
-    private struct HostedCompletionWaiter {
-        let id: UInt64
-        let tag: ChatTranscriptProjectionTag
-        let continuation: CheckedContinuation<Void, Error>
-    }
-    #endif
-
     private(set) var installed: InstalledChatTranscript?
     private(set) var pendingEntranceIDs: Set<String> = []
     private(set) var admittedEntranceIDs: Set<String> = []
@@ -1420,10 +1412,6 @@ final class ChatTranscriptPresentationStore {
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var waiters: [Waiter] = []
     @ObservationIgnored private var nextWaiterID: UInt64 = 0
-    #if HOSTED_TEST
-    @ObservationIgnored private var hostedCompletionWaiters: [HostedCompletionWaiter] = []
-    @ObservationIgnored private var nextHostedCompletionWaiterID: UInt64 = 0
-    #endif
 
     #if HOSTED_TEST
     init(
@@ -1503,18 +1491,12 @@ final class ChatTranscriptPresentationStore {
             let installedReplacement = install(replacement)
             resumeWaiters(with: installedReplacement)
             failWaiters(except: tag, error: .superseded)
-            #if HOSTED_TEST
-            failHostedCompletionWaiters(except: tag, error: .superseded)
-            #endif
             return false
         }
         if installed?.tag == tag || buildingTag == tag || readyToInstall?.tag == tag {
             desiredTag = tag
             pending = nil
             failWaiters(except: tag, error: .superseded)
-            #if HOSTED_TEST
-            failHostedCompletionWaiters(except: tag, error: .superseded)
-            #endif
             return false
         }
         if pending?.tag == tag {
@@ -1534,9 +1516,6 @@ final class ChatTranscriptPresentationStore {
             generation: generation
         )
         failWaiters(except: tag, error: .superseded)
-        #if HOSTED_TEST
-        failHostedCompletionWaiters(except: tag, error: .superseded)
-        #endif
         startWorkerIfNeeded()
         return true
     }
@@ -1566,9 +1545,6 @@ final class ChatTranscriptPresentationStore {
         let installedReplacement = install(replacement)
         resumeWaiters(with: installedReplacement)
         failWaiters(except: tag, error: .superseded)
-        #if HOSTED_TEST
-        failHostedCompletionWaiters(except: tag, error: .superseded)
-        #endif
         return true
     }
 
@@ -1586,15 +1562,6 @@ final class ChatTranscriptPresentationStore {
     func waitForInstall(of tag: ChatTranscriptProjectionTag) async throws -> InstalledChatTranscript {
         try await waitForInstall(of: tag, onRegistered: nil)
     }
-
-    #if HOSTED_TEST
-    func hostedWaitForInstall(
-        of tag: ChatTranscriptProjectionTag,
-        onRegistered: @escaping () -> Void
-    ) async throws -> InstalledChatTranscript {
-        try await waitForInstall(of: tag, onRegistered: onRegistered)
-    }
-    #endif
 
     private func waitForInstall(
         of tag: ChatTranscriptProjectionTag,
@@ -1634,49 +1601,6 @@ final class ChatTranscriptPresentationStore {
             Task { @MainActor [weak self] in self?.cancelWaiter(id: waiterID) }
         }
     }
-
-    #if HOSTED_TEST
-    /// Deterministic observation for frame-publication race tests. This exposes
-    /// no production scheduling control and resumes only after MainActor admits
-    /// a complete, validated projection for frame-gated installation.
-    func hostedWaitForCompletedProjection(
-        of tag: ChatTranscriptProjectionTag,
-        onRegistered: (() -> Void)? = nil
-    ) async throws {
-        if installed?.tag == tag || readyToInstall?.tag == tag { return }
-        guard desiredTag == tag || pending?.tag == tag || buildingTag == tag else {
-            throw ChatTranscriptPresentationStoreError.superseded
-        }
-
-        nextHostedCompletionWaiterID &+= 1
-        let waiterID = nextHostedCompletionWaiterID
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation {
-                (continuation: CheckedContinuation<Void, Error>) in
-                if Task.isCancelled {
-                    continuation.resume(throwing: CancellationError())
-                } else if readyToInstall?.tag == tag {
-                    continuation.resume()
-                } else if desiredTag == tag || pending?.tag == tag || buildingTag == tag {
-                    hostedCompletionWaiters.append(.init(
-                        id: waiterID,
-                        tag: tag,
-                        continuation: continuation
-                    ))
-                    onRegistered?()
-                } else {
-                    continuation.resume(
-                        throwing: ChatTranscriptPresentationStoreError.superseded
-                    )
-                }
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in
-                self?.cancelHostedCompletionWaiter(id: waiterID)
-            }
-        }
-    }
-    #endif
 
     func resolveToolDetails(
         callIDs: [String],
@@ -1835,9 +1759,6 @@ final class ChatTranscriptPresentationStore {
         installFrameTask = nil
         suppressesNextInstallationEntrances = true
         failAllWaiters(with: CancellationError())
-        #if HOSTED_TEST
-        failAllHostedCompletionWaiters(with: CancellationError())
-        #endif
     }
 
     func reset() {
@@ -1862,9 +1783,6 @@ final class ChatTranscriptPresentationStore {
         installed = nil
         clearEntranceBookkeeping(keepingCapacity: false)
         failAllWaiters(with: CancellationError())
-        #if HOSTED_TEST
-        failAllHostedCompletionWaiters(with: CancellationError())
-        #endif
     }
 
     private func startWorkerIfNeeded() {
@@ -1891,12 +1809,6 @@ final class ChatTranscriptPresentationStore {
                     if self.desiredTag == next.tag {
                         self.desiredTag = nil
                         self.failWaiters(for: next.tag, error: .invalidProjection)
-                        #if HOSTED_TEST
-                        self.failHostedCompletionWaiters(
-                            for: next.tag,
-                            error: .invalidProjection
-                        )
-                        #endif
                     }
                     continue
                 }
@@ -1912,9 +1824,6 @@ final class ChatTranscriptPresentationStore {
     }
 
     private func admitCompleted(_ output: InstalledChatTranscript) {
-        #if HOSTED_TEST
-        resumeHostedCompletionWaiters(for: output.tag)
-        #endif
         guard installationFrameScheduler != nil else {
             let installedOutput = install(output)
             resumeWaiters(with: installedOutput)
@@ -2158,44 +2067,4 @@ final class ChatTranscriptPresentationStore {
         waiters.remove(at: index).continuation.resume(throwing: CancellationError())
     }
 
-    #if HOSTED_TEST
-    private func resumeHostedCompletionWaiters(for tag: ChatTranscriptProjectionTag) {
-        let completed = hostedCompletionWaiters.filter { $0.tag == tag }
-        hostedCompletionWaiters.removeAll { $0.tag == tag }
-        completed.forEach { $0.continuation.resume() }
-    }
-
-    private func failHostedCompletionWaiters(
-        for tag: ChatTranscriptProjectionTag,
-        error: ChatTranscriptPresentationStoreError
-    ) {
-        let rejected = hostedCompletionWaiters.filter { $0.tag == tag }
-        hostedCompletionWaiters.removeAll { $0.tag == tag }
-        rejected.forEach { $0.continuation.resume(throwing: error) }
-    }
-
-    private func failHostedCompletionWaiters(
-        except tag: ChatTranscriptProjectionTag,
-        error: ChatTranscriptPresentationStoreError
-    ) {
-        let rejected = hostedCompletionWaiters.filter { $0.tag != tag }
-        hostedCompletionWaiters.removeAll { $0.tag != tag }
-        rejected.forEach { $0.continuation.resume(throwing: error) }
-    }
-
-    private func failAllHostedCompletionWaiters(with error: Error) {
-        let rejected = hostedCompletionWaiters
-        hostedCompletionWaiters.removeAll(keepingCapacity: false)
-        rejected.forEach { $0.continuation.resume(throwing: error) }
-    }
-
-    private func cancelHostedCompletionWaiter(id: UInt64) {
-        guard let index = hostedCompletionWaiters.firstIndex(where: { $0.id == id }) else {
-            return
-        }
-        hostedCompletionWaiters.remove(at: index).continuation.resume(
-            throwing: CancellationError()
-        )
-    }
-    #endif
 }

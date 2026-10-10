@@ -39,8 +39,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
 
     override func tearDown() {
         // A journey pairs the app for real, and the lane's app container is
-        // shared with the hosted unit lane in this worktree: a pairing left
-        // behind makes the next unit run's mounted-view tests time out waiting
+        // shared with the hosted UI lane in this worktree: a pairing left
+        // behind makes the next hosted run's mounted-view tests time out waiting
         // for requests they never issue (A/B/A measured on the lane). The app's
         // own HOSTED_TEST reset returns it to the unpaired launch state every
         // hosted UI test already starts from, after a pass and after a failure.

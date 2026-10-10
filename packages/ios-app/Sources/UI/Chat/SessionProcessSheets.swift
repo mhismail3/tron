@@ -549,9 +549,6 @@ private struct ReadOnlySubagentOpenIdentity: Hashable {
 }
 
 struct ReadOnlySubagentSessionSheet: View {
-    #if HOSTED_TEST
-    @Environment(\.readOnlySubagentHostedProbe) private var hostedProbe
-    #endif
     let parentSessionID: String
     let process: SessionProcessActivity
 
@@ -612,9 +609,6 @@ struct ReadOnlySubagentSessionSheet: View {
                   let target = model.presentationTarget(for: parentSessionID),
                   let subscriptionToken = model.presentationSubscriptionToken(for: parentSessionID) else { return }
             if store == nil { store = ReadOnlySubagentSessionStore(client: model.client) }
-            #if HOSTED_TEST
-            hostedProbe?.store = store
-            #endif
             if invalidationSinkID == nil, let mountedStore = store {
                 invalidationSinkID = model.registerProcessTranscriptInvalidationSink { [weak mountedStore] change in
                     mountedStore?.invalidate(change)

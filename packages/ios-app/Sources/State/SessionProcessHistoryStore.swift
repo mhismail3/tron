@@ -315,21 +315,6 @@ final class SessionProcessHistoryStore {
         }
     }
 
-    #if HOSTED_TEST
-    func installHostedPendingPage(
-        sessionID: String,
-        presentationGeneration: Int
-    ) {
-        reset(sessionID: sessionID, presentationGeneration: presentationGeneration)
-        status = .loading
-        pageTask = Task {
-            try? await Task.sleep(for: .seconds(30))
-        }
-    }
-
-    var hostedHasPendingPage: Bool { pageTask != nil }
-    #endif
-
     private static let maximumRetainedPages = 8
     private static let maximumRetainedItems = 400
     private static let maximumRetainedBytes = 2 * 1_024 * 1_024

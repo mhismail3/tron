@@ -41,8 +41,6 @@ final class DisplayFrameWaiter: NSObject {
         displayLink.add(to: .main, forMode: .common)
     }
 
-    var isWaiting: Bool { continuation != nil }
-
     func cancel() {
         finish(throwing: CancellationError())
     }

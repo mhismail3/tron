@@ -94,7 +94,4 @@ final class AppBackgroundCheckpointCoordinator {
         access.end(active.identifier)
     }
 
-    #if HOSTED_TEST
-    var hostedHasActiveCheckpoint: Bool { active != nil }
-    #endif
 }
