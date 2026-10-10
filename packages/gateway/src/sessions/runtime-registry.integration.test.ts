@@ -6,7 +6,7 @@ import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import * as fsPromises from "node:fs/promises";
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -8991,6 +8991,57 @@ export default function (pi) {
     const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
     const terminal = entries.find(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.receiptKind === "terminal");
     expect(terminal?.data).toMatchObject({ lifecycle: "interrupted" });
+  });
+
+  it("joins a completed run's settlement chain before dispose resolves", async () => {
+    // agent_settled starts the completed run's settlement chain (terminal receipt,
+    // attention, marker clear) outside any operation token. Dispose must join the
+    // whole chain, or its marker clear lands after dispose (#723).
+    const root = await temporaryRoot("tron-dispose-settlement-");
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const faux = fauxProvider({ provider: "tron-dispose-settlement", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("completed before dispose")]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    // Hold only the settlement chain's terminal persistence, its first await.
+    const internal = slot as unknown as { persistInvocationTerminal(...args: unknown[]): Promise<unknown> };
+    const terminalize = internal.persistInvocationTerminal.bind(slot);
+    let releaseTerminal!: () => void;
+    const terminalGate = new Promise<void>((resolve) => { releaseTerminal = resolve; });
+    let held = 0;
+    const spy = vi.spyOn(internal, "persistInvocationTerminal").mockImplementation(async (...args) => {
+      if (held++ === 0) await terminalGate;
+      return terminalize(...args);
+    });
+    let disposed = false;
+    let disposal: Promise<void> | undefined;
+    try {
+      void slot.prompt("complete normally").catch(() => {});
+      await waitFor(() => held > 0, "the completed run's settlement chain to start");
+      disposal = registry.dispose().then(() => { disposed = true; });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(disposed, "dispose resolved while the settlement chain was still pending").toBe(false);
+    } finally {
+      releaseTerminal();
+    }
+    await disposal;
+    spy.mockRestore();
+    const markerPath = join(root, "tron", "gateway", "runtime-markers", `${slot.id}.json`);
+    const markerAtDispose = existsSync(markerPath) ? readFileSync(markerPath, "utf8") : undefined;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(existsSync(markerPath) ? readFileSync(markerPath, "utf8") : undefined, "a marker write landed after dispose").toEqual(markerAtDispose);
   });
 
   it("keeps main's interrupted receipt when a Stop fails and the run then completes on its own", async () => {
