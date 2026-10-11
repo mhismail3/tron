@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -455,8 +455,11 @@ const search = async (client: Client, query: string) => {
 };
 
 describe("session archive over the real Gateway", () => {
-  for (const changedCandidate of [false, true]) {
-    archiveCase(changedCandidate ? "revalidates a changed candidate after delayed ranking" : "publishes search after an unrelated session append during ranking", async () => {
+  for (const change of ["unrelated", "appended", "deleted"] as const) {
+    const changedCandidate = change !== "unrelated";
+    const name = change === "deleted" ? "drops a deleted candidate after delayed ranking"
+      : changedCandidate ? "revalidates a changed candidate after delayed ranking" : "publishes search after an unrelated session append during ranking";
+    archiveCase(name, async () => {
       let rankStarted!: () => void;
       let releaseRank!: () => void;
       const started = new Promise<void>((resolve) => { rankStarted = resolve; });
@@ -474,21 +477,27 @@ describe("session archive over the real Gateway", () => {
       const before = await f.searchService().search({ query: "publication-candidate", maxResults: 10 });
       const beforeHit = before.results.find((item) => item.sessionId === candidate.id)!;
       const unrelated = changedCandidate ? undefined : await f.rawSession("unrelated-before-search", "publication-unrelated-session");
-      const pending = f.searchService().search({ query: "publication-candidate", maxResults: 10, remoteRanking: true, remoteConsent: true });
-      await started;
       const target = changedCandidate ? candidate : unrelated!;
-      const timestamp = new Date().toISOString();
-      await appendFile(target.file, `${JSON.stringify({
-        type: "message", id: `${target.id}-append`, parentId: changedCandidate ? candidate.entryId : null, timestamp,
-        message: { role: "assistant", content: [{ type: "text", text: "appended while ranking" }], api: "faux", provider: "faux", model: "faux-1", stopReason: "stop", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-      })}\n`, "utf8");
-      await f.settle();
-      releaseRank();
+      const slot = await f.current().registry.acquire(target.id);
+      const pending = f.searchService().search({ query: "publication-candidate", maxResults: 10, remoteRanking: true, remoteConsent: true });
+      try {
+        await started;
+        if (change === "deleted") await f.current().registry.delete(target.id);
+        else {
+          await slot.prompt("appended while ranking");
+          await waitFor(() => !slot.snapshot().isStreaming && slot.snapshot().configurationBlocker === null, "concurrent append settles");
+        }
+      } finally {
+        releaseRank();
+      }
       const result = await pending;
       const hit = result.results.find((item) => item.sessionId === candidate.id);
-      expect(hit, JSON.stringify(result)).toBeDefined();
-      expect(hit?.anchorRevision.branchDigest).not.toBeUndefined();
-      if (changedCandidate) expect(hit?.anchorRevision.branchDigest).not.toBe(beforeHit.anchorRevision.branchDigest);
+      if (change === "deleted") expect(hit).toBeUndefined();
+      else {
+        expect(hit, JSON.stringify(result)).toBeDefined();
+        expect(hit?.anchorRevision.branchDigest).not.toBeUndefined();
+        if (changedCandidate) expect(hit?.anchorRevision.branchDigest).not.toBe(beforeHit.anchorRevision.branchDigest);
+      }
       return { changedCandidate, resultCount: result.results.length, candidateReturned: Boolean(hit), refreshedRevision: hit?.anchorRevision.branchDigest !== beforeHit.anchorRevision.branchDigest };
     });
   }

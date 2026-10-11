@@ -323,8 +323,12 @@ export class SessionSearchService {
         currentDocuments.set(result.sessionId, current);
       }
       const entry = current?.texts.get(result.entryId);
-      if (!current || !entry || entry.ordinal !== result.ordinal || !this.matches(entry.text, query)) continue;
-      if (result.semanticScore !== undefined && current.branchDigest !== result.anchorRevision.branchDigest) continue;
+      if (!current || !entry || entry.ordinal !== result.ordinal) continue;
+      if (result.semanticScore !== undefined) {
+        if (current.branchDigest !== result.anchorRevision.branchDigest
+          || current.fileIdentity !== result.anchorRevision.fileIdentity) continue;
+      } else if (!this.matches(entry.text, query)) continue;
+      result.archived = this.sessions.isArchived(result.sessionId);
       result.title = current.title;
       result.cwd = current.cwd;
       result.updatedAt = current.updatedAt;
