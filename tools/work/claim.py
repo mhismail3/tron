@@ -10,6 +10,7 @@ from typing import List, Optional
 
 ISSUE_TRAILER = "Work-Claim-Issue"
 SESSION_TRAILER = "Work-Claim-Session"
+BASE_TRAILER = "Work-Claim-Base"
 _MAX_SLUG_WORDS = 5
 # `<type>/<issue>-<slug>`; group 1 is the issue number.
 _CLAIM_BRANCH = re.compile(r"^[a-z0-9._-]+/([0-9]+)-")
@@ -98,11 +99,13 @@ class Claim:
     branch: str
     sha: str
     session: Optional[str]  # None when the branch has no claim commit
+    base: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class ClaimCommit:
     session: str
+    base: Optional[str] = None
 
 
 @dataclass
@@ -122,12 +125,13 @@ def _remote_heads(repo: Path, remote: str) -> dict:
 
 
 def claim_commit(repo: Path, range_base: str, head: str, number: int) -> Optional[ClaimCommit]:
-    """The latest valid claim on the first-parent path in `range_base..head`."""
+    """The latest valid claim for this issue on the branch's first-parent path."""
     # Handoffs append an empty commit on the owning branch. Newest first makes
     # that canonical trailer authoritative while excluding merged side history.
-    keys = ",".join(f"key={key}" for key in (ISSUE_TRAILER, SESSION_TRAILER))
-    log = _git(repo, "log", "--first-parent", f"--format=%(trailers:{keys},separator=%x00)%x1e",
-               f"{range_base}..{head}").stdout
+    keys = ",".join(f"key={key}" for key in (ISSUE_TRAILER, SESSION_TRAILER, BASE_TRAILER))
+    # Read the branch's first-parent history, not only default-base..head:
+    # explicitly based integration branches may not descend from the default.
+    log = _git(repo, "log", "--first-parent", f"--format=%(trailers:{keys},separator=%x00)%x1e", head).stdout
     for record in log.split("\x1e"):
         fields = {}
         for trailer in record.strip().split("\x00"):
@@ -135,7 +139,7 @@ def claim_commit(repo: Path, range_base: str, head: str, number: int) -> Optiona
             if value.strip():
                 fields.setdefault(key.strip(), value.strip())
         if fields.get(ISSUE_TRAILER) == str(number) and fields.get(SESSION_TRAILER):
-            return ClaimCommit(fields[SESSION_TRAILER])
+            return ClaimCommit(fields[SESSION_TRAILER], fields.get(BASE_TRAILER))
     return None
 
 
@@ -148,7 +152,7 @@ def _read_claims(repo: Path, remote: str, default_base: str, heads: dict) -> Lis
     claims = []
     for b in sorted(heads):
         found = claim_commit(repo, f"{remote}/{default_base}", f"{remote}/{b}", claimed_issue(b))
-        claims.append(Claim(b, heads[b], found.session if found else None))
+        claims.append(Claim(b, heads[b], found.session if found else None, found.base if found else None))
     return claims
 
 
@@ -170,7 +174,7 @@ def create_claim(repo: Path, remote: str, base: str, branch: str, number: int, s
     base_sha = _git(repo, "rev-parse", f"{remote}/{base}").stdout.strip()
     message = (
         f"chore: claim #{number}\n\n"
-        f"{ISSUE_TRAILER}: {number}\n{SESSION_TRAILER}: {session}\n"
+        f"{ISSUE_TRAILER}: {number}\n{SESSION_TRAILER}: {session}\n{BASE_TRAILER}: {base}\n"
     )
     tree = _git(repo, "rev-parse", f"{base_sha}^{{tree}}").stdout.strip()
     sha = _git(repo, "commit-tree", tree, "-p", base_sha, "-m", message).stdout.strip()

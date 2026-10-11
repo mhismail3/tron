@@ -146,9 +146,13 @@ def set_status(gh: Gh, item: dict, status: str) -> None:
     )
 
 
-def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]) -> int:
+def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str],
+        integration: bool = False, requested_base: Optional[str] = None) -> int:
     rules = config["claim"]
-    remote, base = rules["remote"], rules["baseBranch"]
+    remote, default_base = rules["remote"], rules["baseBranch"]
+    base = requested_base or default_base
+    if subprocess.run(["git", "check-ref-format", f"refs/heads/{base}"], capture_output=True).returncode:
+        raise claims.ClaimError(f"invalid base branch: {base}")
     session = session_of(session_arg)
     owner, name = gh.run("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip().split("/")
     issue = load_issue(gh, owner, name, number, rules, config["project"]["title"])
@@ -164,15 +168,22 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
     root = (primary / rules["worktreeRoot"]).resolve()
     if mine:
         branch = mine[0].branch
-        print(f"resuming the claim on {branch}")
+        if requested_base and mine[0].base and requested_base != mine[0].base:
+            raise claims.ClaimError(f"#{number} is already claimed from {mine[0].base}; cannot resume it from {requested_base}")
+        base = requested_base or mine[0].base or default_base
+        print(f"resuming the claim on {branch} from {base}")
         if issue["state"] != "OPEN":
             raise claims.ClaimError(f"#{number} is closed")
     else:
         reasons = claims.ineligibility(issue, rules)
+        # Integration creation is explicit and bypasses only the epic exclusion;
+        # closed issues and open blockers remain hard refusals.
+        if integration and "epic" in issue["labels"]:
+            reasons = [reason for reason in reasons if not reason.startswith("issue is labeled ")]
         if reasons:
             raise claims.ClaimError(f"#{number} cannot be claimed: " + "; ".join(reasons))
         slug = claims.slugify(issue["title"])
-        branch = claims.branch_name(claims.branch_type(issue["labels"], rules), number, slug)
+        branch = claims.branch_name("integration" if integration else claims.branch_type(issue["labels"], rules), number, slug)
     worktree = root / branch.split("/", 1)[1]
     at_path = _worktree_branch(cwd, worktree)
     if worktree.exists() and at_path != branch:
