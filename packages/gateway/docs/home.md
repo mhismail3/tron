@@ -858,9 +858,12 @@ default. The choice is never persisted with the task record.
   verified `0.76.1-tron.6` provider: `guide`, `children.list`, `status`, `list`, `get`,
   `models`, and supervisor `status`, `pending`, `list`. It admits the run controls
   `steer`, `resume`, `interrupt`, `stop`, and `command.status`, `command.yield`,
-  `command.cancel`, only for a run this session's canonical history owns, addressed by
-  `id` or `runId` and never by `dir`. A workflow's child is owned through its workflow's
-  run, so it is controlled by that run's `id` and `index`. A `resume` is owned when it
+  `command.cancel`, only for a run this session owns, addressed by `id` or `runId` and
+  never by `dir`. A run is owned when this session's canonical history launched it, or when
+  it is a child a workflow of this session names in its own provider status (`steps[].runId`).
+  So a child is controlled by its own run id, as the provider's guidance names it, or through
+  its workflow's run and `index`. A run id that no owned run or owned workflow names is refused,
+  and so is a child of another task's workflow. A `resume` is owned when it
   starts: the run it returns is a canonical launch of the task. It admits a supervisor
   `reply` only with `replyTo` naming a request whose child run is owned; a reply with
   `to` or no `replyTo` names no request the gate can prove, so it is refused. It refuses
@@ -886,7 +889,9 @@ A task owns every subagent run its worker session starts. The worker session is 
 for one task and never reused, so its runs end with the task. Ownership is canonical:
 a launch is a `subagent` call without an `action` that the gate admitted, a resume is a
 launch of the run it returns, and an async run is identified by the `asyncDir` in its
-launch result. A supervisor request is the task's when its child run is owned, and its
+launch result. A child run of a workflow the task owns is owned too: the workflow's own
+provider status names it (`steps[].runId`), and the owner reads that status from the
+workflow's canonical directory. A supervisor request is the task's when its child run is owned, and its
 `subagent_supervisor_request` message names that run. Runs are never tracked by a
 slot-wide map that outlives the session, and no field is persisted to prove ownership.
 

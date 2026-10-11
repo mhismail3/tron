@@ -7,14 +7,19 @@ import { join } from "node:path";
  * A request whose messages contain `HOLD-CHILD` stays open until the test releases
  * it or its client disconnects, so a run is demonstrably live until the test
  * stops it. A request containing `ASK-SUPERVISOR` is held the same way, then answers
- * with a `contact_supervisor` call that blocks until the parent replies. Every other
- * request answers `CHILD-DONE` at once. The server counts client disconnects of held
- * requests: that is the proof a child was cut off. */
+ * with a `contact_supervisor` call that blocks until the parent replies. A request
+ * containing `CALL-TOOL` is answered with a `read` call once it is released, so the
+ * child takes a second request that carries whatever was steered into it meanwhile.
+ * Every other request answers `CHILD-DONE` at once. The server counts client disconnects
+ * of held requests: that is the proof a child was cut off. It counts requests carrying
+ * `STEER-PROBE`: that is the proof a steer reached the child's model. */
 export interface ChildModelServer {
   port: number;
   heldRequests: () => number;
   abortedRequests: () => number;
   releaseHeld: () => void;
+  /** Requests whose messages contain `STEER-PROBE`. */
+  steerProbeRequests: () => number;
   close: () => Promise<void>;
 }
 
@@ -25,6 +30,7 @@ export async function startChildModelServer(): Promise<ChildModelServer> {
   let requests = 0;
   let held = 0;
   let aborted = 0;
+  let steerProbes = 0;
   const releasers = new Set<() => void>();
   const server: Server = createServer(async (request, response) => {
     if (++requests > MAX_REQUESTS) { response.writeHead(500).end("request bound exceeded"); return; }
@@ -35,10 +41,12 @@ export async function startChildModelServer(): Promise<ChildModelServer> {
     }
     const messages = (JSON.parse(body) as { messages?: unknown }).messages;
     const text = JSON.stringify(messages);
+    if (text.includes("STEER-PROBE")) steerProbes += 1;
     // A tool result in the request means the held call already answered (the parent's reply
     // to a supervisor request), so the child's next request finishes its turn.
     const answeredByTool = Array.isArray(messages) && messages.some(message => (message as { role?: unknown }).role === "tool");
     const asksSupervisor = !answeredByTool && text.includes("ASK-SUPERVISOR");
+    const callsRead = !answeredByTool && text.includes("CALL-TOOL");
     const holds = !answeredByTool && (text.includes("HOLD-CHILD") || asksSupervisor);
     if (holds) {
       held += 1;
@@ -53,12 +61,15 @@ export async function startChildModelServer(): Promise<ChildModelServer> {
       if (response.destroyed) return;
     }
     response.writeHead(200, { "content-type": "text/event-stream" });
-    const chunks = asksSupervisor
-      ? [{ role: "assistant", tool_calls: [{ index: 0, id: "call-ask", type: "function", function: { name: "contact_supervisor", arguments: JSON.stringify({ reason: "need_decision", message: "ASK-SUPERVISOR: proceed?" }) } }] }, {}]
+    const calledTool = asksSupervisor
+      ? { name: "contact_supervisor", arguments: JSON.stringify({ reason: "need_decision", message: "ASK-SUPERVISOR: proceed?" }) }
+      : callsRead ? { name: "read", arguments: JSON.stringify({ path: "probe.txt" }) } : undefined;
+    const chunks = calledTool
+      ? [{ role: "assistant", tool_calls: [{ index: 0, id: "call-tool", type: "function", function: calledTool }] }, {}]
       : [{ role: "assistant", content: "CHILD-DONE" }, {}];
     chunks.forEach((delta, index) => {
       response.write(`data: ${JSON.stringify({ id: "task-child", object: "chat.completion.chunk", created: 1, model: "child",
-        choices: [{ index: 0, delta, finish_reason: index === chunks.length - 1 ? (asksSupervisor ? "tool_calls" : "stop") : null }] })}\n\n`);
+        choices: [{ index: 0, delta, finish_reason: index === chunks.length - 1 ? (calledTool ? "tool_calls" : "stop") : null }] })}\n\n`);
     });
     response.end("data: [DONE]\n\n");
   });
@@ -72,6 +83,7 @@ export async function startChildModelServer(): Promise<ChildModelServer> {
     heldRequests: () => held,
     abortedRequests: () => aborted,
     releaseHeld: () => { for (const release of [...releasers]) release(); },
+    steerProbeRequests: () => steerProbes,
     close: async () => {
       if (closed) return;
       closed = true;
@@ -101,6 +113,9 @@ export async function startScriptedChild(fixture: { agentDir: string; cwd: strin
 /** Workflow scripts (written under the request cwd) whose one child holds until stopped:
  * the workflow stays running while the child is live. */
 export const HELD_WORKFLOW_SCRIPT = 'return runs.run("hold", { agent: "task-child", task: "HOLD-CHILD workflow search" });\n';
+/** A workflow whose one child holds until released, then calls a tool, so its second request
+ * carries anything steered into it while it was held. */
+export const STEERED_WORKFLOW_SCRIPT = 'return runs.run("hold", { agent: "task-child", task: "HOLD-CHILD CALL-TOOL steered search" });\n';
 /** A child the script launches as async and then returns: the workflow completes while
  * the child keeps running, as a detached workflow child does. */
 export const DETACHED_WORKFLOW_SCRIPT = 'const receipt = await runs.run("hold", { agent: "task-child", task: "HOLD-CHILD detached search", async: true });\nreturn receipt.runId;\n';

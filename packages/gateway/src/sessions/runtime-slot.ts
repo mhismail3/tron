@@ -7608,19 +7608,31 @@ export class RuntimeSlot {
     }
   }
 
-  /** Whether this session's canonical history launched the run. Task controls use it
-   * to refuse a stop or interrupt of any run the task did not start. */
-  ownsSubagentRun(runId: string): boolean {
-    return this.canonicalExtensionRunFacts().has(runId);
+  /** Whether this session owns a run: one its canonical history launched (a launch or a resume
+   * result), or a child run a workflow of this session names in its own provider status. Task
+   * controls use it to refuse a control of any run the task did not start, including a foreign
+   * workflow's child. Only this owner decides, so a control and a reply cannot disagree. */
+  async ownsSubagentRun(runId: string): Promise<boolean> {
+    const facts = this.canonicalExtensionRunFacts();
+    if (facts.has(runId)) return true;
+    for (const fact of facts.values()) {
+      // The status reader opens only a canonical directory: a launch result's path may name a symlinked root.
+      const directory = fact.asyncDir === undefined ? undefined : this.canonicalExtensionArtifactDirectory(fact.asyncDir);
+      if (directory === undefined) continue;
+      const status = await this.readExtensionStatusArtifact(directory, false).catch(() => undefined);
+      if (status?.mode === "workflow" && Array.isArray(status.steps)
+        && status.steps.some(step => (step as { runId?: unknown } | null)?.runId === runId)) return true;
+    }
+    return false;
   }
 
   /** Whether a supervisor request came from a run this session owns. The request is canonical
    * evidence: its `subagent_supervisor_request` message names the child's run. */
-  ownsSupervisorRequest(requestId: string): boolean {
+  async ownsSupervisorRequest(requestId: string): Promise<boolean> {
     const request = this.sessionManager.getBranch().findLast(entry => entry.type === "custom_message"
       && entry.customType === "subagent_supervisor_request" && (entry.details as { requestId?: unknown } | undefined)?.requestId === requestId);
     const runId = request?.type === "custom_message" ? (request.details as { runId?: unknown } | undefined)?.runId : undefined;
-    return typeof runId === "string" && this.ownsSubagentRun(runId);
+    return typeof runId === "string" && await this.ownsSubagentRun(runId);
   }
 
   /** Task-end settlement of this worker's async subagent runs. Every live async run is

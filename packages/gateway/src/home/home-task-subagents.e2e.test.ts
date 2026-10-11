@@ -5,7 +5,7 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OWNED_OPERATION_DEADLINE_MS } from "../sessions/owned-session-dispatch.js";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
-import { DETACHED_WORKFLOW_SCRIPT, HELD_WORKFLOW_SCRIPT, startScriptedChild, type ChildModelServer } from "../../test-support/home-task-subagent-child.js";
+import { DETACHED_WORKFLOW_SCRIPT, HELD_WORKFLOW_SCRIPT, STEERED_WORKFLOW_SCRIPT, startScriptedChild, type ChildModelServer } from "../../test-support/home-task-subagent-child.js";
 import { HOME_TASK_PRODUCER_REFUSAL_REASON } from "./home-task-worker-extension.js";
 import { HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "./home-task-subagents.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -764,6 +764,76 @@ describe("Home task subagents", () => {
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     expect(await asyncState(join(dirname(seen.workflowDir!), await workflowChildRunId(seen.workflowDir!)))).toBe("stopped");
     expect(child.abortedRequests()).toBe(1);
+  }, 60_000);
+
+  it("steers a workflow child by its own run id, and the steer reaches the child's model", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    await writeFile(join(f.cwd, "steered-workflow.js"), STEERED_WORKFLOW_SCRIPT);
+    const seen: { workflowDir?: string; childRunId?: string; steer?: { isError: boolean; text: string } } = {};
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./steered-workflow.js", async: true }, { id: "workflow-launch" })], { stopReason: "toolUse" }),
+      async (context: FauxContext) => {
+        await waitFor(() => child.heldRequests() === 1, "workflow child live", bound);
+        seen.workflowDir = launchedAsyncDir(context, "workflow-launch");
+        seen.childRunId = await workflowChildRunId(seen.workflowDir);
+        // The provider's guidance names the child's own run id, so the worker steers that id.
+        return fauxAssistantMessage([fauxToolCall("subagent", { action: "steer", id: seen.childRunId, message: "STEER-PROBE change course" }, { id: "steer-child" })], { stopReason: "toolUse" });
+      },
+      async (context: FauxContext) => {
+        seen.steer = toolResultText(context, "steer-child");
+        // The held child answers with a tool call; its next request carries the steer.
+        child.releaseHeld();
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => child.steerProbeRequests() === 1, "steer reached the child's model", bound);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "steered workflow child ended before the report", bound);
+        return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(seen.steer).toMatchObject({ isError: false });
+    expect(seen.steer?.text).not.toBe(HOME_TASK_PRODUCER_REFUSAL_REASON);
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    expect(child.steerProbeRequests()).toBe(1);
+    expect(await asyncState(join(dirname(seen.workflowDir!), seen.childRunId!))).toBe("complete");
+  }, 60_000);
+
+  it("refuses a control of a workflow child that another task's workflow owns, and of an unknown run id", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    await writeFile(join(f.cwd, "hold-workflow.js"), HELD_WORKFLOW_SCRIPT);
+    const seen: { foreignChildRunId?: string; results?: Record<string, { isError: boolean; text: string }> } = {};
+    f.faux.setResponses([
+      // The first task launches a held workflow, then waits for it between turns.
+      holdingWorkflowLaunch("workflow-launch"),
+      fauxAssistantMessage("Launched the search; waiting for it."),
+      // The second task controls the first task's workflow child, and an id no task owns.
+      () => fauxAssistantMessage([
+        fauxToolCall("subagent", { action: "steer", id: seen.foreignChildRunId, message: "STEER-PROBE" }, { id: "foreign-steer" }),
+        fauxToolCall("subagent", { action: "stop", id: "unknown-run-id" }, { id: "unknown-stop" }),
+      ], { stopReason: "toolUse" }),
+      (context: FauxContext) => {
+        for (const id of ["foreign-steer", "unknown-stop"]) seen.results = { ...seen.results, [id]: toolResultText(context, id)! };
+        return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      },
+    ]);
+    const first = await dispatch(f, "task-one");
+    const firstSlot = await f.registry.acquire(first.sessionId);
+    await waitFor(() => child.heldRequests() === 1, "first task's workflow child live", bound);
+    await waitBetweenTurns(firstSlot);
+    const [launch] = (await launchResults(f.registry, first.sessionId)).filter(item => item.toolCallId === "workflow-launch");
+    seen.foreignChildRunId = await workflowChildRunId(launch!.details!.asyncDir as string);
+    const second = await dispatch(f, "task-two");
+    const secondResult = await second.completion;
+    expect(secondResult.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    for (const id of ["foreign-steer", "unknown-stop"]) {
+      expect(seen.results?.[id]).toMatchObject({ isError: true, text: HOME_TASK_PRODUCER_REFUSAL_REASON });
+    }
+    expect(child.steerProbeRequests()).toBe(0);
+    await f.registry.homeOwner().stopTask({ taskId: first.taskId, operationId: first.operationId });
+    expect((await first.completion).terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
+    expect(await asyncState(join(dirname(launch!.details!.asyncDir as string), seen.foreignChildRunId!))).toBe("stopped");
   }, 60_000);
 
   it("refuses a supervisor reply that does not name a request of the task's own run, and admits its reads", async () => {
