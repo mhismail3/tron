@@ -177,6 +177,8 @@ async function plainHttp(host: string, port: number, path: string, method = "GET
 const RESPONDING_HANDLERS = {
   onConnection: () => {},
   onSecureConnection: () => {},
+  onClientError: (_error: Error, socket: Duplex) => { socket.destroy(); },
+  onTlsClientError: () => {},
   onRequest: (_request: IncomingMessage, response: ServerResponse) => {
     response.writeHead(200, { "content-type": "application/json" });
     response.end("{}");
@@ -530,6 +532,21 @@ describe("LAN endpoint", () => {
     expect(Object.keys(hello)).not.toContain("lanPin");
   });
 
+  it("records one failed TLS connection and no unused record for a healthy LAN probe", async () => {
+    const fixture = await gatewayFixture();
+    await waitForRecord(fixture.log, "lan.listener", "state", "bound");
+    expect(await plainHttp("::1", fixture.port, "/private-fixture-content")).toBeNull();
+    await waitFor(() => records(fixture.log, "http.connection-unused")[0], "failed TLS record");
+    const unused = records(fixture.log, "http.connection-unused");
+    expect(unused).toHaveLength(1);
+    expect(unused[0]!.fields).toMatchObject({ transport: "lan", reason: "tls_error", code: "ERR_SSL_HTTP_REQUEST" });
+    expect(JSON.stringify(unused)).not.toContain("private-fixture-content");
+    const certificate = await readFile(join(fixture.stateDirectory, "tls-certificate.pem"), "utf8");
+    expect((await lanRequest("::1", fixture.port, "/health", certificate)).status).toBe(200);
+    await fixture.gateway.close();
+    expect(records(fixture.log, "http.connection-unused")).toHaveLength(1);
+  });
+
   it("bounds a lane peer at the main listener's handshake and header limits", async () => {
     const fixture = await gatewayFixture();
     await waitForRecord(fixture.log, "lan.listener", "state", "bound");
@@ -553,6 +570,10 @@ describe("LAN endpoint", () => {
     await awaitsWithin(Promise.all([once(bare, "close"), answered]),
       "lane admission bound", HTTP_HEADERS_TIMEOUT_MS + 15_000);
     expect(await answered).toContain("408");
+    await waitFor(() => records(fixture.log, "http.connection-unused").length === 2, "both unused LAN peers recorded");
+    const unused = records(fixture.log, "http.connection-unused");
+    expect(unused.map(record => record.fields.code).sort()).toEqual(["ERR_HTTP_REQUEST_TIMEOUT", "ERR_TLS_HANDSHAKE_TIMEOUT"]);
+    expect(unused.every(record => record.fields.transportEnd === "timeout")).toBe(true);
   }, 45_000);
 
   it("dates a lane upgrade from the TCP accept, so the record shows the TLS handshake", async () => {
