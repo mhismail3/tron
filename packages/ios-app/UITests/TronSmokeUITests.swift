@@ -271,7 +271,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(state.label, "Ready")
         XCTAssertTrue(app.descendants(matching: .any)["session-usage-summary"].exists, "The stats card comes from the Home chat's session")
         XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["home-memory-model-row"].exists, "The memory model is a row in the model card")
+        XCTAssertTrue(app.buttons["Memory model"].exists, "The memory model is a row in the model card")
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
         for row in ["home-manage-context", "home-manage-memory-browser", "home-manage-chapters", "home-manage-tasks", "home-manage-permissions"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
@@ -441,7 +441,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        XCTAssertTrue(app.descendants(matching: .any)["home-memory-model-row"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Memory model"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Choose a memory model before sending"].waitForExistence(timeout: 5))
         app.buttons["Memory model"].tap()
         let provider = app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Fixture, 2 models")).firstMatch
@@ -461,7 +461,7 @@ final class TronSmokeUITests: XCTestCase {
         let done = try? XCTUnwrap(app.buttons.matching(identifier: "Done").allElementsBoundByIndex.first(where: \.isHittable))
         XCTAssertNotNil(done)
         done?.tap()
-        let modelRow = app.descendants(matching: .any)["home-memory-model-row"]
+        let modelRow = app.buttons["Memory model"]
         let converged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Memory Model B"), object: modelRow)
         XCTAssertEqual(XCTWaiter.wait(for: [converged], timeout: 8), .completed)
         keepScreenshot(named: "home-memory-model-configured")
@@ -483,7 +483,7 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertTrue(app.descendants(matching: .any)["home-manage-context"].exists)
             }
             if state == "empty-models" {
-                XCTAssertTrue(app.descendants(matching: .any)["home-memory-model-row"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.buttons["Memory model"].waitForExistence(timeout: 5))
                 app.buttons["Memory model"].tap()
                 XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "No available memory models")).firstMatch.waitForExistence(timeout: 5))
             } else if state == "configure-refused" {

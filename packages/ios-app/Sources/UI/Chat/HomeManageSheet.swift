@@ -57,16 +57,13 @@ extension HomeSheet {
         ) {
             memoryModelPicker(status)
         } label: {
-            // The identifier sits on the row inside the link: a card-level identifier
-            // would replace the link's own (SessionModelSummaryCard names its container).
             TronSettingsRow(icon: "cpu", title: "Memory model",
                             subtitle: status.memory.configured ? spend : "Choose a memory model before sending",
                             accent: .tronPurple) {
                 TronInlineActionLabel(name)
             }
-            .accessibilityIdentifier("home-memory-model-row")
-            .accessibilityValue(name)
         }
+        .accessibilityValue(name)
     }
 
     /// The picker is its own managed child: a choice is admitted under the picker's
