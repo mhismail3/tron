@@ -10918,6 +10918,68 @@ export default function (pi) {
     }
   });
 
+  it("reaps a slow-starting MCP stdio process and its child when the runtime is disposed", async () => {
+    const root = await temporaryRoot("tron-pi-mcp-startup-dispose-");
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    const fixtureScript = resolve(process.cwd(), "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
+    const statePath = join(root, "state.json");
+    const pidFile = join(root, "server.pid");
+    const childPidFile = join(root, "child.pid");
+    const readyPath = join(root, "ready");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    await writeFile(statePath, JSON.stringify({ tools: [{ name: "echo", description: "Fixture", inputSchema: { type: "object", properties: {} } }] }));
+    await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {
+      slow: { command: process.execPath, args: [fixtureScript, "stdio", statePath, pidFile, childPidFile, "30000", readyPath], exposure: "direct" },
+    } }));
+    const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const faux = fauxProvider({ provider: "tron-pi-mcp-slow-start", tokensPerSecond: 10_000 });
+    const modelRuntimeFactory = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, maximumLiveRuntimes: 1,
+      modelRuntimeFactory, trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    let serverPid: number | undefined;
+    let childPid: number | undefined;
+    try {
+      await initializeRegistry(registry);
+      const slot = await registry.create(cwd);
+      const model = faux.getModel();
+      await slot.setModel(model.provider, model.id);
+      await waitFor(() => existsSync(pidFile) && existsSync(childPidFile), "the starting MCP process and child");
+      serverPid = Number(await readFile(pidFile, "utf8"));
+      childPid = Number(await readFile(childPidFile, "utf8"));
+      // Prove disposal races a live initialization, not an already timed-out server.
+      expect(existsSync(readyPath)).toBe(false);
+      process.kill(serverPid, 0);
+      process.kill(childPid, 0);
+      await registry.dispose();
+      registries.splice(registries.indexOf(registry), 1);
+      await waitFor(() => [serverPid, childPid].every(pid => {
+        try { process.kill(pid!, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      }), "the starting MCP process group to exit after runtime disposal");
+      expect(existsSync(readyPath)).toBe(false);
+      await mkdir(join(process.cwd(), "test-results"), { recursive: true });
+      await writeFile(join(process.cwd(), "test-results", "pi-sdk-mcp-startup-dispose.json"), `${JSON.stringify({ disposedDuringStartup: true, serverPid, childPid, processGroupReaped: true }, null, 2)}\n`);
+    } finally {
+      if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
+      if (registry && registries.includes(registry)) {
+        await registry.dispose();
+        registries.splice(registries.indexOf(registry), 1);
+      }
+      if (serverPid) { try { process.kill(-serverPid, "SIGKILL"); } catch {} }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("loads project MCP config only after TrustService authorizes the workspace", async () => {
     const root = await temporaryRoot("tron-pi-mcp-project-trust-");
     const agentDir = join(root, "agent");
