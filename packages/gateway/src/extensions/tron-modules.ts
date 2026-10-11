@@ -69,8 +69,7 @@ export interface TronModule {
   name: string;
   /** One-line purpose for Settings. */
   purpose: string;
-  /** Tool names the factory registers when its owners are present, proven
-   * against the factory by `tron-modules.test.ts`. */
+  /** Tool names the factory registers when its owners are present. */
   tools: readonly string[];
   /** Command names the factory registers; no Tron module registers one today. */
   commands: readonly string[];
@@ -236,7 +235,7 @@ export const TRON_HOME_MODULE: TronModule = {
  * reading. Like `TRON_HOME_MODULE` it is not part of `TRON_MODULES`, because an
  * ordinary session never loads it. All five tools are always registered — the
  * tool list heads every cached prefix — and each resolves its owner per call. */
-export const TRON_HOME_RESEARCH_MODULE: TronModule = {
+const TRON_HOME_RESEARCH_MODULE: TronModule = {
   name: "tron-home-research",
   purpose: "Adds Home's read-only research tools: web search and fetch, session search, Knowledge lookup and trusted-project file reading.",
   tools: ["web_search", "web_fetch", "session_search", "knowledge", "read_file"],

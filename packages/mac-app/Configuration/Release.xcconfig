@@ -12,6 +12,6 @@ MTL_ENABLE_DEBUG_INFO = NO
 // archived bundle is `Tron.app` with executable `Tron` — matching the
 // Keep the archive product name stable for manual release packaging.
 // and the `/Applications/Tron.app` end-user surface. Debug keeps the default
-// so the `TronMacTests` target's `BUNDLE_LOADER`/`TEST_HOST`
+// so the `TronMacIntegrationTests` target's `BUNDLE_LOADER`/`TEST_HOST`
 // (which reference `TronMac.app/Contents/MacOS/TronMac`) keeps resolving.
 PRODUCT_NAME = Tron

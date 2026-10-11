@@ -18,8 +18,7 @@ import XCTest
 ///
 /// Take text is entered through the fixture's UIKit text-input control, not the
 /// simulator keyboard, whose inline predictions commit extra words on a tap or
-/// space. Keystroke typing during an in-flight save is covered in-process by
-/// `KnowledgeDetailInteractionTests`.
+/// space. Keystroke typing during an in-flight save is not exercised here.
 final class TronKnowledgeDetailUITests: XCTestCase {
     @MainActor
     func testPresentedSummaryReconcilesAfterAppSwitchWithoutReplaying() {

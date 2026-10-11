@@ -9,12 +9,12 @@ import { execFile } from "node:child_process";
  */
 
 /** The documented Tailscale install, then a CLI-only install on `PATH`. */
-export const TAILSCALE_CLI_CANDIDATES = ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "tailscale"] as const;
+const TAILSCALE_CLI_CANDIDATES = ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "tailscale"] as const;
 
 /** One wall-clock bound for the whole status read, per candidate and in total.
  * The record is diagnostic, so an unreadable status becomes `unknown` instead
  * of a heartbeat that waits on a process. */
-export const TAILSCALE_LOOKUP_TIMEOUT_MS = 2_000;
+const TAILSCALE_LOOKUP_TIMEOUT_MS = 2_000;
 /** Every lookup in this window reuses one result: a burst of silent sockets
  * costs one CLI run, not one per socket. */
 const TAILSCALE_RESULT_REUSE_MS = 10_000;
@@ -36,7 +36,7 @@ export interface PeerPathReader {
   lookup(remoteAddress: string): Promise<PeerPathLookup>;
 }
 
-export interface TailscaleStatusResult {
+interface TailscaleStatusResult {
   /** Exit code, or null when the command never ran to completion. */
   code: number | null;
   timedOut: boolean;
@@ -44,7 +44,7 @@ export interface TailscaleStatusResult {
   error?: string;
 }
 
-export type TailscaleStatusCommand = (tool: string, args: readonly string[], timeoutMs: number) => Promise<TailscaleStatusResult>;
+type TailscaleStatusCommand = (tool: string, args: readonly string[], timeoutMs: number) => Promise<TailscaleStatusResult>;
 
 /** The fields of one `tailscale status --json` peer that Tron reads. */
 export interface TailscalePeer {

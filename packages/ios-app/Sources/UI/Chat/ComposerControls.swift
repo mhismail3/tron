@@ -427,19 +427,6 @@ struct MultilineComposerTextView: UIViewRepresentable {
             view.setContentOffset(CGPoint(x: 0, y: y), animated: false)
         }
 
-        #if HOSTED_TEST
-        func hostedCaretIsVisible(in view: UITextView) -> Bool {
-            guard let selection = view.selectedTextRange else { return false }
-            let caret = view.caretRect(for: selection.end)
-            // TextKit can report the terminal caret fractionally beyond its
-            // rounded contentSize edge; one physical-point tolerance matches
-            // UIScrollView's own maximum-offset clamp.
-            let minimum = view.contentOffset.y + view.contentInset.top - 1
-            let maximum = view.contentOffset.y + view.bounds.height
-                - view.contentInset.bottom + 1
-            return caret.minY >= minimum && caret.maxY <= maximum
-        }
-        #endif
     }
 }
 

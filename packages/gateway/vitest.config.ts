@@ -9,7 +9,7 @@ const verifyCpuShare = Number(process.env.VERIFY_CPU_SHARE);
 export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
-    exclude: ["src/**/*.scale.test.ts", ...nestedTestFiles],
+    exclude: nestedTestFiles,
     environment: "node",
     // Durable filesystem/SQLite fixtures and SDK child processes share the
     // host. CPU-count fanout starves their owners; bound concurrency rather

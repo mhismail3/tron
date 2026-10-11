@@ -209,18 +209,16 @@ targets:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.testhost.ShareExtension
           CODE_SIGN_ENTITLEMENTS: ""
 
-  TronMobileTests:
+  # Hosted XCTest bundles that run inside the app process. They are not the
+  # unit tier: E2ETests holds the real-Gateway boundary case, which only the
+  # scripts/ios-gateway-e2e-test harness can provide, and ProfilingTests holds
+  # the performance-measurement scenarios that run only when explicitly asked.
+  TronMobileE2ETests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: Tests
+      - path: E2ETests
         createIntermediateGroups: true
-        optional: true
-      - path: ../protocol-fixtures
-        type: folder
-        buildPhase: resources
-      - path: Tests/Fixtures/gateway-real-burst.json.zlib
-        buildPhase: resources
     dependencies:
       - target: TronMobile
       - target: TronMobileCore
@@ -229,7 +227,28 @@ targets:
         embed: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.testhost.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.testhost.e2e
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TronMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TronMobile"
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_PACKAGE_NAME: TronIOSApp
+        TEST_RUNNER_WAIT_FOR_DEBUGGER: NO
+
+  TronMobileProfiling:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ProfilingTests
+        createIntermediateGroups: true
+    dependencies:
+      - target: TronMobile
+      - target: TronMobileCore
+        # The host app already embeds the framework; a second copy inside the
+        # test bundle would load a duplicate TronMobileCore image at runtime.
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.testhost.profiling
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TronMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TronMobile"
         GENERATE_INFOPLIST_FILE: YES
@@ -260,13 +279,13 @@ schemes:
       targets:
         TronMobile: all
         TronShareExtension: all
-        TronMobileTests: [test]
+        TronMobileE2ETests: [test]
     run:
       config: Development
     test:
       config: Test
       testPlans:
-        - path: TestPlans/UnitTests.xctestplan
+        - path: TestPlans/GatewayE2E.xctestplan
           defaultPlan: true
 
   Tron Device:
@@ -274,7 +293,6 @@ schemes:
       targets:
         TronMobile: all
         TronShareExtension: all
-        TronMobileTests: [test]
     run:
       config: LocalDevice
       debugEnabled: false
@@ -282,16 +300,12 @@ schemes:
       config: LocalDevice
     test:
       config: Test
-      testPlans:
-        - path: TestPlans/UnitTests.xctestplan
-          defaultPlan: true
 
   Tron UI Validation:
     build:
       targets:
         TronMobile: all
         TronShareExtension: all
-        TronMobileTests: [test]
         TronMobileUITests: [test]
     run:
       config: Test
@@ -306,7 +320,7 @@ schemes:
       targets:
         TronMobile: all
         TronShareExtension: all
-        TronMobileTests: [test]
+        TronMobileProfiling: [test]
     run:
       config: DevicePerformance
     test:
@@ -315,7 +329,7 @@ schemes:
       # xcodebuild environment (for example TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1);
       # a scheme macro is not expanded from the caller's environment.
       testPlans:
-        - path: TestPlans/UnitTests.xctestplan
+        - path: TestPlans/Profiling.xctestplan
           defaultPlan: true
 
   Tron Release:

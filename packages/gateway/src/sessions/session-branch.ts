@@ -1,6 +1,6 @@
 import type { FileEntry, SessionEntry } from "@earendil-works/pi-coding-agent";
 
-export interface ParsedSessionBranch {
+interface ParsedSessionBranch {
   sessionId: string;
   parentSession?: string;
   branch: SessionEntry[];

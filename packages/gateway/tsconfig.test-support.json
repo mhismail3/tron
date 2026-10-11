@@ -9,5 +9,5 @@
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["test-support/**/*.ts", "test-fixtures/pi-sdk/record-corpus.test.ts"]
+  "include": ["test-support/**/*.ts", "test-fixtures/pi-sdk/record-corpus.integration.test.ts"]
 }

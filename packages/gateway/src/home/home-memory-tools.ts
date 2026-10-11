@@ -26,9 +26,9 @@ import {
  */
 
 /** The tool names the tron-home extension registers live in `tron-modules.ts`
- * (`TRON_HOME_MODULE.tools`), which `tron-modules.test.ts` proves against this
- * factory, and in the executable allowlist `HOME_TOOL_NAMES` that
- * `home-designation.integration.test.ts` asserts. */
+ * (`TRON_HOME_MODULE.tools`), which must match this factory, and in the
+ * executable allowlist `HOME_TOOL_NAMES` that `home-designation.integration.test.ts`
+ * asserts. */
 
 /**
  * The zoom arguments are plain numbers on purpose: every invalid address — a

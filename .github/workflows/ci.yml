@@ -96,7 +96,7 @@ jobs:
       - run: scripts/verify-ci-toolchain.sh node xcode xcodegen
       - run: packages/mac-app/scripts/bundle-gateway.sh
       - run: scripts/tron mac generate
-      # Compile only. The app-hosted TronMacTests need the team's Mac Development
+      # Compile only. The app-hosted TronMacIntegrationTests need the team's Mac Development
       # certificate, which CI does not hold; they run locally (packages/mac-app/docs/development.md).
       - name: Compile Mac app and test sources unsigned
         working-directory: packages/mac-app

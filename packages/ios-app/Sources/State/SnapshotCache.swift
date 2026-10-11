@@ -210,8 +210,7 @@ actor SnapshotCache {
 
     /// The version 4 `Document` envelope assembled from already-encoded rows.
     /// It decodes to exactly what `JSONEncoder.gateway.encode(Document)` would
-    /// produce (`SnapshotCacheTests` checks this against generated catalogs);
-    /// a nil count is omitted, as synthesized `Codable` omits it.
+    /// produce; a nil count is omitted, as synthesized `Codable` omits it.
     private static func encodedDocument(rows: [Data], archivedCount: Int?) -> Data {
         var data = Data(#"{"version":4,"sessions":["#.utf8)
         data.reserveCapacity(rows.reduce(64) { $0 + $1.count + 1 })

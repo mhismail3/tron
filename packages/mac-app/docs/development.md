@@ -191,7 +191,7 @@ packages/mac-app/scripts/test-gateway-payload-verifier.sh
 # Launcher boundary fixture (also covers channel path-component rejection)
 packages/mac-app/scripts/test-tron-gateway-launcher.sh
 # The launcher's argv against the app's admission checks is the hosted
-# TronMacTests/GatewayLauncherArgvTests suite; run it after any argv change.
+# TronMacIntegrationTests/GatewayLauncherArgvTests suite; run it after any argv change.
 
 # Bundled npm removal with sanitized PATH and isolated HOME/cache
 packages/mac-app/scripts/test-tron-gateway-npm.sh
@@ -481,8 +481,9 @@ plists left in `~/Library/LaunchAgents` also fail verification, even when unload
 login could relaunch a retired owner against Stable's home and port. The maintainer
 must retire the exact legacy service and its login plist; the verifier never unloads
 services or removes files. A healthy current listener does not clear that gate.
-The collision regression runs in `scripts/test-mac-reinstall.py`. The offline
-checkpoint also refuses the loaded dev-takeover job, even without a listener.
+The collision check is in `scripts/verify-mac-install.sh` and runs against the
+installed app (`scripts/tron mac verify`). It also refuses the loaded dev-takeover
+job, even without a listener.
 The verifier checks both signed runtimes and aliases on every Mac, but executes
 only the host-native runtime. The bundled
 foreign-architecture runtime is validated statically; this avoids false
@@ -637,9 +638,6 @@ packages. Do not repeatedly restart after failure. Preserve post-update writes
 and use the coherent manual rollback procedure: restore the protected backup only
 when no accepted new work would be lost.
 
-Focused regression: `python3 scripts/test-mac-reinstall.py` (CI runs it in the Mac
-job).
-
 ### Local recovery location and retention
 
 Use `~/.tron-maintenance` as the single local recovery storage root, outside
@@ -720,7 +718,7 @@ and checker into the existing fingerprinted `app` tree. It checks those staged
 inputs before dependency installation; the payload verifier independently uses
 the trusted source checker against that app root, rejecting missing or invalid
 current/retained provider inputs. This step never installs into a Gateway home.
-The owning regression is `managed-subagents.payload.test.ts` (build the Gateway
+The owning regression is `managed-subagents.payload.integration.test.ts` (build the Gateway
 first): it runs this real staging step, imports its compiled startup boundary
 with TCP denied, and verifies activation plus retained-closure refusal.
 
@@ -787,11 +785,10 @@ copying into `/Applications`, release deployment, or launchd registration.
 
 ## Efficient focused tests
 
-Gateway payload deployment checks run with pinned Node 22:
-`node --test --test-concurrency=2 scripts/gateway-payload-deploy.test.mjs`.
-Lifecycle checks run retention and drain-order assertions inside the injected
-build command and process probe. Do not observe them with `fs.watch`:
-filesystem notifications can be missed, leaving a test waiting indefinitely.
+Gateway payload deployment has two real-boundary checks, run with pinned Node 22:
+`node --test --test-concurrency=2 scripts/gateway-payload-deploy.test.mjs` (a dev
+candidate staged through the real `tron-dev-state.mjs` and `gateway-payload-deploy.mjs`
+CLIs in a git checkout, and a bounded process-tree kill).
 
 ```bash
 xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
@@ -801,10 +798,16 @@ xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
 xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build/DerivedData \
-  -only-testing:TronMacTests/PairingURLBuilderTests \
-  -only-testing:TronMacTests/EnrollmentCodeReaderTests \
-  -only-testing:TronMacTests/SingleInstanceLockTests
+  -only-testing:TronMacIntegrationTests/SingleInstanceLockTests \
+  -only-testing:TronMacIntegrationTests/GatewayLauncherArgvTests
 ```
+
+`TronMacIntegrationTests` holds only real-boundary tests: spawned processes and
+pipes (`SubprocessTests`, `CodeSignatureProbeTests`, `CuaProcessOwnerTests`,
+`MenuBarTerminationTests`), a loopback WebSocket (`MenuBarLogReaderTransportTests`),
+and the built Gateway launcher (`GatewayLauncherArgvTests`). Unit tests with fakes
+or in-process module calls are not kept; cover a change with its real-boundary
+test or the fixture scripts above.
 
 `SingleInstanceLockTests` launches the test-only `SingleInstanceLockProbe` in
 separate processes. The owner and contender communicate through bounded pipe
@@ -814,13 +817,13 @@ lifecycle state.
 
 After an edit, rerun the incremental `build-for-testing`, then keep using
 `test-without-building`. This separates compilation from execution and avoids
-repeatedly paying for unrelated suites. `TronMacTests` is hosted by the app and
+repeatedly paying for unrelated suites. `TronMacIntegrationTests` is hosted by the app and
 must inherit the app's signing team; forcing the bundle to an ad-hoc identity
 causes macOS to reject it before tests bootstrap.
 
 CI holds no signing certificate, so its Mac job builds the same
 `build-for-testing` products with `CODE_SIGNING_ALLOWED=NO`. That catches compile
-and link breaks in the app, its helpers and `TronMacTests`, but runs nothing. On
+and link breaks in the app, its helpers and `TronMacIntegrationTests`, but runs nothing. On
 a Mac that has the team's Mac Development certificate, run the hosted tests
 above. Then run `packages/mac-app/scripts/test-signed-pi-payload-smoke.sh` on
 the built `TronMac.app`.

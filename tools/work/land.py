@@ -65,6 +65,9 @@ def delete_branch(root: Path, remote: str, branch: str, head: str) -> str:
     deleted = _git(root, "push", "-q", f"--force-with-lease=refs/heads/{branch}:{head}", remote,
                    f":refs/heads/{branch}", check=False)
     if deleted.returncode != 0:
+        # GitHub deletes a merged head branch itself; a refusal because it is already gone is not a kept branch.
+        if _remote_head(root, remote, branch) is None:
+            return "already deleted"
         detail = (deleted.stderr.strip().splitlines() or ["no detail"])[-1]
         return f"kept: the delete with a lease on {head[:12]} was refused ({detail})"
     return "deleted"
@@ -163,8 +166,11 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
     remote, base = rules["remote"], rules["baseBranch"]
     branch = _current_branch(root, base)
     body = _summary(summary_file)
-    _scrub(root, config["verify"]["scrubCommand"], (title or "") + "\n\n" + body)
     number = claims.claimed_issue(branch)
+    # The claimed issue names the change; the branch slug is only a fallback.
+    if title is None and number:
+        title = gh.rest("GET", f"repos/{_repository(gh)}/issues/{number}")["title"]
+    _scrub(root, config["verify"]["scrubCommand"], (title or "") + "\n\n" + body)
 
     for loop in range(MAX_LOOPBACKS + 1):
         if loop:

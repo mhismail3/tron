@@ -4,9 +4,9 @@ import {
   type TerminalCapabilities,
 } from "@earendil-works/pi-tui";
 
-export const REMOTE_TUI_MAX_COLUMNS = 160;
-export const REMOTE_TUI_MAX_ROWS = 120;
-export const REMOTE_TUI_MAX_INPUT_BYTES = 16 * 1024;
+const REMOTE_TUI_MAX_COLUMNS = 160;
+const REMOTE_TUI_MAX_ROWS = 120;
+const REMOTE_TUI_MAX_INPUT_BYTES = 16 * 1024;
 
 const WRITE_EVENT_LIMIT = 16;
 const WRITE_SAMPLE_LIMIT = 256;

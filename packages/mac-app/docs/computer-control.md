@@ -223,8 +223,6 @@ Build without launching or changing permissions:
 ```sh
 packages/mac-app/native-computer-control/qualification/build-capture.sh \
   --output "$HOME/.tron/workspace/files/builds/native-capture/<new-run>"
-swift test --package-path packages/mac-app/native-computer-control
-python3 -m unittest discover -s packages/mac-app/native-computer-control/qualification -p 'test_*.py'
 ```
 
 Native app replacement and Gateway transitions are manual maintainer actions.

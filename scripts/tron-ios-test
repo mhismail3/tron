@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Canonical bounded owner for local and CI iOS hosted-unit-test execution.
+# Canonical bounded owner for local and CI iOS UI-test execution.
 
 set -euo pipefail
 
@@ -35,9 +35,10 @@ usage() {
 Usage: scripts/tron-ios-test COMMAND [--lane NAME] [--keep-booted] [--only-testing OWNER ...]
 
 Commands:
-  checkpoint, prepare  Provision, generate, build, and run the complete unit target.
-  build                Provision, generate, and build reusable test products.
-  run                  Run reusable products; defaults to the complete unit target.
+  checkpoint, prepare  Provision, generate, build, and run the smoke journeys.
+  build                Provision, generate, and build reusable test products: the app and
+                       the TronMobileUITests bundle (scheme Tron UI Validation).
+  run                  Run reusable products: the --only-testing journeys, or the smoke set.
   diagnose             Explicit verbose-diagnostics run with a larger finite deadline.
   status               Report toolchain, lane, owned simulator, lease, products, and the newest
                        run this worktree started in this lane.
@@ -66,7 +67,8 @@ Commands:
 
 Selectors:
   --only-testing OWNER  Repeat without shell-generated command fragments, for example:
-                        --only-testing TronMobileTests/SnapshotCacheTests
+                        --only-testing TronMobileUITests/TronSmokeUITests/testIntegrationDestinationsHaveOneDoneButtonThroughSettings
+                        Without a selector, run, checkpoint and prepare run the smoke set (SMOKE_ONLY_TESTING).
 
 Options:
   --all                 With `status`, list every simulator on this Mac (see above).
@@ -254,18 +256,17 @@ simulator_args=(
 )
 [[ "$EPHEMERAL" == 1 ]] && simulator_args+=(--ephemeral)
 
-tier="${TRON_IOS_TEST_TIER:-unit}"
-case "$tier" in
-  unit)
-    test_scheme="Tron Development"
-    test_plan="UnitTests"
-    ;;
-  ui-validation)
-    test_scheme="Tron UI Validation"
-    test_plan="UIValidation"
-    ;;
-  *) die "TRON_IOS_TEST_TIER must be unit or ui-validation" ;;
-esac
+# The one test product: the app and the UI-test bundle, under the UIValidation plan.
+test_scheme="Tron UI Validation"
+test_plan="UIValidation"
+# The smoke set runs when no --only-testing selector is given: the two Home
+# manage-sheet journeys and one Settings journey, the cheapest real-app paths
+# that cover the Home manage surface and the shared Settings chrome.
+SMOKE_ONLY_TESTING=(
+  "TronMobileUITests/TronSmokeUITests/testManageHomeSheetFromGearAndOrdinaryChatKeepsSettings"
+  "TronMobileUITests/TronSmokeUITests/testComposerContextRingOpensManageHomeInHomeAndManageSessionElsewhere"
+  "TronMobileUITests/TronSmokeUITests/testIntegrationDestinationsHaveOneDoneButtonThroughSettings"
+)
 
 command="${1:-checkpoint}"
 if [[ "$command" == -h || "$command" == --help || "$command" == help ]]; then usage; exit 0; fi
@@ -330,8 +331,8 @@ fi
 
 case "$command" in
   checkpoint|prepare|run|diagnose)
-    if [[ "$tier" == ui-validation && -z "${selectors[0]-}" ]]; then
-      die "ui-validation runs require explicit --only-testing selectors"
+    if [[ -z "${selectors[0]-}" ]]; then
+      selectors=("${SMOKE_ONLY_TESTING[@]/#/-only-testing:}")
     fi
     ;;
 esac

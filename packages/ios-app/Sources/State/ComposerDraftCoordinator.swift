@@ -2455,8 +2455,6 @@ final class ComposerDraftCoordinator {
     }
 
     #if HOSTED_TEST
-    var hostedDraftCount: Int { drafts.count }
-    var hostedUploadAdmissionCount: Int { uploadAdmissions.count }
 
     func installHostedPresentation(
         profileID: String,
@@ -2470,27 +2468,5 @@ final class ComposerDraftCoordinator {
         return scope
     }
 
-    func installHostedRestoredPresentation(
-        profileID: String,
-        target: SessionPresentationIdentity,
-        lifecycleGeneration: Int,
-        initialText: String? = nil
-    ) async -> ComposerDraftScope {
-        let scope = prepareDraft(
-            profileID: profileID,
-            sessionID: target.sessionID,
-            initialText: initialText
-        )
-        await restoreDraftIfNeeded(scope)
-        _ = beginOpening(scope: scope, lifecycleGeneration: lifecycleGeneration)
-        _ = mountPreparedPresentation(target)
-        return scope
-    }
-
-    func installHostedAttachment(_ attachment: PendingAttachment, target: SessionPresentationIdentity) {
-        guard admits(target), let scope = lease?.scope else { return }
-        attachmentsByScope[scope, default: []].append(attachment)
-        schedulePersistence(for: scope)
-    }
     #endif
 }

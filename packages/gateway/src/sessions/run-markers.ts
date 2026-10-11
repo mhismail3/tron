@@ -42,7 +42,7 @@ interface RunMarkerStoreOptions {
 }
 
 const productionFileSystem: RunMarkerFileSystem = { mkdir, open, rename, rm };
-export const MAXIMUM_RUN_MARKER_OPERATIONS = 16;
+const MAXIMUM_RUN_MARKER_OPERATIONS = 16;
 const MAXIMUM_RUN_MARKER_BYTES = 32 * 1_024;
 const MAXIMUM_MARKER_IDENTIFIER_BYTES = 256;
 const MAXIMUM_MARKER_TIMESTAMP_BYTES = 128;

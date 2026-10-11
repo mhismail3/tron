@@ -12,12 +12,12 @@ distributed Beta product.
 | Work | Scheme | Configuration | Route / identity |
 |---|---|---|---|
 | Simulator app iteration | Tron Development | Development | beta route, `com.tron.mobile.beta` |
-| Unit tests | Tron Development or Tron Device | Test | `HOSTED_TEST`, isolated test host |
+| Real-Gateway E2E | Tron Development | Test | `scripts/ios-gateway-e2e-test`, `TronMobileE2ETests`, real Gateway fixture |
 | Physical development device | Tron Device | LocalDevice | optimized development, production-sandbox, `com.tron.mobile` |
-| Device performance tests | Tron Device Performance | DevicePerformance | hosted test, production-sandbox |
+| Performance measurement | Tron Device Performance | DevicePerformance | `TronMobileProfiling`, production-sandbox, never a validation gate |
 | Scenario profiling (agents) | `scripts/tron-profile ios` (Tron Device Performance) | DevicePerformance | optimized hosted test on the owned test simulator, shared lease |
 | Manual release archive | Tron Release | Release | production; archive/analyze/profile only |
-| UI validation | Tron UI Validation | Test (run and test actions) | `HOSTED_TEST` app, Test UI host |
+| UI validation (the only `tron-ios-test` product) | Tron UI Validation | Test (run and test actions) | `HOSTED_TEST` app, `TronMobileUITests` |
 
 `LocalDevice` is the optimized normal-use configuration: Swift `-O` whole-module
 compilation, normal Clang optimization, testability disabled, and
@@ -46,8 +46,9 @@ scripts/tron-ios-simulator start
 scripts/tron-ios-simulator status
 scripts/tron-ios-simulator stop
 scripts/tron-ios-test build
-scripts/tron-ios-test run --only-testing TronMobileTests/<Suite>
-scripts/tron-ios-test checkpoint
+scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>
+scripts/tron-ios-test run                 # the smoke set
+scripts/tron-ios-test checkpoint         # build, then the smoke set
 scripts/tron-ios-test status --all
 scripts/tron-ios-test lanes
 scripts/tron-ios-test lane-remove <name>

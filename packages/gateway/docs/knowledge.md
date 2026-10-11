@@ -336,24 +336,6 @@ There is no dual-write/fallback store and no automatic downgrade. A preparation
 failure leaves Knowledge visibly unavailable without disabling unrelated chat;
 after an uncertain publication, the manifest still decides which catalog is active.
 
-`knowledge-catalog.test.ts` covers preserving a legacy corpus and receipt replay,
-missing-revision retry, rescue of a 16,000-cut legacy state above four MiB,
-atomic group rollback, missing/symlinked catalogs, evidence-heavy byte/node
-paging, and public pagination/search across multiple pages with deleted anchors.
-`knowledge-catalog.scale.test.ts` retains the 10,005-record, over-four-MiB
-fixture; it checks exact body-read counts, full-history continuation,
-late-corpus search/recall, scoped recovery, and actual SQLite date-index plans.
-`knowledge-take-freshness.scale.test.ts` exercises source list/search/recall and
-row projection over 12,600 catalog heads and 440 sources, with latency budgets
-and the same bounded row/body separation. On the focused scale run, measured
-latencies were 5 ms row listing, 216 ms row search, 109 ms full-record listing,
-173 ms full-record search, and 162 ms recall (one run, host-dependent).
-The default Raindrop pagination test crosses the real 50-item provider page
-boundary with 51 items; the more expensive all-incomplete-head recovery case is
-in `raindrop-intake-multipage.scale.test.ts`. Run both exact scale regressions
-at release checkpoints with `npm run test:scale`. Default small fixtures do not
-prove the 10,000-record/four-MiB or repeated incomplete-head scale thresholds.
-
 Missing state in an established namespace is invalid and is never treated as
 an empty corpus. Missing or malformed/newer state, unsafe ancestors, and
 corrupt record/object files remain visible as failures rather than being
@@ -452,7 +434,7 @@ Writes send one exactly quoted `add-generic-password` command to `security -i`
 through stdin, never secret process arguments; the entire escaped UTF-8 command
 must fit below the CLI's 4096-byte input-buffer limit. Reads preserve token
 whitespace, removing only the CLI's output newline. Production uses the default
-Keychain target. `connector-credentials.test.ts` injects a private temporary
+Keychain target. `connector-credentials.integration.test.ts` injects a private temporary
 keychain path for every credential command, creates/unlocks it without user
 interaction or search-list changes, and deletes it in `finally`. Construction
 under Vitest or `NODE_ENV=test` without that path refuses before any Keychain
@@ -518,9 +500,6 @@ OpenAI API and subscription transports. Knowledge therefore uses the strict
 extractor, not provider-specific overrides or permissive repair. The retained
 `knowledge.model-failed` shape diagnostic identifies rejected replies without
 retaining source/model text; each field occurs once in the failure reason.
-Regression checks: `knowledge-model-output.test.ts` exercises the synthetic Luna
-leading-prose shape and rejection cases; `knowledge-observation.test.ts` checks
-publication through the durable observation owner.
 
 Prospective source retention is bounded by 64 cuts, 100,000 entries, and a
 conservative 32 MiB retained-data budget including the currently processed cut.
@@ -775,14 +754,6 @@ validation. Browser state is never used to enumerate or sync private bookmarks;
 there is no cookie store, background sync, automatic browser login, or remote
 mutation. Never send known protected content to a public mirror without approval.
 
-Focused regressions: `x-public-post.test.ts` covers identity, URL isolation,
-malformed/mismatched/truncated responses, fallback, partial content, cancellation,
-and safe transport; `source-capture.test.ts` covers final-URI redirect reconciliation
-across aliases/scopes and partial targets, conflicting canonical records, repeat and
-concurrent publication semantics, and envelope preservation. `x-public-capture.test.ts`
-covers raw evidence, opt-in, canonical URL identity deduplication, retry envelope
-preservation, linked-source relations and origin bounds, bounded linked-target
-failures, GitHub UI partial coverage, command-id bounds, and actual agent routing.
 Browser login, private history coverage, Article/thread completeness, and provider
 availability are live validation requirements, not conclusions from fixture tests.
 New Gateway tool behavior requires a manual maintainer update; agents never
@@ -968,35 +939,6 @@ transport boundary; cancellation before that boundary releases the reservation
 so tagging can use the shared budget. The order differs from the initial K5 draft: K8's existing Jev
 admission does not consume summary/tags, and its receipt/budget/move authority
 remains independent of queued enrichment.
-
-`knowledge-intake-enrichment.test.ts` drives ten real connector captures and
-service-owned summaries/tags with local provider fakes. Its model gate proves
-intake returns before generation settles; exact curation terminal callbacks and
-tracked async admissions join the summary-to-tag handoff before fixture removal.
-Assertion failure at the model gate and teardown while atomic publication is
-held exercise cleanup with live writers. Framework timeout does not cancel a
-test body: teardown releases its gates, joins that body and its owned work, and
-retains the fixture instead of deleting it if a bounded join fails. Teardown
-captures and detaches its exact fixtures before yielding, retires each global
-publication spy synchronously and only once, and leaves instance-local admission
-tracking installed until the owned work drains. A late hook cannot restore the
-next fixture's mocks or remove its root. Each whole cleanup/report has one
-5-second join budget, below the unchanged 10-second framework hook budget;
-failed joins retain their exact root even if their work later settles. The existing
-15-second test timeout is unchanged. Publication-observer failures release the
-suspended test body before awaiting its expected rejection; an observation
-deadline cannot strand the body until framework teardown. The Gateway suite's
-bounded worker concurrency applies without reducing the ten-item workload.
-Run `npx vitest run
-src/knowledge/knowledge-intake-enrichment.test.ts` from `packages/gateway` to
-regenerate `test-results/knowledge-intake-outcome.json` (ten durable outcomes)
-and `test-results/knowledge-intake-lifecycle{,-model,-publication}.json` (phase
-timings, dispatches, exact job states and cleanup result). These phase reports
-distinguish intake, model dispatch and publication stalls. The same command
-regenerates `test-results/knowledge-intake-failed-join.json` and
-`test-results/knowledge-intake-delayed-cleanup.json`: failure-first regressions
-read back the subsequent fixture's durable bytes and prove that delayed old
-cleanup preserves the next root and its publication interception.
 
 Each item keeps its bounded complete Raindrop JSON as a `provider-api` source
 representation, the fetched linked evidence separately, and the source

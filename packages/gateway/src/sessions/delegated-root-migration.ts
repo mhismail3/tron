@@ -166,7 +166,7 @@ async function inventoryRoot(rootInput: string, allRoots: readonly string[]): Pr
     absoluteReferences: [...references].filter(value => allRoots.some(source => within(source, resolve(value)))) };
 }
 
-export function discoverDelegatedLegacyRoots(input: { destinationRoot: string; tempDirectory?: string; legacyRoot?: string | undefined }): string[] {
+function discoverDelegatedLegacyRoots(input: { destinationRoot: string; tempDirectory?: string; legacyRoot?: string | undefined }): string[] {
   // pi-subagents scopes its Mac temporary store to the current UID.
   // Project/session artifact history is a separate configured destination;
   // moving it would strand references and the provider would recreate it.
@@ -179,7 +179,7 @@ export function discoverDelegatedLegacyRoots(input: { destinationRoot: string; t
   return resolve(root) === resolve(input.destinationRoot) ? [] : [resolve(root)];
 }
 
-export async function preflightDelegatedRootCutover(options: DelegatedRootMigrationOptions): Promise<DelegatedRootPreflight> {
+async function preflightDelegatedRootCutover(options: DelegatedRootMigrationOptions): Promise<DelegatedRootPreflight> {
   const destinationRoot = absolute(options.destinationRoot, "destination root");
   await ownerDirectory(destinationRoot, "destination root");
   const roots = [...new Set(options.legacyRoots.map(root => absolute(root, "legacy root")))].filter(root => root !== destinationRoot);

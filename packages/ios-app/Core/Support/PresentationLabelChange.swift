@@ -6,8 +6,8 @@ import Foundation
 /// Only labels that never return to an earlier value as time advances qualify
 /// (relative-time and elapsed-time text). That makes "differs from the label at
 /// `start`" monotone in time, so a bounded search finds the first differing
-/// instant without sampling every interval. `PresentationLabelChangeTests`
-/// verifies that property for the formatters that use it.
+/// instant without sampling every interval. Every formatter that uses this
+/// search must keep that monotone property.
 package enum PresentationLabelChange {
     /// Returns the earliest representable instant after `start` whose label
     /// differs from the label at `start`. When the label does not change within

@@ -268,9 +268,6 @@ struct ChatComposerView: View {
                     onSend: onSend,
                     onAbort: onAbort
                 )
-                #if HOSTED_TEST
-                .background(ChatComposerTrailingMotionProbe(mode: trailingMode))
-                #endif
                 .transition(
                     reduceMotion
                         ? .opacity
@@ -341,51 +338,10 @@ struct ChatComposerView: View {
                     .combined(with: .scale(scale: 0.82, anchor: .leading))
                     .combined(with: .opacity)
         )
-        #if HOSTED_TEST
-        .background(ChatCatchUpMotionProbe())
-        #endif
         .accessibilityLabel("Catch up")
         .accessibilityHint("Returns to the latest response and follows new messages")
     }
 }
-
-#if HOSTED_TEST
-final class ChatComposerTrailingMotionMarker: UIView {
-    var mode: ComposerTrailingMode?
-}
-
-struct ChatComposerTrailingMotionProbe: UIViewRepresentable {
-    let mode: ComposerTrailingMode
-
-    func makeUIView(context: Context) -> ChatComposerTrailingMotionMarker {
-        let view = ChatComposerTrailingMotionMarker()
-        view.isUserInteractionEnabled = false
-        view.accessibilityElementsHidden = true
-        view.mode = mode
-        return view
-    }
-
-    func updateUIView(_ view: ChatComposerTrailingMotionMarker, context: Context) {
-        view.mode = mode
-    }
-
-    static func dismantleUIView(_ view: ChatComposerTrailingMotionMarker, coordinator: ()) {
-        view.mode = nil
-    }
-}
-
-final class ChatCatchUpMotionMarker: UIView {}
-
-struct ChatCatchUpMotionProbe: UIViewRepresentable {
-    func makeUIView(context: Context) -> ChatCatchUpMotionMarker {
-        let view = ChatCatchUpMotionMarker()
-        view.isUserInteractionEnabled = false
-        view.accessibilityElementsHidden = true
-        return view
-    }
-    func updateUIView(_ view: ChatCatchUpMotionMarker, context: Context) {}
-}
-#endif
 
 struct ChatPendingAttachmentStrip: View {
     let attachments: [PendingAttachment]

@@ -760,21 +760,20 @@ final class TronSmokeUITests: XCTestCase {
 
     // Failure mode: a Home chat opened before any status is known never routes its
     // gear to Manage Home, because its claimed read is never published or promoted.
+    // Home is never an ordinary session row: while it is Working, its pinned row
+    // is the only Home entry in the dashboard (#756).
     @MainActor
-    func testHomeChatOpenedBeforeStatusRoutesGearAfterClaim() {
+    func testHomeIsNotAnOrdinarySessionRowWhileWorking() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-chat-before-status"]
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-phase-active"]
         app.launch()
-        let count = app.staticTexts["fixture.home-status-count"]
-        XCTAssertTrue(waitForLabel(count, containing: "home-status-count:1", timeout: 10), "The dashboard's first status read must be held")
-        let homeChat = app.buttons["session-row-home-shell-fixture:home-session"]
-        XCTAssertTrue(homeChat.waitForExistence(timeout: 10), app.debugDescription)
-        homeChat.tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.navigationBars.buttons["Manage Home"].waitForExistence(timeout: 10), "The claimed status read did not route the gear to Manage Home")
-        XCTAssertTrue(waitForLabel(count, containing: "home-status-count:2", timeout: 5))
-        app.terminate()
+        defer { app.terminate() }
+        let pinned = app.buttons["home-pinned-row"]
+        XCTAssertTrue(pinned.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(pinned.label.contains("Working"), pinned.label)
+        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:ordinary-session"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.buttons["session-row-home-shell-fixture:home-session"].exists, "Home must not be an ordinary session row")
     }
 
     @MainActor

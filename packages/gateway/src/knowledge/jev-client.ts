@@ -22,7 +22,7 @@ export interface JevNoulAnswer { type: "noul"; noul: number }
 export interface JevChoiceAnswer { type: "choice"; choice: string; probabilities: Record<string, number>; confidence: number }
 export interface JevScoreAnswer { type: "score"; score: number; legend: Record<string, string>; probabilities: Record<string, number>; confidence: number }
 export type JevAnswer = JevNoulAnswer | JevChoiceAnswer | JevScoreAnswer;
-export interface JevDecisionResponse { requestedModel: string; actualModel: string; answers: Record<string, JevAnswer>; usage: { input_tokens: number; output_tokens: number }; estimatedCostCents: number; maxEstimatedChargeCents: number }
+interface JevDecisionResponse { requestedModel: string; actualModel: string; answers: Record<string, JevAnswer>; usage: { input_tokens: number; output_tokens: number }; estimatedCostCents: number; maxEstimatedChargeCents: number }
 export type JevDispatchCertainty = "notSent" | "sent" | "uncertain";
 
 export class JevEvaluationError extends Error {

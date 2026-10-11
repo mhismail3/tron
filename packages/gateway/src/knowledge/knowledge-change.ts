@@ -5,10 +5,10 @@ import type { KnowledgeChange } from "./knowledge-store.js";
  * client must not replay its first page for each commit. The window coalesces
  * them into one payload carrying the latest state revision and the union of the
  * records the window touched. */
-export const KNOWLEDGE_CHANGE_WINDOW_MS = 250;
+const KNOWLEDGE_CHANGE_WINDOW_MS = 250;
 /** Above this many records the union is omitted, and the client refreshes its
  * first page instead of asking for identities it cannot bound. */
-export const KNOWLEDGE_CHANGE_MAX_RECORD_IDS = 64;
+const KNOWLEDGE_CHANGE_MAX_RECORD_IDS = 64;
 
 export class KnowledgeChangeCoalescer {
   private readonly recordIds = new Set<string>();

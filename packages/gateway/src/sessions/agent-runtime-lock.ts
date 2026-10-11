@@ -10,7 +10,7 @@ const LOCK_NAME = ".tron-gateway-runtime.lock";
  * owner per agent directory so two homes cannot accidentally share canonical
  * JSONL sessions (or their model/settings stores).
  */
-export async function acquireAgentRuntimeLock(agentDir: string): Promise<() => Promise<void>> {
+async function acquireAgentRuntimeLock(agentDir: string): Promise<() => Promise<void>> {
   const directory = resolve(agentDir);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, LOCK_NAME);

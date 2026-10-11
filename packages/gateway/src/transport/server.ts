@@ -198,7 +198,7 @@ interface HttpLeaseState {
 }
 
 /** One bounded admission owner for authenticated and pre-auth HTTP requests. */
-export class HttpTransportAdmission {
+class HttpTransportAdmission {
   private active = 0;
   private readonly identities = new Map<string, number>();
   private readonly addresses = new Map<string, number>();
@@ -265,7 +265,7 @@ export class HttpTransportAdmission {
   }
 }
 
-export function shouldTerminateHeartbeat(unansweredHeartbeats: number): boolean {
+function shouldTerminateHeartbeat(unansweredHeartbeats: number): boolean {
   return unansweredHeartbeats >= MAXIMUM_UNANSWERED_HEARTBEATS;
 }
 
@@ -273,7 +273,7 @@ function progressAge(at: number | null, now: number): string {
   return at === null ? "unknown" : String(Math.max(0, Math.round(now - at)));
 }
 
-export function heartbeatTimerDelay(elapsedMs: number, intervalMs = GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs): number {
+function heartbeatTimerDelay(elapsedMs: number, intervalMs = GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs): number {
   return Math.max(0, Math.round(elapsedMs - intervalMs));
 }
 
@@ -351,7 +351,7 @@ interface SynchronizationCompletion {
 
 type SynchronizationOwner = SynchronizationCompletion;
 
-export function existingSessionOpenOwner(
+function existingSessionOpenOwner(
   pendingSessionOpens: ReadonlyMap<string, { readonly requestId: string }>,
   synchronizations: ReadonlyMap<string, ActiveSessionSynchronization>,
   sessionId: string,
@@ -363,7 +363,7 @@ export function existingSessionOpenOwner(
     ?? synchronizations.get(sessionId)?.requestId;
 }
 
-export function releaseSessionTerminals(
+function releaseSessionTerminals(
   terminals: Set<string>,
   sessionId: string,
   belongsToSession: (terminalId: string, sessionId: string) => boolean,
@@ -373,7 +373,7 @@ export function releaseSessionTerminals(
   }
 }
 
-export function canAttachTerminal(
+function canAttachTerminal(
   subscriptionTokens: ReadonlyMap<string, string>,
   terminalId: string,
   belongsToSession: (terminalId: string, sessionId: string) => boolean,
@@ -381,7 +381,7 @@ export function canAttachTerminal(
   return [...subscriptionTokens.keys()].some((sessionId) => belongsToSession(terminalId, sessionId));
 }
 
-export function clearRequestSynchronizations(
+function clearRequestSynchronizations(
   synchronizations: Map<string, ActiveSessionSynchronization>,
   requestId: string,
   revoke?: (sessionId: string, synchronization: ActiveSessionSynchronization) => void,

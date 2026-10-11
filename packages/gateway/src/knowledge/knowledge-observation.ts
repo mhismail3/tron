@@ -166,7 +166,7 @@ function textPart(value: unknown): string {
   return parts.join("\n");
 }
 
-export function projectObservationEntry(raw: unknown): ObservationSourceEntry | undefined {
+function projectObservationEntry(raw: unknown): ObservationSourceEntry | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const entry = raw as Record<string, unknown>;
   if (typeof entry.id !== "string" || typeof entry.timestamp !== "string" || !validTimestamp(entry.timestamp)) return undefined;

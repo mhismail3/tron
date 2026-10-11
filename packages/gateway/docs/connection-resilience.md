@@ -78,7 +78,6 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   `outcome=excused` in the phone's connection log, so a run that shows no
   `pong_timeout` retirement can still tell an excused probe from a probe that
   never missed its deadline.
-  `GatewayClientTransportTests` pins each case on a manual clock.
 - **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
   node ceiling for local and mobile clients. Transcript pages reserve 24,000
   nodes and snapshots 30,000; dense detail is compacted without editing canonical
@@ -235,8 +234,7 @@ keeps today's uncompressed frames.
   compressed connection, bounded by the 32-socket cap.
 - **Measured (2026-09-27, Apple silicon Mac, host load about 10):** the real
   `GatewayServer` broadcasting to one paired client. Repository TypeScript,
-  Swift and Markdown filled the recorded snapshot-burst fixture's transcript
-  text (`packages/ios-app/Tests/Fixtures/gateway-real-burst.json.zlib`). Nine
+  Swift and Markdown filled a recorded snapshot-burst transcript. Nine
   600 KB `session.snapshot` frames went from 5,465,624 to 1,132,866 wire bytes
   (20.7%). 223 cumulative `session.progress` frames up to 24 KiB went from
   3,038,448 to 39,157 (1.3%). 200 small responses and summaries went from 51,199
@@ -499,9 +497,7 @@ integration suites protect ordering and accepted-command ownership. iOS recovery
 and dashboard owner tests cover attempt exhaustion, explicit retry and entry
 replacement without silently resetting the budget.
 
-`projection.test.ts` covers dense browser detail and tiny-content-part aggregates,
-including normalized response envelopes. `server-frame.test.ts` and capacity
-integration tests cover exact node limits, read-local fallback, both client roles,
+Capacity integration tests (`server-capacity.integration.test.ts`) cover exact node limits, read-local fallback, both client roles,
 and rejected-open subscription cleanup. The shared JSON-limit fixture is checked
 against both producer and native constants; the native transport regression drives
 an actual over-node-budget frame through decoding, diagnostic capture and strict

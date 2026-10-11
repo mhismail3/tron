@@ -72,7 +72,7 @@ interface SearchDocument extends SearchIndexDocument {
    * describe it (`RuntimeRegistry.readSearchCut`). */
   runtimeGeneration?: string;
 }
-export interface SessionSearchEmbeddingClient {
+interface SessionSearchEmbeddingClient {
   qualify(signal?: AbortSignal): Promise<{ dimension: number; language: string; modelRevision: string }>;
   embed(text: string, language?: string, signal?: AbortSignal): Promise<{ vector: number[]; dimension: number; language: string; modelRevision: string }>;
 }

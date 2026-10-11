@@ -58,15 +58,6 @@ maintenance". Regenerating rewrites Pi's generated entry ids, timestamps and
 tool-call ids, so a regeneration diff is total by construction; the test result,
 not the diff, is what reports an SDK delta.
 
-## Legacy session formats
-
-`v1.jsonl` (the implicit parent chain and `firstKeptEntryIndex`) and `v2.jsonl`
-(explicit tree ids and the legacy `hookMessage` role) are hand-authored, minimal
-pre-v3 sessions. `src/sessions/pi-session-compatibility.test.ts` asserts Pi still
-migrates both to the current format with the same model context. The corpus
-cannot cover this: the Gateway only writes the current format, so nothing else
-would notice an SDK that stopped reading an old user's session.
-
 ## Rollback probe
 
 The rollback probe (`packages/gateway/scripts/pi-session-compatibility-probe.mjs`,

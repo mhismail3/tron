@@ -228,13 +228,13 @@ scripts/tron work verify --tests "<integration or E2E command>"
 # Gateway, focused
 cd packages/gateway && npx vitest run <owning-test-file>
 
-# iOS: canonical owned test simulator, bounded process, and focused owner
+# iOS: canonical owned test simulator; UI journeys by name
 scripts/tron-ios-test build
-scripts/tron-ios-test run --only-testing TronMobileTests/<Suite>
+scripts/tron-ios-test run --only-testing TronMobileUITests/<Suite>/<test>
 
 # Mac
 scripts/tron mac generate
-cd packages/mac-app && xcodebuild build -project TronMac.xcodeproj -scheme TronMac \
+cd packages/mac-app && xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData
 ```
 

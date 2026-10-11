@@ -129,8 +129,7 @@ struct HostedHomeDashboardFixture: View {
             delayed: arguments.contains("-home-control-delayed"),
             browserState: arguments.first(where: { $0.hasPrefix("-home-browser-") })?.replacingOccurrences(of: "-home-browser-", with: ""),
             emptyContext: arguments.contains("-home-context-empty"),
-            sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""),
-            chatBeforeStatus: arguments.contains("-home-chat-before-status"))
+            sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""))
         self.gateway = gateway
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
@@ -215,12 +214,6 @@ struct HostedHomeDashboardFixture: View {
                     parentSessionId: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
                     messageCount: 0, firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1,
                     gatewayProfileID: profile.id, gatewayProfileLabel: profile.label)]
-                if arguments.contains("-home-chat-before-status") {
-                    model.sessions.append(SessionSummary(id: "home-session", name: "Home fixture chat", cwd: "/workspace",
-                        parentSessionId: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
-                        messageCount: 0, firstMessage: "Home fixture chat", phase: .idle, summaryRevision: 1,
-                        gatewayProfileID: profile.id, gatewayProfileLabel: profile.label))
-                }
                 ready = true
             } catch { self.error = error.localizedDescription }
         }
@@ -276,7 +269,6 @@ private actor HostedHomeShellGateway {
     private var browserReads = 0
     private var taskListReads = 0
     private var configuredModel: ModelRef?
-    private let chatBeforeStatus: Bool
     private var taskStopped = false
     private var taskRedelivered = false
     private var scopeRevoked = false
@@ -285,8 +277,7 @@ private actor HostedHomeShellGateway {
     private var materialized = false
     private var promptRoutes: [String] = []
     private var openedSessions: [String] = []
-    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, chatBeforeStatus: Bool = false) {
-        self.chatBeforeStatus = chatBeforeStatus
+    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
         self.sheetState = sheetState
         self.browserState = browserState
         self.emptyContext = emptyContext
@@ -313,14 +304,8 @@ private actor HostedHomeShellGateway {
             let row = SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace", parentSessionId: nil,
                 createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z", messageCount: 0,
                 firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1)
-            var rows = [try! JSONValue.encode(row)]
-            if chatBeforeStatus {
-                let home = SessionSummary(id: "home-session", name: "Home fixture chat", cwd: "/workspace", parentSessionId: nil,
-                    createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z", messageCount: 0,
-                    firstMessage: "Home fixture chat", phase: .idle, summaryRevision: 1)
-                rows.append(try! JSONValue.encode(home))
-            }
-            return (.object(["sessions": .array(rows), "nextCursor": .null,
+            // Home's chapters are never ordinary rows: the Gateway's user list omits them.
+            return (.object(["sessions": .array([try! JSONValue.encode(row)]), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("home-shell-fixture:1"), "archivedCount": .number(0)]), nil)
         case "provider.list":
             return (.object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),
@@ -419,10 +404,6 @@ private actor HostedHomeShellGateway {
             return (nil, .object(["code": .string("conflict"), "message": .string("Sealed chapter refused"), "retryable": .bool(false)]))
         case "home.status":
             homeStatusCount += 1
-            // The dashboard's first read is held so a chat opened now claims the status surface before any answer.
-            // Only the client's cancellation ends the hold early, as a CancellationError: the
-            // cancelled request then gets no answer, as the Gateway would give none.
-            if chatBeforeStatus, homeStatusCount == 1 { try await Task.sleep(for: .seconds(30)) }
             if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
             return (homeStatus(), nil)
         case "home.designate":

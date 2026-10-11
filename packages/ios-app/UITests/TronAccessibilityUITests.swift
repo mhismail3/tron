@@ -1,7 +1,7 @@
 import XCTest
 
 /// SwiftUI semantics are queried through XCTest's real accessibility client,
-/// not uninitialized NSObject proxies in a hosted unit-test process.
+/// not uninitialized NSObject proxies in a hosted test process.
 @MainActor
 final class TronAccessibilityUITests: XCTestCase {
     private func launch(_ arguments: [String] = []) -> XCUIApplication {

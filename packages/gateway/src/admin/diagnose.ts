@@ -46,7 +46,7 @@ const TAILSCALE_PATH_LINE = /magicsock/iu;
 const PAYLOAD_DOCUMENTS = ["current.json", "previous.json", "deployment-state.json", "update-progress.json"] as const;
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
-export interface BoundedCommandResult {
+interface BoundedCommandResult {
   /** Exit code, or null when the command never ran to completion. */
   code: number | null;
   timedOut: boolean;
@@ -54,7 +54,7 @@ export interface BoundedCommandResult {
   error?: string;
 }
 
-export type BoundedCommand = (tool: string, args: readonly string[], timeoutMs: number) => Promise<BoundedCommandResult>;
+type BoundedCommand = (tool: string, args: readonly string[], timeoutMs: number) => Promise<BoundedCommandResult>;
 
 export interface HealthResult {
   status?: number;
@@ -62,7 +62,7 @@ export interface HealthResult {
   error?: string;
 }
 
-export type HealthReader = (url: string) => Promise<HealthResult>;
+type HealthReader = (url: string) => Promise<HealthResult>;
 
 export interface DiagnosticBundleOptions {
   /** `<count><s|m|h|d>`; defaults to `2h`. */
@@ -414,7 +414,7 @@ function parseDuration(value: string): number | undefined {
   return Number(match[1]) * (UNIT_MS[match[2]] ?? 0);
 }
 
-export async function collectDiagnosticBundle(options: DiagnosticBundleOptions = {}): Promise<{ path: string }> {
+async function collectDiagnosticBundle(options: DiagnosticBundleOptions = {}): Promise<{ path: string }> {
   const since = options.since ?? DEFAULT_SINCE;
   const sinceMs = parseDuration(since);
   if (sinceMs === undefined) throw new Error(`invalid --since value: ${since}`);

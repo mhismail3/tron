@@ -33,7 +33,7 @@ const HANDOFF_END = "\n[/Tron workspace handoff]\n\n";
 
 /** Plain task context is the supported common denominator for native and
  * external one-shot runners. Never rewrite workflow programs or agent configs. */
-export function withWorkspaceHandoff(task: string, workspace: TronWorkspaceDescriptor): string {
+function withWorkspaceHandoff(task: string, workspace: TronWorkspaceDescriptor): string {
   if (task.startsWith(HANDOFF_START)) {
     const end = task.indexOf(HANDOFF_END);
     if (end >= 0) task = task.slice(end + HANDOFF_END.length);

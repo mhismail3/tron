@@ -51,8 +51,7 @@ without a positive
 
 **Rollback:** a build older than the record format refuses the record (Home
 unavailable) and leaves it
-unchanged. There is no down-conversion. `home-owner.test.ts` proves the refusal and
-the unchanged bytes.
+unchanged. There is no down-conversion. The refusal leaves the record's bytes unchanged.
 
 ### Neutral working directory
 
@@ -68,6 +67,18 @@ on it and no project resource can load from it. The profile's `noExtensions`,
 
 A physical chapter is one canonical session holding part of Home's history. The
 record's ordered chapter ledger decides which chapter is writable.
+
+### Dashboard list
+
+The record's chapter set is the only identity for Home (not the workspace cwd: only
+the record names a chapter, and a reserved successor has no file yet). The
+`session.list` projection (`scope: "user"`) omits every chapter the record names,
+current or sealed, enabled or disabled, so Home is never a dashboard row. Live
+`session.summary` events for a chapter still reach clients: the status owner refreshes
+Home on them, and a client applies a summary only to a row it already lists. Catalog
+membership is unchanged, so search (`catalog("user")`, `readSearchCut`), `session.open`
+by id, `scope: "all"` and Home's own reads are not filtered. A designation or rollover
+that changes the chapter set publishes a list change, so clients re-list.
 
 ### Limits and rollover
 
@@ -373,8 +384,7 @@ restart, or cache expiry.
   classifier matches substrings such as `500`, so a deterministic refusal that embedded
   `effective 4500 tokens` ran its retry budget. The variable detail stays on the refusal
   record, which `home.context` reports as `lastRefusalReason` and `lastRefusalDetail`; the
-  chat error does not carry it. `home-request-policy.test.ts` proves every reason's text is
-  never retryable, and C12 of `home-request-seam.integration.test.ts` proves an overflow
+  chat error does not carry it. Every reason's text is never retryable, and C12 of `home-request-seam.integration.test.ts` proves an overflow
   refusal produces one refusal and no retry.
 - **Cache marks.** OpenAI and DeepSeek reuse the prefix themselves. For
   `anthropic-messages`, the `before_provider_request` handler marks the first block
@@ -1113,7 +1123,7 @@ do not drain the inbox.
 - **Rollback (#749).** `homeWake` is an additive invocation-receipt source, following
   `subagentWake`. A Gateway built before it skips a receipt whose source it does not know
   (the reader returns no receipt for it), so the session still opens. The rolled-back
-  wake's rows become unattributed, not refused. Pinned by `invocation-receipts.test.ts`.
+  wake's rows become unattributed, not refused.
 - **Envelope.** Each activation has one delivery envelope, derived from the frozen
   memory prefix, the incoming text and
   images, the effective model window and the response reserve, bounded by the
@@ -1440,9 +1450,6 @@ without a retained artifact.
 | `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; `session.setTools` restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |
 | `src/episodic/home-source.e2e.test.ts` | cross-chapter replay, restart, navigation and frozen-cut proof | `test-results/home-memory/continuity.json` | `npx vitest run src/episodic/home-source.e2e.test.ts` |
-| `src/episodic/home-source.scale.test.ts` | streamed source bound (`heap.json`); 2,000 messages at production caps (`heap-production.json`); 20 messages of 2 MiB at production caps (`heap-over-cap.json`) | `test-results/home-memory/{heap,heap-production,heap-over-cap}.json` | `npx vitest run --config vitest.scale.config.ts src/episodic/home-source.scale.test.ts` (`-t production` for `heap-production.json`) |
-| `src/home/home-owner.test.ts` | strict admission; unknown-version, malformed-topology, corrupt, empty and permissive records preserved and refused; unavailable workspace, including through a symlink; `home.chapterList` order, exact sealed metrics, live active measurement, absent-not-zero sizes, shared limits, and typed undesignated/unavailable refusals | none | `npx vitest run src/home/home-owner.test.ts` |
-| `src/home/home-session-recovery.test.ts` | reserved-chapter scan: absence proven only after a complete scan; duplicate IDs; path mismatch; uninspectable entries; enumeration errors | none | `npx vitest run src/home/home-session-recovery.test.ts` |
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on the chosen model and level; an omitted model keeps the default; unregistered, virtual, unusable and unsupported choices, and thinking without a model, are refused before any task or session; the refusal list is bounded and reaches Home; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries; frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
 | `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
@@ -1454,7 +1461,6 @@ without a retained artifact.
 | `src/home/home-ledger-crash.e2e.test.ts` | seal and reserve with a real child process killed by SIGKILL | `test-results/home-ledger-crash/report.json` | `npx vitest run src/home/home-ledger-crash.e2e.test.ts` |
 | `src/home/home-receipt-crash.e2e.test.ts` | SIGKILL after binding, during SDK effects before completion, and after completion before response: pending fences and exact replay | `test-results/home-receipt-crash/report.json` | `npx vitest run src/home/home-receipt-crash.e2e.test.ts` |
 | `src/sessions/runtime-registry.integration.test.ts` (`-t deadline`) | 24-hour owned-operation deadline: endless no-effect and successful-read turns; a blocked provider request; joined stop | `test-results/owned-session-deadline/report.json` | `npx vitest run src/sessions/runtime-registry.integration.test.ts -t deadline` |
-| `src/home/home-request-policy.test.ts`, `home-memory-tools.test.ts`, `home-memory.test.ts`, `home-task-spend.test.ts` | cache marks on the view's first block and last line; every refusal reason's chat text is never classified as a transient provider error; typed unavailable tool results; serialized opens and coded ingest failure; usage deduplication and contradictory-usage refusal | none | `npx vitest run src/home/home-request-policy.test.ts src/home/home-memory-tools.test.ts src/home/home-memory.test.ts src/home/home-task-spend.test.ts` |
 
 Two limits apply:
 

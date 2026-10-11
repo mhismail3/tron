@@ -13,7 +13,6 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 export { PI_VERSION };
-export const PINNED_PI_VERSION = PI_VERSION;
 export const EXTENSION_PRESENTATION_VERSION = 3 as const;
 
 export type HostClassification = "native-semantic" | "remote-component" | "renderer" | "pi-runtime" | "explicit-fallback";
