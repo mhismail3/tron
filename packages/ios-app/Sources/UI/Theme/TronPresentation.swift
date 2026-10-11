@@ -1243,6 +1243,34 @@ enum TronSettingsGroupSurfaceStyle: Equatable, Sendable {
     case scrollOptimized
 }
 
+/// One badge, styled by its kind (doc 7.3). An unknown kind is neutral and
+/// still shows its label.
+struct SettingsBadgeView: View {
+    let badge: SettingsBadge
+
+    var body: some View {
+        Text(badge.label)
+            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(tint.opacity(0.14)))
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(badge.detail.map { "\(badge.label), \($0)" } ?? badge.label)
+    }
+
+    private var tint: Color {
+        switch badge.kind {
+        case "layer": .tronEmerald
+        case "scope": .tronCyan
+        case "source": .tronPurple
+        case "authority": .tronBlue
+        case "state": .tronAmber
+        default: .tronTextSecondary
+        }
+    }
+}
+
 struct TronSettingsGroup<Content: View>: View {
     let title: String
     let detail: String?

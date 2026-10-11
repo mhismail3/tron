@@ -79,7 +79,7 @@ extension EnvironmentValues {
 struct ConfigurationSliderRequest {
     enum Editor {
         case contextWindow(ContextWindowSliderRequest)
-        case thinking(ThinkingSliderRequest)
+        case choice(SettingsChoiceSliderRequest)
     }
     let session: ConfigurationSliderPresentation.Session
     let anchor: Anchor<CGRect>
@@ -120,8 +120,8 @@ private struct ConfigurationSliderHost: ViewModifier {
                             case .contextWindow(let editor):
                                 ContextWindowSliderEditor(request: editor, anchor: request, source: source,
                                                           availableSize: geometry.size, presentation: presentation)
-                            case .thinking(let editor):
-                                ThinkingSliderEditor(request: editor, anchor: request, source: source,
+                            case .choice(let editor):
+                                SettingsChoiceSliderEditor(request: editor, anchor: request, source: source,
                                                      availableSize: geometry.size, presentation: presentation)
                             }
                         }
@@ -166,7 +166,7 @@ struct ConfigurationSliderContainer<Content: View>: View {
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
     @ScaledMetric(relativeTo: .body) private var contextPanelHeight: CGFloat = 170
-    @ScaledMetric(relativeTo: .body) private var thinkingPanelHeight: CGFloat = 140
+    @ScaledMetric(relativeTo: .body) private var choicePanelHeight: CGFloat = 140
     @AccessibilityFocusState private var sliderFocused: Bool
 
     private var target: CGRect {
@@ -174,7 +174,7 @@ struct ConfigurationSliderContainer<Content: View>: View {
         let preferredHeight: CGFloat
         switch anchor.editor {
         case .contextWindow: preferredHeight = contextPanelHeight
-        case .thinking: preferredHeight = thinkingPanelHeight
+        case .choice: preferredHeight = choicePanelHeight
         }
         let height = min(preferredHeight, max(1, availableSize.height - 24))
         return CGRect(

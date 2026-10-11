@@ -724,16 +724,30 @@ Hosted journeys: `TronSmokeUITests.testManageHomeSettingsApprovalsApproveAndDecl
 show; the push flags stage the relay's payload through `PushNotificationTap.admit`), and `TronProjectTrustUITests.testPermissionFloorsLowerNeedsConfirmAndRaiseApplies` (the
 `floors` scenario of `HostedProjectTrustFixture`).
 The generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is
-`SettingsRendererView` with `SettingsRendererRow` and `SettingsBadgeView`. It sends
-`SettingsRendererContract` (version 1; `toggle`, `choice`, `number`, `text`, `catalog`,
-`readOnly`) with `settings.resolve` and renders whatever comes back: sections in Gateway order
+`SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
+in `TronPresentation.swift`. It sends
+`SettingsRendererContract` (version 1; `toggle`, `choice`, `number`, `text`, `secret`,
+`list`, `catalog`, `readOnly`) with `settings.resolve` and renders whatever comes back: sections in Gateway order
 with their summary (essential values, overrides with a layer badge, waiting approvals, recent
 agent changes) as the section's expand row, every key on expand (essential, then Advanced, with
 subgroup headings), All settings, and search over label, id, help and display. A control it
 does not implement, or a missing presentation, renders the `display` read-only; an unknown
 badge kind is neutral; a group no section declares is shown under its id, so a value is never
 hidden. Choices with an `optionsSource` and catalogs come from `settings.options`, re-requested
-when a key in `dependsOn` changes. Every edit is a `settings.change` dry run first: a refusal
+when a key in `dependsOn` changes. `orderedChoice` uses `SettingsChoiceSlider.swift`,
+the same anchored `ConfigurationSliderContainer` and track used by existing thinking
+rows; the Gateway supplies its values and labels. Both callers share one editor,
+including its native motion, Dynamic Type, VoiceOver adjustment, cancellation and
+commit-on-dismiss lifecycle. Catalogs use the existing selected-value checkmark. `SettingsValueEditors.swift`
+hosts write-only secret replacement and ordered string-list add/remove/reorder in
+standard progressive sheets, fields, groups, rows and action capsules. Secret drafts
+start empty and are cleared on submission/disappearance; list drafts have local row
+identity and write only on Save. Unknown item kinds stay read-only. The
+`testSettingsRendererSecretAndListEditors` journey reopens both editors against the
+fixture socket to prove redaction and persisted ordering.
+`testSettingsRendererOrderedChoiceUsesSharedSlider` exercises a served choice through
+selection and persistence; the legacy Agent Defaults journey protects that caller.
+Every edit is a `settings.change` dry run first: a refusal
 shows under its row and nothing is applied, and a change with `confirm` text asks first.
 `SettingsTrustCoordinator` owns the generic reads and the receipt-bound change, which the
 Permissions floors view also uses for its Mac target. Surfaces adopt the renderer in slices 8

@@ -1119,6 +1119,8 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch, in: app)
         let lite = any["settings-option-Fixture Lite"]
         XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "settings-renderer-catalog")
+        XCTAssertTrue(app.images["Selected"].exists, "The catalog marks the current value like the existing pickers")
         lite.tap()
         XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
         XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:0", timeout: 5))
@@ -1139,6 +1141,85 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(any["settings-row-run.retry.maxRetries"].exists)
         XCTAssertFalse(any["settings-row-run.transport"].exists, "Search shows only matching rows")
         keepScreenshot(named: "settings-renderer-search")
+    }
+
+    /// The same native anchored choice editor works for schema-only choices,
+    /// without thinking-specific labels or a second slider presentation owner.
+    @MainActor
+    func testSettingsRendererOrderedChoiceUsesSharedSlider() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
+        tapScrolling(app.buttons["settings-section-model-expand"], in: app)
+        let row = any["settings-row-model.thinking"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-ordered-choice-row")
+        tapScrolling(row.buttons.firstMatch.buttons.firstMatch, in: app)
+        let slider = any["settings-choice-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "An ordered choice reuses the native anchored slider, not a menu")
+        keepScreenshot(named: "settings-renderer-ordered-choice-expanded")
+        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
+        // The editor's modal ScrollView becomes firstMatch while it is open.
+        // Dismiss on the host backdrop below the observed slider, not inside that panel.
+        let outside = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80)))
+        outside.tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        XCTAssertTrue(showsText("Off", in: app))
+    }
+
+    /// Write-only replacement and ordered-list operations cross the real client
+    /// socket; reopening reads the stored result rather than the editor's draft.
+    @MainActor
+    func testSettingsRendererSecretAndListEditors() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
+        tapScrolling(app.buttons["settings-section-lab-expand"], in: app)
+        let password = any["settings-row-lab.password"]
+        reveal(password, in: app)
+        tapScrolling(password.buttons.firstMatch.buttons.firstMatch, in: app)
+        let field = app.secureTextFields["New value"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-secret-empty")
+        field.tap()
+        field.typeText("fixture-replacement")
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        XCTAssertFalse(showsText("fixture-replacement", in: app), "A submitted secret never appears in the row")
+        tapScrolling(password.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "New value", "Reopening never pre-fills a secret")
+        app.buttons["Done"].tap()
+
+        let paths = any["settings-row-lab.paths"]
+        tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(app.buttons["Edit beta"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-list-before-edit")
+        app.buttons["Edit beta"].tap()
+        app.buttons["Move up"].tap()
+        app.buttons["Edit alpha"].tap()
+        app.buttons["Remove"].tap()
+        app.textFields["Value"].tap()
+        app.textFields["Value"].typeText("gamma")
+        app.buttons["Add"].tap()
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:2", timeout: 5))
+        XCTAssertTrue(paths.buttons.matching(NSPredicate(format: "value == %@", "beta, gamma")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(app.buttons["Edit beta"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Edit gamma"].exists)
+        XCTAssertFalse(app.buttons["Edit alpha"].exists)
+        keepScreenshot(named: "settings-renderer-list-persisted")
     }
 
     /// The renderer in dark mode at the largest accessibility text size.

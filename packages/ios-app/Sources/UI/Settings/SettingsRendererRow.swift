@@ -54,6 +54,10 @@ struct SettingsRendererRow: View {
             if choices.isEmpty {
                 // A source with nothing to offer (a model that does not think) is a value, not a menu.
                 readOnlyRow(subtitle: options == nil ? nil : "No options for the current choice")
+            } else if presentation?.valueKind == "orderedChoice", let value = setting.value {
+                SettingsChoiceSelectionRow(title: title, icon: "slider.horizontal.3", value: value,
+                                           display: setting.display, options: choices, onChange: { onChange($0) })
+                    .controlSize(.small)
             } else {
                 TronSelectionRow(icon: "list.bullet", title: title, value: setting.display) {
                     ForEach(choices) { option in
@@ -67,6 +71,21 @@ struct SettingsRendererRow: View {
                                  value: Binding(get: { setting.value?.intValue ?? 0 }, set: { onChange(.number(Double($0))) }))
         case .text:
             SettingsRendererTextRow(title: title, value: setting.value?.stringValue ?? "", onCommit: { onChange(.string($0)) })
+        case .secret:
+            TronSelectionSheetRow(icon: "lock", title: title, value: setting.display) {
+                SettingsSecretEditor(title: title, help: presentation?.help ?? "", onChange: onChange)
+            }
+        case .list:
+            if ["stringList", "toolSelection"].contains(presentation?.valueKind ?? ""),
+               setting.value == nil || setting.value?.arrayValue?.allSatisfy({ $0.stringValue != nil }) == true {
+                let values = setting.value?.arrayValue ?? []
+                TronSelectionSheetRow(icon: "list.bullet", title: title, value: setting.display) {
+                    SettingsListEditor(title: title, help: presentation?.help ?? "",
+                                       values: values.compactMap(\.stringValue), onChange: onChange)
+                }
+            } else {
+                readOnlyRow(subtitle: "Update Tron to edit this list")
+            }
         case .catalog:
             TronSelectionSheetRow(icon: "square.stack.3d.up", title: title, value: setting.display) {
                 SettingsCatalogPicker(setting: setting, target: target, title: title) { onChange($0) }
@@ -203,7 +222,13 @@ private struct SettingsCatalogPicker: View {
                                 onChoose(option.value)
                                 dismiss()
                             } label: {
-                                TronSettingsRow(icon: nil, title: option.label, subtitle: option.disabledReason ?? option.detail)
+                                TronSettingsRow(icon: nil, title: option.label, subtitle: option.disabledReason ?? option.detail) {
+                                    if option.value == setting.value {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(Color.tronEmerald)
+                                            .accessibilityLabel("Selected")
+                                    }
+                                }
                             }
                             .buttonStyle(.plain)
                             .disabled(option.disabledReason != nil)

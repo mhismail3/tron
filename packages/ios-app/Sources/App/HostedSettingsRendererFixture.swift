@@ -69,10 +69,13 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var closed = false
     // The fixture's stores: one Mac layer over built-ins.
     private var model = "pro"
+    private var thinking = "high"
     private var retries = 6
     private var transport = "sse"
     private var blockImages = false
     private var focusMode = "calm"
+    private var hasSecret = false
+    private var paths = ["alpha", "beta"]
     private var applied = 0
     private var thinkingOptions = -1
 
@@ -101,9 +104,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             key("model.ref", group: "model", value: .object(["provider": .string("fixture"), "id": .string(model)]), display: modelName,
                 layer: "mac", presentation: presentation("Model", "The model new chats start with.", 10, "essential", "catalog",
                     extra: ["optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])),
-            key("model.thinking", group: "model", value: model == "pro" ? .string("high") : .string("off"),
-                display: model == "pro" ? "High" : "Off", presentation: presentation("Thinking", "How much the model reasons.", 20,
-                    "essential", "choice", extra: ["optionsSource": .object(["name": .string("catalog.thinkingLevels"),
+            key("model.thinking", group: "model", value: model == "pro" ? .string(thinking) : .string("off"),
+                display: model == "pro" ? thinking.capitalized : "Off", presentation: presentation("Thinking", "How much the model reasons.", 20,
+                    "essential", "choice", extra: ["valueKind": .string("orderedChoice"), "optionsSource": .object(["name": .string("catalog.thinkingLevels"),
                                                                               "dependsOn": .array([.string("model.ref")])])])),
             key("context.images.block", group: "context", value: .bool(blockImages), display: blockImages ? "On" : "Off",
                 presentation: presentation("Block images", "Images are not sent to the model.", 10, "essential", "toggle")),
@@ -119,12 +122,18 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                     extra: ["options": .array([choice("calm", "Calm"), choice("deep", "Deep")])])),
             key("lab.palette", group: "lab", subgroup: "Experiments", value: .string("teal"), display: "Teal",
                 presentation: presentation("Palette", "A control this app does not implement.", 20, "advanced", "colorWheel")),
+            key("lab.paths", group: "lab", value: .array(paths.map { .string($0) }), display: paths.joined(separator: ", "),
+                presentation: presentation("Paths", "Ordered search locations.", 25, "advanced", "list",
+                    extra: ["valueKind": .string("stringList")])),
+            key("lab.password", group: "lab", value: nil, display: hasSecret ? "Set" : "Not set",
+                presentation: presentation("Password", "Write-only replacement.", 26, "advanced", "secret",
+                    extra: ["redacted": .bool(true)])),
             key("lab.secretToken", group: "lab", value: nil, display: "Set",
                 presentation: presentation("Token", "A secret this app cannot edit yet.", 30, "advanced", "readOnly",
                     extra: ["note": .string("Update Tron to edit"), "redacted": .bool(true)])),
         ]
         let sections: [JSONValue] = [
-            section("model", "Model", 10, essential: [("Model", modelName), ("Thinking", model == "pro" ? "High" : "Off")],
+            section("model", "Model", 10, essential: [("Model", modelName), ("Thinking", model == "pro" ? thinking.capitalized : "Off")],
                     overrides: [("Model", modelName)]),
             section("context", "Context", 20, essential: [("Block images", blockImages ? "On" : "Off")]),
             section("run", "Run", 50, essential: [("Retries", "\(retries) retries")], overrides: [("Retries", "\(retries) retries")],
@@ -169,10 +178,13 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         if !dryRun {
             switch key {
             case "model.ref": model = value?.objectValue?["id"]?.stringValue ?? model
+            case "model.thinking": thinking = value?.stringValue ?? thinking
             case "run.retry.maxRetries": retries = value?.intValue ?? retries
             case "run.transport": transport = value?.stringValue ?? transport
             case "context.images.block": blockImages = value?.boolValue ?? blockImages
             case "lab.focusMode": focusMode = value?.stringValue ?? focusMode
+            case "lab.paths": paths = value?.arrayValue?.compactMap(\.stringValue) ?? []
+            case "lab.password": hasSecret = value?.stringValue?.isEmpty == false
             default: break
             }
             applied += 1

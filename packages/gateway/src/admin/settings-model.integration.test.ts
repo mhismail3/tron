@@ -359,6 +359,21 @@ describe("settings renderer contract", () => {
     });
     expect(presentedRow(everything, "run.retry.maxRetries").presentation.note).toBeUndefined();
 
+    // The new iPhone primitives persist through the same real change path. A
+    // secret is writable but never comes back as an editable/readable value.
+    await maintainerChange(f, [
+      { key: "sources.skills", layer: "mac", op: "set", value: ["beta", "gamma"] },
+      { key: "run.httpProxy", layer: "mac", op: "set", value: "http://replacement.invalid:8080" },
+    ]);
+    const edited = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    expect(presentedRow(edited, "sources.skills")).toMatchObject({ value: ["beta", "gamma"], presentation: { control: "list", valueKind: "stringList" } });
+    expect(presentedRow(edited, "run.httpProxy").presentation).toMatchObject({ control: "secret", redacted: true });
+    expect(presentedRow(edited, "run.httpProxy").value).toBeNull();
+    expect(JSON.stringify(edited)).not.toContain("replacement.invalid");
+    const history = await f.service.invoke(subscribed(), "settings.history", {});
+    expect(JSON.stringify(history)).not.toContain("replacement.invalid");
+    transcript.push({ case: "secret and ordered list after changes", response: { list: presentedRow(edited, "sources.skills"), secret: presentedRow(edited, "run.httpProxy") } });
+
     // A client that speaks only toggles: a choice with no fallback, and a catalog whose fallback is read-only.
     const toggles = await resolveWith(f, macTarget, { version: 1, controls: ["hologram", "toggle"] });
     expect(presentedRow(toggles, "model.thinking[role=chat]", { model: f.modelKey }).presentation).toMatchObject({ control: "readOnly", note: UPDATE_TRON_NOTE });

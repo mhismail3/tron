@@ -6,13 +6,13 @@ import TronMobileCore
 /// control's declared fallback, or read-only, so a key never disappears.
 enum SettingsRendererContract {
     static let version = 1
-    static let controls = ["toggle", "choice", "number", "text", "catalog", "readOnly"]
+    static let controls = ["toggle", "choice", "number", "text", "secret", "list", "catalog", "readOnly"]
 }
 
 /// The control one row renders with. A control this app does not implement, or
 /// a missing presentation, is read-only: the row still shows its `display`.
 enum SettingsRowControl: String, Equatable, Sendable {
-    case toggle, choice, number, text, catalog, readOnly
+    case toggle, choice, number, text, secret, list, catalog, readOnly
 
     init(negotiated control: String?) {
         self = control.flatMap(Self.init(rawValue:)) ?? .readOnly

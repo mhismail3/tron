@@ -18,6 +18,7 @@ struct SettingsRendererView: View {
     @State private var loadGeneration = 0
     @State private var reloadTick = 0
     @State private var search = ""
+    @State private var sliderPresentation = ConfigurationSliderPresentation()
     @State private var expanded: Set<String> = []
     @State private var showsAll = false
     /// Gateway refusals of a dry run, shown under their row; nothing was applied.
@@ -56,6 +57,8 @@ struct SettingsRendererView: View {
             .padding(20)
         }
         .tronScrollEdgeChrome()
+        .tronConfigurationSliderHost(sliderPresentation)
+        .environment(\.configurationSliderSignposts, model.performanceSignposts)
         .confirmationDialog(
             "Change this setting?",
             isPresented: Binding(get: { pendingConfirmation != nil }, set: { if !$0 { pendingConfirmation = nil } }),
@@ -200,11 +203,14 @@ struct SettingsRendererView: View {
             SettingsRendererRow(
                 setting: setting,
                 target: target,
-                editable: writeLayer != nil && changingID != setting.id,
+                editable: writeLayer != nil,
                 dependencyDisplay: Self.dependencyDisplay(setting, in: resolution),
                 error: rowErrors[setting.id],
                 onChange: { value in change(setting, value: value) }
             )
+            // Keep the presenting control's identity while its accepted change
+            // completes; replacing it with read-only would retire its child sheet.
+            .disabled(changingID != nil)
         }
     }
 
@@ -351,34 +357,6 @@ struct SettingsRendererView: View {
 
 private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
-}
-
-/// One badge, styled by its kind (doc 7.3). An unknown kind is neutral and
-/// still shows its label.
-struct SettingsBadgeView: View {
-    let badge: SettingsBadge
-
-    var body: some View {
-        Text(badge.label)
-            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(tint.opacity(0.14)))
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityLabel(badge.detail.map { "\(badge.label), \($0)" } ?? badge.label)
-    }
-
-    private var tint: Color {
-        switch badge.kind {
-        case "layer": .tronEmerald
-        case "scope": .tronCyan
-        case "source": .tronPurple
-        case "authority": .tronBlue
-        case "state": .tronAmber
-        default: .tronTextSecondary
-        }
-    }
 }
 
 /// Converts a resolved row into the Gateway's identifier alphabet for UI tests.

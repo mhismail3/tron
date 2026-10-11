@@ -80,6 +80,7 @@ struct TronSelectionSheetRow<Destination: View>: View {
             TronProgressiveSheetLink(accessibilityLabel: accessibilityLabel ?? title, accent: theme?.accent ?? accent, destination: destination) {
                 TronInlineActionLabel(value, accent: accent)
             }
+            .accessibilityValue(value)
         }
     }
 }
