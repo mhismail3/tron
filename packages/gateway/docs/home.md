@@ -900,17 +900,28 @@ its run id, because the workflow itself can no longer be stopped. A live workflo
 as itself, and the provider's workflow stop reaches its children.
 
 Settlement runs in this order: operation terminal; report stop joined; the Gateway stops
-and joins the live async runs and live workflow children; the worker's settlement fact is
-appended; the evidence cut; the outcome. The join waits until no run is live. Its bound
-is one minute after the stops are requested, or the task's 24-hour deadline (which stays
-armed through settlement) if that comes first; after the bound, the join waits one
-disposal grace (5 s) more. A stopped runner settles within seconds, so a run still live
+and joins the live async runs and live workflow children; each async run's completion
+notice is recorded (below); the worker's settlement fact is appended; the evidence cut; the
+outcome. The join waits until no run is live. Its bound is one minute after the stops are
+requested, or the task's 24-hour deadline (which stays armed through settlement) if that
+comes first; after the bound, the join waits one disposal grace (5 s) more. A stopped runner settles within seconds, so a run still live
 then (a refused stop, an unreadable status) keeps the detached outcome rather than
 holding the sealed task open. The settlement fact is the worker's canonical custom entry
 `tron-home-task-subagents` with `{ receiptId: "subagents:<operationId>", operationId,
 stoppedAtEnd }`. It is written only when the task launched async runs, so its absence
 proves zero Gateway stops. Its value is `null` unless every stop was accepted and every
 run was joined.
+
+**Completion notices.** The provider writes an async run's completion as a `subagent-notify`
+custom message after the run is terminal, and the Gateway records a
+`tron.context-delivery.v4` receipt for it. The notice can land after the report that
+settled the run's status, so settlement joins until every async run the task started has a
+recorded notice: a `subagent-notify` whose text names the run id, with its receipt present.
+The join uses the same bound as the stop join. The notice has no structured run identity, so
+the match is on the run id in its text. The fact and the evidence cut come after this join, so
+a settled task has no later append from its runs. A notice still unrecorded at the bound is
+counted as `noticesUndelivered` in `home.task.subagents`; a non-zero count is the
+`notice-undelivered` condition. The outcome does not change, since the run itself is terminal.
 
 The counts are projections read from canonical evidence and are never persisted with the
 task record:
@@ -1472,7 +1483,7 @@ without a retained artifact.
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on the chosen model and level; an omitted model keeps the default; unregistered, virtual, unusable and unsupported choices, and thinking without a model, are refused before any task or session; the refusal list is bounded and reaches Home; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries; frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
 | `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
-| `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |
+| `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a run's late completion notice recorded before the settlement fact, with nothing appended after it, and a notice the bound never records counted without changing the outcome; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |
 | `src/home/home-wake-inbox.integration.test.ts` | frozen-owner cuts for claim, admission, terminal and acknowledgement; route replacement; redelivery | `HOME_WAKE_REPORT=<artifact-path>` | `HOME_WAKE_REPORT=<artifact-path> npx vitest run src/home/home-wake-inbox.integration.test.ts` |
 | `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice; the ninth wake is refused and says Home is waiting; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | none (faux provider; reports under the fixture) | `npx vitest run src/home/home-wake.e2e.test.ts` |
 | `src/home/home-system-prompt.e2e.test.ts` | every request of an activation carries one identical Home system prompt, framed at the request seam | none | `npx vitest run src/home/home-system-prompt.e2e.test.ts` |

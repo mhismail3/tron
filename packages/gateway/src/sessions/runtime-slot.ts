@@ -52,7 +52,7 @@ import { SessionContextWindowPolicy } from "../providers/context-window-policy.j
 import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
-import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProjection, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
+import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProjection, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -806,6 +806,8 @@ export class RuntimeSlot {
   /** Task-end joins waiting for a detached run's state to change. Each join owns its
    * entry and removes it when it stops waiting. */
   private readonly detachedWorkWaiters = new Set<() => void>();
+  /** Task-end joins waiting for a completion notice's delivery receipt to be recorded. */
+  private readonly canonicalDeliveryWaiters = new Set<() => void>();
   /** Monotonic lifecycle projection ordering and terminal latches are runtime
    * facts; producer timestamps are display evidence only. */
   private readonly extensionActivitySequences = new Map<string, number>();
@@ -1180,6 +1182,7 @@ export class RuntimeSlot {
           safeJson(makeContextDeliveryReceipt(candidate.id, effect.delivery, effect.origin, effect.delivery === "stored" ? effect.managedMessage?.wakeOperationId : undefined)),
           candidate.id,
         );
+        this.notifyCanonicalDelivery();
       }
       changed = true;
     }
@@ -7582,12 +7585,14 @@ export class RuntimeSlot {
    * first, and one disposal grace after it. The
    * fact is appended only when the task launched async runs, so an absent fact proves
    * zero Gateway stops. `stoppedAtEnd` is null unless every stop was accepted and the
-   * join completed. */
-  async settleTaskSubagents(operationId: string, deadline: AbortSignal): Promise<{ stoppedAtEnd: number | null }> {
+   * join completed. Before the fact, the join also waits for each async run's completion
+   * notice to be recorded, bounded the same way; `noticesUndelivered` counts those still
+   * missing at the bound, which never changes the outcome (the run itself is terminal). */
+  async settleTaskSubagents(operationId: string, deadline: AbortSignal): Promise<{ stoppedAtEnd: number | null; noticesUndelivered: number }> {
     if (this.taskWorker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
     const launched = homeTaskSubagentLaunches(this.canonicalSessionEntries());
     const targets = await this.asyncStopTargets();
-    if (targets.length === 0 && launched.every(launch => launch.asyncDir === undefined)) return { stoppedAtEnd: 0 };
+    if (targets.length === 0 && launched.every(launch => launch.asyncDir === undefined)) return { stoppedAtEnd: 0, noticesUndelivered: 0 };
     const tool = this.trustedSubagentController();
     const stops = await Promise.allSettled(targets.map(async runId => {
       if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
@@ -7597,11 +7602,25 @@ export class RuntimeSlot {
     // must not hold the sealed task open for the rest of its 24-hour deadline.
     const stopJoin = new AbortController();
     const stopJoinTimer = setTimeout(() => stopJoin.abort(), HOME_TASK_SUBAGENT_STOP_JOIN_MS);
-    const joined = await this.joinDetachedWork(AbortSignal.any([deadline, stopJoin.signal])).finally(() => clearTimeout(stopJoinTimer));
+    const bound = AbortSignal.any([deadline, stopJoin.signal]);
+    let joined: boolean;
+    let noticesUndelivered: number;
+    try {
+      joined = await this.joinDetachedWork(bound);
+      // A run's completion notice is written after the run is terminal, so it can land after
+      // the report. It is canonical evidence of the run, so settlement records it before the fact
+      // and the evidence cut. A notice still missing at the bound is counted, not waited for.
+      const runIds = launched.flatMap(launch => launch.asyncDir ? [basename(launch.asyncDir)] : []);
+      const undelivered = (): string[] => undeliveredSubagentNotices(this.canonicalSessionEntries(), runIds);
+      await this.joinUntil(() => undelivered().length === 0, this.canonicalDeliveryWaiters, bound);
+      noticesUndelivered = undelivered().length;
+    } finally {
+      clearTimeout(stopJoinTimer);
+    }
     const stoppedAtEnd = joined && stops.every(stop => stop.status === "fulfilled") ? stops.length : null;
     await this.persistCanonicalCustomEntry(HOME_TASK_SUBAGENTS,
       { receiptId: subagentsReceiptId(operationId), operationId, stoppedAtEnd }, subagentsReceiptId(operationId), this.operationWork.get(operationId));
-    return { stoppedAtEnd };
+    return { stoppedAtEnd, noticesUndelivered };
   }
 
   /** The run ids settlement stops through the provider. A live run is stopped as itself,
@@ -7638,6 +7657,13 @@ export class RuntimeSlot {
    * deadline, then by one disposal grace after it fires. A run still live then is
    * not joined, and the caller keeps the detached outcome. */
   private async joinDetachedWork(deadline: AbortSignal): Promise<boolean> {
+    return this.joinUntil(() => !this.hasDetachedDashboardWork(), this.detachedWorkWaiters, deadline);
+  }
+
+  /** Waits until `done` holds. Each wake from `waiters` re-checks it. The wait is bounded by
+   * the deadline, then by one disposal grace after it fires; a condition still unmet then
+   * returns false, and the caller keeps its unproven outcome. */
+  private async joinUntil(done: () => boolean, waiters: Set<() => void>, deadline: AbortSignal): Promise<boolean> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let resolveBound!: (value: "bound") => void;
     const bound = new Promise<"bound">(resolve => { resolveBound = resolve; });
@@ -7645,25 +7671,32 @@ export class RuntimeSlot {
     if (deadline.aborted) start();
     else deadline.addEventListener("abort", start, { once: true });
     try {
-      while (this.hasDetachedDashboardWork()) {
+      while (!done()) {
         let wake!: () => void;
         const changed = new Promise<"changed">(resolve => { wake = () => resolve("changed"); });
-        this.detachedWorkWaiters.add(wake);
+        waiters.add(wake);
         const outcome = await Promise.race([changed, bound]);
-        this.detachedWorkWaiters.delete(wake);
+        waiters.delete(wake);
         if (outcome === "bound") break;
       }
     } finally {
       deadline.removeEventListener("abort", start);
       if (timer !== undefined) clearTimeout(timer);
     }
-    return !this.hasDetachedDashboardWork();
+    return done();
   }
 
   /** Every extension-activity publication may end a join's wait. */
   private notifyDetachedWork(): void {
     const waiters = [...this.detachedWorkWaiters];
     this.detachedWorkWaiters.clear();
+    for (const wake of waiters) wake();
+  }
+
+  /** A recorded completion notice may end a notice join's wait. */
+  private notifyCanonicalDelivery(): void {
+    const waiters = [...this.canonicalDeliveryWaiters];
+    this.canonicalDeliveryWaiters.clear();
     for (const wake of waiters) wake();
   }
 

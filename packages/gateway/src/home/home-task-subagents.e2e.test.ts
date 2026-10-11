@@ -74,6 +74,12 @@ function toolResultText(context: FauxContext, toolCallId: string): { isError: bo
   if (!result) return undefined;
   return { isError: result.isError === true, text: result.content.find((item: { type: string }) => item.type === "text")?.text ?? "" };
 }
+/** A canonical entry's text, as the model reads it. */
+function entryText(entry: { content?: unknown }): string {
+  const content = entry.content;
+  return typeof content === "string" ? content
+    : (content as Array<{ type?: string; text?: string }>).filter(part => part.type === "text").map(part => part.text ?? "").join("\n");
+}
 /** The async run directory a launch returned. A run's id is its directory name. */
 function launchedAsyncDir(context: FauxContext, toolCallId: string): string {
   const result = context.messages.find(message => message.role === "toolResult" && message.toolCallId === toolCallId);
@@ -174,14 +180,6 @@ describe("Home task subagents", () => {
     const result = await run.completion;
     expect(seen.refusal).toMatchObject({ isError: true });
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
-    // The child ended before the report, so its completion notice is recorded as context after settlement.
-    // Read the evidence only once that notice is in place, so the read does not race its append.
-    const slot = await f.registry.acquire(run.sessionId);
-    await waitFor(() => {
-      const entries = slot.canonicalSessionEntries();
-      return entries.some(entry => entry.type === "custom_message" && entry.customType === "subagent-notify")
-        && entries.at(-1)?.type === "custom" && entries.at(-1)?.customType === "tron.context-delivery.v4";
-    }, "late workflow completion notice recorded", bound);
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "workflow-launch");
     const workflowDir = launch!.details!.asyncDir as string;
     expect(await asyncState(workflowDir)).toBe("complete");
@@ -514,6 +512,74 @@ describe("Home task subagents", () => {
     expect(await asyncState(join(dirname(seen.workflowDir!), await workflowChildRunId(seen.workflowDir!)))).toBe("complete");
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     expect(result.reportRef).toMatchObject({ resultId: "report-late" });
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+  }, 60_000);
+
+  it("records a run's late completion notice before the settlement fact, and nothing follows the fact", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    await writeFile(join(f.cwd, "hold-workflow.js"), HELD_WORKFLOW_SCRIPT);
+    const seen: { workflowDir?: string } = {};
+    f.faux.setResponses([
+      holdingWorkflowLaunch("workflow-launch"),
+      async (context: FauxContext) => {
+        await waitFor(() => child.heldRequests() === 1, "workflow child live", bound);
+        seen.workflowDir = launchedAsyncDir(context, "workflow-launch");
+        // The workflow completes with its child. Its completion notice is written after the run became
+        // terminal, so the report races it unless settlement records the notice first.
+        child.releaseHeld();
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "workflow ended before the report", bound);
+        return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    const slot = await f.registry.acquire(run.sessionId);
+    const entries = slot.canonicalSessionEntries();
+    const runId = basename(seen.workflowDir!);
+    const notice = entries.findIndex(entry => entry.type === "custom_message" && entry.customType === "subagent-notify" && entryText(entry).includes(runId));
+    const receipt = entries.findIndex(entry => entry.type === "custom" && entry.customType === "tron.context-delivery.v4"
+      && (entry.data as { targetEntryId?: string })?.targetEntryId === entries[notice]?.id);
+    const fact = entries.findIndex(entry => entry.type === "custom" && entry.customType === "tron-home-task-subagents");
+    expect(notice).toBeGreaterThanOrEqual(0);
+    // Settlement recorded the notice and its delivery before its fact and evidence cut.
+    expect(receipt).toBeGreaterThan(notice);
+    expect(fact).toBeGreaterThan(receipt);
+    expect(fact).toBe(entries.length - 1);
+    // A canonical read after settlement sees no further append from the run.
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    expect(slot.canonicalSessionEntries()).toHaveLength(entries.length);
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+  }, 60_000);
+
+  it("settles without a completion notice the bound never records, counts it, and keeps the outcome", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    let stopJoin: ReturnType<typeof captureTimer> | undefined;
+    f.faux.setResponses([
+      holdingAsyncLaunch("async-launch"),
+      async () => {
+        await waitFor(() => child.heldRequests() === 1, "async child live", bound);
+        child.releaseHeld();
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "async run ended before the report", bound);
+        // The provider's notice never reaches canonical evidence: settlement sees no notice for the run.
+        const canonical = slot.canonicalSessionEntries.bind(slot);
+        vi.spyOn(slot, "canonicalSessionEntries").mockImplementation(() =>
+          canonical().filter(entry => !(entry.type === "custom_message" && entry.customType === "subagent-notify")));
+        // Captured from the report on, so the armed 60 s timer is the settlement's own stop-join bound.
+        stopJoin = captureTimer(HOME_TASK_SUBAGENT_STOP_JOIN_MS);
+        return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    await waitFor(() => stopJoin?.armed() === true, "notice join bounded", bound);
+    stopJoin!.expire();
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.subagents", started: 1, stoppedAtEnd: 0, noticesUndelivered: 1 }));
     expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
   }, 60_000);
 
