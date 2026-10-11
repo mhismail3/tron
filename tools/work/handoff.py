@@ -94,10 +94,10 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, f
         if not (accepted and len(parents) == 2 and parents[1] == head and tree == local_tree
                 and accepted.get(claim.SESSION_TRAILER) == session):
             raise HandoffError(f"local head {head} differs from remote claim head {remote_head}; synchronize manually")
-    claim_commit, old = _claim_at(worktree, head, number)
-    if not claim_commit:
-        raise HandoffError(f"claim for #{number} has no valid issue trailer")
-    # Missing historical identity is unknown, never evidence that an owner is dead.
+    _, old = _claim_at(worktree, head, number)
+    # The issue number in the unique remote branch is the existing claim identity.
+    # Legacy claims may have no claim commit (or no owner trailer); neither case
+    # supplies an old session identity or evidence that its owner is dead.
     old = old or "unknown"
     if old == session:
         transition = _latest_handoff(worktree, head, number, session)
@@ -106,9 +106,11 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, f
             _audit_comment(gh, number, previous_owner, session, pre_head, commit, prior_reason)
         print(f"claim #{number} already belongs to {session}")
         return 0
-    # Live/unknown lifecycle proof is intentionally conservative. The normal
+    # Known-owner lifecycle proof is intentionally conservative. The normal
     # runtime probe is provided by the gateway-backed helper when available.
     if not force:
+        if old == "unknown":
+            raise HandoffError("owner session is unknown; refusing handoff (maintainer may use --force-maintainer and confirm HANDOFF #<issue> FROM unknown)")
         state = owner_lifecycle(old)
         if state != "settled":
             raise HandoffError(f"owner session {old} is {state}; refusing handoff (maintainer may use --force-maintainer)")

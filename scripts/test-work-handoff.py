@@ -4,6 +4,8 @@ from __future__ import annotations
 import json, os, pty, select, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools/work"))
+import claim
 TOKEN = "fixture-local-token-with-at-least-32-bytes"
 
 NODE_FIXTURE = r'''
@@ -194,7 +196,7 @@ os.execv({real_git!r}, [{real_git!r}, *args])
 
         # A legacy claim with no owner is unknown, not evidence of a dead session.
         git(repo,"worktree","remove","--force",str(worktree)); git(repo,"checkout","main"); git(repo,"checkout","-B","feat/41-fixture")
-        git(repo,"commit","--allow-empty","-m","Legacy claim\n\nWork-Claim-Issue: 41"); git(repo,"push","--force","-u","origin","feat/41-fixture")
+        git(repo,"commit","--allow-empty","-m","Legacy claim without claim trailers"); git(repo,"push","--force","-u","origin","feat/41-fixture")
         git(repo,"checkout","main"); git(repo,"worktree","add",str(worktree),"feat/41-fixture")
         (worktree/"tracked.txt").write_text("unstaged bytes\n"); (worktree/"staged.txt").write_text("staged bytes\n")
         git(worktree,"add","staged.txt"); (worktree/"untracked.txt").write_bytes(b"untracked\x00bytes")
@@ -249,6 +251,7 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         after=refuse_snapshot()
         assert before[3:]==after[3:], "successful recovery changed worktree index or dirty bytes"
         assert git(worktree,"rev-parse","origin/feat/41-fixture")==handed
+        assert claim.existing_claims(repo,"origin","main",41)[0].session=="new-owner"
         trailers=git(worktree,"show","-s","--format=%B",handed)
         assert len(comments)==1 and "unknown" in comments[0] and "new-owner" in comments[0] and handed in comments[0]
         assert "Work-Handoff-From: unknown" in trailers and "Work-Handoff-Reason: legacy recovery" in trailers and f"Work-Handoff-Pre-Head: {missing_owner_head}" in trailers
