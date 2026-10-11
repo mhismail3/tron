@@ -410,8 +410,10 @@ its cursor and builds missing summaries in the background under episodic bounds.
 Each activation waits for and freezes the preceding view before provider admission.
 
 - **Summarizer.** An injected dependency resolved from the Gateway-wide model
-  runtime, never from a session. The episodic memory has no other compactor
-  dependency.
+  runtime, never from a session. It returns summary content only: Home labels each
+  line from its canonical item kinds, including mixed-role summaries, and refuses
+  echoed role labels or compactor repair instructions. Older invalid stored
+  summaries are revoked through the episodic projection and rebuilt on demand.
 - **Checkpoints.** Opening the store publishes a checkpoint only when the episodic
   store's threshold is crossed, not on every open
   ([episodic-memory.md](episodic-memory.md)).

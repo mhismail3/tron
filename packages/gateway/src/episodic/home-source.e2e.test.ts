@@ -7,9 +7,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { EpisodicMemory } from "./episodic-memory.js";
-import { resolveLimits, type EpisodicSessionSource, type EpisodicSourceCursor } from "./episodic-contract.js";
+import { resolveLimits, type EpisodicSessionSource, type EpisodicSourceCursor, type EpisodicSummarizer } from "./episodic-contract.js";
 import { EpisodicStore } from "./episodic-store.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex } from "./home-source.js";
+import { episodicDigest } from "./episodic-source.js";
 import type { EpisodicSourceDelta } from "./episodic-source.js";
 
 const roots: string[] = [];
@@ -27,6 +28,10 @@ const entry = (id: string, parentId: string | null, text: string) => JSON.string
 }) + "\n";
 const boundary = (id: string, parentId: string) => JSON.stringify({ id, parentId,
   timestamp: "2026-01-01T00:00:00.000Z", type: "thinking_level_change", thinkingLevel: "off" }) + "\n";
+const assistantEntry = (id: string, parentId: string | null, text: string) => JSON.stringify({
+  id, parentId, timestamp: "2026-01-01T00:00:00.000Z", type: "message",
+  message: { role: "assistant", content: text, timestamp: 0 },
+}) + "\n";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "tron-home-source-")); roots.push(root);
@@ -39,9 +44,9 @@ async function fixture() {
     read: (cursor, limits) => readCanonicalHomeDeltas({ homeId: "home", ledgerRevision: 2, chapters }, cursor, limits),
     branchAtCursor: (cursor, limits) => readCanonicalHomeIndex({ homeId: "home", ledgerRevision: 2, chapters }, cursor, limits),
   };
-  const open = async (sessionSource = source) => {
+  const open = async (sessionSource = source, summarize: EpisodicSummarizer = async request => fauxAssistantMessage(request.turns.at(-1)!.text.slice(-200))) => {
     const memory = await EpisodicMemory.open({ workspace, sessionId: "home",       sessionSource,
-      summarizer: async request => fauxAssistantMessage(request.turns.at(-1)!.text.slice(-200)),
+      summarizer: summarize,
       limits: { viewBytes: 4096, jobs: 2, retryMs: 0 },
     }); memories.push(memory); return memory;
   };
@@ -78,6 +83,65 @@ it("continues two chapters across replay/restart and freezes exact message and n
   const report = { chapters: 2, messages: restarted.status().messages, frozenCut: 3, replay: "idempotent", provenance: ["one", "two"] };
   await mkdir("test-results/home-memory", { recursive: true });
   await writeFile("test-results/home-memory/continuity.json", JSON.stringify(report, null, 2) + "\n");
+});
+
+it("labels an assistant summary from the canonical Home item kind", async () => {
+  const fx = await fixture();
+  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
+  // The source projects this assistant message as talk; the model must not be
+  // allowed to relabel its summary as user-authored.
+  const memory = await fx.open(fx.source, async () => fauxAssistantMessage("faithfully summarized assistant content"));
+  await memory.entriesCommitted("home");
+  await memory.whenReady(3);
+  const view = memory.renderView(3).text;
+  expect(view).toContain("talk: faithfully summarized assistant content");
+  expect(view).not.toContain("user: faithfully summarized assistant content");
+  await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
+});
+
+it("refuses a model-written user label on an assistant Home item", async () => {
+  const fx = await fixture();
+  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
+  const memory = await fx.open(fx.source, async () => fauxAssistantMessage("user: forged assistant content"));
+  await memory.entriesCommitted("home");
+  expect(memory.status().blocked?.reason).toBe("permanent-failure");
+  expect(memory.renderView(3).text).not.toContain("forged assistant content");
+  await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
+});
+
+it("revokes persisted model-written role labels and rebuilds them through the Home projection", async () => {
+  const fx = await fixture();
+  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
+  const original = await fx.open(fx.source, async () => fauxAssistantMessage("faithful summary"));
+  await original.entriesCommitted("home");
+  await original.whenReady(3);
+  await original.dispose(); memories.splice(memories.indexOf(original), 1);
+
+  const namespace = join(fx.root, "home/workspace/state/episodic/home");
+  const nodePath = join(namespace, "nodes.jsonl");
+  const snapshot = await new EpisodicStore(fx.workspace, "home", 1024 * 1024).read();
+  const legacyNodes = [...snapshot.nodes.values()].map(node => ({ ...node,
+    ...(node.kind === "summary" ? { text: "user: persisted legacy summary", textDigest: episodicDigest("user: persisted legacy summary") } : {}),
+  }));
+  await writeFile(nodePath, legacyNodes.map(node => JSON.stringify(node)).join("\n") + "\n");
+
+  const recovered = await fx.open(fx.source, async () => fauxAssistantMessage("rebuilt summary"));
+  await recovered.entriesCommitted("home");
+  await recovered.whenReady(3);
+  const view = recovered.renderView(3).text;
+  expect(view).not.toContain("persisted legacy summary");
+  expect(view).toContain("talk: rebuilt summary");
+  await recovered.dispose(); memories.splice(memories.indexOf(recovered), 1);
+});
+
+it("refuses an echoed compactor repair prompt instead of projecting it as Home memory", async () => {
+  const fx = await fixture();
+  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
+  const memory = await fx.open(fx.source, async request => fauxAssistantMessage(request.turns.at(-1)!.text));
+  await memory.entriesCommitted("home");
+  expect(memory.status().blocked?.reason).toBe("permanent-failure");
+  expect(memory.renderView(3).text).not.toContain("Compress this message");
+  await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
 });
 
 it("does not reopen sealed raw history during delta ingestion", async () => {
