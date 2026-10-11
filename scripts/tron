@@ -38,9 +38,11 @@ Commands:
   work bootstrap [--apply] [--report <path>]
                                     Plan or converge GitHub labels and the tracking
                                     Project to .github/work.json (tools/work)
-  work start <issue> [--session <id>]
+  work start <issue> [--session <id>] [--integration] [--base <remote-branch>]
                                     Claim an open, unclaimed issue: remote branch,
-                                    Project status, claim comment, and its worktree
+                                    Project status, claim comment, and its worktree;
+                                    --integration explicitly admits epics, --base records
+                                    the exact configured-remote starting branch
   work handoff <issue> --reason <text> [--session <id>] [--force-maintainer]
                                     Transfer an existing claim in place; unknown owner
                                     state refuses; force requires exact TTY confirmation
