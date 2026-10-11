@@ -1111,6 +1111,42 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "ordinary-ring-manage-session")
     }
 
+    /// Opening an inherited context window must not create a Chat override.
+    /// Exercise the actual Manage Home card and shared anchored editor, not a duplicate control fixture.
+    @MainActor
+    func testManageHomeContextWindowOpenDismissDoesNotWrite() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitForLabel(ring, containing: "Manage Home", timeout: 10))
+        ring.tap()
+        let control = app.buttons["context-window-control"]
+        reveal(control, in: app)
+        XCTAssertTrue(control.isHittable, app.debugDescription)
+        let inherited = control.value as? String
+        keepScreenshot(named: "manage-home-context-window-row")
+        control.tap()
+        let slider = app.descendants(matching: .any)["context-window-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "manage-home-context-window-editor")
+        // Tap the overlay's backdrop inside the sheet, not the status bar outside its host.
+        let state = app.descendants(matching: .any)["home-manage-state"]
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: state.frame.midX, dy: state.frame.midY)).tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 5), "Dismiss must retire the editor")
+        XCTAssertTrue(control.waitForExistence(timeout: 5))
+        XCTAssertEqual(control.value as? String, inherited)
+        app.buttons["home-sheet-done-manage"].tap()
+        app.buttons["Back"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5),
+                      "Opening and dismissing an inherited value must not call settings.change")
+    }
+
     private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate(format: "isEnabled == true")
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed

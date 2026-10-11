@@ -749,9 +749,15 @@ with their dependencies. Unsupported numeric representations stay read-only.
 The number journey proves that a served 0–10 range wins over a static 0–100
 range, opening does not write, and an unrepresentable future range remains visible.
 Editors use the established motion, Dynamic Type, VoiceOver adjustment,
-cancellation and commit-on-dismiss lifecycle. Context-window and remaining
-legacy-control consolidation is still outstanding; sharing the host is not full
-renderer parity. Catalogs use the existing selected-value checkmark. `SettingsValueEditors.swift`
+cancellation and commit-on-dismiss lifecycle. `SettingsNumberSlider` owns both
+stepped numbers and continuous reference-valued numbers, including their row,
+draft, detents, reset action and editor. The context-window wrapper supplies only
+its inheritance conversion, labels and served limits; it has no second editor or
+presentation lifecycle. `SettingsNumberSliderScale` owns numeric landmarks, and
+`SettingsConfigurationValueRow` preserves the established full-size value row
+and compact settings-row layout. The real Manage Home context-window journey
+checks open/dismiss without a setting write and retains simulator row/editor captures.
+Catalogs use the existing selected-value checkmark. `SettingsValueEditors.swift`
 hosts write-only secret replacement and ordered string-list add/remove/reorder in
 standard progressive sheets, fields, groups, rows and action capsules. Secret drafts
 start empty and are cleared on submission/disappearance; list drafts have local row
@@ -1636,7 +1642,11 @@ stats card, with the state pill on its header row), `SessionModelConfigurationCa
 (model, thinking and context window through the ordinary session RPCs, with the
 Memory model row as its footer), a rows container for the Home sub-sheets, and a
 bottom container for pause/resume and disable. The settings-approvals section
-(#758) inserts between the stats card and the model card. Every Home sub-sheet
+(#758) inserts between the stats card and the model card. Manage Session mounts
+the same section on its usage card with the exact session scope; Home-only
+mounting would hide ordinary chat approval requests and push decisions. The
+hosted decline and push-approve/decline journeys protect that shared mount.
+Every Home sub-sheet
 opens at medium and drags to large, through the shared managed-sheet chrome.
 Its Memory row, Chapters, Tasks and Permissions read the same single load. Task
 recovery appears in Tasks and Permissions only when it needs attention; an

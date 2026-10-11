@@ -1097,7 +1097,8 @@ two RPCs (the Gateway README has the shapes). What the code fixes that 7.2 and
   `SettingsNumberSlider` with the served range, unit and step. A dynamic range
   replaces the static declaration; unsupported numeric representations remain
   visible read-only. Legacy thinking rows use the shared choice primitive;
-  context-window consolidation onto the number primitive remains outstanding.
+  context-window rows use the shared number primitive with a reference value,
+  preserving continuous detents and inheritance reset without a second editor.
   Catalog rows mark the current value with the standard checkmark. Options reads
   carry managed presentation activity and an exact request fence through both
   success and failure publication; changing a dependency clears old choices before
@@ -1123,10 +1124,11 @@ never re-implements a key's control.
 | The Changes feed and approval cards | A fixed structure over any key; generic in what they show. |
 | The Project card header (project, trust, git state) and the New Session sheet | Composites. Their sections are the generic renderer. |
 
-Today's `AgentConfigurationControls`, `ContextWindowSlider` and
-`CompactionSettingsView` are not on this list: they become the `catalog`,
-`choice` and `number` primitives and generic rows. Thinking already uses the
-shared ordered-choice primitive in `SettingsChoiceSlider.swift`.
+Today's `AgentConfigurationControls` and `CompactionSettingsView` are not
+hand-built exceptions: their rows become the `catalog`, `choice` and `number`
+primitives. Thinking and context-window adapters already use the shared
+`SettingsChoiceSlider.swift` and `SettingsNumberSlider.swift` row/editor owners;
+the former dedicated context-window editor is removed.
 
 ### 7.7 Surfaces
 
@@ -1209,7 +1211,7 @@ Re-verified against `main` at `b76f6ca80`.
 | `UI/Chat/HomeSheets.swift:233-291,351` chat model and context window values, memory model | The generic sections, with Profile rows, plus Home's Changes. |
 | `UI/Settings/SettingsView.swift:39-122` groups This iPhone, Agent, Tools & Extensions, Data & Diagnostics, with scope-dependent trust | The sections in order, Mac layer only, and the Changes feed. |
 | `UI/Settings/SettingsScopeRow.swift`, `AgentDefaultsSettingsView.swift`, `ResourceSettingsView.swift:188`, `HooksSettingsView.swift:262` scope pickers | Removed. Project editing moves to the Project card. |
-| `UI/Settings/AgentConfigurationControls.swift`, `ContextWindowSlider.swift` | The `catalog` and `number` control primitives, fed by served options. Ordered `choice` already shares `SettingsChoiceSlider.swift` with thinking rows. |
+| `UI/Settings/AgentConfigurationControls.swift` | Thin layer adapters over the served control primitives. Context-window and generic numbers share `SettingsNumberSlider.swift` and `SettingsNumberSliderScale.swift`; thinking shares `SettingsChoiceSlider.swift`. All use `SettingsConfigurationValueRow.swift`. Model catalog adoption remains with the surface migration. |
 | `UI/Settings/CompactionSettingsView.swift:102,244-257` | Generic rows in Context › Compaction, plus Model › Summary thinking. |
 | `UI/Chat/NewSessionSheet.swift:94-96,339-343`, `NewSessionConfigurationOwner.swift` | Generic Model rows at the new chat's Chat layer, with badges. |
 | The dashboard project list (`UI/Chat/SessionShellView.swift`, inferred owner) | Gains "Project settings", which opens the Project card. |
@@ -1232,7 +1234,7 @@ was added after the first numbering; it lands after slice 4 and before slice 8.
 | 5 | Tiers: floors with the maintainer's overrides, the one-step web mark, approval by tap with 24-hour expiry and the requester told, Approve and Decline on the push, and the `settings` tool. Implemented ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)); the push actions need the relay's category release deployed first ([decision 35](#101-decisions)) | L | Gateway, iOS, push relay | 4 | #763 |
 | 6 | Outside changes: stores compared with the record, "Changed outside Tron" with Apply again, notification by floor, git-state badges | M | Gateway, iOS | 4 | #764 |
 | 7 | Fixed-at-start values carry provenance, with "Use the current default"; live keys reach open chats; Chat-layer values for every key that allows Chat; per-direction timing | M | Gateway, iOS | 3, 4 | #765 |
-| 14 | The generic renderer: served schema, control primitives, `settings.options`, `dryRun` validation, badges and section summaries from the resolver, negotiation with fallback to read-only. Partially implemented ([7.5a](#75a-implemented-the-renderer-contract)), including the bounded-number slider and stale-options fencing; `ContextWindowSlider` and remaining `AgentConfigurationControls` consolidation and real-screen parity evidence remain | L | Gateway, iOS | 3, 4 | #780 |
+| 14 | The generic renderer: served schema, control primitives, `settings.options`, `dryRun` validation, badges and section summaries from the resolver, negotiation with fallback to read-only. Partially implemented ([7.5a](#75a-implemented-the-renderer-contract)), including shared stepped/continuous number and ordered-choice controls, stale-options fencing, and real Manage Home open/dismiss captures; complete catalog consolidation and broader surface parity acceptance remain | L | Gateway, iOS | 3, 4 | #780 |
 | 8 | Manage Session and Manage Home show the sections through the generic renderer (D1, D2, D5, D6, D7) | L | iOS | 2, 7, 14 | #766 |
 | 9 | The Home profile becomes a typed layer for the Home chat: worker model and thinking "same as Home" filled into `delegate` by Home, memory model, task budgets | M | Gateway, iOS | 4 | #767 |
 | 10 | The Project card in Manage Session: the Project layer with git-state badges, trust, and outside changes | M | iOS | 6, 8 | #768 |

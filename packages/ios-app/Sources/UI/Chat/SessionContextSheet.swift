@@ -237,6 +237,7 @@ struct SessionContextSheet: View {
                             }
                         }
                         SessionContextUsageCard(snapshot: snapshot)
+                            .settingsApprovals(.session(sessionID))
                         modelConfigurationCard(snapshot)
                         sessionSection(snapshot)
                         exportSection
