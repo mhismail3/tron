@@ -60,6 +60,9 @@ export interface LogRecord {
   settledBytes?: number;
   settledEntries?: number;
   durationMs?: number;
+  acceptToCloseMs?: number;
+  bytesRead?: number;
+  transportEnd?: "reset" | "timeout" | "fin" | "none";
   /** The request span's compact stage breakdown, one bounded string. */
   stages?: string;
   /** The measured stage a request was in at one instant, e.g. the stage a
@@ -123,6 +126,9 @@ export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | 
   reason?: string;
   cause?: string;
   durationMs?: number;
+  acceptToCloseMs?: number;
+  bytesRead?: number;
+  transportEnd?: "reset" | "timeout" | "fin" | "none";
   /** `name=12ms×2/610KB;name=5ms`; the writer bounds it. */
   stages?: string;
   /** The measured stage a request was in at one instant, e.g. the stage a
@@ -303,6 +309,9 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
   const durationMs = durationField(value.durationMs);
   const unaccountedMs = durationField(value.unaccountedMs);
   const acceptToUpgradeMs = durationField(value.acceptToUpgradeMs);
+  const acceptToCloseMs = durationField(value.acceptToCloseMs);
+  const bytesRead = counterField(value.bytesRead);
+  const transportEnd = value.transportEnd;
   const authMs = durationField(value.authMs);
   const handshakeMs = durationField(value.handshakeMs);
   const helloMs = durationField(value.helloMs);
@@ -356,6 +365,9 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.peerPath === "string" ? { peerPath: boundedDiagnosticID(value.peerPath).slice(0, 32) } : {}),
     ...(typeof value.peerRelay === "string" ? { peerRelay: boundedDiagnosticID(value.peerRelay).slice(0, 32) } : {}),
     ...(typeof value.transport === "string" ? { transport: boundedDiagnosticID(value.transport).slice(0, 32) } : {}),
+    ...(acceptToCloseMs !== undefined ? { acceptToCloseMs } : {}),
+    ...(bytesRead !== undefined ? { bytesRead } : {}),
+    ...(transportEnd === "reset" || transportEnd === "timeout" || transportEnd === "fin" || transportEnd === "none" ? { transportEnd } : {}),
     ...(silentMs !== undefined ? { silentMs } : {}),
     ...(taskHash !== undefined ? { taskHash } : {}),
     ...(operationHash !== undefined ? { operationHash } : {}),
