@@ -7,6 +7,7 @@ import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
+import { GatewayLogger } from "./logger.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { BlobStore } from "../sessions/blob-store.js";
 import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUESTS_PER_CONNECTION, HTTP_REQUEST_IDLE_TIMEOUT_MS, HTTP_REQUEST_TIMEOUT_MS, HTTP_HEADERS_TIMEOUT_MS } from "./server.js";
@@ -54,7 +55,8 @@ async function fixture(maximumHttpRequests = 128) {
   const port = (probe.address() as { port: number }).port;
   await new Promise<void>(resolve => probe.close(() => resolve()));
   const acquireBlob = vi.fn();
-  const logger = { log: vi.fn() };
+  const logger = new GatewayLogger(join(root, "gateway.jsonl"));
+  const log = vi.spyOn(logger, "log");
   const gateway = new GatewayServer({
     host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumHttpRequests,
     devices, uploads: {} as any, sessions: { acquireBlob, unsubscribeClient: vi.fn() } as any,
@@ -75,7 +77,7 @@ async function fixture(maximumHttpRequests = 128) {
     finally { await rm(root, { recursive: true, force: true }); }
   });
   await gateway.listen();
-  return { root, gateway, devices, port, serverSockets, clientSockets, acquireBlob, logger };
+  return { root, gateway, devices, port, serverSockets, clientSockets, acquireBlob, logger: { log }, persistedLogger: logger };
 }
 async function health(port: number): Promise<number> {
   return awaitsWithin(new Promise((resolve, reject) => {
@@ -118,6 +120,61 @@ async function loggedRecord(f: Awaited<ReturnType<typeof fixture>>, event: strin
 }
 
 describe("HTTP pending-work ownership", () => {
+  it.each(["silent", "partial"])("records exactly one unused %s TCP connection without request contents", async kind => {
+    const f = await fixture();
+    const peer = createConnection({ host: "127.0.0.1", port: f.port });
+    f.clientSockets.push(peer);
+    peer.on("error", () => {});
+    await awaitsWithin(once(peer, "connect"), "unused peer connect");
+    const server = await waitFor(() => f.serverSockets[0], "accepted peer");
+    const closed = new Promise<void>(resolve => server.once("close", () => resolve()));
+    if (kind === "partial") {
+      const received = once(server, "data");
+      peer.write("GET /private-fixture-content HTTP/1.1\r\nHost: fixture\r\n");
+      await awaitsWithin(received, "partial request received");
+    }
+    peer.end();
+    peer.resume();
+    await awaitsWithin(closed, "unused peer closed");
+    const records = new GatewayLogger(join(f.root, "gateway.jsonl")).recent().filter(r => r.event === "http.connection-unused");
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ level: "warning", transport: "primary", reason: kind === "silent" ? "silent" : "partial_http", transportEnd: "fin" });
+    expect(records[0]!.acceptToCloseMs).toBeGreaterThanOrEqual(0);
+    expect(records[0]!.bytesRead).toBe(kind === "silent" ? 0 : Buffer.byteLength("GET /private-fixture-content HTTP/1.1\r\nHost: fixture\r\n"));
+    expect(JSON.stringify(records)).not.toContain("private-fixture-content");
+  });
+
+  it("keeps parser rejection responses and records the unused connection's bounded code", async () => {
+    const f = await fixture();
+    const peer = createConnection({ host: "127.0.0.1", port: f.port });
+    f.clientSockets.push(peer);
+    peer.on("error", () => {});
+    await awaitsWithin(once(peer, "connect"), "malformed peer connect");
+    const response = capture(peer);
+    peer.write("NOT-HTTP\r\n\r\n");
+    expect(await response).toContain("400 Bad Request");
+    const record = await loggedRecord(f, "http.connection-unused");
+    expect(record.fields).toMatchObject({ reason: "invalid_http", code: "HPE_INVALID_METHOD" });
+  });
+
+  it("records the raw reset behind WebSocket 1006 without labeling healthy HTTP or upgrades unused", async () => {
+    const f = await fixture();
+    expect(await health(f.port)).toBe(200);
+    const phone = await f.devices.pair((await f.devices.ensureEnrollment()).code, "Fixture");
+    const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: `Bearer ${phone.token}` } });
+    peer.on("error", () => {});
+    cleanups.push(async () => { peer.terminate(); });
+    await awaitsWithin(once(peer, "open"), "reset peer upgrade");
+    // Real TCP RST, not an emitted error or mocked ws callback.
+    const raw = (peer as unknown as { _socket: Socket })._socket;
+    raw.resetAndDestroy();
+    const record = await loggedRecord(f, "connection.closed");
+    expect(record.message).toContain("1006");
+    expect(record.fields).toMatchObject({ transportEnd: "reset" });
+    expect(f.persistedLogger.recent().find(r => r.event === "connection.closed")).toMatchObject({ transportEnd: "reset" });
+    expect(f.logger.log.mock.calls.filter(call => call[2]?.event === "http.connection-unused")).toHaveLength(0);
+  });
+
   it("records an upgrade that opened and was then abandoned before hello", async () => {
     const f = await fixture();
     vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
