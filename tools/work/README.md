@@ -57,10 +57,21 @@ start a build:
   for `.sh` and for shebang-shell files under `scripts/`;
 - each `--tests` command, run from the repository root.
 
-Checks run two at a time. Each log is kept under `<git dir>/work/logs/`, and a
-failing check prints the end of its log. A tree that passed with the same check set is
+Read-only preflight checks run two at a time. Canonical builds then run one at a
+time, in Mac → Gateway → push relay → iOS order when selected; only after they
+succeed do explicit `--tests` commands run, at most two together. Mac staging can
+replace the Gateway's source `node_modules`, and package checks can install their
+dependencies, so those publishers must settle before consumers run. The first
+failed phase prevents later phases from starting; no assertion or timeout is
+relaxed. Explicit journeys must themselves avoid conflicting writes.
+
+Each log is kept under `<git dir>/work/logs/`, and a failing check prints the end
+of its log. A tree that passed with the same check set and build-order contract is
 recorded under `<git dir>/work/verified/` and is not run again. `verify` refuses
-a dirty worktree, because it checks a commit.
+a dirty worktree, because it checks a commit. `python3 -B scripts/test-work-verify.py`
+exercises the real CLI with child-process dependency replacement, an explicit
+reader journey, failed-publisher admission, and exact-tree cache reuse; its
+repeatable evidence is `test-results/work-verify.json`.
 
 `land` refuses a detached HEAD, a base branch, a dirty worktree, a merge or rebase in
 progress, and a branch with no commits beyond the base. The privacy guard runs on the

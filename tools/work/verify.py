@@ -159,7 +159,8 @@ def plan(root: Path, changed: List[str], tests: List[str], merge_base: str) -> L
 
 
 def _cache_key(tree: str, checks: List[Check]) -> str:
-    scope = {"tree": tree, "checks": [[check.name, check.command] for check in checks]}
+    # Older receipts allowed dependency replacement while readers were running.
+    scope = {"build_barriers": 1, "tree": tree, "checks": [[check.name, check.command] for check in checks]}
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
 
 
@@ -238,17 +239,33 @@ def verify(root: Path, config: dict, tests: List[str], base_ref: str) -> bool:
     print(f"verify: {len(checks)} checks for {head[:12]} against {base_ref}")
     live: list = []
     results: List[Result] = []
+    # Mac staging replaces the source Gateway node_modules; the Gateway/relay
+    # checks may also install dependencies. Native builds publish products used
+    # by explicit journeys. Settle these owners before admitting their readers,
+    # rather than racing npm ci against live SDK imports or source-matched tests.
+    # Arbitrary --tests commands have no declared dependency graph, so none may
+    # overlap a canonical build. Independent read-only checks still run together.
+    build_names = ("mac", "gateway", "push-relay", "ios")
+    batches = [[check for check in checks if check.name not in build_names and not check.name.startswith("test-")]]
+    batches.extend([check for check in checks if check.name == name] for name in build_names)
+    batches.append([check for check in checks if check.name.startswith("test-")])
     with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
-        futures = [pool.submit(_run, root, prelude, check, logs / f"{check.name}.log", live, environment)
-                   for check in checks]
         try:
-            for future in as_completed(futures):
-                result = future.result()
-                results.append(result)
-                verdict = "pass" if result.exit_code == 0 else f"FAIL (exit {result.exit_code})"
-                print(f"  {result.check.name}: {verdict} in {result.seconds}s  ({result.log})", flush=True)
+            for batch in batches:
+                futures = [pool.submit(_run, root, prelude, check, logs / f"{check.name}.log", live, environment)
+                           for check in batch]
+                for future in as_completed(futures):
+                    result = future.result()
+                    results.append(result)
+                    verdict = "pass" if result.exit_code == 0 else f"FAIL (exit {result.exit_code})"
+                    print(f"  {result.check.name}: {verdict} in {result.seconds}s  ({result.log})", flush=True)
+                if any(result.exit_code != 0 for result in results):
+                    print("  dependent checks not started after prerequisite failure", flush=True)
+                    break
         except BaseException:
             # Interrupted or failed: stop what the checks started, before the pool waits on them.
+            for future in futures:
+                future.cancel()
             for process in list(live):
                 _kill_group(process)
             raise
