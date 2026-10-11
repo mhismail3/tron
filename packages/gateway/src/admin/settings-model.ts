@@ -61,9 +61,9 @@ export class SettingsModel {
 
   /** Resolve operational defaults at a request boundary, never by reloading the
    * whole SDK manager (which would also change fixed resource/shell settings).
-   * A declared built-in makes every overlay complete, including an unset Chat
-   * value. Optional SDK values need replacement semantics, not merge overrides. */
-  async liveRunSettings(sessionId: string, session: SessionSettingsSource): Promise<Record<string, unknown>> {
+   * Absence is meaningful for optional provider fields: the request boundary
+   * replaces them after the SDK has composed its initial defaults. */
+  async liveRunSettings(sessionId: string, session: SessionSettingsSource): Promise<ReturnType<SettingsManager["getSettings"]>> {
     const keys = KEYS.filter(hasRuntimeRunApplier);
     const resolved = await this.resolve({ kind: "session", sessionId }, session, keys.map(key => key.id));
     const settings: Record<string, unknown> = {};
@@ -71,8 +71,7 @@ export class SettingsModel {
       const key = schemaKey(row.key);
       const binding = key.layers.chat;
       if (binding?.store !== "chat-settings") continue;
-      const value = await key.type.validate(row.value, key.id);
-      setPath(settings, binding.path, value);
+      if (row.value !== undefined) setPath(settings, binding.path, await key.type.validate(row.value, key.id));
     }
     return settings;
   }

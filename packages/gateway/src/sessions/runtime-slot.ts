@@ -5,6 +5,7 @@ import { HOME_PROFILE_BOUND_BYTES } from "../home/home-profile.js";
 const HOME_PROFILE_HEADROOM_TEXT = "x".repeat(HOME_PROFILE_BOUND_BYTES + 1_024);
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
 import { boundedSummaryText } from "./summary-text.js";
 import { catalogActivityTimestamp } from "./catalog-metadata-index.js";
@@ -1363,7 +1364,7 @@ export class RuntimeSlot {
     };
   }
 
-  private async applyLiveRunSettings(session: AgentSession): Promise<void> {
+  private async applyLiveRunSettings(session: AgentSession): Promise<ReturnType<SettingsManager["getSettings"]> | undefined> {
     const owners = this.dependencies.settings();
     if (!owners) return;
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed before settings application");
@@ -1378,6 +1379,7 @@ export class RuntimeSlot {
     session.agent.followUpMode = session.settingsManager.getFollowUpMode();
     session.agent.transport = session.settingsManager.getTransport();
     session.agent.maxRetryDelayMs = session.settingsManager.getProviderRetrySettings().maxRetryDelayMs;
+    return settings;
   }
 
   private async persistChatRunSetting(key: string, value: unknown): Promise<number> {
@@ -1991,6 +1993,25 @@ export class RuntimeSlot {
         ? await this.dependencies.homeModelRuntime()
         : { runtime: await this.dependencies.createModelRuntime(), ownership: "owned" as const };
       const modelRuntime = binding.runtime;
+      // The SDK merges initial optional defaults after agent.streamFunction.
+      // Carry this exact request's resolved settings to the final provider cut:
+      // clearing a Chat/Mac value must not resurrect that stale SDK default.
+      // Ordinary runtimes and Home's borrowed *view* are session-owned; unrelated
+      // memory/extension calls outside this stream retain their explicit options.
+      const requestSettings = new AsyncLocalStorage<ReturnType<SettingsManager["getSettings"]>>();
+      const streamSimple = modelRuntime.streamSimple.bind(modelRuntime);
+      modelRuntime.streamSimple = (model, context, options) => {
+        const settings = requestSettings.getStore();
+        if (!settings) return streamSimple(model, context, options);
+        const { timeoutMs: _timeout, maxRetries: _retries, websocketConnectTimeoutMs: _connect, ...rest } = options ?? {};
+        const timeoutMs = settings.retry?.provider?.timeoutMs ?? settings.httpIdleTimeoutMs;
+        return streamSimple(model, context, {
+          ...rest,
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
+          ...(settings.retry?.provider?.maxRetries === undefined ? {} : { maxRetries: settings.retry.provider.maxRetries }),
+          ...(settings.websocketConnectTimeoutMs === undefined ? {} : { websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs }),
+        });
+      };
       // Only the ModelRuntime owner installs filters. Home's borrowed view reads
       // the Gateway's installation without wrapping its providers on rebuild.
       const detachOpenAIEligibility = binding.ownership === "owned"
@@ -2200,14 +2221,20 @@ export class RuntimeSlot {
       const homeRequestPolicy = this.homeRequestPolicy;
       compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir, home ? { disabled: true } : {});
       const providerStream = created.session.agent.streamFunction;
-      const baseStream: StreamFn = (model, context, options) => providerStream(model, context, this.dependencies.settings()
-        ? { ...options, transport: created.session.settingsManager.getTransport(),
-            maxRetryDelayMs: created.session.settingsManager.getProviderRetrySettings().maxRetryDelayMs }
-        : options);
+      let admittedSettings: ReturnType<SettingsManager["getSettings"]> | undefined;
+      const baseStream: StreamFn = (model, context, options) => {
+        const settings = admittedSettings;
+        if (!settings) return providerStream(model, context, options);
+        return requestSettings.run(settings, () => providerStream(model, context, {
+          ...options,
+          ...(settings.transport === undefined ? {} : { transport: settings.transport }),
+          ...(settings.retry?.provider?.maxRetryDelayMs === undefined ? {} : { maxRetryDelayMs: settings.retry.provider.maxRetryDelayMs }),
+        }));
+      };
       const prepareRequest = created.session.agent.prepareRequest;
       created.session.agent.prepareRequest = async (request, signal) => {
         if (signal?.aborted) throw new Error("Request cancelled before settings resolution");
-        await this.applyLiveRunSettings(created.session);
+        admittedSettings = await this.applyLiveRunSettings(created.session);
         if (signal?.aborted) throw new Error("Request cancelled during settings resolution");
         if (this.dependencies.settings()) {
           this.emit("session.diagnostic", safeJson({

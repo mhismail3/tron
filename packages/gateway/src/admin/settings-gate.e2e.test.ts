@@ -266,24 +266,75 @@ describe("settings risk gate", () => {
     transcript.push({ case: "Home request settings", steps: requests });
   });
 
+  it.each(["ordinary", "Home"] as const)("%s requests replace optional Run values and clear stale SDK defaults", async kind => {
+    const f = await fixture();
+    const fields = [
+      { key: "run.retry.provider.timeoutMs", option: "timeoutMs", value: 8_000 },
+      { key: "run.retry.provider.maxRetries", option: "maxRetries", value: 2 },
+      { key: "run.websocketConnectTimeoutMs", option: "websocketConnectTimeoutMs", value: 9_000 },
+    ];
+    const mac = (op: "set" | "unset") => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "mac" }, changes: fields.map(field => ({ key: field.key, layer: "mac", op,
+        ...(op === "set" ? { value: field.value } : {}) })),
+    });
+    await mac("set");
+    const slot = kind === "Home" ? await f.designateHome() : await f.chat();
+    const observations: Array<Record<string, unknown>> = [];
+    const request = async () => {
+      f.faux.setResponses([async (_context, options) => {
+        observations.push(Object.fromEntries(fields.map(field => [field.option, options?.[field.option as keyof typeof options]])));
+        return fauxAssistantMessage("optional request options observed");
+      }]);
+      await slot.prompt("observe optional request controls");
+      await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "optional request settled");
+      return observations.at(-1);
+    };
+    expect(await request()).toEqual({ timeoutMs: 8_000, maxRetries: 2, websocketConnectTimeoutMs: 9_000 });
+    const change = (op: "set" | "unset") => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: MODEL },
+      changes: fields.map(field => ({ key: field.key, layer: "chat", op, ...(op === "set" ? { value: field.value + 1 } : {}) })),
+    });
+    await change("set");
+    await mac("unset");
+    expect(await request()).toEqual({ timeoutMs: 8_001, maxRetries: 3, websocketConnectTimeoutMs: 9_001 });
+    await change("unset");
+    expect(await request()).toEqual({ timeoutMs: 300_000, maxRetries: undefined, websocketConnectTimeoutMs: undefined });
+    // An independent caller on the very same runtime is not an agent request;
+    // its explicit options must not inherit the last admitted chat snapshot.
+    let independent: unknown;
+    f.faux.setResponses([async (_context, options) => {
+      independent = { timeoutMs: options?.timeoutMs, maxRetries: options?.maxRetries, websocketConnectTimeoutMs: options?.websocketConnectTimeoutMs };
+      return fauxAssistantMessage("independent caller");
+    }]);
+    await slot.runtime.session.modelRuntime.streamSimple(f.faux.getModel(), { messages: [] }, {
+      timeoutMs: 12_000, maxRetries: 4, websocketConnectTimeoutMs: 13_000,
+    }).result();
+    expect(independent).toEqual({ timeoutMs: 12_000, maxRetries: 4, websocketConnectTimeoutMs: 13_000 });
+    expect((await f.macDocument()).retry).toMatchObject({ maxRetries: 3 });
+    transcript.push({ case: `${kind} optional Run replacement`, steps: observations });
+  });
+
   it("an agent records its own live override without deadlocking; fork and cold resume retain it without changing Mac defaults", async () => {
     const f = await fixture();
     const slot = await f.chat();
     const changed = await f.run(slot, "limit retries in this chat only", [{ name: "settings", args: {
       action: "change", reason: "Keep this task bounded", changes: [
         { key: "run.retry.maxRetries", layer: "chat", op: "set", value: 0 },
+        { key: "run.retry.provider.timeoutMs", layer: "chat", op: "set", value: 10_000 },
       ],
     } }]);
     expect(f.settle(changed.results)).toMatchObject({ status: "applied", tier: "quiet" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 3 });
-    expect(slot.settingsChatLayer().settings).toEqual({ retry: { maxRetries: 0 } });
+    const expectedChat = { retry: { maxRetries: 0, provider: { timeoutMs: 10_000 } } };
+    expect(slot.settingsChatLayer().settings).toEqual(expectedChat);
     const point = slot.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
     const fork = await slot.fork(point.id, "at");
-    expect(slot.settingsChatLayer().settings).toEqual({ retry: { maxRetries: 0 } });
+    expect(slot.settingsChatLayer().settings).toEqual(expectedChat);
     const file = slot.runtime.session.sessionManager.getSessionFile()!;
     const canonical = (await readFile(file, "utf8")).split("\n").filter(Boolean).map(line => JSON.parse(line));
     expect(canonical).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.settings.v1",
-      data: expect.objectContaining({ settings: { retry: { maxRetries: 0 } } }) }));
+      data: expect.objectContaining({ settings: expectedChat }) }));
     await f.registry.dispose();
     const reopened = new RuntimeRegistry({
       agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
@@ -295,15 +346,18 @@ describe("settings risk gate", () => {
     settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime,
       sessions: reopened, home: () => reopened.homeOwner(), registry: reopened });
     const resumed = await reopened.acquire(fork.sessionId);
-    expect(resumed.settingsChatLayer().settings).toEqual({ retry: { maxRetries: 0 } });
+    expect(resumed.settingsChatLayer().settings).toEqual(expectedChat);
     let attempts = 0;
-    f.faux.setResponses(Array.from({ length: 4 }, () => async () => {
+    let timeoutMs: number | undefined;
+    f.faux.setResponses(Array.from({ length: 4 }, () => async (_context, options) => {
       attempts += 1;
+      timeoutMs = options?.timeoutMs;
       return fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 service unavailable" });
     }));
     await resumed.prompt("prove the resumed override");
     await waitFor(() => resumed.snapshot().configurationBlocker === null || undefined, "resumed run settled");
     expect(attempts).toBe(1);
+    expect(timeoutMs).toBe(10_000);
     transcript.push({ case: "canonical chat override fork/resume", steps: [{ fork: fork.sessionId, attempts,
       settings: resumed.settingsChatLayer().settings, mac: await f.macDocument() }] });
   });

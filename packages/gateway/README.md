@@ -782,13 +782,17 @@ leaves the write unstaged with the reason), trust (`TrustService.setAndApply` wi
 the project runtime reload), Home's memory model (`HomeOwner`, physical models only),
 and a session's Chat layer through its slot lane (`setModel`, `setThinking`,
 `setContextWindow`, `setTools`, and `setChatRunSetting`). Live Run keys with a
-concrete schema Built-in are resolved at prompt/request admission; explicit
+Chat binding are resolved at prompt/request admission; explicit
 Chat values live in branch-local `tron.settings.v1` entries, survive fork/resume,
 and unset back to current defaults. The runtime overlays operational fields
 without reloading fixed resources or saving defaults. Its own running settings
-tool appends in the lane it already owns. Optional Run fields without a complete
-fallback remain unsupported at the Chat layer until replacement semantics can
-clear them safely; full timing/provenance acceptance is still outstanding.
+tool appends in the lane it already owns. Optional provider timeout/count and
+WebSocket timeout are replaced after SDK default composition, at the final
+provider-stream boundary under the exact agent request's async context. Unset
+cannot resurrect initial SDK values, and unrelated memory/extension requests
+retain their explicit options. Ordinary/Home and fork/cold-resume provider
+journeys cover that distinction. Full timing/provenance acceptance is still
+outstanding.
 A Chat-layer change needs `fence: {
 runtimeGeneration, model?, revision? }`, the runtime the client read; the lane's
 idle, chapter and fence guards are unchanged, and the receipt's work entry is the

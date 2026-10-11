@@ -364,8 +364,8 @@ context window through session entries, and for resources through Reload;
 fixed-value provenance and its reset action are still unfinished. Compaction
 changes refresh open chats through `GatewayService.settingsChanged`.
 
-Run declarations with a concrete Built-in and a Chat settings binding resolve
-again before a prompt and before each provider request. The runtime overlays
+Live Run declarations with a Chat settings binding resolve again before a
+prompt and before each provider request. The runtime overlays
 only these operational fields on the actual session's `SettingsManager`,
 including Home's SDK-created manager; it does not reload fixed resources or
 save defaults. Agent queue modes and request transport/retry-delay options also
@@ -381,14 +381,22 @@ lane. iPhone changes retain the idle, runtime/model fence and chapter guards.
 `settings-gate.e2e.test.ts` proves changed retry counts in an already-open chat,
 Chat isolation, unset, agent self-edit, fork/cold-resume persistence without
 Mac-default writes, and Home's actual provider transport/retry-delay options.
+Optional provider timeout/count and WebSocket timeout use the same Chat store.
+Their complete resolved snapshot replaces the three SDK-composed options at
+`ModelRuntime.streamSimple`, scoped by the exact agent request across asynchronous
+stream work. Unset removes an optional value rather than reviving the manager's
+initial defaults; provider timeout then follows the resolved idle timeout. This
+uses the runtime-owned view (also for Home), so other sessions and independent
+memory/extension calls retain their own options. The same E2E exercises both
+ordinary and Home requests with initial Mac values, a Chat override, removed Mac
+values and unset, plus optional-value fork/cold resume.
 The bounded `settings-run-applied` session diagnostic shows the runtime policy
 at request admission, rather than merely the defaults a settings read resolves.
 
-This is not complete timing support: optional SDK fields without a concrete
-Built-in (provider retry timeout/count and WebSocket timeout), image-direction
-policy, and fixed-value provenance still need their runtime owners. Optional
-Chat writes remain refused: `applyOverrides` deep-merges and skips undefined,
-so pretending that an unset clears a previously applied value would be wrong.
+This is not complete timing support: image-direction policy and fixed-value
+provenance still need their runtime owners. The SDK's merge-only
+`applyOverrides` is not the owner of optional-field removal; the final provider
+boundary above is, after SDK default composition.
 
 **No sticky defaults (verified).** pi 1.0.4's `AgentSession.setModel(model, options)`
 and `setThinkingLevel(level, options)` write `defaultModel` and
