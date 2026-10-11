@@ -137,13 +137,11 @@ struct HomeTaskSheet: View {
     }
 
     /// Task recovery as one row when it is open; a placeholder names the refusal when not.
+    /// Shown only when task recovery needs attention: an available recovery is the
+    /// normal state and would be noise on every task and permission sheet.
     @ViewBuilder func recovery(_ status: HomeStatusDTO) -> some View {
         if !status.available || status.taskRecovery?.available != true {
             TronPlaceholderState(title: "Task recovery needed", detail: status.taskRecovery?.reason ?? status.reason ?? "Task recovery is unavailable on this Gateway.", icon: "exclamationmark.triangle")
-        } else {
-            TronGlassCard(accent: .tronSessionTeal) {
-                TronSettingsRow(icon: "checkmark.shield", title: "Task recovery", subtitle: "Available", accent: .tronSessionTeal)
-            }
         }
     }
 
@@ -277,7 +275,9 @@ struct HomeTaskSheet: View {
                     }
                     if let subagents = task.subagents {
                         if task.workerModel != nil { TronSettingsDivider(accent: .tronSessionTeal) }
-                        TronValueRow(icon: "person.2", title: "Subagents", value: Self.subagentLine(subagents))
+                        // The counts are a sentence, so they sit under the title rather than
+                        // squeezing it into a trailing value column.
+                        TronValueRow(icon: "person.2", title: "Subagents", detail: Self.subagentLine(subagents))
                     }
                     if let runs = task.subagentRuns, runs.total > 0 {
                         TronSettingsDivider(accent: .tronSessionTeal)

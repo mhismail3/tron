@@ -304,11 +304,12 @@ enum HomeChapterPresentation {
     }
 
     /// Contents as rows: counts the Gateway measured, and topics it named.
-    static func contentsLines(_ contents: HomeChapterListDTO.Contents) -> [String] {
-        var lines: [String] = []
-        if let messages = contents.userMessages { lines.append("\(messages.formatted()) \(messages == 1 ? "user message" : "user messages")") }
-        if let replies = contents.homeReplies { lines.append("\(replies.formatted()) Home \(replies == 1 ? "reply" : "replies")") }
-        if let delegated = contents.tasksDelegated { lines.append("\(delegated.formatted()) \(delegated == 1 ? "task" : "tasks") delegated") }
+    /// Each count with the icon of who produced it: you, Home, or its workers.
+    static func contentsLines(_ contents: HomeChapterListDTO.Contents) -> [(icon: String, text: String)] {
+        var lines: [(icon: String, text: String)] = []
+        if let messages = contents.userMessages { lines.append(("person", "\(messages.formatted()) \(messages == 1 ? "user message" : "user messages")")) }
+        if let replies = contents.homeReplies { lines.append(("house", "\(replies.formatted()) Home \(replies == 1 ? "reply" : "replies")")) }
+        if let delegated = contents.tasksDelegated { lines.append(("checklist", "\(delegated.formatted()) \(delegated == 1 ? "task" : "tasks") delegated")) }
         return lines
     }
 

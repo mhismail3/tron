@@ -95,8 +95,8 @@ extension HomeSheet {
                 readingCard(caption: summary.truncated ? "Summary · truncated" : "Summary", text: summary.text)
             }
             readingCard(caption: item.projection.omitted ? "Projection · omitted from view" : "Projection", text: item.projection.text)
-            if !item.projection.omissions.isEmpty {
-                Text("Omitted: \(item.projection.omissions.joined(separator: ", "))")
+            if item.projection.omitted || !item.projection.omissions.isEmpty {
+                Text("Some content was omitted from this view.")
                     .font(TronTypography.secondaryDescription)
                     .foregroundStyle(Color.tronTextMuted)
             }

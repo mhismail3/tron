@@ -488,7 +488,8 @@ private actor HostedHomeShellGateway {
     }
     private func taskSummary(_ id: String) -> JSONValue {
         let terminal = id == "terminal" || taskStopped
-        let now = Date.now.timeIntervalSince1970 * 1000
+        // The Gateway sends whole epoch milliseconds; the task DTOs decode them as Int.
+        let now = nowMilliseconds()
         let created = id == "active" ? now - 2 * 3_600_000 : now - 86_400_000
         let updated = id == "active" ? now - 6 * 60_000 : now - 3 * 3_600_000
         return .object(["taskId": .string(id), "createdAt": .number(created), "updatedAt": .number(updated),
@@ -508,7 +509,9 @@ private actor HostedHomeShellGateway {
         record["subagentRuns"] = .object(["total": .number(id == "active" ? 1 : 0), "runs": .array(id == "active" ? [.object(["runId": .string("run-live"), "agent": .string("researcher"), "state": .string("running"), "startedAt": .string(isoAgo(900)), "lastActivityAt": .string(isoAgo(120))])] : [])])
         record["reportRef"] = id == "terminal" ? .object(["resultId": .string("report-one"), "sessionId": .string("worker-session"),
             "entryId": .string("report-entry"), "digest": .string(String(repeating: "b", count: 64))]) : .null
-        record["intent"] = .object(["text": .string(id == "active" ? "Active finite work" : "Finished finite work")])
+        record["intent"] = .object(["text": .string(id == "active"
+            ? "Continue epic #758 (settings model) on its integration branch. Implement the next slice, keep draft PR 798 updated, and do not merge."
+            : "Draft the email that summarises Thursday's garden review and send it for approval.")])
         record["operationId"] = .string("task-operation")
         let terminal = id == "terminal" || taskStopped
         record["terminalEvidence"] = terminal ? .object(["outcome": .string(id == "active" ? "interrupted" : "final"), "reason": .string("explicit-report"), "sessionId": .string("worker-session"), "entryIds": .array([.string("terminal-entry")])]) : .null
@@ -527,11 +530,11 @@ private actor HostedHomeShellGateway {
         let ids = ["request-existing", "request-approve", "request-deny"]
         let binding = taskBinding()
         var decisions: [JSONValue] = [.object(["id": .string("existing-decision"), "requestId": .string("request-existing"),
-            "decidedAt": .number(1000), "approved": .bool(true), "expiresAt": .number(Date.now.timeIntervalSince1970 * 1000 + 604_800_000)])]
+            "decidedAt": .number(1000), "approved": .bool(true), "expiresAt": .number(nowMilliseconds() + 604_800_000)])]
         decisions += taskDecisions.keys.sorted().map { taskDecisions[$0]!.objectValue!["decision"]! }
         var grant = binding.objectValue!
         grant["id"] = .string("grant-one"); grant["decisionId"] = .string("existing-decision")
-        grant["expiresAt"] = .number(Date.now.timeIntervalSince1970 * 1000 + 604_800_000); grant["state"] = .string(grantRevoked ? "revoked" : "available")
+        grant["expiresAt"] = .number(nowMilliseconds() + 604_800_000); grant["state"] = .string(grantRevoked ? "revoked" : "available")
         var scope: [String: JSONValue] = ["id": .string("scope-one"), "kind": .string("all-trusted-projects"),
             "active": .bool(!scopeRevoked), "restoreEpoch": .string("fixture-epoch"), "createdAt": .number(1000)]
         if scopeRevoked { scope["revokedAt"] = .number(2000) }
@@ -569,6 +572,9 @@ private actor HostedHomeShellGateway {
         .object(["provider": .string("anthropic"), "id": .string(id)])
     }
     /// An ISO timestamp the given seconds before now, so fixture rows read as recent.
+    private func nowMilliseconds() -> Double {
+        (Date.now.timeIntervalSince1970 * 1000).rounded(.down)
+    }
     private func isoAgo(_ seconds: TimeInterval) -> String {
         ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-seconds))
     }

@@ -361,6 +361,12 @@ final class TronSmokeUITests: XCTestCase {
             tapManageRow(app, "home-manage-permissions")
             XCTAssertTrue(app.buttons["Reconfirm permissions"].waitForExistence(timeout: 5))
             keepScreenshot(named: "home-\(appearance)-permissions")
+            // The main sheet scrolled to its bottom container: pause or resume, and disable.
+            app.buttons["home-sheet-done-permissions"].tap()
+            XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5))
+            app.swipeUp()
+            XCTAssertTrue(app.descendants(matching: .any)["home-manage-disable"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "home-\(appearance)-manage-bottom")
             app.terminate()
         }
     }

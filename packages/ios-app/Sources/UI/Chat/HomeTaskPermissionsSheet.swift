@@ -39,7 +39,7 @@ extension HomeTaskSheet {
                     mutedLine("No standing scopes")
                 } else {
                     rowGroup(permissions.scopes) { scope in
-                        permissionRow(title: "All trusted projects", detail: scope.id,
+                        permissionRow(title: "All trusted projects", detail: scope.active ? "Any task in a trusted project" : "No longer admits tasks",
                                       pill: scope.active ? ("Active", Color.tronEmerald) : ("Revoked", Color.tronSlate)) {
                             if scope.active { revokeButton(label: "Revoke scope \(scope.id)") { requestRevocation(.scope(scope.id)) } }
                         }
@@ -141,6 +141,7 @@ extension HomeTaskSheet {
         Button(role: .destructive, action: action) {
             Text("Revoke")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(Color.tronError)
         }
         .buttonStyle(.borderless)
         .disabled(!canMutate)

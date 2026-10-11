@@ -102,7 +102,7 @@ extension HomeSheet {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                         if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
-                        TronSettingsRow(icon: "text.bubble", title: line, accent: .tronSessionTeal)
+                        TronSettingsRow(icon: line.icon, title: line.text, accent: .tronSessionTeal)
                     }
                     if !topics.isEmpty {
                         if !lines.isEmpty { TronSettingsDivider(accent: .tronSessionTeal) }
