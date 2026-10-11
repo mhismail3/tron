@@ -8,6 +8,8 @@ import {
   type SessionProjection,
 } from "@earendil-works/pi-coding-agent";
 import { markAnthropicBlocks } from "../episodic/cache-layout.js";
+import { HOME_TASK_RESULT_MESSAGE } from "../sessions/invocation-receipts.js";
+import type { HomeContextSection } from "../protocol/types.js";
 
 /*
  * Tron Home's request seam (gist §7).
@@ -129,9 +131,12 @@ export interface HomeRefusal {
   detail: string;
 }
 
+/** What started an activation: a maintainer message, or a settled task result that woke Home. */
+export type HomeActivationKind = "user" | "wake";
+
 /** The sizes of the last request one activation prepared, as `home.context` reports them. */
 export interface HomeRequestStep {
-  /** Effective-size estimate of the rewritten context, in tokens. */
+  /** Effective-size estimate of the request, in tokens: the sum of `sections`. */
   effectiveTokens: number;
   /** UTF-8 bytes and lines of the frozen memory view this request carried. */
   viewBytes: number;
@@ -139,6 +144,19 @@ export interface HomeRequestStep {
   /** The model's context window this activation was measured against, 0 when the
    * model declares none. */
   contextWindow: number;
+  /** The request's effective tokens by section. Every message is counted once. */
+  sections: HomeContextSection[];
+}
+
+/** Home's system prompt for one activation, as its two parts. The request carries
+ * their concatenation, `instructions` then `profile`. */
+export interface HomeSystemPrompt {
+  /** The SDK's base prompt followed by Home's operating context. */
+  instructions: string;
+  /** The learned-profile section. */
+  profile: string;
+  /** Active profile notes the section lists. */
+  profileNotes: number;
 }
 
 /** What identifies one activation to the memory view source. */
@@ -199,7 +217,7 @@ export interface HomeRequestPolicyOptions {
   /** Home's full system prompt for one activation, from the SDK's base prompt
    * captured at admission. Called at most once per activation, at its first
    * `prepareRequest` step; a rejection fails that activation closed. */
-  prepareSystemPrompt: (base: string) => Promise<string>;
+  prepareSystemPrompt: (base: string) => Promise<HomeSystemPrompt>;
   /** Where the seam reports its bounded per-activation and refusal records. */
   onRecord?: (record: HomeRequestRecord) => void;
 }
@@ -210,6 +228,9 @@ export interface HomeRequestPolicyOptions {
 export interface HomeActivationEvidence {
   activationStartEntryId: string | null;
   activationOpen: boolean;
+  kind: HomeActivationKind;
+  /** When the activation was admitted, as an ISO-8601 instant. */
+  startedAt: string;
   step?: HomeRequestStep;
   refusal?: HomeRefusal;
 }
@@ -227,9 +248,11 @@ export class HomeRequestPolicyError extends Error {
 
 interface ActivationState extends HomeActivationIdentity {
   cancellation: AbortController;
+  kind: HomeActivationKind;
+  startedAt: string;
   /** The SDK's base system prompt at admission, before any run changed it. */
   systemBase: string;
-  system: Promise<string> | undefined;
+  system: Promise<HomeSystemPrompt> | undefined;
   view: Promise<HomeActivationView> | undefined;
   viewRefusal: HomeRequestPolicyError | undefined;
   /** True while this activation's first request has not been recorded yet. */
@@ -240,11 +263,19 @@ interface ActivationState extends HomeActivationIdentity {
   refusal: HomeRefusal | undefined;
 }
 
+/** An activation's own message, with the canonical entry it projects from. */
+interface TailMessage {
+  message: AgentMessage;
+  entry: number;
+}
+
 interface RewrittenContext {
   messages: AgentMessage[];
   /** The memory message plus the activation's native messages, in request order. */
   nonSystem: AgentMessage[];
   excludedMessages: number;
+  memory: AgentMessage;
+  tail: TailMessage[];
 }
 
 const MAXIMUM_RECORDED_TRANSFORMS = 64;
@@ -281,6 +312,8 @@ export class HomeRequestPolicy {
       return {
         activationStartEntryId: activation.boundaryEntryId,
         activationOpen: true,
+        kind: activation.kind,
+        startedAt: activation.startedAt,
         ...(activation.step ? { step: activation.step } : {}),
         ...(activation.refusal ? { refusal: activation.refusal } : {}),
       };
@@ -294,7 +327,7 @@ export class HomeRequestPolicy {
    * activation start: the input's own entry is appended inside `session.prompt`
    * afterwards, and steering later inserts entries after it, never before it.
    */
-  admit(operationId: string, boundaryEntryId: string | null, systemBase: string): void {
+  admit(operationId: string, boundaryEntryId: string | null, systemBase: string, kind: HomeActivationKind): void {
     // A displaced activation means the previous operation settled without a
     // matching `settle`, or a new run began first. Replacing it is the only safe
     // choice: the old boundary can no longer be trusted.
@@ -303,6 +336,8 @@ export class HomeRequestPolicy {
       operationId,
       nonce: randomUUID(),
       cancellation: new AbortController(),
+      kind,
+      startedAt: new Date().toISOString(),
       boundaryEntryId,
       systemBase,
       system: undefined,
@@ -326,6 +361,8 @@ export class HomeRequestPolicy {
     this.lastClosed = {
       activationStartEntryId: activation.boundaryEntryId,
       activationOpen: false,
+      kind: activation.kind,
+      startedAt: activation.startedAt,
       ...(activation.step ? { step: activation.step } : {}),
       ...(activation.refusal ? { refusal: activation.refusal } : {}),
     };
@@ -387,7 +424,7 @@ export class HomeRequestPolicy {
       this.assertProjectionFidelity(context.messages, projectionBefore, activation);
       const boundaryBefore = this.boundaryIndex(projectionBefore, activation);
       const excludedBefore = excludedMessages(projectionBefore, boundaryBefore);
-      await this.systemPromptFor(activation);
+      const system = await this.systemPromptFor(activation);
       const memoryView = await this.memoryView(activation, signal);
       // The wait can last seconds, so the projection the cut is computed from is
       // read again afterwards. What must not have moved is the part this request
@@ -408,10 +445,8 @@ export class HomeRequestPolicy {
       }
       const rewritten = this.cut(projection, boundaryIndex, activation, memoryView);
       const model = update?.model ?? request.model;
-      const effectiveTokens = rewritten.messages.reduce(
-        (total, message) => total + estimateTokens(message),
-        0,
-      );
+      const sections = requestSections(system, rewritten, memoryView, activation.kind);
+      const effectiveTokens = sections.reduce((total, section) => total + section.tokens, 0);
       const contextWindow = model?.contextWindow ?? 0;
       if (contextWindow > 0 && effectiveTokens > contextWindow - HOME_RESERVE_TOKENS) {
         throw this.refuse(
@@ -424,7 +459,7 @@ export class HomeRequestPolicy {
       this.expectedNonSystemMessages = rewritten.nonSystem;
       const viewBytes = utf8Bytes(memoryView.text);
       const viewLines = memoryView.text === "" ? 0 : memoryView.text.split("\n").length;
-      activation.step = { effectiveTokens, viewBytes, viewLines, contextWindow };
+      activation.step = { effectiveTokens, viewBytes, viewLines, contextWindow, sections };
       memoryView.commit();
       // Once per activation, not once per request: a tool loop or a retry is the
       // same activation and its effective size and wait are already reported.
@@ -465,7 +500,7 @@ export class HomeRequestPolicy {
           activation,
         );
       }
-      const framed = homeSystemFrame(transformed, await this.systemPromptFor(activation));
+      const framed = homeSystemFrame(transformed, homeSystemText(await this.systemPromptFor(activation)));
       this.assertContextNotMutated(framed, activation);
       // Use the same settings-aware converter as this agent's loop; bare
       // conversion would reject Pi's supported image-blocking replacement.
@@ -537,7 +572,7 @@ export class HomeRequestPolicy {
    * captured at admission and frozen, so every request of the activation carries
    * the same bytes. A failure refuses the activation, and the refusal is cached
    * with the prompt, as the memory view's is. */
-  private systemPromptFor(activation: ActivationState): Promise<string> {
+  private systemPromptFor(activation: ActivationState): Promise<HomeSystemPrompt> {
     activation.system ??= this.options.prepareSystemPrompt(activation.systemBase).catch(error => {
       throw this.refuse("system-unavailable", error instanceof Error ? error.message : String(error), activation);
     });
@@ -658,7 +693,7 @@ export class HomeRequestPolicy {
     memoryView: HomeActivationView,
   ): RewrittenContext {
     const systems: AgentMessage[] = [];
-    const tail: AgentMessage[] = [];
+    const tail: TailMessage[] = [];
     let excludedMessages = 0;
     projection.entries.forEach((entry, index) => {
       const withinActivation = index > boundaryIndex;
@@ -670,7 +705,7 @@ export class HomeRequestPolicy {
           systems.push(message);
           continue;
         }
-        if (withinActivation) tail.push(message);
+        if (withinActivation) tail.push({ message, entry: index });
         else excludedMessages += 1;
       }
     });
@@ -688,10 +723,13 @@ export class HomeRequestPolicy {
       details: undefined,
       timestamp: Date.now(),
     } as unknown as AgentMessage;
+    const messages = tail.map(item => item.message);
     return {
-      messages: [...systems, memory, ...tail],
-      nonSystem: [memory, ...tail],
+      messages: [...systems, memory, ...messages],
+      nonSystem: [memory, ...messages],
       excludedMessages,
+      memory,
+      tail,
     };
   }
 
@@ -706,6 +744,62 @@ export class HomeRequestPolicy {
     this.options.onRecord?.({ event: "refused", reason, detail, ...(sizes ?? {}) });
     return new HomeRequestPolicyError(reason, homeRefusalMessage(reason));
   }
+}
+
+/** The system prompt text one request carries: its instructions, then its profile section. */
+function homeSystemText(prompt: HomeSystemPrompt): string {
+  return `${prompt.instructions}\n\n${prompt.profile}`;
+}
+
+/** A settled task result delivered into the canonical session (`home-wake-inbox.ts`). */
+function isTaskResult(message: AgentMessage): boolean {
+  return message.role === "custom" && (message as { customType?: unknown }).customType === HOME_TASK_RESULT_MESSAGE;
+}
+
+/** A memory view line is `start+span|text`, one per summary (`episodic-memory.ts`). */
+const MEMORY_SUMMARY_LINE = /^\d+\+\d+\|/u;
+
+/**
+ * The request's effective size by section, in request order. The frozen system prompt is the
+ * request's head (`homeSystemFrame`), which replaces every recorded system message, so those are
+ * not counted. The activation's own messages split into its input (the user message, or a wake's
+ * trigger result), the task results it delivered and the chapter's remaining turns, so each message
+ * is counted once and the sections sum to the request. A wake's trigger is the result it started
+ * from, so the wake's `results` are the other results it delivered.
+ */
+function requestSections(system: HomeSystemPrompt, cut: RewrittenContext, view: HomeActivationView,
+  kind: HomeActivationKind): HomeContextSection[] {
+  const tail = cut.tail;
+  let inputAt = -1;
+  if (kind === "user") inputAt = tail.findIndex(item => item.message.role === "user");
+  else for (let index = tail.length - 1; index >= 0 && inputAt < 0; index--) {
+    if (isTaskResult(tail[index]!.message)) inputAt = index;
+  }
+  let inputTokens = 0;
+  let resultTokens = 0;
+  let results = 0;
+  let chapterTokens = 0;
+  const chapterEntries = new Set<number>();
+  tail.forEach((item, index) => {
+    const tokens = estimateTokens(item.message);
+    if (index === inputAt) inputTokens = tokens;
+    else if (isTaskResult(item.message)) { resultTokens += tokens; results += 1; }
+    else { chapterTokens += tokens; chapterEntries.add(item.entry); }
+  });
+  const summaries = view.text === "" ? 0 : view.text.split("\n").filter(line => MEMORY_SUMMARY_LINE.test(line)).length;
+  return [
+    { id: "instructions", tokens: estimateTokens(systemMessage(system.instructions)) },
+    { id: "profile", tokens: estimateTokens(systemMessage(system.profile)), count: system.profileNotes },
+    { id: "memory", tokens: estimateTokens(cut.memory), count: summaries },
+    { id: "chapter", tokens: chapterTokens, count: chapterEntries.size },
+    { id: "results", tokens: resultTokens, count: results },
+    { id: "input", tokens: inputTokens },
+  ];
+}
+
+/** A system message carrying one text, sized as the SDK sizes a system message. */
+function systemMessage(text: string): AgentMessage {
+  return { role: "system", content: text, timestamp: 0 } as AgentMessage;
 }
 
 /** Frames a request's system messages as one head holding Home's system prompt,

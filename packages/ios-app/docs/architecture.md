@@ -200,22 +200,23 @@ bounded chapter metadata, tasks and permissions, and disable/check-completion �
 and opens each existing Home destination as a managed child sheet with its own
 read owner. `HomeStatusLinePresentation` is the one source of the sheet's state
 and memory lines. Mutations go through the `HomeMutationCoordinator` authority.
-The sheet subsumed the former Home header bar and its overflow menu (#740):
-Stop response lives in its state card, bound to the chat's live canonical
-operation authority. The Chapters child sheet reads `home.chapterList`
-(gated on `home-chapter-list.v1`) and shows the whole ledger — state, size
-against the shared soft/hard limits via `HomeChapterPresentation`, date range —
-and opens a present chapter read-only through a profile-fenced ordinary route
-staged on sheet dismissal (`ChatRoutes.completeStagedNavigationAfterDismissal`).
+The sheet subsumed the former Home header bar and its overflow menu (#740); the
+composer's Stop is the only Stop (#811), and Manage Home has no Stop row. The
+Chapters child sheet reads `home.chapterList` (gated on `home-chapter-list.v1`),
+lists one row per chapter, and its detail shows the chapter's contents, size
+against the shared soft limit, Browse this chapter's memory, and — for a sealed
+chapter only — the read-only transcript, staged as a profile-fenced ordinary
+route on sheet dismissal (`ChatRoutes.completeStagedNavigationAfterDismissal`).
 The next-prompt preview, delivered-context viewing and the learned-profile view
 are follow-up Gateway reads.
 
-`HomeSheetReadOwner` owns one disposable manage/settings/context/browser/evidence read
-per managed sheet. Its idle/loading/loaded/failed state carries the request's
+`HomeSheetReadOwner` owns one disposable manage/context/chapter/memory/task/evidence read
+per managed sheet; the main sheet's load carries status, context, chapters, the first
+task page and permissions together. Its idle/loading/loaded/failed state carries the request's
 identity and the caller's request-intent ID; changing intent invalidates success,
 error and loading even before SwiftUI starts the replacement task.
-`AppModel.readHomeSheet` admits only the typed status, memory-page and canonical-
-evidence queries, capturing and rechecking the focused profile, connection and
+`AppModel.readHomeSheet` admits only the typed manage, context, chapter, memory-page,
+task, permission and canonical-evidence queries, capturing and rechecking the focused profile, connection and
 lifecycle generation. The sheet additionally checks its exact managed token and
 current activity across every await. Cover/background retires pending reads;
 uncover/reconnect starts a fresh request. Installed parent frames can remain
@@ -322,7 +323,7 @@ metadata nor credential failure can leave selected metadata without its owned se
 lifecycle admission. Mutation receipt reconciliation captures generation-only admission so it may
 resolve across a same-profile reconnect, but profile replacement invalidates it before any poll or
 replay. Connection-owned terminal-open results that resolve after a same-lifecycle reconnect must attach
-again on the current connection before replay can publish; a profile-generation change discards them. Each reconnect executor owns one `GatewayReconnectSchedule` and keeps retrying retryable transport failures while the app is foregrounded on a satisfied path. The selected profile's nominal delay starts at 2 seconds, grows by ×1.7 to 15 seconds, and receives independent 80–120% jitter with a hard 15-second cap; a dashboard pool entry follows that progression without jitter, and once three of its consecutive attempts have failed it escalates by ×4 from the delay it reached to a five-minute cap, so an unreachable secondary profile costs one attempt every five minutes. The pool counts its own failed attempts, of which only a successful attempt clears the count, so a secondary Mac that drops after connecting, a handshake the Gateway never answers and a 503 keep backing off. Foreground, a real path change, and explicit Retry cancel one pending delay; a path change — the interfaces the monitored route uses changing, or an unsatisfied path becoming satisfied — also restarts the backoff curve and, while an attempt is on the wire, is consumed by the attempt that follows it, so the route that came back is attempted at once rather than after the wait the route that went away had grown; a background transition pauses admission. An unsatisfied path hint parks recovery, but never silently: the park is recorded (`reconnect.parked`), its resume is scheduled at `PARKED_RETRY_BOUND` (30 seconds), and that bound probes the possibly stale hint with one attempt, so a missed path callback cannot leave a foregrounded phone disconnected. A foreground activation probes the stale hint the same way, because the app waking is itself evidence the monitor's last reading is old. A parked episode therefore always has an attempt in flight or scheduled, and is never reported as a stall. A replacement attempt ends at the authenticated handshake plus event activation: mounted restoration, terminal reattachment and catalog/provider/settings/device reconciliation run beneath that connected socket, owned by the presentation that implements them, and the socket's loss cancels them. Slow projection work therefore never delays the next attempt, and a drop during restoration starts recovery at once instead of waiting restoration out. That handshake therefore publishes Connected, and only the socket's loss returns the status to Reconnecting: a slow or failed restoration never relabels a live socket. A mounted restoration owns only the treatment its own chat shows — the in-flight notice after a two-second grace, the retained-transcript warning when it fails — never the connection status. That treatment is scoped to the restoring chat and retired against it, so a restoration the user leaves or replaces neither posts onto whatever screen took over nor leaves its notice behind. Every early return of the reconnect request names its refusing guard once (`reconnect.skipped`), so no guard can silently park recovery again. Only unauthenticated, forbidden, protocol-mismatch, and identity-mismatch failures stop automatic recovery, until explicit Retry clears that stop. Retryable failures keep the status Reconnecting; Offline means recovery is stopped. After two consecutive failed connects whose L-10 records show `stage=transport-open` and `transportOpened=false`, the dashboard and delayed recovery notice say **Mac unreachable**, adding the known interface (for example, **Mac unreachable over Wi-Fi**). Failed handshakes do not prove absence of an OS route, even when the interface reports a satisfied path. Mac details offer **Retry Connection** while reconnecting or unreachable as well as when recovery has stopped: the existing selected/pool owner accelerates a pending delay, and refuses competing attempts while its socket is in flight. Retry is a client transport action, not a Gateway restart or a replay of accepted domain commands. `TronIntegrationSheetsUITests.testRetryConnectionRecoversReconnectingDetails` and `.testRetryConnectionRecoversUnreachableDetails` mount the real Mac detail UI through the existing HOSTED_TEST fixture, tap Retry, and verify a connected replacement. Run them with `scripts/tron-ios-test run --only-testing TronMobileUITests/TronIntegrationSheetsUITests`; the owned runner retains screenshots and results in its reported `TestResults.xcresult`. Any attempt that opened a transport, or a recovery episode that began with `ping_timeout`, stays **Reconnecting**. Successful connection clears the presentation. This classification does not change retry timing or ownership. Every attempt bounds the WebSocket open and the hello after it separately: a socket that never opens gives up at the 5-second transport-open deadline, and a socket that opened may spend the 15-second hello deadline on hello and authentication, so a down path is named in one step and a slow Mac is not mistaken for one. The controlled monotonic clock and injected unit-interval source make delay and acceleration behavior deterministic in tests. Background scene transition cancels disposable foreground/catalog reconciliation, preserves the route and bounded profile-owned projections, retires the transport epoch before suspension, and gates event-triggered catalog reads until the next active scene starts one authoritative reconnect pass. After event activation, reconnect and foreground
+again on the current connection before replay can publish; a profile-generation change discards them. Each reconnect executor owns one `GatewayReconnectSchedule` and keeps retrying retryable transport failures while the app is foregrounded on a satisfied path. The selected profile's nominal delay starts at 2 seconds, grows by ×1.7 to 15 seconds, and receives independent 80–120% jitter with a hard 15-second cap; a dashboard pool entry follows that progression without jitter, and once three of its consecutive attempts have failed it escalates by ×4 from the delay it reached to a five-minute cap, so an unreachable secondary profile costs one attempt every five minutes. The pool keeps one profile-owned consecutive-failure count and last successful connection time across background transport retirement; profile identity replacement/removal invalidates both, success clears the count and updates the timestamp, and explicit Retry clears only the count. That same count selects both the next retry delay and **Offline** after three consecutive failures; the pool has no second unreachable counter. The last-connected value records only an authenticated handshake/event-activation success. Token, admission or profile identity changes invalidate the retained state. Nonretryable stops and their reasons survive scene retirement and still require explicit Retry. A backgrounded secondary therefore does not revert to a fresh fast-retry loop or lose its last-connected breadcrumb. The selected Mac remains owned by its lifecycle. A secondary Mac that drops after connecting, a handshake the Gateway never answers and a 503 therefore continue the same backoff episode. For the selected lifecycle, foreground, a real path change, and explicit Retry cancel one pending delay; a path change — the interfaces the monitored route uses changing, or an unsatisfied path becoming satisfied — also restarts the backoff curve and, while an attempt is on the wire, is consumed by the attempt that follows it, so the route that came back is attempted at once rather than after the wait the route that went away had grown; a background transition pauses admission. An unsatisfied path hint parks recovery, but never silently: the park is recorded (`reconnect.parked`), its resume is scheduled at `PARKED_RETRY_BOUND` (30 seconds), and that bound probes the possibly stale hint with one attempt, so a missed path callback cannot leave a foregrounded phone disconnected. A foreground activation probes the stale hint the same way, because the app waking is itself evidence the monitor's last reading is old. A parked episode therefore always has an attempt in flight or scheduled, and is never reported as a stall. A replacement attempt ends at the authenticated handshake plus event activation: mounted restoration, terminal reattachment and catalog/provider/settings/device reconciliation run beneath that connected socket, owned by the presentation that implements them, and the socket's loss cancels them. Slow projection work therefore never delays the next attempt, and a drop during restoration starts recovery at once instead of waiting restoration out. That handshake therefore publishes Connected, and only the socket's loss returns the status to Reconnecting: a slow or failed restoration never relabels a live socket. A mounted restoration owns only the treatment its own chat shows — the in-flight notice after a two-second grace, the retained-transcript warning when it fails — never the connection status. That treatment is scoped to the restoring chat and retired against it, so a restoration the user leaves or replaces neither posts onto whatever screen took over nor leaves its notice behind. Every early return of the reconnect request names its refusing guard once (`reconnect.skipped`), so no guard can silently park recovery again. Only unauthenticated, forbidden, protocol-mismatch, and identity-mismatch failures stop automatic recovery, until explicit Retry clears that stop. Selected-profile retryable failures keep Reconnecting; selected-profile Offline means recovery is stopped. A secondary profile instead becomes Offline after three consecutive failures while its low-frequency retries continue. After two consecutive failed connects whose L-10 records show `stage=transport-open` and `transportOpened=false`, the selected profile's dashboard status and delayed recovery notice say **Mac unreachable**, adding the known interface (for example, **Mac unreachable over Wi-Fi**). Failed handshakes do not prove absence of an OS route, even when the interface reports a satisfied path. Mac details offer **Retry Connection** while reconnecting or unreachable as well as when recovery has stopped: the existing selected/pool owner accelerates a pending delay, and refuses competing attempts while its socket is in flight. Retry is a client transport action, not a Gateway restart or a replay of accepted domain commands. `TronIntegrationSheetsUITests.testRetryConnectionRecoversReconnectingDetails` and `.testRetryConnectionRecoversUnreachableDetails` mount the real Mac detail UI through the existing HOSTED_TEST fixture, tap Retry, and verify a connected replacement. Run them with `scripts/tron-ios-test run --only-testing TronMobileUITests/TronIntegrationSheetsUITests`; the owned runner retains screenshots and results in its reported `TestResults.xcresult`. A failed reconnect attempt whose handshake diagnostic proves the transport opened keeps its recovery episode **Reconnecting**, rather than claiming the Mac cannot be reached. An established socket loss starts recovery; it is not itself a failed transport-open attempt and cannot suppress the next failed-open classification. Successful connection clears the presentation. The selected classifier does not change retry timing or ownership. Secondary foreground reconstruction schedules the count-derived delay rather than an immediate new burst; a real path change may accelerate one pending attempt without clearing that count. Every attempt bounds the WebSocket open and the hello after it separately: a socket that never opens gives up at the 5-second transport-open deadline, and a socket that opened may spend the 15-second hello deadline on hello and authentication, so a down path is named in one step and a slow Mac is not mistaken for one. The controlled monotonic clock and injected unit-interval source make delay and acceleration behavior deterministic in tests. Background scene transition cancels disposable foreground/catalog reconciliation, preserves the route and bounded profile-owned projections, retires the transport epoch before suspension, and gates event-triggered catalog reads until the next active scene starts one authoritative reconnect pass. After event activation, reconnect and foreground
 reconciliation starts dashboard convergence concurrently with mounted-session restoration; terminal
 reattachment follows exact mounted-session synchronization because the Gateway requires that connection's
 subscription before terminal attach. Handshake plus event activation ends planned maintenance and admits exact session-route preparation. Mounted restoration, terminal reattachment, and final live-transport validation own the generation-bound reconciliation aggregate. The complete catalog traversal is independent optional work through the existing connection-refresh task. That owner preserves staged loading: catalog first, then provider/settings/device reads only after revalidating the exact live connection; neither stage gates mounted chat readiness. This also lets initial startup finish transport admission while the catalog's own loading state and retained rows remain in place. Background retirement cancels that optional owner. Already-cancelled catalog demand cannot acquire an owner, and an already-cancelled retry cannot reopen the exhausted failure budget. These are not per-read connection-epoch fences after launch. Catalog failures never write a late mounted-projection failure flag. A projection failure leaves the responsive epoch connected and exposes its own retry surface instead of recycling transport or blocking another session from opening. Focused or background dashboard catalog/schema/application failures retry their projection read without replacing an otherwise responsive exact socket; only observed transport epoch loss enters reconnect. Final teardown cancels and joins the event listener and shares one
@@ -1521,8 +1522,8 @@ remain separate requirements of #393.
 
 Home uses the ordinary `ChatView` transcript, composer, route and focus owners;
 there is no Home header bar (#740). The composer context ring of a
-chat that claims the Home status opens Manage Home (its gear opens Settings, #799), where the state line, memory line, Stop and every Home
-control live. The mounted composer scope supplies the sheet's immutable profile
+chat that claims the Home status opens Manage Home (its gear opens Settings, #799), where the state pill, memory line and every Home
+control live; the composer keeps the only Stop (#811). The mounted composer scope supplies the sheet's immutable profile
 identity. Both rendered admission and delayed callbacks use that owner identity,
 never the profile selected later; the mutation coordinator then captures and
 fences the lifecycle generation before asynchronous work. Gateway `active`
@@ -1535,34 +1536,50 @@ holds: a connection change clears the Home projection, but a presented sheet
 stays with the chat and re-reads from its profile/connection identity when the
 connection returns. Selecting another profile ends the chat route through the
 dashboard's profile route owner, which releases the sheet with it.
-Stop response and the composer invoke the same `ChatView.abortCurrentOperation`
-using the current canonical operation ID; Pause/Resume never substitute for Stop.
+The composer's Stop invokes `ChatView.abortCurrentOperation` with the current
+canonical operation ID; Pause/Resume never substitute for Stop.
 Pause memory, Resume memory and Disable Home use `HomeMutationCoordinator` and
-refresh the mounted status owner only on accepted terminal completion. Stop stays
-reachable while a Home mutation is running. Unresolved completion stays explicit,
+refresh the mounted status owner only on accepted terminal completion. The
+composer's Stop stays reachable while a Home mutation is running. Disable Home asks
+for confirmation first, like every destructive Manage Session action. Unresolved completion stays explicit,
 permits only receipt checks rather than replacement controls, and survives
 background/reconnect in the live invocation. An unresolved Disable retains the
 completion control even after authoritative status says Disabled; confirmed
 Disable returns the ring to Manage Session without replacing chat.
 App restart reads current Gateway status, without claiming or replaying an old
-command. Memory model configuration uses the same receipt path; its settings UI
-is a separate sheet. Manage Home opens Memory Settings, Chapters, Home Context
-and Browse Memory through the shared managed-sheet chrome. The browser
+command. Memory model configuration uses the same receipt path, and its picker is a row of the
+model card (#811), not a separate sheet. Manage Home is the main sheet of the Home
+chat, built from Manage Session's own components: `SessionContextUsageCard` (the
+stats card, with the state pill on its header row), `SessionModelConfigurationCard`
+(model, thinking and context window through the ordinary session RPCs, with the
+Memory model row as its footer), a rows container for the Home sub-sheets, and a
+bottom container for pause/resume and disable. The settings-approvals section
+(#758) inserts between the stats card and the model card. Every Home sub-sheet
+opens at medium and drags to large, through the shared managed-sheet chrome.
+Its Memory row, Chapters, Tasks and Permissions read the same single load. Task
+recovery appears in Tasks and Permissions only when it needs attention; an
+available recovery is the normal state and has no row. The browser
 additionally requires authenticated `home-memory-browser.v1` and the chapter
-list `home-chapter-list.v1`; settings/context require only `home.v1`. Memory Settings
-uses the existing progressive model-selection row and ModelPicker, filtered to
-registered, available physical models. Selection captures the mounted picker
+list `home-chapter-list.v1`; the context sheet requires only `home.v1`. The memory
+picker is the existing progressive model-selection row and ModelPicker, filtered
+to registered, available physical models. Selection captures the mounted picker
 profile/lifecycle before sending `configureMemory` through the existing receipt
 owner. Choices stay Applying until the exact latest canonical status read
 converges, not merely until the configure receipt is terminal; an old installed
-model frame cannot admit a duplicate choice during that gap. It shows spend as
-information, configuration/pause/block state and explicit
-unresolved receipt checks, never budgets or cache/storage controls. The context
-inspector shows the activation's effective token/window, memory line/byte counts,
-start entry and refusal metadata from `home.status`, not SDK canonical usage or
-prompt/memory bodies. Browser cards distinguish summary, capped/omitted projection
-and canonical evidence, label attribution/date/omissions and expose source
-session/entry identity. Pagination replaces one page; canonical text is selectable.
+model frame cannot admit a duplicate choice during that gap. Its row shows spend as information and the
+configuration/pause/block state, with explicit unresolved receipt checks, never
+budgets or cache/storage controls. The Home Context
+sheet reads `home.context`: one bar of the context window split by its breakdown
+sections (instructions, about you, memory, this chapter, task results, input),
+with a legend row per section and the free remainder. It shows no entry IDs or
+byte counts, and falls back to the plain request sizes when the Gateway omits
+`breakdown`. The breakdown is an estimate, never SDK canonical usage or
+prompt/memory bodies. Browser rows show the summary (or projection), a role glyph, and the
+relative time and chapter; a row opens a detail sheet with the summary, the
+projection, and one standard row to Exact Evidence. Evidence shows its role,
+time and chapter in a metadata card, the canonical text in a reading card, and
+its entry reference in the footer. Pagination replaces one page; a chapter's
+memory is the same browser filtered by `sessionId`. Canonical text is selectable.
 Loading, empty, blocked and retryable error states use shared presentation owners.
 
 
@@ -2757,7 +2774,14 @@ milliseconds; spend shows the task's input and output token counts, or is unavai
 an unknown outcome nor a last assistant reply is labeled success.
 
 `HomeTaskSheet` uses the same managed chrome, glass cards, typography, loading,
-placeholder and action owners as the other Home sheets. It first reads status to
+placeholder and action owners as the other Home sheets. Task rows show a title
+(the worker's name, else the brief's first line, else the project), the project,
+a state pill, and the relative update time, with no spend. The task detail shows
+the brief (six lines, then Show all), the result, the worker (its model, subagent
+launches, and live runs with their state pills), spend when reported, and
+standard action rows: Open worker chat, Stop, Steer and Redeliver. Task
+permissions are a Manage Home row: standing scopes, one-use grants and pending
+requests, each a row with a state pill, and Revoke asks for confirmation. It first reads status to
 show the task-only recovery fence and reason without issuing a fenced list or
 permission read. An empty uninitialized task list does not imply a permission
 grant: permission listing may refuse `not-initialized`. The menu requires the

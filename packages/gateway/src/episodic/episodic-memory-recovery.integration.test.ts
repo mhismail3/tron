@@ -313,7 +313,9 @@ describe("episodic memory crash recovery", () => {
   it("repairs a catalog revision whose invalidation a crash lost", async () => {
     // Build once so the child reaches only the edit's invalidation. The exact
     // append hook below, rather than tree size or a polling race, owns the crash.
-    const fx = await fixture("window", 600);
+    // A handful of tree levels exercises the invalidation closure. The append
+    // barrier, not a large history or elapsed time, pins the crash cut.
+    const fx = await fixture("window", 24);
     const prebuild = new TronWorkspace(fx.home);
     owners.push(prebuild);
     const prebuilt = await EpisodicMemory.open({

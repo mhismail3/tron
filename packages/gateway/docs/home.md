@@ -80,6 +80,25 @@ membership is unchanged, so search (`catalog("user")`, `readSearchCut`), `sessio
 by id, `scope: "all"` and Home's own reads are not filtered. A designation or rollover
 that changes the chapter set publishes a list change, so clients re-list.
 
+### Chapter contents
+
+`home.chapterList` gives each chapter a `contents` object, absent when its canonical file cannot
+be read (a partial count is never shown): `userMessages`, `homeReplies` (assistant messages
+without a tool call), `tasksDelegated` (successful `delegate` tool results), the canonical
+`firstAt` and `lastAt` timestamps, and `topics`. `topics` holds at most five of the chapter's
+newest memory summaries, each one line of at most 120 characters, read from the open memory
+only; with no open memory it is empty. A reserved chapter has no file yet, so its counts are zero.
+
+The counts are derived, never persisted. `HomeChapterContentsReader`
+(`home/home-chapter-contents.ts`) caches each chapter's last scan in memory, keyed by its
+file identity (device, inode, size and mtime). An unchanged file costs one `stat`. An appended
+file parses only its new complete lines, once a SHA-256 of the 4 KiB before the cached offset
+proves its earlier bytes unchanged; a changed, replaced or shrunken file is scanned again from
+its start. The first read after a Gateway start scans each chapter once, so that read costs the
+size of the Home history (at most the rollover limits per chapter). A later `home.chapterList`
+costs one `stat` per chapter, the appended bytes, and one in-memory pass over the memory
+catalog for topics, with no source read.
+
 ### Limits and rollover
 
 - At a quiescent turn boundary, crossing the **soft** limit (24 MiB canonical bytes
@@ -292,6 +311,9 @@ model is refused everywhere, because routing runs on the canonical transcript, w
 the Home profile does not own. A model applied to the **enabled** Home is written
 back to the record, the single source for re-enable. A model applied while disabled
 is an ordinary change and does not touch the record.
+`session.setThinking` and `session.setContextWindow` apply to the enabled Home session like any
+session. Each activation is measured against the window its session's model reports, which
+`home.context.breakdown.contextWindow` shows.
 
 **Tool loadout.** A profile change does not rewrite the loadout, because Pi replays
 the declared loadout at every runtime creation. A disabled Home starts with
@@ -358,6 +380,28 @@ setting changes between turns. Only Home-profile runtimes get the seam.
 Receipt settlement, inbox acknowledgement and configuration readiness are distinct
 owner cuts, not one idle predicate.
 
+### Request breakdown
+
+`home.context` (and `home.status.activation`) reports the last request an activation prepared as
+`breakdown`: `activation` (`state` `running` or `settled`, `kind` `user` or `wake`, `startedAt`),
+the request's `contextWindow` and `effectiveTokens`, and its `sections`, which sum to
+`effectiveTokens`:
+
+| section | holds | `count` |
+| --- | --- | --- |
+| `instructions` | the SDK's base prompt and Home's operating context | none |
+| `profile` | the learned profile section | active profile notes it lists |
+| `memory` | the frozen memory view | summary lines |
+| `chapter` | the activation's other messages: its tool calls and results, steers and pending notices | canonical entries |
+| `results` | task results delivered in the activation | results, not counting a wake's trigger |
+| `input` | the maintainer's message, or a wake's trigger result | none |
+
+Tokens are estimates. `effectiveTokens` includes the system prompt, which is the request's head,
+so the overflow refusal measures it too. Recorded system messages are replaced by that head and
+are not counted. A wake is started by the task result that woke Home, so that trigger is its
+`input` and a wake that delivered one result reports `results` as zero. The breakdown is absent
+until the activation prepares a request, and a refused activation before that has no sizes.
+
 ### Prompt caching
 
 Each request can re-read what the previous one sent (#491). The exceptions are the
@@ -410,8 +454,10 @@ its cursor and builds missing summaries in the background under episodic bounds.
 Each activation waits for and freezes the preceding view before provider admission.
 
 - **Summarizer.** An injected dependency resolved from the Gateway-wide model
-  runtime, never from a session. The episodic memory has no other compactor
-  dependency.
+  runtime, never from a session. It returns summary content only: Home labels each
+  leaf line from its canonical item kind, labels multi-message lines as summaries rather than a single speaker, and refuses
+  echoed role labels or compactor repair instructions. Older invalid stored
+  summaries are revoked through the episodic projection and rebuilt on demand.
 - **Checkpoints.** Opening the store publishes a checkpoint only when the episodic
   store's threshold is crossed, not on every open
   ([episodic-memory.md](episodic-memory.md)).
@@ -828,6 +874,12 @@ worker slot's `setModel` and `setThinking` after `createWorker` and before the f
 so the worker's canonical JSONL records it. An omitted model keeps the worker session's
 default. The choice is never persisted with the task record.
 
+**Worker title.** `delegate` takes an optional `title` (at most 80 characters, not blank after
+trimming). It names the worker session through the session's canonical name, written before the
+worker's first prompt, and is never persisted with the task record. A refused title is
+`invalid_request` (`Invalid task title`) and creates no task. Home's operating context asks for
+one on every delegation.
+
 - A task worker has normal project tools and resources plus `report`, and cannot
   replace its owned session. Its canonical `tron-home-task` marker binds the task,
   Home identity and generation, session and operation. Cold
@@ -856,27 +908,44 @@ default. The choice is never persisted with the task record.
 - The first-party task extension admits `subagent` launches, even `async:false`, which
   the pinned configuration can force async, and the read-only management of the
   verified `0.76.1-tron.6` provider: `guide`, `children.list`, `status`, `list`, `get`,
-  `models`, and supervisor `status`, `pending`, `list`. It admits `stop` and `interrupt`
-  only for a run this session's canonical history launched, addressed by `id` or
-  `runId` and never by `dir`. It refuses every other mutating management action
-  (steer, resume, create, worktree, schedule and the rest), revival, the schedule tool,
-  any launch that attaches a mission (`mission` other than `false`, or `missionId`,
-  since a mission outlives its run), and `bg_wait` with `nonBlocking: true`, whose
-  durable subscription can wake the session after report. The blocking `bg_wait` is
-  aborted and joined with the operation. Unknown versions or owners refuse all
-  subagent, supervisor and `bg_wait` calls. A later pin requires a new explicit review
-  before this gate changes. Nested codemode calls cross the same gate.
+  `models`, and supervisor `status`, `pending`, `list`. It admits the run controls
+  `steer`, `resume`, `interrupt`, `stop`, and `command.status`, `command.yield`,
+  `command.cancel`, only for a run this session owns, addressed by `id` or `runId` and
+  never by `dir`. A run is owned when this session's canonical history launched it, or when
+  it is a child a workflow of this session names in its own provider status (`steps[].runId`).
+  So a child is controlled by its own run id, as the provider's guidance names it, or through
+  its workflow's run and `index`. A run id that no owned run or owned workflow names is refused,
+  and so is a child of another task's workflow. A `resume` is owned when it
+  starts: the run it returns is a canonical launch of the task. It admits a supervisor
+  `reply` only with `replyTo` naming a request whose child run is owned; a reply with
+  `to` or no `replyTo` names no request the gate can prove, so it is refused. It refuses
+  every other mutating management action (create, update, worktree, schedule, budget and
+  the rest), a run the task did not start, `dir` targets, revival of a run the task
+  did not start, the schedule tool, any launch or control that attaches a mission
+  (`mission` other than `false`, or `missionId`, since a mission outlives its run), and
+  `bg_wait` with `nonBlocking: true`, whose durable subscription can wake the session
+  after report. The blocking `bg_wait` is aborted and joined with the operation. Unknown
+  versions or owners refuse all subagent, supervisor and `bg_wait` calls. A later pin
+  requires a new explicit review before this gate changes. Nested codemode calls cross
+  the same gate.
 - Trusted extensions are not a sandbox. If detached-work tracking still sees
   task-session work after the subagent join, the outcome is `unknown` with
   `detached-work-outlived-task`, never a clean-termination claim.
+- A task waits across turns while it owns live work (see [Task waits](#task-waits-across-turns)).
+  Only the task's own turns and its provider wakes run in its operation; a wake that
+  arrives while the task is not waiting is refused as before.
 
 ### Subagent runs
 
 A task owns every subagent run its worker session starts. The worker session is created
 for one task and never reused, so its runs end with the task. Ownership is canonical:
-a launch is a `subagent` call without an `action` that the gate admitted, and an async
-run is identified by the `asyncDir` in its launch result. Runs are never tracked by a
-slot-wide map that outlives the session.
+a launch is a `subagent` call without an `action` that the gate admitted, a resume is a
+launch of the run it returns, and an async run is identified by the `asyncDir` in its
+launch result. A child run of a workflow the task owns is owned too: the workflow's own
+provider status names it (`steps[].runId`), and the owner reads that status from the
+workflow's canonical directory. A supervisor request is the task's when its child run is owned, and its
+`subagent_supervisor_request` message names that run. Runs are never tracked by a
+slot-wide map that outlives the session, and no field is persisted to prove ownership.
 
 Per run, the states are:
 
@@ -923,11 +992,20 @@ a settled task has no later append from its runs. A notice still unrecorded at t
 counted as `noticesUndelivered` in `home.task.subagents`; a non-zero count is the
 `notice-undelivered` condition. The outcome does not change, since the run itself is terminal.
 
+The provider also creates a mission record for a default task-based launch unless
+`mission: false` is specified. This is provider-owned history, not another Home task.
+Its async completion watcher settles a stopped run's linked mission to `cancelled`;
+Home does not rewrite mission files. Provider retention bounds terminal mission history
+(default 200), not abandoned active records. The real Stop journey in
+`home-task-subagents.e2e.test.ts` checks the exact run's mission after task settlement
+and writes `test-results/stopped-subagent-mission.json`. A terminal run paired with an
+active mission after settlement is a provider lifecycle defect, not expected retention.
+
 The counts are projections read from canonical evidence and are never persisted with the
 task record:
 
-- `started` counts the subagent launches the task admitted. A call the gate blocked never
-  counts. A provider that rejects an admitted launch before creating a run still counts,
+- `started` counts the subagent launches the task admitted, and each resume it admitted
+  (a resume starts a new run). A call the gate blocked never counts. A provider that rejects an admitted launch before creating a run still counts,
   because its result carries no run identity to tell the two apart.
 - `stoppedAtEnd` counts the async runs and workflow children the Gateway stopped at
   settlement. Foreground runs end with the operation abort and are not Gateway stops.
@@ -937,18 +1015,53 @@ task record:
 it is `0`. Every Home result header states both counts. Settlement emits
 `home.task.subagents`.
 
+**Owner lifecycle is not work success.** For a terminal `unknown:no-report` task,
+`home.taskStatus.ownerSettlement` is either `null` or a bounded read-only proof:
+`{ taskId, sessionId, operationId, markerEntryId, terminalEntryId, settlementEntryId,
+stoppedAtEnd }`. The dispatcher reads a durable canonical file cut and requires a
+unique exact task marker, matching Gateway invocation start/terminal receipts, and
+an ordered subagent settlement receipt at the end of the cut. The marker binds the
+task, Home generation, session and operation; the invocation binds the same session,
+operation and Gateway task origin. Missing, malformed, ambiguous, mismatched or
+racing evidence stays unproven. A terminal invocation with unknown lifecycle and a
+failed child settlement (`stoppedAtEnd: null`) also refuse. A successful join may
+record zero stops when children finished naturally. No async settlement receipt is
+not proof, even when projected live-run counts are zero: terminal `subagentRuns` is
+synthetic. Task identity/lifecycle is rechecked after projection awaits. The local
+claim helper rechecks status and the same operation/proof before returning `settled`;
+other unknown reasons (including cold recovery, detached work and failed stops)
+remain excluded. This never turns `unknown` into a successful work outcome or grants
+control of another task. The proof requires an updated Gateway and rebuilt helper;
+an old Gateway remains fail-closed. The canonical corruption/race regression is in
+`home-task-subagents.e2e.test.ts`; `scripts/test-work-handoff.py` exercises the built
+helper and real claim command, including refusal preservation and status races.
+
+**Task waits across turns.** A task turn that ends normally (its final assistant message
+stopped with `stop`, not `length`, `error` or `aborted`) without a report, while the task
+owns live work, does not settle the task. The task holds its operation open between turns.
+The provider's wake for that work starts the task's next turn in the same operation: a
+run's completion notice, or a supervisor request from one of its children. The next turn
+reports under the task's own operation, so its `report` seals the task, and a further
+wake may start a further turn. The task settles on a report, on Stop, at the 24-hour
+deadline, on a failed or aborted turn, or at a turn end with no live owned run and no
+report. Stop and the deadline settle the waiting task at once; the live runs are stopped
+and joined as at any settlement. The hold is in memory only: a restart leaves a waiting
+task to cold reconciliation, which reports `detached-work-outlived-task` for a live run.
+A live run of a waiting task is listed by `home.taskStatus`.
+
 **Report waits for live runs.** `report` is refused while any run the task started is live,
 by the settlement liveness rule above, including a live child of a completed workflow. The
 refusal is an ordinary tool error that names the live count and the remedy: wait for the runs
 (`subagent` status, or a blocking `bg_wait`) or stop them, then report. It seals nothing and the
 turn continues. A stop request is not an ended run: a run stays live until its status is
 terminal, so a report after `stop` waits for that terminal status. Settlement therefore has no
-live run to stop when a report is accepted; it stops live runs only when the worker ends
-without a report, or on Stop and the deadline.
+live run to stop when a report is accepted; it stops live runs on Stop, at the deadline,
+or on a failed or aborted turn, never on a turn that ends with live work and no report.
 
 Provider completion notices reach a task worker as context of its operation. No turn
-starts after settlement: the provider suppresses idle wakes, and no Gateway guard is
-added. The no-turn checks in `home-task-subagents.e2e.test.ts` cover that property.
+starts after settlement: a wake starts a turn only while the task holds its operation open
+between turns, and the no-turn checks in `home-task-subagents.e2e.test.ts` cover that
+property.
 
 
 **The `report` tool** takes `resultId`, a claimed `outcome` (`progress`,
@@ -1049,14 +1162,12 @@ work. One per-process result is shared by every task surface.
 
 - **`home.taskList`** (maintainer-only) orders by `createdAt` descending, then task
   ID ascending. It scans names within a bounded window and reads at most `limit`
-  records, never report bodies. The opaque cursor binds the last key to the restore
+  records, and then each listed record again for its display: a page costs at most twice `limit` record reads, never report bodies. The result also carries `counts: { active, finished }`, exact over every task record and independent of `limit`: `active` is every non-terminal lifecycle (`pending` and `active`), `finished` is `terminal`. Counts are read with the page, so they cost one read of every task record per page request, and they are not a single snapshot with the items. The opaque cursor binds the last key to the restore
   epoch; foreign, restored and malformed cursors refuse (`conflict`,
-  `invalid-record`). Each row carries task ID, dates, intent title (first 160 code
-  points), target, lifecycle, terminal outcome or null, spend or null, `attention`
-  (needs-input or unknown) and `pendingGrant`. Null spend is unavailable, not zero;
+  `invalid-record`). Each row carries task ID, dates, `title`, `project`, `sessionId`, target, lifecycle, terminal outcome or null, spend or null, `attention` (needs-input or unknown) and `pendingGrant`. `title` is the worker session's canonical name when it has one, else the brief's first non-empty line, at most 80 characters; `project` is the target's last path component; `sessionId` is the worker session the task dispatched (the record's `sessionId`), null before dispatch. A live worker's name comes from its slot and a settled one's from the catalog's index of its file, so no transcript is read. Null spend is unavailable, not zero;
   A never-initialized listing returns `{ items: [] }`
   without creating authority.
-- **`home.taskStatus`** returns the record, the exact active operation, spend, the
+- **`home.taskStatus`** returns the record (its `sessionId` is the worker session), `title` and `project` (as in `home.taskList`), the exact active operation, spend, the
   immutable result, `workerModel`, `subagents` (see [Subagent runs](#subagent-runs)) and
   `subagentRuns`. `workerModel` is the worker session's current `{ provider, id }`, read
   from its canonical `model_change` entries. A running worker answers from its live slot; a
@@ -1251,9 +1362,9 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | method | parameters | kind | contract |
 | --- | --- | --- | --- |
 | `home.status` | none | read | The `HomeStatus` shape below. |
-| `home.context` | none | read | Bounded request context of the current or last activation. Never a message body. |
+| `home.context` | none | read | Bounded request context of the current or last activation, with its `breakdown` by section ([Request breakdown](#request-breakdown)). Never a message body. |
 | `home.open` | none | read | Logical route and binding. Creates no runtime and materializes no successor. |
-| `home.chapterList` | none | read | The whole chapter ledger in ledger order, each chapter with state, `createdAt`, `sealedAt?`, `activationStarted`, `sessionPresent` and metrics, plus the shared soft and hard rollover limits (`home-chapter-list.v1`, #740). Sealed chapters answer exactly their recorded seal metrics (a disable-sealed chapter has none); only the active chapter is measured live, and only while its session is present, so absent sizes mean unmeasured, never zero. Undesignated refuses `not_found`; an unavailable record refuses `conflict`, never a partial list. A disabled Home still lists its chapters. |
+| `home.chapterList` | none | read | The whole chapter ledger in ledger order, each chapter with state, `createdAt`, `sealedAt?`, `activationStarted`, `sessionPresent` and metrics, plus the shared soft and hard rollover limits (`home-chapter-list.v1`, #740). Each chapter also carries `contents` ([Chapter contents](#chapter-contents)). Sealed chapters answer exactly their recorded seal metrics (a disable-sealed chapter has none); only the active chapter is measured live, and only while its session is present, so absent sizes mean unmeasured, never zero. Undesignated refuses `not_found`; an unavailable record refuses `conflict`, never a partial list. A disabled Home still lists its chapters. |
 | `home.prompt` | `commandId`, `text`, `uploadIds` (at most 10, into the resolved chapter), `behavior` (`steer` or `followUp` while a turn runs), `resourceInvocation` | receipted | The composer's whole prompt contract, admitted by the same code as `session.prompt`. Returns the physical session and operation. |
 | `home.designate` | `commandId`, `model?` | receipted | With no record: creates the working directory and its trust decision, a **new** session whose first runtime has the Home profile, applies the model, writes the record, and returns `{ homeId, sessionId, generation }`. An enabled record whose session still exists is idempotent when the model is absent or matches; a different model refuses with a conflict directing to `session.setModel`. A disabled record re-enables the same session at `generation + 1`, preserving any `reserved` or `materializing` successor for the next `home.prompt`. A record whose session is **gone** is given a fresh session at `generation + 1`, enabled or not: the record is the only evidence of the designation, and the dangling ID is never re-enabled. |
 | `home.disable` | `commandId` | receipted | `enabled: false` at `generation + 1`. The session stays ordinary. A record whose session is gone is only marked disabled. |
@@ -1261,8 +1372,8 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.pauseMemory` | `commandId` | receipted | Requires an enabled, configured Home. Durably pauses; idempotent. Returns the memory projection. |
 | `home.resumeMemory` | `commandId` | receipted | Clears pause and or block, re-reads canonical deltas and restarts the pump without awaiting catch-up. A memory that is neither paused nor blocked refuses with conflict. An empty Home resumes without creating a store. |
 | `home.reconfirmPermissions` | `commandId` | receipted | Re-stamps active standing scopes to the current epoch. See [Authorization](#authorization). |
-| `home.taskList` | `limit?` (1–50, default 20), `cursor?` (at most 1,024 characters) | read | Maintainer summary; see [Control and spend status](#control-and-spend-status). |
-| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record, active operation, spend, immutable result, worker model, subagent counts and live subagent runs. |
+| `home.taskList` | `limit?` (1–50, default 20), `cursor?` (at most 1,024 characters) | read | Maintainer summary: each row with its `title`, `project` and `sessionId`, and the result's exact `counts` (`active`, `finished`) over the whole store; see [Control and spend status](#control-and-spend-status). |
+| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record (its `sessionId` is the worker session), `title`, `project`, active operation, spend, immutable result, worker model, subagent counts, live subagent runs and nullable canonical owner-settlement proof. |
 | `home.taskPermissions` | none | read | Strict scopes, requests, decisions and grants with the revision. Refuses before the first dispatch, never granting permission. |
 | `home.steerTask` | `commandId`, `taskId`, `operationId`, `text` (at most 64 KiB) | receipted | Steers the exact active operation. It cannot start a successor. |
 | `home.stopTask` | `commandId`, `taskId`, `operationId` | receipted | Persists the exact Stop intent and joins terminal settlement. Repeatable after settlement without repeating cancellation. |
@@ -1270,7 +1381,7 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.revokeTaskScope` | `commandId`, `scopeId` | receipted | Revokes the standing scope. Repeated or missing references are no-ops. A revoked initial scope is never recreated by dispatch. |
 | `home.revokeTaskGrant` | `commandId`, `grantId` | receipted | Revokes an available grant. Consumed, revoked or missing grants are no-ops and never resurrected. |
 | `home.decideTaskGrant` | `commandId`, `requestId`, `approved` (boolean), `expiresAt` (future Unix milliseconds) | receipted | Decides the exact pending request; the command ID is the decision ID. Returns `{ decision, grant }`, with `grant: null` for deny. |
-| `home.memory.page` | `limit?` (1–50, default 20), `cursor?` | disposable read | [Typed memory browser](#typed-memory-browser). |
+| `home.memory.page` | `limit?` (1–50, default 20), `cursor?`, `sessionId?` (one chapter's rows only) | disposable read | [Typed memory browser](#typed-memory-browser). |
 | `home.memory.evidence` | `evidence`, `offset?` | disposable read | [Typed memory browser](#typed-memory-browser). |
 
 ### `home.status`
@@ -1368,6 +1479,10 @@ refuses with retryable `busy`.
     `home-memory-revision-changed`. The client reloads page one. There is no cursor
     cache and no automatic retry. Offsets beyond the catalog and
     changed limits refuse rather than clamp.
+- **`home.memory.page` with `sessionId`** holds only that chapter's rows. `totalItems` counts them,
+  the row indices stay the catalog's, and the revision binds the chapter, so a continuation under
+  another chapter, or after any change, is `home-memory-revision-changed`. A session that is not a
+  chapter of this Home refuses with `not_found`.
 - **`home.memory.evidence`** accepts `{ evidence, offset? }` and returns `{ format:
   "canonical-history", evidence, text, offset, nextOffset?,
   previousOffset?, totalCharacters, metadata }`. At most **24,000 UTF-16
@@ -1483,7 +1598,7 @@ without a retained artifact.
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on the chosen model and level; an omitted model keeps the default; unregistered, virtual, unusable and unsupported choices, and thinking without a model, are refused before any task or session; the refusal list is bounded and reaches Home; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries; frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
 | `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
-| `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a run's late completion notice recorded before the settlement fact, with nothing appended after it, and a notice the bound never records counted without changing the outcome; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |
+| `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a run's late completion notice recorded before the settlement fact, with nothing appended after it, and a notice the bound never records counted without changing the outcome; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; task Stop leaves the exact provider mission cancelled (sanitized artifact `test-results/stopped-subagent-mission.json`); a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |
 | `src/home/home-wake-inbox.integration.test.ts` | frozen-owner cuts for claim, admission, terminal and acknowledgement; route replacement; redelivery | `HOME_WAKE_REPORT=<artifact-path>` | `HOME_WAKE_REPORT=<artifact-path> npx vitest run src/home/home-wake-inbox.integration.test.ts` |
 | `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice; the ninth wake is refused and says Home is waiting; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | none (faux provider; reports under the fixture) | `npx vitest run src/home/home-wake.e2e.test.ts` |
 | `src/home/home-system-prompt.e2e.test.ts` | every request of an activation carries one identical Home system prompt, framed at the request seam | none | `npx vitest run src/home/home-system-prompt.e2e.test.ts` |

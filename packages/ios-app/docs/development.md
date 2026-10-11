@@ -42,7 +42,7 @@ and old reads arriving after a completion refresh. A user action captures the
 profile/lifecycle authority before its asynchronous task starts; mutations are
 not cancelled with presentation reads. Hosted `TronSmokeUITests` Manage Home
 journeys mount production chat and cover represented states, the existing Stop
-owner (now a sheet row), active-response pause, resume, disable,
+owner (the composer's Stop; Manage Home has no Stop row), active-response pause, resume, disable,
 background/reconnect and explicit unresolved completion.
 `testManageHomeRejectsStaleRouteAction` retains an actual mounted sheet
 callback, authenticates a successor profile, and proves the old
@@ -63,8 +63,8 @@ These simulator stills are not VoiceOver, animation, live Gateway or physical-de
 
 `testHomeCrossSurfaceProofMatrix` is the cross-surface proof for the Home stack. In one
 hosted run it mounts the production chat in light and dark, at normal and accessibility
-Dynamic Type, opens Manage Home from the composer context ring and each child sheet from it (memory
-settings, Home context, browse memory, chapters, tasks and permissions) and captures each. It proves background
+Dynamic Type, opens Manage Home from the composer context ring and each child sheet from it (Home context,
+memory, chapters, tasks and permissions) and captures each. It proves background
 and a hosted reconnect on the tasks sheet each start a fresh authoritative read:
 `fixture.home-task-list-reads` counts the Gateway's `home.taskList` calls. The Home
 fixture forwards scene transitions to the lifecycle as production does, and
@@ -80,15 +80,28 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeStatesAndStopOwner \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeAcceptedControlContinuesInBackground \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeBackgroundReconnectAndUnresolvedCompletion \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeRejectsStaleRouteAction \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskListStopSteerAndRedelivery \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskDetailOpensWorkerChat \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomePermissionRevokeRequiresConfirmation \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetDismissesWhenProfileSwitches \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowCapabilityDesignationAndExactProfileRoute \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeRolloverPendingRoutesSendAndFollowsSuccessor \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetsLoadingEmptyBlockedErrorAndReload \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeContextShowsBreakdownWithoutRawIdentifiers \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeMemoryRowDetailOpensExactEvidence \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChaptersSealedOpensTranscriptActiveBrowsesMemory \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeMemoryModelRowSelectsPhysicalModel \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSettingsRefusalAndEmptyCatalogAndBrowserCapability \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeMainSheetStructure \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeSubSheetsOpenAtMedium \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeSheetCaptureMatrix \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeUnresolvedDisableRetainsCompletionControl \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomePauseResumeDisableKeepsChat \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatStatusPollingResumesAfterCoveredManageHomeSheet \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetDismissesWhenProfileSwitches \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeRolloverPendingRoutesSendAndFollowsSuccessor \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowCapabilityDesignationAndExactProfileRoute \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatStatusPollingResumesAfterCoveredManageHomeSheet \
   --only-testing TronMobileUITests/TronSmokeUITests/testComposerContextRingOpensManageHomeInHomeAndManageSessionElsewhere \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeIsNotAnOrdinarySessionRowWhileWorking \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowNamesRunningDesignationAsUpdate
@@ -869,9 +882,34 @@ for session-scoped facts, not the hosted-only AppModel selection conveniences.
 
 The WebSocket hello attempt has one monotonic deadline covering both the hello send and receive. Its exact socket is closed before a timed-out or canceled operation is joined. Foreground liveness probes every socket on one shared ten-second grid of the injected clock and observes each pong callback with an eight-second bound; a pong that misses that bound retires the epoch only when no inbound frame at all arrived after that probe was sent (a pong queued behind the Gateway's own outbound data is answered by the frame that follows it, while a frame whose last byte arrives past the bound is not proof), and successful probes are not logged, while an excused probe leaves one debug-level `liveness` record (`gateway.connection`). Logs can be opened and refreshed while Connecting, Reconnecting, or Offline: the bounded process-local iOS connection ring is shown immediately with profile ownership, stage, outcome, duration, fixed retirement reason, typed numeric closeCode/HTTP status metadata (kept separate and exact to the retired epoch), and overflow count where applicable, while unavailable Gateway records are retained as stale. Separately, production composes a device-local incident store for ordinary relaunch recovery: it persists only structurally admitted iOS connection/client-work records, bounded to 96 rows, 96 KiB, and seven days. The store reserves the first warning/error of up to eight recently observed, validated client/attempt identities alongside the newest window, under both count and byte pressure; an older incident on the same profile cannot replace the current incident's first cause. The optional incident identity is native diagnostic metadata, not a canonical session/credential record. The persistence mailbox retains newest occurrence timestamps under stalled-writer pressure; it contains no URLs, tokens, prompts, or arbitrary transport error text, and persistence failure cannot affect transport or presentation. Remote log RPCs are skipped until diagnostic readiness so opening Logs cannot interfere with hello; cached remote rows remain visible. Probe durations measure the actual pong wait and transport durations measure the retired epoch's age. Native URL-loading error codes survive failure normalization; intentional cancellation is categorized separately. Failed HTTP upgrades distinguish 401 credentials, 403 permission, and retryable 503 capacity/unavailability. Close codes remain platform-supplied facts: URLSession can report 1005/1006 instead of the peer's exact close frame, so logs never invent that missing code. A bounded dynamic-JSON rejection records a typed `decode_limit` incident before strict transport retirement, including the fixed limit kind, observed/maximum bound, sanitized source path, inbound frame byte count, and existing client/attempt/connection/profile ownership. It does not relax decoding or recover a malformed request locally. Separately, `response_too_large` from a confirmed mutation or its receipt read is an `outcome_unknown`, not proof of execution failure: the command may have completed before response projection was rejected. Its stable command identity is retained and iOS does not replay it or restore a possibly accepted send as definitely failed. Logs export capture time, represented bounds, app build, Gateway identity, and per-source freshness/status so retained local rows and failed remote sources are explicit rather than presented as fresh Gateway state. Export Diagnostics uses the advertised capability only after the Gateway is ready; a missing capability, disconnect, or upload failure takes the local share-sheet path. A successful export response copies the server path, and presentation retirement fences stale feedback without canceling the accepted upload.
 
-Automatic recovery is owned by each connection lifecycle and continues indefinitely for retryable transport failures while the app is foregrounded on a satisfied network path. Both the primary lifecycle and dashboard pool use `GatewayReconnectSchedule`: the primary lifecycle's nominal delays progress from 2 seconds by ×1.7 to a 15-second cap, each independently jittered within 80–120%; a dashboard pool entry follows the same progression without jitter, and once three of its consecutive attempts have failed it escalates by ×4 from the delay it reached to a five-minute cap, so an unreachable profile is retried once every five minutes. The pool counts its own failed attempts and only a successful attempt clears the count, so a Mac that dropped after connecting, a handshake that is never answered and a 503 all keep backing off. Foreground activation, a real path change, and explicit Retry cancel a single pending delay; a path change — the interfaces the monitored route uses changing, or an unsatisfied path becoming satisfied — also restarts the curve, and an attempt already on the wire consumes that change when it ends rather than waiting the interval the closed route had grown; background retirement and an unsatisfied path pause retry admission, including when the path drops while a socket is active and that socket later retires. Authentication, permission, protocol, and identity failures stop automatic attempts until explicit Retry. A protocol mismatch is classified from the Gateway's own close: the Gateway refuses an unspeakable hello with application close code 4006 and a JSON reason carrying its protocol and minimum, so the stop's message names the build to update (an older app or an older Mac) instead of reading as a retryable transport failure, and the same rule keeps a background pool entry stopped while its own entry, not the selected profile, holds that message for the device detail. A Gateway built before that close answers the same hello with 1008 and no range, which stays a retryable transport failure: a Mac must run a Gateway that sends the typed close before its phone stops retrying it. A failed `session.list` read follows the same capped jitter curve while its exact connection remains current, without needing another catalog invalidation; read failures marked nonretryable stop, while the unavailable notice appears once after the third failure. Revision movement remains bounded to its existing immediate traversal attempts. Retryable failures remain Reconnecting, while Offline denotes stopped recovery. Each handshake bounds its socket open with the monotonic five-second transport-open deadline and its hello exchange with the fifteen-second hello deadline; the maintenance restart watchdog changes a stalled restart to Reconnecting and resumes retry rather than exhausting an allowance. Initial connect and profile switches still claim one admission before cache I/O and retain it through hello; exact lifecycle/connection generations fence stale completion, and canceled cache reads cannot replace the resumed authoritative catalog. Accepted domain mutations keep their receipt/possibly-sent ownership and never re-arm transport recovery. Recovery presentation retains the mounted Chat rows, route, draft, keyboard, and scroll identity, and cannot enable Send while `admitsLiveSessionCommands` is false. Optional provider/settings/device/catalog refreshes run through their existing owners after mounted authority and transport readiness.
+Automatic recovery is owned by each connection lifecycle and continues indefinitely for retryable transport failures while the app is foregrounded on a satisfied network path. Both the primary lifecycle and dashboard pool use `GatewayReconnectSchedule`: the primary lifecycle's nominal delays progress from 2 seconds by ×1.7 to a 15-second cap, each independently jittered within 80–120%; a dashboard pool entry follows the same progression without jitter, and once three of its consecutive attempts have failed it escalates by ×4 from the delay it reached to a five-minute cap, so an unreachable profile is retried once every five minutes. The pool has one profile-owned consecutive-failure count for both its Offline label (after three failures) and delay. Background retirement keeps that count and the last authenticated connection timestamp, but cancels transport tasks; foreground reconstruction resumes the count-derived delay. Success or explicit Retry clears the count; success alone updates Last connected. Changed profile identity, credentials or admission invalidate the retained state. For the selected lifecycle, foreground activation, a real path change, and explicit Retry cancel a single pending delay; a path change — the interfaces the monitored route uses changing, or an unsatisfied path becoming satisfied — also restarts the curve, and an attempt already on the wire consumes that change when it ends rather than waiting the interval the closed route had grown; background retirement and an unsatisfied path pause retry admission, including when the path drops while a socket is active and that socket later retires. Authentication, permission, protocol, and identity failures stop automatic attempts until explicit Retry. A protocol mismatch is classified from the Gateway's own close: the Gateway refuses an unspeakable hello with application close code 4006 and a JSON reason carrying its protocol and minimum, so the stop's message names the build to update (an older app or an older Mac) instead of reading as a retryable transport failure, and the same rule keeps a background pool entry stopped while its own entry, not the selected profile, holds that message for the device detail. A Gateway built before that close answers the same hello with 1008 and no range, which stays a retryable transport failure: a Mac must run a Gateway that sends the typed close before its phone stops retrying it. A failed `session.list` read follows the same capped jitter curve while its exact connection remains current, without needing another catalog invalidation; read failures marked nonretryable stop, while the unavailable notice appears once after the third failure. Revision movement remains bounded to its existing immediate traversal attempts. Selected-profile retryable failures remain Reconnecting, while its Offline denotes stopped recovery. Secondary profiles show Offline during escalated low-frequency recovery, without switching the selected Mac. Each handshake bounds its socket open with the monotonic five-second transport-open deadline and its hello exchange with the fifteen-second hello deadline; the maintenance restart watchdog changes a stalled restart to Reconnecting and resumes retry rather than exhausting an allowance. Initial connect and profile switches still claim one admission before cache I/O and retain it through hello; exact lifecycle/connection generations fence stale completion, and canceled cache reads cannot replace the resumed authoritative catalog. Accepted domain mutations keep their receipt/possibly-sent ownership and never re-arm transport recovery. Recovery presentation retains the mounted Chat rows, route, draft, keyboard, and scroll identity, and cannot enable Send while `admitsLiveSessionCommands` is false. Optional provider/settings/device/catalog refreshes run through their existing owners after mounted authority and transport readiness.
 
  Socket retirement barriers remain keyed by profile and exact entry generation so a predecessor cannot erase its successor's pending close. Auth completion consumes exact terminal ownership synchronously; one auth-owned worker and one replaceable pending completion perform optional refresh, with canceled/profile-stale publication fenced. The mounted event owner reduces admitted events synchronously into the bounded `SessionSynchronizationCoordinator`; only a claimed synchronization lease enters its single network task, and exact processing-generation fencing prevents retired tasks from clearing successor work. During automatic recovery the last canonical snapshot remains available for rendering, but its old subscription is not a live command grant. A failed bounded recovery transaction stops repeated resync invalidations on that presentation/connection and supplies a persistent, scoped **Retry Conversation** action; a new connection or explicit retry can obtain fresh authority without replaying a prompt.
+
+The #396 regression journeys run at the hosted native UI/byte-transport boundary:
+
+```bash
+scripts/tron-ios-test build
+scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testEstablishedSocketLossThenOpenTimeoutsBecomeUnreachable \
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testOpenedTransportFailureDoesNotClaimMacUnreachable \
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testSecondaryRecoverySurvivesBackgroundAndResetsOnlyOnRetryOrSuccess \
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversReconnectingDetails \
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversUnreachableDetails
+```
+
+The established-socket case fails receive with a network-loss error and lets the production
+five-second transport-open deadlines expire. Cancellation is not an outage surrogate.
+The secondary case drives the actual pool with a byte transport and an accelerated
+sleep clock, records the delays the production owner requested, backgrounds/reactivates
+the app at the 300-second cap, then proves explicit Retry and automatic-success resets.
+Its selected control socket stays connected with the same identity. The result bundle
+retains the simulator fixture capture; this proves pool ownership and projection, not
+physical-device networking or a visual qualification of the complete Settings surface.
+The known-bad background-count reset must fail at a resumed 2-second delay rather than
+the retained 300-second delay. Existing `gateway.attempt` records (`owner=pool`,
+`stageReached`, `delayBeforeMs`) identify the attempt layer and resumed cadence;
+the selected transport-open diagnostic distinguishes never-opened from opened failures.
 
 ## Efficient focused tests
 
@@ -1012,6 +1050,21 @@ rechecks that under the lease and removes the lease file and the directory, as
 directory (a command between creating its lane and taking its lease) keeps it.
 A sweep's lease take never creates a lane directory, so a lane another holder
 removed meanwhile counts as busy instead of coming back marker-less.
+For an individually verified orphan that has no lane ownership marker,
+`scripts/tron-ios-test clean-unowned UUID NAME` is the only explicit escape
+hatch: provide the exact simulator UUID and exact current device name. The
+owner refuses malformed or unreadable lane markers, any marker claiming that
+UUID, any live lane lease in the discovered lane tree, nonempty malformed lane
+lease metadata, malformed Development state, and the remembered Development
+simulator. An unlocked empty lease is the normal idle state left when a holder
+truncates its metadata, so an unrelated idle lane does not block this exact
+cleanup. It rechecks device identity
+before shutdown and deletion, touches no other simulator or lane state, and is
+not a sweep, adoption, or way to bypass a lane claim. Inspect `status --all`
+first; use this only for a specifically identified orphan, never to reclaim
+unknown or actively used devices. This operation is intentionally destructive
+and deletes the device and its simulator data.
+
 `clean` in the runner or the Gateway E2E harness empties its lane down to the
 lease file, which the command itself cannot delete while its holder
 holds it; the holder removes the lane directory when the command ends, still
@@ -1118,8 +1171,10 @@ devices or simulators.
 ownership marker is ever shut down or deleted (a lane no command has used for 7
 days is reclaimed), each lane's lease is taken (without waiting) for the whole
 shutdown or removal, and lanes a live process holds are skipped.
-The remembered Development simulator (`scripts/tron-ios-simulator`) and every
-unmarked simulator are never shut down or deleted by the runner. Runs and
+The remembered Development simulator (`scripts/tron-ios-simulator`) is never
+shut down or deleted by test tooling. Unmarked simulators are never affected by
+a sweep; only the explicit `clean-unowned` command above can delete one, after
+its exact identity and absence of ownership have been verified. Runs and
 products are only ever removed inside a directory the runner proved with its own
 ownership marker, and only this worktree's and lane's runs are removed by
 `clean`.
