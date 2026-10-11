@@ -4397,6 +4397,23 @@ final class AppModel {
         try await settingsTrust.changeMac(change)
     }
 
+    /// The generic settings renderer's reads and writes, for any target (settings-model.md 7.5).
+    func resolveSettingsForRenderer(target: JSONValue) async throws -> SettingsResolution {
+        try await settingsTrust.resolveForRenderer(target: target)
+    }
+
+    func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, query: String?) async throws -> SettingsOptionsResponse {
+        try await settingsTrust.settingsOptions(target: target, key: key, qualifiers: qualifiers, query: query)
+    }
+
+    func previewSettingsChange(target: JSONValue, change: JSONValue) async throws -> SettingsChangeResult {
+        try await settingsTrust.previewChange(target: target, change: change)
+    }
+
+    func changeSetting(target: JSONValue, change: JSONValue) async throws {
+        try await settingsTrust.change(target: target, change: change)
+    }
+
     func packageInventory(for target: PackageConfigurationTarget) -> PackageInventory? {
         packageConfiguration.inventory(for: target)
     }

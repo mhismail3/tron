@@ -199,37 +199,73 @@ final class SettingsTrustCoordinator {
         return try value.decode(SettingsResolution.self)
     }
 
-    /// A dry run of one Mac-layer change: the tier and any `confirm` text the
-    /// maintainer's row shows before he makes it. Nothing is applied.
-    func previewMacChange(_ change: JSONValue) async throws -> SettingsChangePreview {
+    /// `settings.resolve` for the generic renderer: the controls it implements are
+    /// named so the Gateway negotiates each key's control (docs/settings-model.md 7.5).
+    func resolveForRenderer(target: JSONValue) async throws -> SettingsResolution {
+        let admittedProfileGeneration = profileGeneration
+        let value = try await client.requestValue("settings.resolve", JSONValue.object([
+            "target": target,
+            "renderer": .object([
+                "version": .number(Double(SettingsRendererContract.version)),
+                "controls": .array(SettingsRendererContract.controls.map { JSONValue.string($0) }),
+            ]),
+        ]))
+        try requireProfile(admittedProfileGeneration)
+        return try value.decode(SettingsResolution.self)
+    }
+
+    /// `settings.options`: the choices a key's control offers, filtered by `query`.
+    func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, query: String?) async throws -> SettingsOptionsResponse {
+        let admittedProfileGeneration = profileGeneration
+        var params: [String: JSONValue] = ["target": target, "key": .string(key)]
+        if let qualifiers { params["qualifiers"] = .object(qualifiers.mapValues { JSONValue.string($0) }) }
+        if let query { params["query"] = .string(query) }
+        let value = try await client.requestValue("settings.options", JSONValue.object(params))
+        try requireProfile(admittedProfileGeneration)
+        return try value.decode(SettingsOptionsResponse.self)
+    }
+
+    /// A dry run of one change to a target: its tier, any `confirm` text, and any
+    /// refusal. Nothing is applied; the caller decides what a refusal shows.
+    func previewChange(target: JSONValue, change: JSONValue) async throws -> SettingsChangeResult {
         let admittedProfileGeneration = profileGeneration
         let value = try await client.requestValue("settings.change", JSONValue.object([
-            "commandId": .string(uuidSource.next().uuidString), "target": .object(["kind": .string("mac")]),
+            "commandId": .string(uuidSource.next().uuidString), "target": target,
             "changes": .array([change]), "dryRun": .bool(true),
         ]))
         try requireProfile(admittedProfileGeneration)
-        let result = value.objectValue ?? [:]
-        if let failure = result["changes"]?.arrayValue?.first?.objectValue?["error"]?.objectValue {
-            throw GatewayFailure(code: failure["code"]?.stringValue ?? "invalid_request",
-                                 message: failure["message"]?.stringValue ?? "The change was refused.", retryable: false, details: nil)
+        return try value.decode(SettingsChangeResult.self)
+    }
+
+    /// One change to a target through the confirmed mutation path. A refusal the
+    /// Gateway returns in its outcome is thrown, so nothing reads as applied.
+    func change(target: JSONValue, change: JSONValue) async throws {
+        let admittedProfileGeneration = profileGeneration
+        let commandID = uuidSource.next().uuidString
+        let params: JSONValue = .object([
+            "commandId": .string(commandID), "target": target, "changes": .array([change]),
+        ])
+        let value = try await mutationExecutor.performValue(method: "settings.change", commandID: commandID) {
+            try await client.requestValue("settings.change", params)
         }
-        guard let tier = result["tier"]?.stringValue else {
+        try requireProfile(admittedProfileGeneration)
+        try value.decode(SettingsChangeResult.self).throwIfRefused()
+    }
+
+    /// A dry run of one Mac-layer change: the tier and any `confirm` text the
+    /// maintainer's row shows before he makes it. Nothing is applied.
+    func previewMacChange(_ change: JSONValue) async throws -> SettingsChangePreview {
+        let result = try await previewChange(target: .object(["kind": .string("mac")]), change: change)
+        try result.throwIfRefused()
+        guard let tier = result.tier else {
             throw GatewayFailure(code: "invalid_response", message: "The dry run returned no tier.", retryable: false, details: nil)
         }
-        return SettingsChangePreview(tier: tier, confirm: result["changes"]?.arrayValue?.first?.objectValue?["confirm"]?.stringValue)
+        return SettingsChangePreview(tier: tier, confirm: result.changes.first?.confirm)
     }
 
     /// The maintainer's own Mac-layer change: his tap is the approval (F3).
     func changeMac(_ change: JSONValue) async throws {
-        let admittedProfileGeneration = profileGeneration
-        let commandID = uuidSource.next().uuidString
-        let params: JSONValue = .object([
-            "commandId": .string(commandID), "target": .object(["kind": .string("mac")]), "changes": .array([change]),
-        ])
-        _ = try await mutationExecutor.performValue(method: "settings.change", commandID: commandID) {
-            try await client.requestValue("settings.change", params)
-        }
-        try requireProfile(admittedProfileGeneration)
+        try await self.change(target: .object(["kind": .string("mac")]), change: change)
     }
 
     func noteTrustChanged() {

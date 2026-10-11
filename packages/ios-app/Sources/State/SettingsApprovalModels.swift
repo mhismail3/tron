@@ -101,16 +101,27 @@ struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
     let layer: String
     let applied: Bool
     let badges: [SettingsBadge]
+    /// Absent from a Gateway that predates the renderer contract: the row is then read-only.
+    let presentation: SettingsKeyPresentation?
 
-    var id: String {
-        ([key] + (qualifiers ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }).joined(separator: "|")
-    }
+    var id: String { settingIdentity(key: key, qualifiers: qualifiers) }
 
     func badge(_ kind: String) -> SettingsBadge? { badges.first { $0.kind == kind } }
 }
 
+/// `settings.resolve`: the key instances and, when the request negotiated the
+/// renderer contract, the sections that summarize them in the Gateway's order.
 struct SettingsResolution: Decodable, Sendable {
     let keys: [ResolvedSetting]
+    let sections: [SettingsRendererSection]
+
+    private enum CodingKeys: String, CodingKey { case keys, sections }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        keys = try container.decode([ResolvedSetting].self, forKey: .keys)
+        sections = try container.decodeIfPresent([SettingsRendererSection].self, forKey: .sections) ?? []
+    }
 }
 
 /// A dry run of the maintainer's own change: the tier it would get and, for an

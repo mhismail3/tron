@@ -1039,6 +1039,123 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["settings-approvals-header"].waitForNonExistence(timeout: 5))
     }
 
+    /// The generic renderer over a fixture schema (settings-model.md F1, 7.5): a new
+    /// section, subgroup, key and badge kind render from served data alone; an
+    /// unknown control is read-only; the Gateway refuses an invalid value inline
+    /// and nothing applies; a model without thinking offers no thinking options.
+    @MainActor
+    func testSettingsRendererRendersAFixtureSchema() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        let applied = app.staticTexts["fixture.settings-renderer-applied"]
+        let thinking = app.staticTexts["fixture.settings-renderer-thinking-options"]
+        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(showsText("Fixture Pro · High", in: app), "The Model summary shows its essential values")
+        XCTAssertTrue(showsText("Lab", in: app), "A section the app never heard of renders from its served title")
+        keepScreenshot(named: "settings-renderer-collapsed")
+
+        // The Run section: the override, the pending approval and the recent agent change.
+        scrollTo(any["settings-section-run"], in: app)
+        XCTAssertTrue(any["settings-section-run-pending"].exists)
+        XCTAssertTrue(showsText("Home changed Retries", in: app))
+        tapScrolling(app.buttons["settings-section-run-expand"], in: app)
+        let retries = any["settings-row-run.retry.maxRetries"]
+        XCTAssertTrue(retries.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(showsText("Advanced", in: app), "Advanced keys follow the essential ones")
+        keepScreenshot(named: "settings-renderer-run-expanded")
+
+        // An invalid value: the Gateway's dry run refuses it under the row; nothing applies.
+        let field = retries.textFields.firstMatch
+        tapScrolling(field, in: app)
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3) + "99\n")
+        XCTAssertTrue(any["settings-row-run.retry.maxRetries-error"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Retries must be between 0 and 10")).firstMatch.exists)
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2))
+        keepScreenshot(named: "settings-renderer-invalid")
+
+        // The new key in the new subgroup, the unknown control and the read-only secret.
+        tapScrolling(app.buttons["settings-section-lab-expand"], in: app)
+        scrollTo(any["settings-row-lab.focusMode"], in: app)
+        XCTAssertTrue(showsText("Experiments", in: app), "A subgroup the app never heard of")
+        XCTAssertTrue(showsText("New", in: app), "An unknown badge kind renders neutrally with its label")
+        scrollTo(any["settings-row-lab.palette"], in: app)
+        XCTAssertTrue(showsText("Teal", in: app), "An unknown control shows its display read-only")
+        scrollTo(any["settings-row-lab.secretToken"], in: app)
+        XCTAssertTrue(any["settings-row-lab.secretToken-note"].exists)
+        XCTAssertTrue(showsText("Update Tron to edit", in: app))
+
+        // Switching to a model without thinking: the options are asked for again, and there are none.
+        XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:-1", timeout: 2), "Collapsed rows ask for nothing")
+        tapScrolling(app.buttons["settings-section-model-expand"], in: app)
+        XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:4", timeout: 5))
+        // The row's trailing value opens the catalog picker.
+        tapScrolling(any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch, in: app)
+        let lite = any["settings-option-Fixture Lite"]
+        XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
+        lite.tap()
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
+        XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:0", timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "No options for the current choice")).firstMatch.waitForExistence(timeout: 5))
+
+        // All settings, then search.
+        reveal(any["settings-renderer-all"], in: app)
+        any["settings-renderer-all"].tap()
+        reveal(any["settings-all-lab"], in: app)
+        XCTAssertTrue(any["settings-all-lab"].exists, app.debugDescription)
+        keepScreenshot(named: "settings-renderer-all")
+        let search = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Search settings")).firstMatch
+        for _ in 0..<12 where !search.isHittable { app.swipeDown() }
+        search.tap()
+        // A focused search field drops its placeholder, so type into the focused app.
+        app.typeText("retr")
+        XCTAssertTrue(any["settings-renderer-results"].waitForExistence(timeout: 5))
+        XCTAssertTrue(any["settings-row-run.retry.maxRetries"].exists)
+        XCTAssertFalse(any["settings-row-run.transport"].exists, "Search shows only matching rows")
+        keepScreenshot(named: "settings-renderer-search")
+    }
+
+    /// The renderer in dark mode at the largest accessibility text size.
+    @MainActor
+    func testSettingsRendererDarkLargeType() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-dark",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10), app.debugDescription)
+        keepScreenshot(named: "settings-renderer-dark-xxxl-collapsed")
+        tapScrolling(app.buttons["settings-section-run-expand"], in: app)
+        XCTAssertTrue(any["settings-row-run.retry.maxRetries"].waitForExistence(timeout: 5))
+        scrollTo(any["settings-row-run.retry.maxRetries"], in: app)
+        keepScreenshot(named: "settings-renderer-dark-xxxl-expanded")
+    }
+
+    /// Any element whose label contains the text: a settings row combines its labels.
+    @MainActor
+    private func showsText(_ text: String, in app: XCUIApplication) -> Bool {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
+    }
+
+    /// Scrolls a lazy list down until the element is built and hittable.
+    @MainActor
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
+        for _ in 0..<16 where !(element.exists && element.isHittable) { app.swipeUp() }
+    }
+
+    /// Scrolls until the element is hittable.
+    @MainActor
+    private func scrollTo(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<10 where !element.isHittable { app.swipeUp() }
+    }
+
     @MainActor
     func testIntegrationDestinationsHaveOneDoneButtonThroughSettings() {
         continueAfterFailure = false

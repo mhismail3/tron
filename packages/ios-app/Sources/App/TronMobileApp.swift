@@ -79,6 +79,8 @@ struct TronMobileApp: App {
                 HostedExtensionWidgetsFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-agent-instructions-fixture") {
                 HostedAgentInstructionsFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-settings-renderer-fixture") {
+                HostedSettingsRendererFixture()
             } else {
                 HostedProductionScene(model: hostedModel)
             }

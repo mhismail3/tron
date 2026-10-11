@@ -721,6 +721,23 @@ Hosted journeys: `TronSmokeUITests.testManageHomeSettingsApprovalsApproveAndDecl
 `-session-settings-approvals` fixture flags, each with a request from another scope that must not
 show; the push flags stage the relay's payload through `PushNotificationTap.admit`), and `TronProjectTrustUITests.testPermissionFloorsLowerNeedsConfirmAndRaiseApplies` (the
 `floors` scenario of `HostedProjectTrustFixture`).
+The generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is
+`SettingsRendererView` with `SettingsRendererRow` and `SettingsBadgeView`. It sends
+`SettingsRendererContract` (version 1; `toggle`, `choice`, `number`, `text`, `catalog`,
+`readOnly`) with `settings.resolve` and renders whatever comes back: sections in Gateway order
+with their summary (essential values, overrides with a layer badge, waiting approvals, recent
+agent changes) as the section's expand row, every key on expand (essential, then Advanced, with
+subgroup headings), All settings, and search over label, id, help and display. A control it
+does not implement, or a missing presentation, renders the `display` read-only; an unknown
+badge kind is neutral; a group no section declares is shown under its id, so a value is never
+hidden. Choices with an `optionsSource` and catalogs come from `settings.options`, re-requested
+when a key in `dependsOn` changes. Every edit is a `settings.change` dry run first: a refusal
+shows under its row and nothing is applied, and a change with `confirm` text asks first.
+`SettingsTrustCoordinator` owns the generic reads and the receipt-bound change, which the
+Permissions floors view also uses for its Mac target. Surfaces adopt the renderer in slices 8
+and 11 (#766, #769); until then its proof is `TronSmokeUITests.testSettingsRendererRendersAFixtureSchema`
+and `testSettingsRendererDarkLargeType` over `HostedSettingsRendererFixture`, which serves a
+fixture schema with a section, subgroup, key, control and badge kind the app has never seen.
 `ProviderAuthCoordinator` likewise solely owns typed-target
 provider/model catalogs, per-target paging admission, event-only provider invalidation,
 auth prompt/event parsing, browser-callback submission, and operation-to-target retention through
