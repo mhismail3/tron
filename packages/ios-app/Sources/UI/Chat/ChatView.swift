@@ -265,6 +265,15 @@ struct ChatView: View {
             admitPendingFloatingDisplay()
         }
         .task(id: "search-anchor:\(sessionID):\(initialHistoryEntryID ?? "")") { await navigateToInitialSearchResult() }
+        .onChange(of: model.stagedSettingsDecision?.id, initial: true) { _, _ in openManageForStagedSettingsDecision() }
+    }
+
+    /// A settings-approval push action opens this chat's Manage sheet; the approvals
+    /// section consumes the staging, so this only opens the sheet and never decides.
+    private func openManageForStagedSettingsDecision() {
+        guard model.freshStagedSettingsDecision()?.sessionID == sessionID,
+              homeSheet == nil, !sessionPresentation.showContext else { return }
+        if !presentManageHome() { sessionPresentation.showContext = true }
     }
 
     private var completedDisplayPresentations: [DisplayProjection] {

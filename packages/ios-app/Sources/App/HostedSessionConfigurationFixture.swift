@@ -76,6 +76,9 @@ struct HostedSessionConfigurationFixture: View {
                 model.installHostedSubscribedSnapshot(snapshot)
                 let catalog = try JSONDecoder.gateway.decode([ModelSummary].self, from: Data(#"[{"provider":"fixture","id":"model","name":"Fixture Model","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":32000,"available":true,"releaseDate":"2026-01-01"},{"provider":"fixture","id":"alternative","name":"Alternative Model","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":32000,"available":true,"releaseDate":"2026-01-02"}]"#.utf8))
                 model.installHostedProviderCatalog(ProviderCatalog(providers: [], models: catalog), for: .session(id: snapshot.sessionId))
+                if let action = Self.settingsApprovalPushActionIdentifier(ProcessInfo.processInfo.arguments) {
+                    model.stageSettingsDecision(from: Self.settingsApprovalPush(actionIdentifier: action))
+                }
                 ready = true
             } catch { self.error = String(describing: error) }
         }
@@ -85,6 +88,28 @@ struct HostedSessionConfigurationFixture: View {
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
+    }
+
+    /// The launch flag names the Approve or Decline action the push would carry.
+    private static func settingsApprovalPushActionIdentifier(_ arguments: [String]) -> String? {
+        if arguments.contains("-session-settings-approval-push-approve") {
+            return SettingsApprovalNotification.approveActionIdentifier
+        }
+        if arguments.contains("-session-settings-approval-push-decline") {
+            return SettingsApprovalNotification.declineActionIdentifier
+        }
+        return nil
+    }
+
+    /// The push the relay delivers for a settings change, admitted by the production path.
+    private static func settingsApprovalPush(actionIdentifier: String) -> PushNotificationTap {
+        PushNotificationTap.admit([
+            "aps": ["category": SettingsApprovalNotification.categoryIdentifier,
+                    "alert": ["title": "Approval needed", "body": "A chat's agent asks to change Active tools"]],
+            "tron": ["kind": "agent_notification", "requestId": "fixture-relay-request-0001"],
+            "sessionId": "configuration-fixture",
+            "machineId": "fixture-machine",
+        ], categoryIdentifier: SettingsApprovalNotification.categoryIdentifier, actionIdentifier: actionIdentifier)
     }
 }
 

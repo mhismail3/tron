@@ -727,12 +727,25 @@ fixes that 5.4 and 5.5 leave open:
   actions) declare `true`.
 - **Pushes.** A notify-tier change by an agent queues an `explicit` push; a
   pending request queues a `waiting` push ("Approve or decline in Tron"). The
-  iPhone decides it from the rows in Manage Home and Manage Session. Approve and
-  Decline buttons on the push itself are not built: an iOS notification action
-  needs `aps.category` on the delivered push, and the relay builds the payload
-  from a fixed field list and refuses unknown fields, so the relay's contract
-  (and a relay deployment before the Gateway sends it) is a decision still open
-  on #763.
+  iPhone decides it from the rows in Manage Home and Manage Session.
+- **Approve and Decline on the push** ([decision 35](#101-decisions)). The
+  waiting push asks the relay for the one allowlisted notification category,
+  `settings-approval`, which the relay maps to `aps.category`; the iPhone
+  registers that category with Approve and Decline. Both are foreground
+  actions: the push carries neither the request id nor its digest, so a
+  decision from the push alone could approve a newer request that superseded
+  the one the push described. The action opens the requester's chat and its
+  Manage sheet (Manage Home for Home's chat), and once the approvals are read
+  the chosen decision is staged as a confirmation over the matching row, which
+  shows the exact change: one more tap decides it through the row's
+  digest-bound `settings.decide`. More than one waiting request from that chat
+  leaves the rows to choose from; none says the change is no longer waiting. A
+  relay refuses unknown fields, so the Gateway sends the category only to a
+  relay that advertises it: before queuing the push it reads the relay's
+  `GET /v3/capabilities`, and an older relay (404) gets the push without the
+  field. The decision is fixed into the queued request, whose retries resend
+  the same body. Deploy order: the push relay README's
+  [category release](../../push-relay/README.md#notification-categories).
 - **Approval binds to a digest** of the target and each change's instance,
   `before` and `after`. Approving re-plans each change with the recorded
   `before` as `expected`: a store that moved since supersedes the request. A
@@ -1179,7 +1192,7 @@ was added after the first numbering; it lands after slice 4 and before slice 8.
 |---|---|---|---|---|---|
 | 1 | One door per chat: the ordinary-chat gear opens Manage Session, and Settings is a row inside it | S | iOS | | #759 |
 | 2 | Clear names and the shared badge component on today's rows | S | iOS | | #760 |
-| 5 | Tiers: floors with the maintainer's overrides, the one-step web mark, approval by tap with 24-hour expiry and the requester told, and the `settings` tool. Implemented ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)) except Approve and Decline on the push, which waits on the relay decision | L | Gateway, iOS | 4 | #763 |
+| 5 | Tiers: floors with the maintainer's overrides, the one-step web mark, approval by tap with 24-hour expiry and the requester told, Approve and Decline on the push, and the `settings` tool. Implemented ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)); the push actions need the relay's category release deployed first ([decision 35](#101-decisions)) | L | Gateway, iOS, push relay | 4 | #763 |
 | 6 | Outside changes: stores compared with the record, "Changed outside Tron" with Apply again, notification by floor, git-state badges | M | Gateway, iOS | 4 | #764 |
 | 7 | Fixed-at-start values carry provenance, with "Use the current default"; live keys reach open chats; Chat-layer values for every key that allows Chat; per-direction timing | M | Gateway, iOS | 3, 4 | #765 |
 | 14 | The generic renderer: served schema, control primitives, `settings.options`, `dryRun` validation, badges and section summaries from the resolver, negotiation with fallback to read-only | L | Gateway, iOS | 3, 4 | #780 |
@@ -1270,6 +1283,7 @@ Mohsin on 2026-10-10.
 | 32 | The web mark | A tool that does not declare `annotations.openWorldHint: false` is untrusted: any call to a tool with the hint missing or true marks the turn (one step up). Built-in tools that are safe declare `false` explicitly ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)). |
 | 33 | `bash` | `bash` is trusted: it does not mark the turn. Tron declares it `openWorldHint: false` on pi's behalf, as it does `read`, `edit` and `write` ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)). |
 | 34 | What a task worker may change | The same settings an agent may. A key's `writers` list is the grant; there is no separate per-task grant ([4.1](#41-fields), [5.1](#51-one-path-for-every-actor)). |
+| 35 | Approve and Decline on the push | The relay's notification request gains one optional, allowlisted `category`; its only value is `settings-approval`, sent only with the settings "Waiting for you" push, and the relay maps it to `aps.category`. The iPhone registers the category with Approve and Decline as foreground actions that open the matching approval row and stage the decision for one confirming tap. The relay is deployed before the Gateway sends the field: the Gateway sends it only to a relay that advertises it ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)). |
 
 ### 10.2 Open questions
 

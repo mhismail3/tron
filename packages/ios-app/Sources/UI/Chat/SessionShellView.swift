@@ -679,6 +679,8 @@ struct SessionShellView: View {
                 requestID: request.id,
                 pendingRequestID: model.pushNavigationRequest?.id
             ) else { return }
+            // A failed navigation never reaches the chat, so its staged action must not outlive it.
+            if let staged = model.stagedSettingsDecision { model.consumeStagedSettingsDecision(staged.id) }
             model.consumePushNavigation(request.id)
             model.presentError(error)
         }

@@ -708,10 +708,18 @@ is pending. Settings › Permissions (`PermissionFloorsSettingsView`) lists ever
 badge, and sets or unsets one through `settings.change`: a dry run first, and when the dry run's
 tier is approve (lowering a floor) the Gateway's `confirm` text is shown and the change is sent
 only on the maintainer's tap. The three tiers are F3's fixed vocabulary; the rest is served.
-Hosted journeys: `TronSmokeUITests.testManageHomeSettingsApprovalsApproveAndDecline` and
-`testManageSessionSettingsApprovalDecline` (the `-home-settings-approvals` and
+The "Approval needed" push carries the `settings-approval` category (decision 35), registered by
+`AppDelegate` with Approve and Decline as foreground actions. `PushNotificationTap` admits the
+action only with that category and an admitted route; `AppModel.stageSettingsDecision` holds it
+for two minutes while push navigation opens the requester's chat, `ChatView` opens the Manage
+sheet its context control would, and `SettingsApprovalsSection` consumes it after its read: one matching
+request gets a confirmation dialog over its row (nothing is decided without that tap, because the
+push names no request or digest), several leave the rows, none says it is no longer waiting.
+Hosted journeys: `TronSmokeUITests.testManageHomeSettingsApprovalsApproveAndDecline`,
+`testManageSessionSettingsApprovalDecline` and `testSettingsApprovalPushApproveConfirmsTheRow` /
+`testSettingsApprovalPushDeclineConfirmsTheRow` (the `-home-settings-approvals` and
 `-session-settings-approvals` fixture flags, each with a request from another scope that must not
-show), and `TronProjectTrustUITests.testPermissionFloorsLowerNeedsConfirmAndRaiseApplies` (the
+show; the push flags stage the relay's payload through `PushNotificationTap.admit`), and `TronProjectTrustUITests.testPermissionFloorsLowerNeedsConfirmAndRaiseApplies` (the
 `floors` scenario of `HostedProjectTrustFixture`).
 `ProviderAuthCoordinator` likewise solely owns typed-target
 provider/model catalogs, per-target paging admission, event-only provider invalidation,

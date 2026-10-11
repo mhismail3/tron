@@ -22,11 +22,21 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
     @State private var requests: [SettingsApprovalRequest] = []
     @State private var deciding: Set<String> = []
     @State private var loadGeneration = 0
+    @State private var confirmation: PendingSettingsDecision?
+    @State private var confirmationPresented = false
+    @State private var noLongerWaiting = false
 
     private struct LoadID: Hashable {
         let scope: SettingsApprovalScope
         let revision: Int
         let foregroundGeneration: Int
+        let stagedDecision: Int?
+    }
+
+    /// A settings push action, staged for one row, awaiting the maintainer's own tap.
+    private struct PendingSettingsDecision {
+        let request: SettingsApprovalRequest
+        let approved: Bool
     }
 
     var body: some View {
@@ -46,9 +56,31 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
             if !active { loadGeneration &+= 1 }
         }
         .onDisappear { loadGeneration &+= 1 }
+        .confirmationDialog(
+            confirmation?.approved == false ? "Decline this change?" : "Approve this change?",
+            isPresented: $confirmationPresented,
+            titleVisibility: .visible
+        ) {
+            if let pending = confirmation {
+                if pending.approved {
+                    Button("Approve change") { decide(pending.request, approved: true) }
+                } else {
+                    Button("Decline change", role: .destructive) { decide(pending.request, approved: false) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if let pending = confirmation { Text(Self.confirmationMessage(pending.request)) }
+        }
+        .alert("No longer waiting", isPresented: $noLongerWaiting) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("This change was already decided or has expired.")
+        }
         .task(id: PresentationActivityTaskID(
             source: LoadID(scope: scope, revision: model.settingsApprovalsRevision,
-                           foregroundGeneration: model.foregroundReconciliationGeneration),
+                           foregroundGeneration: model.foregroundReconciliationGeneration,
+                           stagedDecision: model.stagedSettingsDecision?.id),
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             guard presentationActivity.allowsPresentationPublication else { return }
@@ -205,6 +237,7 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
                   activity == presentationActivity, activity.allowsPresentationPublication else { return }
             // Gateway timestamps share one ISO-8601 format, so text order is time order.
             requests = value.sorted { $0.createdAt > $1.createdAt }
+            claimStagedSettingsDecision()
         } catch is CancellationError {
             return
         } catch {
@@ -213,6 +246,45 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
                   foreground == model.foregroundReconciliationGeneration,
                   activity == presentationActivity, activity.allowsPresentationPublication else { return }
             requests = []
+        }
+    }
+
+    /// Gateway text only, in the row's own order: who asked, each change's exact display
+    /// and its confirm text. The decision still binds to the raw values.
+    private static func confirmationMessage(_ request: SettingsApprovalRequest) -> String {
+        let labels = request.changes.map(\.label).joined(separator: ", ")
+        var message = "\(request.requester) asks to change \(labels)."
+        for change in request.changes where change.redacted != true {
+            if let display = change.display {
+                message += " \(change.label): \(display.before) → \(display.after)."
+            }
+        }
+        for change in request.changes {
+            if let confirm = change.confirm { message += " \(confirm)" }
+        }
+        return message
+    }
+
+    /// A push names only the session that asked, not the request or its digest, and a
+    /// newer request may have superseded the one it described. So the action is staged as
+    /// a confirmation over that session's row, and nothing is decided until the maintainer taps.
+    private func claimStagedSettingsDecision() {
+        guard let staged = model.freshStagedSettingsDecision() else { return }
+        let candidates = requests.filter { $0.actor.sessionId == staged.sessionID }
+        let belongsHere = !candidates.isEmpty
+            || scope == .session(staged.sessionID)
+            || (scope == .home && staged.sessionID == model.homeStatus.status?.sessionId)
+        guard belongsHere else { return }
+        model.consumeStagedSettingsDecision(staged.id)
+        switch candidates.count {
+        case 1:
+            confirmation = PendingSettingsDecision(request: candidates[0], approved: staged.decision == .approve)
+            confirmationPresented = true
+        case 0:
+            noLongerWaiting = true
+        default:
+            // Several requests from one session: the rows stay on screen for the maintainer to choose.
+            break
         }
     }
 

@@ -174,6 +174,15 @@ final class AppModel {
         let tap: PushNotificationTap
     }
 
+    /// One settings-approval push action carried across navigation to the chat's
+    /// Manage sheet, where the approvals section stages it as a confirmation.
+    struct StagedSettingsDecision: Equatable, Sendable {
+        let id: Int
+        let sessionID: String
+        let decision: SettingsApprovalPushDecision
+        let stagedAt: Date
+    }
+
     typealias SessionPresentationTarget = SessionPresentationIdentity
 
     typealias SessionOpenResponse = GatewaySessionOpenResponse
@@ -308,6 +317,11 @@ final class AppModel {
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
     private(set) var pushNavigationRequest: PushNavigationRequest?
+    /// Exists only to carry one push action across navigation. A stale one must
+    /// never surprise a later manual visit, so it is honored only while fresh.
+    private(set) var stagedSettingsDecision: StagedSettingsDecision?
+    static let stagedSettingsDecisionLifetime: TimeInterval = 120
+    private var stagedSettingsDecisionSequence = 0
     /// Lease-scoped invalidation for a mounted read-only subagent transcript.
     /// This does not participate in the parent session event cursor.
     private var processTranscriptInvalidationSinks: [UUID: (ProcessTranscriptChanged) -> Void] = [:]
@@ -3182,8 +3196,36 @@ final class AppModel {
 
     func requestPushNavigation(_ tap: PushNotificationTap) {
         guard tap.sessionID != nil, tap.machineID != nil else { return }
+        stageSettingsDecision(from: tap)
         pushNavigationSequence &+= 1
         pushNavigationRequest = PushNavigationRequest(id: pushNavigationSequence, tap: tap)
+    }
+
+    /// A newer plain tap replaces an older action, so any tap without a settings
+    /// decision clears the staging.
+    func stageSettingsDecision(from tap: PushNotificationTap) {
+        guard let decision = tap.settingsDecision, let sessionID = tap.sessionID else {
+            stagedSettingsDecision = nil
+            return
+        }
+        stagedSettingsDecisionSequence &+= 1
+        stagedSettingsDecision = StagedSettingsDecision(
+            id: stagedSettingsDecisionSequence,
+            sessionID: sessionID,
+            decision: decision,
+            stagedAt: .now
+        )
+    }
+
+    func freshStagedSettingsDecision(now: Date = .now) -> StagedSettingsDecision? {
+        guard let staged = stagedSettingsDecision,
+              now.timeIntervalSince(staged.stagedAt) < Self.stagedSettingsDecisionLifetime else { return nil }
+        return staged
+    }
+
+    func consumeStagedSettingsDecision(_ id: Int) {
+        guard stagedSettingsDecision?.id == id else { return }
+        stagedSettingsDecision = nil
     }
 
     func refreshNotificationInbox() async {
