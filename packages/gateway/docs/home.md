@@ -10,6 +10,22 @@ the terminal client. Ordinary sessions are unaffected by every rule here. Signal
 names and reasons
 are owned by [observability.md](observability.md).
 
+## Display identity
+
+Every chapter of Home presents the session title **Home**, independently of its
+canonical authored or generated name. Runtime snapshots, live summaries, cold
+catalog/search cuts and iOS Home-route chrome project that role without rewriting
+JSONL or opaque session IDs. Ordinary sessions retain their own names.
+
+Notification admission uses the designation owner's chapter membership to choose
+**Home** for all Home notification producers, including input requests and settings
+approvals, before persisting the relay retry envelope. Historical inbox rows project
+that role title on read without rewriting receipts or already-sent payloads. Task-wake notifications use
+the same title. The role title is product copy, so preview-disabled explicit
+notifications retain **Home** while preserving their existing model-text body redaction. The focused `runtime-terminal-notifications.integration.test.ts`
+Home-title journey checks a real registry, notification store and local HTTP relay;
+its payload artifact is not physical APNs-delivery evidence.
+
 ## The designation record
 
 `<tronHome>/gateway/home/home.json` is written `0600` and published atomically and

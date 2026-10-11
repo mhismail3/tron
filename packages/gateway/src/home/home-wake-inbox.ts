@@ -86,7 +86,7 @@ export class WakeInboxOwner {
   /** The task-finished push of today: one advisory notice per result, decided before enqueue. */
   private async pushTask(task: HomeTaskRecord): Promise<void> {
     await this.decide([task.taskId], "push-task-finished");
-    await this.notify(task.homeId, task.wake!.eventId, `Tron Home task`,
+    await this.notify(task.homeId, task.wake!.eventId,
       `Task finished: ${task.terminalEvidence!.outcome}. Open Home to review the result.`);
   }
 
@@ -110,7 +110,7 @@ export class WakeInboxOwner {
       if (mode === "task") { for (const task of pending) await this.pushTask(task); return; }
       if (pending.length === 0) return;
       await this.decide(pending.map(task => task.taskId), "push-waiting");
-      await this.notify(homeId, `home-waiting:${pending[0]!.wake!.eventId}`, "Tron Home",
+      await this.notify(homeId, `home-waiting:${pending[0]!.wake!.eventId}`,
         "Home is waiting for you: finished task results are waiting in Home.");
     });
   }
@@ -290,7 +290,7 @@ export class WakeInboxOwner {
       if (replied) await this.decide(pending.map(task => task.taskId), "push-wake-reply");
       else {
         await this.decide(pending.map(task => task.taskId), "push-waiting-uncertain");
-        await this.notify(route.homeId, `home-waiting:${pending[0]!.wake!.eventId}`, "Tron Home", "Home is waiting for you: finished task results are waiting in Home.");
+        await this.notify(route.homeId, `home-waiting:${pending[0]!.wake!.eventId}`, "Home is waiting for you: finished task results are waiting in Home.");
       }
     }
     for (const taskId of provenIds) {
@@ -365,11 +365,11 @@ export class WakeInboxOwner {
     for (const taskId of taskIds) await this.change(taskId, wake => ({ ...wake, push: "decided" }), reason);
   }
 
-  private async notify(homeId: string, sourceId: string, title: string, message: string): Promise<void> {
+  private async notify(homeId: string, sourceId: string, message: string): Promise<void> {
     const sessionId = this.options.pushSession(homeId);
     if (!sessionId) return;
     try {
-      await this.options.notify({ sessionId, sourceId, kind: "agent_finished", title, message,
+      await this.options.notify({ sessionId, sourceId, kind: "agent_finished", title: "Home", message,
         ...(this.options.machineId ? { route: { sessionId, machineId: this.options.machineId } } : {}) });
     } catch { /* canonical result/inbox remains available independently */ }
   }

@@ -2845,6 +2845,20 @@ false. A resource sheet presented by a composer chip/catalog must regain its own
 primary scroll eligibility rather than inherit the covered chat's exclusion.
 and their native document scrolls; without the reset both variants fail.
 
+### Home display identity and terminal
+
+The Home chat header presents **Home** rather than a generated conversation name;
+ordinary chat headers retain their canonical titles. The Gateway also projects the
+role title on snapshots and notification admission, preserving opaque route IDs.
+Manage Home's top-left terminal action shares `SessionTerminalToolbarButton` with
+Manage Session and presents the existing managed `TerminalSheet(sessionID:)`.
+It disables when the Gateway lacks `terminal.v1` or no Home session is bound.
+The terminal controller continues to own loading, shell reuse and unavailable
+states; Home does not add a second terminal lifecycle. The context circle still
+opens Manage Home at medium, and the gear still opens Settings. Hosted UI journeys
+cover the role title, leading placement, exact Home terminal request and unavailable
+capability alongside the existing routing/detent journey.
+
 ### Home task sheets
 
 The Tasks sheet uses the task contract in

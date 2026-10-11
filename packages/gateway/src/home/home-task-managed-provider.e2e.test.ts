@@ -38,6 +38,6 @@ describe("Home task managed provider", () => {
     expect(result.terminalEvidence?.outcome).toBe(ending === "report" ? "final" : "unknown");
     expect(f.notifications).toHaveLength(1);
     // The push names Home's openable chapter, which a tap can open.
-    expect(f.notifications[0]).toMatchObject({ kind: "agent_finished", title: "Tron Home task", sessionId: f.home.sessionId });
+    expect(f.notifications[0]).toMatchObject({ kind: "agent_finished", title: "Home", sessionId: f.home.sessionId });
   }, 20_000);
 });

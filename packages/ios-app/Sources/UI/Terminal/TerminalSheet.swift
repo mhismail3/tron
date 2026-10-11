@@ -3,6 +3,24 @@ import SwiftUI
 import UIKit
 import TronMobileCore
 
+/// Manage Session and Manage Home share the same launch affordance and shell owner.
+struct SessionTerminalToolbarButton: View {
+    let enabled: Bool
+    let identifier: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "terminal")
+                .font(TronTypography.buttonSM)
+                .foregroundStyle(Color.tronEmerald)
+        }
+        .disabled(!enabled)
+        .accessibilityLabel("Terminal")
+        .accessibilityIdentifier(identifier)
+    }
+}
+
 struct TerminalSheet: View {
     let sessionID: String
     @Environment(AppModel.self) private var model

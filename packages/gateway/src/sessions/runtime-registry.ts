@@ -2046,7 +2046,7 @@ export class RuntimeRegistry {
       path: row.path,
       cwd: row.cwd,
       ...(row.parentSessionPath ? { parentSessionPath: row.parentSessionPath } : {}),
-      ...(row.name ? { name: row.name } : {}),
+      ...(this.home.chapterStateFor(row.id).homeId ? { name: "Home" } : row.name ? { name: row.name } : {}),
       created: new Date(row.createdAt),
       modified: new Date(row.updatedAt),
       messageCount: row.messageCount,

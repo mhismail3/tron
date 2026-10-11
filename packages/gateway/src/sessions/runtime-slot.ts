@@ -3465,6 +3465,7 @@ export class RuntimeSlot {
   }
 
   private notificationTitle(): string {
+    if (this.isHomeChapter) return "Home";
     // Read canonical input rather than a deferred summary projection so a new
     // session's first terminal notification cannot be titled "New session".
     const rawName = this.sessionManager.getSessionName()?.trim();
@@ -3550,6 +3551,7 @@ export class RuntimeSlot {
       hasActiveSubagents: this.hasDetachedDashboardWork(),
       waitingForUser: this.ui.hasPendingInteractions,
       ...canonical,
+      ...(this.isHomeChapter ? { name: "Home" } : {}),
       updatedAt,
       ...(activeSince ? { activeSince } : {}),
     };
@@ -7345,7 +7347,8 @@ export class RuntimeSlot {
       // whether a new prompt can request steer/follow-up delivery right now.
       acceptsQueuedPrompts,
       configurationBlocker: this.configurationBlocker(),
-      ...(session.sessionName ? { name: session.sessionName } : {}),
+      // Home is a role, not a generated conversation title. Never rewrite its canonical name or ID.
+      ...(this.isHomeChapter ? { name: "Home" } : session.sessionName ? { name: session.sessionName } : {}),
       cwd: session.sessionManager.getCwd(),
       ...(session.sessionManager.getHeader()?.parentSession ? { parentSessionId: session.sessionManager.getHeader()!.parentSession } : {}),
       ...(session.model ? { model: { provider: session.model.provider, id: session.model.id } } : {}),

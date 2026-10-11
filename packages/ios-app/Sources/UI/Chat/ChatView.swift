@@ -2787,7 +2787,8 @@ struct ChatView: View {
     }
 
     private var chatTitle: String {
-        selectedAuthoritativeSnapshot?.name
+        if isHomeRoute { return "Home" }
+        return selectedAuthoritativeSnapshot?.name
             ?? model.sessions.first { $0.id == sessionID }?.title
             ?? "Session"
     }

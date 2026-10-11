@@ -131,7 +131,8 @@ struct HostedHomeDashboardFixture: View {
             browserState: arguments.first(where: { $0.hasPrefix("-home-browser-") })?.replacingOccurrences(of: "-home-browser-", with: ""),
             emptyContext: arguments.contains("-home-context-empty"),
             sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""),
-            settingsApprovals: arguments.contains("-home-settings-approvals"))
+            settingsApprovals: arguments.contains("-home-settings-approvals"),
+            terminalEnabled: !arguments.contains("-home-terminal-unsupported"))
         self.gateway = gateway
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
@@ -256,6 +257,7 @@ struct HostedHomeDashboardFixture: View {
 
 private actor HostedHomeShellGateway {
     private let capabilityEnabled: Bool
+    private let terminalEnabled: Bool
     private let initialState: String
     private var designated: Bool
     private var homeStatusCount = 0
@@ -284,7 +286,8 @@ private actor HostedHomeShellGateway {
     private var openedSessions: [String] = []
     private var approvals: [JSONValue] = []
     private var settingsDecisions: [String] = []
-    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, settingsApprovals: Bool = false) {
+    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, settingsApprovals: Bool = false, terminalEnabled: Bool = true) {
+        self.terminalEnabled = terminalEnabled
         self.sheetState = sheetState
         // Home's and a task worker's requests show in Manage Home; a chat agent's does not.
         approvals = settingsApprovals ? [
@@ -320,10 +323,14 @@ private actor HostedHomeShellGateway {
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
     func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
-    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "context-window.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
+    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "context-window.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
 
     func handle(_ method: String, _ params: [String: JSONValue]) async throws -> (JSONValue?, JSONValue?) {
         switch method {
+        case "terminal.list":
+            return (nil, .object(["code": .string("unavailable"),
+                "message": .string("Fixture terminal unavailable for \(params["sessionId"]?.stringValue ?? "missing")"),
+                "retryable": .bool(false)]))
         case "session.list":
             let row = SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace", parentSessionId: nil,
                 createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z", messageCount: 0,

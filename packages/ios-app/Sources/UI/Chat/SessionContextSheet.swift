@@ -253,14 +253,10 @@ struct SessionContextSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
-                    Button { destination = .terminal } label: {
-                        Image(systemName: "terminal")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                    SessionTerminalToolbarButton(enabled: displayedPresentation != nil,
+                                                 identifier: "manage-session-terminal") {
+                        destination = .terminal
                     }
-                    .disabled(displayedPresentation == nil)
-                    .accessibilityLabel("Terminal")
-                    .accessibilityIdentifier("manage-session-terminal")
                     Button {
                         name = displayedPresentation?.name ?? ""
                         showRename = true

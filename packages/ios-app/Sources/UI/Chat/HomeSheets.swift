@@ -129,6 +129,7 @@ struct HomeSheet: View {
     /// Rows present an existing Home sheet as a managed child, so each child keeps
     /// its own read owner and lifetime.
     @State var childDestination: HomeSheetDestination?
+    @State private var showsTerminal = false
     @State var mutationFailure: String?
     @State var confirmingDisable = false
     @State var disableAdmission: HomeControlAdmission?
@@ -180,6 +181,15 @@ struct HomeSheet: View {
         .tronScrollEdgeChrome()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if case .manage = destination {
+                ToolbarItem(placement: .topBarLeading) {
+                    SessionTerminalToolbarButton(
+                        enabled: active && sessionID != nil
+                            && model.gatewayInfo?.capabilities.contains("terminal.v1") == true,
+                        identifier: "manage-home-terminal"
+                    ) { showsTerminal = true }
+                }
+            }
             ToolbarItem(placement: .principal) { TronSheetTitle(title: destination.title, accent: .tronEmerald) }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
@@ -208,6 +218,9 @@ struct HomeSheet: View {
                              preserveInstalledFrame: destination.id == "manage") {
                 try await fetch(query: query, identity: identity, requestID: requestID)
             }
+        }
+        .tronManagedSheet(isPresented: $showsTerminal, identity: "home.\(profileID).terminal") {
+            if let sessionID { TerminalSheet(sessionID: sessionID) }
         }
         .tronManagedSheet(item: $childDestination, identity: { "home.\(profileID).\($0.id)" }) { child in
             HomeSheet(destination: child, profileID: profileID, sessionID: sessionID, onOpenSession: onOpenSession)

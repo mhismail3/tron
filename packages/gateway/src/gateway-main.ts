@@ -149,7 +149,7 @@ let transport: GatewayServer;
 const devices = new DeviceStore(config.tronHome, config.machineId);
 await devices.initialize();
 startupCheckpoint("devices");
-const notifications = new NotificationService(
+const notifications: NotificationService = new NotificationService(
   new NotificationGrantStore(config.tronHome),
   new PushRelayClient(config.pushServiceOrigin),
   Date.now,
@@ -162,6 +162,7 @@ const notifications = new NotificationService(
     `Push notification ${outcome}`,
     { event: `notification.push.${outcome.replaceAll("_", "-")}`, source: "notifications", kind, outcome, reason: relayReason },
   ),
+  (sessionId) => sessions.homeOwner().chapterStateFor(sessionId).homeId !== undefined,
 );
 await notifications.initialize();
 startupCheckpoint("notifications");

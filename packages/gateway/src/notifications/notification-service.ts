@@ -257,6 +257,7 @@ export class NotificationService {
     private readonly inboxChanged: (payload: NotificationInboxChanged) => void = () => {},
     private readonly inboxReadFailed: () => void = () => {},
     private readonly deliverySignal: (signal: { kind: NotificationKind; outcome: "refused" | "failed" | "rate_limited"; relayReason: string }) => void = () => {},
+    private readonly isHomeSession: (sessionId: string) => boolean = () => false,
   ) {}
 
   async initialize(): Promise<void> {
@@ -503,7 +504,11 @@ export class NotificationService {
     const selected = entries.slice(0, limit);
     const last = selected.at(-1);
     return {
-      notifications: selected.map(inboxItem),
+      notifications: selected.map(entry => ({
+        ...inboxItem(entry),
+        // Historical titles are receipt evidence, not Home's display identity.
+        ...(this.isHomeSession(entry.sessionId) ? { title: "Home" } : {}),
+      })),
       // The revision covers the whole inbox state; unreadCount is every unread
       // row, not only the filtered or paged subset.
       ...inboxState(document.inbox),
@@ -669,7 +674,11 @@ export class NotificationService {
     readOnAdmission?: boolean;
   }): Promise<NotificationAdmissionStatus> {
     const message = boundedText(input.message, 512, "message");
-    const title = input.title === undefined ? undefined : boundedText(input.title, 256, "title");
+    // Resolve the role at admission for every producer (including asks and settings),
+    // before persisting the immutable retry envelope. IDs remain opaque routing authority.
+    const isHome = this.isHomeSession(input.sessionId);
+    const title = isHome ? "Home"
+      : input.title === undefined ? undefined : boundedText(input.title, 256, "title");
     const route = boundedRoute(input.route, input.sessionId);
     if (!input.sessionId || !input.sourceId) throw new GatewayError("invalid_request", "Notification identity is missing");
     if (input.category !== undefined && input.kind !== "waiting") {
@@ -716,7 +725,7 @@ export class NotificationService {
       const targets = grants.map((grant) => {
         const exposesModelText = input.kind !== "explicit" || grant.previewsEnabled;
         const targetMessage = exposesModelText ? message : GENERIC_MESSAGE;
-        const targetTitle = title ? exposesModelText ? title : "Tron" : undefined;
+        const targetTitle = title ? (isHome || exposesModelText ? title : "Tron") : undefined;
         const requestId = notificationHash(`${intentId}\0${grant.grantId}`);
         const relayEnvelope = JSON.stringify({
           version: 1, kind: "agent_alert", notificationKind: input.kind,
@@ -748,7 +757,7 @@ export class NotificationService {
         kind: input.kind,
         createdAt: iso(now),
         updatedAt: iso(now),
-        title: inboxExposesModelText ? title ?? "Tron" : "Tron",
+        title: isHome || inboxExposesModelText ? title ?? "Tron" : "Tron",
         message: inboxExposesModelText ? message : GENERIC_MESSAGE,
         sessionId: input.sessionId,
         ...(route ? { machineId: route.machineId } : {}),
