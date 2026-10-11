@@ -1132,8 +1132,8 @@ with **"Edit at Project"** or **"Edit at Mac"**, which opens that surface.
 
 | Surface | Edits | Also holds |
 |---|---|---|
-| **Manage Session** (an ordinary chat) | Chat | The Project card first (project, trust, git state, outside changes); a Settings row, the one door per chat (the ordinary-chat gear opens Manage Session, not Settings: `ChatView.swift:2864-2876`, `ChatRoutes.swift:89-101`); this chat's Changes; the Session section (history, fork, export, archive). |
-| **Manage Home** | Chat for Home's chat; Profile for profile keys | Memory browser, chapters, tasks, Home's Changes; #743's next-prompt preview as Context's delivered stage; #734's "About you" beside the profile values. The gear and context ring keep their routing (#748). |
+| **Manage Session** (an ordinary chat) | Chat | The Project card first (project, trust, git state, outside changes); a Settings row, the one door per chat (the ordinary-chat gear opens Manage Session, not Settings: `ChatView.swift:2738-2749`, `ChatRoutes.swift:89-101`); this chat's Changes; the Session section (history, fork, export, archive). |
+| **Manage Home** | Chat for Home's chat; Profile for profile keys | Memory browser, chapters, tasks, Home's Changes; #743's next-prompt preview as Context's delivered stage; #734's "About you" beside the profile values. In the Home chat the gear opens Settings, and the composer's context ring opens Manage Home at the medium detent, draggable to large (#748, #799); its child sheets open large. |
 | **Project card** | Project (the `.pi/` working tree), and `permissions.projectTrust` for this project (a Mac key qualified by it) | The repo's outside changes by commit; Staged, Uncommitted and Local only badges ([5.7](#57-project-writes)); an untrusted project's values as not applied, with Review trust. Opened from Manage Session and from the dashboard project list as the same component. |
 | **Settings** | Mac | The floor overrides in Permissions; the full Changes feed; Accounts, Sources, Setup and This iPhone. The Global/Project scope pickers are removed. |
 | **New Session** | Chat of the new chat, at creation | The resolved values for the picked project with badges, mainly Model, and the trust decision when needed. Overriding never changes a default. `NewSessionSheet.swift:94-96` already says "Use the current agent default"; it gains the badge. |
@@ -1192,9 +1192,9 @@ Re-verified against `main` at `b76f6ca80`.
 | Today | Becomes |
 |---|---|
 | Per-screen settings views with per-key controls | One generic renderer over the served schema: the control primitives, badges, section summaries and negotiation ([7.5](#75-the-rendering-contract)). |
-| `UI/Chat/ChatView.swift:2864-2876` gear opens Settings for ordinary chats | Opens Manage Session. Home is unchanged. |
+| `UI/Chat/ChatView.swift:2738-2749` gear opens Settings for ordinary chats | Opens Manage Session. The Home chat's gear keeps opening Settings (#799). |
 | `UI/Chat/ChatRoutes.swift:89-101` `SettingsView(scope: .project)` sheet | Reached as a row inside Manage Session. |
-| `UI/Chat/ChatComposerView.swift:259` context ring | Unchanged: it already opens Manage Session (#748). |
+| `UI/Chat/ChatComposerView.swift:259` context ring | Unchanged: it opens Manage Session in ordinary chats and Manage Home (medium detent) in the Home chat (#748, #799). |
 | `UI/Chat/SessionContextSheet.swift:530-590` model card, thinking and context window; `:649-690` session section | The generic sections plus the Project card, this chat's Changes and the Settings row. |
 | `UI/Chat/HomeSheets.swift:233-291,351` chat model and context window values, memory model | The generic sections, with Profile rows, plus Home's Changes. |
 | `UI/Settings/SettingsView.swift:39-122` groups This iPhone, Agent, Tools & Extensions, Data & Diagnostics, with scope-dependent trust | The sections in order, Mac layer only, and the Changes feed. |
