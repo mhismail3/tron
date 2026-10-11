@@ -100,7 +100,10 @@ and idempotent recovery after a partial close. Regenerable evidence is written t
 `test-results/work-close.json`; the fixture repository and home are removed on exit.
 
 `python3 scripts/test-work-handoff.py` exercises handoff through the real CLI and Git
-in an isolated fixture. It checks unknown owner refusal, non-interactive force refusal,
-TTY-confirmed takeover through real Git, dirty-file preservation, exact public audit
-contents, idempotent retry, and missing-worktree refusal without recreation. Evidence is written to
-`test-results/work-handoff.json`.
+in an isolated fixture, with owner-status evidence served by a real localhost Gateway
+WebSocket using the built client helper. It checks active-only refusal without status
+reads, pagination to a finished matching owner, malformed evidence, natural completion
+with zero stopped subagents, refusal preservation of refs/index/dirty bytes, ordinary
+and TTY-confirmed takeover, idempotent audit, and missing-worktree refusal without
+recreation. Evidence is written to `test-results/work-handoff.json`; build the Gateway
+first with the pinned Node runtime using `npm --prefix packages/gateway run build`.
