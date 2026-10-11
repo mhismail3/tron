@@ -2831,16 +2831,17 @@ struct ChatView: View {
             }
         }
         ToolbarItem(placement: .primaryAction) {
-            // The gear opens Settings in every chat, Home included; Manage Home
-            // replaces only the context ring's Manage Session sheet (#799).
+            // The route owns this choice even while Home status is loading.
+            // Home keeps direct Settings; ordinary chats enter through Manage Session.
             Button {
-                sessionPresentation.showSettings = true
+                if isHomeRoute { sessionPresentation.showSettings = true }
+                else { sessionPresentation.showContext = true }
             } label: {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                     .foregroundStyle(Color.tronEmerald)
             }
-            .accessibilityLabel("Settings")
+            .accessibilityLabel(isHomeRoute ? "Settings" : "Manage Session")
         }
     }
 

@@ -1222,7 +1222,7 @@ Re-verified against `main` at `b76f6ca80`.
 | Today | Becomes |
 |---|---|
 | Per-screen settings views with per-key controls | One generic renderer over the served schema: the control primitives, badges, section summaries and negotiation ([7.5](#75-the-rendering-contract)). |
-| `UI/Chat/ChatView.swift:2738-2749` gear opens Settings for ordinary chats | Opens Manage Session. The Home chat's gear keeps opening Settings (#799). |
+| Ordinary-chat gear (`UI/Chat/ChatView.swift`) and Settings row (`UI/Chat/SessionContextSheet.swift`) | The gear opens Manage Session at medium; its Settings row opens the project-scoped child, then dismisses back to Manage Session. Home's route keeps direct Settings even while status loads; its circle still opens Manage Home (#799). The hosted context-ring/gear journey proves both entry paths and return navigation. |
 | `UI/Chat/ChatRoutes.swift:89-101` `SettingsView(scope: .project)` sheet | Reached as a row inside Manage Session. |
 | `UI/Chat/ChatComposerView.swift:259` context ring | Unchanged: it opens Manage Session in ordinary chats and Manage Home (medium detent) in the Home chat (#748, #799). |
 | `UI/Chat/SessionContextSheet.swift:530-590` model card, thinking and context window; `:649-690` session section | The generic sections plus the Project card, this chat's Changes and the Settings row. |

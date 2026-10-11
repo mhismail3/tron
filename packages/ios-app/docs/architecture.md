@@ -1771,8 +1771,14 @@ search, segmented choices, fields, editors, toolbar typography, row actions,
 icon buttons, loading labels, and prominent actions use shared semantic
 components. Toolbar and sheet action icons use Tron emerald while their
 container geometry and Liquid Glass remain default iOS styling rather than
-receiving a second app-drawn container. The chat toolbar's trailing gear opens
-app Settings; Manage Session is owned by the composer's context ring. Its principal title
+receiving a second app-drawn container. In ordinary chats, both the toolbar's
+trailing gear and the composer's context ring open Manage Session at its existing
+medium detent; its Settings row opens the project-scoped Settings child sheet,
+whose dismissal returns to Manage Session. Settings retains its own category
+palette rather than inheriting the Session destinations' teal theme. Home's
+route keeps its direct Settings gear even while Home status loads; its context
+ring still opens Manage Home, with the existing leading terminal button.
+The chat toolbar's principal title
 is explicitly bounded from the mounted chat viewport and clipped after tail truncation,
 so a cancelled interactive-pop transition cannot temporarily restore intrinsic-width text
 across the back or Settings controls. App-owned workspace

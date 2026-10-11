@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 private enum ManageSessionDestination: String, Identifiable {
-    case agentInstructions, tools, projectResources, history, processHistory, terminal, workspace
+    case settings, agentInstructions, tools, projectResources, history, processHistory, terminal, workspace
     var id: String { rawValue }
 }
 
@@ -239,6 +239,13 @@ struct SessionContextSheet: View {
                         SessionContextUsageCard(snapshot: snapshot)
                             .settingsApprovals(.session(sessionID))
                         modelConfigurationCard(snapshot)
+                        TronGlassCard(accent: .tronEmerald) {
+                            manageRow(icon: "gearshape", title: "Settings",
+                                      subtitle: "Settings for this chat and its project", accent: .tronEmerald) {
+                                destination = .settings
+                            }
+                            .accessibilityIdentifier("manage-session-settings")
+                        }
                         sessionSection(snapshot)
                         exportSection
                     } else {
@@ -320,6 +327,12 @@ struct SessionContextSheet: View {
             ) { route in
                 Group {
                     switch route {
+                    case .settings:
+                        SettingsView(scope: .project, projectSessionID: sessionID,
+                                     projectCWD: displayedPresentation?.cwd, onImported: handleForkCreated)
+                            // Root Settings owns its category palette, not the
+                            // teal theme inherited by Session destinations.
+                            .environment(\.tronSettingsVisualTheme, nil)
                     case .agentInstructions:
                         AgentInstructionsSheet(sessionID: sessionID)
                     case .tools:
