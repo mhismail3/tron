@@ -29,7 +29,13 @@ wss.on("connection", (socket, request) => {
       if (frame.method === "home.taskList") {
         const page = current.pages[frame.params.cursor || "first"] || {items:[]};
         result = page;
-      } else if (frame.method === "home.taskStatus") result = current.statuses[frame.params.taskId];
+      } else if (frame.method === "home.taskStatus") {
+        const value = current.statuses[frame.params.taskId];
+        if (Array.isArray(value)) {
+          const index = current.calls.filter(call => call.method === frame.method && call.params.taskId === frame.params.taskId).length - 1;
+          result = value[Math.min(index, value.length - 1)];
+        } else result = value;
+      }
       else throw new Error(`unexpected method ${frame.method}`);
       socket.send(JSON.stringify({type:"response", id:frame.id, ok:true, result}));
     }
@@ -88,7 +94,8 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         cli=ROOT/"tools/work/cli.py"
         def call(*args,input=None): return subprocess.run([sys.executable,str(cli),*args],cwd=worktree if worktree.exists() else repo,env=env,input=input,capture_output=True,text=True,timeout=30)
         def fixture(pages=None,statuses=None):
-            state.write_text(json.dumps({"comments":[],"writes":[],"calls":[],"pages":pages or {"first":{"items":[]}},"statuses":statuses or {}}))
+            bound={key: ([{"taskId":key, **value} for value in values] if isinstance(values,list) else {"taskId":key, **values}) for key,values in (statuses or {}).items()}
+            state.write_text(json.dumps({"comments":[],"writes":[],"calls":[],"pages":pages or {"first":{"items":[]}},"statuses":bound}))
         ws=root/"gateway-fixture.js"; ws.write_text(NODE_FIXTURE)
         gateway_env={**env,"WS_MODULE":str(ROOT/"packages/gateway/node_modules/ws"),"FIXTURE_TOKEN":TOKEN,"PORT_FILE":str(port_file)}
         def start_gateway(bind_host, output):
@@ -147,7 +154,7 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         data=assert_refused("active-only owner refused without task status",lambda:fixture({"first":{"items":[{"taskId":"active","lifecycle":"active"}]}},{"active":{}}),"refusing handoff")
         assert [c["method"] for c in data["calls"]]==["home.taskList"]
         terminal=lambda i:{"taskId":i,"lifecycle":"terminal"}
-        settled={"sessionId":"old-owner","lifecycle":"terminal","terminalEvidence":{"outcome":"final","reason":"explicit-report","sessionId":"old-owner"},"subagents":{"started":0,"stoppedAtEnd":0},"subagentRuns":{"total":0,"runs":[]}}
+        settled={"operationId":"operation-natural","sessionId":"old-owner","lifecycle":"terminal","terminalEvidence":{"outcome":"final","reason":"explicit-report","sessionId":"old-owner"},"subagents":{"started":0,"stoppedAtEnd":0},"subagentRuns":{"total":0,"runs":[]},"ownerSettlement":None}
         data=assert_refused("malformed or missing terminal evidence refuses",lambda:fixture({"first":{"items":[terminal("bad"),terminal("missing")]}},{"bad":{**settled,"terminalEvidence":None}}),"refusing handoff")
         assert [c["params"].get("taskId") for c in data["calls"] if c["method"]=="home.taskStatus"]==["bad"]
         merge_marker=Path(git(worktree,"rev-parse","--path-format=absolute","--git-path","MERGE_HEAD"))
@@ -173,10 +180,57 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         common=Path(git(worktree,"rev-parse","--path-format=absolute","--git-common-dir"))
         assert not (common/"work"/"handoff.lock").exists()
 
-        # stoppedAtEnd=0 is a naturally finished subagent set, not indeterminate.
+        # Terminal plus synthetic zero-live-run projection cannot settle an unknown outcome.
+        no_proof={**settled,"taskId":"natural","operationId":"operation-natural",
+          "terminalEvidence":{"outcome":"unknown","reason":"no-report","sessionId":"old-owner"},
+          "subagents":{"started":1,"stoppedAtEnd":0}}
+        assert_refused("unknown no-report without canonical receipts refuses",lambda:fixture({"first":{"items":[terminal("natural")]}},{"natural":no_proof}),"refusing handoff")
+
+        # Unknown work outcome can settle owner lifecycle only with bound canonical receipts.
         dirty_before={name:(worktree/name).read_bytes() for name in ["tracked.txt","staged.txt","untracked.txt"]}
         index_before=Path(git(worktree,"rev-parse","--path-format=absolute","--git-path","index")).read_bytes()
-        fixture({"first":{"items":[terminal("natural")] }},{"natural":{**settled,"subagents":{"started":2,"stoppedAtEnd":0}}})
+        unknown_terminal={**settled,"terminalEvidence":{"outcome":"unknown","reason":"no-report","sessionId":"old-owner"},
+          "operationId":"operation-natural","subagents":{"started":1,"stoppedAtEnd":1},
+          "ownerSettlement":{"taskId":"natural","sessionId":"old-owner","operationId":"operation-natural",
+            "markerEntryId":"marker-one","terminalEntryId":"terminal-one","settlementEntryId":"settlement-one","stoppedAtEnd":1}}
+        for label, mutate in [
+          ("proof session mismatch", lambda value: value["ownerSettlement"].update(sessionId="other-session")),
+          ("proof operation mismatch", lambda value: value["ownerSettlement"].update(operationId="other-operation")),
+          ("proof task mismatch", lambda value: value["ownerSettlement"].update(taskId="other-task")),
+          ("status task mismatch", lambda value: value.update(taskId="other-task")),
+          ("missing settlement proof", lambda value: value.update(ownerSettlement=None)),
+          ("failed settlement proof", lambda value: value["ownerSettlement"].update(stoppedAtEnd=None)),
+          ("malformed receipt identity", lambda value: value["ownerSettlement"].update(terminalEntryId="")),
+          ("ambiguous receipt identities", lambda value: value["ownerSettlement"].update(terminalEntryId="marker-one")),
+          ("unexpected proof field", lambda value: value["ownerSettlement"].update(unverified=True)),
+          ("contradictory settlement counts", lambda value: value["ownerSettlement"].update(stoppedAtEnd=0)),
+          ("remaining live children", lambda value: value.update(subagentRuns={"total":1,"runs":[{}]})),
+          ("unknown lifecycle", lambda value: value.update(lifecycle="unknown")),
+          ("status became active", lambda value: value.update(lifecycle="active")),
+        ]:
+            invalid=json.loads(json.dumps(unknown_terminal)); mutate(invalid)
+            assert_refused(label,lambda invalid=invalid:fixture({"first":{"items":[terminal("natural")]}},{"natural":invalid}),"refusing handoff")
+        for reason in ["detached-work-outlived-task","deadline-stop-failed","report-stop-failed","task-stop-failed","admission-refused","cold-no-report"]:
+            invalid=json.loads(json.dumps(unknown_terminal)); invalid["terminalEvidence"]["reason"]=reason
+            assert_refused(f"reason-specific exclusion: {reason}",lambda invalid=invalid:fixture({"first":{"items":[terminal("natural")]}},{"natural":invalid}),"refusing handoff")
+        for label, mutate in [
+          ("lifecycle race", lambda value: value.update(lifecycle="active")),
+          ("operation race", lambda value: (value.update(operationId="replacement"), value["ownerSettlement"].update(operationId="replacement"))),
+          ("session race", lambda value: value.update(sessionId="replacement")),
+          ("settlement race", lambda value: value["ownerSettlement"].update(settlementEntryId="replacement")),
+        ]:
+            raced=json.loads(json.dumps(unknown_terminal)); mutate(raced)
+            data=assert_refused(label,lambda raced=raced:fixture({"first":{"items":[terminal("natural")]}},{"natural":[unknown_terminal,raced]}),"refusing handoff")
+            assert len([c for c in data["calls"] if c["method"]=="home.taskStatus"])==2
+        for label, value in [
+          ("naturally finished ordinary children", {**settled,"subagents":{"started":2,"stoppedAtEnd":0}}),
+          ("no-report canonical settlement with zero task-end stops", {**unknown_terminal,"subagents":{"started":1,"stoppedAtEnd":0},"ownerSettlement":{**unknown_terminal["ownerSettlement"],"stoppedAtEnd":0}}),
+        ]:
+            fixture({"first":{"items":[terminal("natural")]}},{"natural":value})
+            result=subprocess.run(["node",str(ROOT/"packages/gateway/dist/client/work-owner-status.js"),"old-owner"],cwd=ROOT,env=env,capture_output=True,text=True,timeout=30)
+            evidence.append({"case":label,"exit":result.returncode,"stdout":result.stdout.strip()})
+            assert result.returncode==0 and result.stdout.strip()=="settled", result.stderr
+        fixture({"first":{"items":[terminal("natural")] }},{"natural":unknown_terminal})
         env["PATH"]=str(git_bin)+os.pathsep+env.get("PATH","")
         natural=call("handoff","41","--session","new-owner","--reason","naturally settled")
         evidence.append({"case":"remote accepted but update-ref failed once","exit":natural.returncode,"stderr":natural.stderr.strip()})
@@ -304,7 +358,7 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         ref=call("handoff","41","--session","new-owner","--reason","settled owner"); data=json.loads(state.read_text())
         evidence.append({"case":"matching finished owner behind unrelated terminal row and later page transfers without force","exit":ref.returncode,"stderr":ref.stderr.strip(),"gatewayCalls":data["calls"]})
         if ref.returncode==0:
-            assert [c["method"] for c in data["calls"]]==["home.taskList","home.taskStatus","home.taskList","home.taskStatus"]
+            assert [c["method"] for c in data["calls"]]==["home.taskList","home.taskStatus","home.taskList","home.taskStatus","home.taskStatus"]
             handed=git(worktree,"rev-parse","HEAD"); assert git(worktree,"rev-parse","origin/feat/41-fixture")==handed
             assert len(data["writes"])==1 and "old-owner" in data["comments"][0] and "new-owner" in data["comments"][0]
             assert {line.split()[0] for line in refs_before} <= {line.split()[0] for line in git(repo,"for-each-ref","--format=%(refname) %(objectname)").splitlines()}

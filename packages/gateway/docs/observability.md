@@ -563,6 +563,12 @@ through their existing diagnostic envelopes.
 | `managed pi-subagents requires PI_SUBAGENTS_TEMP_ROOT bound to this Tron home's delegated artifact root before loading` | extension-load `conflict` before execution or during admission/reload; standard RPC error or in-process load rejection | The host did not bind the process root to the managed selection's explicit Tron home. Bind via `delegatedProviderEnvironment(delegatedArtifactRoot(tronHome))` before loading; do not allow the provider's system-temp fallback. The refusal includes no filesystem paths. | `managed-subagents.install.integration.test.ts`: missing/blank/foreign binding and binding changed between loading and admission; `managed-subagents.integration.test.ts`: real registry refuses an unbound host or a selection bound to another registry home, and bound execution leaves no default temp root |
 | `managed pi-subagents unavailable` / `managed pi-subagents is not installed` | activation verification or bounded catalog/provides diagnostic | No selected managed build has been installed in a read-only/unactivated fixture. Gateway startup installs the selected payload's pinned closure offline before discovery; it never fetches bytes. | `managed-subagents.install.integration.test.ts`: verification fails before installation |
 
+## Home owner-settlement evidence
+
+| Signal | Owner | Interpretation | Regression |
+| --- | --- | --- | --- |
+| `home.taskStatus.ownerSettlement` | `home-task-dispatcher.ts`, read-only canonical cut | For terminal `unknown:no-report`, a non-null proof binds exact task/session/operation and marker, invocation-terminal and successful child-settlement entry IDs. `null` is unproven, not live or successful. Terminal `subagentRuns.total: 0` alone is synthetic and cannot diagnose settlement. Identity/lifecycle changes during inspection refuse the read. | `home-task-subagents.e2e.test.ts` exercises stopped/naturally completed children, corrupt and mismatched receipts, missing/failed settlement and replacement races; `scripts/test-work-handoff.py` exercises helper status rechecks and unchanged claims on refusal. |
+
 ## Getting a diagnostic bundle
 
 Run `scripts/tron diagnose` (default window 2h) and read
