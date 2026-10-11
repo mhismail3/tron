@@ -80,8 +80,12 @@ deletes the local branch and the remote branch with a lease on the proven head.
 - **A conflict is merged by hand.** `land` aborts a conflicting merge and names the files.
 - **Unverified code is merged.** The squash merge names the verified commit, so GitHub
   refuses it if the branch changed. A base that moved is re-merged and re-verified first.
-  A base that moves in the instant between that check and GitHub's merge call is not
-  caught; the merge still composes the base with the verified branch.
+  After publishing, land checks the remote branch and, when the PR response is stale,
+  re-reads the PR at most three times. A different remote SHA is a foreign branch move;
+  an unchanged expected remote SHA paired with a persistently stale PR is reported as
+  uncertain and must be observed again by rerunning land. Neither path weakens the
+  exact-SHA merge request. A base that moves in the instant between the final check and
+  GitHub's merge call is not caught; the merge still composes the base with the verified branch.
 - **Unmerged work is removed.** `cleanup` needs a merged pull request at the local head,
   or a closed issue whose branch holds only its empty claim commit.
 - **A closed or blocked issue is claimed.** `start` refuses a closed issue, an excluded
@@ -92,6 +96,13 @@ deletes the local branch and the remote branch with a lease on the proven head.
 The tooling has no unit tests. Changes are validated by running the real commands: a
 `verify` or `land --dry-run` on the branch, and an integration run against a temporary
 repository when a change touches Git, GitHub or cleanup behavior.
+
+`python3 scripts/test-work-land.py` exercises land through the real CLI, temporary Git
+remote, and process-level GitHub fixture. It covers a base advance followed by a stale
+PR PATCH response and fresh PR observation, refusal of a genuine remote branch move,
+and truthful uncertainty when the PR projection remains stale. Evidence is written to
+`test-results/work-land.json`; the fixture repository, home, and temporary files are
+removed on exit.
 
 `python3 scripts/test-work-close.py` exercises epic/task close through the real CLI
 and Git with a process-level GitHub fixture in an isolated temporary home. It covers
