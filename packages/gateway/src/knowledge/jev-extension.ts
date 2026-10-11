@@ -15,6 +15,8 @@ export function createJevExtension(client: JevDecisionClient): ExtensionFactory 
   return (pi) => {
     pi.registerTool({
       name: "jev",
+      // docs/settings-model.md 5.4: declares it reads no open-world content.
+      annotations: { openWorldHint: false },
       label: "Jev Evaluate",
       description: "Evaluate explicitly supplied bounded JSON with Pi's TypeSafe classifier (choice, bool, or score questions). Bool answers use a probability; score answers include no legend or probability breakdown. Jev is a decision adapter, not chat completion; callers must supply their own rubric, disclosure, and budget authority.",
       promptSnippet: "Use jev only for an explicit bounded typed decision; never send secrets or unrequested source data.",

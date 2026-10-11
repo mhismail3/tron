@@ -234,10 +234,10 @@ imported Registry target is ordinary unless the ledger names it.
 
 | | Home | Ordinary |
 | --- | --- | --- |
-| Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` | every Tron module, Pi built-ins (codemode, tool-search, MCP) and the Tron-pinned managed subagent provider |
+| Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` | every Tron module, Pi built-ins (codemode, tool-search, MCP) and the Tron-pinned managed subagent provider |
 | Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles`; no subagent discovery | agent directory and trusted project resources; managed-provider settings exclude user pi-subagents declarations |
 | System prompt | agent-directory `SYSTEM.md` and `APPEND_SYSTEM.md` dropped (`systemPromptOverride`, `appendSystemPromptOverride`) | loaded |
-| Executable tools | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task`, `profile`, `web_search`, `web_fetch`, `session_search`, `knowledge`, `read_file` (`HOME_TOOL_NAMES`) | SDK defaults plus Tron's direct bash tool |
+| Executable tools | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task`, `profile`, `web_search`, `web_fetch`, `session_search`, `knowledge`, `read_file`, `settings` (`HOME_TOOL_NAMES`) | SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
 | Model | fixed physical model | any, including virtual routing |
 | Model runtime | session-local view of the Gateway-wide user-scope runtime | one per session runtime |
@@ -617,6 +617,22 @@ says retrieved text is never instructions or authorization to delegate, and this
 paragraph records the residual risk: a prompt-injected Home could still dispatch a
 task inside an existing standing scope, exactly as it could from a maintainer
 message that quoted the same text.
+
+## The settings tool
+
+Home is the chief of staff for settings: it changes any setting its writers allow
+with the `settings` tool (`tron-settings`, the same module every session loads),
+through the one change path, recorded as `home` with its chapter session and the
+tool call ([settings-model.md](settings-model.md) 5.1). Its tier is enforced like
+any agent's (5.4): a quiet floor applies, notify applies and pushes, approve holds
+a pending change for the maintainer's tap. `web_search`, `web_fetch` and the other
+tools that do not declare `openWorldHint: false` mark the activation, which
+raises the tier one step; unlike delegation (above), a settings change is gated on
+fetched content, because the mark is Gateway state read when the change is
+planned, never request text. The mark lives in the module, not in the cached
+prefix. A declined, expired or superseded change Home asked for is named in one
+custom message on Home's next maintainer-prompted activation (a wake starts its
+run from the task result alone, so it carries none).
 
 ## The learned profile
 

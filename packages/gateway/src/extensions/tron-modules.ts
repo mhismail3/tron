@@ -10,6 +10,7 @@ import { createTronComputerExtension } from "../display/tron-computer-extension.
 import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
 import { createTronHomeExtension } from "../home/tron-home-extension.js";
+import { createTronSettingsExtension, type SettingsToolAccess } from "../admin/tron-settings-extension.js";
 import { homeResearchTools, type HomeResearchTransport } from "../home/home-research-tools.js";
 import type { SessionSearchRequest, SessionSearchResponse } from "../sessions/session-search-contract.js";
 import type { HomeMemoryToolAccess } from "../home/home-memory.js";
@@ -61,6 +62,9 @@ export interface TronModuleHost {
   /** Transport injection for Home's web tools, the same seam capture's fetch
    * exposes (`SourceCaptureOptions`); production omits it. */
   homeWebTransport?: HomeResearchTransport;
+  /** This chat's settings, as itself (Home, a task worker or an agent), late-bound:
+   * the change path is installed after the registry exists. */
+  settings: () => SettingsToolAccess | undefined;
 }
 
 /** One built-in Tron extension. `name` is the runtime-registered inline name, so
@@ -127,6 +131,13 @@ export const TRON_MODULES: readonly TronModule[] = [
     tools: ["knowledge", "connections", "jev"],
     commands: [],
     factory: (host) => createTronCoreExtension(host.workspace, host.knowledge, host.jev, host.connections),
+  },
+  {
+    name: "tron-settings",
+    purpose: "Lets the agent read and change settings through the one logged change path, and marks a run that read web content.",
+    tools: ["settings"],
+    commands: [],
+    factory: (host) => createTronSettingsExtension(() => host.settings()),
   },
   {
     name: "tron-ask-user",
@@ -211,6 +222,7 @@ export function tronModuleFactories(host: TronModuleHost): TronModuleRegistratio
 export const HOME_MODULE_NAMES: readonly string[] = [
   "tron-context-window",
   "tron-compaction-policy",
+  "tron-settings",
   "tron-ask-user",
   "tron-display",
   "tron-notify",
@@ -257,7 +269,7 @@ const TRON_HOME_RESEARCH_MODULE: TronModule = {
  * allowlist semantic. */
 export const HOME_TOOL_NAMES: readonly string[] = [
   "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
-  "web_search", "web_fetch", "session_search", "knowledge", "read_file",
+  "web_search", "web_fetch", "session_search", "knowledge", "read_file", "settings",
 ];
 
 /** The curated Home profile: the kept Tron modules plus tron-home, and nothing

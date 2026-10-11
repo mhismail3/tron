@@ -42,6 +42,8 @@ export type Binding =
   | { store: "profile"; path: readonly string[] }
   | { store: "home-memory" }
   | { store: "trust" }
+  /** `<tronHome>/gateway/settings/floors.json`: the maintainer's floor
+   * overrides, `{ [keyId]: { widen?, narrow? } }` (doc 5.4). */
   | { store: "floors" };
 
 export type Floor = Tier | { widen: Tier; narrow: Tier };
@@ -61,6 +63,8 @@ export interface KeyDeclaration {
   layers: Partial<Record<Exclude<LayerId, "builtin">, Binding>>;
   /** The built-in value. `undefined` means none: the key is unset. */
   builtin?: unknown;
+  /** A built-in that depends on the instance (a floor's built-in is that key's code floor). */
+  builtinFor?: (qualifiers: Partial<Record<QualifierName, string>>) => unknown;
   timing: TimingDeclaration;
   effect: Effect;
   floor: Floor;
@@ -131,13 +135,20 @@ const chatPi = (...path: string[]) => ({ chat: { store: "chat-settings", path } 
 
 const thinkingType = types.choice(THINKING, true);
 
+const TIER_LABELS = [{ value: "quiet", label: "Quiet" }, { value: "notify", label: "Notify" }, { value: "approve", label: "Approve" }] as const;
+function tierType(): ValueType { return types.choice(TIER_LABELS, true); }
+const TIER_ORDER = ["quiet", "notify", "approve"];
+/** A floor change lowers (widens) when the new tier is below the one it replaces. */
+const lowers = (before: unknown, after: unknown): Direction =>
+  TIER_ORDER.indexOf(String(after)) < TIER_ORDER.indexOf(String(before)) ? "widen" : "narrow";
+
 export const KEYS: readonly KeyDeclaration[] = [
   // Model ---------------------------------------------------------------
   {
     id: "model.ref[role=chat]", group: "model", fixed: { role: "chat" }, type: types.modelRef(),
     optionsSource: { name: "catalog.models", dependsOn: [] },
     layers: { chat: { store: "chat", field: "model" }, profile: { store: "profile", path: ["model", "chat"] }, ...both({ store: "pi-model-ref" }) },
-    timing: "fixed", effect: "next-turn", floor: "quiet", writers: ["ui", "home", "agent"],
+    timing: "fixed", effect: "next-turn", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Model", help: "The model this chat runs.", order: 10, importance: "essential", control: "catalog", fallback: "readOnly",
   },
   {
@@ -147,7 +158,7 @@ export const KEYS: readonly KeyDeclaration[] = [
       chat: { store: "chat", field: "thinking" }, profile: { store: "profile", path: ["thinking", "chat"] },
       ...both({ store: "pi", path: ["defaultThinkingLevel"], qualified: ["modelThinkingLevels", "{model}"] }),
     },
-    timing: "fixed", effect: "next-turn", floor: "quiet", writers: ["ui", "home", "agent"],
+    timing: "fixed", effect: "next-turn", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Thinking", help: "How much the model reasons before it answers. A model that lacks a level uses the closest one it supports.",
     order: 20, importance: "essential", control: "choice",
   },
@@ -155,13 +166,13 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "model.contextWindow", group: "model", qualifier: "model", type: types.integer(1_024, 100_000_000, "tokens"),
     optionsSource: { name: "catalog.contextWindow", dependsOn: ["model.ref[role=chat]"] },
     layers: { chat: { store: "chat", field: "contextWindow" }, ...both(pi("modelContextWindows", "{model}")) },
-    timing: "fixed", effect: "next-turn", floor: "quiet", writers: ["ui", "home", "agent"],
+    timing: "fixed", effect: "next-turn", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Context window", help: "How many tokens of conversation the model is given. Bounded by the model's capacity and compaction headroom.",
     order: 30, importance: "essential", control: "number",
   },
   {
     id: "model.thinkingBudgets", group: "model", subgroup: "Thinking budgets", type: thinkingBudgetsType(),
-    layers: both(pi("thinkingBudgets")), timing: "fixed", effect: "new-chat", floor: "quiet", writers: ["ui", "home", "agent"],
+    layers: both(pi("thinkingBudgets")), timing: "fixed", effect: "new-chat", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Thinking budgets", help: "Token budgets per thinking level for models that take a budget.", order: 60, importance: "advanced",
     control: "readOnly",
   },
@@ -175,7 +186,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "model.thinking[role=summarizer]", group: "model", fixed: { role: "summarizer" }, subgroup: "Compaction",
     type: types.choice([{ value: "inherit", label: "Same as chat" }, ...THINKING], true),
     layers: both(pi("compaction", "thinkingLevel")), builtin: "inherit", timing: "live", effect: "next-compaction", floor: "quiet",
-    writers: ["ui", "home", "agent"], label: "Summary thinking", help: "Thinking level for compaction summaries.", order: 80,
+    writers: ["ui", "home", "agent", "worker"], label: "Summary thinking", help: "Thinking level for compaction summaries.", order: 80,
     importance: "advanced", control: "choice",
   },
   {
@@ -203,19 +214,19 @@ export const KEYS: readonly KeyDeclaration[] = [
   {
     id: "context.compaction.enabled", group: "context", subgroup: "Compaction", type: types.boolean(),
     layers: chatPi("compaction", "enabled"), builtin: true, timing: "live", effect: "next-compaction", floor: "quiet",
-    writers: ["ui", "home", "agent"], label: "Automatic compaction", help: "Summarize older conversation when the context fills.",
+    writers: ["ui", "home", "agent", "worker"], label: "Automatic compaction", help: "Summarize older conversation when the context fills.",
     order: 10, importance: "essential", control: "toggle",
   },
   {
     id: "context.compaction.reserveTokens", group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(1_024, 1_000_000, "tokens"),
     layers: { chat: { store: "chat-settings", path: ["compaction", "reserveTokens"] }, ...both({ store: "pi", path: ["compaction", "reserveTokens"], qualified: ["compaction", "modelOverrides", "{model}", "reserveTokens"] }) },
-    builtin: 16_384, timing: "live", effect: "next-compaction", floor: "quiet", writers: ["ui", "home", "agent"],
+    builtin: 16_384, timing: "live", effect: "next-compaction", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Reserve", help: "Tokens kept free for the response before compaction starts.", order: 20, importance: "advanced", control: "number",
   },
   {
     id: "context.compaction.keepRecentTokens", group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(0, 1_000_000, "tokens"),
     layers: { chat: { store: "chat-settings", path: ["compaction", "keepRecentTokens"] }, ...both({ store: "pi", path: ["compaction", "keepRecentTokens"], qualified: ["compaction", "modelOverrides", "{model}", "keepRecentTokens"] }) },
-    builtin: 20_000, timing: "live", effect: "next-compaction", floor: "quiet", writers: ["ui", "home", "agent"],
+    builtin: 20_000, timing: "live", effect: "next-compaction", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Keep recent", help: "Tokens of recent conversation kept verbatim after compaction.", order: 30, importance: "advanced", control: "number",
   },
   {
@@ -226,18 +237,18 @@ export const KEYS: readonly KeyDeclaration[] = [
   {
     id: "context.branchSummary.reserveTokens", group: "context", subgroup: "Compaction", type: types.integer(1_024, 1_000_000, "tokens"),
     layers: both(pi("branchSummary", "reserveTokens")), builtin: 16_384, timing: "live", effect: "next-compaction", floor: "quiet",
-    writers: ["ui", "home", "agent"], label: "Branch summary reserve", help: "Tokens reserved when summarizing an abandoned branch.",
+    writers: ["ui", "home", "agent", "worker"], label: "Branch summary reserve", help: "Tokens reserved when summarizing an abandoned branch.",
     order: 50, importance: "advanced", control: "number",
   },
   {
     id: "context.images.autoResize", group: "context", subgroup: "Images", type: types.boolean(),
-    layers: chatPi("images", "autoResize"), builtin: true, timing: "fixed", effect: "new-chat", floor: "quiet", writers: ["ui", "home", "agent"],
+    layers: chatPi("images", "autoResize"), builtin: true, timing: "fixed", effect: "new-chat", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Resize images", help: "Shrink large images before they are sent.", order: 60, importance: "advanced", control: "toggle",
   },
   {
     id: "context.images.block", group: "context", subgroup: "Images", type: types.boolean(["Blocked", "Allowed"]),
     layers: chatPi("images", "blockImages"), builtin: false, timing: { narrow: "live", widen: "fixed" }, effect: "next-request",
-    floor: { widen: "approve", narrow: "quiet" }, direction: turnsOn, writers: ["ui", "home", "agent"],
+    floor: { widen: "approve", narrow: "quiet" }, direction: turnsOn, writers: ["ui", "home", "agent", "worker"],
     label: "Block images", help: "Replace images with a placeholder before they reach the model.", order: 70, importance: "advanced", control: "toggle",
     confirm: "Allowing images again lets the model see image content.",
   },
@@ -246,7 +257,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "tools.active", group: "tools", type: toolSelectionType(),
     layers: { chat: { store: "chat", field: "tools" }, profile: { store: "profile", path: ["tools"] }, ...both(pi("defaultTools")) },
     builtin: ["read", "bash", "edit", "write"], timing: "fixed", effect: "next-turn", floor: { widen: "notify", narrow: "quiet" },
-    direction: toolsDirection, writers: ["ui", "home", "agent"],
+    direction: toolsDirection, writers: ["ui", "home", "agent", "worker"],
     label: "Tools", help: "The tools the model may call.", order: 10, importance: "essential", control: "list",
   },
   {
@@ -284,62 +295,73 @@ export const KEYS: readonly KeyDeclaration[] = [
     label: "Default trust policy", help: "What happens with a project that has no trust decision.", order: 20, importance: "advanced",
     control: "choice", confirm: "Always trust loads every new project's extensions and hooks without asking.",
   },
+  {
+    // Lowering a floor widens what agents may do, so it is this key's widen
+    // direction and its floor is approve; only the maintainer's tap writes it,
+    // and that tap is the approval (doc 4.2, F3). Nothing else is special.
+    id: "permissions.floor", group: "permissions", subgroup: "Floors", qualifier: "key", type: tierType(),
+    layers: { mac: { store: "floors" } }, builtinFor: (qualifiers) => codeFloor(qualifiers),
+    timing: "live", effect: "next-change", floor: { widen: "approve", narrow: "quiet" }, direction: lowers, writers: ["ui"],
+    label: "Floor", help: "The least attention a change to this setting gets when an agent asks: Quiet applies it, Notify applies it and tells you, Approve waits for your tap. A turn that read web content raises it one step.",
+    order: 90, importance: "advanced", control: "choice",
+    confirm: "Lowering a floor lets agents make this change with less of your attention.",
+  },
   // Run -----------------------------------------------------------------
   {
     id: "run.queue.steeringMode", group: "run", subgroup: "Queue", type: types.choice(QUEUE),
-    layers: chatPi("steeringMode"), builtin: "one-at-a-time", timing: "live", effect: "next-turn", floor: "quiet", writers: ["ui", "home", "agent"],
+    layers: chatPi("steeringMode"), builtin: "one-at-a-time", timing: "live", effect: "next-turn", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Steering delivery", help: "How queued steering messages reach a running turn.", order: 10, importance: "advanced", control: "choice",
   },
   {
     id: "run.queue.followUpMode", group: "run", subgroup: "Queue", type: types.choice(QUEUE),
-    layers: chatPi("followUpMode"), builtin: "one-at-a-time", timing: "live", effect: "next-turn", floor: "quiet", writers: ["ui", "home", "agent"],
+    layers: chatPi("followUpMode"), builtin: "one-at-a-time", timing: "live", effect: "next-turn", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Follow-up delivery", help: "How queued follow-up messages are delivered after a turn.", order: 20, importance: "advanced", control: "choice",
   },
   {
     id: "run.retry.enabled", group: "run", subgroup: "Retry", type: types.boolean(),
-    layers: chatPi("retry", "enabled"), builtin: true, timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent"],
+    layers: chatPi("retry", "enabled"), builtin: true, timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Retry", help: "Retry a failed model request.", order: 30, importance: "advanced", control: "toggle",
   },
   {
     id: "run.retry.maxRetries", group: "run", subgroup: "Retry", type: types.integer(0, 20, "retries"),
-    layers: chatPi("retry", "maxRetries"), builtin: 3, timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent"],
+    layers: chatPi("retry", "maxRetries"), builtin: 3, timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Retries", help: "How many times a failed request is retried.", order: 40, importance: "essential", control: "number",
   },
   {
     id: "run.retry.baseDelayMs", group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
-    layers: chatPi("retry", "baseDelayMs"), builtin: 2_000, timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent"],
+    layers: chatPi("retry", "baseDelayMs"), builtin: 2_000, timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Retry delay", help: "The first delay between retries; later delays grow.", order: 50, importance: "advanced", control: "number",
   },
   {
     id: "run.retry.provider.timeoutMs", group: "run", subgroup: "Retry", type: types.integer(1_000, 3_600_000, "ms"),
-    layers: chatPi("retry", "provider", "timeoutMs"), timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent"],
+    layers: chatPi("retry", "provider", "timeoutMs"), timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Provider timeout", help: "The provider client's request timeout.", order: 60, importance: "advanced", control: "number",
   },
   {
     id: "run.retry.provider.maxRetries", group: "run", subgroup: "Retry", type: types.integer(0, 20, "retries"),
-    layers: chatPi("retry", "provider", "maxRetries"), timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent"],
+    layers: chatPi("retry", "provider", "maxRetries"), timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Provider retries", help: "Retries inside the provider client.", order: 70, importance: "advanced", control: "number",
   },
   {
     id: "run.retry.provider.maxRetryDelayMs", group: "run", subgroup: "Retry", type: types.integer(0, 300_000, "ms"),
     layers: chatPi("retry", "provider", "maxRetryDelayMs"), builtin: 60_000, timing: "live", effect: "next-request", floor: "quiet",
-    writers: ["ui", "home", "agent"], label: "Provider retry delay cap", help: "The longest delay the provider client waits.",
+    writers: ["ui", "home", "agent", "worker"], label: "Provider retry delay cap", help: "The longest delay the provider client waits.",
     order: 80, importance: "advanced", control: "number",
   },
   {
     id: "run.transport", group: "run", subgroup: "Connection",
     type: types.choice([{ value: "auto", label: "Automatic" }, { value: "sse", label: "SSE" }, { value: "websocket", label: "WebSocket" }, { value: "websocket-cached", label: "WebSocket (cached)" }]),
-    layers: chatPi("transport"), builtin: "auto", timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent"],
+    layers: chatPi("transport"), builtin: "auto", timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Transport", help: "How requests reach the provider.", order: 90, importance: "advanced", control: "choice",
   },
   {
     id: "run.httpIdleTimeoutMs", group: "run", subgroup: "Connection", type: types.integer(1_000, 3_600_000, "ms"),
-    layers: chatPi("httpIdleTimeoutMs"), builtin: 300_000, timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent"],
+    layers: chatPi("httpIdleTimeoutMs"), builtin: 300_000, timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "Idle timeout", help: "How long a silent HTTP stream may idle.", order: 100, importance: "advanced", control: "number",
   },
   {
     id: "run.websocketConnectTimeoutMs", group: "run", subgroup: "Connection", type: types.integer(1_000, 300_000, "ms"),
-    layers: chatPi("websocketConnectTimeoutMs"), timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent"],
+    layers: chatPi("websocketConnectTimeoutMs"), timing: "live", effect: "next-request", floor: "quiet", writers: ["ui", "home", "agent", "worker"],
     label: "WebSocket connect timeout", help: "How long a WebSocket connection may take to open.", order: 110, importance: "advanced", control: "number",
   },
   {
@@ -405,8 +427,30 @@ export function schemaKey(id: string): KeyDeclaration {
   return key;
 }
 
-export function floorFor(key: KeyDeclaration, direction: Direction): Tier {
-  return typeof key.floor === "string" ? key.floor : key.floor[direction];
+/** The maintainer's floor overrides as `floors.json` holds them. */
+export type FloorOverrides = Record<string, { widen?: Tier; narrow?: Tier }>;
+
+/** A key's floor for a direction: the maintainer's override, else the code floor (doc 5.4). */
+export function floorFor(key: KeyDeclaration, direction: Direction, overrides?: FloorOverrides): { floor: Tier; source: "code" | "override" } {
+  const override = overrides?.[key.id]?.[direction];
+  if (override) return { floor: override, source: "override" };
+  return { floor: typeof key.floor === "string" ? key.floor : key.floor[direction], source: "code" };
+}
+
+/** The instances of the floor key: one per key, or one per direction for a
+ * key whose floor differs by direction. */
+export function floorInstances(): Array<{ key: string; direction?: Direction }> {
+  return KEYS.flatMap(key => typeof key.floor === "string" ? [{ key: key.id }] : [{ key: key.id, direction: "widen" as const }, { key: key.id, direction: "narrow" as const }]);
+}
+
+function codeFloor(qualifiers: Partial<Record<QualifierName, string>>): Tier | undefined {
+  const key = qualifiers.key === undefined ? undefined : byId.get(qualifiers.key);
+  if (!key) return undefined;
+  return typeof key.floor === "string" ? key.floor : key.floor[qualifiers.direction === "narrow" ? "narrow" : "widen"];
+}
+
+export function builtinValue(key: KeyDeclaration, qualifiers: Partial<Record<QualifierName, string>>): unknown {
+  return key.builtinFor ? key.builtinFor(qualifiers) : key.builtin;
 }
 
 export function timingFor(key: KeyDeclaration, direction: Direction): Timing {

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "./trust-service.js";
 import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "./settings-record.js";
+import { SettingsApprovals } from "./settings-approvals.js";
 import type { Resolution } from "./settings-resolver.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
@@ -65,7 +66,7 @@ async function fixture(options: { segmentEntries?: number } = {}) {
   await registry.initialize();
   const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime });
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
-  const settingsChanges = new SettingsChangePath(settingsModel, record, {
+  const settingsChanges = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
     setTrust: async (project, decision) => {
       return trust.setAndApply(project, decision,
         async inspection => { await registry.reloadProject(inspection.cwd, inspection.effectiveDecision === true, false); },

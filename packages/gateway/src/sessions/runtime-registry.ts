@@ -593,6 +593,7 @@ export class RuntimeRegistry {
   private readonly workspace: TronWorkspace;
   private knowledgeService: KnowledgeService | undefined;
   private sessionSearchService: import("./session-search-service.js").SessionSearchService | undefined;
+  private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
@@ -933,6 +934,13 @@ export class RuntimeRegistry {
   setSessionSearchService(service: import("./session-search-service.js").SessionSearchService): void {
     if (this.sessionSearchService && this.sessionSearchService !== service) throw new Error("Session search service is already installed");
     this.sessionSearchService = service;
+  }
+
+  /** Installs the settings model and its change path for the `settings` tool.
+   * Both are built over this registry, so slots read them late-bound. */
+  setSettings(model: import("../admin/settings-model.js").SettingsModel, changes: import("../admin/settings-model.js").SettingsChangePath): void {
+    if (this.settingsOwners && this.settingsOwners.changes !== changes) throw new Error("Settings are already installed");
+    this.settingsOwners = { model, changes };
   }
 
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
@@ -1955,6 +1963,7 @@ export class RuntimeRegistry {
       ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
       sessionSearch: () => this.sessionSearchService,
+      settings: () => this.settingsOwners,
       ...(this.options.homeWebTransport ? { homeWebTransport: this.options.homeWebTransport } : {}),
       ...(this.options.jev ? { jev: this.options.jev } : {}),
       ...(this.options.connections ? { connections: this.options.connections } : {}),

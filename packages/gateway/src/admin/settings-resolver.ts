@@ -1,4 +1,4 @@
-import { KEYS, SECTIONS, floorFor, schemaKey, type Binding, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, SECTIONS, builtinValue, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_LABELS, type FormatContext, type LayerId, type Qualifiers } from "./settings-types.js";
 
 /**
@@ -47,6 +47,8 @@ export interface SettingsStores {
   mac: Record<string, unknown>;
   /** Saved trust decisions by canonical project path. */
   trust: Record<string, boolean>;
+  /** The maintainer's floor overrides (Mac policy, doc 5.4). */
+  floors: FloorOverrides;
 }
 
 /** Capability-constrained option sources (doc 3.6, 7.5). */
@@ -146,7 +148,9 @@ export function readBinding(stores: SettingsStores, layer: LayerId, binding: Bin
     case "trust":
       return qualifiers.project === undefined ? undefined : stores.trust[qualifiers.project];
     case "floors":
-      return undefined;
+      // A key with one floor keeps both directions equal, so widen reads it.
+      return qualifiers.key === undefined ? undefined
+        : stores.floors[qualifiers.key]?.[qualifiers.direction === "narrow" ? "narrow" : "widen"];
   }
 }
 
@@ -209,6 +213,10 @@ function instances(key: KeyDeclaration, target: SettingsTarget, stores: Settings
     const onlyQualified = Object.values(key.layers).some(binding => binding.store === "pi" && binding.path.includes("{model}"));
     return model ? [{ ...fixed, model }] : onlyQualified ? [] : [fixed];
   }
+  if (key.qualifier === "key") {
+    // Floors are Mac policy only the maintainer's tap writes; they appear on the Mac target.
+    return target.kind === "mac" ? floorInstances().map(instance => ({ ...fixed, ...instance })) : [];
+  }
   if (key.qualifier === "project") {
     if (target.kind === "project" || target.kind === "session") return stores.project ? [{ ...fixed, project: stores.project.root }] : [];
     return Object.keys(stores.trust).sort().map(project => ({ ...fixed, project }));
@@ -248,7 +256,8 @@ function resolveInstance(
     return entry ? [entry] : [];
   });
 
-  let value: unknown = key.builtin;
+  const builtin = builtinValue(key, qualifiers);
+  let value: unknown = builtin;
   let layer: LayerId = "builtin";
   for (const entry of present) {
     if (!entry.applied) continue;
@@ -261,7 +270,7 @@ function resolveInstance(
   for (const layerId of [...BOTTOM_UP].reverse()) {
     if (!stores.layers.includes(layerId) && layerId !== "builtin") continue;
     if (layerId === "builtin") {
-      layerValues.push({ layer: "builtin", ...(key.builtin === undefined ? {} : { value: key.builtin, display: format(key.builtin) }), applied: true });
+      layerValues.push({ layer: "builtin", ...(builtin === undefined ? {} : { value: builtin, display: format(builtin) }), applied: true });
       continue;
     }
     if (!key.layers[layerId as Exclude<LayerId, "builtin">]) continue;
@@ -274,6 +283,9 @@ function resolveInstance(
   const badges: Badge[] = [{ kind: "layer", label: LAYER_LABELS[layer] }];
   if (qualifiers.model && key.qualifier === "model") badges.push({ kind: "scope", label: qualifiers.model });
   if (qualifiers.project && key.qualifier === "project") badges.push({ kind: "scope", label: qualifiers.project });
+  if (qualifiers.key && key.qualifier === "key") {
+    badges.push({ kind: "scope", label: qualifiers.direction ? `${schemaKey(qualifiers.key).label} (${qualifiers.direction})` : schemaKey(qualifiers.key).label });
+  }
   if (notApplied) {
     badges.push({ kind: "state", label: "Not applied (untrusted)", detail: `${LAYER_LABELS[notApplied.layer]}: ${format(notApplied.value)}`,
       action: { kind: "reviewTrust", label: "Review trust" } });

@@ -12,9 +12,10 @@ import { updateJsonLocked } from "../util/json.js";
 import { writeProjectSettings } from "./project-settings-writer.js";
 import type { TrustService } from "./trust-service.js";
 import type { Actor, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
+import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
 import { readBinding, resolveSettings, targetLayers, type ChatStore, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
-import { floorFor, schemaKey, type Binding, type KeyDeclaration } from "./settings-schema.js";
-import { LAYER_LABELS, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
+import { builtinValue, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
 
 /** What a session target contributes: its Chat layer and whether it is Home's chat. */
 export interface SessionSettingsSource {
@@ -45,6 +46,11 @@ export class SettingsModel {
 
   get profilePath(): string {
     return join(this.dependencies.tronHome, "gateway", "home", "profile.json");
+  }
+
+  /** The maintainer's floor overrides (doc 5.4); only the change path writes it. */
+  get floorsPath(): string {
+    return join(this.dependencies.tronHome, "gateway", "settings", "floors.json");
   }
 
   async resolve(target: SettingsTarget, session?: SessionSettingsSource, keys?: readonly string[]): Promise<Resolution> {
@@ -78,6 +84,7 @@ export class SettingsModel {
       layers,
       mac,
       trust,
+      floors: await this.floorOverrides(),
       ...(project ? { project } : {}),
       ...(session ? { chat: session.chat } : {}),
       ...(home ? { profile: await readJsonObject(this.profilePath) } : {}),
@@ -103,6 +110,21 @@ export class SettingsModel {
       project: cwd === this.dependencies.agentDir || projectUnreadable ? {} : manager.getProjectSettings() as Record<string, unknown>,
       ...(projectUnreadable ? { projectUnreadable: true as const } : {}),
     };
+  }
+
+  private async floorOverrides(): Promise<FloorOverrides> {
+    const document = await readJsonObject(this.floorsPath);
+    const result: FloorOverrides = {};
+    for (const [key, value] of Object.entries(document)) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const entry: { widen?: Tier; narrow?: Tier } = {};
+      for (const direction of ["widen", "narrow"] as const) {
+        const tier = (value as Record<string, unknown>)[direction];
+        if (typeof tier === "string" && (TIERS as readonly string[]).includes(tier)) entry[direction] = tier as Tier;
+      }
+      result[key] = entry;
+    }
+    return result;
   }
 
   private async trustDecisions(): Promise<Record<string, boolean>> {
@@ -179,6 +201,9 @@ export interface ChangeContext {
   reason?: string;
   commandId?: string;
   dryRun?: boolean;
+  /** The requesting turn read web or browser content (doc 5.4 input 2). The
+   * Gateway sets it from the tool calls it executed; the UI has no turn. */
+  web?: boolean;
   session?: SessionSettingsSource & { appliers: ChatAppliers };
   undoOf?: string;
   applyAgainOf?: string;
@@ -198,12 +223,29 @@ export interface ChangeOutcome {
   error?: { code: string; message: string };
 }
 
+export interface ChangeResult {
+  dryRun?: true;
+  status: ChangeStatus;
+  /** The request's tier: the highest of its changes (doc 5.4). */
+  tier: Tier;
+  changes: ChangeOutcome[];
+  /** A pending request: what the maintainer decides and the exact diff it binds to. */
+  approval?: { requestId: string; digest: string; expiresAt: string };
+}
+
 export interface SettingsWriters {
   /** Trust's applier: TrustService.setAndApply with the runtime reload. Returns
    * the resulting trust inspection, which the change outcome carries. */
   setTrust(project: string, decision: boolean | null): Promise<unknown>;
   /** Home memory's applier: HomeOwner (doc 6.1). */
   configureHomeMemory?(model: ModelRefValue): Promise<void>;
+}
+
+/** Who hears about changes once they happen. The Gateway service registers one:
+ * after-apply effects and broadcasts, and the maintainer's pushes (doc 5.4, 5.5). */
+export interface SettingsObserver {
+  applied(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; tier: Tier; reason?: string; approved?: true }): void;
+  approvals(event: { kind: "pending" | "resolved"; request: ApprovalRequest }): void;
 }
 
 interface Planned {
@@ -225,10 +267,13 @@ const STORE_ORDER: Record<Binding["store"], number> = {
   "pi": 0, "pi-model-ref": 0, "trust": 1, "home-memory": 2, "profile": 3, "floors": 4, "chat": 5, "chat-settings": 5,
 };
 
+const DECIDED = new Set<ChangeStatus>(["approved", "declined", "expired", "superseded", "failed"]);
+
 export class SettingsChangePath {
   /** Changes serialize per target (in a bounded set of stripes), so distinct
    * sessions change concurrently; each store's applier holds its own lock too. */
   private readonly stripes = Array.from({ length: 32 }, () => new AsyncMutex());
+  private observer: SettingsObserver | undefined;
 
   private mutexFor(target: SettingsTarget): AsyncMutex {
     const id = target.kind === "session" ? `session:${target.sessionId}` : target.kind === "project" ? `project:${target.cwd}` : target.kind;
@@ -239,14 +284,21 @@ export class SettingsChangePath {
   constructor(
     private readonly model: SettingsModel,
     readonly record: SettingsChangeRecord,
+    readonly approvals: SettingsApprovals,
     private readonly writers: SettingsWriters,
     private readonly agentDir: string,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  async change(target: SettingsTarget, requests: readonly ChangeRequest[], context: ChangeContext): Promise<{ dryRun?: true; status: ChangeStatus; changes: ChangeOutcome[] }> {
+  observe(observer: SettingsObserver): void {
+    if (this.observer && this.observer !== observer) throw new Error("Settings changes already have an observer");
+    this.observer = observer;
+  }
+
+  async change(target: SettingsTarget, requests: readonly ChangeRequest[], context: ChangeContext): Promise<ChangeResult> {
     if (requests.length === 0 || requests.length > 50) throw new GatewayError("invalid_request", "A settings change holds 1 to 50 changes");
     if (context.actor.kind !== "ui" && !context.reason?.trim()) throw new GatewayError("invalid_request", "A reason is required for a change not made from the iPhone");
+    await this.expireDue();
     return this.mutexFor(target).run(async () => {
       const stores = await this.model.stores(target, context.session);
       const runtime = context.session?.modelRuntime ?? this.model.modelRuntime;
@@ -260,49 +312,27 @@ export class SettingsChangePath {
           errors.set(index, error instanceof GatewayError ? error : new GatewayError("invalid_request", String(error)));
         }
       }
+      const tier = planned.length ? maxTier(...planned.map(plan => plan.tier)) : "quiet";
+      // Only the maintainer's own tap applies an approve-tier request at once;
+      // that tap is the approval (F3). Everyone else waits for it.
+      const held = tier === "approve" && context.actor.kind !== "ui";
       if (context.dryRun) {
         let next = 0;
         return {
-          dryRun: true as const, status: "applied" as const,
+          dryRun: true as const, status: held ? "pending" as const : "applied" as const, tier,
           changes: requests.map((request, index) => {
             const error = errors.get(index);
             if (error) return { changeId: "", key: request.key, layer: request.layer, status: "failed" as const, tier: "quiet" as const, error: { code: error.code, message: error.message } };
             const plan = planned[next++]!;
-            return { changeId: "", key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}), layer: request.layer, status: "applied" as const, tier: plan.tier };
+            return { changeId: "", key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}), layer: request.layer, status: held ? "pending" as const : "applied" as const, tier: plan.tier };
           }),
         };
       }
-      const ordered = [...planned].sort((a, b) => STORE_ORDER[a.binding.store] - STORE_ORDER[b.binding.store]);
-      const applied: Array<{ plan: Planned; revision?: number; git?: GitResult; result?: unknown }> = [];
-      let failure: { plan: Planned; error: GatewayError } | undefined;
-      for (const plan of ordered) {
-        try {
-          const result = await this.apply(target, stores, plan, plan.after, context);
-          applied.push({ plan, ...result });
-        } catch (error) {
-          failure = { plan, error: error instanceof GatewayError ? error : new GatewayError("internal", error instanceof Error ? error.message : String(error)) };
-          break;
-        }
-      }
-      if (failure) {
-        // Roll back the stores already changed, newest first (doc 5.2).
-        for (const done of [...applied].reverse()) {
-          await this.apply(target, stores, done.plan, done.plan.before, context).catch(() => undefined);
-        }
-        await this.record.append(ordered.map(plan => this.entry(target, plan, context, "failed",
-          plan === failure!.plan ? failure!.error.message : "Rolled back: another change in the same request failed")));
-        throw failure.error;
-      }
-      await this.record.append(applied.map(done => this.entry(target, done.plan, context, "applied", undefined, done.git)));
-      return {
-        status: "applied" as const,
-        changes: applied.map(({ plan, revision, git, result }) => ({
-          changeId: plan.changeId, key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
-          layer: plan.request.layer, status: "applied" as const, tier: plan.tier,
-          ...(revision === undefined ? {} : { revision }), ...(git ? { git } : {}),
-          ...(result === undefined ? {} : { result }),
-        })),
-      };
+      if (held) return this.hold(target, planned, context, tier);
+      const applied = await this.applyAll(target, stores, planned, context, entry => entry);
+      const changes = this.outcomes(applied, "applied");
+      this.observer?.applied(target, changes, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
+      return { status: "applied" as const, tier, changes };
     });
   }
 
@@ -312,7 +342,9 @@ export class SettingsChangePath {
     if (!found) throw new GatewayError("not_found", "No such settings change");
     const { entry } = found;
     if (entry.redacted) throw new GatewayError("conflict", "This change is not undoable: its previous value was never recorded");
-    if (entry.status !== "applied" && entry.status !== "approved") throw new GatewayError("conflict", "Only an applied change can be undone");
+    // A pending entry's outcome is its latest decision fact.
+    const status = entry.status === "pending" ? [...found.facts].reverse().find(fact => DECIDED.has(fact.status))?.status ?? "pending" : entry.status;
+    if (status !== "applied" && status !== "approved") throw new GatewayError("conflict", "Only an applied change can be undone");
     const key = schemaKey(entry.key);
     const stores = await this.model.stores(entry.target, session);
     const binding = key.layers[entry.layer]!;
@@ -332,6 +364,191 @@ export class SettingsChangePath {
       ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {}),
       filter: entry => (!input.key || entry.key === input.key) && (!input.status || entry.status === input.status),
     });
+  }
+
+  /** Requests waiting for the maintainer, after expiring those past 24 hours. */
+  async pendingApprovals(): Promise<ApprovalRequest[]> {
+    await this.expireDue();
+    return this.approvals.pending();
+  }
+
+  /**
+   * The maintainer's decision on one pending request, bound to the exact diff
+   * he saw (`digest`). Approval re-checks every store against the diff's
+   * `before`: a store that moved since supersedes the request, so an approval
+   * can never apply a different change than the one shown (doc 5.5).
+   */
+  async decide(requestId: string, input: { digest: string; approved: boolean; decidedBy: Actor; commandId?: string; session?: ChangeContext["session"] }): Promise<ChangeResult> {
+    await this.expireDue();
+    const found = await this.approvals.get(requestId);
+    if (!found) throw new GatewayError("not_found", "No such settings approval");
+    return this.mutexFor(found.target).run(async () => {
+      const request = await this.approvals.get(requestId);
+      if (!request || request.status !== "pending") throw new GatewayError("conflict", `This change is no longer waiting for approval (${request?.status ?? "gone"})`);
+      if (input.digest !== request.digest) throw new GatewayError("conflict", "This approval is for a different change than the one waiting");
+      const context: ChangeContext = {
+        actor: request.actor, ...(request.reason ? { reason: request.reason } : {}),
+        ...(input.commandId ? { commandId: input.commandId } : {}), ...(input.session ? { session: input.session } : {}),
+      };
+      const fact = (status: ChangeStatus, failure?: string) => request.changes.map((change): ChangeEntry => ({
+        ...this.pendingEntry(request, change, context), changeId: randomUUID(), at: this.now().toISOString(), status,
+        refersTo: change.changeId, decidedBy: input.decidedBy, ...(failure ? { failure } : {}),
+      }));
+      if (!input.approved) {
+        const settled = await this.approvals.settle(requestId, "declined", this.now());
+        await this.record.append(fact("declined"));
+        this.observer?.approvals({ kind: "resolved", request: settled });
+        return { status: "declined" as const, tier: "approve" as const, changes: request.changes.map(change => this.pendingOutcome(change, "declined")) };
+      }
+      const stores = await this.model.stores(request.target, input.session);
+      const runtime = input.session?.modelRuntime ?? this.model.modelRuntime;
+      const planned: Planned[] = [];
+      try {
+        for (const change of request.changes) {
+          const plan = await this.plan(request.target, stores, {
+            key: change.key, ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}), layer: change.layer, op: change.op,
+            ...(change.op === "set" ? { value: change.after } : {}),
+            // A redacted diff has no `before` to compare; the digest still binds its key.
+            ...(change.redacted ? {} : { expected: change.before === undefined ? null : change.before }),
+          }, context, runtime);
+          planned.push({ ...plan, changeId: change.changeId, tier: change.tier, basis: change.tierBasis });
+        }
+      } catch (error) {
+        const message = error instanceof GatewayError && error.code === "conflict"
+          ? "The setting changed since this was requested" : error instanceof Error ? error.message : String(error);
+        const settled = await this.approvals.settle(requestId, "superseded", this.now(), message);
+        await this.record.append(fact("superseded", message));
+        this.observer?.approvals({ kind: "resolved", request: settled });
+        throw new GatewayError("conflict", `This change was superseded: ${message}`);
+      }
+      let applied: Awaited<ReturnType<SettingsChangePath["applyAll"]>>;
+      try {
+        applied = await this.applyAll(request.target, stores, planned, context, entry => ({
+          ...entry, changeId: randomUUID(), status: entry.status === "failed" ? "failed" : "approved", refersTo: entry.changeId, requestId, decidedBy: input.decidedBy,
+        }));
+      } catch (error) {
+        const settled = await this.approvals.settle(requestId, "failed", this.now(), error instanceof Error ? error.message : String(error));
+        this.observer?.approvals({ kind: "resolved", request: settled });
+        throw error;
+      }
+      const settled = await this.approvals.settle(requestId, "approved", this.now());
+      const changes = this.outcomes(applied, "approved");
+      this.observer?.applied(request.target, changes, { actor: request.actor, tier: "approve", ...(request.reason ? { reason: request.reason } : {}), approved: true });
+      this.observer?.approvals({ kind: "resolved", request: settled });
+      return { status: "approved" as const, tier: "approve" as const, changes };
+    });
+  }
+
+  /**
+   * What the requester hears on its next turn (Q22): one line per change it
+   * asked for that was declined, expired or superseded since it last heard.
+   */
+  async takeOutcomes(sessionId: string): Promise<string[]> {
+    await this.expireDue();
+    const taken = await this.approvals.takeOutcomes(sessionId);
+    return taken.flatMap(request => request.changes.map(change => {
+      const what = `${schemaKey(change.key).label} (${change.key}) at the ${LAYER_LABELS[change.layer]} layer`;
+      const outcome = request.status === "declined" ? "was declined by the maintainer"
+        : request.status === "expired" ? "expired after 24 hours without a decision"
+          : request.status === "superseded" ? `was superseded${request.failure ? ` (${request.failure})` : " by a newer request"}`
+            : `failed${request.failure ? ` (${request.failure})` : ""}`;
+      return `Settings change ${change.changeId}: ${what} ${outcome}; it was not applied.`;
+    }));
+  }
+
+  /** Pending requests past their 24 hours become expired, never applied (decision 8). */
+  private async expireDue(): Promise<void> {
+    const expired = await this.approvals.expire(this.now());
+    for (const request of expired) {
+      await this.record.append(request.changes.map((change): ChangeEntry => ({
+        ...this.pendingEntry(request, change, { actor: request.actor }), changeId: randomUUID(), at: this.now().toISOString(),
+        status: "expired", refersTo: change.changeId,
+      })));
+      this.observer?.approvals({ kind: "resolved", request });
+    }
+  }
+
+  /** Holds an approve-tier request for the maintainer's tap (doc 5.5). */
+  private async hold(target: SettingsTarget, planned: readonly Planned[], context: ChangeContext, tier: Tier): Promise<ChangeResult> {
+    const changes = planned.map((plan): PendingChange => ({
+      changeId: plan.changeId, key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
+      layer: plan.request.layer, op: plan.request.op,
+      ...(plan.key.redacted ? { redacted: true as const } : {
+        ...(plan.before === undefined ? {} : { before: plan.before }), ...(plan.after === undefined ? {} : { after: plan.after }),
+      }),
+      tier: plan.tier, tierBasis: plan.basis,
+    }));
+    const { request, superseded } = await this.approvals.create({
+      target, actor: context.actor, ...(context.reason ? { reason: context.reason } : {}), changes,
+    }, this.now());
+    for (const previous of superseded) {
+      await this.record.append(previous.changes.map((change): ChangeEntry => ({
+        ...this.pendingEntry(previous, change, { actor: previous.actor }), changeId: randomUUID(), at: request.createdAt,
+        status: "superseded", refersTo: change.changeId, failure: `Superseded by request ${request.requestId}`,
+      })));
+      this.observer?.approvals({ kind: "resolved", request: previous });
+    }
+    await this.record.append(changes.map(change => this.pendingEntry(request, change, context)));
+    this.observer?.approvals({ kind: "pending", request });
+    return {
+      status: "pending", tier, approval: { requestId: request.requestId, digest: request.digest, expiresAt: request.expiresAt },
+      changes: changes.map(change => this.pendingOutcome(change, "pending")),
+    };
+  }
+
+  private pendingOutcome(change: PendingChange, status: ChangeStatus): ChangeOutcome {
+    return { changeId: change.changeId, key: change.key, ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}), layer: change.layer, status, tier: change.tier };
+  }
+
+  private pendingEntry(request: ApprovalRequest, change: PendingChange, context: Pick<ChangeContext, "actor" | "commandId" | "reason">): ChangeEntry {
+    return {
+      changeId: change.changeId, at: request.createdAt, ...(context.commandId ? { commandId: context.commandId } : {}),
+      actor: request.actor, target: request.target, layer: change.layer, key: change.key,
+      ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}), op: change.op,
+      ...(change.redacted ? { changed: true as const, redacted: true as const } : {
+        ...(change.before === undefined ? {} : { before: change.before }), ...(change.after === undefined ? {} : { after: change.after }),
+      }),
+      ...(request.reason ? { reason: request.reason } : {}),
+      tier: change.tier, tierBasis: change.tierBasis, status: "pending", requestId: request.requestId,
+    };
+  }
+
+  /** Applies every plan in store order, rolls back on a failure (doc 5.2), and
+   * records one entry per change, shaped by `shape` (an approval's facts). */
+  private async applyAll(target: SettingsTarget, stores: SettingsStores, planned: readonly Planned[], context: ChangeContext, shape: (entry: ChangeEntry) => ChangeEntry) {
+    const ordered = [...planned].sort((a, b) => STORE_ORDER[a.binding.store] - STORE_ORDER[b.binding.store]);
+    const applied: Array<{ plan: Planned; revision?: number; git?: GitResult; result?: unknown }> = [];
+    let failure: { plan: Planned; error: GatewayError } | undefined;
+    for (const plan of ordered) {
+      try {
+        const result = await this.apply(target, stores, plan, plan.after, context);
+        applied.push({ plan, ...result });
+      } catch (error) {
+        failure = { plan, error: error instanceof GatewayError ? error : new GatewayError("internal", error instanceof Error ? error.message : String(error)) };
+        break;
+      }
+    }
+    if (failure) {
+      // Roll back the stores already changed, newest first (doc 5.2).
+      for (const done of [...applied].reverse()) {
+        await this.apply(target, stores, done.plan, done.plan.before, context).catch(() => undefined);
+      }
+      await this.record.append(ordered.map(plan => shape(this.entry(target, plan, context, "failed",
+        plan === failure!.plan ? failure!.error.message : "Rolled back: another change in the same request failed"))));
+      throw failure.error;
+    }
+    const entries = applied.map(done => shape(this.entry(target, done.plan, context, "applied", undefined, done.git)));
+    await this.record.append(entries);
+    return applied.map((done, index) => ({ ...done, changeId: entries[index]!.changeId }));
+  }
+
+  private outcomes(applied: ReadonlyArray<{ plan: Planned; changeId: string; revision?: number; git?: GitResult; result?: unknown }>, status: ChangeStatus): ChangeOutcome[] {
+    return applied.map(({ plan, changeId, revision, git, result }) => ({
+      changeId, key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
+      layer: plan.request.layer, status, tier: plan.tier,
+      ...(revision === undefined ? {} : { revision }), ...(git ? { git } : {}),
+      ...(result === undefined ? {} : { result }),
+    }));
   }
 
   private async plan(target: SettingsTarget, stores: SettingsStores, request: ChangeRequest, context: ChangeContext, runtime: ModelRuntime): Promise<Planned> {
@@ -354,12 +571,15 @@ export class SettingsChangePath {
       qualifiers.project = stores.project.root;
     }
     if (key.qualifier === "project" && !qualifiers.project) throw new GatewayError("invalid_request", `${key.label} needs a project`);
+    if (key.qualifier === "key" && !floorInstances().some(instance => instance.key === qualifiers.key && instance.direction === qualifiers.direction)) {
+      throw new GatewayError("invalid_request", `${key.label} names a setting and, when its floor differs by direction, that direction`);
+    }
     if (bindingNeedsModel(binding) && !qualifiers.model) {
       const chatModel = stores.chat?.model;
       if (request.layer === "chat" && chatModel) qualifiers.model = `${chatModel.provider}/${chatModel.id}`;
       else throw new GatewayError("invalid_request", `${key.label} needs a model qualifier`);
     }
-    if (binding.store === "chat-settings" || binding.store === "profile" || binding.store === "floors") {
+    if (binding.store === "chat-settings" || binding.store === "profile") {
       throw new GatewayError("unsupported", `${key.label} has no writable ${LAYER_LABELS[request.layer]} store yet`);
     }
     let after: unknown;
@@ -376,11 +596,15 @@ export class SettingsChangePath {
     if (request.expected !== undefined && binding.store !== "chat" && !deepEqual(request.expected, before)) {
       throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, { current: (before ?? null) as never });
     }
-    const direction = key.direction ? key.direction(before ?? key.builtin, after ?? key.builtin) : "widen";
-    const floor = floorFor(key, direction);
+    const builtin = builtinValue(key, qualifiers);
+    const direction = key.direction ? key.direction(before ?? builtin, after ?? builtin) : "widen";
+    // F3: tier = max(floor + web, riskModel), capped at approve. No risk model
+    // exists yet (slice 13), so it never raises.
+    const { floor, source } = floorFor(key, direction, stores.floors);
+    const web = context.web === true;
     return {
       request, key, binding, qualifiers, before, after,
-      tier: floor, basis: { direction, floor, floorSource: "code", web: false, risk: null },
+      tier: raiseTier(floor, web ? 1 : 0), basis: { direction, floor, floorSource: source, web, risk: null },
       changeId: randomUUID(),
     };
   }
@@ -415,6 +639,17 @@ export class SettingsChangePath {
       }
       case "trust":
         return { result: await this.writers.setTrust(qualifiers.project!, unset ? null : value as boolean) };
+      case "floors":
+        await updateJsonLocked<Record<string, Record<string, Tier>>>(this.model.floorsPath, {}, document => {
+          const entry = { ...(document[qualifiers.key!] ?? {}) };
+          // A key with one floor keeps both directions equal.
+          for (const direction of qualifiers.direction ? [qualifiers.direction] : ["widen", "narrow"]) {
+            if (unset) delete entry[direction]; else entry[direction] = value as Tier;
+          }
+          if (Object.keys(entry).length === 0) delete document[qualifiers.key!]; else document[qualifiers.key!] = entry;
+          return document;
+        });
+        return {};
       case "home-memory":
         if (!this.writers.configureHomeMemory) throw new GatewayError("unsupported", "Home is not available");
         if (unset) throw new GatewayError("invalid_request", "The memory model cannot be unset");

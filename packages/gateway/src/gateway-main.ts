@@ -14,6 +14,7 @@ import { TerminalService } from "./machine/terminal-service.js";
 import { SettingsService } from "./admin/settings-service.js";
 import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
 import { SettingsChangeRecord } from "./admin/settings-record.js";
+import { SettingsApprovals } from "./admin/settings-approvals.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
 import { HookResources } from "./admin/hook-resources.js";
@@ -772,6 +773,23 @@ async function runStopDrain(): Promise<void> {
   }
 }
 
+// The one settings change path (docs/settings-model.md 5). Agents reach it
+// through the `settings` tool; the slots read it late-bound from the registry.
+const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(config.tronHome), new SettingsApprovals(config.tronHome), {
+  setTrust: async (project, decision) => trust.setAndApply(
+    project,
+    decision,
+    async (inspection) => sessions.reloadProject(inspection.cwd, inspection.effectiveDecision === true, false),
+    async (inspection) => sessions.commitProjectReload(inspection.cwd),
+  ),
+  configureHomeMemory: async (model) => {
+    const home = sessions.homeOwner();
+    if (!home) throw new GatewayError("unsupported", "Tron Home is not available");
+    await home.configureMemory({ model });
+  },
+}, config.agentDir);
+sessions.setSettings(settingsModel, settingsChanges);
+
 const service = new GatewayService({
   config,
   modelRuntime,
@@ -783,21 +801,7 @@ const service = new GatewayService({
   trust,
   settings,
   settingsModel,
-  settingsChanges: new SettingsChangePath(settingsModel, new SettingsChangeRecord(config.tronHome), {
-    setTrust: async (project, decision) => {
-      return trust.setAndApply(
-        project,
-        decision,
-        async (inspection) => sessions.reloadProject(inspection.cwd, inspection.effectiveDecision === true, false),
-        async (inspection) => sessions.commitProjectReload(inspection.cwd),
-      );
-    },
-    configureHomeMemory: async (model) => {
-      const home = sessions.homeOwner();
-      if (!home) throw new GatewayError("unsupported", "Tron Home is not available");
-      await home.configureMemory({ model });
-    },
-  }, config.agentDir),
+  settingsChanges,
   modelConfig,
   packages,
   hookResources,

@@ -12,7 +12,9 @@ import { runtimeIdentity } from "./runtime-identity.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_BROWSER_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
 import { admitHomeMemoryPage, admitHomeMemoryEvidence } from "../home/home-memory-browser.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
-import type { ChatAppliers, ChangeRequest, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import type { ChatAppliers, ChangeOutcome, ChangeRequest, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import type { ApprovalRequest } from "../admin/settings-approvals.js";
+import type { Actor } from "../admin/settings-record.js";
 import { schemaKey } from "../admin/settings-schema.js";
 import type { SettingsTarget } from "../admin/settings-resolver.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
@@ -188,7 +190,7 @@ function settingsChangeRequest(raw: unknown, label: string): ChangeRequest {
   rejectUnknownFields(change, ["key", "qualifiers", "layer", "op", "value", "expected"], label);
   const qualifiers = change.qualifiers === undefined ? undefined : object(change.qualifiers, `${label}.qualifiers`);
   if (qualifiers) {
-    rejectUnknownFields(qualifiers, ["role", "model", "provider", "tool", "project", "connection", "key"], `${label}.qualifiers`);
+    rejectUnknownFields(qualifiers, ["role", "model", "provider", "tool", "project", "connection", "key", "direction"], `${label}.qualifiers`);
     for (const [name, value] of Object.entries(qualifiers)) string(value, `${label}.qualifiers.${name}`, { max: 4_096 });
   }
   return {
@@ -198,6 +200,28 @@ function settingsChangeRequest(raw: unknown, label: string): ChangeRequest {
     op: oneOf(change.op, `${label}.op`, ["set", "unset"] as const),
     ...("value" in change ? { value: change.value } : {}),
     ...("expected" in change ? { expected: change.expected } : {}),
+  };
+}
+
+function actorLabel(actor: Actor): string {
+  return actor.kind === "home" ? "Home" : actor.kind === "worker" ? "A Home task worker" : actor.kind === "agent" ? "A chat's agent" : "You";
+}
+
+/** A pending request as the iPhone shows it: the diff it would approve. */
+function approvalProjection(request: ApprovalRequest) {
+  return {
+    requestId: request.requestId, digest: request.digest, createdAt: request.createdAt, expiresAt: request.expiresAt,
+    target: request.target, actor: request.actor, ...(request.reason ? { reason: request.reason } : {}),
+    changes: request.changes.map(change => {
+      const key = schemaKey(change.key);
+      const format = (value: unknown) => value === undefined ? "Not set" : key.type.format(value, { modelName: () => undefined });
+      return {
+        changeId: change.changeId, key: change.key, label: key.label, ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}),
+        layer: change.layer, op: change.op, tier: change.tier, tierBasis: change.tierBasis,
+        ...(change.redacted ? { redacted: true } : { before: change.before ?? null, after: change.after ?? null, display: { before: format(change.before), after: format(change.after) } }),
+        ...(key.confirm ? { confirm: key.confirm } : {}),
+      };
+    }),
   };
 }
 
@@ -398,6 +422,12 @@ export class GatewayService {
         dependencies.broadcast("models.catalogChanged", {});
       },
       ...(this.workRegistry ? { workRegistry: this.workRegistry } : {}),
+    });
+    // One observer for every actor's changes: the iPhone's RPCs and the agents'
+    // `settings` tool reach the same after-apply effects, broadcasts and pushes.
+    dependencies.settingsChanges?.observe({
+      applied: (target, changes, context) => this.settingsChanged(target, changes, context),
+      approvals: (event) => this.settingsApprovalsChanged(event),
     });
   }
 
@@ -1964,7 +1994,7 @@ export class GatewayService {
         const slot = await this.openedSlot(client, { sessionId: target.sessionId });
         return safeJson(await this.dependencies.settingsModel.resolve(target, {
           cwd: slot.cwd,
-          home: this.dependencies.home?.chapterStateFor(target.sessionId).homeId !== undefined,
+          home: slot.isHomeChapter,
           chat: slot.settingsChatLayer(),
           modelRuntime: slot.modelRuntime,
         }, keys));
@@ -1986,7 +2016,6 @@ export class GatewayService {
             ...(params.applyAgainOf === undefined ? {} : { applyAgainOf: string(params.applyAgainOf, "applyAgainOf", { max: 100 }) }),
             ...(session ? { session } : {}),
           });
-          if (!result.dryRun) this.settingsChanged(target, result.changes);
           return safeJson(result);
         });
       case "settings.undo":
@@ -2001,8 +2030,30 @@ export class GatewayService {
             actor: { kind: "ui", id: client.identity },
             commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
           }, session);
-          if (found) this.settingsChanged(found.entry.target, result.changes);
           return safeJson(result);
+        });
+      case "settings.approvals": {
+        rejectUnknownFields(params, [], method);
+        return safeJson({ requests: (await this.dependencies.settingsChanges.pendingApprovals()).map(approvalProjection) });
+      }
+      case "settings.decide":
+        // The maintainer's decision on a pending change, bound to the exact diff
+        // he saw (docs/settings-model.md 5.5). A Chat-layer change carries the
+        // fence of the chat it applies to, as settings.change does.
+        return this.mutation(client, method, params, async (workToken) => {
+          rejectUnknownFields(params, ["commandId", "requestId", "digest", "approved", "fence"], method);
+          const requestId = string(params.requestId, "requestId", { max: 100 });
+          const pending = (await this.dependencies.settingsChanges.approvals.get(requestId))?.target;
+          const session = pending?.kind === "session" && params.approved === true
+            ? await this.settingsSession(await this.slot({ sessionId: pending.sessionId }), pending.sessionId, params.fence, workToken)
+            : undefined;
+          return safeJson(await this.dependencies.settingsChanges.decide(requestId, {
+            digest: string(params.digest, "digest", { max: 64 }),
+            approved: boolean(params.approved, "approved"),
+            decidedBy: { kind: "ui", id: client.identity },
+            commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
+            ...(session ? { session } : {}),
+          }));
         });
       case "settings.history": {
         rejectUnknownFields(params, ["cursor", "limit", "key", "status"], method);
@@ -2280,7 +2331,7 @@ export class GatewayService {
     };
     return {
       cwd: slot.cwd,
-      home: this.dependencies.home?.chapterStateFor(sessionId).homeId !== undefined,
+      home: slot.isHomeChapter,
       chat: slot.settingsChatLayer(),
       modelRuntime: slot.modelRuntime,
       appliers: {
@@ -2295,9 +2346,15 @@ export class GatewayService {
     };
   }
 
-  /** After-apply effects by each key's effect point, then the broadcast (doc 5.2 step 6). */
-  private settingsChanged(target: SettingsTarget, changes: ReadonlyArray<{ changeId: string; key: string; layer: string; result?: unknown }>): void {
+  /** After-apply effects by each key's effect point, then the broadcast (doc 5.2
+   * step 6), and for a notify-tier change an agent made, the push with Undo (5.4). */
+  private settingsChanged(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; tier: string; reason?: string; approved?: true }): void {
     if (changes.length === 0) return;
+    if (context.tier === "notify" && context.actor.kind !== "ui" && !context.approved) {
+      const what = changes.map(change => schemaKey(change.key).label).join(", ");
+      void this.settingsPush(context.actor, `settings-applied:${changes[0]!.changeId}`, "explicit", "Setting changed",
+        `${actorLabel(context.actor)} changed ${what}${context.reason ? `: ${context.reason}` : ""}. Undo it in Tron.`);
+    }
     const cwd = target.kind === "project" ? target.cwd : undefined;
     for (const change of changes) {
       const key = schemaKey(change.key);
@@ -2314,6 +2371,31 @@ export class GatewayService {
     for (const change of changes) {
       if (change.key === "permissions.projectTrust" && change.result !== undefined) this.dependencies.broadcast("trust.changed", safeJson(change.result));
     }
+  }
+
+  /** A pending change asks the maintainer (push "Waiting for you"); every change
+   * to the pending set is broadcast so open clients refresh it (doc 5.5). */
+  private settingsApprovalsChanged(event: { kind: "pending" | "resolved"; request: ApprovalRequest }): void {
+    if (event.kind === "pending") {
+      const what = event.request.changes.map(change => schemaKey(change.key).label).join(", ");
+      void this.settingsPush(event.request.actor, `settings-approval:${event.request.requestId}`, "waiting", "Approval needed",
+        `${actorLabel(event.request.actor)} asks to change ${what}${event.request.reason ? `: ${event.request.reason}` : ""}. Approve or decline in Tron.`);
+    }
+    this.dependencies.broadcast("settings.approvalsChanged", safeJson({ kind: event.kind, requestId: event.request.requestId, status: event.request.status }));
+  }
+
+  /** Pushes are advisory: an unavailable relay leaves the pending change and the record as they are. */
+  private async settingsPush(actor: Actor, sourceId: string, kind: "explicit" | "waiting", title: string, message: string): Promise<void> {
+    const notifications = this.dependencies.notifications;
+    if (!notifications) return;
+    const sessionId = actor.sessionId ?? "settings";
+    const machineId = this.dependencies.config?.machineId;
+    await notifications.enqueue({
+      sessionId, sourceId, kind, title, message: message.slice(0, 512),
+      ...(actor.sessionId && machineId ? { route: { sessionId: actor.sessionId, machineId } } : {}),
+    }).catch((error: unknown) => this.dependencies.logger?.log("warning", "Settings notification was not queued", {
+      event: "settings.notification.failed", source: "settings", error: error instanceof Error ? error.message : String(error),
+    }));
   }
 
   private configurationExpectation(params: Record<string, unknown>) {

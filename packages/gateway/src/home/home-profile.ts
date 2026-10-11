@@ -202,6 +202,8 @@ const SINGLE_LINE = /[\u0000-\u001f\u007f\u2028\u2029]/;
 export function homeProfileTool(knowledge: () => KnowledgeService | undefined): ToolDefinition<TSchema, HomeProfileToolDetails> {
   return {
     name: "profile",
+    // docs/settings-model.md 5.4: declares it reads no open-world content.
+    annotations: { openWorldHint: false },
     label: "Profile",
     description: "Change the learned profile of the maintainer: learn a durable preference, standing decision, delegation default or fact; refine an item's text; supersede an item with a replacement; or retire an item with a reason. Every change is saved unconfirmed (inferred) until the maintainer confirms it, and applies from the next activation. Learn only what the maintainer stated durably.",
     parameters: PROFILE_PARAMETERS,

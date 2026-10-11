@@ -55,6 +55,9 @@ import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extensio
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProjection, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
+import type { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import type { Actor } from "../admin/settings-record.js";
+import type { SettingsToolAccess } from "../admin/tron-settings-extension.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
@@ -534,6 +537,9 @@ export interface RuntimeSlotDependencies {
   /** Session search for Home's research tools, late-bound: the service is
    * installed on the registry after construction and may be absent. */
   sessionSearch: () => import("./session-search-service.js").SessionSearchService | undefined;
+  /** The settings model and its one change path, late-bound like session search:
+   * installed on the registry after construction (docs/settings-model.md 5.1). */
+  settings: () => { model: SettingsModel; changes: SettingsChangePath } | undefined;
   /** Transport injection for Home's web tools (tests); production omits it. */
   homeWebTransport?: import("../home/home-research-tools.js").HomeResearchTransport;
   connections?: ConnectionOwner;
@@ -1286,6 +1292,44 @@ export class RuntimeSlot {
     return this.runtime.session.modelRuntime;
   }
 
+  /** A Home chapter has the Profile layer and no Project layer (settings-model.md 3.3). */
+  get isHomeChapter(): boolean {
+    return this.dependencies.homeChapterState(this.id).homeId !== undefined;
+  }
+
+  /**
+   * The `settings` tool's view of this chat (docs/settings-model.md 5.1): its
+   * own session target, recorded as Home, a task worker or an agent. The tool
+   * runs inside this chat's run, and a Chat-layer value changes only while the
+   * chat is idle, so its own Chat layer is refused here rather than waiting on
+   * the lane the run holds; an approved pending change applies it later.
+   */
+  private settingsToolAccess(): SettingsToolAccess | undefined {
+    const owners = this.dependencies.settings();
+    if (!owners) return undefined;
+    const target = { kind: "session" as const, sessionId: this.id };
+    const busy = (): never => { throw new GatewayError("busy", "This chat's own Chat-layer settings change between runs, not during one"); };
+    const source = () => ({
+      cwd: this.cwd,
+      home: this.isHomeChapter,
+      chat: this.settingsChatLayer(),
+      modelRuntime: this.modelRuntime,
+      appliers: { setModel: busy, setThinking: busy, setContextWindow: busy, setTools: busy },
+    });
+    const actor = (toolCallId: string): Actor => {
+      const kind = this.liveProfile() === "home" ? "home" : this.taskWorker ? "worker" : "agent";
+      return { kind, id: this.id, sessionId: this.id, toolCallId, ...(this.taskWorker ? { taskId: this.taskWorker.identity.taskId } : {}) };
+    };
+    return {
+      resolve: (keys) => owners.model.resolve(target, source(), keys),
+      change: (changes, input) => owners.changes.change(target, changes, {
+        actor: actor(input.toolCallId), reason: input.reason, web: input.web, session: source(),
+        ...(input.dryRun ? { dryRun: true } : {}),
+      }),
+      takeOutcomes: () => owners.changes.takeOutcomes(this.id),
+    };
+  }
+
   /** This chat's Chat layer as its session record holds it (settings-model.md
    * 3.2): the model, thinking, explicit context window and active tools. */
   settingsChatLayer(): ChatStore {
@@ -1931,6 +1975,7 @@ export class RuntimeSlot {
           }
         },
         ...(this.dependencies.homeWebTransport ? { homeWebTransport: this.dependencies.homeWebTransport } : {}),
+        settings: () => this.settingsToolAccess(),
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept

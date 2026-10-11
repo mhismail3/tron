@@ -773,6 +773,46 @@ time. `settings.undo { commandId, changeId, fence? }` writes `before` back as an
 ordinary change, refused with the current value when the store no longer holds
 `after`, and refused for a redacted change, which has no `before`.
 
+Every change gets a tier, and the tier is enforced (docs/settings-model.md 5.4,
+5.5). It is `max(floor + web, riskModel)` capped at approve: the key's floor for
+the change's direction, or the maintainer's override of it in
+`<tronHome>/gateway/settings/floors.json` (the key `permissions.floor`, qualified
+by `key` and, for a key whose floor differs by direction, `direction`; only the
+iPhone writes it, and lowering one is its widen direction, floor approve); one
+step more when the requesting run read open-world content; no risk model yet.
+The iPhone's own change is applied at once whatever its tier. An agent's
+(`home`, `worker`, `agent`) quiet change applies; a notify change applies and
+queues an `explicit` push naming it; an approve request is held: one entry per
+change is recorded `pending`, a `waiting` push asks the maintainer, and the
+result is `{ status: "pending", approval: { requestId, digest, expiresAt } }`.
+Pending requests live in `<tronHome>/gateway/settings/approvals.json` (at most
+100 open). `settings.approvals {}` lists the open ones with their diff and
+`digest`; `settings.decide { commandId, requestId, digest, approved, fence? }`
+approves or declines one, bound to that exact diff. Approval re-plans every change
+against the store with the recorded `before` as `expected`, so a store that moved
+since, or a newer request for the same key, supersedes it and the approval is
+refused. Decisions, supersession and expiry (24 hours, evaluated against the
+change path's clock whenever the path is used) are appended to the record as
+facts referring to the pending entry; an expired or declined change is never
+applied. `settings.approvalsChanged { kind, requestId, status }` is broadcast on
+every change to the open set. The requester is told on its next run: the
+`tron-settings` module adds one `tron.settings-outcome.v1` custom message naming
+each of its declined, expired or superseded changes, once.
+
+The `tron-settings` module registers the `settings` tool in every session,
+Home included: a thin client of the resolver and the change path that always
+targets its own chat, recorded as Home, the task worker (with its task id) or
+the chat's agent, with the tool call id. A chat's own Chat-layer values change
+only between runs, so the tool refuses them during its run. The module also sets
+the run's web mark from the `tool_call` hook, which runs before each call
+(nested codemode calls included): a call to any tool that does not declare
+`annotations.openWorldHint: false` marks the run until it ends. Tron's own tools
+declare it; `web_search`, `web_fetch`, `computer` and the `knowledge` tool (its
+X, capture and Raindrop actions) declare `true`; pi's built-in `read`, `edit`,
+`write`, `grep`, `find`, `ls`, `codemode` and `tool_search` are declared in
+`tron-settings-extension.ts` against their built-in source; `bash` and any
+undeclared third-party or MCP tool mark the run.
+
 `modules.list` reports Tron's built-in extensions for Settings without opening a
 session. It returns one row per entry of the single `TRON_MODULES` definition
 that `RuntimeSlot` also registers (`tron-modules.ts`: stable name, one-line

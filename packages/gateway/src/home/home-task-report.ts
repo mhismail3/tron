@@ -119,7 +119,7 @@ export class HomeTaskReportOwner {
    * worker session shows no aborted reply. */
   tool(sessionId: () => string, operationId: () => string | undefined,
     append: (report: HomeTaskReport) => Promise<string>): ToolDefinition {
-    return { name: "report", label: "Report", description: "Seal the task's explicit immutable result with acceptance evidence. Ends this task immediately; do no work afterwards.",
+    return { name: "report", label: "Report", annotations: { openWorldHint: false }, description: "Seal the task's explicit immutable result with acceptance evidence. Ends this task immediately; do no work afterwards.",
       parameters: PARAMETERS, executionMode: "sequential",
       execute: async (_id, request) => {
         const entryId = await this.accept(sessionId(), operationId(), request, append);

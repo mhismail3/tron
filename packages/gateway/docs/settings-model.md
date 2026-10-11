@@ -432,7 +432,7 @@ Gateway serves it to clients; iOS holds no per-key code.
 | `id` | A stable dotted id, independent of storage: `model.thinking`. |
 | `group` | The section: `model`, `context`, `tools`, `permissions` or `run`, or a supply section: `accounts`, `sources`, `setup` or `iphone`. Sections are themselves declared, with a title and order, so a new one needs no client change. |
 | `subgroup` | An optional heading within the section (for example `Compaction`). |
-| `qualifiers` | Any of `role`, `model`, `provider`, `tool`, `project`, `connection`, `key`. |
+| `qualifiers` | Any of `role`, `model`, `provider`, `tool`, `project`, `connection`, `key`, `direction` (a floor override's direction). |
 | `type` | The value type and its static validation (range, pattern, length, item type). |
 | `options` | A static list of allowed values, or an `optionsSource`: a named Gateway source such as `catalog.models`, `catalog.thinkingLevels(model)` or `catalog.contextWindow(model)`, with the keys it depends on. |
 | `layers` | The allowed layers, each with its storage binding (file and path, or session entry type). |
@@ -477,7 +477,7 @@ Provenance is not a field. It is part of every resolved value
 | `permissions.defaultProjectTrust` | permissions | | mac → `defaultProjectTrust` | live | approve / notify | ui |
 | `permissions.connectionWrite` | permissions | `connection` | mac → connections policy | narrow live | approve / quiet | ui |
 | `permissions.budget.task` | permissions | | profile | narrow live | approve / quiet | ui, home |
-| `permissions.floor` | permissions | `key` | mac → `<tronHome>/gateway/settings/floors.json` | live / next change | lower: approve / raise: quiet | ui |
+| `permissions.floor` | permissions | `key`, `direction` | mac → `<tronHome>/gateway/settings/floors.json` | live / next change | lower: approve / raise: quiet | ui |
 | `run.queue.steeringMode` | run | | chat; project/mac → `steeringMode` | live / next-turn | quiet | ui, home, agent |
 | `run.retry.maxRetries` | run | `provider` | chat → `tron.settings.v1`; project/mac → `retry.maxRetries`, `retry.provider.maxRetries` | live / next-request | quiet | ui, home, agent |
 | `run.transport` | run | `provider` | chat → `tron.settings.v1`; project/mac → `transport` | live / next-request | quiet | ui, home, agent |
@@ -514,8 +514,11 @@ open:
   pi reads `.pi/` there with no upward search, so that is the Project store the
   resolver reads. A linked worktree resolves its own `.pi/`. A chat started in a
   subdirectory of a worktree today reads the subdirectory's `.pi/`, not the
-  worktree root's; moving it to the root (Q27) changes what pi loads and is left
-  to slice 4.
+  worktree root's. Mohsin decided (2026-10-11, [10.1](#101-decisions)) that the
+  Project layer is the worktree root's `.pi/`; moving it changes what pi loads
+  (extensions, skills, prompts and settings, under trust), so it is a deliberate
+  change of its own with a test, recorded on slice 6 (#764) and PR 798, not part
+  of slice 5.
 - **Home memory model.** Until slice 9 moves it to `profile.json`, the Profile
   layer of `model.ref[role=memory]` is read from `home.json` through `HomeOwner`.
 
@@ -653,7 +656,7 @@ above leave open:
   their pi-document patches are turned into key changes on the device
   (`SettingsPatchChanges`); an unknown path is refused, never dropped.
 
-The tier is computed and recorded but not enforced until slice 5.
+Slice 5 enforces the tier ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)).
 
 ### 5.4 Tiers
 
@@ -690,6 +693,60 @@ The inputs:
 
 Each record entry names its floor and any override, so a lowered floor is
 visible on every change it let through.
+
+### 5.4a Implemented: tiers, floors and the web mark
+
+Slice 5 (#763) implements 5.4 and 5.5 on the Gateway: the gate in
+`SettingsChangePath` (`settings-model.ts`), pending requests in
+`settings-approvals.ts`, and the `settings` tool and web mark in
+`tron-settings-extension.ts` (the `tron-settings` module, loaded by every
+session, Home included). The Gateway README has the RPC contract. What the code
+fixes that 5.4 and 5.5 leave open:
+
+- **The request's tier** is the highest tier of its changes; a request is held
+  or applied whole, because it applies atomically (5.2).
+- **The maintainer's own change** (`ui`) is applied at once at any tier, and its
+  tier is recorded. He is not pushed about his own tap.
+- **Floor overrides** are the key `permissions.floor`, qualified by the key and,
+  for a key whose floor differs by direction, the direction; a key with one
+  floor is overridden for both directions at once. The resolver lists them on the
+  Mac target, each with its code floor as the built-in. Every record entry names
+  the floor and whether it was the code floor or an override.
+- **The web mark is per run**, from the prompt to the agent's final answer: what
+  a tool returned stays in context for the rest of the run, so a later turn of
+  the same run is marked too. The next run starts clean (decision 28). A tool
+  marks the run unless it declares `annotations.openWorldHint: false` (Mohsin,
+  2026-10-11); an undeclared tool is untrusted. The `tool_call` hook sets it
+  before the call executes, nested codemode calls included. pi's own tools carry
+  no annotations, so the module declares `read`, `edit`, `write`, `grep`,
+  `find`, `ls`, `codemode` and `tool_search` closed-world against their
+  built-in source; `bash` is not declared, because a shell can reach the
+  network. Tron's tools declare it in their registrations; `web_search`,
+  `web_fetch`, `computer` and the `knowledge` tool (its X, capture and Raindrop
+  actions) declare `true`.
+- **Pushes.** A notify-tier change by an agent queues an `explicit` push; a
+  pending request queues a `waiting` push ("Approve or decline in Tron"). The
+  push relay's kinds are fixed, so Approve and Decline buttons on the push
+  itself need the iOS notification actions and are part of the remaining iOS
+  work of this slice.
+- **Approval binds to a digest** of the target and each change's instance,
+  `before` and `after`. Approving re-plans each change with the recorded
+  `before` as `expected`: a store that moved since supersedes the request. A
+  newer request for any of the same key instances supersedes an open one at
+  once. `superseded` is a record status of its own.
+- **Expiry** is evaluated against the change path's clock whenever the path is
+  used (a change, the open list, a decision, a requester's next run), so no timer
+  runs; an expired request can never be approved.
+- **The requester told.** The requester's next run that starts from a prompt
+  carries one `tron.settings-outcome.v1` custom message, one line per declined,
+  expired or superseded change, once. A Home wake starts its run from the task
+  result alone, so Home hears it on the next maintainer message, as task results
+  a wake could not take do.
+- **A chat's own Chat layer** changes only while the chat is idle, so the tool
+  refuses it during its own run; an approval later applies a pending Chat-layer
+  change from the iPhone with the chat's fence.
+- **Workers** are writers of every key agents may write. A task worker is
+  recorded as `worker` with its task id.
 
 ### 5.5 Approvals
 
@@ -1113,7 +1170,7 @@ was added after the first numbering; it lands after slice 4 and before slice 8.
 |---|---|---|---|---|---|
 | 1 | One door per chat: the ordinary-chat gear opens Manage Session, and Settings is a row inside it | S | iOS | | #759 |
 | 2 | Clear names and the shared badge component on today's rows | S | iOS | | #760 |
-| 5 | Tiers: floors with the maintainer's overrides, the one-step web mark, approval by tap with 24-hour expiry and the requester told, and the `settings` tool | L | Gateway, iOS | 4 | #763 |
+| 5 | Tiers: floors with the maintainer's overrides, the one-step web mark, approval by tap with 24-hour expiry and the requester told, and the `settings` tool. The Gateway half is implemented ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)); the iOS approval rows, push actions and floor rows remain | L | Gateway, iOS | 4 | #763 |
 | 6 | Outside changes: stores compared with the record, "Changed outside Tron" with Apply again, notification by floor, git-state badges | M | Gateway, iOS | 4 | #764 |
 | 7 | Fixed-at-start values carry provenance, with "Use the current default"; live keys reach open chats; Chat-layer values for every key that allows Chat; per-direction timing | M | Gateway, iOS | 3, 4 | #765 |
 | 14 | The generic renderer: served schema, control primitives, `settings.options`, `dryRun` validation, badges and section summaries from the resolver, negotiation with fallback to read-only | L | Gateway, iOS | 3, 4 | #780 |
@@ -1194,6 +1251,14 @@ Mohsin on 2026-10-10.
 |---|---|---|---|
 | 28 | Does the web mark travel with content another turn reads later (a worker's report, a Knowledge record captured from the web, a snippet of a marked chat)? | No. The mark belongs to the turn whose tool call read web or browser content. | F3 |
 | 29 | May staging also stage the maintainer's own unstaged edits in the same `.pi/` file? | Yes: stage anyway, and warn in Changes, as for other staged work. | Decision 14, Q26 |
+
+**Decided by Mohsin on 2026-10-11**
+
+| # | Topic | Decision |
+|---|---|---|
+| 30 | Protocol version | #762 removed RPCs, so the Gateway protocol version moves to 8 with no compatibility shim: an older iPhone app is refused at hello with "update required". Landing needs the manual Mac-first reinstall the README describes for a protocol step. |
+| 31 | Subdirectory chats (Q27) | The Project layer is the worktree root's `.pi/`, even for a chat started in a subdirectory. That changes what pi loads, so it is made deliberately with a test of its own; it is recorded on slice 6 (#764) and PR 798 ([4.3](#43-implemented-the-schema-and-the-resolver)). |
+| 32 | The web mark | A tool that does not declare `annotations.openWorldHint: false` is untrusted: any call to a tool with the hint missing or true marks the turn (one step up). Built-in tools that are safe declare `false` explicitly ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)). |
 
 ### 10.2 Open questions
 

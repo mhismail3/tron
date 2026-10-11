@@ -10,6 +10,13 @@ export const LAYER_LABELS: Record<LayerId, string> = {
 };
 export const TIERS = ["quiet", "notify", "approve"] as const;
 export type Tier = typeof TIERS[number];
+/** One step up, capped at approve (foundation F3: the web step). */
+export function raiseTier(tier: Tier, steps: number): Tier {
+  return TIERS[Math.min(TIERS.indexOf(tier) + steps, TIERS.length - 1)]!;
+}
+export function maxTier(...tiers: Tier[]): Tier {
+  return TIERS[Math.max(...tiers.map(tier => TIERS.indexOf(tier)))]!;
+}
 export type Writer = "ui" | "home" | "worker" | "agent";
 export type Direction = "widen" | "narrow";
 export type Timing = "fixed" | "live";
@@ -19,7 +26,7 @@ export type Control = typeof CONTROLS[number];
 /** The renderer contract the Gateway speaks (doc 7.5). A client names the
  * controls it implements and its version; anything else falls back. */
 export const RENDERER_CONTRACT_VERSION = 1;
-export type QualifierName = "role" | "model" | "provider" | "tool" | "project" | "connection" | "key";
+export type QualifierName = "role" | "model" | "provider" | "tool" | "project" | "connection" | "key" | "direction";
 export type Qualifiers = Partial<Record<QualifierName, string>>;
 
 export interface ModelRefValue { provider: string; id: string }

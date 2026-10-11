@@ -61,6 +61,8 @@ export function createTronAskUserExtension(): ExtensionFactory {
   return (pi) => {
     pi.registerTool({
       name: "ask_user",
+      // docs/settings-model.md 5.4: declares it reads no open-world content.
+      annotations: { openWorldHint: false },
       label: "Ask User",
       description: "Ask the user one bounded set of questions and wait for one atomic answer in Tron.",
       promptSnippet: "Ask the user for a bounded set of choices when a decision is required.",

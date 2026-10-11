@@ -25,7 +25,7 @@ export interface Actor {
   taskId?: string;
 }
 
-export type ChangeStatus = "applied" | "pending" | "approved" | "declined" | "expired" | "failed" | "outside" | "committed";
+export type ChangeStatus = "applied" | "pending" | "approved" | "declined" | "expired" | "superseded" | "failed" | "outside" | "committed";
 
 export interface TierBasis {
   direction: Direction;
@@ -69,6 +69,9 @@ export interface ChangeEntry {
   applyAgainOf?: string;
   /** A later fact about an earlier entry. */
   refersTo?: string;
+  /** The approval request a pending entry belongs to, and on a decision fact who decided. */
+  requestId?: string;
+  decidedBy?: Actor;
 }
 
 export const SEGMENT_ENTRIES = 500;
