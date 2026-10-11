@@ -318,6 +318,12 @@ private actor HostedHomeShellGateway {
         case "model.recent": return (.object(["models": .array([])]), nil)
         case "home.taskList":
             taskListReads += 1
+            // Hold the real sheet's read at the socket boundary, not its view state.
+            // Both Manage Home and its nested Tasks sheet must lay out before data.
+            if sheetState == "presentation-loading" { try await Task.sleep(for: .seconds(8)) }
+            if sheetState == "tasks-error", taskListReads == 2 {
+                return (nil, .object(["code": .string("busy"), "message": .string("Task list unavailable"), "retryable": .bool(true)]))
+            }
             return (.object(["items": .array(sheetState == "tasks-empty" ? [] : [taskSummary("active"), taskSummary("terminal")])]), nil)
         case "home.taskStatus":
             guard let id = params["taskId"]?.stringValue, ["active", "terminal"].contains(id) else { return taskRefusal() }
