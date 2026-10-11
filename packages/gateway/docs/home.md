@@ -80,6 +80,25 @@ membership is unchanged, so search (`catalog("user")`, `readSearchCut`), `sessio
 by id, `scope: "all"` and Home's own reads are not filtered. A designation or rollover
 that changes the chapter set publishes a list change, so clients re-list.
 
+### Chapter contents
+
+`home.chapterList` gives each chapter a `contents` object, absent when its canonical file cannot
+be read (a partial count is never shown): `userMessages`, `homeReplies` (assistant messages
+without a tool call), `tasksDelegated` (successful `delegate` tool results), the canonical
+`firstAt` and `lastAt` timestamps, and `topics`. `topics` holds at most five of the chapter's
+newest memory summaries, each one line of at most 120 characters, read from the open memory
+only; with no open memory it is empty. A reserved chapter has no file yet, so its counts are zero.
+
+The counts are derived, never persisted. `HomeChapterContentsReader`
+(`home/home-chapter-contents.ts`) caches each chapter's last scan in memory, keyed by its
+file identity (device, inode, size and mtime). An unchanged file costs one `stat`. An appended
+file parses only its new complete lines, once a SHA-256 of the 4 KiB before the cached offset
+proves its earlier bytes unchanged; a changed, replaced or shrunken file is scanned again from
+its start. The first read after a Gateway start scans each chapter once, so that read costs the
+size of the Home history (at most the rollover limits per chapter). A later `home.chapterList`
+costs one `stat` per chapter, the appended bytes, and one in-memory pass over the memory
+catalog for topics, with no source read.
+
 ### Limits and rollover
 
 - At a quiescent turn boundary, crossing the **soft** limit (24 MiB canonical bytes
@@ -292,6 +311,9 @@ model is refused everywhere, because routing runs on the canonical transcript, w
 the Home profile does not own. A model applied to the **enabled** Home is written
 back to the record, the single source for re-enable. A model applied while disabled
 is an ordinary change and does not touch the record.
+`session.setThinking` and `session.setContextWindow` apply to the enabled Home session like any
+session. Each activation is measured against the window its session's model reports, which
+`home.context.breakdown.contextWindow` shows.
 
 **Tool loadout.** A profile change does not rewrite the loadout, because Pi replays
 the declared loadout at every runtime creation. A disabled Home starts with
@@ -357,6 +379,28 @@ setting changes between turns. Only Home-profile runtimes get the seam.
 
 Receipt settlement, inbox acknowledgement and configuration readiness are distinct
 owner cuts, not one idle predicate.
+
+### Request breakdown
+
+`home.context` (and `home.status.activation`) reports the last request an activation prepared as
+`breakdown`: `activation` (`state` `running` or `settled`, `kind` `user` or `wake`, `startedAt`),
+the request's `contextWindow` and `effectiveTokens`, and its `sections`, which sum to
+`effectiveTokens`:
+
+| section | holds | `count` |
+| --- | --- | --- |
+| `instructions` | the SDK's base prompt and Home's operating context | none |
+| `profile` | the learned profile section | active profile notes it lists |
+| `memory` | the frozen memory view | summary lines |
+| `chapter` | the activation's other messages: its tool calls and results, steers and pending notices | canonical entries |
+| `results` | task results delivered in the activation | results, not counting a wake's trigger |
+| `input` | the maintainer's message, or a wake's trigger result | none |
+
+Tokens are estimates. `effectiveTokens` includes the system prompt, which is the request's head,
+so the overflow refusal measures it too. Recorded system messages are replaced by that head and
+are not counted. A wake is started by the task result that woke Home, so that trigger is its
+`input` and a wake that delivered one result reports `results` as zero. The breakdown is absent
+until the activation prepares a request, and a refused activation before that has no sizes.
 
 ### Prompt caching
 
@@ -828,6 +872,12 @@ worker slot's `setModel` and `setThinking` after `createWorker` and before the f
 so the worker's canonical JSONL records it. An omitted model keeps the worker session's
 default. The choice is never persisted with the task record.
 
+**Worker title.** `delegate` takes an optional `title` (at most 80 characters, not blank after
+trimming). It names the worker session through the session's canonical name, written before the
+worker's first prompt, and is never persisted with the task record. A refused title is
+`invalid_request` (`Invalid task title`) and creates no task. Home's operating context asks for
+one on every delegation.
+
 - A task worker has normal project tools and resources plus `report`, and cannot
   replace its owned session. Its canonical `tron-home-task` marker binds the task,
   Home identity and generation, session and operation. Cold
@@ -1049,14 +1099,12 @@ work. One per-process result is shared by every task surface.
 
 - **`home.taskList`** (maintainer-only) orders by `createdAt` descending, then task
   ID ascending. It scans names within a bounded window and reads at most `limit`
-  records, never report bodies. The opaque cursor binds the last key to the restore
+  records, and then each listed record again for its display: a page costs at most twice `limit` record reads, never report bodies. The opaque cursor binds the last key to the restore
   epoch; foreign, restored and malformed cursors refuse (`conflict`,
-  `invalid-record`). Each row carries task ID, dates, intent title (first 160 code
-  points), target, lifecycle, terminal outcome or null, spend or null, `attention`
-  (needs-input or unknown) and `pendingGrant`. Null spend is unavailable, not zero;
+  `invalid-record`). Each row carries task ID, dates, `title`, `project`, `workerSessionId`, target, lifecycle, terminal outcome or null, spend or null, `attention` (needs-input or unknown) and `pendingGrant`. `title` is the worker session's canonical name when it has one, else the brief's first non-empty line, at most 80 characters; `project` is the target's last path component; `workerSessionId` is null before dispatch. A live worker's name comes from its slot and a settled one's from the catalog's index of its file, so no transcript is read. Null spend is unavailable, not zero;
   A never-initialized listing returns `{ items: [] }`
   without creating authority.
-- **`home.taskStatus`** returns the record, the exact active operation, spend, the
+- **`home.taskStatus`** returns the record, `title`, `project` and `workerSessionId` (as in `home.taskList`), the exact active operation, spend, the
   immutable result, `workerModel`, `subagents` (see [Subagent runs](#subagent-runs)) and
   `subagentRuns`. `workerModel` is the worker session's current `{ provider, id }`, read
   from its canonical `model_change` entries. A running worker answers from its live slot; a
@@ -1251,9 +1299,9 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | method | parameters | kind | contract |
 | --- | --- | --- | --- |
 | `home.status` | none | read | The `HomeStatus` shape below. |
-| `home.context` | none | read | Bounded request context of the current or last activation. Never a message body. |
+| `home.context` | none | read | Bounded request context of the current or last activation, with its `breakdown` by section ([Request breakdown](#request-breakdown)). Never a message body. |
 | `home.open` | none | read | Logical route and binding. Creates no runtime and materializes no successor. |
-| `home.chapterList` | none | read | The whole chapter ledger in ledger order, each chapter with state, `createdAt`, `sealedAt?`, `activationStarted`, `sessionPresent` and metrics, plus the shared soft and hard rollover limits (`home-chapter-list.v1`, #740). Sealed chapters answer exactly their recorded seal metrics (a disable-sealed chapter has none); only the active chapter is measured live, and only while its session is present, so absent sizes mean unmeasured, never zero. Undesignated refuses `not_found`; an unavailable record refuses `conflict`, never a partial list. A disabled Home still lists its chapters. |
+| `home.chapterList` | none | read | The whole chapter ledger in ledger order, each chapter with state, `createdAt`, `sealedAt?`, `activationStarted`, `sessionPresent` and metrics, plus the shared soft and hard rollover limits (`home-chapter-list.v1`, #740). Each chapter also carries `contents` ([Chapter contents](#chapter-contents)). Sealed chapters answer exactly their recorded seal metrics (a disable-sealed chapter has none); only the active chapter is measured live, and only while its session is present, so absent sizes mean unmeasured, never zero. Undesignated refuses `not_found`; an unavailable record refuses `conflict`, never a partial list. A disabled Home still lists its chapters. |
 | `home.prompt` | `commandId`, `text`, `uploadIds` (at most 10, into the resolved chapter), `behavior` (`steer` or `followUp` while a turn runs), `resourceInvocation` | receipted | The composer's whole prompt contract, admitted by the same code as `session.prompt`. Returns the physical session and operation. |
 | `home.designate` | `commandId`, `model?` | receipted | With no record: creates the working directory and its trust decision, a **new** session whose first runtime has the Home profile, applies the model, writes the record, and returns `{ homeId, sessionId, generation }`. An enabled record whose session still exists is idempotent when the model is absent or matches; a different model refuses with a conflict directing to `session.setModel`. A disabled record re-enables the same session at `generation + 1`, preserving any `reserved` or `materializing` successor for the next `home.prompt`. A record whose session is **gone** is given a fresh session at `generation + 1`, enabled or not: the record is the only evidence of the designation, and the dangling ID is never re-enabled. |
 | `home.disable` | `commandId` | receipted | `enabled: false` at `generation + 1`. The session stays ordinary. A record whose session is gone is only marked disabled. |
@@ -1261,8 +1309,8 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.pauseMemory` | `commandId` | receipted | Requires an enabled, configured Home. Durably pauses; idempotent. Returns the memory projection. |
 | `home.resumeMemory` | `commandId` | receipted | Clears pause and or block, re-reads canonical deltas and restarts the pump without awaiting catch-up. A memory that is neither paused nor blocked refuses with conflict. An empty Home resumes without creating a store. |
 | `home.reconfirmPermissions` | `commandId` | receipted | Re-stamps active standing scopes to the current epoch. See [Authorization](#authorization). |
-| `home.taskList` | `limit?` (1–50, default 20), `cursor?` (at most 1,024 characters) | read | Maintainer summary; see [Control and spend status](#control-and-spend-status). |
-| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record, active operation, spend, immutable result, worker model, subagent counts and live subagent runs. |
+| `home.taskList` | `limit?` (1–50, default 20), `cursor?` (at most 1,024 characters) | read | Maintainer summary, each row with its `title`, `project` and `workerSessionId`; see [Control and spend status](#control-and-spend-status). |
+| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record, `title`, `project`, `workerSessionId`, active operation, spend, immutable result, worker model, subagent counts and live subagent runs. |
 | `home.taskPermissions` | none | read | Strict scopes, requests, decisions and grants with the revision. Refuses before the first dispatch, never granting permission. |
 | `home.steerTask` | `commandId`, `taskId`, `operationId`, `text` (at most 64 KiB) | receipted | Steers the exact active operation. It cannot start a successor. |
 | `home.stopTask` | `commandId`, `taskId`, `operationId` | receipted | Persists the exact Stop intent and joins terminal settlement. Repeatable after settlement without repeating cancellation. |
@@ -1270,7 +1318,7 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.revokeTaskScope` | `commandId`, `scopeId` | receipted | Revokes the standing scope. Repeated or missing references are no-ops. A revoked initial scope is never recreated by dispatch. |
 | `home.revokeTaskGrant` | `commandId`, `grantId` | receipted | Revokes an available grant. Consumed, revoked or missing grants are no-ops and never resurrected. |
 | `home.decideTaskGrant` | `commandId`, `requestId`, `approved` (boolean), `expiresAt` (future Unix milliseconds) | receipted | Decides the exact pending request; the command ID is the decision ID. Returns `{ decision, grant }`, with `grant: null` for deny. |
-| `home.memory.page` | `limit?` (1–50, default 20), `cursor?` | disposable read | [Typed memory browser](#typed-memory-browser). |
+| `home.memory.page` | `limit?` (1–50, default 20), `cursor?`, `sessionId?` (one chapter's rows only) | disposable read | [Typed memory browser](#typed-memory-browser). |
 | `home.memory.evidence` | `evidence`, `offset?` | disposable read | [Typed memory browser](#typed-memory-browser). |
 
 ### `home.status`
@@ -1368,6 +1416,10 @@ refuses with retryable `busy`.
     `home-memory-revision-changed`. The client reloads page one. There is no cursor
     cache and no automatic retry. Offsets beyond the catalog and
     changed limits refuse rather than clamp.
+- **`home.memory.page` with `sessionId`** holds only that chapter's rows. `totalItems` counts them,
+  the row indices stay the catalog's, and the revision binds the chapter, so a continuation under
+  another chapter, or after any change, is `home-memory-revision-changed`. A session that is not a
+  chapter of this Home refuses with `not_found`.
 - **`home.memory.evidence`** accepts `{ evidence, offset? }` and returns `{ format:
   "canonical-history", evidence, text, offset, nextOffset?,
   previousOffset?, totalCharacters, metadata }`. At most **24,000 UTF-16

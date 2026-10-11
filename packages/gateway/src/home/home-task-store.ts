@@ -7,6 +7,8 @@ import { durableAtomicWriteJson, isDurablePublicationUncertain, syncDurably, typ
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { authorizationRequestId, type HomeTaskAuthorizationState, type HomeTaskAuthorizationStore } from "./home-task-authorization.js";
 import type { HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
+/** A list row before the dispatcher adds the project and worker of its display. */
+type HomeTaskRow = Omit<HomeTaskSummary, "project" | "workerSessionId">;
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
 
 const TASK_BYTES = 256 * 1_024;
@@ -386,7 +388,7 @@ export class HomeTaskStore {
 
   /** Maintainer list reads only the selected records, never report bodies.
    * A continuation is bound to the physical namespace, not installation text. */
-  async page(input: { limit?: number; cursor?: string }): Promise<HomeTaskPage> {
+  async page(input: { limit?: number; cursor?: string }): Promise<{ items: HomeTaskRow[]; nextCursor?: string }> {
     return this.run(async () => {
       const limit = input.limit ?? 20;
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) invalid();
@@ -412,7 +414,7 @@ export class HomeTaskStore {
         selected.sort(compareTaskNames);
         if (selected.length > limit + 1) selected.pop();
       }
-      const items: HomeTaskSummary[] = [];
+      const items: HomeTaskRow[] = [];
       for (const name of selected.slice(0, limit)) {
         const task = await this.readNamedTask(name);
         validateAuthorityReferences(task, authority);
