@@ -18,7 +18,7 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | `cleanup [--all] [--dry-run]` | Removes a task worktree and its branches once its pull request merged at its head (or its issue is closed and it holds only its claim commit). Names what it keeps and why. |
 | `dashboard [--html P] [--json P]` | Read-only view of claims, Status, epics, stale work, orphans and main CI. |
 | `comment <issue> --body-file F` | Privacy-checks, then posts a public issue comment. |
-| `issue create\|labels\|close\|parent\|block` | Files issues and changes labels and links. Labels are optional; only declared labels are accepted. `close` posts a comment, closes, and sets Status Done. |
+| `issue create\|labels\|close\|parent\|block` | Files issues and changes labels and links. Labels are optional; only declared labels are accepted. `close` posts a comment, closes, and sets Status Done. Epics may close only when all linked children are closed (every page is checked before any write, for either close reason). |
 | `project add\|set` | Adds an issue to the Project, or sets Status (Proposed, Ready, Blocked) and Priority. |
 | `bootstrap [--apply]` | Plans or converges labels and the Project fields to `.github/work.json`. Adds and updates only. |
 
@@ -89,3 +89,9 @@ deletes the local branch and the remote branch with a lease on the proven head.
 The tooling has no unit tests. Changes are validated by running the real commands: a
 `verify` or `land --dry-run` on the branch, and an integration run against a temporary
 repository when a change touches Git, GitHub or cleanup behavior.
+
+`python3 scripts/test-work-close.py` exercises epic/task close through the real CLI
+and Git with a process-level GitHub fixture in an isolated temporary home. It covers
+completed epics, unfinished children on later pages, failed reads, foreign claims,
+and idempotent recovery after a partial close. Regenerable evidence is written to
+`test-results/work-close.json`; the fixture repository and home are removed on exit.
