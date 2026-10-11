@@ -51,7 +51,24 @@ def run():
         remote=root/"remote.git"; state=root/"gateway.json"; gh=root/"gh"; port_file=root/"port"
         gh.write_text('#!/usr/bin/env python3\nimport json,os,sys\np=os.environ["FIXTURE"]; s=json.load(open(p)); a=sys.argv[1:]\nif a[:2]==["repo","view"]: print(json.dumps({"nameWithOwner":"fixture/project","owner":{"login":"fixture"}}))\nelif a[:3]==["issue","view","41"]: print(json.dumps({"state":"OPEN","comments":s["comments"]}))\nelif a[:1]==["api"]: print("\\n".join(s["comments"]))\nelif a[:2]==["issue","comment"]: s["comments"].append(sys.stdin.read()); s["writes"].append("comment"); json.dump(s,open(p,"w"))\nelse: raise SystemExit("unexpected gh: "+repr(a))\n')
         gh.chmod(0o755)
-        env={**os.environ,"HOME":str(home),"TMPDIR":str(tmp),"WORK_GH":str(gh),"FIXTURE":str(state),"WORK_SESSION_ID":"new-owner","GIT_CONFIG_NOSYSTEM":"1","GIT_CONFIG_GLOBAL":os.devnull,"PYTHONDONTWRITEBYTECODE":"1","TRON_GATEWAY_HOST":"127.0.0.1"}
+        git_bin=root/"git-bin"; git_bin.mkdir()
+        real_git=shutil.which("git")
+        if not real_git: raise RuntimeError("git executable unavailable")
+        git_wrapper=git_bin/"git"
+        fail_update_once=root/"fail-update-ref-once"
+        git_wrapper.write_text(f'''#!/usr/bin/env python3
+import os, sys
+from pathlib import Path
+args = sys.argv[1:]
+marker = Path(os.environ["FAIL_UPDATE_REF_ONCE"])
+if args[:1] == ["update-ref"] and not marker.exists():
+    marker.write_text("failed\\n")
+    print("fixture: update-ref failed once", file=sys.stderr)
+    raise SystemExit(1)
+os.execv({real_git!r}, [{real_git!r}, *args])
+''')
+        git_wrapper.chmod(0o755)
+        env={**os.environ,"HOME":str(home),"TMPDIR":str(tmp),"WORK_GH":str(gh),"FIXTURE":str(state),"WORK_SESSION_ID":"new-owner","GIT_CONFIG_NOSYSTEM":"1","GIT_CONFIG_GLOBAL":os.devnull,"PYTHONDONTWRITEBYTECODE":"1","TRON_GATEWAY_HOST":"127.0.0.1","FAIL_UPDATE_REF_ONCE":str(fail_update_once)}
         def git(cwd,*args): return subprocess.run(["git",*args],cwd=cwd,env=env,check=True,capture_output=True,text=True).stdout.strip()
         git(repo,"init","-b","main"); git(repo,"config","user.name","Fixture"); git(repo,"config","user.email","fixture@example.invalid")
         (repo/".github").mkdir(); shutil.copy(ROOT/".github/work.json",repo/".github/work.json")
@@ -88,7 +105,8 @@ def run():
             important={str(p.relative_to(gitdir)):p.read_bytes() for p in work_dir.rglob("*") if p.is_file()} if work_dir.exists() else {}
             comment_state=json.loads(state.read_text())
             dirty={name:(worktree/name).read_bytes() for name in ["tracked.txt","staged.txt","untracked.txt"]}
-            index=(gitdir/"index").read_bytes()
+            index_path=Path(git(worktree,"rev-parse","--path-format=absolute","--git-path","index"))
+            index=index_path.read_bytes()
             return refs,important,comment_state,index,dirty
         def assert_refused(name, setup, expected):
             setup(); before=refuse_snapshot(); r=call("handoff","41","--session","new-owner","--reason","owner settled")
@@ -105,19 +123,44 @@ def run():
         settled={"sessionId":"old-owner","lifecycle":"terminal","terminalEvidence":{"outcome":"final","reason":"explicit-report","sessionId":"old-owner"},"subagents":{"started":0,"stoppedAtEnd":0},"subagentRuns":{"total":0,"runs":[]}}
         data=assert_refused("malformed or missing terminal evidence refuses",lambda:fixture({"first":{"items":[terminal("bad"),terminal("missing")]}},{"bad":{**settled,"terminalEvidence":None}}),"refusing handoff")
         assert [c["params"].get("taskId") for c in data["calls"] if c["method"]=="home.taskStatus"]==["bad"]
-        gitdir=Path(git(worktree,"rev-parse","--path-format=absolute","--git-common-dir"))
-        merge_marker=gitdir/"MERGE_HEAD"
-        data=assert_refused("merge in progress refuses without creating lock files",lambda:(fixture({"first":{"items":[terminal("owner")]}},{"owner":settled}),merge_marker.write_text("unknown\n")),"MERGE_HEAD")
-        merge_marker.unlink()
-        assert not (gitdir/"work"/"handoff.lock").exists()
+        merge_marker=Path(git(worktree,"rev-parse","--path-format=absolute","--git-path","MERGE_HEAD"))
+        head_before_merge=git(worktree,"rev-parse","HEAD")
+        git(worktree,"stash","push","--include-untracked","-m","merge fixture setup")
+        original_branch=git(worktree,"branch","--show-current")
+        merge_base=git(worktree,"rev-parse","HEAD~1")
+        git(worktree,"branch","fixture-merge-side",merge_base)
+        git(worktree,"checkout","fixture-merge-side")
+        git(worktree,"commit","--allow-empty","-m","merge-side-only")
+        git(worktree,"checkout",original_branch)
+        git(worktree,"merge","--no-commit","fixture-merge-side")
+        assert merge_marker.is_file(), "real linked-worktree merge marker was not created"
+        fixture({"first":{"items":[terminal("owner")]}},{"owner":settled})
+        merge_ref=git(worktree,"rev-parse","HEAD")
+        merge_result=call("handoff","41","--session","new-owner","--reason","owner settled")
+        evidence.append({"case":"real linked-worktree merge in progress refuses","exit":merge_result.returncode,"stderr":merge_result.stderr.strip()})
+        assert merge_result.returncode and "MERGE_HEAD" in merge_result.stderr, merge_result.stderr
+        assert git(worktree,"rev-parse","HEAD")==merge_ref
+        git(worktree,"merge","--abort")
+        git(worktree,"reset","--hard",head_before_merge)
+        git(worktree,"stash","pop")
+        common=Path(git(worktree,"rev-parse","--path-format=absolute","--git-common-dir"))
+        assert not (common/"work"/"handoff.lock").exists()
 
         # stoppedAtEnd=0 is a naturally finished subagent set, not indeterminate.
-        git(repo,"worktree","remove","--force",str(worktree)); git(repo,"worktree","add",str(worktree),"feat/41-fixture")
+        dirty_before={name:(worktree/name).read_bytes() for name in ["tracked.txt","staged.txt","untracked.txt"]}
+        index_before=Path(git(worktree,"rev-parse","--path-format=absolute","--git-path","index")).read_bytes()
         fixture({"first":{"items":[terminal("natural")] }},{"natural":{**settled,"subagents":{"started":2,"stoppedAtEnd":0}}})
+        env["PATH"]=str(git_bin)+os.pathsep+env.get("PATH","")
         natural=call("handoff","41","--session","new-owner","--reason","naturally settled")
-        evidence.append({"case":"started2 stoppedAtEnd0 naturally finished accepted","exit":natural.returncode,"stderr":natural.stderr.strip()})
+        evidence.append({"case":"remote accepted but update-ref failed once","exit":natural.returncode,"stderr":natural.stderr.strip()})
+        assert natural.returncode and "update-ref" in natural.stderr and fail_update_once.exists(), natural.stderr
+        assert not json.loads(state.read_text())["writes"]
+        natural=call("handoff","41","--session","new-owner","--reason","naturally settled")
+        evidence.append({"case":"accepted remote recovered on retry","exit":natural.returncode,"stderr":natural.stderr.strip()})
         assert natural.returncode==0,natural.stderr
         natural_head=git(worktree,"rev-parse","HEAD"); natural_state=json.loads(state.read_text())
+        assert Path(git(worktree,"rev-parse","--path-format=absolute","--git-path","index")).read_bytes()==index_before
+        assert {name:(worktree/name).read_bytes() for name in dirty_before}==dirty_before
         retry=call("handoff","41","--session","new-owner","--reason","retry ignored")
         assert retry.returncode==0 and git(worktree,"rev-parse","HEAD")==natural_head
         assert git(worktree,"rev-parse","refs/heads/feat/41-fixture")==natural_head

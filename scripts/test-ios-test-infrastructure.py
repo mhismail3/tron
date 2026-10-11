@@ -637,18 +637,42 @@ class UnownedSimulatorCleanupFixture(SimulatorHarness, unittest.TestCase):
                 calls = (self.root / "simctl.log").read_text().splitlines() if (self.root / "simctl.log").exists() else []
                 self.assertFalse(any(call.startswith(("shutdown ", "delete ")) for call in calls))
 
+    def test_exact_cleanup_accepts_empty_idle_unrelated_lane_lease(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Shutdown")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target]})
+        lane = self.root / "ios-test-idle"
+        lane.mkdir()
+        lease_path = lane / "lease.lock"
+        lease_path.write_text("")
+        before = lease_path.read_bytes()
+        result = self.clean_command()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(lease_path.read_bytes(), before)
+        self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [])
+
+    def test_refuses_nonempty_malformed_idle_lane_lease(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Shutdown")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target]})
+        lane = self.root / "ios-test-malformed"
+        lane.mkdir()
+        (lane / "lease.lock").write_text("not json\n")
+        result = self.clean_command()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("ambiguous lane lease", result.stderr)
+        self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [target])
+
     def test_refuses_markerless_live_lane_lease(self) -> None:
         target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]
         self.write_inventory(devices={RUNTIME_ID: [target]})
         lane = self.root / "ios-test-live"
         lane.mkdir()
         lease_path = lane / "lease.lock"
-        lease_path.write_text("")
-        with lease_path.open("r+") as lease:
-            fcntl.flock(lease.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            result = self.clean_command()
+        lease_path.write_text(json.dumps({
+            "pid": os.getpid(), "started_at_epoch_seconds": int(time.time()), "command": "fixture",
+        }))
+        result = self.clean_command()
         self.assertNotEqual(result.returncode, 0, result.stdout)
-        self.assertIn("ambiguous lane lease", result.stderr)
+        self.assertIn("test lane is leased", result.stderr)
         self.assertTrue(any(device["udid"] == UDID_A for device in json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]))
 
     def test_requires_matching_uuid_and_name(self) -> None:
@@ -1001,7 +1025,11 @@ class AdmissionFixture(SimulatorHarness, unittest.TestCase):
 class RunnerFixture(SyntheticReaders, unittest.TestCase):
     """Exercise the production runner with only synthetic xcode/simctl tools."""
 
-    def test_clean_unowned_routes_exact_identity_to_simulator_owner(self) -> None:
+    def test_clean_unowned_routes_exact_identity_with_unrelated_empty_lane_lease(self) -> None:
+        lane = self.root / "ios-test-idle"
+        lane.mkdir()
+        lease = lane / "lease.lock"
+        lease.write_bytes(b"")
         target = {
             "name": "Orphan Test Simulator", "udid": UDID_A, "state": "Booted",
             "isAvailable": True, "deviceTypeIdentifier": RUNNER_TYPE_ID,
@@ -1016,6 +1044,7 @@ class RunnerFixture(SyntheticReaders, unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn(UDID_A, [device["udid"] for device in json.loads(self.simulator_inventory.read_text())["devices"][RUNNER_RUNTIME_ID]])
         self.assertEqual(self.simctl_calls("delete"), [f"delete {UDID_A}"])
+        self.assertEqual(lease.read_bytes(), b"")
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

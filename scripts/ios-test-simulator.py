@@ -380,7 +380,13 @@ def lease_description(text: str) -> str:
 
 
 def parse_lease(text: str) -> dict[str, Any] | None:
-    """The object a lease file records, or None when it records nothing usable."""
+    """The object a lease file records, or None when it records nothing usable.
+
+    The lock owner truncates metadata when an otherwise idle lane is released;
+    an empty file is therefore a valid idle lease, unlike nonempty malformed data.
+    """
+    if text == "":
+        return {}
     try:
         value = json.loads(text)
     except json.JSONDecodeError:

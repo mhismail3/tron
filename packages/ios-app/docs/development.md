@@ -1009,8 +1009,11 @@ For an individually verified orphan that has no lane ownership marker,
 `scripts/tron-ios-test clean-unowned UUID NAME` is the only explicit escape
 hatch: provide the exact simulator UUID and exact current device name. The
 owner refuses malformed or unreadable lane markers, any marker claiming that
-UUID, any live lane lease in the discovered lane tree, malformed Development
-state, and the remembered Development simulator. It rechecks device identity
+UUID, any live lane lease in the discovered lane tree, nonempty malformed lane
+lease metadata, malformed Development state, and the remembered Development
+simulator. An unlocked empty lease is the normal idle state left when a holder
+truncates its metadata, so an unrelated idle lane does not block this exact
+cleanup. It rechecks device identity
 before shutdown and deletion, touches no other simulator or lane state, and is
 not a sweep, adoption, or way to bypass a lane claim. Inspect `status --all`
 first; use this only for a specifically identified orphan, never to reclaim

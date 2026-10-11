@@ -135,7 +135,8 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, f
         # cross-checkout concurrency fence.
         before = git(worktree, "rev-parse", "HEAD")
         for marker in ("MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
-            if (git_dir / marker).exists():
+            worktree_marker = Path(git(worktree, "rev-parse", "--path-format=absolute", "--git-path", marker))
+            if worktree_marker.exists():
                 raise HandoffError(f"refusing handoff while {marker} is in progress")
         if before != head:
             raise HandoffError("local head moved while preparing handoff")

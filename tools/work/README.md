@@ -56,7 +56,7 @@ is aborted, and the conflicting files are listed for the agent to resolve and co
 then `land` runs again. A moved base sends `land` back to merging it, at most three
 times. A refused merge after the base moved is retried the same way. A head that a
 pull request already merged is refused, so a repeat run cannot open a second one.
-Other refusals stop `land` with nothing merged. Claim handoff serializes through a read-only descriptor on the pre-existing common Git directory (it creates no lock file), refuses merge/rebase/cherry-pick/revert-in-progress repositories, and rechecks local and remote heads before changing a ref. An exact accepted transition commit can repair local ref state after a partial push; unrelated or malformed remote objects are never treated as proof.
+Other refusals stop `land` with nothing merged. Claim handoff serializes through a read-only descriptor on the pre-existing common Git directory (it creates no lock file), checks operation markers in the selected worktree's private Git directory (including linked-worktree merge/rebase/cherry-pick/revert state), and rechecks local and remote heads before changing a ref. An exact accepted transition commit can repair local ref state after a partial push; unrelated or malformed remote objects are never treated as proof.
 
 ## `cleanup`
 
