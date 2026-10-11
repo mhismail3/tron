@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
-"""Exercise explicit integration/custom-base creation through the real CLI and Git."""
+"""Exercise claim creation, guarded admission and handoff through real CLI/Git processes."""
 from __future__ import annotations
-import json, os, shutil, subprocess, sys, tempfile
+
+import json
+import os
+import pty
+import select
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
 from pathlib import Path
+
 ROOT = Path(__file__).resolve().parents[1]
+
 
 def fixture_gh():
     path = Path(os.environ["WORK_START_FIXTURE"])
@@ -11,77 +22,185 @@ def fixture_gh():
     args = sys.argv[1:]
     response = None
     if args[:2] == ["repo", "view"]:
-        response = "fixture/project"
-        print(response)
+        print("fixture/project")
+        return
+    if args[:2] == ["issue", "view"]:
+        print(json.dumps({"state": state["state"]}))
+        return
+    if args[:1] == ["api"] and args[1:2] != ["graphql"]:
+        print("\n".join(state["comments"]))
         return
     if args[:2] == ["api", "graphql"]:
-        req = json.load(sys.stdin); query = req["query"]
+        req = json.load(sys.stdin)
+        query = req["query"]
         if "mutation" in query:
             state["status"] = "In progress"
             state["writes"].append("status")
             response = {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "item"}}}}
         elif "query($owner" in query:
             response = {"data": {"repository": {"issue": {
-                "id": "issue", "number": 841, "state": state["state"], "title": "Canonical owners for epic",
-                "url": "https://example.invalid/issues/841", "labels": {"nodes": [{"name": "epic"}]},
-                "blockedBy": {"nodes": []}, "comments": {"nodes": [{"body": b} for b in state["comments"]]},
+                "id": "issue", "number": req["variables"]["number"], "state": state["state"], "title": "Canonical owners for epic",
+                "url": "https://example.invalid/issues/841", "labels": {"nodes": [{"name": x} for x in state["labels"]]},
+                "blockedBy": {"nodes": state["blockers"]}, "comments": {"nodes": [{"body": b} for b in state["comments"]]},
                 "projectItems": {"nodes": [{"id": "item", "project": {"id": "project", "title": "Tron",
-                    "field": {"id": "status", "options": [{"id": "progress", "name": "In progress"}] }},
+                    "field": {"id": "status", "options": [{"id": "progress", "name": "In progress"}]}},
                     "fieldValueByName": {"name": state["status"]}}]}}}}}
         elif "query($project" in query:
             response = {"data": {"node": {"items": {"pageInfo": {"hasNextPage": False}, "nodes": []}}}}
-        else: raise AssertionError(query)
+        else:
+            raise AssertionError(query)
     elif args[:2] == ["issue", "comment"]:
-        state["comments"].append(sys.stdin.read()); state["writes"].append("comment")
-    else: raise AssertionError(args)
-    path.write_text(json.dumps(state)); print(json.dumps(response))
+        state["comments"].append(sys.stdin.read())
+        state["writes"].append("comment")
+    else:
+        raise AssertionError(args)
+    path.write_text(json.dumps(state))
+    print(json.dumps(response))
+
 
 def run():
-    artifact = ROOT / "test-results/work-start.json"; artifact.parent.mkdir(exist_ok=True)
+    artifact = ROOT / "test-results/work-start.json"
+    artifact.parent.mkdir(exist_ok=True)
     evidence = []
     try:
         with tempfile.TemporaryDirectory(prefix="tron-work-start-") as td:
-            root = Path(td); repo = root / "repo"; repo.mkdir(); home=root/"home"; home.mkdir(); tmp=root/"tmp"; tmp.mkdir()
-            env={**os.environ,"HOME":str(home),"TMPDIR":str(tmp),"WORK_GH":str(Path(__file__).resolve()),
-                 "WORK_SESSION_ID":"fixture-owner","WORK_START_FIXTURE":str(root/"github.json"),
-                 "PYTHONDONTWRITEBYTECODE":"1","GIT_CONFIG_NOSYSTEM":"1","GIT_CONFIG_GLOBAL":os.devnull}
-            def git(*args): return subprocess.run(["git",*args],cwd=repo,env=env,check=True,text=True,capture_output=True).stdout.strip()
-            git("init","-b","main"); git("config","user.name","Fixture"); git("config","user.email","fixture@example.invalid")
-            git("commit","--allow-empty","-m","main base")
-            remote=root/"remote.git"; git("init","--bare",str(remote)); git("remote","add","origin",str(remote)); git("push","origin","main")
-            # An unrelated base verifies that the receipt does not falsely call it main.
-            git("checkout","--orphan","integration-base"); git("commit","--allow-empty","-m","integration base"); git("push","origin","integration-base"); git("checkout","main")
-            (repo/".github").mkdir(); shutil.copy(ROOT/".github/work.json",repo/".github/work.json")
-            (repo/"scripts").mkdir(); shutil.copy(ROOT/"scripts/personal-info-guard.sh",repo/"scripts/personal-info-guard.sh")
-            Path(env["WORK_START_FIXTURE"]).write_text(json.dumps({"state":"OPEN","status":"Ready","comments":[],"writes":[]}))
-            def start(*opts):
-                r=subprocess.run([sys.executable,str(ROOT/"tools/work/cli.py"),"start","841",*opts],cwd=repo,env=env,capture_output=True,text=True,timeout=30)
-                evidence.append({"args":list(opts),"exit":r.returncode,"stdout":r.stdout,"stderr":r.stderr})
-                return r
-            # Prove the original CLI cannot make this claim: ordinary start refuses
-            # the epic and its parser has no supported integration creation option.
-            denied=start()
-            assert denied.returncode != 0 and "epic" in denied.stderr, evidence[-1]
-            baseline = root / "baseline"
-            baseline.mkdir()
-            archive=subprocess.run(["git","archive","049d88af9","tools/work"],cwd=ROOT,check=True,capture_output=True).stdout
-            subprocess.run(["tar","-x","-C",str(baseline)],input=archive,check=True)
-            old=subprocess.run([sys.executable,str(baseline/"tools/work/cli.py"),"start","841","--integration","--base","integration-base"],cwd=repo,env=env,capture_output=True,text=True,timeout=30)
-            evidence.append({"case":"baseline explicit integration","exit":old.returncode,"stderr":old.stderr})
-            assert old.returncode != 0 and "unrecognized arguments" in old.stderr, evidence[-1]
-            accepted=start("--integration","--base","integration-base")
+            root = Path(td)
+            repo, home, tmp = (root / name for name in ("repo", "home", "tmp"))
+            for directory in (repo, home, tmp):
+                directory.mkdir()
+            state_path = root / "github.json"
+            env = {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "WORK_GH": str(Path(__file__).resolve()),
+                   "WORK_SESSION_ID": "fixture-owner", "WORK_START_FIXTURE": str(state_path),
+                   "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+            def git(*args):
+                return subprocess.run(["git", *args], cwd=repo, env=env, check=True, text=True, capture_output=True).stdout.strip()
+            def state(**changes):
+                value = json.loads(state_path.read_text())
+                value.update(changes)
+                state_path.write_text(json.dumps(value))
+                return value
+            def call(*args):
+                result = subprocess.run([sys.executable, str(ROOT / "tools/work/cli.py"), *args], cwd=repo,
+                                        env=env, capture_output=True, text=True, timeout=30)
+                evidence.append({"args": list(args), "exit": result.returncode,
+                                 "stdout": result.stdout, "stderr": result.stderr})
+                return result
+            def refused(expected, *args):
+                before = git("ls-remote", "--heads", "origin"), state()["writes"]
+                result = call(*args)
+                assert result.returncode and expected in result.stderr, evidence[-1]
+                assert before == (git("ls-remote", "--heads", "origin"), state()["writes"])
+                return result
+            git("init", "-b", "main")
+            git("config", "user.name", "Fixture")
+            git("config", "user.email", "fixture@example.invalid")
+            (repo / ".github").mkdir()
+            shutil.copy(ROOT / ".github/work.json", repo / ".github/work.json")
+            (repo / "scripts").mkdir()
+            shutil.copy(ROOT / "scripts/personal-info-guard.sh", repo / "scripts/personal-info-guard.sh")
+            git("add", ".")
+            git("commit", "-m", "main base")
+            git("init", "--bare", str(root / "remote.git"))
+            git("remote", "add", "origin", str(root / "remote.git"))
+            git("push", "origin", "main")
+            git("checkout", "-b", "integration-base")
+            (repo / "integration.txt").write_text("preserve integration contents\n")
+            git("add", ".")
+            git("commit", "-m", "integration base")
+            base_head = git("rev-parse", "HEAD")
+            git("push", "origin", "integration-base")
+            git("checkout", "main")
+            state_path.write_text(json.dumps({"state": "OPEN", "status": "Ready", "labels": ["epic"],
+                                              "blockers": [], "comments": [], "writes": []}))
+            refused("epic", "start", "841")
+            state(state="CLOSED")
+            refused("closed", "start", "841", "--integration")
+            state(state="OPEN", blockers=[{"number": 42, "state": "OPEN"}])
+            refused("blocked", "start", "841", "--integration")
+            state(blockers=[], labels=["epic", "excluded-fixture"])
+            config_path = repo / ".github/work.json"
+            config = json.loads(config_path.read_text())
+            config["claim"]["excludeLabels"].append("excluded-fixture")
+            config_path.write_text(json.dumps(config))
+            refused("excluded-fixture", "start", "841", "--integration")
+            state(labels=["epic"])
+            refused("invalid base", "start", "841", "--integration", "--base", "../bad")
+            refused("git fetch", "start", "841", "--integration", "--base", "missing-base")
+            accepted = call("start", "841", "--integration", "--base", "integration-base")
             assert accepted.returncode == 0, evidence[-1]
-            state=json.loads(Path(env["WORK_START_FIXTURE"]).read_text())
-            assert len(state["comments"]) == 1 and "Base: `integration-base`" in state["comments"][0]
-            assert "integration/841-canonical-owners-for-epic" in accepted.stdout
-            worktree=root / "tron-worktrees" / "841-canonical-owners-for-epic"
-            # Root setting resolves relative to primary; remove through Git before temp cleanup.
-            assert worktree.exists()
-            git("worktree","remove","--force",str(worktree))
-            claim=subprocess.run(["git","show","-s","--format=%B","origin/integration/841-canonical-owners-for-epic"],cwd=repo,env=env,text=True,capture_output=True,check=True).stdout
-            assert "Work-Claim-Base: integration-base" in claim
-            evidence.append({"case":"claim receipt","base":"integration-base","trailers":claim.splitlines()[-3:]})
+            branch = "integration/841-canonical-owners-for-epic"
+            worktree = root / "tron-worktrees/841-canonical-owners-for-epic"
+            assert worktree.is_dir() and (worktree / "integration.txt").read_text() == "preserve integration contents\n"
+            head = git("rev-parse", branch)
+            assert git("rev-parse", f"{head}^") == base_head
+            receipt = git("show", "-s", "--format=%B", head)
+            assert "Work-Claim-Session: fixture-owner" in receipt and "Work-Claim-Base: integration-base" in receipt
+            assert len(state()["comments"]) == 1 and "Base: `integration-base`" in state()["comments"][0]
+            resumed = call("start", "841")
+            assert resumed.returncode == 0 and "from integration-base" in resumed.stdout, evidence[-1]
+            assert git("rev-parse", branch) == head and len(state()["comments"]) == 1
+            refused("cannot resume", "start", "841", "--base", "main")
+            git("checkout", "integration-base")
+            git("commit", "--allow-empty", "-m", "base advances after creation")
+            git("push", "origin", "integration-base")
+            git("checkout", "main")
+            env["WORK_SESSION_ID"] = "successor"
+            refused("already claimed", "start", "841", "--integration")
+            # The fixture alone types confirmation, never a real claim or live owner.
+            master, slave = pty.openpty()
+            process = subprocess.Popen([sys.executable, str(ROOT / "tools/work/cli.py"), "handoff", "841",
+                                        "--force-maintainer", "--reason", "fixture transfer"], cwd=repo,
+                                       env=env, stdin=slave, stdout=slave, stderr=slave)
+            os.close(slave)
+            transcript = b""
+            sent = False
+            try:
+                deadline = time.monotonic() + 30
+                while process.poll() is None and time.monotonic() < deadline:
+                    if select.select([master], [], [], .1)[0]:
+                        try:
+                            transcript += os.read(master, 65536)
+                        except OSError:
+                            break
+                        if not sent and b"Type exactly: HANDOFF #841 FROM fixture-owner" in transcript:
+                            os.write(master, b"HANDOFF #841 FROM fixture-owner\n")
+                            sent = True
+                process.wait(timeout=5)
+                evidence.append({"case": "fixture TTY handoff", "exit": process.returncode, "output": transcript.decode()})
+                assert sent and process.returncode == 0, evidence[-1]
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                os.close(master)
+            transfer = git("rev-parse", branch)
+            assert git("rev-parse", f"{transfer}^") == head
+            assert git("rev-parse", f"{transfer}^{{tree}}") == git("rev-parse", f"{head}^{{tree}}")
+            resumed = call("start", "841")
+            assert resumed.returncode == 0 and "from integration-base" in resumed.stdout, evidence[-1]
+            assert f"work:handoff commit={transfer}" in "\n".join(state()["comments"])
+            successor_comment = state()["comments"][-1]
+            assert f"Base: `integration-base` at `{base_head}`" in successor_comment, successor_comment
+            assert git("rev-parse", branch) == transfer
+            evidence.append({"case": "handoff preserves base and successor admission", "head": transfer})
+            # A legacy branch without metadata is not adopted by integration creation.
+            git("checkout", "-b", "feat/842-legacy")
+            git("push", "origin", "feat/842-legacy")
+            git("checkout", "main")
+            refused("unknown", "start", "842", "--integration")
+            # Local-only manual branches also cannot be silently adopted.
+            git("branch", "integration/844-canonical-owners-for-epic")
+            refused("local branch", "start", "844", "--integration")
+            # The ordinary non-epic path still creates an owned task branch.
+            state(labels=[])
+            ordinary = call("start", "843")
+            assert ordinary.returncode == 0 and "feat/843-" in ordinary.stdout, evidence[-1]
+            git("worktree", "remove", str(worktree))
+            git("worktree", "remove", str(root / "tron-worktrees/843-canonical-owners-for-epic"))
         print(f"Passed integration start journeys; evidence: {artifact}")
-    finally: artifact.write_text(json.dumps(evidence,indent=2)+"\n")
+    finally:
+        artifact.write_text(json.dumps(evidence, indent=2) + "\n")
+
+
 if __name__ == "__main__":
     fixture_gh() if "WORK_START_FIXTURE" in os.environ else run()

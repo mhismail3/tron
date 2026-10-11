@@ -157,7 +157,7 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
     owner, name = gh.run("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip().split("/")
     issue = load_issue(gh, owner, name, number, rules, config["project"]["title"])
 
-    existing = claims.existing_claims(cwd, remote, base, number)
+    existing = claims.existing_claims(cwd, remote, default_base, number)
     mine = [c for c in existing if c.session == session]
     others = [c for c in existing if c.session != session]
     if others and not mine:
@@ -171,15 +171,15 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
         if requested_base and mine[0].base and requested_base != mine[0].base:
             raise claims.ClaimError(f"#{number} is already claimed from {mine[0].base}; cannot resume it from {requested_base}")
         base = requested_base or mine[0].base or default_base
+        base_sha = mine[0].base_sha
         print(f"resuming the claim on {branch} from {base}")
         if issue["state"] != "OPEN":
             raise claims.ClaimError(f"#{number} is closed")
     else:
-        reasons = claims.ineligibility(issue, rules)
-        # Integration creation is explicit and bypasses only the epic exclusion;
-        # closed issues and open blockers remain hard refusals.
-        if integration and "epic" in issue["labels"]:
-            reasons = [reason for reason in reasons if not reason.startswith("issue is labeled ")]
+        # Only the epic label is exempted by explicit integration creation;
+        # all other exclusions, closed issues and blockers still refuse.
+        eligible = {**issue, "labels": [label for label in issue["labels"] if label != "epic"]} if integration else issue
+        reasons = claims.ineligibility(eligible, rules)
         if reasons:
             raise claims.ClaimError(f"#{number} cannot be claimed: " + "; ".join(reasons))
         slug = claims.slugify(issue["title"])
@@ -190,13 +190,18 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
         raise claims.ClaimError(f"{worktree} exists and is not a worktree on {branch}; move it first")
 
     if not mine:
+        # A pre-existing local ref is not the new remote claim. Reusing it would
+        # leave the worktree ownerless despite publishing canonical metadata.
+        if subprocess.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=cwd).returncode == 0:
+            raise claims.ClaimError(f"local branch {branch} already exists without this remote claim; refusing adoption")
         result = claims.create_claim(cwd, remote, base, branch, number, session)
-        if not result.won or not claims.resolve_race(cwd, remote, base, number, session):
-            winner = claims.existing_claims(cwd, remote, base, number)
+        if not result.won or not claims.resolve_race(cwd, remote, default_base, number, session):
+            winner = claims.existing_claims(cwd, remote, default_base, number)
             raise claims.ClaimError(
                 f"#{number} was claimed by another session first: "
                 + ", ".join(f"{c.branch} (session {c.session})" for c in winner)
             )
+        base_sha = result.base
         print(f"claimed #{number} as {branch} on {remote}")
 
     # The branch is the claim; Status and the comment project it. A failure
@@ -209,8 +214,12 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
     published = os.path.relpath(worktree, primary.parent)
     marker = f"<!-- work:claim session={session} branch={branch} -->"
     if not any(marker in body for body in issue["comments"]):
-        _git(cwd, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}")
-        base_sha = _git(cwd, "rev-parse", f"{remote}/{base}")
+        if base_sha is None:
+            # Existing claims predate the creation-base receipt. Do not invent
+            # historical provenance: label the observation as current instead.
+            _git(cwd, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}")
+            base_sha = _git(cwd, "rev-parse", f"{remote}/{base}")
+            base = f"{base} (current; creation base unrecorded)"
         gh.run("issue", "comment", str(number), "--body-file", "-",
                stdin=claims.claim_comment(session, branch, published, base, base_sha))
 
