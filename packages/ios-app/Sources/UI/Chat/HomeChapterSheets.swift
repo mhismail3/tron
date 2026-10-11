@@ -86,6 +86,7 @@ extension HomeSheet {
                     }
                 }
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home-chapter-detail")
         } else {
             TronPlaceholderState(title: "Chapter not found", detail: "This chapter is no longer in Home's ledger.", icon: "book.closed")

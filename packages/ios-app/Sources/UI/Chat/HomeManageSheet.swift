@@ -80,6 +80,11 @@ extension HomeSheet {
         .tronNavigationTitle("Memory Model", accent: .tronPurple)
         .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)
         .controlSize(.regular)
+        // A refused model choice is raised where the choice was made, on the picker.
+        .alert("Home change", isPresented: Binding(get: { mutationFailure != nil },
+                                                   set: { if !$0 { mutationFailure = nil } })) {
+            Button("OK", role: .cancel) { mutationFailure = nil }
+        } message: { Text(mutationFailure ?? "") }
     }
 
     var modelSelectionAvailability: ModelSelectionAvailability {

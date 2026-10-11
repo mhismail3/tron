@@ -125,6 +125,9 @@ struct SessionModelSummaryCard<Controls: View, Footer: View>: View {
         .controlSize(.small)
         .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.14)
         .tronSettingsVisualTheme(accent: .tronPurple)
+        // Keep the card a container: an identifier on a plain stack would replace
+        // its children's identifiers (the footer row, the compact control).
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("session-model-summary")
     }
 

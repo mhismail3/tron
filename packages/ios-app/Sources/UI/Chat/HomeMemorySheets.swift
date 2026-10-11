@@ -113,6 +113,7 @@ extension HomeSheet {
                 .accessibilityIdentifier("home-memory-exact-evidence")
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home-memory-detail")
     }
 

@@ -237,6 +237,7 @@ struct HomeTaskSheet: View {
             workerCard(task, status: status)
             actionsCard(task, status: status)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home-task-detail")
     }
 

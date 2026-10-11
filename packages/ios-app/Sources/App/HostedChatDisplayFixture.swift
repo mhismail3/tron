@@ -498,8 +498,8 @@ private actor HostedHomeShellGateway {
         record["intentDigest"] = .string(String(repeating: "a", count: 64)); record["grantRef"] = .null; record["scopeRef"] = .string("scope-one")
         record["sessionId"] = .string("worker-session"); record["stopIntent"] = .null
         record["workerModel"] = .object(["provider": .string("fixture"), "id": .string("worker-model")])
-        record["subagents"] = .object(["started": .number(2), "stoppedAtEnd": .number(0)])
-        record["subagentRuns"] = .object(["total": .number(id == "active" ? 1 : 0), "runs": .array(id == "active" ? [.object(["id": .string("run-live"), "state": .string("running")])] : [])])
+        record["subagents"] = .object(["started": .number(2), "stoppedAtEnd": .number(1)])
+        record["subagentRuns"] = .object(["total": .number(id == "active" ? 1 : 0), "runs": .array(id == "active" ? [.object(["runId": .string("run-live"), "agent": .string("researcher"), "state": .string("running"), "startedAt": .string("2026-01-02T10:05:00Z"), "lastActivityAt": .string("2026-01-02T10:07:00Z")])] : [])])
         record["reportRef"] = id == "terminal" ? .object(["resultId": .string("report-one"), "sessionId": .string("worker-session"),
             "entryId": .string("report-entry"), "digest": .string(String(repeating: "b", count: 64))]) : .null
         record["intent"] = .object(["text": .string(id == "active" ? "Active finite work" : "Finished finite work")])
@@ -544,25 +544,42 @@ private actor HostedHomeShellGateway {
         .object(["index": .number(Double(index)), "sessionId": .string(sessionID), "entryId": .string("source-entry"),
                  "sourceDigest": .string(String(repeating: "a", count: 64))])
     }
+    /// The sealed chapter (1) holds memory item 0 and the active chapter (2) item 1.
+    /// A chapter-filtered page returns only that chapter's item, with both indexes
+    /// still below the page's total.
     private func memoryPage(next: Bool, empty: Bool, sessionID: String? = nil) -> JSONValue {
-        let index = next ? 1 : 0
-        let chapterSession = next ? "home-session" : "home-chapter-sealed"
-        let item: JSONValue = .object(["index": .number(Double(index)), "kind": .string(next ? "talk" : "user"),
-            "attribution": .string(next ? "assistant" : "user"), "timestamp": .string(next ? "2026-01-02T10:00:00Z" : "2025-12-20T09:00:00Z"),
-            "evidence": evidence(index: index, sessionID: chapterSession), "projection": .object(["format": .string("memory-projection"),
-                "text": .string(next ? "Projected assistant memory" : "Projected user memory"), "omitted": .bool(false),
-                "omissions": .array([.string("browser-cap")])]), "summary": next ? .null : .object([
-                    "format": .string("memory-summary"), "text": .string("Condensed memory summary"), "truncated": .bool(true)])])
+        let sealed = memoryItem(index: 0, chapterSession: "home-chapter-sealed")
+        let active = memoryItem(index: 1, chapterSession: "home-session")
+        let revision = JSONValue.string(String(repeating: "a", count: 64))
         if let sessionID {
-            // One chapter's page: its single entry, with no further cursor.
-            let matches = sessionID == chapterSession
-            return .object(["homeId": .string("home-fixture"), "revision": .string(String(repeating: "a", count: 64)),
-                "totalItems": .number(matches ? 1 : 0), "items": .array(matches ? [item] : [])])
+            let items = [sealed, active].filter { $0.sessionID == sessionID }.map(\.json)
+            return .object(["homeId": .string("home-fixture"), "revision": revision,
+                "totalItems": .number(2), "items": .array(items)])
         }
-        var page: [String: JSONValue] = ["homeId": .string("home-fixture"), "revision": .string(String(repeating: "a", count: 64)),
+        let item = next ? active.json : sealed.json
+        var page: [String: JSONValue] = ["homeId": .string("home-fixture"), "revision": revision,
             "totalItems": .number(empty ? 0 : 2), "items": .array(empty ? [] : [item])]
         if !next && !empty { page["nextCursor"] = .string("fixture-next") }
         return .object(page)
+    }
+
+    private struct FixtureMemoryItem {
+        let index: Int
+        let sessionID: String
+        let json: JSONValue
+    }
+
+    private func memoryItem(index: Int, chapterSession: String) -> FixtureMemoryItem {
+        let isActive = chapterSession == "home-session"
+        let json: JSONValue = .object(["index": .number(Double(index)), "kind": .string(isActive ? "talk" : "user"),
+            "attribution": .string(isActive ? "assistant" : "user"),
+            "timestamp": .string(isActive ? "2026-01-02T10:00:00Z" : "2025-12-20T09:00:00Z"),
+            "evidence": evidence(index: index, sessionID: chapterSession),
+            "projection": .object(["format": .string("memory-projection"),
+                "text": .string(isActive ? "Projected assistant memory" : "Projected user memory"), "omitted": .bool(false),
+                "omissions": .array([.string("browser-cap")])]),
+            "summary": isActive ? .null : .object(["format": .string("memory-summary"), "text": .string("Condensed memory summary"), "truncated": .bool(true)])])
+        return FixtureMemoryItem(index: index, sessionID: chapterSession, json: json)
     }
 
     /// `home.context`: the activation's request sizes with the body-free breakdown

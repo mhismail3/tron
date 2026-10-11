@@ -202,10 +202,6 @@ struct HomeSheet: View {
         .tronManagedSheet(item: $childDestination, identity: { "home.\(profileID).\($0.id)" }) { child in
             HomeSheet(destination: child, profileID: profileID, sessionID: sessionID, onOpenSession: onOpenSession)
         }
-        .alert("Home change", isPresented: Binding(get: { mutationFailure != nil && destination.id == "manage" },
-                                                   set: { if !$0 { mutationFailure = nil } })) {
-            Button("OK", role: .cancel) { mutationFailure = nil }
-        } message: { Text(mutationFailure ?? "") }
         #if HOSTED_TEST
         // Retains the mounted pause action so hosted journeys can invoke it after
         // a route replacement; the identity fences inside `perform` must refuse it.

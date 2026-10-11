@@ -34,6 +34,7 @@ extension HomeSheet {
                     freeRow(free)
                 }
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home-context-breakdown")
         }
     }
