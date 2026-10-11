@@ -1,6 +1,7 @@
 import {
   MAX_MESSAGE_BYTES,
   MAX_TITLE_BYTES,
+  NOTIFICATION_CATEGORIES,
   ROUTES,
   type InstallationRegistration,
   type NotificationRequest,
@@ -47,7 +48,7 @@ export function validateNotification(value: unknown, now = Date.now()):
   | { ok: true; value: NotificationRequest }
   | { ok: false; error: string } {
   if (!isRecord(value)) return { ok: false, error: "invalid_request" };
-  const allowed = ["version", "kind", "notificationKind", "interruptionLevel", "requestId", "message", "title", "sessionId", "machineId", "expiresAt"];
+  const allowed = ["version", "kind", "notificationKind", "interruptionLevel", "category", "requestId", "message", "title", "sessionId", "machineId", "expiresAt"];
   if (Object.keys(value).some((key) => !allowed.includes(key))) {
     return { ok: false, error: "unknown_field" };
   }
@@ -58,6 +59,9 @@ export function validateNotification(value: unknown, now = Date.now()):
     value.version !== 1 || value.kind !== "agent_alert"
     || !["ask", "explicit", "agent_finished", "waiting"].includes(value.notificationKind as string)
     || (value.interruptionLevel !== undefined && value.interruptionLevel !== "time-sensitive")
+    || (value.category !== undefined && (
+      !(NOTIFICATION_CATEGORIES as readonly unknown[]).includes(value.category) || value.notificationKind !== "waiting"
+    ))
     || !isOpaqueId(value.requestId) ||
     typeof value.message !== "string" || value.message.length < 1 || utf8(value.message).byteLength > MAX_MESSAGE_BYTES ||
     (value.title !== undefined && (typeof value.title !== "string" || value.title.length < 1 || utf8(value.title).byteLength > MAX_TITLE_BYTES)) ||

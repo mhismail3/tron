@@ -2384,19 +2384,20 @@ export class GatewayService {
     if (event.kind === "pending") {
       const what = event.request.changes.map(change => schemaKey(change.key).label).join(", ");
       void this.settingsPush(event.request.actor, `settings-approval:${event.request.requestId}`, "waiting", "Approval needed",
-        `${actorLabel(event.request.actor)} asks to change ${what}${event.request.reason ? `: ${event.request.reason}` : ""}. Approve or decline in Tron.`);
+        `${actorLabel(event.request.actor)} asks to change ${what}${event.request.reason ? `: ${event.request.reason}` : ""}. Approve or decline in Tron.`, "settings-approval");
     }
     this.dependencies.broadcast("settings.approvalsChanged", safeJson({ kind: event.kind, requestId: event.request.requestId, status: event.request.status }));
   }
 
   /** Pushes are advisory: an unavailable relay leaves the pending change and the record as they are. */
-  private async settingsPush(actor: Actor, sourceId: string, kind: "explicit" | "waiting", title: string, message: string): Promise<void> {
+  private async settingsPush(actor: Actor, sourceId: string, kind: "explicit" | "waiting", title: string, message: string, category?: "settings-approval"): Promise<void> {
     const notifications = this.dependencies.notifications;
     if (!notifications) return;
     const sessionId = actor.sessionId ?? "settings";
     const machineId = this.dependencies.config?.machineId;
     await notifications.enqueue({
       sessionId, sourceId, kind, title, message: message.slice(0, 512),
+      ...(category ? { category } : {}),
       ...(actor.sessionId && machineId ? { route: { sessionId: actor.sessionId, machineId } } : {}),
     }).catch((error: unknown) => this.dependencies.logger?.log("warning", "Settings notification was not queued", {
       event: "settings.notification.failed", source: "settings", error: error instanceof Error ? error.message : String(error),

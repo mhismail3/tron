@@ -108,13 +108,13 @@ async function fixture() {
   const { settingsModel, settingsChanges } = settingsDependencies({
     agentDir, tronHome, trust, modelRuntime, sessions: registry, home: () => registry.homeOwner(), registry, now: () => new Date(clock),
   });
-  const pushes: Array<{ kind: string; title?: string; message: string; sessionId: string }> = [];
+  const pushes: Array<{ kind: string; title?: string; message: string; sessionId: string; category?: string }> = [];
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   const service = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome),
     // The push owner's admission boundary, recorded: delivery is not under test.
-    notifications: { enqueue: async (input: { kind: string; title?: string; message: string; sessionId: string }) => { pushes.push(input); return "queued"; } },
+    notifications: { enqueue: async (input: { kind: string; title?: string; message: string; sessionId: string; category?: string }) => { pushes.push(input); return "queued"; } },
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
@@ -224,6 +224,8 @@ describe("settings risk gate", () => {
     expect(f.settle(marked.results)).toMatchObject({ status: "applied", tier: "notify" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
     expect(f.pushes).toContainEqual(expect.objectContaining({ kind: "explicit", sessionId: slot.id, message: expect.stringContaining("Retries") }));
+    // Only the approval push is categorized; a notify-tier change is not.
+    expect(f.pushes.at(-1)).not.toHaveProperty("category");
     steps.push({ step: "after an undeclared third-party tool", result: f.settle(marked.results), push: f.pushes.at(-1) });
 
     // The mark belongs to that run: the next run is clean again (decision 28).
@@ -238,7 +240,7 @@ describe("settings risk gate", () => {
     const pending = f.settle(widen.results) as { status: string; tier: string; approval: { requestId: string } };
     expect(pending).toMatchObject({ status: "pending", tier: "approve" });
     expect((await f.macDocument()).defaultTools).toBeUndefined();
-    expect(f.pushes).toContainEqual(expect.objectContaining({ kind: "waiting", sessionId: slot.id }));
+    expect(f.pushes).toContainEqual(expect.objectContaining({ kind: "waiting", sessionId: slot.id, category: "settings-approval" }));
     const [waiting] = await f.approvals();
     // The row the iPhone shows: who asked and the exact change, as Gateway display strings.
     expect(waiting).toMatchObject({

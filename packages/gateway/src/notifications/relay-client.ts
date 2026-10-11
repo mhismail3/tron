@@ -11,6 +11,7 @@ const RESPONSE_MAX_BYTES = 16 * 1_024;
 const REQUEST_MAX_BYTES = 2 * 1_024;
 // APNs owns a bounded 15-second provider request; the caller must not abort first.
 const TIMEOUT_MS = 20_000;
+const CAPABILITIES_TIMEOUT_MS = 5_000;
 const PUBLIC_HOST_LABEL = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
 function fixedPushOrigin(raw: string | undefined): URL | undefined {
@@ -116,6 +117,33 @@ export class PushRelayClient {
     return response.status === 429 || response.status >= 500
       ? { status: "retryable", reason: relayError ?? `http_${response.status}` }
       : { status: "ambiguous", reason: relayError ?? `http_${response.status}` };
+  }
+
+  /** The notification categories this relay accepts. Decision 35: an older relay
+   * rejects unknown fields, so a category is sent only to a relay that advertises
+   * it. Not cached: the probe runs per categorized push, so a relay rollback is
+   * seen by the next push. Every failure means "none advertised"; it never throws. */
+  async notificationCategories(): Promise<ReadonlySet<string>> {
+    const none = new Set<string>();
+    if (!this.origin) return none;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CAPABILITIES_TIMEOUT_MS);
+    timeout.unref();
+    try {
+      const response = await this.fetcher(new URL("/v3/capabilities", this.origin).toString(), {
+        method: "GET", redirect: "error", signal: controller.signal,
+      });
+      const text = await boundedBody(response);
+      if (response.status !== 200) return none;
+      const value = JSON.parse(text) as unknown;
+      if (!value || typeof value !== "object" || Array.isArray(value)) return none;
+      const { version, notificationCategories } = value as Record<string, unknown>;
+      if (version !== 1 || !Array.isArray(notificationCategories)
+        || !notificationCategories.every((category) => typeof category === "string")) return none;
+      return new Set(notificationCategories as string[]);
+    } catch {
+      return none;
+    } finally { clearTimeout(timeout); }
   }
 
   async revoke(grantId: string, secret: string, requestId: string): Promise<"revoked" | "retryable"> {

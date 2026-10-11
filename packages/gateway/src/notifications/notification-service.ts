@@ -659,6 +659,9 @@ export class NotificationService {
     message: string;
     title?: string;
     interruptionLevel?: "time-sensitive";
+    /** Relay-side category (APNs `aps.category`); only for waiting pushes, and
+     * sent only when the relay advertises it. */
+    category?: "settings-approval";
     route?: { sessionId: string; machineId: string };
     /** Internal admission fence for semantic ask notifications. */
     requireAskPolicy?: boolean;
@@ -669,6 +672,13 @@ export class NotificationService {
     const title = input.title === undefined ? undefined : boundedText(input.title, 256, "title");
     const route = boundedRoute(input.route, input.sessionId);
     if (!input.sessionId || !input.sourceId) throw new GatewayError("invalid_request", "Notification identity is missing");
+    if (input.category !== undefined && input.kind !== "waiting") {
+      throw new GatewayError("invalid_request", "A notification category is only valid on a waiting notification");
+    }
+    // Probed before the admission transaction, which must stay synchronous. The
+    // result is persisted in each target envelope, so retries resend the same body.
+    const category = input.category !== undefined && this.relay.available
+      && (await this.relay.notificationCategories()).has(input.category) ? input.category : undefined;
     const now = this.now();
     const dedupeKey = notificationHash(`${input.kind}\0${input.sessionId}\0${input.sourceId}`);
     const sessionKey = notificationHash(`session\0${input.sessionId}`);
@@ -711,6 +721,7 @@ export class NotificationService {
         const relayEnvelope = JSON.stringify({
           version: 1, kind: "agent_alert", notificationKind: input.kind,
           ...(input.interruptionLevel ? { interruptionLevel: input.interruptionLevel } : {}),
+          ...(category ? { category } : {}),
           requestId, message: targetMessage,
           ...(targetTitle ? { title: targetTitle } : {}),
           ...(route ? { sessionId: route.sessionId, machineId: route.machineId } : {}),
