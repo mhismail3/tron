@@ -61,6 +61,34 @@ memory copy and composer reachability, and export with
 `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`.
 These simulator stills are not VoiceOver, animation, live Gateway or physical-device proof.
 
+The focused sheet-sizing regression runs with:
+
+```bash
+scripts/tron-ios-test build
+scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth \
+  --only-testing TronMobileUITests/TronSmokeUITests/testNestedHomeTasksErrorRetriesWithoutMovingChrome \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetsLoadingEmptyBlockedErrorAndReload \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings
+```
+
+The loading journey holds socket responses in the hosted fixture and samples the
+rendered material above the title, not just accessibility geometry: the native
+scroll frame alone stays full-width even when its overlay is visibly narrow.
+It covers Manage Home and nested Tasks, light/dark, medium/large, loaded content,
+and dismissal/reopen while loading. The recovery journeys cover error/retry,
+empty and blocked states; screenshot attachments preserve the observed sequence.
+These are simulator snapshots and interaction assertions, not frame-by-frame
+animation, physical-device, Reduce Motion or Reduce Transparency certification.
+The app-owned presentation callsite audit found two raw `.sheet` owners (the
+managed boolean/item modifiers); scroll sheets inherit the corrected shared
+edge surface, including progressive Settings, Home, resources, tools, Knowledge,
+automations and onboarding. Native document underlap and non-scroll terminal/form
+surfaces share its width owner. Camera, Safari, system pickers, video and
+content-fit detents keep their existing presentation policy. Audit coverage is
+structural, not a claim that every destination was exercised by this journey.
+
 `testHomeCrossSurfaceProofMatrix` is the cross-surface proof for the Home stack. In one
 hosted run it mounts the production chat in light and dark, at normal and accessibility
 Dynamic Type, opens Manage Home from the composer context ring and each child sheet from it (Home context,
