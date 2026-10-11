@@ -263,7 +263,7 @@ test_plan="UIValidation"
 # manage-sheet journeys and one Settings journey, the cheapest real-app paths
 # that cover the Home manage surface and the shared Settings chrome.
 SMOKE_ONLY_TESTING=(
-  "TronMobileUITests/TronSmokeUITests/testManageHomeSheetFromGearAndOrdinaryChatKeepsSettings"
+  "TronMobileUITests/TronSmokeUITests/testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings"
   "TronMobileUITests/TronSmokeUITests/testComposerContextRingOpensManageHomeInHomeAndManageSessionElsewhere"
   "TronMobileUITests/TronSmokeUITests/testIntegrationDestinationsHaveOneDoneButtonThroughSettings"
 )

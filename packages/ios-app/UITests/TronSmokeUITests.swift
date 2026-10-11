@@ -114,7 +114,7 @@ final class TronSmokeUITests: XCTestCase {
         send.tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-prompt-route"], containing: "prompt-route:home.prompt", timeout: 10))
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-opened-session"], containing: "opened-session:home-successor", timeout: 20))
-        XCTAssertTrue(app.navigationBars.buttons["Manage Home"].waitForExistence(timeout: 10), "The successor chat did not claim the Home status")
+        XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Home", timeout: 10), "The successor chat did not claim the Home status")
         keepScreenshot(named: "home-rollover-followed")
     }
 
@@ -478,7 +478,7 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.staticTexts["Home fixture chat"].exists)
         // Authoritative disable does not resolve an unknown command receipt: the
-        // gear still manages Home, and the fresh read shows Disabled.
+        // ring still manages Home, and the fresh read shows Disabled.
         openManageHome(app)
         XCTAssertTrue(waitForLabel(app.descendants(matching: .any)["home-manage-state"], containing: "Disabled", timeout: 8))
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-check-completion"].exists)
@@ -533,7 +533,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(state, containing: "Disabled", timeout: 5))
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.staticTexts["Home fixture chat"].exists)
-        // Confirmed disable returns the gear to the ordinary settings sheet.
+        // Confirmed disable returns the ring to Manage Session.
+        XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Session", timeout: 8))
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["Manage Home"].exists)
         app.terminate()
@@ -544,15 +545,16 @@ final class TronSmokeUITests: XCTestCase {
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
     }
 
-    /// Opens Manage Home from the mounted chat's gear (#740); the sheet's state
-    /// row is the readiness signal the removed header bar used to provide. The
-    /// composer's context ring has the same name in a Home chat (#748), so the
-    /// gear is found in the navigation bar.
+    /// Opens Manage Home from the composer's context ring (#748, #799). The ring
+    /// names the sheet it opens, so its "Manage Home" label is the claim; the
+    /// sheet's state row is the readiness signal.
     @MainActor
     private func openManageHome(_ app: XCUIApplication) {
-        let gear = app.navigationBars.buttons["Manage Home"]
-        XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
-        gear.tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(ring.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitForLabel(ring, containing: "Manage Home", timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitForEnabled(ring, timeout: 10), app.debugDescription)
+        ring.tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
@@ -582,7 +584,7 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     func testHomePinnedRowCapabilityDesignationAndExactProfileRoute() {
         continueAfterFailure = false
-        // Capability-off baseline: no pinned row or Manage Home gear; the ordinary session opens unchanged.
+        // Capability-off baseline: no pinned row or Manage Home ring; the ordinary session opens unchanged.
         let unsupported = XCUIApplication()
         unsupported.launchArguments = ["-tron-home-dashboard-fixture", "-home-capability-absent"]
         unsupported.launch()
@@ -632,11 +634,9 @@ final class TronSmokeUITests: XCTestCase {
         let count = app.staticTexts["fixture.home-status-count"]
         XCTAssertTrue(count.waitForExistence(timeout: 5))
         let statusCount = { Int(count.label.split(separator: ":").last ?? "0") ?? 0 }
-        // The Home chat's gear opens Manage Home (#725); its one status read must
-        // settle inside the baseline window below, and it never polls.
-        let gear = app.navigationBars.buttons["Manage Home"]
-        XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
-        gear.tap()
+        // The Home chat's context ring opens Manage Home (#725, #799); its one status
+        // read must settle inside the baseline window below, and it never polls.
+        openManageHome(app)
         XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 5))
         // Let a read admitted before cover settle, then require a quiet interval
         // longer than the five-second fallback while the managed sheet is open.
@@ -652,11 +652,12 @@ final class TronSmokeUITests: XCTestCase {
         app.terminate()
     }
 
-    // Failure modes (#725): the Home chat's gear opens the ordinary settings sheet
-    // whose controls are refused for Home; an ordinary chat's gear regresses to
-    // Manage Home; a Manage Home child surface cannot open or return.
+    // Failure modes (#725, #799): the Home chat's gear opens Manage Home instead of
+    // Settings; Manage Home opens full height instead of at medium like Manage
+    // Session; an ordinary chat's gear regresses to Manage Home; a Manage Home child
+    // surface cannot open or return.
     @MainActor
-    func testManageHomeSheetFromGearAndOrdinaryChatKeepsSettings() {
+    func testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
@@ -665,12 +666,31 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["home-pinned-row"].tap()
         XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10), app.debugDescription)
-        let gear = app.navigationBars.buttons["Manage Home"]
+        // The Home chat's gear opens Settings, as it does in every chat (#799).
+        let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.navigationBars.buttons["Manage Home"].exists)
         gear.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
+        keepScreenshot(named: "home-gear-settings-sheet")
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 5), app.debugDescription)
+        // Its context ring opens Manage Home at the medium detent, like Manage Session.
+        openManageHome(app)
         let state = app.descendants(matching: .any)["home-manage-state"]
-        XCTAssertTrue(state.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(state.label.contains("Ready"), state.label)
+        let done = app.buttons["home-sheet-done-manage"]
+        let windowHeight = app.windows.firstMatch.frame.height
+        let mediumTop = done.frame.minY
+        XCTAssertGreaterThan(mediumTop, windowHeight * 0.40, "Manage Home must open at its medium detent")
+        keepScreenshot(named: "manage-home-medium")
+        // It drags to large from the sheet title.
+        let title = app.staticTexts["Manage Home"].firstMatch
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < mediumTop - 100 }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed, "Manage Home must drag to its large detent")
+        keepScreenshot(named: "manage-home-large")
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-chat-model"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-chapters"].exists)
         for row in ["home-manage-stop", "home-manage-context", "home-manage-memory-settings", "home-manage-memory-browser",
@@ -692,7 +712,7 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-chapters-sheet")
         app.descendants(matching: .any)["home-chapter-open-1"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-opened-session"], containing: "opened-session:home-chapter-sealed", timeout: 10))
-        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10), "A read-only chapter chat must not claim Home")
+        XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Session", timeout: 10), "A read-only chapter chat must not claim Home")
         XCTAssertFalse(app.buttons["Manage Home"].exists)
         keepScreenshot(named: "home-chapter-read-only")
         // Opening a chapter replaced the single chat route, so Back returns to the
@@ -709,9 +729,9 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "ordinary-chat-settings-sheet")
     }
 
-    // Failure modes (#748): the Home chat's composer context ring opens the ordinary
-    // Manage Session sheet, whose controls Home refuses, while its gear opens Manage
-    // Home; or the fix routes an ordinary chat's ring away from Manage Session.
+    // Failure modes (#748, #799): the Home chat's composer context ring opens the ordinary
+    // Manage Session sheet, whose controls Home refuses; or the fix routes an ordinary
+    // chat's ring away from Manage Session.
     @MainActor
     func testComposerContextRingOpensManageHomeInHomeAndManageSessionElsewhere() {
         continueAfterFailure = false
@@ -722,8 +742,9 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["home-pinned-row"].tap()
         XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10), app.debugDescription)
-        // The gear's claim proves the Home status is routed before the ring is judged.
-        XCTAssertTrue(app.navigationBars.buttons["Manage Home"].waitForExistence(timeout: 10), app.debugDescription)
+        // The ring's claim proves the Home status is routed before the ring is judged.
+        XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Home", timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.buttons["Settings"].exists)
         let ring = app.buttons["session-context-button"]
         XCTAssertTrue(ring.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(waitForEnabled(ring, timeout: 10), app.debugDescription)
@@ -749,6 +770,9 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(ordinaryRing.label, "Manage Session")
         ordinaryRing.tap()
         XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 5), app.debugDescription)
+        let manageSessionDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(manageSessionDone.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertGreaterThan(manageSessionDone.frame.minY, app.windows.firstMatch.frame.height * 0.40, "Manage Session opens at medium (the detent Manage Home matches)")
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
         keepScreenshot(named: "ordinary-ring-manage-session")
     }
@@ -758,8 +782,6 @@ final class TronSmokeUITests: XCTestCase {
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
     }
 
-    // Failure mode: a Home chat opened before any status is known never routes its
-    // gear to Manage Home, because its claimed read is never published or promoted.
     // Home is never an ordinary session row: while it is Working, its pinned row
     // is the only Home entry in the dashboard (#756).
     @MainActor

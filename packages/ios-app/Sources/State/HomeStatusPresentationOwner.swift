@@ -123,9 +123,9 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     }
 }
 
-/// The chat route that a status claim and the gear's Manage Home routing both decide for. A
+/// The chat route that a status claim and the context ring's Manage Home routing both decide for. A
 /// Home route always presents Home, even when no chapter is openable, so its
-/// recovery state stays reachable from the gear. An ordinary chat presents only
+/// recovery state stays reachable from the composer's context ring. An ordinary chat presents only
 /// the chapter it is (`sessionId`), so an ordinary chat on the sealed
 /// predecessor during a rollover neither claims the status nor manages Home.
 enum HomeChatRouteKey: Equatable, Sendable {
@@ -413,7 +413,7 @@ final class HomeStatusPresentationOwner {
     }
 
     /// A claim's first publication decides it, by the same `HomeChatRouteKey` the
-    /// chat's gear routing uses. A matching route promotes the surface to the mounted
+    /// chat's context-ring routing uses. A matching route promotes the surface to the mounted
     /// cadence without an extra read. Any other route releases it and stops every
     /// read, while the published status stays for the dashboard.
     private func resolveClaim(with value: HomeStatusDTO) {
