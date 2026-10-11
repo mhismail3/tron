@@ -1641,6 +1641,29 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-renderer-search")
     }
 
+    /// Source actions are renderer primitives, not per-key code. The fixture
+    /// socket receives one unset via the existing dry-run/receipt path; unknown
+    /// actions stay display-only rather than dispatching arbitrary operations.
+    @MainActor
+    func testSettingsRendererUsesCurrentDefaultSourceAction() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-source-actions"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["settings-section-model-expand"].waitForExistence(timeout: 10))
+        app.buttons["settings-section-model-expand"].tap()
+        let reset = app.buttons["settings-row-model.ref-useCurrentDefault"]
+        XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.buttons["Unsupported action"].exists)
+        keepScreenshot(named: "settings-current-default-before")
+        tapScrolling(reset, in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        XCTAssertTrue(showsText("Fixture Lite", in: app))
+        XCTAssertTrue(showsText("Future source", in: app), "Unknown actions do not hide their value or badge")
+        keepScreenshot(named: "settings-current-default-after")
+    }
+
     /// A served catalog remains complete beyond its first page and a new search
     /// retires both the prior results and cursor without changing the setting.
     @MainActor

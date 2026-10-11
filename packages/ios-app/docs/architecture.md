@@ -780,6 +780,13 @@ fixture socket to prove redaction and persisted ordering.
 `testSettingsRendererNumberUsesSharedSlider` exercises a served number through selection
 and persistence; the legacy Agent Defaults journey protects the existing
 AgentConfigurationControls callers, which share the same choice and value-row primitives.
+Source badges may carry `useCurrentDefault` or `followDefault` actions. The row
+renders the Gateway's label with the shared inline action capsule and routes an
+unset through the same change owner; it contains no per-key reset logic. Unknown
+actions remain display-only badges, and a negotiated read-only row cannot reset.
+`testSettingsRendererUsesCurrentDefaultSourceAction` proves one applied unset
+against the hosted socket and preserves the unknown badge without dispatching it.
+This is primitive coverage; session-surface adoption still owns the runtime fence.
 Every edit is a `settings.change` dry run first: a refusal
 shows under its row and nothing is applied, and a change with `confirm` text asks first.
 `SettingsTrustCoordinator` owns the generic reads and the receipt-bound change, which the

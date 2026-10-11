@@ -13,7 +13,7 @@ import { writeProjectSettings } from "./project-settings-writer.js";
 import type { TrustService } from "./trust-service.js";
 import type { Actor, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
-import { readBinding, resolveSettings, targetLayers, type ChatStore, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
+import { readBinding, resolveSettings, targetLayers, type ChatStore, type FixedSetting, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
 import { KEYS, builtinValue, floorFor, floorInstances, hasRuntimeRequestApplier, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
 
@@ -63,8 +63,8 @@ export class SettingsModel {
    * whole SDK manager (which would also change fixed resource/shell settings).
    * Absence is meaningful for optional provider fields: the request boundary
    * replaces them after the SDK has composed its initial defaults. */
-  async requestSettings(sessionId: string, session: SessionSettingsSource, previousPins: Record<string, unknown>): Promise<{
-    settings: ReturnType<SettingsManager["getSettings"]>; requestPins: Record<string, unknown>;
+  async requestSettings(sessionId: string, session: SessionSettingsSource, previousPins: Record<string, FixedSetting>): Promise<{
+    settings: ReturnType<SettingsManager["getSettings"]>; requestPins: Record<string, FixedSetting>;
   }> {
     const keys = KEYS.filter(hasRuntimeRequestApplier);
     const resolved = await this.resolve({ kind: "session", sessionId }, session, keys.map(key => key.id));
@@ -77,8 +77,10 @@ export class SettingsModel {
       let value = row.value;
       if (typeof key.timing !== "string") {
         const previous = previousPins[key.id];
-        if (previous !== undefined && key.direction && timingFor(key, key.direction(previous, value)) === "fixed") value = previous;
-        requestPins[key.id] = value;
+        if (previous && key.direction && timingFor(key, key.direction(previous.value, value)) === "fixed") value = previous.value;
+        if (!previous || !deepEqual(previous.value, value)) requestPins[key.id] = {
+          value, from: row.layer, at: new Date().toISOString(), ref: randomUUID(), ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}),
+        };
       }
       if (value !== undefined) setPath(settings, binding.path, await key.type.validate(value, key.id));
     }
@@ -321,11 +323,11 @@ export interface ChangeRequest {
 /** The Chat layer's appliers: the session's slot-lane setters, whose lane
  * guards (idle configuration, chapter writability, runtime fence) stay. */
 export interface ChatAppliers {
-  setModel(ref: ModelRefValue): Promise<number>;
-  setThinking(level: string): Promise<number>;
-  setContextWindow(model: ModelRefValue, value: number | null): Promise<number>;
-  setTools(tools: string[]): Promise<void>;
-  setSetting(key: string, value: unknown, allowFixedDirection: boolean): Promise<number>;
+  setModel(ref: ModelRefValue, fixedAt?: FixedSetting): Promise<number>;
+  setThinking(level: string, fixedAt?: FixedSetting): Promise<number>;
+  setContextWindow(model: ModelRefValue, value: number | null, fixedAt?: FixedSetting): Promise<number>;
+  setTools(tools: string[], fixedAt?: FixedSetting): Promise<void>;
+  setSetting(key: string, value: unknown, allowFixedDirection: boolean, fixedAt?: FixedSetting): Promise<number>;
 }
 
 export interface ChangeContext {
@@ -395,6 +397,7 @@ interface Planned {
   tier: Tier;
   basis: TierBasis;
   changeId: string;
+  fixedAt?: FixedSetting;
 }
 
 const deepEqual = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
@@ -550,7 +553,7 @@ export class SettingsChangePath {
             // A redacted diff has no `before` to compare; the digest still binds its key.
             ...(change.redacted ? {} : { expected: change.before === undefined ? null : change.before }),
           }, context, runtime);
-          planned.push({ ...plan, changeId: change.changeId, tier: change.tier, basis: change.tierBasis });
+          planned.push({ ...plan, ...(change.fixedAt ? { fixedAt: change.fixedAt } : {}), changeId: change.changeId, tier: change.tier, basis: change.tierBasis });
         }
       } catch (error) {
         const message = error instanceof GatewayError && error.code === "conflict"
@@ -611,7 +614,7 @@ export class SettingsChangePath {
   private async hold(target: SettingsTarget, planned: readonly Planned[], context: ChangeContext, tier: Tier): Promise<ChangeResult> {
     const changes = planned.map((plan): PendingChange => ({
       changeId: plan.changeId, key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
-      layer: plan.request.layer, op: plan.request.op,
+      layer: plan.request.layer, op: plan.request.op, ...(plan.fixedAt ? { fixedAt: plan.fixedAt } : {}),
       ...(plan.key.redacted ? { redacted: true as const } : {
         ...(plan.before === undefined ? {} : { before: plan.before }), ...(plan.after === undefined ? {} : { after: plan.after }),
       }),
@@ -643,7 +646,7 @@ export class SettingsChangePath {
     return {
       changeId: change.changeId, at: request.createdAt, ...(context.commandId ? { commandId: context.commandId } : {}),
       actor: request.actor, target: request.target, layer: change.layer, key: change.key,
-      ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}), op: change.op,
+      ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}), op: change.op, ...(change.fixedAt ? { fixedAt: change.fixedAt } : {}),
       ...(change.redacted ? { changed: true as const, redacted: true as const } : {
         ...(change.before === undefined ? {} : { before: change.before }), ...(change.after === undefined ? {} : { after: change.after }),
       }),
@@ -728,8 +731,26 @@ export class SettingsChangePath {
     } else if (request.op !== "unset") {
       throw new GatewayError("invalid_request", "op must be set or unset");
     }
-    if (request.op === "unset" && binding.store === "chat" && binding.field !== "contextWindow") {
-      throw new GatewayError("invalid_request", `${key.label} always has a Chat value; set another value instead`);
+    let fixedAt: FixedSetting | undefined;
+    if (request.op === "unset" && (binding.store === "chat" || binding.store === "chat-settings") && key.timing === "fixed") {
+      // A fixed key never starts following a moving default: reset resolves
+      // below its Chat value now and records another explicit start snapshot.
+      const chat = structuredClone(stores.chat!);
+      if (binding.store === "chat") delete chat[binding.field];
+      else unsetPath(chat.settings, binding.path);
+      if (chat.fixed) delete chat.fixed[key.id];
+      const resolution = resolveSettings(target, { ...stores, chat }, { format: formatContext(runtime), options: optionSources(runtime), keys: [key.id] });
+      const row = resolution.keys.find(row => row.key === key.id);
+      after = row?.value;
+      if (after === undefined && binding.store === "chat" && binding.field === "contextWindow" && qualifiers.model) {
+        const ref = parseContextModelKey(qualifiers.model);
+        const model = runtime.getPhysicalModel(ref.provider, ref.id);
+        after = model && contextWindowLimits(model)?.default;
+      }
+      if (after === undefined) throw new GatewayError("conflict", `No current default is available for ${key.label}`);
+      after = await key.type.validate(after, key.id, { admitModel: ref => this.admitModel(runtime, ref) });
+      fixedAt = { value: after, from: row?.layer ?? "builtin", at: this.now().toISOString(), ref: randomUUID(), ...(row?.qualifiers ? { qualifiers: row.qualifiers } : {}) };
+      request = { ...request, op: "set", value: after };
     }
     const before = readBinding(stores, request.layer, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
     if (request.expected !== undefined && binding.store !== "chat" && !deepEqual(request.expected, before)) {
@@ -744,7 +765,7 @@ export class SettingsChangePath {
     return {
       request, key, binding, qualifiers, before, after,
       tier: raiseTier(floor, web ? 1 : 0), basis: { direction, floor, floorSource: source, web, risk: null },
-      changeId: randomUUID(),
+      changeId: randomUUID(), ...(fixedAt ? { fixedAt } : {}),
     };
   }
 
@@ -804,16 +825,16 @@ export class SettingsChangePath {
         return {};
       case "chat-settings": {
         if (!context.session || target.kind !== "session") throw new GatewayError("invalid_request", "A Chat-layer change needs its open session");
-        return { revision: await context.session.appliers.setSetting(plan.key.id, value, context.actor.kind === "ui" || context.approved === true) };
+        return { revision: await context.session.appliers.setSetting(plan.key.id, value, context.actor.kind === "ui" || context.approved === true, plan.fixedAt) };
       }
       case "chat": {
         const appliers = context.session?.appliers;
         if (!appliers || target.kind !== "session") throw new GatewayError("invalid_request", "A Chat-layer change needs its open session");
-        if (binding.field === "model") return { revision: await appliers.setModel(value as ModelRefValue) };
-        if (binding.field === "thinking") return { revision: await appliers.setThinking(value as string) };
-        if (binding.field === "tools") { await appliers.setTools(value as string[]); return {}; }
+        if (binding.field === "model") return { revision: await appliers.setModel(value as ModelRefValue, plan.fixedAt) };
+        if (binding.field === "thinking") return { revision: await appliers.setThinking(value as string, plan.fixedAt) };
+        if (binding.field === "tools") { await appliers.setTools(value as string[], plan.fixedAt); return {}; }
         const [provider, ...id] = qualifiers.model!.split("/");
-        return { revision: await appliers.setContextWindow({ provider: provider!, id: id.join("/") }, unset ? null : value as number) };
+        return { revision: await appliers.setContextWindow({ provider: provider!, id: id.join("/") }, unset ? null : value as number, plan.fixedAt) };
       }
       default:
         throw new GatewayError("unsupported", "This store has no applier yet");
@@ -827,7 +848,7 @@ export class SettingsChangePath {
       ...(context.commandId ? { commandId: context.commandId } : {}),
       actor: context.actor, target, layer: plan.request.layer, key: plan.key.id,
       ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
-      op: plan.request.op,
+      op: plan.request.op, ...(plan.fixedAt ? { fixedAt: plan.fixedAt } : {}),
       ...(redacted ? { changed: true as const, redacted: true as const } : {
         ...(plan.before === undefined ? {} : { before: plan.before }),
         ...(plan.after === undefined ? {} : { after: plan.after }),

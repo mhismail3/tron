@@ -160,6 +160,7 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   {
     id: "model.thinking[role=chat]", group: "model", fixed: { role: "chat" }, qualifier: "model", type: thinkingType,
+    builtin: "medium", // Pinned SDK DEFAULT_THINKING_LEVEL; capability clamping is resolver-owned.
     optionsSource: { name: "catalog.thinkingLevels", dependsOn: ["model.ref[role=chat]"] },
     layers: {
       chat: { store: "chat", field: "thinking" }, profile: { store: "profile", path: ["thinking", "chat"] },
@@ -464,7 +465,7 @@ export function builtinValue(key: KeyDeclaration, qualifiers: Partial<Record<Qua
  * Optional provider fields are replaced at the final provider boundary; fixed
  * directions are retained in the canonical Chat request snapshot. */
 export function hasRuntimeRequestApplier(key: KeyDeclaration): boolean {
-  return key.layers.chat?.store === "chat-settings" && ((key.group === "run" && key.timing === "live")
+  return key.layers.chat?.store === "chat-settings" && (key.timing === "fixed" || (key.group === "run" && key.timing === "live")
     || (key.effect === "next-request" && typeof key.timing !== "string"));
 }
 

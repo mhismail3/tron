@@ -20,7 +20,7 @@ import {
   trustedDelegatedController,
 } from "./delegated-provider.js";
 import type { AgentMessage, AgentTurnDecision, StreamFn } from "@earendil-works/pi-agent-core";
-import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings, readChatRequestPins } from "./chat-settings.js";
+import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings, readChatRequestPins, readChatFixedSettings } from "./chat-settings.js";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
@@ -172,8 +172,8 @@ import { projectHookRegistrations } from "./hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
 import { boundedUtf8Prefix } from "../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
-import type { ChatStore } from "../admin/settings-resolver.js";
-import { schemaKey } from "../admin/settings-schema.js";
+import type { ChatStore, FixedSetting } from "../admin/settings-resolver.js";
+import { KEYS, schemaKey } from "../admin/settings-schema.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
 // admitted the first property from the exact-owned status file. A payload key
@@ -692,6 +692,7 @@ function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefin
 
 export class RuntimeSlot {
   private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
+  private readonly newSettingsSessions = new WeakSet<AgentSession>();
   private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
   /** The open Home activation of the live runtime, undefined for every ordinary
    * runtime. Re-resolved in `runtimeFactory`, so a profile change takes effect
@@ -1333,7 +1334,7 @@ export class RuntimeSlot {
         setModel: busy, setThinking: busy, setContextWindow: busy, setTools: busy,
         // This tool already owns the running lane. It records the override;
         // request admission applies it, never a mutation of the active request.
-        setSetting: (key: string, value: unknown, allowFixedDirection: boolean) => this.persistChatRunSetting(key, value, allowFixedDirection),
+        setSetting: (key: string, value: unknown, allowFixedDirection: boolean, fixedAt?: FixedSetting) => this.persistChatRunSetting(key, value, allowFixedDirection, fixedAt),
       },
     });
     const actor = (toolCallId: string): Actor => {
@@ -1363,6 +1364,7 @@ export class RuntimeSlot {
       tools: session.getActiveToolNames(),
       settings: readChatSettings(session.sessionManager.getBranch()),
       requestPins: readChatRequestPins(session.sessionManager.getBranch()),
+      fixed: readChatFixedSettings(session.sessionManager.getBranch()),
     };
   }
 
@@ -1381,7 +1383,7 @@ export class RuntimeSlot {
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during settings resolution");
     if (JSON.stringify(previousPins) !== JSON.stringify(requestPins)) {
       const receiptId = randomUUID();
-      await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings: explicitSettings, requestPins }), receiptId);
+      await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings: explicitSettings, requestPins, fixed: readChatFixedSettings(branch) }), receiptId);
     }
     session.settingsManager.applyOverrides(settings);
     // These SDK controls are copied when Agent is created, not read from its
@@ -1393,10 +1395,14 @@ export class RuntimeSlot {
     return settings;
   }
 
-  private async persistChatRunSetting(key: string, value: unknown, allowFixedDirection: boolean): Promise<number> {
+  private async persistChatRunSetting(key: string, value: unknown, allowFixedDirection: boolean, fixedAt?: FixedSetting): Promise<number> {
     this.assertChapterWritable();
     const branch = this.sessionManager.getBranch();
     const settings = changeChatSetting(readChatSettings(branch), key, value);
+    const fixed = readChatFixedSettings(branch);
+    if (schemaKey(key).timing === "fixed") {
+      fixed[key] = { ...(fixedAt ?? { from: "chat", at: new Date().toISOString(), ref: randomUUID() }), value };
+    }
     const requestPins = readChatRequestPins(branch);
     // Tier admission and timing are separate: lowering a floor must not make
     // an unapproved widening live. Only an approval or the maintainer's tap
@@ -1408,21 +1414,23 @@ export class RuntimeSlot {
       const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, {
         cwd: this.cwd, home: this.isHomeChapter, chat: { ...chat, settings }, modelRuntime: this.runtime.session.modelRuntime,
       }, [key]);
-      requestPins[key] = resolved.keys[0]?.value;
+      const row = resolved.keys[0];
+      if (!row) throw new GatewayError("conflict", "Settings default is unavailable");
+      requestPins[key] = { value: row.value, from: row.layer, at: new Date().toISOString(), ref: randomUUID(), ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) };
     }
     const receiptId = randomUUID();
-    await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings, requestPins }), receiptId);
+    await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings, requestPins, fixed }), receiptId);
     this.revision += 1;
     this.publishSnapshot();
     return this.revision;
   }
 
   async setChatRunSetting(key: string, value: unknown, initiatingWorkToken?: string,
-    expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, allowFixedDirection = false): Promise<number> {
+    expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, allowFixedDirection = false, fixedAt?: FixedSetting): Promise<number> {
     return this.lane.run(async () => {
       this.assertConfigurationIdle(initiatingWorkToken);
       if (expectation) this.assertConfigurationExpectation(expectation);
-      return this.persistChatRunSetting(key, value, allowFixedDirection);
+      return this.persistChatRunSetting(key, value, allowFixedDirection, fixedAt);
     });
   }
 
@@ -2203,6 +2211,7 @@ export class RuntimeSlot {
           }
         }
       }
+      const startsNewChat = sessionManager.getEntryCount() === 0;
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
@@ -2232,13 +2241,22 @@ export class RuntimeSlot {
             })] : []),
         ] } : {}),
       });
+      if (startsNewChat) this.newSettingsSessions.add(created.session);
       // The transcript owns a chat's tool loadout. Pi's createAgentSession always
       // passes its configured defaults, which skips AgentSession's own transcript
       // restore, so a resumed, forked or reloaded chat would silently fall back
       // to the defaults and the next prompt would persist that (#327). Apply the
       // declared loadout here; a session without one keeps the defaults.
       const declared = getCurrentSystemMessage(sessionManager.buildSessionContext().messages);
-      if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
+      const branch = sessionManager.getBranch();
+      const fixedTools = readChatFixedSettings(branch)["tools.active"];
+      const fixedToolsIndex = fixedTools ? branch.findIndex(entry => entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY
+        && (entry.data as { fixed?: Record<string, FixedSetting> }).fixed?.["tools.active"]?.ref === fixedTools.ref) : -1;
+      const declaredIndex = branch.findLastIndex(entry => entry.type === "message" && entry.message.role === "system");
+      // A choice made after the last rendered system frame is already canonical,
+      // even if no prompt has yet caused the SDK to emit the next frame.
+      if (fixedTools && fixedToolsIndex > declaredIndex && Array.isArray(fixedTools.value)) created.session.setActiveToolsByName(fixedTools.value as string[]);
+      else if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
       this.runtimeProfiles.set(created.session, home ? "home" : "ordinary");
       this.homeRequestPolicy = home
         ? this.dependencies.homeRequestPolicy(sessionManager.getSessionId())
@@ -2337,7 +2355,47 @@ export class RuntimeSlot {
     });
     this.installRuntimeHooks();
     await this.bindSession();
-    await this.applyLiveRunSettings(this.runtime.session);
+  }
+
+  private async captureFixedDefaults(): Promise<void> {
+    const owners = this.dependencies.settings();
+    if (!owners) return;
+    const session = this.runtime.session;
+    const keys = KEYS.filter(key => key.timing === "fixed" && (key.layers.chat?.store === "chat" || key.layers.chat?.store === "chat-settings"));
+    const defaults = await owners.model.resolve({ kind: "session", sessionId: this.id }, {
+      cwd: this.cwd, home: this.isHomeChapter, chat: { settings: {} }, modelRuntime: session.modelRuntime,
+    }, keys.map(key => key.id));
+    const actual = this.settingsChatLayer();
+    const policy = this.contextPolicies.get(session);
+    const context = policy?.snapshot();
+    const fixed: Record<string, FixedSetting> = {};
+    for (const row of defaults.keys) {
+      const binding = schemaKey(row.key).layers.chat;
+      if (binding?.store !== "chat" && binding?.store !== "chat-settings") continue;
+      const value = binding.store === "chat-settings" ? row.value
+        : binding.field === "contextWindow" ? context?.effective : actual[binding.field];
+      if (value === undefined) continue;
+      // Startup fallback/explicit Home choices are not attributed to a default
+      // that did not supply them. Existing chats never acquire invented history.
+      const from = binding.store === "chat" && binding.field === "model" && row.value !== undefined && JSON.stringify(value) !== JSON.stringify(row.value)
+        ? "chat" : row.layer;
+      fixed[row.key] = { value, from, at: new Date().toISOString(), ref: randomUUID(), ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) };
+    }
+    if (context && session.model) policy!.set({ provider: session.model.provider, id: session.model.id }, context.effective);
+    await this.persistFixedSettings(fixed);
+  }
+
+  private async persistFixedSettings(fixed: Record<string, FixedSetting>): Promise<void> {
+    const branch = this.sessionManager.getBranch();
+    const receiptId = randomUUID();
+    await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId,
+      settings: readChatSettings(branch), requestPins: readChatRequestPins(branch), fixed }), receiptId);
+  }
+
+  private async recordFixedSetting(key: string, value: unknown, origin?: FixedSetting): Promise<void> {
+    const fixed = readChatFixedSettings(this.sessionManager.getBranch());
+    fixed[key] = { ...(origin ?? { from: "chat", at: new Date().toISOString(), ref: randomUUID() }), value };
+    await this.persistFixedSettings(fixed);
   }
 
   private effectiveResourceReloadOptions(): { resolveProjectTrust: () => Promise<boolean> } | undefined {
@@ -2561,6 +2619,11 @@ export class RuntimeSlot {
     this.forkBoundary = await this.dependencies.resolveForkBoundary?.(nextManager);
     this.hydrateCanonicalExtensionActivities();
     this.reconcileCanonicalDisplayArtifacts();
+    if (this.newSettingsSessions.has(session)) {
+      await this.captureFixedDefaults();
+      this.newSettingsSessions.delete(session);
+    }
+    await this.applyLiveRunSettings(session);
     this.revision += 1;
     this.publishSnapshot();
   }
@@ -9591,7 +9654,7 @@ export class RuntimeSlot {
 
   /** Direct runtime owners may omit expectations; every remote RPC requires
    * the originating runtime/model cut before entering this serialized lane. */
-  async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<number> {
+  async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
     return this.lane.run(async () => {
       this.assertConfigurationIdle(initiatingWorkToken);
       this.assertChapterWritable();
@@ -9604,7 +9667,10 @@ export class RuntimeSlot {
       if (this.liveProfile() === "home" && model.api === VIRTUAL_MODEL_API) {
         throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
       }
+      const previousThinking = this.runtime.session.thinkingLevel;
       await this.runtime.session.setModel(model as Model<never>);
+      await this.recordFixedSetting("model.ref[role=chat]", { provider, id: modelId }, fixedAt);
+      if (this.runtime.session.thinkingLevel !== previousThinking) await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel);
       // The Home record is the single source of truth for the model a re-enable
       // restores, and only an enabled Home's change belongs to it.
       if (this.liveProfile() === "home") {
@@ -9616,8 +9682,8 @@ export class RuntimeSlot {
     });
   }
 
-  async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string): Promise<number> {
-    return this.lane.run(() => {
+  async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<number> {
+    return this.lane.run(async () => {
       this.assertConfigurationIdle(initiatingWorkToken);
       this.assertChapterWritable();
       if (expectedRuntimeGeneration !== this.runtimeGeneration || expectedRevision !== this.revision) {
@@ -9627,6 +9693,7 @@ export class RuntimeSlot {
       if (!policy) throw new GatewayError("conflict", "Session context configuration is unavailable");
       try {
         policy.set({ provider, id: modelId }, contextWindow);
+        await this.recordFixedSetting("model.contextWindow", policy.snapshot()?.effective, fixedAt);
       } finally {
         // Pi may have staged the entry even when its disk append failed. Always
         // project the exact runtime outcome rather than leaving clients stale.
@@ -9638,20 +9705,21 @@ export class RuntimeSlot {
     });
   }
 
-  async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<number> {
-    return this.lane.run(() => {
+  async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
+    return this.lane.run(async () => {
       this.assertConfigurationIdle(initiatingWorkToken);
       this.assertChapterWritable();
       if (expectation) this.assertConfigurationExpectation(expectation);
       this.runtime.session.setThinkingLevel(level);
+      await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel, fixedAt);
       this.revision += 1;
       this.publishSnapshot();
       return this.revision;
     });
   }
 
-  async setTools(toolNames: string[], initiatingWorkToken?: string): Promise<void> {
-    await this.lane.run(() => {
+  async setTools(toolNames: string[], initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<void> {
+    await this.lane.run(async () => {
       this.assertIdle(false, initiatingWorkToken);
       const tools = this.runtime.session.getAllTools();
       const known = new Set(tools.map((tool) => tool.name));
@@ -9660,6 +9728,7 @@ export class RuntimeSlot {
       const hidden = toolNames.filter((name) => tools.find((tool) => tool.name === name)?.exposure === "hidden");
       if (hidden.length > 0) throw new GatewayError("invalid_request", `Hidden agent tools cannot be activated: ${hidden.join(", ")}`);
       this.runtime.session.setActiveToolsByName(toolNames);
+      await this.recordFixedSetting("tools.active", this.runtime.session.getActiveToolNames(), fixedAt);
       this.revision += 1;
       this.emit("session.contextChanged", {});
       this.publishSnapshot();

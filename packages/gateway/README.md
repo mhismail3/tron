@@ -795,8 +795,14 @@ journeys cover that distinction. Directional request settings also retain their
 effective value in canonical `requestPins`: image blocking narrows before SDK
 message conversion, including within a tool turn; default/outside widening stays
 fixed across fork/resume. A Chat-layer approval or maintainer tap can release it;
-lowering a risk floor alone cannot. Full fixed-value provenance/reset and
-approved Mac/Project widening propagation remain outstanding.
+lowering a risk floor alone cannot. New chats also record fixed model, thinking,
+context-window, tools and declared fixed Chat settings with their actual value,
+source, time and stable reference. Fork/resume preserve that provenance; a fixed
+Chat unset snapshots the current lower-layer default through the normal audited
+change path. Inherited snapshots are not explicit overrides in summaries. The
+generic native row handles the served reset action, but session-surface adoption,
+Home chapter carry-forward and approved Mac/Project widening propagation remain
+outstanding.
 A Chat-layer change needs `fence: {
 runtimeGeneration, model?, revision? }`, the runtime the client read; the lane's
 idle, chapter and fence guards are unchanged, and the receipt's work entry is the

@@ -2,7 +2,7 @@ import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import type { SettingsTarget } from "./settings-resolver.js";
+import type { FixedSetting, SettingsTarget } from "./settings-resolver.js";
 import type { Direction, LayerId, Qualifiers, Tier } from "./settings-types.js";
 
 /**
@@ -57,6 +57,7 @@ export interface ChangeEntry {
   /** Absent for redacted keys, which record only `changed`. */
   before?: unknown;
   after?: unknown;
+  fixedAt?: FixedSetting;
   changed?: true;
   redacted?: true;
   reason?: string;

@@ -2364,14 +2364,14 @@ export class GatewayService {
       chat: slot.settingsChatLayer(),
       modelRuntime: slot.modelRuntime,
       appliers: {
-        setModel: (ref) => slot.setModel(ref.provider, ref.id, workToken, expectation()),
-        setThinking: (level) => slot.setThinking(oneOf(level, "level", thinkingLevels), workToken, expectation()),
-        setContextWindow: (model, value) => {
+        setModel: (ref, fixedAt) => slot.setModel(ref.provider, ref.id, workToken, expectation(), fixedAt),
+        setThinking: (level, fixedAt) => slot.setThinking(oneOf(level, "level", thinkingLevels), workToken, expectation(), fixedAt),
+        setContextWindow: (model, value, fixedAt) => {
           const { runtimeGeneration } = expectation();
-          return slot.setContextWindow(model.provider, model.id, value, integer(fence!.revision, "fence.revision", 0, Number.MAX_SAFE_INTEGER), runtimeGeneration, workToken);
+          return slot.setContextWindow(model.provider, model.id, value, integer(fence!.revision, "fence.revision", 0, Number.MAX_SAFE_INTEGER), runtimeGeneration, workToken, fixedAt);
         },
-        setTools: (tools) => slot.setTools(tools, workToken),
-        setSetting: (key, value, allowFixedDirection) => slot.setChatRunSetting(key, value, workToken, expectation(), allowFixedDirection),
+        setTools: (tools, fixedAt) => slot.setTools(tools, workToken, fixedAt),
+        setSetting: (key, value, allowFixedDirection, fixedAt) => slot.setChatRunSetting(key, value, workToken, expectation(), allowFixedDirection, fixedAt),
       },
     };
   }

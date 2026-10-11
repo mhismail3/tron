@@ -148,7 +148,7 @@ function summarize(section: SectionDeclaration, sectionKeys: readonly PresentedK
     .sort((left, right) => left.presentation.order - right.presentation.order)
     .map(key => ({ key: key.key, ...(key.qualifiers ? { qualifiers: key.qualifiers } : {}), label: key.presentation.label, display: key.display }));
   const overrides = sectionKeys
-    .filter(key => key.applied && key.layer !== "builtin")
+    .filter(key => key.applied && key.layer !== "builtin" && (!key.fixedAt || key.fixedAt.from === "chat"))
     .map(key => ({
       key: key.key, ...(key.qualifiers ? { qualifiers: key.qualifiers } : {}), label: key.presentation.label, display: key.display,
       layer: key.layer, layerLabel: LAYER_LABELS[key.layer],

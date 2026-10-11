@@ -359,10 +359,24 @@ The **effect point** is a separate field: `next-turn`, `next-request`,
 `new-chat`, `reload` or `restart`. The row shows it when a change does not take
 effect at once ("Applies after restart").
 
-**Current implementation.** Fixed-at-start holds for model, thinking and
-context window through session entries, and for resources through Reload;
-fixed-value provenance and its reset action are still unfinished. Compaction
-changes refresh open chats through `GatewayService.settingsChanged`.
+**Current implementation.** New chats capture fixed model, thinking, context
+window, active tools and declared fixed Chat settings in canonical
+`tron.settings.v1` metadata (`value`, `from`, `at`, stable `ref`, and role
+qualifiers). SDK model/thinking entries and context policy remain their value
+owners. Metadata records their actual capability-clamped values, not a second
+runtime setting. Existing chats without provenance do not acquire fabricated
+history. Fork and cold resume preserve the metadata and tool choice; a later
+canonical choice wins over an older SDK system frame.
+
+The resolver exposes source badges and `fixedAt`. Inherited snapshots do not
+count as explicit overrides in section summaries. A fixed-key Chat unset means
+“Use the current default”: it resolves the lower layers once, records the source,
+and applies that exact value through the normal audit/approval path. Subsequent
+default changes still cannot move it. The generic iOS renderer understands this
+served action, but adoption in Manage Session/Home remains a separate slice.
+Image auto-resize uses its fixed snapshot at the actual conversion boundary.
+Resources still apply through Reload. Compaction changes refresh open chats
+through `GatewayService.settingsChanged`.
 
 Live Run declarations with a Chat settings binding resolve again before a
 prompt and before each provider request. The runtime overlays
@@ -393,8 +407,8 @@ values and unset, plus optional-value fork/cold resume.
 The bounded `settings-run-applied` session diagnostic shows the runtime policy
 at request admission, rather than merely the defaults a settings read resolves.
 
-Directional request settings now retain a canonical `requestPins` snapshot in
-`tron.settings.v1`. At start and before SDK message conversion, the schema's
+Directional request settings retain canonical `requestPins` snapshots with the
+same value/source/time/reference metadata in `tron.settings.v1`. At start and before SDK message conversion, the schema's
 direction/timing permits narrowing but retains a fixed-direction value. Image
 blocking therefore strips images from the next provider request, including the
 next request within a tool turn. A default or outside relaxation cannot expose
@@ -404,9 +418,10 @@ to the current default. Lowering the key's risk floor alone does not change its
 timing. Ordinary and Home provider-content journeys prove these boundaries.
 The resolver shows the effective pinned value separately from the stored override.
 
-This is not complete timing support: fixed-value provenance/reset, Home chapter
-carry-forward, and propagation of an approved Mac/Project widening into existing
-chats still need their runtime owners. The SDK's merge-only
+This is not complete timing support: Home chapter carry-forward and propagation
+of an approved Mac/Project widening into existing chats still need their runtime
+owners. End-to-end Chat reset adoption in the native session surfaces is also
+outstanding. The SDK's merge-only
 `applyOverrides` is not the owner of optional-field removal; the final provider
 boundary above is, after SDK default composition.
 

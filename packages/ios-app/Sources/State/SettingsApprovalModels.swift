@@ -85,9 +85,18 @@ struct SettingsApprovalsResponse: Decodable, Sendable {
 
 /// One badge as the resolver returns it; iOS maps `kind` to a style only.
 struct SettingsBadge: Decodable, Hashable, Sendable {
+    struct Action: Decodable, Hashable, Sendable {
+        let kind: String
+        let label: String
+    }
     let kind: String
     let label: String
     let detail: String?
+    let action: Action?
+
+    init(kind: String, label: String, detail: String?, action: Action? = nil) {
+        self.kind = kind; self.label = label; self.detail = detail; self.action = action
+    }
 }
 
 /// One resolved key instance from `settings.resolve` (docs/settings-model.md 3.1).

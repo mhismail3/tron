@@ -6,6 +6,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type ToolCall } from 
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
+import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { TrustService } from "./trust-service.js";
 import { APPROVAL_TTL_MS } from "./settings-approvals.js";
 import type { ChangeEntry } from "./settings-record.js";
@@ -67,7 +68,7 @@ function phone(): ClientContext {
 let command = 0;
 const commandId = () => `settings-gate-${String(++command).padStart(4, "0")}`;
 
-async function fixture() {
+async function fixture(options: { reasoning?: boolean } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-settings-gate-")));
   roots.push(root);
   const tronHome = join(root, "tron");
@@ -81,7 +82,7 @@ async function fixture() {
   vi.stubEnv("PI_OFFLINE", "1");
   await writeFile(join(agentDir, "extensions", "third-party.ts"), THIRD_PARTY_EXTENSION);
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, retry: { maxRetries: 3 }, defaultProvider: MODEL.provider, defaultModel: MODEL.id }));
-  const faux = fauxProvider({ provider: PROVIDER, models: [{ id: MODEL.id }, { id: MEMORY_MODEL.id, reasoning: false }], tokensPerSecond: 1_000_000 });
+  const faux = fauxProvider({ provider: PROVIDER, models: [{ id: MODEL.id, reasoning: options.reasoning ?? false }, { id: MEMORY_MODEL.id, reasoning: false }], tokensPerSecond: 1_000_000 });
   const modelRuntimeFactory = async () => {
     const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
@@ -191,6 +192,101 @@ const retries = (value: number, expected: number) => ({
 });
 
 describe("settings risk gate", () => {
+  it("fixed model and thinking retain their start source and reset through the audited current-default path", async () => {
+    const f = await fixture({ reasoning: true });
+    const slot = await f.registry.create(f.project);
+    const resolve = async () => await f.service.invoke(phone(), "settings.resolve", {
+      target: { kind: "session", sessionId: slot.id }, keys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"],
+    }) as unknown as { keys: Array<{ key: string; value: unknown; fixedAt?: { from: string; value: unknown; at: string }; badges: Array<{ kind: string; action?: { kind: string; label: string } }> }> };
+    const initial = await resolve();
+    expect(initial.keys.find(row => row.key === "model.ref[role=chat]")?.fixedAt).toMatchObject({ from: "mac", value: MODEL });
+    expect(initial.keys.find(row => row.key === "model.thinking[role=chat]")?.fixedAt).toMatchObject({ from: "builtin" });
+    const resetKey = (key: string) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL, revision: slot.snapshot().revision },
+      changes: [{ key, layer: "chat", op: "unset" }],
+    });
+    const startWindow = slot.snapshot().contextWindowPolicy!.effective;
+    const startTools = slot.settingsChatLayer().tools;
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [
+      { key: "model.thinking[role=chat]", layer: "mac", op: "set", value: "high" },
+      { key: "model.contextWindow", layer: "mac", qualifiers: { model: `${MODEL.provider}/${MODEL.id}` }, op: "set", value: 65_536 },
+      { key: "tools.active", layer: "mac", op: "set", value: ["read"] },
+    ] });
+    expect(slot.settingsChatLayer().thinking).toBe("medium");
+    expect(slot.snapshot().contextWindowPolicy!.effective).toBe(startWindow);
+    expect(slot.settingsChatLayer().tools).toEqual(startTools);
+    await resetKey("model.thinking[role=chat]");
+    await resetKey("model.contextWindow");
+    await resetKey("tools.active");
+    expect(slot.settingsChatLayer()).toMatchObject({ thinking: "high", tools: ["read"], contextWindow: { value: 65_536 } });
+    for (const key of ["model.thinking[role=chat]", "model.contextWindow", "tools.active"]) {
+      expect((await resolve()).keys.find(row => row.key === key)?.fixedAt?.from).toBe("mac");
+    }
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [
+      { key: "model.ref[role=chat]", layer: "mac", op: "set", value: MEMORY_MODEL },
+    ] });
+    expect(slot.snapshot().model).toMatchObject(MODEL);
+    expect((await resolve()).keys.find(row => row.key === "model.ref[role=chat]")?.fixedAt).toEqual(initial.keys[0]!.fixedAt);
+    await f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL },
+      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "unset" }],
+    });
+    expect(slot.snapshot().model).toMatchObject(MEMORY_MODEL);
+    const reset = (await resolve()).keys.find(row => row.key === "model.ref[role=chat]")!;
+    expect(reset.fixedAt).toMatchObject({ from: "mac", value: MEMORY_MODEL });
+    expect(reset.badges).toContainEqual(expect.objectContaining({ kind: "source", action: { kind: "useCurrentDefault", label: "Use the current default" } }));
+    expect((await f.history()).find(entry => entry.layer === "chat" && entry.key === "model.ref[role=chat]"))
+      .toMatchObject({ before: MODEL, after: MEMORY_MODEL, status: "applied" });
+    f.faux.setResponses([fauxAssistantMessage("retain these settings")]);
+    await slot.prompt("retain settings across fork");
+    await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "fixed settings turn settled");
+    const point = slot.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
+    const fork = await slot.fork(point.id, "at");
+    expect(slot.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toEqual(reset.fixedAt);
+    await f.registry.dispose();
+    const reopened = new RuntimeRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
+    registries.push(reopened);
+    await reopened.initialize();
+    await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut() || undefined, "fixed settings catalog cut");
+    settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime, sessions: reopened,
+      home: () => reopened.homeOwner(), registry: reopened });
+    const resumed = await reopened.acquire(fork.sessionId);
+    expect(resumed.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toEqual(reset.fixedAt);
+    expect(resumed.settingsChatLayer().tools).toEqual(["read"]);
+    transcript.push({ case: "fixed start source and current-default reset", steps: [{ initial, reset, resumed: resumed.settingsChatLayer() }] });
+  });
+  it("image resizing is fixed at start until the audited current-default reset", async () => {
+    const f = await fixture();
+    const slot = await f.registry.create(f.project);
+    const image = { type: "image" as const, mimeType: "image/png", data: syntheticPng(3000, 3000).toString("base64") };
+    const observed: Array<{ resized: boolean; bytes: number }> = [];
+    const observe = async () => {
+      f.faux.setResponses([async context => {
+        const images = context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === "image");
+        const delivered = images.at(-1)!;
+        observed.push({ resized: delivered.data !== image.data, bytes: delivered.data.length });
+        return fauxAssistantMessage("image resize observed");
+      }]);
+      await slot.prompt("observe resizing", [image]);
+      await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "resize request settled");
+    };
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [
+      { key: "context.images.autoResize", layer: "mac", op: "set", value: false },
+    ] });
+    await observe();
+    expect(observed.at(-1)?.resized).toBe(true);
+    expect(slot.settingsChatLayer().fixed?.["context.images.autoResize"]).toMatchObject({ from: "builtin", value: true });
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL }, changes: [{ key: "context.images.autoResize", layer: "chat", op: "unset" }] });
+    await observe();
+    expect(observed.at(-1)?.resized).toBe(false);
+    expect(slot.settingsChatLayer().fixed?.["context.images.autoResize"]).toMatchObject({ from: "mac", value: false });
+    transcript.push({ case: "fixed image resizing", steps: observed });
+  });
+
   it.each(["ordinary", "Home"] as const)("%s image narrowing reaches the next provider request and widening waits for approval or a new chat", async kind => {
     const f = await fixture();
     const slot = kind === "Home" ? await f.designateHome() : await f.chat();
@@ -263,7 +359,7 @@ describe("settings risk gate", () => {
     } }])).results);
     expect(lowered).toMatchObject({ status: "applied", tier: "quiet" });
     expect((await observe()).images).toBe(0);
-    expect(slot.settingsChatLayer().requestPins).toEqual({ "context.images.block": true });
+    expect(slot.settingsChatLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true }) });
     await f.service.invoke(phone(), "settings.change", {
       commandId: commandId(), target: { kind: "session", sessionId: slot.id },
       fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL },
@@ -414,7 +510,7 @@ describe("settings risk gate", () => {
     await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "narrowed request settled");
     const document = await f.macDocument();
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...document, images: { blockImages: false } }));
-    expect(slot.settingsChatLayer().requestPins).toEqual({ "context.images.block": true });
+    expect(slot.settingsChatLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true, from: "mac" }) });
     const expectedChat = { retry: { maxRetries: 0, provider: { timeoutMs: 10_000 } } };
     expect(slot.settingsChatLayer().settings).toEqual(expectedChat);
     const point = slot.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
@@ -436,7 +532,7 @@ describe("settings risk gate", () => {
       sessions: reopened, home: () => reopened.homeOwner(), registry: reopened });
     const resumed = await reopened.acquire(fork.sessionId);
     expect(resumed.settingsChatLayer().settings).toEqual(expectedChat);
-    expect(resumed.settingsChatLayer().requestPins).toEqual({ "context.images.block": true });
+    expect(resumed.settingsChatLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true, from: "mac" }) });
     let attempts = 0;
     let timeoutMs: number | undefined;
     f.faux.setResponses(Array.from({ length: 4 }, () => async (_context, options) => {

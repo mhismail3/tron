@@ -161,6 +161,18 @@ struct SettingsRendererRow: View {
                         }
                     }
                 }
+                if editable, control != .readOnly {
+                    // Action primitives are served with the source badge. A
+                    // future action stays a neutral badge, never an arbitrary
+                    // RPC; reset reuses the row's dry-run and receipt owner.
+                    ForEach(Array(badges.compactMap(\.action).enumerated()), id: \.offset) { _, action in
+                        if ["useCurrentDefault", "followDefault"].contains(action.kind) {
+                            Button { onChange(nil) } label: { TronInlineActionLabel(action.label) }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("\(settingsRowIdentifier(setting))-\(action.kind)")
+                        }
+                    }
+                }
                 if showsHelp, let help = presentation?.help {
                     TronSettingsCaption(help)
                 }

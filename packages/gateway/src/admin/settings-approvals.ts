@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { readJson, updateJsonLocked } from "../util/json.js";
 import type { Actor, TierBasis } from "./settings-record.js";
-import type { SettingsTarget } from "./settings-resolver.js";
+import type { FixedSetting, SettingsTarget } from "./settings-resolver.js";
 import type { LayerId, Qualifiers, Tier } from "./settings-types.js";
 
 /**
@@ -34,6 +34,7 @@ export interface PendingChange {
   /** Absent for a redacted key: the diff names the key, never the value. */
   before?: unknown;
   after?: unknown;
+  fixedAt?: FixedSetting;
   redacted?: true;
   tier: Tier;
   tierBasis: TierBasis;
@@ -63,7 +64,7 @@ const EMPTY: ApprovalsDocument = { version: 1, requests: [] };
 export function approvalDigest(target: SettingsTarget, changes: readonly PendingChange[]): string {
   return createHash("sha256").update(JSON.stringify({
     target,
-    changes: changes.map(change => [change.key, change.qualifiers ?? {}, change.layer, change.op, change.before ?? null, change.after ?? null]),
+    changes: changes.map(change => [change.key, change.qualifiers ?? {}, change.layer, change.op, change.before ?? null, change.after ?? null, change.fixedAt ?? null]),
   })).digest("hex");
 }
 

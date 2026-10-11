@@ -1,5 +1,6 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
+import type { FixedSetting } from "../admin/settings-resolver.js";
 import { hasRuntimeRequestApplier, schemaKey } from "../admin/settings-schema.js";
 
 export const CHAT_SETTINGS_ENTRY = "tron.settings.v1";
@@ -18,15 +19,28 @@ export function readChatSettings(entries: readonly SessionEntry[]): Record<strin
 
 /** Directional request values are branch-local timing snapshots, not explicit
  * overrides. A lower layer can narrow them live but cannot silently widen them. */
-export function readChatRequestPins(entries: readonly SessionEntry[]): Record<string, unknown> {
+export function readChatRequestPins(entries: readonly SessionEntry[]): Record<string, FixedSetting> {
+  return readChatSnapshots(entries, "requestPins");
+}
+
+export function readChatFixedSettings(entries: readonly SessionEntry[]): Record<string, FixedSetting> {
+  return readChatSnapshots(entries, "fixed");
+}
+
+function readChatSnapshots(entries: readonly SessionEntry[], field: "fixed" | "requestPins"): Record<string, FixedSetting> {
   const entry = entries.findLast(entry => entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY);
   if (!entry || entry.type !== "custom") return {};
-  const pins = (entry.data as { requestPins?: unknown } | null)?.requestPins;
-  if (pins === undefined) return {};
-  if (!pins || typeof pins !== "object" || Array.isArray(pins)) {
-    throw new GatewayError("conflict", "Canonical Chat request timing is invalid");
+  const snapshots = (entry.data as Record<string, unknown> | null)?.[field];
+  if (snapshots === undefined) return {};
+  if (!snapshots || typeof snapshots !== "object" || Array.isArray(snapshots)) throw new GatewayError("conflict", "Canonical Chat snapshots are invalid");
+  for (const value of Object.values(snapshots)) {
+    if (!value || typeof value !== "object" || typeof value.at !== "string" || !Number.isFinite(Date.parse(value.at))
+      || typeof value.ref !== "string" || !value.ref
+      || !["builtin", "mac", "project", "profile", "chat", "delegate"].includes(value.from)) {
+      throw new GatewayError("conflict", "Canonical Chat provenance is invalid");
+    }
   }
-  return structuredClone(pins) as Record<string, unknown>;
+  return structuredClone(snapshots) as Record<string, FixedSetting>;
 }
 
 /** The schema owns paths; callers cannot name an arbitrary SDK field. Undefined

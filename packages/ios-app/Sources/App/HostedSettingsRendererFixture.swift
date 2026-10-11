@@ -63,6 +63,7 @@ struct HostedSettingsRendererFixture: View {
 }
 
 private actor HostedSettingsRendererSocket: GatewaySocketConnection {
+    private let sourceActions = ProcessInfo.processInfo.arguments.contains("-settings-renderer-source-actions")
     private var hello = true
     private var receiver: CheckedContinuation<Data, Error>?
     private var pending: [Data] = []
@@ -103,7 +104,13 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private func resolution() -> JSONValue {
         let keys: [JSONValue] = [
             key("model.ref", group: "model", value: .object(["provider": .string("fixture"), "id": .string(model)]), display: modelName,
-                layer: "mac", presentation: presentation("Model", "The model new chats start with.", 10, "essential", "catalog",
+                layer: "mac", badges: sourceActions ? [.object([
+                    "kind": .string("source"), "label": .string("Fixture source"),
+                    "action": .object(["kind": .string("useCurrentDefault"), "label": .string("Use the current default")]),
+                ]), .object([
+                    "kind": .string("future"), "label": .string("Future source"),
+                    "action": .object(["kind": .string("futureAction"), "label": .string("Unsupported action")]),
+                ])] : [], presentation: presentation("Model", "The model new chats start with.", 10, "essential", "catalog",
                     extra: ["optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])),
             key("model.thinking", group: "model", value: model == "pro" ? .string(thinking) : .string("off"),
                 display: model == "pro" ? thinking.capitalized : "Off", presentation: presentation("Thinking", "How much the model reasons.", 20,
@@ -194,7 +201,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         }
         if !dryRun {
             switch key {
-            case "model.ref": model = value?.objectValue?["id"]?.stringValue ?? model
+            case "model.ref": model = value?.objectValue?["id"]?.stringValue ?? (sourceActions && change["op"]?.stringValue == "unset" ? "lite" : model)
             case "model.thinking": thinking = value?.stringValue ?? thinking
             case "run.retry.maxRetries": retries = value?.intValue ?? retries
             case "lab.invalidValue": invalidValue = value?.stringValue ?? invalidValue

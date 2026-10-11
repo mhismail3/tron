@@ -16,6 +16,14 @@ export type SettingsTarget =
   | { kind: "session"; sessionId: string }
   | { kind: "home" };
 
+export interface FixedSetting {
+  value: unknown;
+  from: LayerId | "delegate";
+  at: string;
+  ref: string;
+  qualifiers?: Qualifiers;
+}
+
 /** The Chat layer as the session record holds it (doc 3.2). */
 export interface ChatStore {
   model?: { provider: string; id: string };
@@ -26,7 +34,8 @@ export interface ChatStore {
   /** `tron.settings.v1`: explicit Chat-layer values for the other keys. */
   settings: Record<string, unknown>;
   /** Effective directional request values retained at this branch's boundary. */
-  requestPins?: Record<string, unknown>;
+  requestPins?: Record<string, FixedSetting>;
+  fixed?: Record<string, FixedSetting>;
 }
 
 export interface ProjectStore {
@@ -82,6 +91,7 @@ export interface ResolvedKey {
   applied: boolean;
   reason?: "untrusted";
   badges: Badge[];
+  fixedAt?: FixedSetting;
   layers: LayerValue[];
 }
 
@@ -143,7 +153,7 @@ export function readBinding(stores: SettingsStores, layer: LayerId, binding: Bin
     }
     case "chat-settings":
       return qualifiedOnly ? undefined : (keyId && stores.chat?.requestPins?.[keyId] !== undefined
-        ? stores.chat.requestPins[keyId] : readPath(stores.chat?.settings, binding.path));
+        ? stores.chat.requestPins[keyId].value : keyId && stores.chat?.fixed?.[keyId] ? stores.chat.fixed[keyId].value : readPath(stores.chat?.settings, binding.path));
     case "profile":
       return qualifiedOnly ? undefined : readPath(stores.profile, binding.path);
     case "home-memory":
@@ -306,6 +316,18 @@ function resolveInstance(
     }
   }
   if (key.redacted) badges.push({ kind: "state", label: "Not undoable" });
+  const candidate = stores.chat?.fixed?.[key.id] ?? stores.chat?.requestPins?.[key.id];
+  const fixedAt = layer === "chat" && candidate && JSON.stringify(candidate.value) === JSON.stringify(value)
+    && (!candidate.qualifiers?.model || candidate.qualifiers.model === qualifiers.model) ? candidate : undefined;
+  if (fixedAt) {
+    const binding = key.layers.chat;
+    const requested = binding?.store === "chat-settings" ? readPath(stores.chat?.settings, binding.path) : undefined;
+    if (requested !== undefined && JSON.stringify(requested) !== JSON.stringify(value)) {
+      badges.push({ kind: "state", label: "Applies to a new chat", detail: `Requested: ${format(requested)}` });
+    }
+    badges.push({ kind: "source", label: fixedAt.from === "chat" ? "Explicit choice" : `From default at start: ${format(fixedAt.value)} (${fixedAt.from === "delegate" ? "Home" : LAYER_LABELS[fixedAt.from]})`,
+      action: { kind: "useCurrentDefault", label: "Use the current default" } });
+  }
 
   return {
     key: key.id,
@@ -318,6 +340,7 @@ function resolveInstance(
     applied: !notApplied,
     ...(notApplied ? { reason: notApplied.reason } : {}),
     badges,
+    ...(fixedAt ? { fixedAt } : {}),
     layers: key.redacted ? layerValues.map(({ value: _value, ...rest }) => rest) : layerValues,
   };
 }
