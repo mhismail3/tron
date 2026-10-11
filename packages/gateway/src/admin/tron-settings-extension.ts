@@ -31,19 +31,22 @@ export interface SettingsToolAccess {
 /**
  * pi's own tools carry no annotations, so Tron declares the closed-world ones
  * here, bound to their built-in source so a third-party tool of the same name
- * declares for itself. `bash` is absent: a shell can reach the network.
+ * declares for itself. `bash` is trusted (decision 33): Tron passes pi's bash
+ * definition as its direct bash tool (`DirectBashProcessOwner`), so its source
+ * is `<sdk:bash>`, and owner attribution reserves the name from extensions.
  */
-const PI_CLOSED_WORLD: Readonly<Record<string, string>> = {
-  read: "builtin:read", edit: "builtin:edit", write: "builtin:write", grep: "builtin:grep", find: "builtin:find", ls: "builtin:ls",
+const PI_CLOSED_WORLD: Readonly<Record<string, readonly string[]>> = {
+  read: ["builtin:read"], edit: ["builtin:edit"], write: ["builtin:write"], grep: ["builtin:grep"], find: ["builtin:find"], ls: ["builtin:ls"],
+  bash: ["builtin:bash", "<sdk:bash>"],
   // codemode's own call reads nothing; each tool it calls is marked by its own declaration.
-  codemode: "builtin:codemode", tool_search: "builtin:tool-search",
+  codemode: ["builtin:codemode"], tool_search: ["builtin:tool-search"],
 };
 
 /** Whether a call to this tool marks the run as having read open-world content. */
 export function marksTurn(tool: Pick<ToolInfo, "name" | "annotations" | "sourceInfo"> | undefined): boolean {
   if (!tool) return true;
   if (tool.annotations?.openWorldHint === false) return false;
-  return PI_CLOSED_WORLD[tool.name] !== tool.sourceInfo.path;
+  return !(Object.hasOwn(PI_CLOSED_WORLD, tool.name) && PI_CLOSED_WORLD[tool.name]!.includes(tool.sourceInfo.path));
 }
 
 const CHANGE = Type.Object({

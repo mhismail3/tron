@@ -207,11 +207,16 @@ function actorLabel(actor: Actor): string {
   return actor.kind === "home" ? "Home" : actor.kind === "worker" ? "A Home task worker" : actor.kind === "agent" ? "A chat's agent" : "You";
 }
 
+/** Who asked, as the iPhone's approval row names it. */
+function requesterLabel(actor: Actor): string {
+  return actor.kind === "worker" && actor.taskId ? `Home task ${actor.taskId}` : actorLabel(actor);
+}
+
 /** A pending request as the iPhone shows it: the diff it would approve. */
 function approvalProjection(request: ApprovalRequest) {
   return {
     requestId: request.requestId, digest: request.digest, createdAt: request.createdAt, expiresAt: request.expiresAt,
-    target: request.target, actor: request.actor, ...(request.reason ? { reason: request.reason } : {}),
+    target: request.target, actor: request.actor, requester: requesterLabel(request.actor), ...(request.reason ? { reason: request.reason } : {}),
     changes: request.changes.map(change => {
       const key = schemaKey(change.key);
       const format = (value: unknown) => value === undefined ? "Not set" : key.type.format(value, { modelName: () => undefined });

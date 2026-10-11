@@ -441,7 +441,7 @@ Gateway serves it to clients; iOS holds no per-key code.
 | `effect` | `next-turn`, `next-request`, `new-chat`, `reload` or `restart`. |
 | `floor` | The code floor, one tier or per direction `{ widen, narrow }`. Tiers are `quiet`, `notify`, `approve`. The maintainer may override it ([5.4](#54-tiers)). |
 | `direction` | How to tell widen from narrow for this type (for example a larger budget widens, a removed tool narrows). Keys without a direction use one floor. |
-| `writers` | Which actors may request a change: `ui`, `home`, `worker`, `agent`. `outside` is observed, never admitted. |
+| `writers` | Which actors may request a change: `ui`, `home`, `worker`, `agent`. `outside` is observed, never admitted. The list is the grant: there is no per-task grant, and a task worker may change every key an agent may ([decision 34](#101-decisions)). |
 | `redacted` | Show "set" or "changed", never the value. The record holds no old value, so the change is not undoable ([Q19](#101-decisions)). |
 | `applier` | The owner that performs the write: the pi settings file, a session entry through the slot lane, the profile store, the trust store, the MCP config, or the connections policy. |
 
@@ -554,7 +554,7 @@ open:
 |---|---|---|
 | The maintainer on iPhone | `settings.change` from a row | Paired device id. The tap is the approval. |
 | Home | The `settings` tool | Home session and chapter, plus the triggering message id. |
-| A task worker | The `settings` tool, if its grant includes it | The worker session and the task id. |
+| A task worker | The `settings` tool, for every key whose `writers` include `worker`: the same keys as an agent ([decision 34](#101-decisions)) | The worker session and the task id. |
 | An agent in an ordinary chat | The `settings` tool | The session id and the tool call id. |
 | Outside Tron (hand edit, git, pi CLI) | Not admitted. Found by comparing the store with the record ([5.6](#56-outside-changes)). | `outside`, plus the file, and git `HEAD` and branch for repo files. |
 
@@ -719,9 +719,10 @@ fixes that 5.4 and 5.5 leave open:
   2026-10-11); an undeclared tool is untrusted. The `tool_call` hook sets it
   before the call executes, nested codemode calls included. pi's own tools carry
   no annotations, so the module declares `read`, `edit`, `write`, `grep`,
-  `find`, `ls`, `codemode` and `tool_search` closed-world against their
-  built-in source; `bash` is not declared, because a shell can reach the
-  network. Tron's tools declare it in their registrations; `web_search`,
+  `find`, `ls`, `bash`, `codemode` and `tool_search` closed-world against their
+  built-in source. `bash` is trusted ([decision 33](#101-decisions)): Tron
+  passes pi's bash as its direct bash tool, so its source is `<sdk:bash>`, and
+  no extension may register that name. Tron's tools declare it in their registrations; `web_search`,
   `web_fetch`, `computer` and the `knowledge` tool (its X, capture and Raindrop
   actions) declare `true`.
 - **Pushes.** A notify-tier change by an agent queues an `explicit` push; a
@@ -745,8 +746,13 @@ fixes that 5.4 and 5.5 leave open:
 - **A chat's own Chat layer** changes only while the chat is idle, so the tool
   refuses it during its own run; an approval later applies a pending Chat-layer
   change from the iPhone with the chat's fence.
-- **Workers** are writers of every key agents may write. A task worker is
-  recorded as `worker` with its task id.
+- **Workers** are writers of every key agents may write: a key's `writers`
+  list is the grant, with no per-task grant ([decision 34](#101-decisions)). A
+  task worker is recorded as `worker` with its task id.
+- **The iPhone's rows** read Gateway text only: `settings.approvals` gives each
+  request's `requester` and each change's `label`, `display` strings, raw
+  `before` and `after` and `confirm`; a dry run of the maintainer's own change
+  returns an approve-tier change's `confirm` text for his row to show first.
 
 ### 5.5 Approvals
 
@@ -1259,6 +1265,8 @@ Mohsin on 2026-10-10.
 | 30 | Protocol version | #762 removed RPCs, so the Gateway protocol version moves to 8 with no compatibility shim: an older iPhone app is refused at hello with "update required". Landing needs the manual Mac-first reinstall the README describes for a protocol step. |
 | 31 | Subdirectory chats (Q27) | The Project layer is the worktree root's `.pi/`, even for a chat started in a subdirectory. That changes what pi loads, so it is made deliberately with a test of its own; it is recorded on slice 6 (#764) and PR 798 ([4.3](#43-implemented-the-schema-and-the-resolver)). |
 | 32 | The web mark | A tool that does not declare `annotations.openWorldHint: false` is untrusted: any call to a tool with the hint missing or true marks the turn (one step up). Built-in tools that are safe declare `false` explicitly ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)). |
+| 33 | `bash` | `bash` is trusted: it does not mark the turn. Tron declares it `openWorldHint: false` on pi's behalf, as it does `read`, `edit` and `write` ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)). |
+| 34 | What a task worker may change | The same settings an agent may. A key's `writers` list is the grant; there is no separate per-task grant ([4.1](#41-fields), [5.1](#51-one-path-for-every-actor)). |
 
 ### 10.2 Open questions
 

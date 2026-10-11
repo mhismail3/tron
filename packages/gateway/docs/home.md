@@ -626,7 +626,8 @@ through the one change path, recorded as `home` with its chapter session and the
 tool call ([settings-model.md](settings-model.md) 5.1). Its tier is enforced like
 any agent's (5.4): a quiet floor applies, notify applies and pushes, approve holds
 a pending change for the maintainer's tap. `web_search`, `web_fetch` and the other
-tools that do not declare `openWorldHint: false` mark the activation, which
+tools that do not declare `openWorldHint: false` mark the activation (`bash` is
+declared trusted, decision 33), which
 raises the tier one step; unlike delegation (above), a settings change is gated on
 fetched content, because the mark is Gateway state read when the change is
 planned, never request text. The mark lives in the module, not in the cached

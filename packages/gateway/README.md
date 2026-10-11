@@ -787,7 +787,9 @@ change is recorded `pending`, a `waiting` push asks the maintainer, and the
 result is `{ status: "pending", approval: { requestId, digest, expiresAt } }`.
 Pending requests live in `<tronHome>/gateway/settings/approvals.json` (at most
 100 open). `settings.approvals {}` lists the open ones with their diff and
-`digest`; `settings.decide { commandId, requestId, digest, approved, fence? }`
+`digest`, each change with its `label`, raw `before` and `after`, Gateway `display`
+strings and any `confirm` text, and the request with `requester`, who asked as the
+iPhone names it; `settings.decide { commandId, requestId, digest, approved, fence? }`
 approves or declines one, bound to that exact diff. Approval re-plans every change
 against the store with the recorded `before` as `expected`, so a store that moved
 since, or a newer request for the same key, supersedes it and the approval is
@@ -809,9 +811,12 @@ the run's web mark from the `tool_call` hook, which runs before each call
 `annotations.openWorldHint: false` marks the run until it ends. Tron's own tools
 declare it; `web_search`, `web_fetch`, `computer` and the `knowledge` tool (its
 X, capture and Raindrop actions) declare `true`; pi's built-in `read`, `edit`,
-`write`, `grep`, `find`, `ls`, `codemode` and `tool_search` are declared in
-`tron-settings-extension.ts` against their built-in source; `bash` and any
-undeclared third-party or MCP tool mark the run.
+`write`, `grep`, `find`, `ls`, `bash`, `codemode` and `tool_search` are declared in
+`tron-settings-extension.ts` against their built-in source (`bash` is Tron's
+direct bash tool, `<sdk:bash>`; decision 33); any undeclared third-party or MCP
+tool marks the run. A task worker writes exactly the keys an ordinary chat's
+agent may: a key's `writers` list is the grant, and there is no per-task grant
+(decision 34).
 
 `modules.list` reports Tron's built-in extensions for Settings without opening a
 session. It returns one row per entry of the single `TRON_MODULES` definition

@@ -218,6 +218,9 @@ export interface ChangeOutcome {
   tier: Tier;
   revision?: number;
   git?: GitResult;
+  /** A dry run's: the key's `confirm` text when this change's tier is approve,
+   * for the maintainer's row to show before he makes it. */
+  confirm?: string;
   /** The store's resulting state when its applier reports one (trust's inspection). */
   result?: unknown;
   error?: { code: string; message: string };
@@ -324,7 +327,9 @@ export class SettingsChangePath {
             const error = errors.get(index);
             if (error) return { changeId: "", key: request.key, layer: request.layer, status: "failed" as const, tier: "quiet" as const, error: { code: error.code, message: error.message } };
             const plan = planned[next++]!;
-            return { changeId: "", key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}), layer: request.layer, status: held ? "pending" as const : "applied" as const, tier: plan.tier };
+            return { changeId: "", key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}), layer: request.layer, status: held ? "pending" as const : "applied" as const, tier: plan.tier,
+              // The maintainer's row shows this before an approve-tier change of his own (doc 5.4, item 4).
+              ...(plan.tier === "approve" && plan.key.confirm ? { confirm: plan.key.confirm } : {}) };
           }),
         };
       }

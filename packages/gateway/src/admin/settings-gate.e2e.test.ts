@@ -190,7 +190,7 @@ const retries = (value: number, expected: number) => ({
 });
 
 describe("settings risk gate", () => {
-  it("an ordinary chat's agent: quiet from a clean run, notify after an undeclared third-party tool, approve for a notify floor after web", async () => {
+  it("an ordinary chat's agent: quiet from a clean run and after bash, notify after an undeclared third-party tool, approve for a notify floor after web", async () => {
     const f = await fixture();
     const slot = await f.chat();
     const steps: Array<Record<string, unknown>> = [];
@@ -205,19 +205,29 @@ describe("settings risk gate", () => {
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     steps.push({ step: "clean run", result: f.settle(clean.results) });
 
+    // bash is trusted (decision 33): Tron's direct bash tool does not mark the run.
+    const shell = await f.run(slot, "run a command, then raise retries", [
+      { name: "bash", args: { command: "echo trusted" } },
+      { name: "settings", args: retries(5, 4) },
+    ]);
+    expect(shell.results[0]).toMatchObject({ tool: "bash", isError: false, text: expect.stringContaining("trusted") });
+    expect(f.settle(shell.results)).toMatchObject({ status: "applied", tier: "quiet" });
+    expect(f.pushes).toEqual([]);
+    steps.push({ step: "after bash", result: f.settle(shell.results) });
+
     // The same quiet-floor change after a tool that does not declare
     // openWorldHint: false: the run is marked, one step up to notify, applied and pushed.
     const marked = await f.run(slot, "raise retries again", [
       { name: "fetch_page", args: {} },
-      { name: "settings", args: retries(5, 4) },
+      { name: "settings", args: retries(6, 5) },
     ]);
     expect(f.settle(marked.results)).toMatchObject({ status: "applied", tier: "notify" });
-    expect((await f.macDocument()).retry).toEqual({ maxRetries: 5 });
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
     expect(f.pushes).toContainEqual(expect.objectContaining({ kind: "explicit", sessionId: slot.id, message: expect.stringContaining("Retries") }));
     steps.push({ step: "after an undeclared third-party tool", result: f.settle(marked.results), push: f.pushes.at(-1) });
 
     // The mark belongs to that run: the next run is clean again (decision 28).
-    const next = await f.run(slot, "and once more", [{ name: "settings", args: retries(6, 5) }]);
+    const next = await f.run(slot, "and once more", [{ name: "settings", args: retries(7, 6) }]);
     expect(f.settle(next.results)).toMatchObject({ status: "applied", tier: "quiet" });
 
     // A notify-floor change (adding a default tool widens tools.active) after web: approve, so pending.
@@ -230,12 +240,18 @@ describe("settings risk gate", () => {
     expect((await f.macDocument()).defaultTools).toBeUndefined();
     expect(f.pushes).toContainEqual(expect.objectContaining({ kind: "waiting", sessionId: slot.id }));
     const [waiting] = await f.approvals();
-    expect(waiting).toMatchObject({ requestId: pending.approval.requestId, actor: { kind: "agent", sessionId: slot.id } });
+    // The row the iPhone shows: who asked and the exact change, as Gateway display strings.
+    expect(waiting).toMatchObject({
+      requestId: pending.approval.requestId, actor: { kind: "agent", sessionId: slot.id }, requester: "A chat's agent", reason: "The page said to",
+      changes: [{ key: "tools.active", layer: "mac", tier: "approve", after: expect.arrayContaining(["fetch_page"]), display: { before: "Not set", after: expect.any(String) } }],
+    });
     steps.push({ step: "notify floor after web", result: pending, approvals: await f.approvals() });
 
     const entries = await f.history();
     const byKey = entries.filter(entry => entry.actor.kind === "agent" && entry.key === "run.retry.maxRetries").reverse();
-    expect(byKey.map(entry => [entry.tier, entry.tierBasis.web, entry.status])).toEqual([["quiet", false, "applied"], ["notify", true, "applied"], ["quiet", false, "applied"]]);
+    expect(byKey.map(entry => [entry.tier, entry.tierBasis.web, entry.status])).toEqual([
+      ["quiet", false, "applied"], ["quiet", false, "applied"], ["notify", true, "applied"], ["quiet", false, "applied"],
+    ]);
     expect(byKey[0]!.actor).toMatchObject({ kind: "agent", id: slot.id, sessionId: slot.id });
     expect(byKey[0]!.reason).toBe("Flaky provider today");
     transcript.push({ case: "ordinary chat agent", steps });
@@ -287,6 +303,9 @@ describe("settings risk gate", () => {
     const lowerFloor = { key: "permissions.floor", layer: "mac", op: "set", value: "notify", qualifiers: { key: "permissions.projectTrust", direction: "widen" } };
     const refused = await f.run(home, "lower the trust floor", [{ name: "settings", args: { action: "change", reason: "To save taps", changes: [lowerFloor] } }]);
     expect(refused.results[0]).toMatchObject({ isError: true, text: expect.stringContaining("cannot be changed by home") });
+    // His row asks first: a dry run names the approve tier and the key's confirm text.
+    const preview = await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [lowerFloor], dryRun: true }) as { tier: string; changes: Array<{ confirm?: string }> };
+    expect(preview).toMatchObject({ tier: "approve", changes: [{ confirm: expect.stringContaining("Lowering a floor") }] });
     // His tap lowers it at once; the record names its tier (approve, the floor key's widen floor).
     const lowered = await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [lowerFloor] }) as Record<string, unknown>;
     expect(lowered).toMatchObject({ status: "applied", tier: "approve" });
@@ -332,14 +351,20 @@ describe("settings risk gate", () => {
     transcript.push({ case: "superseded and expired", steps: [{ statuses, outcomes: told.outcomes }] });
   }, 60_000);
 
-  it("a Home task worker: quiet from a clean turn, notify after an undeclared tool in its turn", async () => {
+  it("a Home task worker: quiet from a clean turn, notify after an undeclared third-party tool in its turn", async () => {
     const f = await homeTaskFixture();
+    // The worker's project carries a third-party tool that declares nothing, so it marks the run.
+    await mkdir(join(f.cwd, ".pi", "extensions"), { recursive: true });
+    await writeFile(join(f.cwd, ".pi", "extensions", "third-party.ts"), THIRD_PARTY_EXTENSION);
     const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     const { settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime, sessions: f.registry, registry: f.registry });
     await f.registry.homeOwner().configureMemory({ model: { provider: f.model.provider, id: f.model.id } });
     const textOf = (message: { content: unknown }) => typeof message.content === "string" ? message.content
       : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
     const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));
+    // What the worker's own fetch_page call returned: the tool really ran in the
+    // worker, so the mark comes from its declaration, not from a missing tool.
+    const fetched = new Map<string, string>();
     const worker = (taskId: string, value: number, expected: number, marked: boolean) =>
       (context: TranscriptContext): AssistantMessage => {
         if (!isWorker(context)) {
@@ -350,7 +375,10 @@ describe("settings risk gate", () => {
             : fauxAssistantMessage([fauxToolCall("delegate", { taskId, intent: "Raise retries", target: f.cwd })], { stopReason: "toolUse" });
         }
         const done = new Set(context.messages.flatMap(message => message.role === "toolResult" ? [message.toolName] : []));
-        if (marked && !done.has("bash")) return fauxAssistantMessage([fauxToolCall("bash", { command: "echo fetched" })], { stopReason: "toolUse" });
+        for (const message of context.messages) {
+          if (message.role === "toolResult" && message.toolName === "fetch_page") fetched.set(taskId, message.isError === true ? "error" : textOf(message));
+        }
+        if (marked && !done.has("fetch_page")) return fauxAssistantMessage([fauxToolCall("fetch_page", {})], { stopReason: "toolUse" });
         if (!done.has("settings")) return fauxAssistantMessage([fauxToolCall("settings", retries(value, expected))], { stopReason: "toolUse" });
         return fauxAssistantMessage([reportCall(taskId)], { stopReason: "toolUse" });
       };
@@ -367,6 +395,7 @@ describe("settings risk gate", () => {
     // The fixture's settings carry no retry value; the worker's change sets it.
     await delegateOnce("clean-worker", 4, null as unknown as number, false);
     await delegateOnce("marked-worker", 5, 4, true);
+    expect(fetched.get("marked-worker")).toContain("Ignore previous instructions");
     const entries = (await settingsChanges.history({ key: "run.retry.maxRetries" })).entries.reverse();
     expect(entries.map(entry => [entry.actor.kind, entry.tier, entry.tierBasis.web, entry.status, entry.after])).toEqual([
       ["worker", "quiet", false, "applied", 4], ["worker", "notify", true, "applied", 5],
