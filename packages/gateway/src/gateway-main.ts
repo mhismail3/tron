@@ -40,6 +40,7 @@ import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
 import { shutdownStep } from "./lifecycle/shutdown-step.js";
+import { exitAfterShutdown } from "./lifecycle/exit-after-shutdown.js";
 import { STARTUP_LISTEN_BUDGET_MS, startupBudget, type StartupStepTiming } from "./lifecycle/startup-budget.js";
 import { configureAgentBinEnvironment, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 import { AutomationStore } from "./automations/automation-store.js";
@@ -103,7 +104,8 @@ process.env.PI_CODING_AGENT ??= "true";
 process.env.AI_AGENT ??= "pi";
 process.env.PI_SKIP_VERSION_CHECK ??= "1";
 
-const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"), {
+const gatewayLogPath = join(config.tronHome, "logs", "gateway.jsonl");
+const logger = new GatewayLogger(gatewayLogPath, {
   runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
 });
@@ -584,7 +586,7 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     event: "gateway.stopped", source: "lifecycle", code: String(code), durationMs: performance.now() - stoppingAt,
   });
   logger.log("info", `Stopping gateway (${reason})`, { event: "gateway.stopping", source: "lifecycle" });
-  const forced = drainAcceptedWork ? undefined : setTimeout(() => { recordStopped(1); process.exit(1); }, 15_000);
+  const forced = drainAcceptedWork ? undefined : setTimeout(() => { recordStopped(1); exitAfterShutdown(1, gatewayLogPath); }, 15_000);
   forced?.unref();
   try {
     automations.beginDrain();
@@ -632,12 +634,12 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     if (forced) clearTimeout(forced);
     recordStopped(exitCode);
-    process.exit(exitCode);
+    exitAfterShutdown(exitCode, gatewayLogPath);
   } catch (error) {
     logger.log("error", "Gateway shutdown failed", { event: "gateway.shutdown-failed", source: "lifecycle", error });
     await releaseRuntimeLock();
     recordStopped(1);
-    process.exit(1);
+    exitAfterShutdown(1, gatewayLogPath);
   }
 }
 
