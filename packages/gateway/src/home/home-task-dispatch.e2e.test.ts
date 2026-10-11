@@ -805,13 +805,17 @@ describe("Home task list RPC", () => {
     }
     const first = await service.invoke(client, "home.taskList", { limit: 2 }) as any;
     expect(first.items.map((row: any) => row.taskId)).toEqual(["list-4", "list-3"]);
+    // The result counts the whole store, not the page: five pending tasks, two on this page.
+    expect(first.counts).toEqual({ active: 5, finished: 0 });
     expect(first.items[0]).toMatchObject({ createdAt: expect.any(Number), updatedAt: expect.any(Number), title: "Finite work", lifecycle: "pending", spend: null });
     const oldestPath = await taskFile(f, "list-0");
     const oldestBytes = await readFile(oldestPath);
     try {
+      // Exact counts read every record, so one torn record refuses the list rather than hiding it.
       await writeFile(oldestPath, "{torn", { mode: 0o600 });
-      expect((await service.invoke(client, "home.taskList", { limit: 1 }) as any).items[0].taskId).toBe("list-4");
+      await expect(service.invoke(client, "home.taskList", { limit: 1 })).rejects.toMatchObject({ code: "conflict" });
     } finally { await writeFile(oldestPath, oldestBytes, { mode: 0o600 }); }
+    expect((await service.invoke(client, "home.taskList", { limit: 1 }) as any).counts).toEqual({ active: 5, finished: 0 });
     const base = (await store.read("list-4"))!;
     await store.put({ ...base, taskId: "arrived", revision: 1 }, null);
     const second = await service.invoke(client, "home.taskList", { limit: 2, cursor: first.nextCursor }) as any;

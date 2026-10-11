@@ -435,6 +435,9 @@ export interface OwnedOperationTerminal {
   errorCode?: string;
   assistantCompletionId?: string;
 }
+/** The terminal a task's Stop or deadline reports while the task waits between turns: no turn
+ * was running to interrupt, so the dispatcher reads it as a stop of the waiting task. */
+export const TASK_STOP_WAITING = "task-stop-waiting";
 
 interface RuntimeSlotHooks {
   broadcast: SessionBroadcast;
@@ -977,6 +980,11 @@ export class RuntimeSlot {
   private homeWakeTrigger: { eventId: string; taskId: string; operationId: string } | undefined;
   /** Whether the admitted operation is a wake, so the activation's idle notice names it. */
   private operationWasHomeWake = false;
+  /** A task worker's operation between turns: its last turn ended with live owned runs and no
+   * report, so the dispatcher's observer is held here instead of settling the task. A provider
+   * wake starts the next turn of the same task (`wakeOperationId` set once that turn runs). Only
+   * this instance holds it: a restart leaves a waiting task to cold reconciliation. */
+  private taskWait: { observer: (terminal: OwnedOperationTerminal) => Promise<void> | void; terminal: OwnedOperationTerminal; wakeOperationId?: string } | undefined;
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
    * runtime that did not load it. */
@@ -1973,6 +1981,7 @@ export class RuntimeSlot {
                 taskHash: createHash("sha256").update(this.taskWorker!.identity.taskId).digest("hex").slice(0, 16), reason }),
               reportSealed: () => this.taskWorker!.reportSealed,
               ownsSubagentRun: runId => this.ownsSubagentRun(runId),
+              ownsSupervisorRequest: requestId => this.ownsSupervisorRequest(requestId),
             }) }] : []),
           ];
       const services = await createAgentSessionServices({
@@ -2059,7 +2068,7 @@ export class RuntimeSlot {
         // bash schema is nevertheless the exact SDK definition registered here.
         ...(directBashProcesses ? { customTools: [
           directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition,
-          ...(this.taskWorker ? [this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.activeOperationId : undefined,
+          ...(this.taskWorker ? [this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined,
             async report => {
               // A sealed report decides the outcome, so no task-owned run may still be live then: settlement
               // would stop it after the outcome was fixed. Refuse under the liveness rule settlement uses.
@@ -3708,10 +3717,36 @@ export class RuntimeSlot {
   }
 
   private async notifyOwnedTerminal(terminal: OwnedOperationTerminal): Promise<void> {
-    const observer = this.ownedTerminalObservers.get(terminal.operationId);
+    const observer = this.ownedTerminalObservers.get(terminal.operationId)
+      ?? (this.taskWait?.wakeOperationId === terminal.operationId ? this.taskWait.observer : undefined);
     if (!observer) return;
     this.ownedTerminalObservers.delete(terminal.operationId);
+    // Only the task's own turns (its first operation, then each wake) hold or settle it; a steer
+    // or other owned operation reports to its own observer and never touches the wait.
+    if (this.taskWorker && (terminal.operationId === this.taskWorker.identity.operationId || this.taskWait?.wakeOperationId === terminal.operationId)) {
+      if (this.taskTurnAwaitsWake(terminal)) {
+        this.taskWait = { observer, terminal };
+        return;
+      }
+      this.taskWait = undefined;
+    }
     await observer(terminal);
+  }
+
+  /** The task operation a turn reports under. A wake that continues the held task is the task's
+   * next turn, so its report seals the task's operation, not the wake's own. */
+  private taskTurnOperationId(operationId: string): string {
+    return this.taskWait?.wakeOperationId === operationId && this.taskWorker ? this.taskWorker.identity.operationId : operationId;
+  }
+
+  /** A task turn that completed normally, without a report, while owned runs are live. The
+   * provider's completion or supervisor request wakes the same task for its next turn. A sealed or
+   * stopping task, a length, error or aborted turn, and a task with no live run settle now. */
+  private taskTurnAwaitsWake(terminal: OwnedOperationTerminal): boolean {
+    if (terminal.lifecycle !== "completed" || !this.taskWorker?.acceptsSteering) return false;
+    const last = this.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant");
+    return last?.type === "message" && last.message.role === "assistant" && last.message.stopReason === "stop"
+      && this.hasDetachedDashboardWork();
   }
 
   private async terminalizeInvocation(
@@ -7573,10 +7608,31 @@ export class RuntimeSlot {
     }
   }
 
-  /** Whether this session's canonical history launched the run. Task controls use it
-   * to refuse a stop or interrupt of any run the task did not start. */
-  ownsSubagentRun(runId: string): boolean {
-    return this.canonicalExtensionRunFacts().has(runId);
+  /** Whether this session owns a run: one its canonical history launched (a launch or a resume
+   * result), or a child run a workflow of this session names in its own provider status. Task
+   * controls use it to refuse a control of any run the task did not start, including a foreign
+   * workflow's child. Only this owner decides, so a control and a reply cannot disagree. */
+  async ownsSubagentRun(runId: string): Promise<boolean> {
+    const facts = this.canonicalExtensionRunFacts();
+    if (facts.has(runId)) return true;
+    for (const fact of facts.values()) {
+      // The status reader opens only a canonical directory: a launch result's path may name a symlinked root.
+      const directory = fact.asyncDir === undefined ? undefined : this.canonicalExtensionArtifactDirectory(fact.asyncDir);
+      if (directory === undefined) continue;
+      const status = await this.readExtensionStatusArtifact(directory, false).catch(() => undefined);
+      if (status?.mode === "workflow" && Array.isArray(status.steps)
+        && status.steps.some(step => (step as { runId?: unknown } | null)?.runId === runId)) return true;
+    }
+    return false;
+  }
+
+  /** Whether a supervisor request came from a run this session owns. The request is canonical
+   * evidence: its `subagent_supervisor_request` message names the child's run. */
+  async ownsSupervisorRequest(requestId: string): Promise<boolean> {
+    const request = this.sessionManager.getBranch().findLast(entry => entry.type === "custom_message"
+      && entry.customType === "subagent_supervisor_request" && (entry.details as { requestId?: unknown } | undefined)?.requestId === requestId);
+    const runId = request?.type === "custom_message" ? (request.details as { runId?: unknown } | undefined)?.runId : undefined;
+    return typeof runId === "string" && await this.ownsSubagentRun(runId);
   }
 
   /** Task-end settlement of this worker's async subagent runs. Every live async run is
@@ -7773,8 +7829,18 @@ export class RuntimeSlot {
    * presentation primitive (automatic compaction/retry may have another ID). */
   async cancelHomeTaskOperation(operationId: string, reason: string): Promise<void> {
     if (!this.taskWorker || this.taskWorker.identity.operationId !== operationId) throw new GatewayError("conflict", "Task cancellation owner changed");
-    if (this.activeOperationId !== operationId && this.operation?.id !== operationId) return;
-    await this.abort("agent", operationId, reason);
+    // Between turns no turn runs to abort: the held observer settles the waiting task now. The
+    // runs it still owns are stopped and joined by settlement, as for an interrupted turn.
+    if (this.taskWait && this.taskWait.wakeOperationId === undefined) {
+      const { observer, terminal } = this.taskWait;
+      this.taskWait = undefined;
+      await observer({ lifecycle: "interrupted", operationId, invocationId: terminal.invocationId, errorCode: TASK_STOP_WAITING });
+      return;
+    }
+    // A provider wake's turn is the task's running turn: its abort is the task's Stop.
+    const turnOperationId = this.taskWait?.wakeOperationId ?? operationId;
+    if (this.activeOperationId !== turnOperationId && this.operation?.id !== turnOperationId) return;
+    await this.abort("agent", turnOperationId, reason);
   }
 
   /** Starts one Home wake: the inbox's pending results start the run. */
@@ -8108,6 +8174,9 @@ export class RuntimeSlot {
         if (ownership?.operationId === this.taskWorker.identity.operationId) {
           await this.persistCanonicalCustomEntry(HOME_TASK_MARKER,
             JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...this.taskWorker.identity, sessionId: this.id })), `task:${operationId}`);
+        } else if (ownership?.kind === "subagentWake" && this.taskWait && this.taskWait.wakeOperationId === undefined
+          && this.taskWorker.acceptsSteering && this.activeOperationId === undefined && this.operation === undefined && !session.isStreaming) {
+          // The provider's wake continues the task this operation holds open; its marker stays the first one.
         } else {
           const fence = ownership?.taskFence;
           if (behavior !== "steer" || this.activeOperationId !== this.taskWorker.identity.operationId
@@ -8336,6 +8405,9 @@ export class RuntimeSlot {
           this.publishSnapshot();
         } else if (!queuesIntoActiveRun) {
           this.activeOperationId = operationId;
+          if (ownership?.kind === "subagentWake" && this.taskWait && this.taskWait.wakeOperationId === undefined) {
+            this.taskWait.wakeOperationId = operationId;
+          }
           // The canonical leaf immediately before Pi sees the input is the exact
           // activation start: the input's own entry is appended inside
           // `session.prompt` below, and steering later inserts entries after it,
@@ -8353,7 +8425,7 @@ export class RuntimeSlot {
           // Publish before entering Pi preflight. Automatic compaction can begin
           // inside that call before the RPC receives its admission result.
           this.publishSnapshot();
-          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null, session.systemPrompt);
+          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null, session.systemPrompt, ownership?.kind === "homeWake" ? "wake" : "user");
           this.operationWasHomeWake = ownership?.kind === "homeWake";
           if (this.homeRequestPolicy) {
             homeWakeTrigger = await this.dependencies.homeInboxAdmission(this.id, operationId, ownership?.kind === "homeWake" ? "wake" : "user", async message => {
@@ -8397,7 +8469,7 @@ export class RuntimeSlot {
             // must also revoke this exact pending prompt at SDK admission; an
             // aborted summary alone does not prevent Agent.prompt() starting.
             if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)
-              || (this.taskWorker && operationId !== this.taskWorker.identity.operationId
+              || (this.taskWorker && operationId !== this.taskWorker.identity.operationId && this.taskWait?.wakeOperationId !== operationId
                 && (!this.taskWorker.acceptsSteering || this.activeOperationId !== this.taskWorker.identity.operationId))) {
               preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
             } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
