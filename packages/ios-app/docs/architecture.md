@@ -1510,8 +1510,8 @@ immediate revocation; revoking this iPhone also removes its local profile.
 
 Home uses the ordinary `ChatView` transcript, composer, route and focus owners;
 there is no Home header bar (#740). The composer context ring of a
-chat that claims the Home status opens Manage Home (its gear opens Settings, #799), where the state line, memory line, Stop and every Home
-control live. The mounted composer scope supplies the sheet's immutable profile
+chat that claims the Home status opens Manage Home (its gear opens Settings, #799), where the state pill, memory line and every Home
+control live; the composer keeps the only Stop (#811). The mounted composer scope supplies the sheet's immutable profile
 identity. Both rendered admission and delayed callbacks use that owner identity,
 never the profile selected later; the mutation coordinator then captures and
 fences the lifecycle generation before asynchronous work. Gateway `active`
@@ -1524,11 +1524,12 @@ holds: a connection change clears the Home projection, but a presented sheet
 stays with the chat and re-reads from its profile/connection identity when the
 connection returns. Selecting another profile ends the chat route through the
 dashboard's profile route owner, which releases the sheet with it.
-Stop response and the composer invoke the same `ChatView.abortCurrentOperation`
-using the current canonical operation ID; Pause/Resume never substitute for Stop.
+The composer's Stop invokes `ChatView.abortCurrentOperation` with the current
+canonical operation ID; Pause/Resume never substitute for Stop.
 Pause memory, Resume memory and Disable Home use `HomeMutationCoordinator` and
-refresh the mounted status owner only on accepted terminal completion. Stop stays
-reachable while a Home mutation is running. Unresolved completion stays explicit,
+refresh the mounted status owner only on accepted terminal completion. The
+composer's Stop stays reachable while a Home mutation is running. Disable Home asks
+for confirmation first, like every destructive Manage Session action. Unresolved completion stays explicit,
 permits only receipt checks rather than replacement controls, and survives
 background/reconnect in the live invocation. An unresolved Disable retains the
 completion control even after authoritative status says Disabled; confirmed
@@ -1543,7 +1544,9 @@ Memory model row as its footer), a rows container for the Home sub-sheets, and a
 bottom container for pause/resume and disable. The settings-approvals section
 (#758) inserts between the stats card and the model card. Every Home sub-sheet
 opens at medium and drags to large, through the shared managed-sheet chrome.
-Its Memory row, Chapters, Tasks and Permissions read the same single load. The browser
+Its Memory row, Chapters, Tasks and Permissions read the same single load. Task
+recovery appears in Tasks and Permissions only when it needs attention; an
+available recovery is the normal state and has no row. The browser
 additionally requires authenticated `home-memory-browser.v1` and the chapter
 list `home-chapter-list.v1`; the context sheet requires only `home.v1`. The memory
 picker is the existing progressive model-selection row and ModelPicker, filtered

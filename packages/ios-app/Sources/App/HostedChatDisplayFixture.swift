@@ -529,12 +529,14 @@ private actor HostedHomeShellGateway {
     private func taskPermissions() -> JSONValue {
         let ids = ["request-existing", "request-approve", "request-deny"]
         let binding = taskBinding()
+        // A grant's expiry must equal its decision's exactly; read the clock once.
+        let expiresAt = nowMilliseconds() + 604_800_000
         var decisions: [JSONValue] = [.object(["id": .string("existing-decision"), "requestId": .string("request-existing"),
-            "decidedAt": .number(1000), "approved": .bool(true), "expiresAt": .number(nowMilliseconds() + 604_800_000)])]
+            "decidedAt": .number(1000), "approved": .bool(true), "expiresAt": .number(expiresAt)])]
         decisions += taskDecisions.keys.sorted().map { taskDecisions[$0]!.objectValue!["decision"]! }
         var grant = binding.objectValue!
         grant["id"] = .string("grant-one"); grant["decisionId"] = .string("existing-decision")
-        grant["expiresAt"] = .number(nowMilliseconds() + 604_800_000); grant["state"] = .string(grantRevoked ? "revoked" : "available")
+        grant["expiresAt"] = .number(expiresAt); grant["state"] = .string(grantRevoked ? "revoked" : "available")
         var scope: [String: JSONValue] = ["id": .string("scope-one"), "kind": .string("all-trusted-projects"),
             "active": .bool(!scopeRevoked), "restoreEpoch": .string("fixture-epoch"), "createdAt": .number(1000)]
         if scopeRevoked { scope["revokedAt"] = .number(2000) }
