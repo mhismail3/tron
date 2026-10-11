@@ -99,6 +99,15 @@ it("labels an assistant summary from the canonical Home item kind", async () => 
   await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
 });
 
+it("keeps legitimate byte-limit content instead of treating every size mention as a repair prompt", async () => {
+  const fx = await fixture();
+  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `The task requires short output. ${"detail ".repeat(500)}`));
+  const memory = await fx.open(fx.source, async () => fauxAssistantMessage("Keep output at most 512 bytes"));
+  await memory.entriesCommitted("home");
+  await memory.whenReady(3);
+  expect(memory.renderView(3).text).toContain("talk: Keep output at most 512 bytes");
+});
+
 it("refuses a model-written user label on an assistant Home item", async () => {
   const fx = await fixture();
   await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));

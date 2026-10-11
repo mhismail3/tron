@@ -704,14 +704,10 @@ export class EpisodicMemory {
 
   private attributedViewLine(start: number, span: number, text: string | undefined): string {
     if (text === undefined) return EPISODIC_PLACEHOLDER;
-    const kinds = new Set<EpisodicMessageRecord["kind"]>();
-    for (let index = start; index < start + span; index += 1) {
-      const kind = this.messages.get(index)?.kind;
-      if (kind) kinds.add(kind);
-    }
-    const labels: Record<EpisodicMessageRecord["kind"], string> = { user: "user", talk: "talk", echo: "echo", event: "event" };
-    const roles = [...kinds].map(kind => labels[kind]);
-    return `${roles.join("/")}: ${viewLine(text)}`;
+    // A merged line has no single speaker. Do not scan its entire historical
+    // span on every render, or claim a model-written sentence is user-authored.
+    const kind = span === 1 ? this.messages.get(start)?.kind : "summary";
+    return `${kind ?? "summary"}: ${viewLine(text)}`;
   }
 
   private setNode(record: EpisodicNodeRecord): void {
@@ -1289,5 +1285,5 @@ function viewLine(text: string | undefined): string {
 /** Model-generated metadata and echoed size-repair prompts are never summary content. */
 function invalidSummaryText(text: string): boolean {
   return /(?:^|;\s*)(?:user|talk|echo|event|assistant|tool):\s/iu.test(text)
-    || /(?:corrected line|output only (?:that )?line|(?:at most|limit is) \d+ bytes|end where it is cut|compress this message into one line|merge these two lines into one)/iu.test(text);
+    || /(?:the corrected line must|output only (?:that |the )?line|that line is \d+ bytes; the limit is|end where it is cut|compress this message into one line|merge these two lines into one)/iu.test(text);
 }
