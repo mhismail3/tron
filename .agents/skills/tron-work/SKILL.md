@@ -30,7 +30,12 @@ when the user wants the page. Report a `work:` error as is; do not retry with st
    `HANDOFF #<issue> FROM unknown`. This records an unknown prior owner without
    asserting session identity or liveness. Handoff also requires local and remote
    heads to match (except verified partial-handoff recovery); it does not accept
-   divergent or merely unpushed local heads, even with force.
+   divergent or merely unpushed local heads, even with force. For a clean unpublished
+   descendant from an authoritatively settled owner, first use
+   `scripts/tron work recover <issue> --expected-local <full-SHA> --expected-remote <full-SHA> --reason TEXT`.
+   This only publishes an unverified candidate and audits its exact heads; it does not
+   transfer ownership or accept the work. Then use ordinary `handoff`. Recovery has
+   no force override. Preserve dirty, divergent, unknown-owner or racing states.
 3. **Implement.** Ship the code, its owning docs, and the integration or E2E test
    that proves it. For a bug, add or extend a test that reproduces it and show it
    failing before the fix. Commit on the task branch; merge `origin/main` rather
