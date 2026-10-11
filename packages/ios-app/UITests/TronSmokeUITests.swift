@@ -551,7 +551,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-check-completion"].waitForExistence(timeout: 8),
                       "An unresolved disable must offer only the completion check")
         app.buttons["home-sheet-done-manage"].tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].exists)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].exists)
         // Authoritative disable does not resolve an unknown command receipt: the
         // ring still manages Home, and the fresh read shows Disabled.
         openManageHome(app)
@@ -569,7 +569,7 @@ final class TronSmokeUITests: XCTestCase {
         let row = app.buttons["home-pinned-row"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10))
         openManageHome(app)
         let state = app.descendants(matching: .any)["home-manage-state"]
         tapManageRow(app, "home-manage-pause")
@@ -586,7 +586,7 @@ final class TronSmokeUITests: XCTestCase {
         confirmHomeAction(app)
         XCTAssertTrue(waitForLabel(state, containing: "Disabled", timeout: 5))
         app.buttons["home-sheet-done-manage"].tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].exists)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].exists)
         // Confirmed disable returns the ring to Manage Session.
         XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Session", timeout: 8))
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 8))
@@ -653,7 +653,7 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["home-pinned-row"].tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
         // The Home chat's gear opens Settings, as it does in every chat (#799).
         let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
@@ -663,7 +663,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
         keepScreenshot(named: "home-gear-settings-sheet")
         app.buttons["Done"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5), app.debugDescription)
         // Its context ring opens Manage Home at the medium detent, like Manage Session.
         openManageHome(app)
         let state = app.descendants(matching: .any)["home-manage-state"]
@@ -851,7 +851,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"))
         keepScreenshot(named: "manage-home-background-accepted-paused")
         app.buttons["home-sheet-done-manage"].tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
     }
 
     /// Manage Home's pending settings changes (settings-model.md 5.5): each row
@@ -989,7 +989,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
         XCTAssertTrue(waitForLabel(row, containing: "Updating Home", timeout: 3), row.label)
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 15), app.debugDescription)
     }
 
     @MainActor
@@ -1014,7 +1014,7 @@ final class TronSmokeUITests: XCTestCase {
         let home = ready.buttons["home-pinned-row"]
         XCTAssertTrue(home.waitForExistence(timeout: 10))
         home.tap()
-        XCTAssertTrue(ready.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
+        XCTAssertTrue(ready.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10))
         XCTAssertTrue(ready.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
         ready.terminate()
 
@@ -1025,7 +1025,7 @@ final class TronSmokeUITests: XCTestCase {
             let designate = setup.buttons["home-pinned-row"]
             XCTAssertTrue(designate.waitForExistence(timeout: 10), state)
             designate.tap()
-            XCTAssertTrue(setup.staticTexts["Home fixture chat"].waitForExistence(timeout: 10), state)
+            XCTAssertTrue(setup.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), state)
             XCTAssertTrue(setup.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
             setup.terminate()
         }
@@ -1040,7 +1040,7 @@ final class TronSmokeUITests: XCTestCase {
         let home = app.buttons["home-pinned-row"]
         XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
         home.tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
         let count = app.staticTexts["fixture.home-status-count"]
         XCTAssertTrue(count.waitForExistence(timeout: 5))
@@ -1075,7 +1075,7 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["home-pinned-row"].tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
         // The ring's claim proves the Home status is routed before the ring is judged.
         XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Home", timeout: 10), app.debugDescription)
         XCTAssertTrue(app.navigationBars.buttons["Settings"].exists)
@@ -1088,7 +1088,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(state.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "home-ring-manage-home")
         app.buttons["home-sheet-done-manage"].tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
         // VoiceOver names the ring by what it opens.
         XCTAssertEqual(ring.label, "Manage Home")
 
