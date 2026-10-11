@@ -158,12 +158,45 @@ enum HomeStatusLinePresentation {
         }
     }
 
-    static func memory(_ status: HomeStatusDTO, unresolvedCommand: Bool) -> String {
-        if unresolvedCommand { return "Home change unresolved · Check completion" }
-        if status.memory.paused == true { return "Memory paused · New responses are blocked" }
-        if let blocked = status.memory.blocked { return "Memory blocked · \(blocked)" }
-        if !status.memory.configured { return "Choose a memory model before sending" }
-        return status.memory.open ? "Memory available" : "Memory configured"
+    /// The Memory row's subtitle. A blocked or unresolved memory names its reason
+    /// here, while the state pill carries the headline.
+    static func memory(_ status: HomeStatusDTO, summaries: Int?, unresolvedCommand: Bool) -> String {
+        if unresolvedCommand { return "Home change unresolved" }
+        if status.memory.paused == true { return "Paused" }
+        if let blocked = status.memory.blocked { return "Blocked · \(blocked)" }
+        if !status.memory.configured { return "Choose a memory model" }
+        guard status.memory.open else { return "Configured" }
+        guard let summaries else { return "Available" }
+        return "Available · \(summaries.formatted()) \(summaries == 1 ? "summary" : "summaries")"
+    }
+}
+
+/// The Manage Home rows' secondary lines, each read from the sheet's own load.
+enum HomeManageRowPresentation {
+    /// Chapter count, and the active chapter's share of the soft limit when measured.
+    static func chapters(_ list: HomeChapterListDTO?, fallback: HomeStatusDTO.Chapter?) -> String? {
+        guard let list else { return fallback.map(HomeChapterPresentation.manageSubtitle) }
+        let count = list.chapters.count == 1 ? "1 chapter" : "\(list.chapters.count.formatted()) chapters"
+        guard let active = list.chapters.last(where: { $0.state == .active }),
+              let percent = HomeChapterPresentation.softPercent(active, limits: list.limits) else { return count }
+        return "\(count) · \(percent)% of limit"
+    }
+
+    /// Active and finished counts from the first page. A further page makes the
+    /// finished count a floor, shown with a plus sign.
+    static func tasks(_ page: HomeTaskPageDTO?, admitted: Bool) -> String {
+        guard admitted, let page else { return "Unavailable while task recovery is closed" }
+        if page.items.isEmpty { return "No tasks yet" }
+        let active = page.items.filter { $0.lifecycle != .terminal }.count
+        let finished = page.items.count - active
+        return "\(active) active · \(finished)\(page.nextCursor == nil ? "" : "+") finished"
+    }
+
+    static func permissions(_ permissions: HomeTaskPermissionsDTO?) -> String {
+        guard let permissions else { return "Unavailable while task recovery is closed" }
+        let standing = permissions.scopes.contains(where: \.active) ? "All trusted projects" : "No standing scopes"
+        guard !permissions.pendingRequests.isEmpty else { return standing }
+        return "\(standing) · \(permissions.pendingRequests.count) pending"
     }
 }
 

@@ -42,7 +42,7 @@ and old reads arriving after a completion refresh. A user action captures the
 profile/lifecycle authority before its asynchronous task starts; mutations are
 not cancelled with presentation reads. Hosted `TronSmokeUITests` Manage Home
 journeys mount production chat and cover represented states, the existing Stop
-owner (now a sheet row), active-response pause, resume, disable,
+owner (the composer's Stop; Manage Home has no Stop row), active-response pause, resume, disable,
 background/reconnect and explicit unresolved completion.
 `testManageHomeRejectsStaleRouteAction` retains an actual mounted sheet
 callback, authenticates a successor profile, and proves the old
@@ -63,8 +63,8 @@ These simulator stills are not VoiceOver, animation, live Gateway or physical-de
 
 `testHomeCrossSurfaceProofMatrix` is the cross-surface proof for the Home stack. In one
 hosted run it mounts the production chat in light and dark, at normal and accessibility
-Dynamic Type, opens Manage Home from the composer context ring and each child sheet from it (memory
-settings, Home context, browse memory, chapters, tasks and permissions) and captures each. It proves background
+Dynamic Type, opens Manage Home from the composer context ring and each child sheet from it (Home context,
+memory, chapters, tasks and permissions) and captures each. It proves background
 and a hosted reconnect on the tasks sheet each start a fresh authoritative read:
 `fixture.home-task-list-reads` counts the Gateway's `home.taskList` calls. The Home
 fixture forwards scene transitions to the lifecycle as production does, and
@@ -80,15 +80,28 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeStatesAndStopOwner \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeAcceptedControlContinuesInBackground \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeBackgroundReconnectAndUnresolvedCompletion \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeRejectsStaleRouteAction \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskListStopSteerAndRedelivery \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskDetailOpensWorkerChat \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomePermissionRevokeRequiresConfirmation \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetDismissesWhenProfileSwitches \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowCapabilityDesignationAndExactProfileRoute \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeRolloverPendingRoutesSendAndFollowsSuccessor \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetsLoadingEmptyBlockedErrorAndReload \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeContextShowsBreakdownWithoutRawIdentifiers \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeMemoryRowDetailOpensExactEvidence \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChaptersSealedOpensTranscriptActiveBrowsesMemory \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeMemoryModelRowSelectsPhysicalModel \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSettingsRefusalAndEmptyCatalogAndBrowserCapability \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeMainSheetStructure \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeSubSheetsOpenAtMedium \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeSheetCaptureMatrix \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeUnresolvedDisableRetainsCompletionControl \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomePauseResumeDisableKeepsChat \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatStatusPollingResumesAfterCoveredManageHomeSheet \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetDismissesWhenProfileSwitches \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeRolloverPendingRoutesSendAndFollowsSuccessor \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowCapabilityDesignationAndExactProfileRoute \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatStatusPollingResumesAfterCoveredManageHomeSheet \
   --only-testing TronMobileUITests/TronSmokeUITests/testComposerContextRingOpensManageHomeInHomeAndManageSessionElsewhere \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeIsNotAnOrdinarySessionRowWhileWorking \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowNamesRunningDesignationAsUpdate
@@ -1030,6 +1043,21 @@ rechecks that under the lease and removes the lease file and the directory, as
 directory (a command between creating its lane and taking its lease) keeps it.
 A sweep's lease take never creates a lane directory, so a lane another holder
 removed meanwhile counts as busy instead of coming back marker-less.
+For an individually verified orphan that has no lane ownership marker,
+`scripts/tron-ios-test clean-unowned UUID NAME` is the only explicit escape
+hatch: provide the exact simulator UUID and exact current device name. The
+owner refuses malformed or unreadable lane markers, any marker claiming that
+UUID, any live lane lease in the discovered lane tree, nonempty malformed lane
+lease metadata, malformed Development state, and the remembered Development
+simulator. An unlocked empty lease is the normal idle state left when a holder
+truncates its metadata, so an unrelated idle lane does not block this exact
+cleanup. It rechecks device identity
+before shutdown and deletion, touches no other simulator or lane state, and is
+not a sweep, adoption, or way to bypass a lane claim. Inspect `status --all`
+first; use this only for a specifically identified orphan, never to reclaim
+unknown or actively used devices. This operation is intentionally destructive
+and deletes the device and its simulator data.
+
 `clean` in the runner or the Gateway E2E harness empties its lane down to the
 lease file, which the command itself cannot delete while its holder
 holds it; the holder removes the lane directory when the command ends, still
@@ -1136,8 +1164,10 @@ devices or simulators.
 ownership marker is ever shut down or deleted (a lane no command has used for 7
 days is reclaimed), each lane's lease is taken (without waiting) for the whole
 shutdown or removal, and lanes a live process holds are skipped.
-The remembered Development simulator (`scripts/tron-ios-simulator`) and every
-unmarked simulator are never shut down or deleted by the runner. Runs and
+The remembered Development simulator (`scripts/tron-ios-simulator`) is never
+shut down or deleted by test tooling. Unmarked simulators are never affected by
+a sweep; only the explicit `clean-unowned` command above can delete one, after
+its exact identity and absence of ownership have been verified. Runs and
 products are only ever removed inside a directory the runner proved with its own
 ownership marker, and only this worktree's and lane's runs are removed by
 `clean`.

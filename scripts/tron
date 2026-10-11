@@ -41,6 +41,9 @@ Commands:
   work start <issue> [--session <id>]
                                     Claim an open, unclaimed issue: remote branch,
                                     Project status, claim comment, and its worktree
+  work handoff <issue> --reason <text> [--session <id>] [--force-maintainer]
+                                    Transfer an existing claim in place; unknown owner
+                                    state refuses; force requires exact TTY confirmation
   work verify [--tests "<command>"]...
                                     Run the local checks the branch diff requires,
                                     plus each --tests command, on the current commit

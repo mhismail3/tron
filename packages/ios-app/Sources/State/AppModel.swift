@@ -4769,9 +4769,36 @@ final class AppModel {
                 throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the memory browser.", retryable: false, details: nil)
             }
         }
+        func optionalRead<Value>(_ value: () async throws -> Value) async throws -> Value? {
+            do { return try await value() }
+            catch is CancellationError { throw CancellationError() }
+            catch { return nil }
+        }
+        func chapterListCapable() -> Bool {
+            lifecycle.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
+        }
+        func readChapterList() async throws -> HomeChapterListDTO {
+            try HomeChapterListDTO.decode(try await read("home.chapterList"))
+        }
         switch query {
-        case .status:
-            return .status(try HomeStatusDTO.decode(try await read("home.status")))
+        case .manage:
+            let status = try HomeStatusDTO.decode(try await read("home.status"))
+            let context = try HomeContextDTO.decode(try await read("home.context"))
+            let chapters = chapterListCapable() ? try await readChapterList() : nil
+            // A refused task or permission read leaves its row "Unavailable"; the sheet still loads.
+            var tasks: HomeTaskPageDTO?
+            var permissions: HomeTaskPermissionsDTO?
+            if status.admitsTaskReads {
+                tasks = try await optionalRead {
+                    try HomeTaskPageDTO.decode(try await read("home.taskList", .object(["limit": .number(20)])))
+                }
+                permissions = try await optionalRead {
+                    try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions"))
+                }
+            }
+            return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks, permissions: permissions))
+        case .context:
+            return .context(try HomeContextDTO.decode(try await read("home.context")))
         case .tasks(let cursor):
             let status = try await readTaskStatus()
             var params: [String: JSONValue] = ["limit": .number(20)]
@@ -4784,15 +4811,22 @@ final class AppModel {
             let status = try await readTaskStatus()
             return .permissions(status.admitsTaskReads ? try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions")) : nil, status)
         case .chapters:
-            guard lifecycle.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true else {
+            guard chapterListCapable() else {
                 throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the chapter list.", retryable: false, details: nil)
             }
-            return .chapters(try HomeChapterListDTO.decode(try await read("home.chapterList")))
-        case .memory(let continuation):
+            return .chapters(try await readChapterList())
+        case .memory(let sessionID, let continuation):
             try requireMemoryBrowser()
             var values: [String: JSONValue] = ["limit": .number(20)]
             if let continuation { values["cursor"] = .string(continuation.cursor) }
-            return .memory(try HomeMemoryPageDTO.decode(try await read("home.memory.page", .object(values)), continuation: continuation))
+            if let sessionID { values["sessionId"] = .string(sessionID) }
+            let page = try HomeMemoryPageDTO.decode(try await read("home.memory.page", .object(values)), continuation: continuation)
+            // Each row names its chapter by ordinal; the list supplies the mapping.
+            var ordinals: [String: Int] = [:]
+            if chapterListCapable() {
+                for chapter in try await readChapterList().chapters { ordinals[chapter.sessionId] = chapter.ordinal }
+            }
+            return .memory(page, chapterOrdinals: ordinals)
         case .evidence(let source, let offset):
             try requireMemoryBrowser()
             let params = JSONValue.object(["evidence": try JSONValue.encode(source), "offset": .number(Double(offset))])
@@ -4804,11 +4838,11 @@ final class AppModel {
         homeStatus.retireSurface(surfaceToken)
     }
 
-    /// A profile-fenced ordinary route to one Home chapter, opened read-only from
-    /// the Chapters sheet: sealed chapters refuse mutation at the Gateway, and an
+    /// A profile-fenced ordinary route to one Home chapter or its worker chat, opened
+    /// from Manage Home: sealed chapters refuse mutation at the Gateway, and an
     /// ordinary chat on a Home chapter neither claims the Home status nor sends
     /// through `home.prompt`. A stale tap can never switch profiles.
-    func navigationRouteForHomeChapter(profileID: String, sessionID: String) throws -> SessionNavigationRoute {
+    func navigationRouteForHomeSession(profileID: String, sessionID: String) throws -> SessionNavigationRoute {
         guard lifecycle.selectedProfileID == profileID,
               connectionState == .connected,
               !sessionID.isEmpty else { throw CancellationError() }

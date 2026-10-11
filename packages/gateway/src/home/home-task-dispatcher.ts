@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import type { GatewayWorkHandle } from "../sessions/gateway-work-registry.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
-import type { OwnedOperationTerminal } from "../sessions/runtime-slot.js";
+import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "../sessions/runtime-slot.js";
 import { OwnedSessionDispatch, type OwnedOperationDeadline } from "../sessions/owned-session-dispatch.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/invocation-receipts.js";
 import { GatewayError } from "../errors.js";
@@ -14,6 +14,8 @@ import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
 import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
 import { HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "./home-task-subagents.js";
+import type { HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
+import { basename } from "node:path";
 
 export type HomeTaskDiagnostic =
   | HomeTaskAuthorizationDiagnostic
@@ -27,14 +29,24 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
 export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
-export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice { taskId: string; intent: string; target: string }
+/** `title` names the worker session; it is never persisted with the task record. */
+export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice { taskId: string; intent: string; target: string; title?: string }
 /** The durable record plus the worker's model from its own transcript. The model is
  * projected per read, never persisted with the task. */
-export type HomeTaskStatus = HomeTaskRecord & { workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns };
+export type HomeTaskStatus = HomeTaskRecord & HomeTaskDisplay & { workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns };
 export interface HomeTaskControlRequest { taskId: string; operationId: string }
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord> }
 const reportDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
+/** The longest name a task or its worker session is shown by. */
+export const HOME_TASK_TITLE_CHARACTERS = 80;
+
+/** The name a task is shown by: the worker session's name when it has one, else the brief's first non-empty line. */
+export function homeTaskTitle(brief: string, workerName: string | undefined): string {
+  const name = workerName?.trim();
+  const line = name || brief.split("\n").map(candidate => candidate.trim()).find(candidate => candidate.length > 0) || "";
+  return [...line].slice(0, HOME_TASK_TITLE_CHARACTERS).join("");
+}
 
 /** Installation capability owner. Each dispatch closure, not a parallel ID map,
  * owns its lease, cancellation signal, terminal promise and report lifetime. */
@@ -148,9 +160,11 @@ export class HomeTaskDispatcher {
   private async startOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle): Promise<HomeTaskHandle> {
     const input = structuredClone(request);
     const keys = Object.keys(input);
-    if (!["taskId", "intent", "target"].every(key => keys.includes(key)) || keys.some(key => !["taskId", "intent", "target", "model", "thinking"].includes(key))
+    if (!["taskId", "intent", "target"].every(key => keys.includes(key)) || keys.some(key => !["taskId", "intent", "target", "model", "thinking", "title"].includes(key))
       || typeof input.taskId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/u.test(input.taskId)
       || typeof input.intent !== "string" || !input.intent.trim() || Buffer.byteLength(input.intent) > 65536) throw new GatewayError("invalid_request", "Invalid task intent");
+    const title = typeof input.title === "string" ? input.title.trim() : undefined;
+    if (input.title !== undefined && (!title || [...title].length > HOME_TASK_TITLE_CHARACTERS)) throw new GatewayError("invalid_request", "Invalid task title");
     // Refused before any task record, namespace initialization or worker exists.
     const choice = await this.sessions.admitTaskWorkerChoice(input);
     const epoch = await this.setup.run(async () => {
@@ -187,6 +201,8 @@ export class HomeTaskDispatcher {
       // Trust is rechecked by the neutral creation/admission boundary too.
       lease = await dispatch.createWorker(task.target, reports);
       const { slot } = lease;
+      // The worker's canonical name is its transcript's session entry, written before its first prompt.
+      if (title) await slot.rename(title);
       // The slot's own configuration owners record the choice in the worker's transcript
       // before its first prompt. An omitted model keeps the session's default.
       if (choice.model) await slot.setModel(choice.model.provider, choice.model.id);
@@ -248,9 +264,11 @@ export class HomeTaskDispatcher {
             if (entry.type !== "custom" || entry.customType !== INVOCATION_RECEIPT_TYPE) return false;
             const receipt = parseInvocationReceipt(entry.data);
             return receipt?.receiptKind === "terminal" && receipt.lifecycle === "interrupted"
-              && receipt.operationId === operationId && receipt.invocationId === outcome.terminal.invocationId && receipt.sessionId === slot.id;
+              && receipt.operationId === outcome.terminal.operationId && receipt.invocationId === outcome.terminal.invocationId && receipt.sessionId === slot.id;
           });
-        const interrupted = interruption !== undefined;
+        // A Stop that landed between turns interrupted no turn, so it has no interruption receipt to
+        // pin: the waiting terminal and the durable stop intent are its proof.
+        const interrupted = interruption !== undefined || (outcome.state === "terminal" && outcome.terminal.errorCode === TASK_STOP_WAITING);
         // Stop intent is append-only. Qualify before entering the store update:
         // missing proof is not namespace corruption or a publication attempt.
         const stoppedBeforeConversation = cut.state === "absent";
@@ -354,7 +372,26 @@ export class HomeTaskDispatcher {
   async status(taskId: string): Promise<HomeTaskStatus> {
     const task = await this.result(taskId);
     const workerModel = task.sessionId ? await this.sessions.taskWorkerModel(task.sessionId) ?? null : null;
-    return { ...task, workerModel, subagents: await this.subagents(task), subagentRuns: await this.liveSubagentRuns(task) };
+    return { ...task, ...await this.display(task), workerModel, subagents: await this.subagents(task), subagentRuns: await this.liveSubagentRuns(task) };
+  }
+
+  /** The list page of the newest tasks, each with its display. Reads each listed record once more, so
+   * a page costs at most twice its `limit` record reads and never a report body. */
+  async list(input: { limit?: number; cursor?: string }): Promise<HomeTaskPage> {
+    const page = await this.store.page(input);
+    const items: HomeTaskSummary[] = [];
+    for (const item of page.items) {
+      const task = await this.store.read(item.taskId);
+      if (!task) throw new GatewayError("conflict", "Listed task is missing");
+      items.push({ ...item, ...await this.display(task), sessionId: task.sessionId });
+    }
+    return { ...page, items, counts: await this.store.counts() };
+  }
+
+  /** A task's display. A worker's name is read from its canonical session, never a transcript scan. */
+  private async display(task: HomeTaskRecord): Promise<HomeTaskDisplay> {
+    const workerName = task.sessionId ? await this.sessions.taskWorkerName(task.sessionId) : undefined;
+    return { title: homeTaskTitle(task.intent.text, workerName), project: basename(task.target) };
   }
 
   /** The worker's live subagent runs, newest first and bounded for status. Only an active

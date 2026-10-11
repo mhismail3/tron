@@ -16,6 +16,7 @@ import cleanup  # noqa: E402
 import comments  # noqa: E402
 import dashboard  # noqa: E402
 import land  # noqa: E402
+import handoff  # noqa: E402
 import start  # noqa: E402
 import tracking  # noqa: E402
 import verify  # noqa: E402
@@ -39,6 +40,11 @@ def main(argv: list) -> int:
     begin = commands.add_parser("start", help="claim an issue and create its branch and worktree")
     begin.add_argument("issue", type=int, help="issue number")
     begin.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
+    transfer = commands.add_parser("handoff", help="transfer a claim after authoritative owner settlement proof")
+    transfer.add_argument("issue", type=int)
+    transfer.add_argument("--session", help="new owner session (default: WORK_SESSION_ID, PI_SESSION_ID)")
+    transfer.add_argument("--reason", required=True, help="concise reason recorded in the public audit comment")
+    transfer.add_argument("--force-maintainer", action="store_true", help="override unknown owner state after exact interactive confirmation (including missing legacy owner)")
     check = commands.add_parser("verify", help="run the local checks the branch diff requires")
     check.add_argument("--tests", action="append", default=[], metavar="COMMAND",
                        help="integration or E2E command to run from the repository root; repeat for each")
@@ -100,6 +106,8 @@ def main(argv: list) -> int:
             return bootstrap.run(Gh(root), root, config, args.apply, args.report)
         if args.command == "start":
             return start.run(Gh(root), Path.cwd(), config, args.issue, args.session)
+        if args.command == "handoff":
+            return handoff.run(Gh(root), Path.cwd(), config, args.issue, args.session, args.force_maintainer, args.reason)
         if args.command == "verify":
             base_ref = f"{config['claim']['remote']}/{config['claim']['baseBranch']}"
             return 0 if verify.verify(root, config, args.tests, base_ref) else 1
@@ -137,7 +145,7 @@ def main(argv: list) -> int:
             return land.land(Gh(root), root, config, args.title, args.summary_file, args.tests, args.dry_run)
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
-    except (GhError, bootstrap.BootstrapError, claim.ClaimError, verify.VerifyError, dashboard.DashboardError,
+    except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, verify.VerifyError, dashboard.DashboardError,
             land.LandError, warm.WarmError, cleanup.CleanupError, tracking.TrackingError, FileNotFoundError,
             json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)

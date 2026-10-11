@@ -7,6 +7,7 @@ import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
 import { HomeTaskDispatcher, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest } from "./home-task-dispatcher.js";
 import type { HomeTaskSubagents } from "./home-task-subagents.js";
+import { HOME_CHAPTER_TOPIC_COUNT, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { HomeChapterList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryPage, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
@@ -194,6 +195,8 @@ export class HomeOwner {
    * open activation rather than dropping it. A fork is a new id, hence a new
    * seam and no activation. */
   private readonly policies = new Map<string, HomeRequestPolicy>();
+  /** Per-chapter counts read from canonical files; a memory cache only (`home-chapter-contents.ts`). */
+  private readonly chapterContents = new HomeChapterContentsReader();
   /** A creation-time Home profile exists before designation publishes its chapter. */
   private designating = false;
   private record: HomeRecord | undefined;
@@ -330,7 +333,7 @@ export class HomeOwner {
   async taskList(input: { limit?: number; cursor?: string }) {
     const owner = await this.taskOwner();
     if (this.unavailable) throw new GatewayError("conflict", "Home is unavailable", false, { reason: this.unavailable });
-    try { return await owner.store.page(input); }
+    try { return await owner.list(input); }
     catch (error) {
       if (error instanceof HomeTaskStoreError) throw new GatewayError("conflict", "Home task list refused", false, { reason: error.code });
       throw error;
@@ -623,6 +626,7 @@ export class HomeOwner {
     this.assertAvailable();
     const record = this.record;
     if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
+    const topics = await this.chapterTopics(record);
     const chapters: HomeChapterSummary[] = [];
     for (const chapter of record.chapters) {
       const sessionPresent = await this.options.sessions.sessionPresent(chapter.sessionId);
@@ -633,6 +637,8 @@ export class HomeOwner {
         bytes = metrics.bytes;
         entries = metrics.entries;
       }
+      const counts = await this.chapterContents.counts(chapter.sessionId,
+        await this.options.sessions.sessionFile(chapter.sessionId), chapter.state === "reserved");
       chapters.push({
         sessionId: chapter.sessionId,
         ordinal: chapter.ordinal,
@@ -643,6 +649,7 @@ export class HomeOwner {
         ...(chapter.sealedAt === undefined ? {} : { sealedAt: chapter.sealedAt }),
         ...(bytes === undefined ? {} : { bytes }),
         ...(entries === undefined ? {} : { entries }),
+        ...(counts === undefined ? {} : { contents: { ...counts, topics: topics.get(chapter.sessionId) ?? [] } }),
       });
     }
     return {
@@ -652,6 +659,24 @@ export class HomeOwner {
       limits: { softBytes: HOME_SOFT_BYTES, softEntries: HOME_SOFT_ENTRIES, hardBytes: HOME_HARD_BYTES, hardEntries: HOME_HARD_ENTRIES },
       chapters,
     };
+  }
+
+  /**
+   * Each chapter's newest memory summaries, from the open memory only. Without an open memory
+   * there is nothing to show, so no chapter has topics. An unavailable memory is the same
+   * answer, never a failed chapter list: the counts above do not depend on it.
+   */
+  private async chapterTopics(record: HomeRecord): Promise<Map<string, string[]>> {
+    const memory = this.memory?.sessionId === record.homeId ? this.memory.owner : undefined;
+    if (!memory) return new Map();
+    try {
+      return await memory.browserRead(async episodic => new Map([...episodic.recentSummaries(
+        record.chapters.map(chapter => chapter.sessionId), HOME_CHAPTER_TOPIC_COUNT)]
+        .map(([sessionId, summaries]) => [sessionId, summaries.map(homeChapterTopic)])));
+    } catch (error) {
+      if (error instanceof GatewayError || error instanceof EpisodicMemoryError || error instanceof HomeMemoryRefusal) return new Map();
+      throw error;
+    }
   }
 
   /** The admitted model for the enabled Home at the runtime construction
@@ -1100,6 +1125,9 @@ export class HomeOwner {
   }
 
   async memoryPage(request: HomeMemoryPageRequest, signal?: AbortSignal): Promise<HomeMemoryPage> {
+    if (request.sessionId !== undefined && !this.record?.chapters.some(chapter => chapter.sessionId === request.sessionId)) {
+      throw new GatewayError("not_found", "Session is not a chapter of Tron Home");
+    }
     return this.browserRead(async memory => memory.browserPage(request), signal);
   }
 
@@ -1176,6 +1204,12 @@ export class HomeOwner {
         viewBytes: step.viewBytes,
         effectiveTokens: step.effectiveTokens,
         contextWindow: step.contextWindow,
+        breakdown: {
+          activation: { state: evidence.activationOpen ? "running" : "settled", kind: evidence.kind, startedAt: evidence.startedAt },
+          contextWindow: step.contextWindow,
+          effectiveTokens: step.effectiveTokens,
+          sections: step.sections.map(section => ({ ...section })),
+        },
       } : {}),
       ...(evidence.refusal ? { lastRefusalReason: evidence.refusal.reason, lastRefusalDetail: evidence.refusal.detail } : {}),
     };
