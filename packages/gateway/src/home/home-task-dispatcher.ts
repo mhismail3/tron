@@ -13,7 +13,7 @@ import { homeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
 import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
-import { homeTaskSubagentLaunches, homeTaskSubagentsProjection, type HomeTaskSubagents } from "./home-task-subagents.js";
+import { HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "./home-task-subagents.js";
 
 export type HomeTaskDiagnostic =
   | HomeTaskAuthorizationDiagnostic
@@ -21,7 +21,7 @@ export type HomeTaskDiagnostic =
   | HomeWakeDiagnostic
   | { event: "home.task.producer-refused"; taskHash: string; reason: import("./home-task-worker-extension.js").HomeTaskProducerRefusal }
   | { event: "home.task.detached-work"; taskHash: string; operationHash: string; reason: "detached-work-outlived-task" }
-  | { event: "home.task.subagents"; taskHash: string; operationHash: string; started: number; stoppedAtEnd: number | null }
+  | { event: "home.task.subagents"; taskHash: string; operationHash: string; started: number; stoppedAtEnd: number | null; noticesUndelivered: number }
   | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; outputTokens: number }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
@@ -30,7 +30,7 @@ export type HomeTaskRecoveryStatus = { available: true } | { available: false; r
 export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice { taskId: string; intent: string; target: string }
 /** The durable record plus the worker's model from its own transcript. The model is
  * projected per read, never persisted with the task. */
-export type HomeTaskStatus = HomeTaskRecord & { workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents };
+export type HomeTaskStatus = HomeTaskRecord & { workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns };
 export interface HomeTaskControlRequest { taskId: string; operationId: string }
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord> }
 const reportDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -225,7 +225,7 @@ export class HomeTaskDispatcher {
         try { await reports.joinStop(); } catch { reportStopFailed = true; }
         // Async runs the task started are stopped and joined before the evidence cut,
         // so the cut records every stop and the outcome reads the join's result.
-        await slot.settleTaskSubagents(operationId, deadline!.signal);
+        const settled = await slot.settleTaskSubagents(operationId, deadline!.signal);
         // Share cold recovery's durable file cut before publishing any terminal
         // references/outbox or acknowledging the operation. SDK append visibility
         // alone cannot guarantee the worker evidence survives a power loss.
@@ -265,7 +265,7 @@ export class HomeTaskDispatcher {
         this.transition(final, final.terminalEvidence!.reason);
         if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(final.taskId), operationHash: hash(operationId), reason: "detached-work-outlived-task" });
         const subagents = cut.state === "present" ? homeTaskSubagentsProjection(entries, operationId) : { started: 0, stoppedAtEnd: 0 };
-        this.diagnostic?.({ event: "home.task.subagents", taskHash: hash(final.taskId), operationHash: hash(operationId), started: subagents.started, stoppedAtEnd: subagents.stoppedAtEnd });
+        this.diagnostic?.({ event: "home.task.subagents", taskHash: hash(final.taskId), operationHash: hash(operationId), started: subagents.started, stoppedAtEnd: subagents.stoppedAtEnd, noticesUndelivered: settled.noticesUndelivered });
         const spendReference = `${hash(final.taskId)}:${final.revision}`;
         this.diagnostic?.({ event: "home.task.spend", taskHash: hash(final.taskId), spendReference,
           inputTokens: spend.inputTokens, outputTokens: spend.outputTokens });
@@ -354,7 +354,16 @@ export class HomeTaskDispatcher {
   async status(taskId: string): Promise<HomeTaskStatus> {
     const task = await this.result(taskId);
     const workerModel = task.sessionId ? await this.sessions.taskWorkerModel(task.sessionId) ?? null : null;
-    return { ...task, workerModel, subagents: await this.subagents(task) };
+    return { ...task, workerModel, subagents: await this.subagents(task), subagentRuns: await this.liveSubagentRuns(task) };
+  }
+
+  /** The worker's live subagent runs, newest first and bounded for status. Only an active
+   * task has a live worker to read; a settled task lists none. */
+  async liveSubagentRuns(task: HomeTaskRecord): Promise<HomeTaskSubagentRuns> {
+    if (task.lifecycle !== "active" || !task.sessionId) return { total: 0, runs: [] };
+    const runs = (await this.sessions.acquire(task.sessionId)).liveSubagentRuns();
+    const newestFirst = [...runs].sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt));
+    return { total: runs.length, runs: newestFirst.slice(0, HOME_TASK_STATUS_RUN_LIMIT) };
   }
 
   /** The operation's subagent counts, read from the worker's canonical evidence and
