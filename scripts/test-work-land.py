@@ -124,7 +124,8 @@ def run() -> None:
             shutil.copy(ROOT / "scripts/personal-info-guard.sh", repo / "scripts/personal-info-guard.sh")
             run_git("add", ".github/work.json", "scripts/personal-info-guard.sh")
             run_git("commit", "-m", "fixture base")
-            subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+            # The remote HEAD is part of this fixture, not the caller's Git defaults.
+            subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(remote)], check=True, capture_output=True)
             run_git("remote", "add", "origin", str(remote))
             run_git("push", "origin", "main")
             run_git("checkout", "-b", "feature")

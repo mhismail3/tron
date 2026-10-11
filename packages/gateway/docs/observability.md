@@ -534,6 +534,12 @@ before the `chat.geometry.*`, `chat.viewport.transition` and
 only as a last resort. A composer flag missing from an export was therefore a
 repeat, or was reclaimed ahead of geometry — not a control the app never sampled.
 
+## Verification dependency ownership
+
+| Signal | Where to inspect | Meaning / action | Regression |
+| --- | --- | --- | --- |
+| `dependent checks not started after prerequisite failure` | `work verify` output and `<git dir>/work/logs/<head>/` | A canonical build/install owner failed, so later readers were not admitted. Mac staging's `installing locked gateway dependencies` must complete before the Gateway check begins: overlapping that line with SDK reads can produce missing extensions or changing package-asset paths, not a product timeout. | `scripts/test-work-verify.py`: real CLI, child-process package replacement, reader ordering, failed-publisher refusal and exact-tree reuse; `test-results/work-verify.json` |
+
 ## Mac payload build diagnostics
 
 | Signal | Where to inspect | Meaning / action | Regression |
