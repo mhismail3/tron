@@ -791,8 +791,12 @@ WebSocket timeout are replaced after SDK default composition, at the final
 provider-stream boundary under the exact agent request's async context. Unset
 cannot resurrect initial SDK values, and unrelated memory/extension requests
 retain their explicit options. Ordinary/Home and fork/cold-resume provider
-journeys cover that distinction. Full timing/provenance acceptance is still
-outstanding.
+journeys cover that distinction. Directional request settings also retain their
+effective value in canonical `requestPins`: image blocking narrows before SDK
+message conversion, including within a tool turn; default/outside widening stays
+fixed across fork/resume. A Chat-layer approval or maintainer tap can release it;
+lowering a risk floor alone cannot. Full fixed-value provenance/reset and
+approved Mac/Project widening propagation remain outstanding.
 A Chat-layer change needs `fence: {
 runtimeGeneration, model?, revision? }`, the runtime the client read; the lane's
 idle, chapter and fence guards are unchanged, and the receipt's work entry is the

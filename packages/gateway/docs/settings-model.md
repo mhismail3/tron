@@ -393,8 +393,20 @@ values and unset, plus optional-value fork/cold resume.
 The bounded `settings-run-applied` session diagnostic shows the runtime policy
 at request admission, rather than merely the defaults a settings read resolves.
 
-This is not complete timing support: image-direction policy and fixed-value
-provenance still need their runtime owners. The SDK's merge-only
+Directional request settings now retain a canonical `requestPins` snapshot in
+`tron.settings.v1`. At start and before SDK message conversion, the schema's
+direction/timing permits narrowing but retains a fixed-direction value. Image
+blocking therefore strips images from the next provider request, including the
+next request within a tool turn. A default or outside relaxation cannot expose
+images already blocked in that chat; fork and cold resume retain the snapshot.
+A Chat-layer approval or maintainer tap can release it, including an unset back
+to the current default. Lowering the key's risk floor alone does not change its
+timing. Ordinary and Home provider-content journeys prove these boundaries.
+The resolver shows the effective pinned value separately from the stored override.
+
+This is not complete timing support: fixed-value provenance/reset, Home chapter
+carry-forward, and propagation of an approved Mac/Project widening into existing
+chats still need their runtime owners. The SDK's merge-only
 `applyOverrides` is not the owner of optional-field removal; the final provider
 boundary above is, after SDK default composition.
 

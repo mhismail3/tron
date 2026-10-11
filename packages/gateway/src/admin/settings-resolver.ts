@@ -25,6 +25,8 @@ export interface ChatStore {
   tools?: string[];
   /** `tron.settings.v1`: explicit Chat-layer values for the other keys. */
   settings: Record<string, unknown>;
+  /** Effective directional request values retained at this branch's boundary. */
+  requestPins?: Record<string, unknown>;
 }
 
 export interface ProjectStore {
@@ -116,7 +118,7 @@ function piDocument(stores: SettingsStores, layer: LayerId): Record<string, unkn
 }
 
 /** Read one layer's raw value for a key instance from that layer's store. */
-export function readBinding(stores: SettingsStores, layer: LayerId, binding: Binding, qualifiers: Qualifiers, qualifiedOnly: boolean): unknown {
+export function readBinding(stores: SettingsStores, layer: LayerId, binding: Binding, qualifiers: Qualifiers, qualifiedOnly: boolean, keyId?: string): unknown {
   switch (binding.store) {
     case "pi": {
       const document = piDocument(stores, layer);
@@ -140,7 +142,8 @@ export function readBinding(stores: SettingsStores, layer: LayerId, binding: Bin
       return chat.contextWindow && chat.contextWindow.model === qualifiers.model ? chat.contextWindow.value : undefined;
     }
     case "chat-settings":
-      return qualifiedOnly ? undefined : readPath(stores.chat?.settings, binding.path);
+      return qualifiedOnly ? undefined : (keyId && stores.chat?.requestPins?.[keyId] !== undefined
+        ? stores.chat.requestPins[keyId] : readPath(stores.chat?.settings, binding.path));
     case "profile":
       return qualifiedOnly ? undefined : readPath(stores.profile, binding.path);
     case "home-memory":
@@ -240,7 +243,7 @@ function resolveInstance(
       if (layer === "builtin" || !stores.layers.includes(layer)) continue;
       const binding = key.layers[layer as Exclude<LayerId, "builtin">];
       if (!binding) continue;
-      const value = readBinding(stores, layer, binding, qualifiers, qualifiedOnly);
+      const value = readBinding(stores, layer, binding, qualifiers, qualifiedOnly, key.id);
       if (value === undefined) continue;
       found.push({ layer, value, ...layerApplied(stores, layer) });
     }

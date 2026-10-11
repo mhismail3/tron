@@ -191,6 +191,87 @@ const retries = (value: number, expected: number) => ({
 });
 
 describe("settings risk gate", () => {
+  it.each(["ordinary", "Home"] as const)("%s image narrowing reaches the next provider request and widening waits for approval or a new chat", async kind => {
+    const f = await fixture();
+    const slot = kind === "Home" ? await f.designateHome() : await f.chat();
+    const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
+    const captures: Array<{ images: number; placeholders: number }> = [];
+    const observe = async (target = slot) => {
+      f.faux.setResponses([async context => {
+        const content = context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []);
+        captures.push({ images: content.filter(part => part.type === "image").length,
+          placeholders: content.filter(part => part.type === "text" && part.text === "Image reading is disabled.").length });
+        return fauxAssistantMessage("observed image policy");
+      }]);
+      await target.prompt("observe image policy", [image]);
+      await waitFor(() => target.snapshot().configurationBlocker === null || undefined, "image request settled");
+      return captures.at(-1)!;
+    };
+    const mac = (value: boolean) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "mac" }, changes: [{ key: "context.images.block", layer: "mac", op: "set", value }],
+    });
+    expect((await observe()).images).toBeGreaterThan(0);
+    await mac(true);
+    expect(await observe()).toMatchObject({ images: 0 });
+    expect(captures.at(-1)!.placeholders).toBeGreaterThan(0);
+    expect(f.runtimeEvents.filter(event => event.sessionId === slot.id && event.topic === "session.diagnostic").at(-1))
+      .toMatchObject({ payload: { data: { code: "settings-run-applied", imagesBlocked: true } } });
+    const createdWhileBlocked = await f.chat();
+    // An outside/default relaxation is not permission to expose this chat's
+    // retained images. A fresh chat, however, uses the new default.
+    const document = await f.macDocument();
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...document, images: { blockImages: false } }));
+    expect((await observe()).images).toBe(0);
+    expect((await observe(createdWhileBlocked)).images).toBe(0);
+    expect((await observe(await f.chat())).images).toBeGreaterThan(0);
+    const pending = f.settle((await f.run(slot, "request images", [{ name: "settings", args: {
+      action: "change", reason: "Need the attached image", changes: [{ key: "context.images.block", layer: "chat", op: "set", value: false }],
+    } }])).results);
+    expect(pending.status).toBe("pending");
+    expect((await observe()).images).toBe(0);
+    const approval = (await f.approvals())[0]!;
+    await f.service.invoke(phone(), "settings.decide", {
+      commandId: commandId(), requestId: approval.requestId, digest: approval.digest, approved: true,
+      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL },
+    });
+    expect((await observe()).images).toBeGreaterThan(0);
+    // Narrowing during a model/tool loop must affect the next request in the
+    // same turn, not only the next user prompt.
+    const withinTurn: number[] = [];
+    f.faux.setResponses([
+      async context => {
+        withinTurn.push(context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === "image").length);
+        return fauxAssistantMessage(fauxToolCall("settings", { action: "change", reason: "Stop reading images", changes: [
+          { key: "context.images.block", layer: "chat", op: "set", value: true },
+        ] }));
+      },
+      async context => {
+        withinTurn.push(context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === "image").length);
+        return fauxAssistantMessage("blocked within turn");
+      },
+    ]);
+    await slot.prompt("block images now", [image]);
+    await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "image tool turn settled");
+    expect(withinTurn).toHaveLength(2);
+    expect(withinTurn[0]).toBeGreaterThan(0);
+    expect(withinTurn[1]).toBe(0);
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [
+      { key: "permissions.floor", layer: "mac", op: "set", value: "quiet", qualifiers: { key: "context.images.block", direction: "widen" } },
+    ] });
+    const lowered = f.settle((await f.run(slot, "request images under the lower floor", [{ name: "settings", args: {
+      action: "change", reason: "Need the attached image", changes: [{ key: "context.images.block", layer: "chat", op: "set", value: false }],
+    } }])).results);
+    expect(lowered).toMatchObject({ status: "applied", tier: "quiet" });
+    expect((await observe()).images).toBe(0);
+    expect(slot.settingsChatLayer().requestPins).toEqual({ "context.images.block": true });
+    await f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL },
+      changes: [{ key: "context.images.block", layer: "chat", op: "unset" }],
+    });
+    expect((await observe()).images).toBeGreaterThan(0);
+    transcript.push({ case: `${kind} directional image request policy`, steps: [...captures, { withinTurn, lowered }] });
+  });
   it("open chats follow live retry defaults while a canonical Chat override stays local and can be unset", async () => {
     const f = await fixture();
     const mac = (maxRetries: number) => f.service.invoke(phone(), "settings.change", {
@@ -326,6 +407,14 @@ describe("settings risk gate", () => {
     } }]);
     expect(f.settle(changed.results)).toMatchObject({ status: "applied", tier: "quiet" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 3 });
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" },
+      changes: [{ key: "context.images.block", layer: "mac", op: "set", value: true }] });
+    f.faux.setResponses([fauxAssistantMessage("capture narrowing")]);
+    await slot.prompt("capture the narrowed default");
+    await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "narrowed request settled");
+    const document = await f.macDocument();
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...document, images: { blockImages: false } }));
+    expect(slot.settingsChatLayer().requestPins).toEqual({ "context.images.block": true });
     const expectedChat = { retry: { maxRetries: 0, provider: { timeoutMs: 10_000 } } };
     expect(slot.settingsChatLayer().settings).toEqual(expectedChat);
     const point = slot.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
@@ -347,6 +436,7 @@ describe("settings risk gate", () => {
       sessions: reopened, home: () => reopened.homeOwner(), registry: reopened });
     const resumed = await reopened.acquire(fork.sessionId);
     expect(resumed.settingsChatLayer().settings).toEqual(expectedChat);
+    expect(resumed.settingsChatLayer().requestPins).toEqual({ "context.images.block": true });
     let attempts = 0;
     let timeoutMs: number | undefined;
     f.faux.setResponses(Array.from({ length: 4 }, () => async (_context, options) => {

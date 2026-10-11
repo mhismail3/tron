@@ -20,7 +20,7 @@ import {
   trustedDelegatedController,
 } from "./delegated-provider.js";
 import type { AgentMessage, AgentTurnDecision, StreamFn } from "@earendil-works/pi-agent-core";
-import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings } from "./chat-settings.js";
+import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings, readChatRequestPins } from "./chat-settings.js";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
@@ -173,6 +173,7 @@ import { resourceDistribution } from "./resource-distribution.js";
 import { boundedUtf8Prefix } from "../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
 import type { ChatStore } from "../admin/settings-resolver.js";
+import { schemaKey } from "../admin/settings-schema.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
 // admitted the first property from the exact-owned status file. A payload key
@@ -1332,7 +1333,7 @@ export class RuntimeSlot {
         setModel: busy, setThinking: busy, setContextWindow: busy, setTools: busy,
         // This tool already owns the running lane. It records the override;
         // request admission applies it, never a mutation of the active request.
-        setSetting: (key: string, value: unknown) => this.persistChatRunSetting(key, value),
+        setSetting: (key: string, value: unknown, allowFixedDirection: boolean) => this.persistChatRunSetting(key, value, allowFixedDirection),
       },
     });
     const actor = (toolCallId: string): Actor => {
@@ -1361,6 +1362,7 @@ export class RuntimeSlot {
       ...(policy && policy.override !== null ? { contextWindow: { model: `${policy.model.provider}/${policy.model.id}`, value: policy.override } } : {}),
       tools: session.getActiveToolNames(),
       settings: readChatSettings(session.sessionManager.getBranch()),
+      requestPins: readChatRequestPins(session.sessionManager.getBranch()),
     };
   }
 
@@ -1368,10 +1370,19 @@ export class RuntimeSlot {
     const owners = this.dependencies.settings();
     if (!owners) return;
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed before settings application");
-    const settings = await owners.model.liveRunSettings(this.id, {
-      cwd: this.cwd, home: this.isHomeChapter, chat: this.settingsChatLayer(), modelRuntime: session.modelRuntime,
-    });
+    const branch = session.sessionManager.getBranch();
+    const previousPins = readChatRequestPins(branch);
+    const explicitSettings = readChatSettings(branch);
+    const { requestPins: _pins, ...chat } = this.settingsChatLayer();
+    const { settings, requestPins } = await owners.model.requestSettings(this.id, {
+      cwd: this.cwd, home: this.isHomeChapter,
+      chat: { ...chat, settings: explicitSettings }, modelRuntime: session.modelRuntime,
+    }, previousPins);
     if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during settings resolution");
+    if (JSON.stringify(previousPins) !== JSON.stringify(requestPins)) {
+      const receiptId = randomUUID();
+      await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings: explicitSettings, requestPins }), receiptId);
+    }
     session.settingsManager.applyOverrides(settings);
     // These SDK controls are copied when Agent is created, not read from its
     // SettingsManager during queue draining. Never use setters that save defaults.
@@ -1382,22 +1393,36 @@ export class RuntimeSlot {
     return settings;
   }
 
-  private async persistChatRunSetting(key: string, value: unknown): Promise<number> {
+  private async persistChatRunSetting(key: string, value: unknown, allowFixedDirection: boolean): Promise<number> {
     this.assertChapterWritable();
-    const settings = changeChatSetting(readChatSettings(this.sessionManager.getBranch()), key, value);
+    const branch = this.sessionManager.getBranch();
+    const settings = changeChatSetting(readChatSettings(branch), key, value);
+    const requestPins = readChatRequestPins(branch);
+    // Tier admission and timing are separate: lowering a floor must not make
+    // an unapproved widening live. Only an approval or the maintainer's tap
+    // releases the fixed-direction snapshot (including Follow the default).
+    if (typeof schemaKey(key).timing !== "string" && allowFixedDirection) {
+      const owners = this.dependencies.settings();
+      if (!owners) throw new GatewayError("conflict", "Settings owner is unavailable");
+      const { requestPins: _pins, ...chat } = this.settingsChatLayer();
+      const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, {
+        cwd: this.cwd, home: this.isHomeChapter, chat: { ...chat, settings }, modelRuntime: this.runtime.session.modelRuntime,
+      }, [key]);
+      requestPins[key] = resolved.keys[0]?.value;
+    }
     const receiptId = randomUUID();
-    await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings }), receiptId);
+    await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings, requestPins }), receiptId);
     this.revision += 1;
     this.publishSnapshot();
     return this.revision;
   }
 
   async setChatRunSetting(key: string, value: unknown, initiatingWorkToken?: string,
-    expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<number> {
+    expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, allowFixedDirection = false): Promise<number> {
     return this.lane.run(async () => {
       this.assertConfigurationIdle(initiatingWorkToken);
       if (expectation) this.assertConfigurationExpectation(expectation);
-      return this.persistChatRunSetting(key, value);
+      return this.persistChatRunSetting(key, value, allowFixedDirection);
     });
   }
 
@@ -2231,6 +2256,14 @@ export class RuntimeSlot {
           ...(settings.retry?.provider?.maxRetryDelayMs === undefined ? {} : { maxRetryDelayMs: settings.retry.provider.maxRetryDelayMs }),
         }));
       };
+      const convertToLlm = created.session.agent.convertToLlm;
+      created.session.agent.convertToLlm = async messages => {
+        // Image filtering happens during SDK message conversion, before
+        // prepareRequest. Resolve here too, so a tool's narrowing applies to
+        // the very next request rather than leaking one request of images.
+        await this.applyLiveRunSettings(created.session);
+        return convertToLlm(messages);
+      };
       const prepareRequest = created.session.agent.prepareRequest;
       created.session.agent.prepareRequest = async (request, signal) => {
         if (signal?.aborted) throw new Error("Request cancelled before settings resolution");
@@ -2239,6 +2272,7 @@ export class RuntimeSlot {
         if (this.dependencies.settings()) {
           this.emit("session.diagnostic", safeJson({
             code: "settings-run-applied", retry: created.session.settingsManager.getRetrySettings(),
+            imagesBlocked: created.session.settingsManager.getBlockImages(),
             transport: created.session.agent.transport,
             steeringMode: created.session.agent.steeringMode, followUpMode: created.session.agent.followUpMode,
           }));
@@ -2303,6 +2337,7 @@ export class RuntimeSlot {
     });
     this.installRuntimeHooks();
     await this.bindSession();
+    await this.applyLiveRunSettings(this.runtime.session);
   }
 
   private effectiveResourceReloadOptions(): { resolveProjectTrust: () => Promise<boolean> } | undefined {

@@ -14,7 +14,7 @@ import type { TrustService } from "./trust-service.js";
 import type { Actor, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
 import { readBinding, resolveSettings, targetLayers, type ChatStore, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
-import { KEYS, builtinValue, floorFor, floorInstances, hasRuntimeRunApplier, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, builtinValue, floorFor, floorInstances, hasRuntimeRequestApplier, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
 
 /** What a session target contributes: its Chat layer and whether it is Home's chat. */
@@ -63,17 +63,26 @@ export class SettingsModel {
    * whole SDK manager (which would also change fixed resource/shell settings).
    * Absence is meaningful for optional provider fields: the request boundary
    * replaces them after the SDK has composed its initial defaults. */
-  async liveRunSettings(sessionId: string, session: SessionSettingsSource): Promise<ReturnType<SettingsManager["getSettings"]>> {
-    const keys = KEYS.filter(hasRuntimeRunApplier);
+  async requestSettings(sessionId: string, session: SessionSettingsSource, previousPins: Record<string, unknown>): Promise<{
+    settings: ReturnType<SettingsManager["getSettings"]>; requestPins: Record<string, unknown>;
+  }> {
+    const keys = KEYS.filter(hasRuntimeRequestApplier);
     const resolved = await this.resolve({ kind: "session", sessionId }, session, keys.map(key => key.id));
     const settings: Record<string, unknown> = {};
+    const requestPins = structuredClone(previousPins);
     for (const row of resolved.keys) {
       const key = schemaKey(row.key);
       const binding = key.layers.chat;
       if (binding?.store !== "chat-settings") continue;
-      if (row.value !== undefined) setPath(settings, binding.path, await key.type.validate(row.value, key.id));
+      let value = row.value;
+      if (typeof key.timing !== "string") {
+        const previous = previousPins[key.id];
+        if (previous !== undefined && key.direction && timingFor(key, key.direction(previous, value)) === "fixed") value = previous;
+        requestPins[key.id] = value;
+      }
+      if (value !== undefined) setPath(settings, binding.path, await key.type.validate(value, key.id));
     }
-    return settings;
+    return { settings, requestPins };
   }
 
   /** `settings.options` (docs/settings-model.md 7.5): the choices a key's control offers. */
@@ -316,7 +325,7 @@ export interface ChatAppliers {
   setThinking(level: string): Promise<number>;
   setContextWindow(model: ModelRefValue, value: number | null): Promise<number>;
   setTools(tools: string[]): Promise<void>;
-  setSetting(key: string, value: unknown): Promise<number>;
+  setSetting(key: string, value: unknown, allowFixedDirection: boolean): Promise<number>;
 }
 
 export interface ChangeContext {
@@ -324,6 +333,8 @@ export interface ChangeContext {
   reason?: string;
   commandId?: string;
   dryRun?: boolean;
+  /** Set only by the approval owner, never accepted from a request payload. */
+  approved?: true;
   /** The requesting turn read web or browser content (doc 5.4 input 2). The
    * Gateway sets it from the tool calls it executed; the UI has no turn. */
   web?: boolean;
@@ -476,7 +487,7 @@ export class SettingsChangePath {
     const key = schemaKey(entry.key);
     const stores = await this.model.stores(entry.target, session);
     const binding = key.layers[entry.layer]!;
-    const current = readBinding(stores, entry.layer, binding, entry.qualifiers ?? {}, qualifiedWrite(binding, entry.qualifiers ?? {}));
+    const current = readBinding(stores, entry.layer, binding, entry.qualifiers ?? {}, qualifiedWrite(binding, entry.qualifiers ?? {}), entry.key);
     if (!deepEqual(current, entry.after)) {
       throw new GatewayError("conflict", "The setting changed since; undo would overwrite a newer value", false,
         { current: (current ?? null) as never, after: (entry.after ?? null) as never });
@@ -515,7 +526,7 @@ export class SettingsChangePath {
       if (!request || request.status !== "pending") throw new GatewayError("conflict", `This change is no longer waiting for approval (${request?.status ?? "gone"})`);
       if (input.digest !== request.digest) throw new GatewayError("conflict", "This approval is for a different change than the one waiting");
       const context: ChangeContext = {
-        actor: request.actor, ...(request.reason ? { reason: request.reason } : {}),
+        actor: request.actor, ...(input.approved ? { approved: true as const } : {}), ...(request.reason ? { reason: request.reason } : {}),
         ...(input.commandId ? { commandId: input.commandId } : {}), ...(input.session ? { session: input.session } : {}),
       };
       const fact = (status: ChangeStatus, failure?: string) => request.changes.map((change): ChangeEntry => ({
@@ -707,7 +718,7 @@ export class SettingsChangePath {
       if (request.layer === "chat" && chatModel) qualifiers.model = `${chatModel.provider}/${chatModel.id}`;
       else throw new GatewayError("invalid_request", `${key.label} needs a model qualifier`);
     }
-    if (binding.store === "profile" || (binding.store === "chat-settings" && !hasRuntimeRunApplier(key))) {
+    if (binding.store === "profile" || (binding.store === "chat-settings" && !hasRuntimeRequestApplier(key))) {
       throw new GatewayError("unsupported", `${key.label} has no writable ${LAYER_LABELS[request.layer]} store yet`);
     }
     let after: unknown;
@@ -720,7 +731,7 @@ export class SettingsChangePath {
     if (request.op === "unset" && binding.store === "chat" && binding.field !== "contextWindow") {
       throw new GatewayError("invalid_request", `${key.label} always has a Chat value; set another value instead`);
     }
-    const before = readBinding(stores, request.layer, binding, qualifiers, qualifiedWrite(binding, qualifiers));
+    const before = readBinding(stores, request.layer, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
     if (request.expected !== undefined && binding.store !== "chat" && !deepEqual(request.expected, before)) {
       throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, { current: (before ?? null) as never });
     }
@@ -793,7 +804,7 @@ export class SettingsChangePath {
         return {};
       case "chat-settings": {
         if (!context.session || target.kind !== "session") throw new GatewayError("invalid_request", "A Chat-layer change needs its open session");
-        return { revision: await context.session.appliers.setSetting(plan.key.id, value) };
+        return { revision: await context.session.appliers.setSetting(plan.key.id, value, context.actor.kind === "ui" || context.approved === true) };
       }
       case "chat": {
         const appliers = context.session?.appliers;
