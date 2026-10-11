@@ -227,6 +227,8 @@ struct HomeSheet: View {
                     }
                 }
             }
+            // Pending settings changes from Home and its task workers (settings-model.md 5.5).
+            .settingsApprovals(.home)
             Text("Model").font(TronTypography.headline)
             TronGlassCard(accent: .tronEmerald) {
                 VStack(spacing: 0) {

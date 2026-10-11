@@ -696,6 +696,18 @@ decisions. `TronProjectTrustUITests` exercises the real controls against the `HO
 `HostedProjectTrustFixture`: an older accepted receipt and older inspection value/error cannot replace
 a later canonical Block, with ordered/single decisions, foreground receipt reconciliation and a
 replacement Mac with the same cwd as controls. The fixture changes no actual trust or resources.
+The settings risk gate's iPhone half (gateway `docs/settings-model.md` 5.4 and 5.5) has the same
+owner. `SettingsApprovalsSection` shows pending changes in Manage Home (Home's and its task
+workers') and Manage Session (this chat's): it re-reads `settings.approvals` on the
+`settings.approvalsChanged` revision and decides with `settings.decide` through the receipt
+executor, bound to the request's digest; a Chat-layer change carries the chat's last read
+runtime fence. Every word a row shows is Gateway text (`requester`, `label`, `display`,
+`confirm`), with the raw `before` and `after` one tap away, and it renders nothing when nothing
+is pending. Settings › Permissions (`PermissionFloorsSettingsView`) lists every
+`permissions.floor` instance from `settings.resolve` for the Mac target, titled by its scope
+badge, and sets or unsets one through `settings.change`: a dry run first, and when the dry run's
+tier is approve (lowering a floor) the Gateway's `confirm` text is shown and the change is sent
+only on the maintainer's tap. The three tiers are F3's fixed vocabulary; the rest is served.
 `ProviderAuthCoordinator` likewise solely owns typed-target
 provider/model catalogs, per-target paging admission, event-only provider invalidation,
 auth prompt/event parsing, browser-callback submission, and operation-to-target retention through

@@ -255,6 +255,8 @@ struct SessionContextSheet: View {
                             }
                         }
                         SessionContextUsageCard(snapshot: snapshot)
+                            // This chat's pending settings changes (settings-model.md 5.5).
+                            .settingsApprovals(.session(sessionID))
                         modelSummaryCard(snapshot)
                         sessionSection(snapshot)
                         exportSection

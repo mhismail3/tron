@@ -727,9 +727,12 @@ fixes that 5.4 and 5.5 leave open:
   actions) declare `true`.
 - **Pushes.** A notify-tier change by an agent queues an `explicit` push; a
   pending request queues a `waiting` push ("Approve or decline in Tron"). The
-  push relay's kinds are fixed, so Approve and Decline buttons on the push
-  itself need the iOS notification actions and are part of the remaining iOS
-  work of this slice.
+  iPhone decides it from the rows in Manage Home and Manage Session. Approve and
+  Decline buttons on the push itself are not built: an iOS notification action
+  needs `aps.category` on the delivered push, and the relay builds the payload
+  from a fixed field list and refuses unknown fields, so the relay's contract
+  (and a relay deployment before the Gateway sends it) is a decision still open
+  on #763.
 - **Approval binds to a digest** of the target and each change's instance,
   `before` and `after`. Approving re-plans each change with the recorded
   `before` as `expected`: a store that moved since supersedes the request. A
@@ -1176,7 +1179,7 @@ was added after the first numbering; it lands after slice 4 and before slice 8.
 |---|---|---|---|---|---|
 | 1 | One door per chat: the ordinary-chat gear opens Manage Session, and Settings is a row inside it | S | iOS | | #759 |
 | 2 | Clear names and the shared badge component on today's rows | S | iOS | | #760 |
-| 5 | Tiers: floors with the maintainer's overrides, the one-step web mark, approval by tap with 24-hour expiry and the requester told, and the `settings` tool. The Gateway half is implemented ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)); the iOS approval rows, push actions and floor rows remain | L | Gateway, iOS | 4 | #763 |
+| 5 | Tiers: floors with the maintainer's overrides, the one-step web mark, approval by tap with 24-hour expiry and the requester told, and the `settings` tool. Implemented ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)) except Approve and Decline on the push, which waits on the relay decision | L | Gateway, iOS | 4 | #763 |
 | 6 | Outside changes: stores compared with the record, "Changed outside Tron" with Apply again, notification by floor, git-state badges | M | Gateway, iOS | 4 | #764 |
 | 7 | Fixed-at-start values carry provenance, with "Use the current default"; live keys reach open chats; Chat-layer values for every key that allows Chat; per-direction timing | M | Gateway, iOS | 3, 4 | #765 |
 | 14 | The generic renderer: served schema, control primitives, `settings.options`, `dryRun` validation, badges and section summaries from the resolver, negotiation with fallback to read-only | L | Gateway, iOS | 3, 4 | #780 |

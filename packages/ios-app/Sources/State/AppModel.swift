@@ -300,6 +300,7 @@ final class AppModel {
     var packageInvalidationGeneration: Int { packageConfiguration.invalidationGeneration }
     var customModelInvalidationGeneration: Int { customModelConfiguration.invalidationGeneration }
     var trustRevision: Int { settingsTrust.trustRevision }
+    var settingsApprovalsRevision: Int { settingsTrust.approvalsRevision }
     var pairedDevices: [PairedDevice] = []
     // Invalidates surface-owned device reads without blocking control-event intake.
     var deviceCatalogRevision = 0
@@ -4323,6 +4324,37 @@ final class AppModel {
         try await settingsTrust.setTrust(target: target, decision: decision)
     }
 
+    func settingsApprovals(scope: SettingsApprovalScope) async throws -> [SettingsApprovalRequest] {
+        try await settingsTrust.pendingApprovals().filter(scope.includes)
+    }
+
+    /// Approves or declines one pending change. A change to a chat's own Chat
+    /// layer applies under the runtime this app last read for that chat, as the
+    /// chat's own controls do; without a read the Gateway refuses it.
+    func decideSettingsApproval(_ request: SettingsApprovalRequest, approved: Bool) async throws {
+        var fence: JSONValue?
+        if approved, request.target.kind == "session", request.changes.contains(where: { $0.layer == "chat" }),
+           let sessionID = request.target.sessionId, let snapshot = authoritativeSnapshot(for: sessionID) {
+            fence = .object([
+                "runtimeGeneration": .string(snapshot.runtimeGeneration),
+                "model": try snapshot.model.map { try JSONValue.encode($0) } ?? .null,
+            ])
+        }
+        try await settingsTrust.decideApproval(request, approved: approved, fence: fence)
+    }
+
+    func resolveMacSettings(keys: [String]) async throws -> SettingsResolution {
+        try await settingsTrust.resolveSettings(target: .object(["kind": .string("mac")]), keys: keys)
+    }
+
+    func previewMacSettingsChange(_ change: JSONValue) async throws -> SettingsChangePreview {
+        try await settingsTrust.previewMacChange(change)
+    }
+
+    func changeMacSetting(_ change: JSONValue) async throws {
+        try await settingsTrust.changeMac(change)
+    }
+
     func packageInventory(for target: PackageConfigurationTarget) -> PackageInventory? {
         packageConfiguration.inventory(for: target)
     }
@@ -5034,6 +5066,8 @@ final class AppModel {
             settingsTrust.noteSettingsChanged()
         case "trust.changed":
             settingsTrust.noteTrustChanged()
+        case "settings.approvalsChanged":
+            settingsTrust.noteApprovalsChanged()
         case "providers.changed":
             providerAuth.noteProvidersChanged()
         case "packages.changed":

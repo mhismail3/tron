@@ -72,6 +72,10 @@ struct SettingsView: View {
                             AgentDefaultsSettingsView(projectCWD: projectCWD, projectSessionID: projectSessionID)
                         }
                         settingsDivider(accent: .tronPurple)
+                        settingsLink("Permissions", summary: "How much of your attention agent changes need", icon: "hand.raised", accent: .tronPurple) {
+                            PermissionFloorsSettingsView()
+                        }
+                        settingsDivider(accent: .tronPurple)
                         settingsLink("Compaction", summary: "Summaries, focus, and token budgets", icon: "arrow.triangle.2.circlepath", accent: .tronPurple) {
                             CompactionSettingsView(projectCWD: projectCWD, projectSessionID: projectSessionID)
                         }

@@ -47,6 +47,9 @@ final class SettingsTrustCoordinator {
 
     private(set) var settingsInvalidationGeneration = 0
     private(set) var trustRevision = 0
+    /// Advances on `settings.approvalsChanged` and on profile change, so a
+    /// surface showing pending changes re-reads `settings.approvals`.
+    private(set) var approvalsRevision = 0
 
     init(
         client: GatewayClient,
@@ -156,6 +159,79 @@ final class SettingsTrustCoordinator {
         settingsInvalidationGeneration &+= 1
     }
 
+    func noteApprovalsChanged() {
+        approvalsRevision &+= 1
+    }
+
+    /// The open pending changes (docs/settings-model.md 5.5). A disposable read:
+    /// the surface fences publication with its own presentation activity.
+    func pendingApprovals() async throws -> [SettingsApprovalRequest] {
+        let admittedProfileGeneration = profileGeneration
+        let value = try await client.requestValue("settings.approvals", JSONValue.object([:]))
+        try requireProfile(admittedProfileGeneration)
+        return try value.decode(SettingsApprovalsResponse.self).requests
+    }
+
+    /// The maintainer's decision on one pending change, bound to the exact diff
+    /// he saw by its digest. A Chat-layer change carries the chat's fence.
+    func decideApproval(_ request: SettingsApprovalRequest, approved: Bool, fence: JSONValue?) async throws {
+        let admittedProfileGeneration = profileGeneration
+        let commandID = uuidSource.next().uuidString
+        var params: [String: JSONValue] = [
+            "commandId": .string(commandID), "requestId": .string(request.requestId),
+            "digest": .string(request.digest), "approved": .bool(approved),
+        ]
+        if let fence { params["fence"] = fence }
+        _ = try await mutationExecutor.performValue(method: "settings.decide", commandID: commandID) {
+            try await client.requestValue("settings.decide", JSONValue.object(params))
+        }
+        try requireProfile(admittedProfileGeneration)
+        approvalsRevision &+= 1
+    }
+
+    /// `settings.resolve` for a target and keys (docs/settings-model.md 3.1).
+    func resolveSettings(target: JSONValue, keys: [String]) async throws -> SettingsResolution {
+        let admittedProfileGeneration = profileGeneration
+        let value = try await client.requestValue("settings.resolve", JSONValue.object([
+            "target": target, "keys": .array(keys.map(JSONValue.string)),
+        ]))
+        try requireProfile(admittedProfileGeneration)
+        return try value.decode(SettingsResolution.self)
+    }
+
+    /// A dry run of one Mac-layer change: the tier and any `confirm` text the
+    /// maintainer's row shows before he makes it. Nothing is applied.
+    func previewMacChange(_ change: JSONValue) async throws -> SettingsChangePreview {
+        let admittedProfileGeneration = profileGeneration
+        let value = try await client.requestValue("settings.change", JSONValue.object([
+            "commandId": .string(uuidSource.next().uuidString), "target": .object(["kind": .string("mac")]),
+            "changes": .array([change]), "dryRun": .bool(true),
+        ]))
+        try requireProfile(admittedProfileGeneration)
+        let result = value.objectValue ?? [:]
+        if let failure = result["changes"]?.arrayValue?.first?.objectValue?["error"]?.objectValue {
+            throw GatewayFailure(code: failure["code"]?.stringValue ?? "invalid_request",
+                                 message: failure["message"]?.stringValue ?? "The change was refused.", retryable: false, details: nil)
+        }
+        guard let tier = result["tier"]?.stringValue else {
+            throw GatewayFailure(code: "invalid_response", message: "The dry run returned no tier.", retryable: false, details: nil)
+        }
+        return SettingsChangePreview(tier: tier, confirm: result["changes"]?.arrayValue?.first?.objectValue?["confirm"]?.stringValue)
+    }
+
+    /// The maintainer's own Mac-layer change: his tap is the approval (F3).
+    func changeMac(_ change: JSONValue) async throws {
+        let admittedProfileGeneration = profileGeneration
+        let commandID = uuidSource.next().uuidString
+        let params: JSONValue = .object([
+            "commandId": .string(commandID), "target": .object(["kind": .string("mac")]), "changes": .array([change]),
+        ])
+        _ = try await mutationExecutor.performValue(method: "settings.change", commandID: commandID) {
+            try await client.requestValue("settings.change", params)
+        }
+        try requireProfile(admittedProfileGeneration)
+    }
+
     func noteTrustChanged() {
         trustRevision &+= 1
         settingsInvalidationGeneration &+= 1
@@ -166,6 +242,7 @@ final class SettingsTrustCoordinator {
     func clearProfile() {
         profileGeneration &+= 1
         settingsInvalidationGeneration &+= 1
+        approvalsRevision &+= 1
         settingsLoadGenerationByTarget = settingsLoadGenerationByTarget.mapValues { $0 &+ 1 }
         settingsByTarget.removeAll()
     }
