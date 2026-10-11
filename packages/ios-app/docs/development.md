@@ -1005,6 +1005,18 @@ rechecks that under the lease and removes the lease file and the directory, as
 directory (a command between creating its lane and taking its lease) keeps it.
 A sweep's lease take never creates a lane directory, so a lane another holder
 removed meanwhile counts as busy instead of coming back marker-less.
+For an individually verified orphan that has no lane ownership marker,
+`scripts/tron-ios-test clean-unowned UUID NAME` is the only explicit escape
+hatch: provide the exact simulator UUID and exact current device name. The
+owner refuses malformed or unreadable lane markers, any marker claiming that
+UUID, any live lane lease in the discovered lane tree, malformed Development
+state, and the remembered Development simulator. It rechecks device identity
+before shutdown and deletion, touches no other simulator or lane state, and is
+not a sweep, adoption, or way to bypass a lane claim. Inspect `status --all`
+first; use this only for a specifically identified orphan, never to reclaim
+unknown or actively used devices. This operation is intentionally destructive
+and deletes the device and its simulator data.
+
 `clean` in the runner or the Gateway E2E harness empties its lane down to the
 lease file, which the command itself cannot delete while its holder
 holds it; the holder removes the lane directory when the command ends, still
@@ -1111,8 +1123,10 @@ devices or simulators.
 ownership marker is ever shut down or deleted (a lane no command has used for 7
 days is reclaimed), each lane's lease is taken (without waiting) for the whole
 shutdown or removal, and lanes a live process holds are skipped.
-The remembered Development simulator (`scripts/tron-ios-simulator`) and every
-unmarked simulator are never shut down or deleted by the runner. Runs and
+The remembered Development simulator (`scripts/tron-ios-simulator`) is never
+shut down or deleted by test tooling. Unmarked simulators are never affected by
+a sweep; only the explicit `clean-unowned` command above can delete one, after
+its exact identity and absence of ownership have been verified. Runs and
 products are only ever removed inside a directory the runner proved with its own
 ownership marker, and only this worktree's and lane's runs are removed by
 `clean`.

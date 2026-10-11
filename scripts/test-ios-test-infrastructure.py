@@ -552,6 +552,78 @@ raise SystemExit(2)
             "deviceTypeIdentifier": TYPE_ID,
         }
 
+class UnownedSimulatorCleanupFixture(SimulatorHarness, unittest.TestCase):
+    """Exact-UUID cleanup refuses every ownership signal before deletion."""
+
+    def clean_command(self, udid: str = UDID_A, name: str = "Orphan Test Simulator") -> subprocess.CompletedProcess[str]:
+        environment = self.contained_environment(self.root)
+        environment.update({"TRON_IOS_XCRUN": str(self.fake_xcrun), "FAKE_SIMCTL_INVENTORY": str(self.inventory_path)})
+        environment.update(self.reader_environment())
+        return subprocess.run(
+            [sys.executable, str(SIMULATOR), "delete-unowned", "--udid", udid, "--name", name,
+             "--discovery-root", str(self.root), "--default-state-dir", str(self.root),
+             "--development-state", str(self.development)],
+            env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    def test_deletes_only_exact_unowned_requested_simulator(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]
+        unrelated = self.device(UDID_B, name="Other Simulator", state="Booted")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target, unrelated]})
+        result = self.clean_command()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        devices = json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]
+        self.assertEqual([device["udid"] for device in devices], [UDID_B])
+        self.assertEqual(devices[0]["state"], "Booted")
+
+    def test_refuses_owned_live_development_and_malformed_targets(self) -> None:
+        cases = ("owned", "development", "malformed")
+        for case in cases:
+            with self.subTest(case=case):
+                target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]
+                self.write_inventory(devices={RUNTIME_ID: [target]})
+                if case == "owned":
+                    lane = self.root / "ios-test-active"
+                    lane.mkdir()
+                    (lane / "simulator.json").write_text(json.dumps(self.owned_marker(UDID_A)))
+                    (lane / "lease.lock").write_text("")
+                    # Hold an actual advisory lock to prove a live lane is refused.
+                    with (lane / "lease.lock").open("r+") as lease:
+                        fcntl.flock(lease.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        result = self.clean_command()
+                elif case == "development":
+                    self.development.write_text(UDID_A + "\\n")
+                    result = self.clean_command()
+                else:
+                    lane = self.root / "ios-test-bad"
+                    lane.mkdir()
+                    (lane / "simulator.json").write_text("not json")
+                    result = self.clean_command()
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertTrue(any(device["udid"] == UDID_A for device in json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]))
+
+    def test_refuses_markerless_live_lane_lease(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target]})
+        lane = self.root / "ios-test-live"
+        lane.mkdir()
+        lease_path = lane / "lease.lock"
+        lease_path.write_text("")
+        with lease_path.open("r+") as lease:
+            fcntl.flock(lease.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.clean_command()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("leased", result.stderr)
+        self.assertTrue(any(device["udid"] == UDID_A for device in json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]))
+
+    def test_requires_matching_uuid_and_name(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target]})
+        self.assertNotEqual(self.clean_command(UDID_B).returncode, 0)
+        self.assertNotEqual(self.clean_command(name="different name").returncode, 0)
+        self.assertTrue(any(device["udid"] == UDID_A for device in json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]))
+
+
 class SimulatorFixture(SimulatorHarness, unittest.TestCase):
     """Exercise the simulator owner directly against a synthetic simctl."""
 
@@ -893,6 +965,22 @@ class AdmissionFixture(SimulatorHarness, unittest.TestCase):
 
 class RunnerFixture(SyntheticReaders, unittest.TestCase):
     """Exercise the production runner with only synthetic xcode/simctl tools."""
+
+    def test_clean_unowned_routes_exact_identity_to_simulator_owner(self) -> None:
+        target = {
+            "name": "Orphan Test Simulator", "udid": UDID_A, "state": "Booted",
+            "isAvailable": True, "deviceTypeIdentifier": RUNNER_TYPE_ID,
+        }
+        document = json.loads(self.simulator_inventory.read_text())
+        document["devices"][RUNNER_RUNTIME_ID].append(target)
+        self.simulator_inventory.write_text(json.dumps(document))
+        result = self.invoke(
+            command="clean-unowned", extra_args=[UDID_A, "Orphan Test Simulator"],
+            discovery_root=self.root,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(UDID_A, [device["udid"] for device in json.loads(self.simulator_inventory.read_text())["devices"][RUNNER_RUNTIME_ID]])
+        self.assertEqual(self.simctl_calls("delete"), [f"delete {UDID_A}"])
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
