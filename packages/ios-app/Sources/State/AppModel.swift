@@ -4410,8 +4410,8 @@ final class AppModel {
         try await settingsTrust.resolveForRenderer(target: target)
     }
 
-    func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, query: String?) async throws -> SettingsOptionsResponse {
-        try await settingsTrust.settingsOptions(target: target, key: key, qualifiers: qualifiers, query: query)
+    func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, query: String?, cursor: String? = nil) async throws -> SettingsOptionsResponse {
+        try await settingsTrust.settingsOptions(target: target, key: key, qualifiers: qualifiers, query: query, cursor: cursor)
     }
 
     func previewSettingsChange(target: JSONValue, change: JSONValue) async throws -> SettingsChangeResult {

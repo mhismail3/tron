@@ -1482,6 +1482,38 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-renderer-search")
     }
 
+    /// A served catalog remains complete beyond its first page and a new search
+    /// retires both the prior results and cursor without changing the setting.
+    @MainActor
+    func testSettingsRendererCatalogPagesAndSearchesWithoutWriting() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
+        app.buttons["settings-section-model-expand"].tap()
+        tapScrolling(any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(any["settings-option-Fixture Pro"].waitForExistence(timeout: 5))
+        XCTAssertFalse(any["settings-option-Fixture Page Two"].exists)
+        let more = app.buttons["settings-catalog-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5), "A served nextCursor must make the rest of the catalog reachable")
+        more.tap()
+        XCTAssertTrue(any["settings-option-Fixture Page Two"].waitForExistence(timeout: 5))
+        XCTAssertFalse(more.exists, "The final page retires its cursor")
+        keepScreenshot(named: "settings-catalog-second-page")
+        let search = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Search")).firstMatch
+        search.tap()
+        app.typeText("Page")
+        XCTAssertTrue(any["settings-option-Fixture Pro"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(any["settings-option-Fixture Page Two"].waitForExistence(timeout: 5))
+        XCTAssertFalse(more.exists)
+        keepScreenshot(named: "settings-catalog-search")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:0", timeout: 5))
+    }
+
     /// The same native anchored choice editor works for schema-only choices,
     /// without thinking-specific labels or a second slider presentation owner.
     @MainActor

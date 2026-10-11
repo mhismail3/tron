@@ -757,15 +757,19 @@ presentation lifecycle. `SettingsNumberSliderScale` owns numeric landmarks, and
 `SettingsConfigurationValueRow` preserves the established full-size value row
 and compact settings-row layout. The real Manage Home context-window journey
 checks open/dismiss without a setting write and retains simulator row/editor captures.
-`TronCatalogSelectionRow` is the shared selected-value sheet entry point used by
-both the settings catalog control and `TronModelSelectionRow`; it preserves the
-standard row and managed-sheet chrome while the destination retains its domain
-owner. Settings catalogs keep the renderer's `settings.options` qualifier,
-search, and latest-request lifecycle. Model selection keeps `ModelPicker` as its
-visual owner, including its search and paged catalog projection; catalog rows use
-the established selected-value checkmark. Hosted renderer coverage opens and
-dismisses a served catalog without writing, then selects a model and verifies the
-thinking options are re-requested. `SettingsValueEditors.swift` hosts write-only
+Catalog destinations share `TronCatalogOptionRow`, extracted without changing
+ModelPicker's row layout, fact typography, selection/applying treatment or tint.
+ModelPicker keeps its domain-owned Recent/Latest rails, provider expansion and
+local search; the generic catalog takes opaque values, labels, disabled reasons
+and cursor pages from `settings.options`. Both use the existing selected-value
+sheet entry and managed chrome, not a second row wrapper. The generic catalog's
+Load more carries the returned cursor; search, target, connection, foreground
+and presentation changes retire the old page chain. Every page completion is
+fenced before publishing options, errors or loading state. Overlapping pages
+preserve existing row identity, and repeated cursors stop rather than loop.
+Hosted coverage opens and dismisses a served catalog without writing, selects a
+model and verifies dependent thinking options refresh, and reaches a second page
+then searches without carrying the old cursor or applying any setting. `SettingsValueEditors.swift` hosts write-only
 secret replacement and ordered string-list add/remove/reorder in standard
 progressive sheets, fields, groups, rows and action capsules. Secret drafts
 start empty and are cleared on submission/disappearance; list drafts have local row

@@ -91,7 +91,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         let result: JSONValue
         switch method {
         case "settings.resolve": result = resolution()
-        case "settings.options": result = try options(key: params["key"]?.stringValue ?? "")
+        case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", query: params["query"]?.stringValue, cursor: params["cursor"]?.stringValue)
         case "settings.change": result = try change(params)
         default: result = .object([:])
         }
@@ -152,13 +152,19 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                         "diagnostics": .array([])])
     }
 
-    private func options(key: String) throws -> JSONValue {
+    private func options(key: String, query: String?, cursor: String?) throws -> JSONValue {
         switch key {
         case "model.ref":
-            return .object(["key": .string(key), "source": .string("catalog.models"), "dependsOn": .array([]), "options": .array([
-                .object(["value": .object(["provider": .string("fixture"), "id": .string("pro")]), "label": .string("Fixture Pro"), "detail": .string("fixture")]),
-                .object(["value": .object(["provider": .string("fixture"), "id": .string("lite")]), "label": .string("Fixture Lite"), "detail": .string("fixture")]),
-            ])])
+            let entries = [("pro", "Fixture Pro"), ("lite", "Fixture Lite"), ("page", "Fixture Page Two")]
+                .filter { query?.isEmpty != false || $0.1.localizedCaseInsensitiveContains(query!) }
+            let offset = Int(cursor ?? "0") ?? 0
+            let page = Array(entries.dropFirst(offset).prefix(2))
+            var result: [String: JSONValue] = ["key": .string(key), "source": .string("catalog.models"), "dependsOn": .array([]),
+                "options": .array(page.map { id, label in
+                    .object(["value": .object(["provider": .string("fixture"), "id": .string(id)]), "label": .string(label), "detail": .string("fixture")])
+                })]
+            if offset + page.count < entries.count { result["nextCursor"] = .string(String(offset + page.count)) }
+            return .object(result)
         case "run.retry.maxRetries":
             return .object(["key": .string(key), "source": .string("fixture.retryRange"), "dependsOn": .array([]),
                             "options": .array([]), "range": .object(["min": .number(0), "max": .number(10),

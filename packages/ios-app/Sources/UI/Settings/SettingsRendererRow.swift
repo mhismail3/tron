@@ -119,7 +119,7 @@ struct SettingsRendererRow: View {
                 readOnlyRow(subtitle: "Update Tron to edit this list")
             }
         case .catalog:
-            TronCatalogSelectionRow(icon: "square.stack.3d.up", title: title, value: setting.display) {
+            TronSelectionSheetRow(icon: "square.stack.3d.up", title: title, value: setting.display) {
                 SettingsCatalogPicker(setting: setting, target: target, title: title) { onChange($0) }
             }
         case .readOnly:
@@ -240,7 +240,8 @@ private struct SettingsRendererTextRow: View {
     }
 }
 
-/// A searchable picker over a Gateway-served catalog (`settings.options`).
+/// A searchable, paged catalog over the Gateway's option source. Presentation
+/// uses the same option row as ModelPicker; values and cursors remain opaque.
 private struct SettingsCatalogPicker: View {
     let setting: ResolvedSetting
     let target: JSONValue
@@ -248,84 +249,144 @@ private struct SettingsCatalogPicker: View {
     let onChoose: (JSONValue) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var query = ""
     @State private var options: [SettingsOption]?
+    @State private var nextCursor: String?
+    @State private var pageCursor: String?
+    @State private var consumedCursors: Set<String> = []
     @State private var loadError: String?
+    @State private var loading = false
     @State private var requestGeneration = 0
-    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @State private var reloadTick = 0
+    @State private var displayedSource: Source?
+
+    private struct Source: Hashable {
+        let target: JSONValue
+        let key: String
+        let qualifiers: [String: String]?
+        let query: String
+        let identity: KnowledgePresentationIdentity
+        let foreground: Int
+    }
+
+    private struct LoadID: Hashable {
+        let source: Source
+        let cursor: String?
+        let reloadTick: Int
+    }
+
+    private var source: Source {
+        Source(target: target, key: setting.key, qualifiers: setting.qualifiers, query: query,
+               identity: model.knowledgePresentationIdentity, foreground: model.foregroundReconciliationGeneration)
+    }
 
     var body: some View {
         ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 8) {
                 TronSearchBar(text: $query, prompt: "Search")
-                if let options {
-                    TronGlassCard {
-                        ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
-                            if index > 0 { TronSettingsDivider() }
-                            Button {
-                                onChoose(option.value)
-                                dismiss()
-                            } label: {
-                                TronSettingsRow(icon: nil, title: option.label, subtitle: option.disabledReason ?? option.detail) {
-                                    if option.value == setting.value {
-                                        Image(systemName: "checkmark")
-                                            .foregroundStyle(Color.tronEmerald)
-                                            .accessibilityLabel("Selected")
-                                    }
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(option.disabledReason != nil)
-                            .accessibilityIdentifier("settings-option-\(option.label)")
+                    .padding(.bottom, 8)
+                if let options, displayedSource == source {
+                    ForEach(options) { option in
+                        TronCatalogOptionRow(
+                            title: option.label, summary: option.disabledReason, detail: option.detail,
+                            icon: "square.stack.3d.up", isSelected: option.value == setting.value,
+                            isEnabled: option.disabledReason == nil
+                        ) {
+                            guard displayedSource == source else { return }
+                            onChoose(option.value)
+                            dismiss()
                         }
+                        .accessibilityIdentifier("settings-option-\(option.label)")
                     }
-                } else if let loadError {
+                    if options.isEmpty { TronSettingsCaption("No options match this search") }
+                    if let nextCursor {
+                        Button { pageCursor = nextCursor } label: {
+                            TronInlineActionLabel("Load more", isWorking: loading)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(loading)
+                        .accessibilityIdentifier("settings-catalog-more")
+                    }
+                }
+                if let loadError {
                     TronSettingsCaption(loadError)
-                } else {
+                    Button("Try again") { reloadTick &+= 1 }
+                        .buttonStyle(.plain)
+                } else if options == nil || displayedSource != source {
                     TronLoadingState(label: "Loading…")
                 }
             }
-            .padding(20)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
+        .tronScrollEdgeChrome()
         .tronNavigationTitle(title)
-        .onChange(of: query) { _, _ in
-            requestGeneration &+= 1
-            options = nil
-            loadError = nil
-        }
-        .onChange(of: presentationActivity) { _, _ in
-            requestGeneration &+= 1
-            options = nil
-            loadError = nil
-        }
+        .onChange(of: source) { _, _ in reset() }
+        .onChange(of: presentationActivity) { _, _ in reset() }
         .onDisappear { requestGeneration &+= 1 }
-        .task(id: PresentationActivityTaskID(source: query, presentationActive: presentationActivity.allowsPresentationPublication)) {
+        .task(id: PresentationActivityTaskID(
+            source: LoadID(source: source, cursor: pageCursor, reloadTick: reloadTick),
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
             guard presentationActivity.allowsPresentationPublication else { return }
-            requestGeneration &+= 1
-            let ticket = requestGeneration
-            let activity = presentationActivity
-            let identity = model.knowledgePresentationIdentity
-            let foreground = model.foregroundReconciliationGeneration
-            // A result for the previous search must not remain selectable while the new one loads.
+            await load()
+        }
+    }
+
+    private func reset() {
+        requestGeneration &+= 1
+        options = nil
+        displayedSource = nil
+        pageCursor = nil
+        nextCursor = nil
+        consumedCursors = []
+        loadError = nil
+        loading = false
+    }
+
+    private func load() async {
+        requestGeneration &+= 1
+        let ticket = requestGeneration
+        let activity = presentationActivity
+        let requestedSource = source
+        let cursor = pageCursor
+        loading = true
+        loadError = nil
+        if cursor == nil {
             options = nil
-            loadError = nil
-            @MainActor func isCurrent() -> Bool {
-                ticket == requestGeneration && !Task.isCancelled
-                    && activity == presentationActivity && activity.allowsPresentationPublication
-                    && identity == model.knowledgePresentationIdentity
-                    && foreground == model.foregroundReconciliationGeneration
+            nextCursor = nil
+            consumedCursors = []
+        }
+        @MainActor func isCurrent() -> Bool {
+            ticket == requestGeneration && !Task.isCancelled && source == requestedSource
+                && activity == presentationActivity && activity.allowsPresentationPublication
+        }
+        defer { if isCurrent() { loading = false } }
+        do {
+            let response = try await model.settingsOptions(
+                target: requestedSource.target, key: requestedSource.key, qualifiers: requestedSource.qualifiers,
+                query: requestedSource.query.isEmpty ? nil : requestedSource.query, cursor: cursor
+            )
+            guard isCurrent() else { return }
+            // Values identify rows across pages; overlapping server pages must
+            // not duplicate SwiftUI identity or reorder already-visible choices.
+            var seen = Set((cursor == nil ? [] : options ?? []).map(\.id))
+            let additions = response.options.filter { seen.insert($0.id).inserted }
+            options = (cursor == nil ? [] : options ?? []) + additions
+            displayedSource = requestedSource
+            if let cursor { consumedCursors.insert(cursor) }
+            if let next = response.nextCursor, consumedCursors.contains(next) {
+                nextCursor = nil
+                loadError = "The catalog could not advance. Search to narrow the results."
+            } else {
+                nextCursor = response.nextCursor
             }
-            do {
-                let response = try await model.settingsOptions(target: target, key: setting.key, qualifiers: setting.qualifiers,
-                                                               query: query.isEmpty ? nil : query)
-                guard isCurrent() else { return }
-                options = response.options
-            } catch is CancellationError {
-                return
-            } catch {
-                guard isCurrent() else { return }
-                loadError = error.localizedDescription
-            }
+        } catch is CancellationError {
+            return
+        } catch {
+            guard isCurrent() else { return }
+            loadError = error.localizedDescription
         }
     }
 }

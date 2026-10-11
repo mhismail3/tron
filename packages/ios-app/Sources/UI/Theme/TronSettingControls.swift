@@ -85,21 +85,76 @@ struct TronSelectionSheetRow<Destination: View>: View {
     }
 }
 
-/// The shared entry point for catalog-backed selection. Domain-specific
-/// destinations retain ownership of their search, paging, and selection rules.
-struct TronCatalogSelectionRow<Destination: View>: View {
-    let icon: String
+/// Catalog choices share the established model-picker row. Catalog owners
+/// supply facts and selection authority; this primitive owns only presentation.
+struct TronCatalogOptionRow: View {
     let title: String
+    var summary: String? = nil
     var detail: String? = nil
-    let value: String
-    var accessibilityLabel: String? = nil
-    var accent: Color = .tronEmerald
-    @ViewBuilder let destination: () -> Destination
+    var badge: String? = nil
+    var icon: String = "cpu"
+    let isSelected: Bool
+    var isApplying = false
+    var isEnabled = true
+    let action: () -> Void
+    @Environment(\.tronSettingsVisualTheme) private var theme
+
+    private var accent: Color { theme?.accent ?? (isSelected ? .tronEmerald : .tronSlate) }
 
     var body: some View {
-        TronSelectionSheetRow(icon: icon, title: title, detail: detail, value: value,
-                              accessibilityLabel: accessibilityLabel, accent: accent,
-                              destination: destination)
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Group {
+                    if isSelected && isApplying {
+                        TronPulseLoadingIndicator(accent: theme?.accent ?? .tronEmerald, size: 14)
+                    } else {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : icon)
+                            .foregroundStyle(accent)
+                            .accessibilityLabel(isSelected ? "Selected" : title)
+                    }
+                }
+                .frame(width: 22)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(Color.tronTextPrimary)
+                        if let badge {
+                            Text(badge)
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextSecondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.tronCyan.opacity(0.12), in: Capsule())
+                        }
+                    }
+                    // Uniform fact lines preserve lazy-list scroll estimates.
+                    if let summary {
+                        Text(summary)
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .lineLimit(1)
+                    }
+                    if let detail {
+                        Text(detail)
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .tronScrollSurface(accent: accent, cornerRadius: 14, tintOpacity: isSelected ? 0.18 : 0.08)
+        .disabled(!isEnabled)
+        .accessibilityLabel([title, summary, detail].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityValue(isSelected && isApplying ? "Applying configuration" : isSelected ? "Selected" : "")
     }
 }
 
