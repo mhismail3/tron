@@ -1358,10 +1358,15 @@ final class AppModel {
         return await sessionPresentation.loadHistoricalLater(sessionID: sessionID, presentationGeneration: generation)
     }
 
-    /// Why this profile is stopped, for the device detail's Status group. The
-    /// selected profile's stop is the lifecycle's own `.offline` reason; a
-    /// background profile's stop lives on its pool entry, which the pool
-    /// publishes here (F-3).
+    /// Last authenticated success of a secondary profile, never a guessed last-seen time.
+    func dashboardLastConnectedAt(for profileID: String) -> Date? {
+        _ = profileRevision
+        guard profiles.profiles.contains(where: { $0.id == profileID }) else { return nil }
+        if profiles.selected?.id == profileID { return nil }
+        return dashboardConnections.lastConnectedAt(for: profileID)
+    }
+
+    /// A selected profile's stop belongs to its lifecycle; a secondary stop belongs to its pool.
     func dashboardConnectionStopReason(for profileID: String) -> String? {
         _ = profileRevision
         guard let profile = profiles.profiles.first(where: { $0.id == profileID }) else { return nil }

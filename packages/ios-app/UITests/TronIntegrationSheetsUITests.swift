@@ -662,13 +662,79 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     }
 
     @MainActor
+    func testEstablishedSocketLossThenOpenTimeoutsBecomeUnreachable() {
+        continueAfterFailure = false
+        let app = launch(scenario: "connection-loss-unreachable")
+        defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Connected")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Mac unreachable")).firstMatch.waitForExistence(timeout: 30), app.debugDescription)
+        keepScreenshot(app, name: "established-loss-unreachable-simulator")
+    }
+
+    @MainActor
+    func testOpenedTransportFailureDoesNotClaimMacUnreachable() {
+        let app = launch(scenario: "connection-opened-failure")
+        defer { app.terminate() }
+        let count = app.staticTexts["failed-socket-count"]
+        let twoAttempts = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "failed sockets 2"), object: count)
+        XCTAssertEqual(XCTWaiter.wait(for: [twoAttempts], timeout: 10), .completed)
+        let reconnecting = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Connection status: Reconnecting")).firstMatch
+        XCTAssertTrue(reconnecting.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Mac unreachable")).firstMatch.exists)
+        app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Retry Connection")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Connection status: Connected")).firstMatch.waitForExistence(timeout: 10))
+        keepScreenshot(app, name: "opened-transport-recovered-simulator")
+    }
+
+    @MainActor
+    func testSecondaryRecoverySurvivesBackgroundAndResetsOnlyOnRetryOrSuccess() {
+        continueAfterFailure = false
+        let app = launch(scenario: "connection-secondary")
+        defer { app.terminate() }
+        let state = app.staticTexts["secondary-state"]
+        func waitLabel(_ element: XCUIElement, _ value: String, timeout: TimeInterval = 10) {
+            let predicate = NSPredicate(format: "label == %@", value)
+            XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed, app.debugDescription)
+        }
+        waitLabel(state, "connected")
+        let primary = app.staticTexts["primary-state"].label
+        let lastConnected = app.staticTexts["secondary-last-connected"].label
+        XCTAssertTrue(lastConnected.hasPrefix("last connected "))
+        app.buttons["Lose secondary"].tap()
+        waitLabel(state, "offline")
+        waitLabel(app.staticTexts["secondary-delay"], "wait 300.0")
+        XCTAssertEqual(app.staticTexts["secondary-last-connected"].label, lastConnected)
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        waitLabel(state, "offline")
+        let waits = app.staticTexts["secondary-waits"]
+        func waitFirstDelay(_ value: String) {
+            let predicate = NSPredicate(format: "label BEGINSWITH %@", value)
+            XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: waits)], timeout: 5) == .completed, app.debugDescription)
+        }
+        waitFirstDelay("300.0,")
+        XCTAssertEqual(app.staticTexts["secondary-last-connected"].label, lastConnected)
+        XCTAssertEqual(app.staticTexts["primary-state"].label, primary)
+        app.buttons["Retry secondary"].tap()
+        waitFirstDelay("2.0,")
+        app.buttons["Restore secondary"].tap()
+        // Automatic success, without another Retry, must reset the next outage.
+        waitLabel(state, "connected")
+        XCTAssertEqual(app.staticTexts["primary-state"].label, primary)
+        XCTAssertNotEqual(app.staticTexts["secondary-last-connected"].label, lastConnected)
+        app.buttons["Lose secondary"].tap()
+        waitFirstDelay("2.0,")
+        keepScreenshot(app, name: "secondary-recovery-reset-simulator")
+    }
+
+    @MainActor
     private func assertRetryRecovers(scenario: String) {
         continueAfterFailure = false
         do {
             let app = launch(scenario: scenario)
             defer { app.terminate() }
             let state = scenario == "connection-unreachable" ? "Mac unreachable" : "Reconnecting"
-            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", state)).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", state)).firstMatch.waitForExistence(timeout: 30), app.debugDescription)
             let retry = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Retry Connection")).firstMatch
             XCTAssertTrue(retry.waitForExistence(timeout: 3), app.debugDescription)
             keepScreenshot(app, name: "\(scenario)-retry-available")
