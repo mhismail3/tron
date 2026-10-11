@@ -1297,8 +1297,13 @@ export interface HomeTaskDisplay {
   title: string;
   /** The target directory's last path component. */
   project: string;
-  /** The worker session the task dispatched, or null before dispatch. */
-  workerSessionId: string | null;
+}
+
+/** Exact task counts over the whole task store, independent of any page. `active` covers every
+ * non-terminal lifecycle (`pending` and `active`); `finished` covers `terminal`. */
+export interface HomeTaskCounts {
+  active: number;
+  finished: number;
 }
 
 /** home.taskList: bounded newest-first task metadata; no canonical reports. */
@@ -1306,6 +1311,8 @@ export interface HomeTaskSummary extends HomeTaskDisplay {
   taskId: string;
   createdAt: number;
   updatedAt: number;
+  /** The worker session the task dispatched (the task's `sessionId`), or null before dispatch. */
+  sessionId: string | null;
   target: string;
   lifecycle: "pending" | "active" | "terminal";
   outcome: "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown" | null;
@@ -1316,4 +1323,6 @@ export interface HomeTaskSummary extends HomeTaskDisplay {
 export interface HomeTaskPage {
   items: HomeTaskSummary[];
   nextCursor?: string;
+  /** Exact counts for the whole store, read with this page; never capped by `limit`. */
+  counts: HomeTaskCounts;
 }

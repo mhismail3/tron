@@ -6,9 +6,9 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, isDurablePublicationUncertain, syncDurably, type DurableJsonFileSystem } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { authorizationRequestId, type HomeTaskAuthorizationState, type HomeTaskAuthorizationStore } from "./home-task-authorization.js";
-import type { HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
-/** A list row before the dispatcher adds the project and worker of its display. */
-type HomeTaskRow = Omit<HomeTaskSummary, "project" | "workerSessionId">;
+import type { HomeTaskCounts, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
+/** A list row before the dispatcher adds the project and the session of its display. */
+type HomeTaskRow = Omit<HomeTaskSummary, "project" | "sessionId">;
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
 
 const TASK_BYTES = 256 * 1_024;
@@ -384,6 +384,17 @@ export class HomeTaskStore {
     const info = await lstat(this.directory, { bigint: true });
     if (!info.isDirectory() || info.isSymbolicLink() || info.birthtimeNs <= 0n) throw new HomeTaskStoreError("unsafe-state");
     return createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
+  }
+
+  /** Exact lifecycle counts over every task record. Each record is read once, so the cost grows with
+   * the namespace; a never-initialized namespace has none. */
+  async counts(): Promise<HomeTaskCounts> {
+    const counts: HomeTaskCounts = { active: 0, finished: 0 };
+    for await (const task of this.records()) {
+      if (task.lifecycle === "terminal") counts.finished += 1;
+      else counts.active += 1;
+    }
+    return counts;
   }
 
   /** Maintainer list reads only the selected records, never report bodies.

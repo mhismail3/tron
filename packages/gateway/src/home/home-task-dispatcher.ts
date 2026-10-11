@@ -381,16 +381,15 @@ export class HomeTaskDispatcher {
     for (const item of page.items) {
       const task = await this.store.read(item.taskId);
       if (!task) throw new GatewayError("conflict", "Listed task is missing");
-      items.push({ ...item, ...await this.display(task) });
+      items.push({ ...item, ...await this.display(task), sessionId: task.sessionId });
     }
-    return { ...page, items };
+    return { ...page, items, counts: await this.store.counts() };
   }
 
   /** A task's display. A worker's name is read from its canonical session, never a transcript scan. */
   private async display(task: HomeTaskRecord): Promise<HomeTaskDisplay> {
-    const workerSessionId = task.sessionId ?? null;
     const workerName = task.sessionId ? await this.sessions.taskWorkerName(task.sessionId) : undefined;
-    return { title: homeTaskTitle(task.intent.text, workerName), project: basename(task.target), workerSessionId };
+    return { title: homeTaskTitle(task.intent.text, workerName), project: basename(task.target) };
   }
 
   /** The worker's live subagent runs, newest first and bounded for status. Only an active

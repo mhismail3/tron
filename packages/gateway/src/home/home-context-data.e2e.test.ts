@@ -182,9 +182,10 @@ describe("Home chapters, task names and memory pages", () => {
     expect(worker.snapshot().name).toBe("Count the chapter");
 
     const status = await owner.taskStatus("task-titled");
-    expect(status).toMatchObject({ title: "Count the chapter", project: basename(f.cwd), workerSessionId: task.sessionId });
+    expect(status).toMatchObject({ title: "Count the chapter", project: basename(f.cwd), sessionId: task.sessionId });
     const list = await owner.taskList({});
-    expect(list.items[0]).toMatchObject({ taskId: "task-titled", title: "Count the chapter", project: basename(f.cwd), workerSessionId: task.sessionId });
+    expect(list.items[0]).toMatchObject({ taskId: "task-titled", title: "Count the chapter", project: basename(f.cwd), sessionId: task.sessionId });
+    expect(list.counts).toEqual({ active: 0, finished: 1 });
 
     // One user message, Home's delegated reply and its wake reply (the tool-call message is not a reply), one delegation.
     const chapter = (await owner.chapterList()).chapters[0]!;
@@ -207,7 +208,7 @@ describe("Home chapters, task names and memory pages", () => {
     await run.completion;
     await waitFor(async () => (await owner.taskResult("task-plain")).wake?.state === "acknowledged", "plain wake acknowledged");
     const list = await owner.taskList({});
-    expect(list.items[0]).toMatchObject({ taskId: "task-plain", title: "Finite work", project: basename(f.cwd), workerSessionId: run.sessionId });
+    expect(list.items[0]).toMatchObject({ taskId: "task-plain", title: "Finite work", project: basename(f.cwd), sessionId: run.sessionId });
   }, 60_000);
 
   it("refuses a delegated title that is blank or longer than 80 characters, and creates no task", async () => {
@@ -219,7 +220,7 @@ describe("Home chapters, task names and memory pages", () => {
     await expect(owner.dispatchTask(f.home.sessionId, { taskId: "task-blank-title", intent: "Finite work", target: f.cwd, title: "   " }))
       .rejects.toMatchObject({ code: "invalid_request", message: "Invalid task title" });
     // Refused before any namespace or record exists: the list of an uninitialized namespace is empty.
-    expect(await owner.taskList({})).toEqual({ items: [] });
+    expect(await owner.taskList({})).toEqual({ items: [], counts: { active: 0, finished: 0 } });
   }, 30_000);
 
   it("pages one chapter's memory rows when a sessionId names it, and refuses a session that is not a chapter", async () => {
@@ -267,6 +268,46 @@ describe("Home chapters, task names and memory pages", () => {
     expect(walked).toEqual(onlySecond.items.map(item => item.evidence.entryId));
 
     await expect(owner.memoryPage({ limit: 50, sessionId: "not-a-chapter" })).rejects.toMatchObject({ code: "not_found" });
+  }, 60_000);
+});
+
+describe("Home task counts", () => {
+  it("counts every task exactly, active and finished, whatever the page cap", async () => {
+    const f = await fixture();
+    await configure(f);
+    const owner = f.registry.homeOwner();
+    const hold = gate();
+    const home: AssistantMessage[] = Array.from({ length: 6 }, (_, index) => fauxAssistantMessage(`wake ${index}`));
+    // Worker requests take their replies in order; the third waits until the gate opens, so it stays active.
+    const worker: Array<AssistantMessage | (() => Promise<AssistantMessage>)> = [
+      fauxAssistantMessage([reportCall("count-one", "One")], { stopReason: "toolUse" }),
+      fauxAssistantMessage([reportCall("count-two", "Two")], { stopReason: "toolUse" }),
+      async () => { await hold.wait; return fauxAssistantMessage([reportCall("count-three", "Three")], { stopReason: "toolUse" }); },
+    ];
+    f.faux.setResponses(Array.from({ length: 16 }, () => (context: { messages: Array<{ role: string; content?: unknown }> }) => {
+      const system = context.messages.filter(message => message.role === "system").map(message => String(message.content)).join("\n");
+      if (system.includes("## Tron Home")) return home.shift() ?? fauxAssistantMessage("unexpected Home request");
+      const next = worker.shift();
+      return typeof next === "function" ? next() : next ?? fauxAssistantMessage("unexpected worker request");
+    }));
+    const dispatched = (taskId: string) => owner.dispatchTask(f.home.sessionId, { taskId, intent: `Count ${taskId}`, target: f.cwd });
+    await dispatched("count-one");
+    await dispatched("count-two");
+    await waitFor(async () => (await owner.taskList({})).counts.finished === 2, "two tasks finished");
+    await dispatched("count-three");
+    await waitFor(async () => (await owner.taskList({})).counts.active === 1, "third task active");
+
+    // One row per page, yet the counts cover the whole store.
+    const capped = await owner.taskList({ limit: 1 });
+    expect(capped.items).toHaveLength(1);
+    expect(capped.nextCursor).toBeDefined();
+    expect(capped.counts).toEqual({ active: 1, finished: 2 });
+
+    hold.open();
+    await waitFor(async () => (await owner.taskList({ limit: 1 })).counts.finished === 3, "third task finished");
+    expect((await owner.taskList({ limit: 1 })).counts).toEqual({ active: 0, finished: 3 });
+    const everything = await owner.taskList({ limit: 50 });
+    expect(everything.items.every(item => typeof item.sessionId === "string")).toBe(true);
   }, 60_000);
 });
 

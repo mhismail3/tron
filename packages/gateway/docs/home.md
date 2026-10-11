@@ -1099,12 +1099,12 @@ work. One per-process result is shared by every task surface.
 
 - **`home.taskList`** (maintainer-only) orders by `createdAt` descending, then task
   ID ascending. It scans names within a bounded window and reads at most `limit`
-  records, and then each listed record again for its display: a page costs at most twice `limit` record reads, never report bodies. The opaque cursor binds the last key to the restore
+  records, and then each listed record again for its display: a page costs at most twice `limit` record reads, never report bodies. The result also carries `counts: { active, finished }`, exact over every task record and independent of `limit`: `active` is every non-terminal lifecycle (`pending` and `active`), `finished` is `terminal`. Counts are read with the page, so they cost one read of every task record per page request, and they are not a single snapshot with the items. The opaque cursor binds the last key to the restore
   epoch; foreign, restored and malformed cursors refuse (`conflict`,
-  `invalid-record`). Each row carries task ID, dates, `title`, `project`, `workerSessionId`, target, lifecycle, terminal outcome or null, spend or null, `attention` (needs-input or unknown) and `pendingGrant`. `title` is the worker session's canonical name when it has one, else the brief's first non-empty line, at most 80 characters; `project` is the target's last path component; `workerSessionId` is null before dispatch. A live worker's name comes from its slot and a settled one's from the catalog's index of its file, so no transcript is read. Null spend is unavailable, not zero;
+  `invalid-record`). Each row carries task ID, dates, `title`, `project`, `sessionId`, target, lifecycle, terminal outcome or null, spend or null, `attention` (needs-input or unknown) and `pendingGrant`. `title` is the worker session's canonical name when it has one, else the brief's first non-empty line, at most 80 characters; `project` is the target's last path component; `sessionId` is the worker session the task dispatched (the record's `sessionId`), null before dispatch. A live worker's name comes from its slot and a settled one's from the catalog's index of its file, so no transcript is read. Null spend is unavailable, not zero;
   A never-initialized listing returns `{ items: [] }`
   without creating authority.
-- **`home.taskStatus`** returns the record, `title`, `project` and `workerSessionId` (as in `home.taskList`), the exact active operation, spend, the
+- **`home.taskStatus`** returns the record (its `sessionId` is the worker session), `title` and `project` (as in `home.taskList`), the exact active operation, spend, the
   immutable result, `workerModel`, `subagents` (see [Subagent runs](#subagent-runs)) and
   `subagentRuns`. `workerModel` is the worker session's current `{ provider, id }`, read
   from its canonical `model_change` entries. A running worker answers from its live slot; a
@@ -1309,8 +1309,8 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.pauseMemory` | `commandId` | receipted | Requires an enabled, configured Home. Durably pauses; idempotent. Returns the memory projection. |
 | `home.resumeMemory` | `commandId` | receipted | Clears pause and or block, re-reads canonical deltas and restarts the pump without awaiting catch-up. A memory that is neither paused nor blocked refuses with conflict. An empty Home resumes without creating a store. |
 | `home.reconfirmPermissions` | `commandId` | receipted | Re-stamps active standing scopes to the current epoch. See [Authorization](#authorization). |
-| `home.taskList` | `limit?` (1–50, default 20), `cursor?` (at most 1,024 characters) | read | Maintainer summary, each row with its `title`, `project` and `workerSessionId`; see [Control and spend status](#control-and-spend-status). |
-| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record, `title`, `project`, `workerSessionId`, active operation, spend, immutable result, worker model, subagent counts and live subagent runs. |
+| `home.taskList` | `limit?` (1–50, default 20), `cursor?` (at most 1,024 characters) | read | Maintainer summary: each row with its `title`, `project` and `sessionId`, and the result's exact `counts` (`active`, `finished`) over the whole store; see [Control and spend status](#control-and-spend-status). |
+| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record (its `sessionId` is the worker session), `title`, `project`, active operation, spend, immutable result, worker model, subagent counts and live subagent runs. |
 | `home.taskPermissions` | none | read | Strict scopes, requests, decisions and grants with the revision. Refuses before the first dispatch, never granting permission. |
 | `home.steerTask` | `commandId`, `taskId`, `operationId`, `text` (at most 64 KiB) | receipted | Steers the exact active operation. It cannot start a successor. |
 | `home.stopTask` | `commandId`, `taskId`, `operationId` | receipted | Persists the exact Stop intent and joins terminal settlement. Repeatable after settlement without repeating cancellation. |
