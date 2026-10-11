@@ -2,30 +2,48 @@ import SwiftUI
 import TronMobileCore
 
 /// A managed task projection and its controls share one installed read intent.
-/// Receipted mutations outlive the sheet; reads and errors do not.
+/// Receipted mutations outlive the sheet; reads and errors do not. The task list,
+/// task detail and permissions are this one owner's three presentations.
 struct HomeTaskSheet: View {
     let destination: HomeSheetDestination
     let profileID: String
-    @Environment(AppModel.self) private var model
+    var onOpenSession: ((String) -> Void)?
+    @Environment(AppModel.self) var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var token
     @Environment(\.tronPresentationActivity) private var activity
     @State private var owner = HomeSheetReadOwner()
-    @State private var requestID = UUID()
-    @State private var query: HomeSheetReadQuery
-    @State private var child: HomeSheetDestination?
-    @State private var failure: String?
-    @State private var steering = ""
-    @State private var expiry = Date.now
+    @State var requestID = UUID()
+    @State var query: HomeSheetReadQuery
+    @State var child: HomeSheetDestination?
+    @State var failure: String?
+    @State var steering = ""
+    @State var expiry = Date.now
+    @State var briefExpanded = false
+    @State var revoking: HomeRevocation?
 
-    init(destination: HomeSheetDestination, profileID: String) {
-        self.destination = destination; self.profileID = profileID
+    /// A standing scope or one-use grant the user is about to revoke.
+    enum HomeRevocation: Identifiable {
+        case scope(String), grant(String)
+        var id: String {
+            switch self {
+            case .scope(let id): "scope.\(id)"
+            case .grant(let id): "grant.\(id)"
+            }
+        }
+    }
+
+    init(destination: HomeSheetDestination, profileID: String, onOpenSession: ((String) -> Void)? = nil) {
+        self.destination = destination
+        self.profileID = profileID
+        self.onOpenSession = onOpenSession
         _query = State(initialValue: destination.initialQuery)
     }
-    private var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
+
+    var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
     private var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
-    private var canMutate: Bool {
+    var canMutate: Bool {
         guard active, !model.homeMutations.isRunning(profileID: profileID),
               !model.homeMutations.ownsUnresolvedCommand(profileID: profileID),
               case .loaded(let read, _) = owner.state else { return false }
@@ -40,10 +58,11 @@ struct HomeTaskSheet: View {
                     content
                     if model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
                         TronPlaceholderState(title: "Home change unresolved", detail: "Check completion; do not repeat the change.", icon: "clock")
-                        Button("Check completion") { checkCompletion() }.buttonStyle(TronActionButtonStyle(expands: false))
+                        checkCompletionRow
                     }
                     if let failure { TronPlaceholderState(title: "Home change", detail: failure, icon: "exclamationmark.triangle") }
-                }.padding(18)
+                }
+                .padding(18)
             }
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
@@ -52,7 +71,9 @@ struct HomeTaskSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(Color.tronEmerald)
-                    }.accessibilityLabel("Done").accessibilityIdentifier("home-sheet-done-\(destination.id)")
+                    }
+                    .accessibilityLabel("Done")
+                    .accessibilityIdentifier("home-sheet-done-\(destination.id)")
                 }
             }
         }
@@ -66,7 +87,17 @@ struct HomeTaskSheet: View {
             }
         }
         .tronManagedSheet(item: $child, identity: { "home.\(profileID).\($0.id)" }) {
-            HomeSheet(destination: $0, profileID: profileID)
+            HomeSheet(destination: $0, profileID: profileID, onOpenSession: onOpenSession)
+        }
+        .tronManagedSheet(item: $revoking, identity: { "home.\(profileID).revoke.\($0.id)" }) { target in
+            TronConfirmationSheet(
+                title: target.title,
+                message: target.message,
+                confirmTitle: "Revoke",
+                destructive: true,
+                icon: "lock.slash",
+                onConfirm: { mutate(target.command) }
+            )
         }
         .onDisappear { owner.retire() }
     }
@@ -94,180 +125,286 @@ struct HomeTaskSheet: View {
                     }
                 default: EmptyView()
                 }
-            } else { TronLoadingState(label: "Waiting for Home…") }
+            } else {
+                TronLoadingState(label: "Waiting for Home…")
+            }
         }
     }
 
-    @ViewBuilder private func recovery(_ status: HomeStatusDTO) -> some View {
+    /// Task recovery as one row when it is open; a placeholder names the refusal when not.
+    @ViewBuilder func recovery(_ status: HomeStatusDTO) -> some View {
         if !status.available || status.taskRecovery?.available != true {
             TronPlaceholderState(title: "Task recovery needed", detail: status.taskRecovery?.reason ?? status.reason ?? "Task recovery is unavailable on this Gateway.", icon: "exclamationmark.triangle")
         } else {
-            Text("Task recovery available").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
+            TronGlassCard(accent: .tronSessionTeal) {
+                TronSettingsRow(icon: "checkmark.shield", title: "Task recovery", subtitle: "Available", accent: .tronSessionTeal)
+            }
         }
     }
 
     private func taskList(_ page: HomeTaskPageDTO) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Button("Permissions") { child = .permissions }.buttonStyle(TronActionButtonStyle(expands: false))
-            if page.items.isEmpty { TronPlaceholderState(title: "No tasks", detail: "Home has not recorded any tasks.", icon: "checklist") }
-            ForEach(page.items) { row in
-                TronGlassCard(accent: .tronEmerald) {
-                    Button { child = .task(row.taskId) } label: {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(row.title).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
-                            Text(row.target).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
-                            Text([row.lifecycle.rawValue, row.outcome?.rawValue].compactMap { $0 }.joined(separator: " · "))
-                                .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronEmerald)
-                            dates(created: row.createdAt, updated: row.updatedAt)
-                            spend(row.spend)
-                            if row.attention { Text("Needs attention").font(TronTypography.secondaryDescription) }
-                            if row.pendingGrant { Text("Permission request pending").font(TronTypography.secondaryDescription) }
-                        }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                    }.buttonStyle(.plain).accessibilityIdentifier("home-task-\(row.taskId)")
+        VStack(alignment: .leading, spacing: 14) {
+            if page.items.isEmpty {
+                TronPlaceholderState(title: "No tasks", detail: "Home has not recorded any tasks.", icon: "checklist")
+            } else {
+                TronGlassCard(accent: .tronSessionTeal) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(page.items.enumerated()), id: \.element.id) { index, row in
+                            if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
+                            taskRow(row)
+                        }
+                    }
                 }
             }
             if let cursor = page.nextCursor {
-                Button("Next tasks page") { query = .tasks(cursor); requestID = UUID() }.buttonStyle(TronActionButtonStyle(expands: false))
+                actionRow(title: "Next tasks page", icon: "chevron.down", id: "home-tasks-next") { query = .tasks(cursor); requestID = UUID() }
             }
-            Button("Reload tasks") { reload() }.buttonStyle(TronActionButtonStyle(expands: false))
+            actionRow(title: "Reload tasks", icon: "arrow.clockwise", id: "home-tasks-reload") { reload() }
         }
+    }
+
+    private func taskRow(_ row: HomeTaskPageDTO.Row) -> some View {
+        let title = HomeTaskPresentation.title(title: row.title, briefText: nil, project: row.project)
+        return Button { child = .task(row.taskId) } label: {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .lineLimit(2)
+                    if let project = row.project {
+                        Text(project)
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .trailing, spacing: 6) {
+                    TronStatusPill(text: HomeTaskPresentation.stateLabel(lifecycle: row.lifecycle, outcome: row.outcome),
+                                   accent: Self.taskAccent(row.lifecycle, outcome: row.outcome))
+                    Text(HomeSheetTime.relative(milliseconds: row.updatedAt) ?? "")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                }
+                Image(systemName: "chevron.right")
+                    .font(TronTypography.caption)
+                    .foregroundStyle(Color.tronSessionTeal)
+                    .accessibilityHidden(true)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("home-task-\(row.taskId)")
     }
 
     private func taskDetail(_ task: HomeTaskDTO, status: HomeStatusDTO) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            TronGlassCard(accent: .tronEmerald) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(task.intent.text).font(TronTypography.bodySM).textSelection(.enabled)
-                    Text(task.target).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
-                    Text(task.lifecycle.rawValue).font(TronTypography.secondaryDescription)
-                    if let terminal = task.terminalEvidence {
-                        Text(terminal.outcome.rawValue).font(TronTypography.bodySM)
+        let title = HomeTaskPresentation.title(title: task.title, briefText: task.intent.text, project: task.project)
+        return VStack(alignment: .leading, spacing: 14) {
+            TronGlassCard(accent: .tronSessionTeal) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(title)
+                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                    HStack(spacing: 8) {
+                        TronStatusPill(text: HomeTaskPresentation.stateLabel(lifecycle: task.lifecycle, outcome: task.terminalEvidence?.outcome),
+                                       accent: Self.taskAccent(task.lifecycle, outcome: task.terminalEvidence?.outcome))
+                        if let project = task.project {
+                            Text(project)
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextSecondary)
+                        }
+                    }
+                    Text(dateLine(created: task.createdAt, updated: task.updatedAt))
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextMuted)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            briefCard(task.intent.text)
+            if let terminal = task.terminalEvidence {
+                sectionCard("Result") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(terminal.outcome.rawValue.capitalized).font(TronTypography.bodySM)
                         Text(terminal.reason).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
                     }
-                    dates(created: task.createdAt, updated: task.updatedAt)
-                    spend(task.spend)
-                    if let wake = task.wake {
-                        Text("Result delivery").font(TronTypography.bodySM)
-                        Text(wake.state.rawValue).font(TronTypography.secondaryDescription)
+                }
+            }
+            workerCard(task, status: status)
+            actionsCard(task, status: status)
+        }
+        .accessibilityIdentifier("home-task-detail")
+    }
+
+    /// The brief, collapsed to six lines until the user asks for all of it.
+    private func briefCard(_ text: String) -> some View {
+        let long = text.count > 320 || text.split(whereSeparator: \.isNewline).count > 6
+        return sectionCard("Brief") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(text)
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(briefExpanded ? nil : 6)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if long {
+                    Button(briefExpanded ? "Show less" : "Show all") { briefExpanded.toggle() }
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronEmerald)
+                        .accessibilityIdentifier("home-task-brief-toggle")
+                }
+            }
+        }
+    }
+
+    /// The worker: its model, its subagent launches, and the runs live right now.
+    @ViewBuilder private func workerCard(_ task: HomeTaskDTO, status: HomeStatusDTO) -> some View {
+        if task.workerModel != nil || task.subagents != nil || task.subagentRuns != nil {
+            sectionCard("Worker") {
+                VStack(alignment: .leading, spacing: 0) {
+                    if let model = task.workerModel {
+                        TronValueRow(icon: "cpu", title: "Model", value: model.displayName)
                     }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                    if let subagents = task.subagents {
+                        if task.workerModel != nil { TronSettingsDivider(accent: .tronSessionTeal) }
+                        TronValueRow(icon: "person.2", title: "Subagents", value: Self.subagentLine(subagents))
+                    }
+                    if let runs = task.subagentRuns, runs.total > 0 {
+                        TronSettingsDivider(accent: .tronSessionTeal)
+                        Text("\(runs.total) live subagent \(runs.total == 1 ? "run" : "runs")")
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .padding(.vertical, 10)
+                        ForEach(runs.runs) { run in
+                            HStack(alignment: .center, spacing: 10) {
+                                Text(run.agent)
+                                    .font(TronTypography.secondaryCodeDescription)
+                                    .foregroundStyle(Color.tronTextPrimary)
+                                    .lineLimit(1)
+                                Spacer(minLength: 6)
+                                TronStatusPill(text: run.state.capitalized, accent: .tronSessionTeal)
+                                Text(HomeSheetTime.relative(run.lastActivityAt ?? run.startedAt) ?? "")
+                                    .font(TronTypography.caption)
+                                    .foregroundStyle(Color.tronTextMuted)
+                            }
+                            .padding(.vertical, 6)
+                        }
+                        if runs.total > runs.runs.count {
+                            Text("+ \(runs.total - runs.runs.count) more")
+                                .font(TronTypography.caption)
+                                .foregroundStyle(Color.tronTextMuted)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func actionsCard(_ task: HomeTaskDTO, status: HomeStatusDTO) -> some View {
+        let redeliverable = status.enabled && task.homeId == status.homeId ? status.routeGeneration.flatMap { route in
+            task.wake.flatMap { wake in wake.canRedeliver && wake.routeGeneration != route ? route : nil }
+        } : nil
+        return VStack(alignment: .leading, spacing: 14) {
+            if let spend = task.spend {
+                Text("\(spend.inputTokens.formatted()) input · \(spend.outputTokens.formatted()) output tokens")
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .accessibilityIdentifier("home-task-spend")
+            }
+            if let worker = task.workerSessionId, let onOpenSession {
+                actionRow(title: "Open worker chat", subtitle: "The ordinary chat Home delegated to", icon: "bubble.left.and.text.bubble.right", id: "home-task-open-worker") {
+                    onOpenSession(worker)
+                }
             }
             if task.lifecycle == .active, let operation = task.operationId {
-                Button("Stop task", role: .destructive) { mutate(.stopTask(taskID: task.taskId, operationID: operation)) }
-                    .buttonStyle(TronActionButtonStyle(expands: false)).disabled(!canMutate)
-                TextField("Steering message", text: $steering, axis: .vertical).tronField()
-                Button("Send steer") { mutate(.steerTask(taskID: task.taskId, operationID: operation, text: steering)) }
-                    .buttonStyle(TronActionButtonStyle(expands: false))
-                    .disabled(!canMutate || steering.isEmpty || steering.count > 65536)
-            }
-            if status.enabled, task.homeId == status.homeId, let route = status.routeGeneration,
-               let wake = task.wake, wake.canRedeliver, wake.routeGeneration != route {
-                Text("Explicitly deliver this unadmitted result to the current Home after replacement. This does not replay the task.")
-                    .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
-                Button("Redeliver result") { mutate(.redeliver(taskID: task.taskId, homeID: task.homeId, routeGeneration: route)) }
-                    .buttonStyle(TronActionButtonStyle(expands: false)).disabled(!canMutate)
-            }
-            Button("Reload task") { reload() }.buttonStyle(TronActionButtonStyle(expands: false))
-        }
-    }
-
-    private func permissionList(_ permissions: HomeTaskPermissionsDTO) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("After a restore, reconfirm active standing scopes. This never renews one-use grants or revoked scopes.")
-                .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
-            Button("Reconfirm permissions") { mutate(.reconfirmPermissions) }
-                .buttonStyle(TronActionButtonStyle(expands: false)).disabled(!canMutate)
-            Text("Standing scopes").font(TronTypography.bodySM)
-            ForEach(permissions.scopes) { scope in
-                TronGlassCard(accent: .tronEmerald) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("All trusted projects").font(TronTypography.bodySM)
-                        Text(scope.active ? "Active" : "Revoked").font(TronTypography.secondaryDescription)
-                        Text(scope.id).font(TronTypography.secondaryCodeDescription).textSelection(.enabled)
-                        if scope.active {
-                            Button("Revoke scope", role: .destructive) { mutate(.revokeScope(scope.id)) }
-                                .accessibilityLabel("Revoke scope \(scope.id)").disabled(!canMutate)
-                        }
-                    }.padding(14)
+                actionRow(title: "Stop task", icon: "stop.fill", destructive: true, id: "home-task-stop", enabled: canMutate) {
+                    mutate(.stopTask(taskID: task.taskId, operationID: operation))
                 }
-            }
-            Text("One-use grants").font(TronTypography.bodySM)
-            ForEach(permissions.grants) { grant in
-                TronGlassCard(accent: .tronEmerald) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(grant.target).font(TronTypography.bodySM)
-                        Text(grant.id).font(TronTypography.secondaryCodeDescription).textSelection(.enabled)
-                        Text(grant.state.rawValue).font(TronTypography.secondaryDescription)
-                        Text("Expires \(date(grant.expiresAt).formatted())").font(TronTypography.secondaryDescription)
-                        if grant.state == .available {
-                            Button("Revoke grant", role: .destructive) { mutate(.revokeGrant(grant.id)) }
-                                .accessibilityLabel("Revoke grant \(grant.id)").disabled(!canMutate)
+                sectionCard("Steer") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        TextField("Steering message", text: $steering, axis: .vertical)
+                            .tronField()
+                            .accessibilityIdentifier("home-task-steer")
+                        actionRow(title: "Send steer", icon: "paperplane", id: "home-task-steer-send",
+                                  enabled: canMutate && !steering.isEmpty && steering.count <= 65536) {
+                            mutate(.steerTask(taskID: task.taskId, operationID: operation, text: steering))
                         }
-                    }.padding(14)
-                }
-            }
-            Text("Pending requests").font(TronTypography.bodySM)
-            ForEach(permissions.pendingRequests) { request in
-                Button { child = .grant(request) } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Review request").font(TronTypography.bodySM)
-                        Text(request.request.target).font(TronTypography.secondaryDescription)
-                        Text(request.id).font(TronTypography.secondaryCodeDescription)
                     }
                 }
-                    .accessibilityLabel("Review request \(request.id)").buttonStyle(TronActionButtonStyle(expands: false))
             }
-            if permissions.scopes.isEmpty && permissions.grants.isEmpty && permissions.pendingRequests.isEmpty {
-                TronPlaceholderState(title: "No task permissions", detail: "No standing scopes, grants or pending requests are recorded.", icon: "lock")
+            if let route = redeliverable {
+                sectionCard("Redeliver") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Explicitly deliver this unadmitted result to the current Home after replacement. This does not replay the task.")
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronTextMuted)
+                        actionRow(title: "Redeliver result", icon: "arrow.uturn.forward", id: "home-task-redeliver", enabled: canMutate) {
+                            mutate(.redeliver(taskID: task.taskId, homeID: task.homeId, routeGeneration: route))
+                        }
+                    }
+                }
             }
-            Button("Reload permissions") { reload() }.buttonStyle(TronActionButtonStyle(expands: false))
+            actionRow(title: "Reload task", icon: "arrow.clockwise", id: "home-task-reload") { reload() }
         }
     }
 
-    private func grantDecision(_ request: HomeTaskPermissionsDTO.Request, permissions: HomeTaskPermissionsDTO) -> some View {
-        let pending = permissions.pendingRequests.first { $0 == request }
-        return VStack(alignment: .leading, spacing: 18) {
-            TronGlassCard(accent: .tronEmerald) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(request.request.target).font(TronTypography.bodySM)
-                    Text(request.request.intentDigest).font(TronTypography.secondaryCodeDescription).textSelection(.enabled)
-                    Text("Scope: \(request.request.authorizationScope)").font(TronTypography.secondaryDescription)
-                    Text("Restore epoch: \(request.request.restoreEpoch)").font(TronTypography.secondaryCodeDescription).textSelection(.enabled)
-                }.padding(14)
+    /// Dates in the Gateway's clock, one line.
+    private func dateLine(created: Int, updated: Int) -> String {
+        "Created \(Date(timeIntervalSince1970: Double(created) / 1000).formatted()) · Updated \(Date(timeIntervalSince1970: Double(updated) / 1000).formatted())"
+    }
+
+    static func subagentLine(_ subagents: HomeTaskDTO.Subagents) -> String {
+        let started = "\(subagents.started.formatted()) started"
+        guard let stopped = subagents.stoppedAtEnd else { return started }
+        return "\(started) · \(stopped.formatted()) stopped at end"
+    }
+
+    static func taskAccent(_ lifecycle: HomeTaskLifecycle, outcome: HomeTaskOutcome?) -> Color {
+        switch lifecycle {
+        case .pending: .tronSlate
+        case .active: .tronEmerald
+        case .terminal: outcome == .final ? .tronSuccess : outcome == .interrupted ? .tronSlate : .tronWarning
+        }
+    }
+
+    func reload() { query = destination.initialQuery; requestID = UUID() }
+
+    /// A standard action row: a chevron-free row that performs one action.
+    func actionRow(title: String, subtitle: String? = nil, icon: String, destructive: Bool = false,
+                   id: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
+        TronGlassCard(accent: destructive ? .tronError : .tronSessionTeal) {
+            Button(action: action) {
+                TronSettingsRow(icon: icon, title: title, subtitle: subtitle,
+                                accent: destructive ? .tronError : .tronSessionTeal,
+                                titleColor: destructive ? .tronError : .tronTextPrimary)
             }
-            if pending != nil {
-                DatePicker("Expiry", selection: $expiry, in: Date.now..., displayedComponents: [.date, .hourAndMinute])
-                    .font(TronTypography.bodySM).accessibilityIdentifier("home-grant-expiry")
-                Text("Choose a future expiry. Approval creates one grant for this exact binding; it does not replay the refused task. Denial records a decision without a grant.")
-                    .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
-                HStack {
-                    Button("Approve request") { decide(request.id, approved: true) }
-                    Button("Deny request", role: .destructive) { decide(request.id, approved: false) }
-                }.buttonStyle(TronActionButtonStyle(expands: false)).disabled(!canMutate || expiry <= .now)
-            } else {
-                Text(permissions.decisions.first { $0.requestId == request.id }?.approved == true ? "Approved" : "Denied or no longer pending")
-                    .font(TronTypography.bodySM)
+            .buttonStyle(.plain)
+            .disabled(!enabled)
+            .accessibilityLabel(title)
+            .accessibilityIdentifier(id)
+        }
+    }
+
+    /// A titled group of standard rows; the title is a section label, never a row.
+    func sectionCard<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(Color.tronTextSecondary)
+                .padding(.horizontal, 4)
+            TronGlassCard(accent: .tronSessionTeal) {
+                content()
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
-    @ViewBuilder private func spend(_ spend: HomeTaskSpendDTO?) -> some View {
-        if let spend {
-            Text("\(spend.inputTokens.formatted()) input · \(spend.outputTokens.formatted()) output tokens").font(TronTypography.secondaryDescription)
-        } else { Text("Spend unavailable").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted) }
-    }
-    private func dates(created: Int, updated: Int) -> some View {
-        Text("Created \(date(created).formatted()) · Updated \(date(updated).formatted())")
-            .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
-    }
-    private func date(_ milliseconds: Int) -> Date { Date(timeIntervalSince1970: Double(milliseconds) / 1000) }
-    private func reload() { query = destination.initialQuery; requestID = UUID() }
-    private func decide(_ request: String, approved: Bool) {
-        let milliseconds = expiry.timeIntervalSince1970 * 1000
-        guard milliseconds.isFinite, milliseconds > Date.now.timeIntervalSince1970 * 1000 else { return }
-        mutate(.decideGrant(requestID: request, approved: approved, expiresAt: Int(milliseconds)))
-    }
-    private func mutate(_ command: HomeMutationCoordinator.Command) {
+    func mutate(_ command: HomeMutationCoordinator.Command) {
         guard canMutate, let identity, let coordinator,
               let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
         let intent = requestID
@@ -284,7 +421,12 @@ struct HomeTaskSheet: View {
             }
         }
     }
-    private func checkCompletion() {
+
+    private var checkCompletionRow: some View {
+        actionRow(title: "Check completion", icon: "arrow.clockwise", id: "home-task-check-completion") { checkCompletion() }
+    }
+
+    func checkCompletion() {
         guard active, let identity, let coordinator,
               let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
         let intent = requestID
@@ -300,5 +442,12 @@ struct HomeTaskSheet: View {
                 failure = error.localizedDescription
             }
         }
+    }
+}
+
+extension HomeSheetTime {
+    /// Relative time for the Gateway's millisecond clock.
+    static func relative(milliseconds: Int, now: Date = .now) -> String {
+        RelativeDateTimeFormatter().localizedString(for: Date(timeIntervalSince1970: Double(milliseconds) / 1000), relativeTo: now)
     }
 }

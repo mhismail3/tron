@@ -126,11 +126,27 @@ struct HomeChapterListDTO: Decodable, Equatable, Sendable {
         let sealedAt: String?
         let bytes: Int?
         let entries: Int?
+        /// What the chapter holds, from the Gateway's bounded ledger; absent on an older Gateway.
+        let contents: Contents?
         var id: Int { ordinal }
         var valid: Bool {
             !sessionId.isEmpty && sessionId.utf8.count <= 512 && ordinal > 0
                 && [createdAt, sealedAt ?? ""].allSatisfy { $0.utf8.count <= 64 }
                 && (bytes ?? 0) >= 0 && (entries ?? 0) >= 0
+                && (contents.map(\.valid) ?? true)
+        }
+    }
+    struct Contents: Decodable, Equatable, Sendable {
+        let firstAt: String?
+        let lastAt: String?
+        let userMessages: Int?
+        let homeReplies: Int?
+        let tasksDelegated: Int?
+        /// At most five of the chapter's newest memory summaries, each at most 120 characters.
+        let topics: [String]?
+        var valid: Bool {
+            [userMessages, homeReplies, tasksDelegated].allSatisfy { ($0 ?? 0) >= 0 }
+                && (topics?.count ?? 0) <= 5 && (topics ?? []).allSatisfy { $0.count <= 120 }
         }
     }
     struct Limits: Decodable, Equatable, Sendable {
@@ -159,6 +175,106 @@ struct HomeChapterListDTO: Decodable, Equatable, Sendable {
     }
 }
 
+/// Typed projection of `home.context`: the activation's request sizes, plus the
+/// body-free breakdown of the context window when the Gateway reports one. An
+/// older Gateway omits `breakdown`, and the sheet keeps the plain fields.
+struct HomeContextDTO: Equatable, Sendable {
+    struct Breakdown: Decodable, Equatable, Sendable {
+        struct Activation: Decodable, Equatable, Sendable {
+            enum State: String, Decodable, Sendable { case running, settled }
+            enum Kind: String, Decodable, Sendable { case user, wake }
+            let state: State
+            let kind: Kind
+            let startedAt: String
+        }
+        struct Section: Decodable, Equatable, Sendable, Identifiable {
+            enum ID: String, Decodable, Sendable { case instructions, profile, memory, chapter, results, input }
+            let id: ID
+            let tokens: Int
+            /// Notes, summary lines, entries or results, when the section has a count.
+            let count: Int?
+        }
+        let activation: Activation
+        let contextWindow: Int
+        let effectiveTokens: Int
+        let sections: [Section]
+    }
+
+    let activation: HomeStatusDTO.Activation
+    let breakdown: Breakdown?
+
+    private struct Wire: Decodable { let breakdown: Breakdown? }
+
+    static func decode(_ value: JSONValue) throws -> Self {
+        let activation = try value.decode(HomeStatusDTO.Activation.self)
+        let wire = try value.decode(Wire.self)
+        if let breakdown = wire.breakdown {
+            guard breakdown.sections.count <= 6, breakdown.effectiveTokens >= 0, breakdown.contextWindow > 0,
+                  breakdown.sections.allSatisfy({ $0.tokens >= 0 && ($0.count ?? 0) >= 0 }),
+                  Set(breakdown.sections.map(\.id)).count == breakdown.sections.count else { throw invalidHomeRead() }
+        }
+        return Self(activation: activation, breakdown: wire.breakdown)
+    }
+}
+
+/// The Manage Home main sheet's one owner load: every read it presents, admitted
+/// by the same status. Task and permission reads are absent while task recovery
+/// is closed, and chapters are absent on a Gateway without the chapter list.
+struct HomeManageDTO: Equatable, Sendable {
+    let status: HomeStatusDTO
+    let context: HomeContextDTO
+    let chapters: HomeChapterListDTO?
+    let tasks: HomeTaskPageDTO?
+    let permissions: HomeTaskPermissionsDTO?
+}
+
+/// The Home context and memory text the sheets show, derived in one owner so the
+/// rows and their tests describe the same meanings.
+enum HomeContextPresentation {
+    static func sectionLabel(_ id: HomeContextDTO.Breakdown.Section.ID, input: HomeContextDTO.Breakdown.Activation.Kind) -> String {
+        switch id {
+        case .instructions: "Instructions"
+        case .profile: "About you"
+        case .memory: "Memory"
+        case .chapter: "This chapter"
+        case .results: "Task results"
+        case .input: input == .wake ? "Wake" : "Your message"
+        }
+    }
+
+    static func meaning(_ id: HomeContextDTO.Breakdown.Section.ID, input: HomeContextDTO.Breakdown.Activation.Kind) -> String {
+        switch id {
+        case .instructions: "Tron's base instructions and Home's operating context"
+        case .profile: "What Home has learned about you"
+        case .memory: "Summaries of earlier conversation Home can recall"
+        case .chapter: "This chapter's recent turns, sent live"
+        case .results: "Finished task results delivered in this activation"
+        case .input: input == .wake ? "The trigger that started this activation" : "The message you sent"
+        }
+    }
+
+    /// The count the section names, in the words of its meaning ("3 notes").
+    static func countLine(_ section: HomeContextDTO.Breakdown.Section) -> String? {
+        guard let count = section.count else { return nil }
+        switch section.id {
+        case .profile: return "\(count.formatted()) \(count == 1 ? "note" : "notes")"
+        case .memory: return "\(count.formatted()) \(count == 1 ? "summary" : "summaries")"
+        case .chapter: return "\(count.formatted()) \(count == 1 ? "entry" : "entries")"
+        case .results: return "\(count.formatted()) delivered"
+        case .instructions, .input: return nil
+        }
+    }
+
+    /// Activation header: what started it, how long ago, and whether it still runs.
+    static func activationLine(_ activation: HomeContextDTO.Breakdown.Activation, now: Date = .now) -> String {
+        let kind = activation.kind == .wake ? "Wake" : "Your message"
+        let state = activation.state == .running ? "Running" : "Settled"
+        guard let started = HomeChapterPresentation.parse(activation.startedAt) else { return "\(kind) · \(state)" }
+        let relative = RelativeDateTimeFormatter().localizedString(for: started, relativeTo: now)
+        return "\(kind) · \(relative) · \(state)"
+    }
+}
+
 /// One owner of the chapter rows' derived text, so the sheet and its tests
 /// describe the same ledger identically.
 enum HomeChapterPresentation {
@@ -178,6 +294,22 @@ enum HomeChapterPresentation {
         case .reserved: "Reserved"
         case .materializing: "Materializing"
         }
+    }
+
+    /// The soft-limit share of a chapter, the larger of its bytes and entries, so
+    /// the size bar and the row's subtitle read the same measurement.
+    static func softPercent(_ chapter: HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits) -> Int? {
+        guard let bytes = chapter.bytes, let entries = chapter.entries else { return nil }
+        return max(ratio(bytes, limits.softBytes), ratio(entries, limits.softEntries))
+    }
+
+    /// Contents as rows: counts the Gateway measured, and topics it named.
+    static func contentsLines(_ contents: HomeChapterListDTO.Contents) -> [String] {
+        var lines: [String] = []
+        if let messages = contents.userMessages { lines.append("\(messages.formatted()) \(messages == 1 ? "user message" : "user messages")") }
+        if let replies = contents.homeReplies { lines.append("\(replies.formatted()) Home \(replies == 1 ? "reply" : "replies")") }
+        if let delegated = contents.tasksDelegated { lines.append("\(delegated.formatted()) \(delegated == 1 ? "task" : "tasks") delegated") }
+        return lines
     }
 
     /// `createdAt` to `sealedAt`, or open-ended for the chapter still being written.
@@ -209,7 +341,7 @@ enum HomeChapterPresentation {
         return Int((Double(value) / Double(limit) * 100).rounded())
     }
 
-    private static func parse(_ timestamp: String) -> Date? {
+    static func parse(_ timestamp: String) -> Date? {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = fractional.date(from: timestamp) { return date }
@@ -229,16 +361,23 @@ struct HomeSheetReadIdentity: Hashable {
 }
 
 enum HomeSheetReadQuery: Hashable, Sendable {
-    case status
+    case manage
+    case context
     case tasks(String?), task(String), permissions
     case chapters
-    case memory(HomeMemoryPageDTO.Continuation?)
+    /// One chapter's memory when `sessionID` is set; otherwise the whole memory view.
+    case memory(sessionID: String?, continuation: HomeMemoryPageDTO.Continuation?)
     case evidence(HomeMemoryEvidenceDTO, offset: Int)
 }
 
 enum HomeSheetContent {
+    case manage(HomeManageDTO)
+    case context(HomeContextDTO)
     case tasks(HomeTaskPageDTO?, HomeStatusDTO), task(HomeTaskDTO?, HomeStatusDTO), permissions(HomeTaskPermissionsDTO?, HomeStatusDTO)
-    case status(HomeStatusDTO), chapters(HomeChapterListDTO), memory(HomeMemoryPageDTO), evidence(HomeMemoryEvidencePageDTO)
+    case chapters(HomeChapterListDTO)
+    /// The page, and the chapter ordinal of each session it names, from the chapter list.
+    case memory(HomeMemoryPageDTO, chapterOrdinals: [String: Int])
+    case evidence(HomeMemoryEvidencePageDTO)
 }
 
 /// One page, one request, one sheet lifetime. Keeping the request in the state

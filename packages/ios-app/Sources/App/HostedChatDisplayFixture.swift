@@ -367,10 +367,16 @@ private actor HostedHomeShellGateway {
                     .object(["sessionId": .string("home-chapter-sealed"), "ordinal": .number(1), "state": .string("sealed"),
                              "createdAt": .string("2025-12-01T00:00:00Z"), "sealedAt": .string("2025-12-31T00:00:00Z"),
                              "activationStarted": .bool(true), "sessionPresent": .bool(true),
-                             "bytes": .number(25_165_824), "entries": .number(50_001)]),
+                             "bytes": .number(25_165_824), "entries": .number(50_001),
+                             "contents": .object(["firstAt": .string("2025-12-01T08:00:00Z"), "lastAt": .string("2025-12-31T18:00:00Z"),
+                                 "userMessages": .number(412), "homeReplies": .number(409), "tasksDelegated": .number(7),
+                                 "topics": .array([.string("Quarterly planning"), .string("Travel bookings"), .string("Kitchen renovation")])])]),
                     .object(["sessionId": .string("home-session"), "ordinal": .number(2), "state": .string("active"),
                              "createdAt": .string("2026-01-01T00:00:00Z"), "activationStarted": .bool(true),
-                             "sessionPresent": .bool(true), "bytes": .number(480), "entries": .number(12)]),
+                             "sessionPresent": .bool(true), "bytes": .number(480), "entries": .number(12),
+                             "contents": .object(["firstAt": .string("2026-01-01T09:00:00Z"), "lastAt": .string("2026-01-02T10:00:00Z"),
+                                 "userMessages": .number(6), "homeReplies": .number(6), "tasksDelegated": .number(1),
+                                 "topics": .array([.string("Garden redesign")])])]),
                 ]),
             ]), nil)
         case "home.memory.page":
@@ -379,13 +385,13 @@ private actor HostedHomeShellGateway {
             if browserState == "error", browserReads == 1 {
                 return (nil, .object(["code": .string("busy"), "message": .string("Canonical source unavailable"), "retryable": .bool(true)]))
             }
-            return (memoryPage(next: params["cursor"] != nil, empty: browserState == "empty"), nil)
+            return (memoryPage(next: params["cursor"] != nil, empty: browserState == "empty", sessionID: params["sessionId"]?.stringValue), nil)
         case "home.memory.evidence":
             let offset = params["offset"]?.intValue ?? 0
             let first = "Canonical original, not the memory projection"
             let second = "Canonical continuation"
             let text = offset == 0 ? first : second
-            var result: [String: JSONValue] = ["format": .string("canonical-history"), "evidence": evidence(),
+            var result: [String: JSONValue] = ["format": .string("canonical-history"), "evidence": params["evidence"] ?? evidence(),
                 "text": .string(text), "offset": .number(Double(offset)),
                 "totalCharacters": .number(Double(first.utf16.count + second.utf16.count)), "metadata": .object(["role": .string("user")])]
             if offset == 0 { result["nextOffset"] = .number(Double(first.utf16.count)) }
@@ -402,6 +408,8 @@ private actor HostedHomeShellGateway {
         case "session.prompt":
             promptRoutes.append("session.prompt:\(params["sessionId"]?.stringValue ?? "none")")
             return (nil, .object(["code": .string("conflict"), "message": .string("Sealed chapter refused"), "retryable": .bool(false)]))
+        case "home.context":
+            return (contextProjection(), nil)
         case "home.status":
             homeStatusCount += 1
             if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
@@ -478,7 +486,8 @@ private actor HostedHomeShellGateway {
     private func taskSummary(_ id: String) -> JSONValue {
         let terminal = id == "terminal" || taskStopped
         return .object(["taskId": .string(id), "createdAt": .number(id == "active" ? 2000 : 1000), "updatedAt": .number(3000),
-            "title": .string(id == "active" ? "Active finite work" : "Finished finite work"), "target": .string("/trusted/project"),
+            "title": .string(id == "active" ? "Active finite work" : "Finished finite work"), "project": .string("project"),
+            "workerSessionId": .string("worker-session"), "target": .string("/trusted/project"),
             "lifecycle": .string(terminal ? "terminal" : "active"), "outcome": terminal ? .string(id == "active" ? "interrupted" : "final") : .null,
             "spend": taskSpend(), "attention": .bool(false), "pendingGrant": .bool(false)])
     }
@@ -488,6 +497,9 @@ private actor HostedHomeShellGateway {
         record["homeId"] = .string("home-fixture"); record["generation"] = .number(1); record["routeGeneration"] = .number(1)
         record["intentDigest"] = .string(String(repeating: "a", count: 64)); record["grantRef"] = .null; record["scopeRef"] = .string("scope-one")
         record["sessionId"] = .string("worker-session"); record["stopIntent"] = .null
+        record["workerModel"] = .object(["provider": .string("fixture"), "id": .string("worker-model")])
+        record["subagents"] = .object(["started": .number(2), "stoppedAtEnd": .number(0)])
+        record["subagentRuns"] = .object(["total": .number(id == "active" ? 1 : 0), "runs": .array(id == "active" ? [.object(["id": .string("run-live"), "state": .string("running")])] : [])])
         record["reportRef"] = id == "terminal" ? .object(["resultId": .string("report-one"), "sessionId": .string("worker-session"),
             "entryId": .string("report-entry"), "digest": .string(String(repeating: "b", count: 64))]) : .null
         record["intent"] = .object(["text": .string(id == "active" ? "Active finite work" : "Finished finite work")])
@@ -498,7 +510,7 @@ private actor HostedHomeShellGateway {
             "routeGeneration": .number(taskRedelivered ? 2 : 1), "delivery": .null,
             "eventId": .string("task-result-" + String(repeating: "b", count: 64)), "createdAt": .string("2026-01-01T00:00:00Z"),
             "push": .string("decided"), "acknowledgedAt": .null, "redeliveries": .array([])]) : .null
-        for key in ["title", "outcome", "attention", "pendingGrant"] { record.removeValue(forKey: key) }
+        for key in ["outcome", "attention", "pendingGrant"] { record.removeValue(forKey: key) }
         return .object(record)
     }
     private func taskBinding() -> JSONValue {
@@ -526,22 +538,51 @@ private actor HostedHomeShellGateway {
                  "input": .array([.string("text")]), "contextWindow": .number(8192), "maxTokens": .number(1024),
                  "available": .bool(true), "virtual": .bool(virtual)])
     }
-    private func evidence(index: Int = 0) -> JSONValue {
-        .object(["index": .number(Double(index)), "sessionId": .string("source-session"), "entryId": .string("source-entry"),
+    /// Memory entries belong to chapters: the sealed chapter (1) holds the first
+    /// entry and the active chapter (2) the second, so a chapter-filtered page is one item.
+    private func evidence(index: Int = 0, sessionID: String = "home-chapter-sealed") -> JSONValue {
+        .object(["index": .number(Double(index)), "sessionId": .string(sessionID), "entryId": .string("source-entry"),
                  "sourceDigest": .string(String(repeating: "a", count: 64))])
     }
-    private func memoryPage(next: Bool, empty: Bool) -> JSONValue {
+    private func memoryPage(next: Bool, empty: Bool, sessionID: String? = nil) -> JSONValue {
         let index = next ? 1 : 0
+        let chapterSession = next ? "home-session" : "home-chapter-sealed"
         let item: JSONValue = .object(["index": .number(Double(index)), "kind": .string(next ? "talk" : "user"),
-            "attribution": .string(next ? "assistant" : "user"), "timestamp": .string("2026-01-01T00:00:00Z"),
-            "evidence": evidence(index: index), "projection": .object(["format": .string("memory-projection"),
+            "attribution": .string(next ? "assistant" : "user"), "timestamp": .string(next ? "2026-01-02T10:00:00Z" : "2025-12-20T09:00:00Z"),
+            "evidence": evidence(index: index, sessionID: chapterSession), "projection": .object(["format": .string("memory-projection"),
                 "text": .string(next ? "Projected assistant memory" : "Projected user memory"), "omitted": .bool(false),
                 "omissions": .array([.string("browser-cap")])]), "summary": next ? .null : .object([
                     "format": .string("memory-summary"), "text": .string("Condensed memory summary"), "truncated": .bool(true)])])
+        if let sessionID {
+            // One chapter's page: its single entry, with no further cursor.
+            let matches = sessionID == chapterSession
+            return .object(["homeId": .string("home-fixture"), "revision": .string(String(repeating: "a", count: 64)),
+                "totalItems": .number(matches ? 1 : 0), "items": .array(matches ? [item] : [])])
+        }
         var page: [String: JSONValue] = ["homeId": .string("home-fixture"), "revision": .string(String(repeating: "a", count: 64)),
             "totalItems": .number(empty ? 0 : 2), "items": .array(empty ? [] : [item])]
         if !next && !empty { page["nextCursor"] = .string("fixture-next") }
         return .object(page)
+    }
+
+    /// `home.context`: the activation's request sizes with the body-free breakdown
+    /// (sections sum to the effective tokens; the chapter section takes the remainder).
+    private func contextProjection() -> JSONValue {
+        if emptyContext { return .object(["available": .bool(false)]) }
+        return .object(["available": .bool(true), "activationStartEntryId": .string("activation-entry"), "activationOpen": .bool(true),
+            "viewLines": .number(12), "viewBytes": .number(480), "effectiveTokens": .number(320), "contextWindow": .number(8192),
+            "breakdown": .object([
+                "activation": .object(["state": .string("running"), "kind": .string("user"), "startedAt": .string("2026-01-02T10:00:00Z")]),
+                "contextWindow": .number(8192), "effectiveTokens": .number(320),
+                "sections": .array([
+                    .object(["id": .string("instructions"), "tokens": .number(120)]),
+                    .object(["id": .string("profile"), "tokens": .number(40), "count": .number(3)]),
+                    .object(["id": .string("memory"), "tokens": .number(60), "count": .number(260)]),
+                    .object(["id": .string("chapter"), "tokens": .number(80), "count": .number(12)]),
+                    .object(["id": .string("results"), "tokens": .number(0), "count": .number(0)]),
+                    .object(["id": .string("input"), "tokens": .number(20)]),
+                ]),
+            ])])
     }
 
     /// The Gateway's rollover shape: the reserved successor is named but absent.
@@ -579,11 +620,11 @@ private actor HostedHomeShellGateway {
             "openSessionId": sessionPresent ? .string("home-session") : .null,
             "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(sessionPresent),
             "model": designated ? .object(["provider": .string("fixture"), "id": .string("chat-model")]) : .null,
-            "chapter": designated ? .object(["count": .number(3), "currentBytes": .number(480),
+            "chapter": designated ? .object(["count": .number(2), "currentBytes": .number(480),
                 "currentEntries": .number(12), "recoveryDecision": .string("none")]) : .null,
             "memory": .object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused),
                 "blocked": phase == "blocked" && configured ? .string("source-unavailable") : .null,
-                "spentTokens": .number(42), "model": configuredModel.map { try! JSONValue.encode($0) } ?? .null])])
+                "spentTokens": .number(9_912_345), "model": configuredModel.map { try! JSONValue.encode($0) } ?? .null])])
     }
 }
 
