@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { isIP } from "node:net";
+import { networkInterfaces } from "node:os";
 import { resolveBindHost } from "../config.js";
 import type { JsonValue } from "../protocol/types.js";
 import { resolveTronHome } from "../tron-home.js";
@@ -18,10 +20,14 @@ async function main(): Promise<void> {
   if (!session) throw new Error("session id required");
   const tronHome = resolveTronHome();
   const port = Number(process.env.TRON_GATEWAY_PORT ?? (process.env.TRON_HOME_NAME === ".tron-dev" ? 9848 : 9847));
-  const requestedHost = process.env.TRON_GATEWAY_HOST ?? "localhost";
-  const host = resolveBindHost(requestedHost);
-  if (!["localhost", "127.0.0.1", "::1"].includes(host)) {
-    throw new Error("owner status requires a trusted local Gateway address");
+  const interfaces = networkInterfaces();
+  const requestedHost = process.env.TRON_GATEWAY_HOST?.trim() || "tailscale";
+  const host = resolveBindHost(requestedHost, interfaces);
+  const trustedLoopback = ["localhost", "127.0.0.1", "::1"].includes(host);
+  const assignedLocally = isIP(host) !== 0 && Object.values(interfaces)
+    .some((addresses) => addresses?.some((address) => address.address === host));
+  if (!trustedLoopback && !assignedLocally) {
+    throw new Error("owner status requires localhost or an IP address assigned to this Mac");
   }
   const client = new GatewayProtocolClient(`ws://${host.includes(":") ? `[${host}]` : host}:${port}/v1/socket`,
     await readLocalCredential(tronHome));

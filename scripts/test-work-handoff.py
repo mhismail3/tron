@@ -33,14 +33,14 @@ wss.on("connection", (socket, request) => {
     }
   });
 });
-server.listen(0, "127.0.0.1", () => fs.writeFileSync(process.env.PORT_FILE, String(server.address().port)));
+server.listen(0, process.env.FIXTURE_BIND_HOST || "127.0.0.1", () => fs.writeFileSync(process.env.PORT_FILE, String(server.address().port)));
 process.on("SIGTERM", () => { wss.close(() => server.close(() => process.exit(0))); setTimeout(() => process.exit(0), 1000).unref(); });
 '''
 
 
 def run():
     evidence=[]; artifact=ROOT/"test-results/work-handoff.json"; artifact.parent.mkdir(parents=True,exist_ok=True)
-    server=None
+    servers=[]
     try:
       with tempfile.TemporaryDirectory(prefix="tron-work-handoff-") as d:
         root=Path(d); repo=root/"repo"; repo.mkdir(); home=root/"home"; home.mkdir(); tmp=root/"tmp"; tmp.mkdir()
@@ -89,13 +89,38 @@ os.execv({real_git!r}, [{real_git!r}, *args])
             state.write_text(json.dumps({"comments":[],"writes":[],"calls":[],"pages":pages or {"first":{"items":[]}},"statuses":statuses or {}}))
         ws=root/"gateway-fixture.js"; ws.write_text(NODE_FIXTURE)
         gateway_env={**env,"WS_MODULE":str(ROOT/"packages/gateway/node_modules/ws"),"FIXTURE_TOKEN":TOKEN,"PORT_FILE":str(port_file)}
-        server=subprocess.Popen(["node",str(ws)],env=gateway_env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
-        deadline=time.monotonic()+10
-        while not port_file.exists() and time.monotonic()<deadline:
-            if server.poll() is not None: raise RuntimeError("WebSocket fixture exited: "+server.stderr.read().decode())
-            time.sleep(.02)
-        if not port_file.exists(): raise RuntimeError("WebSocket fixture did not bind")
-        env["TRON_GATEWAY_PORT"]=port_file.read_text()
+        def start_gateway(bind_host, output):
+            output.unlink(missing_ok=True)
+            process=subprocess.Popen(["node",str(ws)],env={**gateway_env,"FIXTURE_BIND_HOST":bind_host,"PORT_FILE":str(output)},stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+            servers.append(process)
+            deadline=time.monotonic()+10
+            while not output.exists() and time.monotonic()<deadline:
+                if process.poll() is not None: raise RuntimeError("WebSocket fixture exited: "+process.stderr.read().decode())
+                time.sleep(.02)
+            if not output.exists(): raise RuntimeError(f"WebSocket fixture did not bind {bind_host}")
+            return output.read_text()
+        env["TRON_GATEWAY_PORT"]=start_gateway("127.0.0.1", port_file)
+
+        # Reject an arbitrary literal before loading the local credential or opening a socket.
+        fixture()
+        unsafe_env={**env,"TRON_GATEWAY_HOST":"203.0.113.1"}
+        unsafe=subprocess.run(["node",str(ROOT/"packages/gateway/dist/client/work-owner-status.js"),"old-owner"],cwd=ROOT,env=unsafe_env,capture_output=True,text=True,timeout=10)
+        evidence.append({"case":"unassigned literal host rejected before socket", "exit":unsafe.returncode,"stderr":unsafe.stderr.strip()})
+        assert unsafe.returncode and "requires localhost or an IP address assigned" in unsafe.stderr, unsafe.stderr
+        assert not json.loads(state.read_text())["calls"], "untrusted host reached the Gateway fixture"
+
+        # Exercise the same process helper against a fixture bound to an assigned non-loopback IP, when available.
+        interfaces=json.loads(subprocess.check_output(["node","-e","console.log(JSON.stringify(require('node:os').networkInterfaces()))"],text=True))
+        local_ip=next((entry["address"] for entries in interfaces.values() for entry in (entries or [])
+                       if not entry["internal"] and entry["family"] in ("IPv4",4) and entry["address"] != "127.0.0.1"),None)
+        if local_ip:
+            local_port_file=root/"local-port"
+            local_port=start_gateway(local_ip,local_port_file)
+            local_env={**env,"TRON_GATEWAY_HOST":local_ip,"TRON_GATEWAY_PORT":local_port}
+            local= subprocess.run(["node",str(ROOT/"packages/gateway/dist/client/work-owner-status.js"),"old-owner"],cwd=ROOT,env=local_env,capture_output=True,text=True,timeout=10)
+            evidence.append({"case":"assigned interface host accepted by process helper", "exit":local.returncode,"stdout":local.stdout.strip(),"stderr":local.stderr.strip()})
+            assert local.returncode==0 and local.stdout.strip()=="unknown", local.stderr
+            assert json.loads(state.read_text())["calls"], "assigned interface fixture did not receive the query"
         before_head=git(worktree,"rev-parse","HEAD")
 
         def refuse_snapshot():
@@ -221,9 +246,9 @@ os.execv({real_git!r}, [{real_git!r}, *args])
             raise AssertionError(ref.stderr)
         print(f"Passed {len(evidence)} handoff journeys; evidence: {artifact}")
     finally:
-      if server is not None:
-        server.terminate()
-        try: server.wait(timeout=5)
-        except subprocess.TimeoutExpired: server.kill(); server.wait()
+      for process in servers:
+        process.terminate()
+        try: process.wait(timeout=5)
+        except subprocess.TimeoutExpired: process.kill(); process.wait()
       artifact.write_text(json.dumps(evidence,indent=2)+"\n")
 if __name__=="__main__": run()

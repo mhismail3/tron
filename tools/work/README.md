@@ -13,7 +13,7 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | Command | Does |
 | --- | --- |
 | `start <issue>` | Claims an open, unclaimed, non-epic issue: pushes a claim commit to `claim.remote`, sets Status In progress, comments the claim, and creates the worktree `../tron-worktrees/<issue>-<slug>` on `<type>/<issue>-<slug>`. A session resumes its own claim. |
-| `handoff <issue> --reason TEXT [--session ID] [--force-maintainer]` | Transfers an existing claim in place; preserves the registered worktree and dirty files. Automatic transfer requires authoritative terminal settlement evidence from `packages/gateway/dist/client/work-owner-status.js`; prepare it with `PATH="$HOME/.nvm/versions/node/v$(cat .node-version)/bin:$PATH" npm --prefix packages/gateway run build`. Maintainer override requires a real TTY and exact typed confirmation. The public audit includes old/new owner, reason, and exact transition commit SHA. |
+| `handoff <issue> --reason TEXT [--session ID] [--force-maintainer]` | Transfers an existing claim in place; preserves the registered worktree and dirty files. Automatic transfer requires authoritative terminal settlement evidence from `packages/gateway/dist/client/work-owner-status.js`; prepare it with `PATH="$HOME/.nvm/versions/node/v$(cat .node-version)/bin:$PATH" npm --prefix packages/gateway run build`. The helper defaults `TRON_GATEWAY_HOST` to the local Tailscale address, matching terminal chat. Set `TRON_GATEWAY_HOST=127.0.0.1` when querying a loopback-bound development Gateway, or set it to a literal IP assigned to this Mac; it refuses other hosts before reading the local credential or opening a socket. Maintainer override requires a real TTY and exact typed confirmation. The public audit includes old/new owner, reason, and exact transition commit SHA. |
 | `verify [--tests CMD]...` | Runs the checks the branch's paths require, then each `--tests` command, on the current commit. Exit 0 when all pass. |
 | `land --summary-file <md> [--title T] [--tests CMD]... [--dry-run]` | Merges `origin/main` in, verifies the merged tree, pushes the branch, opens or updates its pull request (title = `--title` or the issue title; body = the summary file, verbatim), squash-merges at the verified commit, deletes the remote branch, and closes the issue as completed with Status Done. Prints `merged: <commit>`. |
 | `cleanup [--all] [--dry-run]` | Removes a task worktree and its branches once its pull request merged at its head (or its issue is closed and it holds only its claim commit). Names what it keeps and why. |
@@ -100,10 +100,13 @@ and idempotent recovery after a partial close. Regenerable evidence is written t
 `test-results/work-close.json`; the fixture repository and home are removed on exit.
 
 `python3 scripts/test-work-handoff.py` exercises handoff through the real CLI and Git
-in an isolated fixture, with owner-status evidence served by a real localhost Gateway
-WebSocket using the built client helper. It checks active-only refusal without status
-reads, pagination to a finished matching owner, malformed evidence, natural completion
-with zero stopped subagents, refusal preservation of refs/index/dirty bytes, ordinary
-and TTY-confirmed takeover, idempotent audit, and missing-worktree refusal without
-recreation. Evidence is written to `test-results/work-handoff.json`; build the Gateway
-first with the pinned Node runtime using `npm --prefix packages/gateway run build`.
+in an isolated fixture, with owner-status evidence served by real Gateway WebSockets
+using the built client helper. It checks refusal of an unassigned IP before socket
+access, acceptance of a locally assigned interface IP when one is available, active-only
+refusal without status reads, pagination to a finished matching owner, malformed
+evidence, natural completion with zero stopped subagents, refusal preservation of
+refs/index/dirty bytes, ordinary and TTY-confirmed takeover, idempotent audit, and
+missing-worktree refusal without recreation. Evidence is written to
+`test-results/work-handoff.json`; build the Gateway first with the pinned Node runtime
+using `npm --prefix packages/gateway run build`. The fixture sets
+`TRON_GATEWAY_HOST=127.0.0.1` by default so it remains independent of host Tailscale.
