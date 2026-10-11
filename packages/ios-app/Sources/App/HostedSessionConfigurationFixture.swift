@@ -102,8 +102,9 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             try enqueue(.object(["type": .string("event"), "topic": .string("session.snapshot"),
                 "sessionId": .string(snapshot.sessionId), "payload": try JSONValue.encode(snapshot)]))
             result = .object(["aborted": .bool(true)])
-        case "session.setThinking":
-            guard frame.objectValue?["params"]?.objectValue?["level"]?.stringValue == "high" else {
+        case "settings.change":
+            let change = frame.objectValue?["params"]?.objectValue?["changes"]?.arrayValue?.first?.objectValue
+            guard change?["key"]?.stringValue == "model.thinking[role=chat]", change?["value"]?.stringValue == "high" else {
                 throw GatewayFailure(code: "invalid_request", message: "Expected a real changed Thinking selection", retryable: false, details: nil)
             }
             snapshot.revision += 1
@@ -133,7 +134,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         try enqueue(.object(["type": .string("event"), "topic": .string("session.snapshot"),
             "sessionId": .string(snapshot.sessionId), "payload": try JSONValue.encode(snapshot)]))
         try enqueue(.object(["type": .string("response"), "id": .string(pendingThinking.id), "ok": .bool(true),
-            "result": .object(["updated": .bool(true), "revision": .number(Double(pendingThinking.revision))])]))
+            "result": fixtureSettingsChangeResult(key: "model.thinking[role=chat]", revision: pendingThinking.revision)]))
         return true
     }
     private func enqueue(_ frame: JSONValue) throws {

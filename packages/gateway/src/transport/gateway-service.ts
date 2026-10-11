@@ -12,7 +12,8 @@ import { runtimeIdentity } from "./runtime-identity.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_BROWSER_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
 import { admitHomeMemoryPage, admitHomeMemoryEvidence } from "../home/home-memory-browser.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
-import type { SettingsModel } from "../admin/settings-model.js";
+import type { ChatAppliers, ChangeRequest, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import { schemaKey } from "../admin/settings-schema.js";
 import type { SettingsTarget } from "../admin/settings-resolver.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
@@ -170,6 +171,36 @@ function settingsTarget(raw: unknown): SettingsTarget {
   return { kind };
 }
 
+/** The session a receipt-backed mutation works on: its `sessionId`, or a
+ * `settings.change` session target, so the work entry is the session's. */
+function mutationSessionId(params: Record<string, unknown>): string | undefined {
+  if (typeof params.sessionId === "string") return params.sessionId;
+  const target = params.target;
+  if (typeof target === "object" && target !== null && (target as Record<string, unknown>).kind === "session") {
+    const sessionId = (target as Record<string, unknown>).sessionId;
+    return typeof sessionId === "string" ? sessionId : undefined;
+  }
+  return undefined;
+}
+
+function settingsChangeRequest(raw: unknown, label: string): ChangeRequest {
+  const change = object(raw, label);
+  rejectUnknownFields(change, ["key", "qualifiers", "layer", "op", "value", "expected"], label);
+  const qualifiers = change.qualifiers === undefined ? undefined : object(change.qualifiers, `${label}.qualifiers`);
+  if (qualifiers) {
+    rejectUnknownFields(qualifiers, ["role", "model", "provider", "tool", "project", "connection", "key"], `${label}.qualifiers`);
+    for (const [name, value] of Object.entries(qualifiers)) string(value, `${label}.qualifiers.${name}`, { max: 4_096 });
+  }
+  return {
+    key: string(change.key, `${label}.key`, { max: 200 }),
+    ...(qualifiers ? { qualifiers: qualifiers as NonNullable<ChangeRequest["qualifiers"]> } : {}),
+    layer: oneOf(change.layer, `${label}.layer`, ["chat", "profile", "project", "mac"] as const),
+    op: oneOf(change.op, `${label}.op`, ["set", "unset"] as const),
+    ...("value" in change ? { value: change.value } : {}),
+    ...("expected" in change ? { expected: change.expected } : {}),
+  };
+}
+
 function rejectUnknownFields(params: Record<string, unknown>, allowed: readonly string[], label: string): void {
   if (Object.keys(params).some((key) => !allowed.includes(key))) {
     throw new GatewayError("invalid_request", `${label} contains unknown fields`);
@@ -287,8 +318,10 @@ export interface GatewayServiceDependencies {
   terminals: TerminalService;
   trust: TrustService;
   settings: SettingsService;
-  /** The settings model's resolver and (later) its one change path (docs/settings-model.md). */
+  /** The settings model's resolver (docs/settings-model.md). */
   settingsModel: SettingsModel;
+  /** The settings model's one change path, with its record. */
+  settingsChanges: SettingsChangePath;
   modelConfig: ModelConfigService;
   packages: PackageService;
   /** Session-free hook listings for a scope; never opens or registers a session. */
@@ -565,14 +598,6 @@ export class GatewayService {
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId"], method);
           return safeJson(await this.requireHome().disable());
-        });
-      case "home.configureMemory":
-        return this.mutation(client, method, params, async () => {
-          // The memory's model and nothing else: spend regulates itself (#493).
-          rejectUnknownFields(params, ["commandId", "model"], method);
-          const model = this.admitNamedHomeModel(params.model);
-          if (!model) throw new GatewayError("invalid_request", "home.configureMemory requires model");
-          return safeJson(await this.requireHome().configureMemory({ model }));
         });
       case "home.pauseMemory":
         return this.mutation(client, method, params, async () => {
@@ -1685,37 +1710,6 @@ export class GatewayService {
           params.excludeFromContext === undefined ? false : boolean(params.excludeFromContext, "excludeFromContext"),
           workToken,
         ));
-      case "session.setModel":
-        return this.mutation(client, method, params, async (workToken) => {
-          const slot = await this.openedSlot(client, params);
-          const provider = string(params.provider, "provider", { max: 120 });
-          const modelId = string(params.modelId, "modelId", { max: 300 });
-          await assertNewModelChoice(slot.modelRuntime, provider, modelId, client.signal);
-          const revision = await slot.setModel(provider, modelId, workToken, this.configurationExpectation(params));
-          return { updated: true, revision };
-        });
-      case "session.setContextWindow":
-        return this.mutation(client, method, params, async (workToken) => {
-          const revision = await (await this.openedSlot(client, params)).setContextWindow(
-            string(params.provider, "provider", { max: 120 }),
-            string(params.modelId, "modelId", { max: 300 }),
-            params.contextWindow,
-            integer(params.expectedRevision, "expectedRevision", 0, Number.MAX_SAFE_INTEGER),
-            string(params.expectedRuntimeGeneration, "expectedRuntimeGeneration", { max: 200 }),
-            workToken,
-          );
-          return { updated: true, revision };
-        });
-      case "session.setThinking":
-        return this.mutation(client, method, params, async (workToken) => {
-          const revision = await (await this.openedSlot(client, params)).setThinking(oneOf(params.level, "level", thinkingLevels), workToken, this.configurationExpectation(params));
-          return { updated: true, revision };
-        });
-      case "session.setTools":
-        return this.mutation(client, method, params, async (workToken) => {
-          await (await this.openedSlot(client, params)).setTools(arrayOfStrings(params.tools, "tools", 256), workToken);
-          return { updated: true };
-        });
       case "session.compact":
         return this.mutation(client, method, params, async () => {
           const result = await (await this.openedSlot(client, params)).compact(optionalString(params.instructions, "instructions", 20_000));
@@ -1964,9 +1958,8 @@ export class GatewayService {
 
       case "settings.resolve": {
         rejectUnknownFields(params, ["target", "keys"], method);
-        const target = settingsTarget(params.target);
+        const target = await this.canonicalSettingsTarget(params.target);
         const keys = params.keys === undefined ? undefined : arrayOfStrings(params.keys, "keys", 200);
-        if (target.kind === "project") target.cwd = await this.dependencies.trust.canonicalDirectory(target.cwd);
         if (target.kind !== "session") return safeJson(await this.dependencies.settingsModel.resolve(target, undefined, keys));
         const slot = await this.openedSlot(client, { sessionId: target.sessionId });
         return safeJson(await this.dependencies.settingsModel.resolve(target, {
@@ -1976,6 +1969,50 @@ export class GatewayService {
           modelRuntime: slot.modelRuntime,
         }, keys));
       }
+      case "settings.change":
+        return this.mutation(client, method, params, async (workToken) => {
+          rejectUnknownFields(params, ["commandId", "target", "fence", "changes", "reason", "dryRun", "applyAgainOf"], method);
+          const target = await this.canonicalSettingsTarget(params.target);
+          if (!Array.isArray(params.changes)) throw new GatewayError("invalid_request", "changes must be an array");
+          const changes = params.changes.map((raw, index) => settingsChangeRequest(raw, `changes[${index}]`));
+          const session = target.kind === "session"
+            ? await this.settingsSession(await this.openedSlot(client, { sessionId: target.sessionId }), target.sessionId, params.fence, workToken)
+            : undefined;
+          const result = await this.dependencies.settingsChanges.change(target, changes, {
+            actor: { kind: "ui", id: client.identity },
+            ...(params.reason === undefined ? {} : { reason: boundedText(params.reason, "reason", 2_000) }),
+            commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
+            ...(params.dryRun === true ? { dryRun: true } : {}),
+            ...(params.applyAgainOf === undefined ? {} : { applyAgainOf: string(params.applyAgainOf, "applyAgainOf", { max: 100 }) }),
+            ...(session ? { session } : {}),
+          });
+          if (!result.dryRun) this.settingsChanged(target, result.changes);
+          return safeJson(result);
+        });
+      case "settings.undo":
+        return this.mutation(client, method, params, async (workToken) => {
+          rejectUnknownFields(params, ["commandId", "changeId", "fence"], method);
+          const changeId = string(params.changeId, "changeId", { max: 100 });
+          const found = await this.dependencies.settingsChanges.record.entry(changeId);
+          const session = found?.entry.target.kind === "session"
+            ? await this.settingsSession(await this.slot({ sessionId: found.entry.target.sessionId }), found.entry.target.sessionId, params.fence, workToken)
+            : undefined;
+          const result = await this.dependencies.settingsChanges.undo(changeId, {
+            actor: { kind: "ui", id: client.identity },
+            commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
+          }, session);
+          if (found) this.settingsChanged(found.entry.target, result.changes);
+          return safeJson(result);
+        });
+      case "settings.history": {
+        rejectUnknownFields(params, ["cursor", "limit", "key", "status"], method);
+        return safeJson(await this.dependencies.settingsChanges.history({
+          ...(params.cursor === undefined ? {} : { cursor: string(params.cursor, "cursor", { max: 40 }) }),
+          ...(params.limit === undefined ? {} : { limit: integer(params.limit, "limit", 1, 200) }),
+          ...(params.key === undefined ? {} : { key: string(params.key, "key", { max: 200 }) }),
+          ...(params.status === undefined ? {} : { status: string(params.status, "status", { max: 40 }) }),
+        }));
+      }
       case "settings.get": {
         const cwd = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();
         const scope = params.scope === undefined ? "project" : oneOf(params.scope, "scope", ["global", "project"] as const);
@@ -1983,49 +2020,8 @@ export class GatewayService {
         const inspection = await this.dependencies.trust.inspect(cwd);
         return safeJson(this.dependencies.settings.get(inspection.cwd, inspection.effectiveDecision === true));
       }
-      case "settings.update":
-        return this.mutation(client, method, params, async () => {
-          const scope = params.scope === undefined ? "global" : oneOf(params.scope, "scope", ["global", "project"] as const);
-          const cwdInput = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();
-          const resolved = scope === "project"
-            ? await this.dependencies.trust.requireResolved(cwdInput)
-            : { cwd: await this.dependencies.trust.canonicalDirectory(cwdInput), trusted: false };
-          const settingsSlot = scope === "project" && params.sessionId !== undefined ? await this.openedSlot(client, params) : undefined;
-          if (settingsSlot && settingsSlot.cwd !== resolved.cwd) throw new GatewayError("conflict", "Settings session belongs to a different project");
-          const result = await this.dependencies.settings.update(params.patch, {
-            cwd: resolved.cwd,
-            scope,
-            projectTrusted: scope === "project" && resolved.trusted,
-            ...(settingsSlot ? { modelRuntime: settingsSlot.modelRuntime } : {}),
-          });
-          if (params.patch && typeof params.patch === "object" && scope === "global"
-            && ("packages" in params.patch || "extensions" in params.patch)) {
-            this.dependencies.globalProviderResources.requestReload();
-          }
-          if (params.patch && typeof params.patch === "object" && "compaction" in params.patch) {
-            this.dependencies.sessions.refreshCompactionPolicies(scope, resolved.cwd);
-          }
-          this.dependencies.broadcast("settings.changed", { scope, cwd: resolved.cwd });
-          return safeJson(result);
-        });
       case "trust.inspect":
         return safeJson(await this.dependencies.trust.inspect(string(params.cwd, "cwd", { max: 4_096 })));
-      case "trust.set":
-        return this.mutation(client, method, params, async () => {
-          const decision = params.decision === null ? null : boolean(params.decision, "decision");
-          const result = await this.dependencies.trust.setAndApply(
-            string(params.cwd, "cwd", { max: 4_096 }),
-            decision,
-            async (inspection) => this.dependencies.sessions.reloadProject(
-              inspection.cwd,
-              inspection.effectiveDecision === true,
-              false,
-            ),
-            async (inspection) => this.dependencies.sessions.commitProjectReload(inspection.cwd),
-          );
-          this.dependencies.broadcast("trust.changed", safeJson(result));
-          return safeJson(result);
-        });
       case "packages.list":
         rejectUnknownFields(params, ["cwd"], "Package listing");
         return safeJson(await this.dependencies.packages.list(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
@@ -2265,6 +2261,59 @@ export class GatewayService {
       throw new GatewayError("invalid_request", "Open the session before reading its live runtime projection");
     }
     if (!release) throw new GatewayError("busy", "Session runtime is no longer available", true);
+  }
+
+  private async canonicalSettingsTarget(raw: unknown): Promise<SettingsTarget> {
+    const target = settingsTarget(raw);
+    if (target.kind === "project") target.cwd = await this.dependencies.trust.canonicalDirectory(target.cwd);
+    return target;
+  }
+
+  /** A session target's Chat layer and its slot-lane appliers. The fence is the
+   * runtime the client read (and its model or revision); the lane guards stay. */
+  private async settingsSession(slot: RuntimeSlot, sessionId: string, rawFence: unknown, workToken?: string): Promise<SessionSettingsSource & { appliers: ChatAppliers }> {
+    const fence = rawFence === undefined ? undefined : object(rawFence, "fence");
+    if (fence) rejectUnknownFields(fence, ["runtimeGeneration", "model", "revision"], "fence");
+    const expectation = () => {
+      if (!fence) throw new GatewayError("invalid_request", "A Chat-layer change needs the fence it read");
+      return this.configurationExpectation({ expectedRuntimeGeneration: fence.runtimeGeneration, expectedModel: fence.model ?? null });
+    };
+    return {
+      cwd: slot.cwd,
+      home: this.dependencies.home?.chapterStateFor(sessionId).homeId !== undefined,
+      chat: slot.settingsChatLayer(),
+      modelRuntime: slot.modelRuntime,
+      appliers: {
+        setModel: (ref) => slot.setModel(ref.provider, ref.id, workToken, expectation()),
+        setThinking: (level) => slot.setThinking(oneOf(level, "level", thinkingLevels), workToken, expectation()),
+        setContextWindow: (model, value) => {
+          const { runtimeGeneration } = expectation();
+          return slot.setContextWindow(model.provider, model.id, value, integer(fence!.revision, "fence.revision", 0, Number.MAX_SAFE_INTEGER), runtimeGeneration, workToken);
+        },
+        setTools: (tools) => slot.setTools(tools, workToken),
+      },
+    };
+  }
+
+  /** After-apply effects by each key's effect point, then the broadcast (doc 5.2 step 6). */
+  private settingsChanged(target: SettingsTarget, changes: ReadonlyArray<{ changeId: string; key: string; layer: string; result?: unknown }>): void {
+    if (changes.length === 0) return;
+    const cwd = target.kind === "project" ? target.cwd : undefined;
+    for (const change of changes) {
+      const key = schemaKey(change.key);
+      if (key.effect === "reload" && change.layer === "mac" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();
+      if (key.effect === "next-compaction" && (change.layer === "mac" || cwd)) {
+        this.dependencies.sessions.refreshCompactionPolicies(change.layer === "mac" ? "global" : "project", cwd ?? this.dependencies.config.tronHome);
+      }
+    }
+    this.dependencies.broadcast("settings.changed", safeJson({
+      changeIds: changes.map(change => change.changeId), keys: [...new Set(changes.map(change => change.key))],
+      layer: changes[0]!.layer, target,
+    }));
+    // `trust.changed` carries the resulting trust inspection, as trust's own event.
+    for (const change of changes) {
+      if (change.key === "permissions.projectTrust" && change.result !== undefined) this.dependencies.broadcast("trust.changed", safeJson(change.result));
+    }
   }
 
   private configurationExpectation(params: Record<string, unknown>) {
@@ -2527,7 +2576,7 @@ export class GatewayService {
     const admission = {
       kind: "rpc-mutation" as const,
       method,
-      ...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
+      ...(mutationSessionId(params) ? { sessionId: mutationSessionId(params)! } : {}),
       hostEpoch: this.workRegistry?.runtimeEpoch ?? "",
     };
     const work = this.workRegistry

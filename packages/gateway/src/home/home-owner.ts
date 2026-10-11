@@ -72,7 +72,7 @@ export interface HomeRecord {
   model: ModelRef;
   createdAt: string;
   updatedAt: string;
-  /** Home's memory model. Absent until `home.configureMemory` records one: there
+  /** Home's memory model. Absent until `settings.change` records one (`model.ref[role=memory]`): there
    * are no defaults (decision D4), so an unconfigured memory refuses. */
   memory?: { model: ModelRef; paused?: true };
 }
@@ -877,7 +877,7 @@ export class HomeOwner {
    * cursor and drains its pump under its own bounds, so no caller waits on it.
    *
    * A session whose memory is not open yet is not opened here: designation and
-   * `home.configureMemory` decide when a memory starts spending.
+   * `model.ref[role=memory]` (changed through `settings.change`) decide when a memory starts spending.
    */
   noteEntriesCommitted(sessionId: string): void {
     const record = this.record;
@@ -978,7 +978,7 @@ export class HomeOwner {
   }
 
   /**
-   * `home.configureMemory`: record the model Home's memory runs its compactor
+   * The `model.ref[role=memory]` applier (settings-model.md 6.1): record the model Home's memory runs its compactor
    * calls on. There is no budget to manage (#493): the memory's spend is bounded
    * by construction and grows only with the conversation. The memory is opened (or re-opened, when the model changed)
    * before the record is written, so a refused configuration changes nothing and
@@ -1046,7 +1046,7 @@ export class HomeOwner {
     const record = this.record;
     if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
     if (!record.enabled) throw new GatewayError("conflict", "Tron Home is disabled: designate it before controlling its memory");
-    if (!record.memory) throw new GatewayError("conflict", "Home memory is not configured: configure it with home.configureMemory");
+    if (!record.memory) throw new GatewayError("conflict", "Home memory is not configured: set the memory model (model.ref[role=memory]) with settings.change");
     return record;
   }
 
@@ -1325,8 +1325,8 @@ export class HomeOwner {
 
   /**
    * `home.designate`. An enabled record whose session still exists is idempotent,
-   * but cannot change the session-owned model; callers use `session.setModel` for
-   * that. A disabled record is re-enabled on the same session. A record whose
+   * but cannot change the session-owned model; callers change `model.ref[role=chat]` through
+   * `settings.change` for that. A disabled record is re-enabled on the same session. A record whose
    * session is gone is kept and given a fresh session, because the record is the
    * only evidence of the designation.
    */
@@ -1346,7 +1346,7 @@ export class HomeOwner {
         if (existing.enabled) {
           if (input.model && (input.model.provider !== existing.model.provider || input.model.id !== existing.model.id)) {
             this.options.diagnostic?.({ outcome: "refused", reason: "model-change-requires-session-set-model" });
-            throw new GatewayError("conflict", "Tron Home is already enabled with a different model; use session.setModel to change its model");
+            throw new GatewayError("conflict", "Tron Home is already enabled with a different model; change its model through settings.change");
           }
           return designation(existing);
         }

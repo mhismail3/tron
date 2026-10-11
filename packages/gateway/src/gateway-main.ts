@@ -12,7 +12,8 @@ import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
 import { SettingsService } from "./admin/settings-service.js";
-import { SettingsModel } from "./admin/settings-model.js";
+import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
+import { SettingsChangeRecord } from "./admin/settings-record.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
 import { HookResources } from "./admin/hook-resources.js";
@@ -177,7 +178,7 @@ const trust = new TrustService(config.agentDir);
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
-const settings = new SettingsService(config.agentDir, modelRuntime, false);
+const settings = new SettingsService(config.agentDir);
 const settingsModel = new SettingsModel({
   agentDir: config.agentDir,
   tronHome: config.tronHome,
@@ -782,6 +783,21 @@ const service = new GatewayService({
   trust,
   settings,
   settingsModel,
+  settingsChanges: new SettingsChangePath(settingsModel, new SettingsChangeRecord(config.tronHome), {
+    setTrust: async (project, decision) => {
+      return trust.setAndApply(
+        project,
+        decision,
+        async (inspection) => sessions.reloadProject(inspection.cwd, inspection.effectiveDecision === true, false),
+        async (inspection) => sessions.commitProjectReload(inspection.cwd),
+      );
+    },
+    configureHomeMemory: async (model) => {
+      const home = sessions.homeOwner();
+      if (!home) throw new GatewayError("unsupported", "Tron Home is not available");
+      await home.configureMemory({ model });
+    },
+  }, config.agentDir),
   modelConfig,
   packages,
   hookResources,

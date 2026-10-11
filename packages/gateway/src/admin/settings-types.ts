@@ -111,6 +111,7 @@ export const types = {
       kind: "modelRef",
       validate: async (value, label, context) => {
         const ref = object(value, label);
+        if (Object.keys(ref).some(name => name !== "provider" && name !== "id")) throw new GatewayError("invalid_request", `${label} accepts only provider and id`);
         const result = { provider: string(ref.provider, `${label}.provider`, { max: 120 }), id: string(ref.id, `${label}.id`, { max: 300 }) };
         await context?.admitModel(result);
         return result;

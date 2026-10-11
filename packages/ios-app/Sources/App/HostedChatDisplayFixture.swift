@@ -410,16 +410,18 @@ private actor HostedHomeShellGateway {
             if delayed { try? await Task.sleep(for: .seconds(6)) }
             designated = true
             return (.object(["homeId": .string("home-fixture"), "sessionId": .string("home-session"), "generation": .number(1)]), nil)
-        case "home.pauseMemory", "home.resumeMemory", "home.configureMemory", "home.disable":
+        case "home.pauseMemory", "home.resumeMemory", "settings.change", "home.disable":
             controlCount += 1
-            if method == "home.configureMemory", sheetState == "configure-refused" {
+            let memoryChange = params["changes"]?.arrayValue?.first?.objectValue
+            if method == "settings.change", memoryChange?["key"]?.stringValue != "model.ref[role=memory]" { return (nil, nil) }
+            if method == "settings.change", sheetState == "configure-refused" {
                 return (nil, .object(["code": .string("conflict"), "message": .string("Memory configuration refused"), "retryable": .bool(false)]))
             }
             if method == "home.pauseMemory" { paused = true; if phase != "active" { phase = "paused" } }
             if method == "home.resumeMemory" { paused = false; phase = "ready" }
-            if method == "home.configureMemory" {
+            if method == "settings.change" {
                 configured = true; phase = "ready"
-                configuredModel = try? params["model"]?.decode(ModelRef.self)
+                configuredModel = try? memoryChange?["value"]?.decode(ModelRef.self)
             }
             if method == "home.disable" { designated = false; phase = "disabled" }
             let result = JSONValue.object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused)])

@@ -361,8 +361,8 @@ effect at once ("Applies after restart").
 
 **Today.** Fixed-at-start already holds for the model, thinking and context
 window through session entries, and for resources through Reload, but no
-provenance is recorded. Only compaction policy follows live: `settings.update`
-refreshes it for open chats (`packages/gateway/src/transport/gateway-service.ts:1974-1976`).
+provenance is recorded. Only compaction policy follows live: a compaction change
+through `settings.change` refreshes it for open chats (`GatewayService.settingsChanged`).
 Each runtime builds its own `SettingsManager` when it starts
 (`runtime-slot.ts:1924`), so, as far as the code reads, retry, transport and
 queue modes reach an open chat only when its runtime is rebuilt. That is
@@ -533,12 +533,12 @@ open:
   `cacheWarming` are agent-directory only). The schema encodes those once and a
   test checks them against the pinned pi version, so a pi upgrade that adds or
   moves a key fails loudly.
-- Chat-layer setters are separate RPCs: `session.setModel`, `setThinking`,
-  `setContextWindow` and `setTools` (`runtime-slot.ts:9271-9344`). They keep
-  their slot-lane appliers and become appliers behind `settings.change`.
-- Trust (`trust.set`), MCP (`mcp.*`), connections policy, Home memory
-  (`home.configureMemory`) and Home task grants each have their own RPC. Those
-  that hold harness keys become schema appliers. Accounts flows (`auth.*`,
+- Done in slice 4: the Chat-layer setters (`session.setModel`, `setThinking`,
+  `setContextWindow`, `setTools`), `trust.set`, `settings.update` and
+  `home.configureMemory` are gone; their owners are appliers behind
+  `settings.change` ([5.3a](#53a-implemented-the-change-path)).
+- MCP (`mcp.*`), connections policy and Home task grants each still have their
+  own RPC. Those that hold harness keys become schema appliers. Accounts flows (`auth.*`,
   `connections.setup.*`, `models.custom.*`) stay guided flows
   ([7.6](#76-hand-built-screens)). They record into the same change log, and
   credential values are never recorded.
@@ -619,6 +619,41 @@ Both are ordinary changes through the same path, gated like any other.
 - **Apply again** writes a logged value back after an outside change replaced
   or removed it ([5.6](#56-outside-changes)), with `applyAgainOf`. It is only
   ever offered, never automatic (F2).
+
+### 5.3a Implemented: the change path
+
+Slice 4 (#762) implements 5.1 to 5.3 and 5.7 for the iPhone actor:
+`SettingsChangePath` (`packages/gateway/src/admin/settings-model.ts`), the record
+(`settings-record.ts`) and the Project applier (`project-settings-writer.ts`);
+the Gateway README has the RPC contract. What the code fixes that the sections
+above leave open:
+
+- **Record layout.** `<tronHome>/gateway/settings/changes/` holds append-only
+  segments of at most 500 entries, named in `index.json`. A page of
+  `settings.history` reads one segment at a time.
+- **One target per request.** A request's changes share a target; a target with
+  several layers (a project has Project and Mac) gives the cross-store order and
+  rollback. Changes serialize per target, so distinct chats change concurrently.
+- **The Chat layer's fence.** A Chat-layer change carries `fence: {
+  runtimeGeneration, model?, revision? }`, the runtime the client read, and the
+  slot lane's existing guards check it; `expected` is the value check for every
+  other store.
+- **Stores without an applier yet.** `tron.settings.v1` (Chat-layer Run and
+  compaction values) arrives with slice 7, and `profile.json` with slice 9; a
+  change to those layers is refused as unsupported until then.
+- **Keys with no writer.** `setup.sessionDir` declares no writer: the runtime
+  fixes its session folder under the ownership lock at start, so it changes only
+  while the Gateway is stopped.
+- **Applier results.** Trust's applier returns the resulting trust inspection;
+  the change outcome carries it, and `trust.changed` broadcasts it.
+- **Unparseable Project files.** A `.pi/settings.json` that cannot be parsed is an
+  unreadable, empty layer in `settings.resolve` (`projectUnreadable`), and a write
+  to it is a `failed` entry with the file untouched.
+- **The iPhone's hand-built screens.** Until the generic renderer replaces them,
+  their pi-document patches are turned into key changes on the device
+  (`SettingsPatchChanges`); an unknown path is refused, never dropped.
+
+The tier is computed and recorded but not enforced until slice 5.
 
 ### 5.4 Tiers
 
@@ -777,7 +812,8 @@ no change to the resolver (F4). The Home profile has two parts.
 The typed values live in `<tronHome>/gateway/home/profile.json`, owned by
 `HomeOwner` and written only by the change path. The memory model moves there
 from `home.json` `memory.model` (`packages/gateway/src/home/home-owner.ts:77`),
-and `home.configureMemory` (`:978`) becomes a schema applier. The Home chat's
+and `HomeOwner.configureMemory` (`:987`), already the applier behind
+`settings.change`, writes it there. The Home chat's
 own model in `home.json` (`home-owner.ts:72`) stays: it is Home's Chat layer,
 carried across chapters.
 
@@ -1035,13 +1071,9 @@ Re-verified against `main` at `b76f6ca80`.
 | Today | Becomes |
 |---|---|
 | `admin/settings-service.ts:121-195` `get`: two documents plus an effective object | `settings.resolve` from the schema: every key with value, `display`, layer, applied flag, badges and section summaries, for a target (Mac, project, session or profile). `settings.get` is removed when its last client moves (no alias). |
-| `admin/settings-service.ts:197-356` `update` and `applyPatch`: hand validators | Schema entries own validation. `SettingsService` becomes the pi-settings-file applier. |
-| `transport/gateway-service.ts:1948-1978` `settings.get` and `settings.update` | `settings.resolve`, `settings.change` (with `dryRun`), `settings.undo`, `settings.history` and `settings.options`, plus the schema served to clients. |
-| `transport/gateway-service.ts:1671-1690` `session.setModel` and `setContextWindow`; `runtime-slot.ts:9271-9344` setters | Chat-layer appliers behind `settings.change`. The lane guards (`assertConfigurationIdle`, expectations) stay. |
-| `transport/gateway-service.ts:1980-1996` `trust.set`; `admin/trust-service.ts:107-157` | The `permissions.projectTrust` applier. `setAndApply`'s rollback pattern becomes the cross-store rule. |
-| `home/home-owner.ts:77,978` memory model in `home.json`, `home.configureMemory` | `model.ref[role=memory]` in `profile.json`, applied by `HomeOwner`. |
+| `transport/gateway-service.ts` `settings.get` | Removed when its last client moves to `settings.resolve` (slices 8 and 11); `settings.options` and the served schema arrive with slice 14. |
+| `home/home-owner.ts:77` memory model in `home.json` (its applier is now behind `settings.change`) | `model.ref[role=memory]` in `profile.json`, applied by `HomeOwner`. |
 | `home/home-task-dispatcher.ts:190-193`, `home-task-worker-choice.ts`, `tron-home-extension.ts:29,77` ("omit both for the Gateway default") | Home's `delegate` handler fills omitted `model` and `thinking` from the profile (`sameAs: home`) before admission, clamping thinking to the model; an explicit choice wins with its reason ([6.3](#63-worker-model-same-as-home)). |
-| `admin/settings-service.ts` project writes: working tree only | The Project applier writes, stages when git can, and records the git result; it never commits ([5.7](#57-project-writes)). |
 | No per-chat Run values; `images.blockImages` read per request by pi but only from settings files | Chat-layer values in `tron.settings.v1` for every key that allows Chat, applied to the chat's own settings ([3.4](#34-timing)). |
 | `home/home-profile.ts:21-23` `delegation-default` notes | Kept as the *why*. Values move to typed keys. |
 | `runtime-slot.ts:1924` one `SettingsManager` per runtime build; compaction-only live refresh (`runtime-registry.ts:3656`) | Live keys read the resolver at their effect point; fixed keys are copied with provenance at chat start. |
@@ -1081,7 +1113,6 @@ was added after the first numbering; it lands after slice 4 and before slice 8.
 |---|---|---|---|---|---|
 | 1 | One door per chat: the ordinary-chat gear opens Manage Session, and Settings is a row inside it | S | iOS | | #759 |
 | 2 | Clear names and the shared badge component on today's rows | S | iOS | | #760 |
-| 4 | One change path: `settings.change`, the record (kept forever), undo and Apply again, history; today's setters migrate; Project writes are written and staged, never committed | L | Gateway, iOS | 3 | #762 |
 | 5 | Tiers: floors with the maintainer's overrides, the one-step web mark, approval by tap with 24-hour expiry and the requester told, and the `settings` tool | L | Gateway, iOS | 4 | #763 |
 | 6 | Outside changes: stores compared with the record, "Changed outside Tron" with Apply again, notification by floor, git-state badges | M | Gateway, iOS | 4 | #764 |
 | 7 | Fixed-at-start values carry provenance, with "Use the current default"; live keys reach open chats; Chat-layer values for every key that allows Chat; per-direction timing | M | Gateway, iOS | 3, 4 | #765 |

@@ -372,8 +372,10 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   // Setup ---------------------------------------------------------------
   {
+    // No writer: the runtime snapshots its session folder under the ownership
+    // lock at start, so it changes only while the Gateway is stopped.
     id: "setup.sessionDir", group: "setup", type: types.text(4_096), layers: { mac: pi("sessionDir") }, timing: "live", effect: "restart",
-    floor: "notify", writers: ["ui"], label: "Session folder", help: "Where chats are stored. Changes apply after the Gateway restarts.",
+    floor: "notify", writers: [], label: "Session folder", help: "Where chats are stored. Changes apply after the Gateway restarts.",
     order: 10, importance: "advanced", control: "text",
   },
   {

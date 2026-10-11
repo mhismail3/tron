@@ -11,8 +11,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     private struct CloseResponse: Decodable { let closed: Bool }
     private struct ReceiptParams: Encodable { let commandId: String; let method: String }
     private struct ReceiptResponse: Decodable { let status: String; let result: JSONValue? }
-    private struct ModelParams: Encodable { let sessionId: String; let provider: String; let modelId: String; let commandId: String; let expectedRuntimeGeneration: String; let expectedModel: JSONValue }
-    private struct UpdatedResponse: Decodable { let updated: Bool }
+    private struct SettingsChangeResponse: Decodable { let status: String }
 
     private final class MemoryProfileMetadataStore: GatewayProfileMetadataStoring {
         var document: GatewayProfileDocument?
@@ -203,10 +202,17 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         // Global extension registration and initial model selection are separate
         // SDK phases. Explicitly choose the fixture provider before testing
         // admission; ambient/default credentials must never decide this case.
-        let selected: UpdatedResponse = try await firstClient.request("session.setModel", ModelParams(
-            sessionId: created.sessionId, provider: "tron-e2e", modelId: "e2e-model", commandId: UUID().uuidString,
-            expectedRuntimeGeneration: opened.session.runtimeGeneration, expectedModel: try opened.session.model.map { try JSONValue.encode($0) } ?? .null))
-        XCTAssertTrue(selected.updated)
+        // The chat's model is its Chat-layer `model.ref[role=chat]`, changed
+        // through the one settings path and fenced to the runtime it read.
+        let selected: SettingsChangeResponse = try await firstClient.request("settings.change", JSONValue.object([
+            "commandId": .string(UUID().uuidString),
+            "target": .object(["kind": .string("session"), "sessionId": .string(created.sessionId)]),
+            "fence": .object(["runtimeGeneration": .string(opened.session.runtimeGeneration),
+                              "model": try opened.session.model.map { try JSONValue.encode($0) } ?? .null]),
+            "changes": .array([.object(["key": .string("model.ref[role=chat]"), "layer": .string("chat"), "op": .string("set"),
+                                        "value": .object(["provider": .string("tron-e2e"), "id": .string("e2e-model")])])]),
+        ]))
+        XCTAssertEqual(selected.status, "applied")
         let configured = try await synchronizedOpen(client: firstClient, sessionID: created.sessionId)
         XCTAssertEqual(configured.session.model?.provider, "tron-e2e")
         XCTAssertEqual(configured.session.model?.id, "e2e-model")

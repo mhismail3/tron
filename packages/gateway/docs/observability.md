@@ -146,6 +146,7 @@ Pi `src/tests/cache.test.ts`; configuration races are covered in core
 | `Library/Caches/Logs/app.jsonl` | 10 MiB (the user's chosen cap) | **Not yet measured:** the build that writes this stream is not installed on the phone |
 | iOS incident store | 96 KiB, 7 days | Bounded incident history, independent of the app log's cap |
 | `device-exports/` | 10 bundles | The newest exports; older ones are deleted at write time |
+| `gateway/settings/changes/` (the settings change record) | None: kept forever (settings-model.md decision 12) | One entry per settings key changed, a few hundred bytes each, in segments of 500 entries named in `index.json`; `settings.history` reads one segment per page. Its size on disk is the growth signal. **Not yet measured** |
 
 Measured volume (2026-09-24, the first day a rebuilt Gateway ran with the level
 policy): **187 records, 77,022 bytes, in 6.0 h** (10:20–16:21 UTC), a normal day

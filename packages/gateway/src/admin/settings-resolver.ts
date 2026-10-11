@@ -30,6 +30,8 @@ export interface ChatStore {
 export interface ProjectStore {
   root: string;
   document: Record<string, unknown>;
+  /** The file exists but cannot be parsed; its values are unknown. */
+  unreadable?: true;
   applied: boolean;
   reason?: "untrusted";
 }
@@ -84,6 +86,8 @@ export interface Diagnostic { key: string; layer: LayerId; reason: "layer-not-al
 export interface Resolution {
   target: SettingsTarget;
   layers: readonly LayerId[];
+  /** The Project store exists but cannot be parsed (for example merge markers). */
+  projectUnreadable?: true;
   keys: ResolvedKey[];
   diagnostics: Diagnostic[];
 }
@@ -110,7 +114,7 @@ function piDocument(stores: SettingsStores, layer: LayerId): Record<string, unkn
 }
 
 /** Read one layer's raw value for a key instance from that layer's store. */
-function readBinding(stores: SettingsStores, layer: LayerId, binding: Binding, qualifiers: Qualifiers, qualifiedOnly: boolean): unknown {
+export function readBinding(stores: SettingsStores, layer: LayerId, binding: Binding, qualifiers: Qualifiers, qualifiedOnly: boolean): unknown {
   switch (binding.store) {
     case "pi": {
       const document = piDocument(stores, layer);
@@ -196,7 +200,7 @@ export function resolveSettings(target: SettingsTarget, stores: SettingsStores, 
       resolved.push(resolveInstance(key, qualifiers, stores, options, dependencyValue));
     }
   }
-  return { target, layers: stores.layers, keys: resolved, diagnostics };
+  return { target, layers: stores.layers, ...(stores.project?.unreadable ? { projectUnreadable: true as const } : {}), keys: resolved, diagnostics };
 }
 
 function instances(key: KeyDeclaration, target: SettingsTarget, stores: SettingsStores, model: string | undefined): Qualifiers[] {

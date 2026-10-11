@@ -1,4 +1,6 @@
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import { settingsDependencies } from "../../test-support/settings-dependencies.js";
+import { homeMemoryChange } from "../../test-support/chat-settings-change.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -141,7 +143,9 @@ async function fixture(responses = false) {
   disposals.push(async () => { await registry.dispose(); });
   const service = new GatewayService({
     config: { tronHome } as unknown as GatewayConfig, modelRuntime: runtime, sessions: registry, home: registry.homeOwner(),
-    receipts: new CommandReceiptStore(join(tronHome, "receipts")), settings: new SettingsService(agentDir, runtime),
+    receipts: new CommandReceiptStore(join(tronHome, "receipts")), settings: new SettingsService(agentDir),
+    broadcast: () => {},
+    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => registry.homeOwner() }),
     trust: new TrustService(agentDir), sessionDeleted: () => {}, uploads: { removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);
   await registry.initialize();
@@ -239,7 +243,7 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
   it("OpenAI Responses preserves Home's stable prefix, tool loop and cache affinity", async () => {
     const f = await fixture(true);
     await f.service.invoke(client, "home.designate", { commandId: "responses-designate", model: MODEL });
-    await f.service.invoke(client, "home.configureMemory", { commandId: "responses-memory", model: MODEL });
+    await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "responses-memory", model: MODEL }));
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const home = await f.registry.acquire(status.sessionId!);
     for (let turn = 0; turn < 3; turn += 1) {
@@ -285,7 +289,7 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
   it("lays out Home turns and summarizer calls as the recipe's cached prefix", async () => {
     const f = await fixture();
     await f.service.invoke(client, "home.designate", { commandId: "cache-designate", model: MODEL });
-    await f.service.invoke(client, "home.configureMemory", { commandId: "cache-memory", model: MODEL });
+    await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "cache-memory", model: MODEL }));
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const home = await f.registry.acquire(status.sessionId!);
 
@@ -395,7 +399,7 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
   it("keeps Home's cached view across turns past the view budget", async () => {
     const f = await fixture();
     await f.service.invoke(client, "home.designate", { commandId: "budget-designate", model: MODEL });
-    await f.service.invoke(client, "home.configureMemory", { commandId: "budget-memory", model: MODEL });
+    await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "budget-memory", model: MODEL }));
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const home = await f.registry.acquire(status.sessionId!);
     // About 1 KB of summaries per turn: the 128,000-byte view fills near turn 125.
@@ -440,7 +444,7 @@ describe.sequential("Tron Home prompt caching on the wire", () => {
   it("keeps the cached view's end across an activation refused before dispatch", async () => {
     const f = await fixture();
     await f.service.invoke(client, "home.designate", { commandId: "refused-designate", model: MODEL });
-    await f.service.invoke(client, "home.configureMemory", { commandId: "refused-memory", model: MODEL });
+    await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "refused-memory", model: MODEL }));
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const home = await f.registry.acquire(status.sessionId!);
     const owner = f.registry.homeOwner();

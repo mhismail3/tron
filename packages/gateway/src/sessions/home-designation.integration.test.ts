@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -126,7 +127,9 @@ function openRegistry(f: {
     sessions: registry,
     home: registry.homeOwner(),
     receipts: new CommandReceiptStore(join(f.tronHome, "receipts")),
-    settings: new SettingsService(f.agentDir, f.runtime),
+    settings: new SettingsService(f.agentDir),
+    broadcast: () => {},
+    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner() }),
     trust: new TrustService(f.agentDir),
   } as unknown as GatewayServiceDependencies);
   return { registry, service };
@@ -267,7 +270,7 @@ describe("Tron Home designation", () => {
       model: { provider: PROVIDER, id: OTHER_MODEL_ID },
     })).rejects.toMatchObject({
       code: "conflict",
-      message: expect.stringContaining("session.setModel"),
+      message: expect.stringContaining("settings.change"),
     });
     expect(await homeStatus(f)).toEqual(before);
     expect(home.snapshot().model).toEqual(runtimeModel);

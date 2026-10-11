@@ -314,8 +314,13 @@ export async function configureHomeMemory(
   client: Pick<GatewayProtocolClient, "request">,
   model: { provider: string; id: string },
 ): Promise<string> {
-  const result = await client.request("home.configureMemory", { commandId: randomUUID(), model }) as unknown as HomeMemoryStatus;
-  return describeHomeMemory(result);
+  // The memory model is a Home profile key, changed through the one settings path.
+  await client.request("settings.change", {
+    commandId: randomUUID(), target: { kind: "home" },
+    changes: [{ key: "model.ref[role=memory]", layer: "profile", op: "set", value: model }],
+  });
+  const status = await client.request("home.status", {}) as unknown as HomeStatus;
+  return describeHomeMemory(status.memory);
 }
 
 export async function resumeHomeMemory(client: Pick<GatewayProtocolClient, "request">): Promise<string> {

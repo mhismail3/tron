@@ -159,19 +159,22 @@ private actor ProjectTrustFixtureGateway {
                 }
             }
             return (snapshot, nil)
-        case "trust.set":
+        case "settings.change":
+            let change = fixtureTrustChange(params)
+            guard change.isTrust else { return (nil, nil) }
             sets += 1
             guard let commandID = params["commandId"]?.stringValue else { return (nil, nil) }
             if let receipt = receipts[commandID] { repeats += 1; record("repeat:\(commandID)"); return (receipt, nil) }
-            if params["cwd"] != .string("/fixture/project") { wrongCWD += 1 }
-            decision = params["decision"]?.boolValue
-            let result = inspection()
+            if change.cwd != .string("/fixture/project") { wrongCWD += 1 }
+            decision = change.decision
+            let canonical = inspection()
+            let result = fixtureSettingsChangeResult(key: "permissions.projectTrust", result: canonical)
             // The real TrustService mutex protects application/commit, not
             // network response delivery. No await separates these fake commits.
             receipts[commandID] = result
             let isFirst = receipts.count == 1
             record("commit:\(decision.map(String.init) ?? "nil"):\(commandID)")
-            for socket in sockets { await socket.emitTrustChanged(result) }
+            for socket in sockets { await socket.emitTrustChanged(canonical) }
             record("changed:\(decision.map(String.init) ?? "nil")")
             if isFirst, holdFirst {
                 held += 1
@@ -179,14 +182,14 @@ private actor ProjectTrustFixtureGateway {
                 firstReply += 1
                 record("typed-first:true")
             } else {
-                record("typed:\(params["decision"]?.boolValue.map(String.init) ?? "nil")")
+                record("typed:\(change.decision.map(String.init) ?? "nil")")
             }
             return (result, nil)
         case "command.status":
             queries += 1
             let commandID = params["commandId"]?.stringValue ?? ""
             record("status:\(commandID)")
-            if params["method"] == .string("trust.set"), let result = receipts[commandID] {
+            if params["method"] == .string("settings.change"), let result = receipts[commandID] {
                 return (.object(["status": .string("completed"), "result": result]), nil)
             }
             return (.object(["status": .string("missing")]), nil)
@@ -248,3 +251,18 @@ private actor ProjectTrustFixtureSocket: GatewaySocketConnection {
     }
 }
 #endif
+
+/// Reads a fixture `settings.change` that changes project trust.
+func fixtureTrustChange(_ params: [String: JSONValue]) -> (cwd: JSONValue?, decision: Bool?, isTrust: Bool) {
+    let change = params["changes"]?.arrayValue?.first?.objectValue
+    let isTrust = change?["key"]?.stringValue == "permissions.projectTrust"
+    return (params["target"]?.objectValue?["cwd"], change?["op"]?.stringValue == "set" ? change?["value"]?.boolValue : nil, isTrust)
+}
+
+/// A fixture `settings.change` outcome for one applied change.
+func fixtureSettingsChangeResult(key: String, result: JSONValue? = nil, revision: Int? = nil) -> JSONValue {
+    var change: [String: JSONValue] = ["changeId": .string("fixture-change"), "key": .string(key), "status": .string("applied"), "tier": .string("quiet")]
+    if let result { change["result"] = result }
+    if let revision { change["revision"] = .number(Double(revision)) }
+    return .object(["status": .string("applied"), "changes": .array([.object(change)])])
+}

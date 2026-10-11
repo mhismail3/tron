@@ -286,7 +286,7 @@ extension may register a provider. Sharing is safe for Home because:
 
 **Model resolution.** Designation uses the requested model, or, for a fresh session
 only, the Gateway default. Re-enable uses the requested model, else the last
-designated one, applied through `session.setModel` when the live model differs.
+designated one, applied through the session's model setter when the live model differs.
 Runtime construction supplies the recorded model explicitly. A virtual (routed)
 model is refused everywhere, because routing runs on the canonical transcript, which
 the Home profile does not own. A model applied to the **enabled** Home is written
@@ -298,7 +298,7 @@ the declared loadout at every runtime creation. A disabled Home starts with
 `ask_user`, `display` and `notify`; the ordinary tools are only registered
 (`runtime-tool-loadout.integration.test.ts`). The memory and research tools belong
 to the Home-only modules and are never registered or activated for an ordinary
-profile. `session.setTools` restores the ordinary tools.
+profile. A Chat-layer `tools.active` change (`settings.change`) restores the ordinary tools.
 
 ## Profile changes
 
@@ -415,9 +415,10 @@ Each activation waits for and freezes the preceding view before provider admissi
 - **Checkpoints.** Opening the store publishes a checkpoint only when the episodic
   store's threshold is crossed, not on every open
   ([episodic-memory.md](episodic-memory.md)).
-- **Configuration.** There is no default model. `home.configureMemory` writes
-  `memory.model`, refuses virtual or unregistered models, and returns the
-  projection. The same model changes nothing.
+- **Configuration.** There is no default model. The memory model is the Home
+  profile key `model.ref[role=memory]`, changed through `settings.change`
+  ([settings-model.md](settings-model.md)); its applier writes `memory.model`
+  through `HomeOwner` and refuses virtual or unregistered models. The same model changes nothing.
 - **No budget.** Spend is bounded by construction
   ([episodic-memory.md](episodic-memory.md)): a summary is built when missing, with
   bounded tries, and rebuilt only after its source changes. `spentTokens` is
@@ -508,7 +509,7 @@ change the profile nor rebuild a busy session.
 | --- | --- |
 | `retries-exhausted` | The next activation resumes once by itself, re-arming bounded retries; if it blocks again while that activation waits, the activation is refused with the reason. |
 | `permanent-failure`, `source-unavailable` | `home.resumeMemory` (receipted): the operator's statement that the cause is gone. |
-| any block | `home.configureMemory` with a *different* model, which resumes it while reopening the store. |
+| any block | Setting a *different* memory model (`settings.change`, `model.ref[role=memory]`), which resumes it while reopening the store. |
 
 None of these waits for summary catch-up. The block clears, the source is re-read,
 and the pump restarts; the activation waits only for the lines it will send. Resume
@@ -1225,9 +1226,8 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.open` | none | read | Logical route and binding. Creates no runtime and materializes no successor. |
 | `home.chapterList` | none | read | The whole chapter ledger in ledger order, each chapter with state, `createdAt`, `sealedAt?`, `activationStarted`, `sessionPresent` and metrics, plus the shared soft and hard rollover limits (`home-chapter-list.v1`, #740). Sealed chapters answer exactly their recorded seal metrics (a disable-sealed chapter has none); only the active chapter is measured live, and only while its session is present, so absent sizes mean unmeasured, never zero. Undesignated refuses `not_found`; an unavailable record refuses `conflict`, never a partial list. A disabled Home still lists its chapters. |
 | `home.prompt` | `commandId`, `text`, `uploadIds` (at most 10, into the resolved chapter), `behavior` (`steer` or `followUp` while a turn runs), `resourceInvocation` | receipted | The composer's whole prompt contract, admitted by the same code as `session.prompt`. Returns the physical session and operation. |
-| `home.designate` | `commandId`, `model?` | receipted | With no record: creates the working directory and its trust decision, a **new** session whose first runtime has the Home profile, applies the model, writes the record, and returns `{ homeId, sessionId, generation }`. An enabled record whose session still exists is idempotent when the model is absent or matches; a different model refuses with a conflict directing to `session.setModel`. A disabled record re-enables the same session at `generation + 1`, preserving any `reserved` or `materializing` successor for the next `home.prompt`. A record whose session is **gone** is given a fresh session at `generation + 1`, enabled or not: the record is the only evidence of the designation, and the dangling ID is never re-enabled. |
+| `home.designate` | `commandId`, `model?` | receipted | With no record: creates the working directory and its trust decision, a **new** session whose first runtime has the Home profile, applies the model, writes the record, and returns `{ homeId, sessionId, generation }`. An enabled record whose session still exists is idempotent when the model is absent or matches; a different model refuses with a conflict directing to `settings.change`. A disabled record re-enables the same session at `generation + 1`, preserving any `reserved` or `materializing` successor for the next `home.prompt`. A record whose session is **gone** is given a fresh session at `generation + 1`, enabled or not: the record is the only evidence of the designation, and the dangling ID is never re-enabled. |
 | `home.disable` | `commandId` | receipted | `enabled: false` at `generation + 1`. The session stays ordinary. A record whose session is gone is only marked disabled. |
-| `home.configureMemory` | `commandId`, `model` (required) | receipted | Names a registered physical model; virtual or unavailable refuses. Refused on a disabled Home. Resumes a block its change addresses, never clears operator pause. Returns the memory projection. |
 | `home.pauseMemory` | `commandId` | receipted | Requires an enabled, configured Home. Durably pauses; idempotent. Returns the memory projection. |
 | `home.resumeMemory` | `commandId` | receipted | Clears pause and or block, re-reads canonical deltas and restarts the pump without awaiting catch-up. A memory that is neither paused nor blocked refuses with conflict. An empty Home resumes without creating a store. |
 | `home.reconfirmPermissions` | `commandId` | receipted | Re-stamps active standing scopes to the current epoch. See [Authorization](#authorization). |
@@ -1416,7 +1416,7 @@ RPC is printed and the chat continues. The table is generated from `HOME_USAGE` 
 | `/home [status]` | `home.status` | Phase, activation, readiness gaps, memory and recovery action. |
 | `/home designate [provider/id]` | `home.designate` | Designates Home. Without a model, the Gateway's default is used for a fresh session. |
 | `/home disable` | `home.disable` | Disables Home; the session becomes an ordinary session. |
-| `/home memory <provider/id>` | `home.configureMemory` | Configures memory, then prints the memory projection it returns. Exactly one model argument. |
+| `/home memory <provider/id>` | `settings.change` (`model.ref[role=memory]`), then `home.status` | Configures memory, then prints the memory projection. Exactly one model argument. |
 | `/home resume` | `home.resumeMemory` | Resumes paused or blocked memory, then prints the memory projection it returns. |
 | `/home context` | `home.context` | The activation's start, whether it is open, the request sizes and its refusal. |
 | `/home reconfirm-permissions` | `home.reconfirmPermissions` | Reconfirms standing scopes for the current restore epoch; revoked scopes and grants are not renewed. |
@@ -1447,7 +1447,7 @@ without a retained artifact.
 | `src/sessions/home-memory-tools.e2e.test.ts` | the three memory tools, end to end | `test-results/home-memory-tools/report.json` | `npx vitest run src/sessions/home-memory-tools.e2e.test.ts` |
 | `src/sessions/home-research-tools.integration.test.ts` | the five research tools inside real activations with zero seam refusals; result caps; SSRF and trust-escape refusals; Knowledge writes structurally unreachable; ordinary sessions unaffected | `test-results/home-research-tools/report.json` | `npx vitest run src/sessions/home-research-tools.integration.test.ts` |
 | `src/sessions/home-profile.integration.test.ts` | learn through a real activation with its evidence and unconfirmed state; verbatim injection with a byte-stable prompt; refine, supersede and retire lifecycles; refusals of retired and superseded items; a native confirmation and correction keep the item; the over-bound refusal; a worker receives the brief; Home chapters unobserved; ordinary sessions without the profile tool | `test-results/home-profile/report.json` | `npx vitest run src/sessions/home-profile.integration.test.ts` |
-| `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; `session.setTools` restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
+| `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; a Chat-layer `tools.active` change restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |
 | `src/episodic/home-source.e2e.test.ts` | cross-chapter replay, restart, navigation and frozen-cut proof | `test-results/home-memory/continuity.json` | `npx vitest run src/episodic/home-source.e2e.test.ts` |
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on the chosen model and level; an omitted model keeps the default; unregistered, virtual, unusable and unsupported choices, and thinking without a model, are refused before any task or session; the refusal list is bounded and reaches Home; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |

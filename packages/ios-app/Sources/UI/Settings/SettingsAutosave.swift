@@ -29,7 +29,7 @@ enum SettingsAutosave {
                 key: .settings(target, sessionID: sessionID), patch: delta,
                 write: { [weak model] patch in
                     guard let model, model.profileRevision == profile, let patch else { throw CancellationError() }
-                    try await model.updateSettings(patch, target: target, sessionID: sessionID)
+                    try await model.updateSettings(patch, target: target)
                 },
                 completed: { [weak model] in
                     guard let model, model.profileRevision == profile else { return }

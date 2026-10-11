@@ -4298,8 +4298,8 @@ final class AppModel {
         await settingsTrust.refreshSettings(target: target)
     }
 
-    func updateSettings(_ patch: JSONValue, target: SettingsTarget, sessionID: String? = nil) async throws {
-        try await settingsTrust.updateSettings(patch, target: target, sessionID: sessionID)
+    func updateSettings(_ patch: JSONValue, target: SettingsTarget) async throws {
+        try await settingsTrust.updateSettings(patch, target: target)
     }
 
     func mutateMCPAdmin(_ method: String, parameters: [String: JSONValue]) async throws -> JSONValue {

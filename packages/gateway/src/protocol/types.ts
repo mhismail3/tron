@@ -1171,7 +1171,7 @@ export interface HomeStatus {
   sessionPresent: boolean;
   /** Home's memory, once a record names one. There are no memory defaults
    * (decision D4), so a Home whose memory is unconfigured refuses its
-   * activations until `home.configureMemory`. */
+   * activations until the memory model is set (`model.ref[role=memory]`). */
   memory: HomeMemoryStatus;
 }
 

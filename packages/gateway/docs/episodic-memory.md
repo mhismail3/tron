@@ -557,7 +557,7 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
   `searchMessages` through `HomeMemory`, which ingests the latest commits first,
   never awaits the pump, and answers a typed result for a memory that is not
   open, not configured or stopped.
-- The model is the Home record's (`home.configureMemory`); what this module
+- The model is the Home record's (`model.ref[role=memory]`, set through `settings.change`); what this module
   persists about spend, blocking and its cursor is described above.
 
 Still outside this module: any per-project compactor instructions, and the tool

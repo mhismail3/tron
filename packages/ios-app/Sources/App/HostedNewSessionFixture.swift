@@ -135,12 +135,15 @@ private actor NewSessionFixtureGateway {
         switch method {
         case "settings.get": return .object(["effective": .object([:])])
         case "trust.inspect": return .object(["requiresDecision": .bool(scenario.hasPrefix("trust-") && !trustResolved), "effectiveDecision": scenario.hasPrefix("trust-") && !trustResolved ? .null : .bool(false)])
-        case "trust.set":
+        case "settings.change":
+            let change = fixtureTrustChange(params)
+            guard change.isTrust else { return nil }
             trusts += 1
             if replacement { successorTrusts += 1 }
-            fallbackMatches = params["cwd"] == .string("/fixture/original") && params["decision"] == .bool(false)
+            fallbackMatches = change.cwd == .string("/fixture/original") && change.decision == false
             trustResolved = true; publish()
-            return .object(["requiresDecision": .bool(false), "effectiveDecision": .bool(false)])
+            return fixtureSettingsChangeResult(key: "permissions.projectTrust",
+                                               result: .object(["requiresDecision": .bool(false), "effectiveDecision": .bool(false)]))
         case "git.inspect": return .object(["isRepository": .bool(true), "branch": .string("main"), "dirty": .bool(false), "branches": .array([.object(["name": .string("main"), "checkedOut": .bool(true)]), .object(["name": .string("fixture-base"), "checkedOut": .bool(false)])]), "commits": .array([])])
         case "session.create": creates += 1; publish(); return .object(["sessionId": .string("fixture-created-session")])
         case "session.list", "session.listUpdated": return .object(["sessions": .array([])])

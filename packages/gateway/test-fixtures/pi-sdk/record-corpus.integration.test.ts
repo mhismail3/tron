@@ -41,7 +41,6 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { AuthBroker } from "../../src/admin/auth-broker.js";
-import { SettingsService } from "../../src/admin/settings-service.js";
 import { TrustService } from "../../src/admin/trust-service.js";
 import { UploadStore } from "../../src/machine/upload-store.js";
 import type { JsonValue } from "../../src/protocol/types.js";
@@ -76,6 +75,7 @@ import {
   type CorpusObservation,
   type CorpusServerObservation,
 } from "../../test-support/pi-persisted-state-corpus.js";
+import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { SYNTHETIC_NATIVE_IMAGE } from "./computer-use-image.js";
 
@@ -187,23 +187,29 @@ describe("persisted-state upgrade corpus recorder", () => {
       const modelRuntimeFactory = () => corpusModelRuntime(agentDir, faux);
 
       // The agent directory's own owners write the settings and the provider
-      // credential: `settings.json` through Tron's SettingsService (which
-      // validates the model against the SDK catalog) and `auth.json` through the
-      // Gateway's AuthBroker, exactly as a device sign-in does.
+      // credential: `settings.json` through Tron's one settings change path
+      // (which validates the model against the SDK catalog) and `auth.json`
+      // through the Gateway's AuthBroker, exactly as a device sign-in does. The
+      // session folder has no runtime writer (it is fixed while a Gateway runs),
+      // so the fixture writes it before any owner starts.
       const settingsRuntime = await modelRuntimeFactory();
-      await new SettingsService(agentDir, settingsRuntime).update({
-        sessionDir,
-        defaultModel: { provider: CORPUS_AZURE_PROVIDER, id: CORPUS_AZURE_MODEL },
-        defaultThinkingLevel: "medium",
-        thinkingBudgets: { minimal: 512, high: 8_192 },
-        defaultTools: ["read", "edit", "write", "bash", "+codemode", "+tool_search"],
-        enabledModels: [`${CORPUS_AZURE_PROVIDER}/${CORPUS_AZURE_MODEL}`, `${CORPUS_FAUX_PROVIDER}/${CORPUS_FAUX_MODEL}`],
+      const existing = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8").catch(() => "{}")) as Record<string, unknown>;
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ ...existing, sessionDir }));
+      const mac = (key: string, value: unknown) => ({ key, layer: "mac" as const, op: "set" as const, value });
+      await settingsDependencies({ agentDir, tronHome: join(root, "tron"), trust, modelRuntime: settingsRuntime }).settingsChanges.change({ kind: "mac" }, [
+        mac("model.ref[role=chat]", { provider: CORPUS_AZURE_PROVIDER, id: CORPUS_AZURE_MODEL }),
+        mac("model.thinking[role=chat]", "medium"),
+        mac("model.thinkingBudgets", { minimal: 512, high: 8_192 }),
+        mac("tools.active", ["read", "edit", "write", "bash", "+codemode", "+tool_search"]),
+        mac("model.offered", [`${CORPUS_AZURE_PROVIDER}/${CORPUS_AZURE_MODEL}`, `${CORPUS_FAUX_PROVIDER}/${CORPUS_FAUX_MODEL}`]),
         // A corpus-sized session must still be compactable: the retained tail is
         // tiny, so one manual compaction records a real `compaction` entry.
-        compaction: { enabled: true, reserveTokens: 4_096, keepRecentTokens: 100 },
+        mac("context.compaction.enabled", true),
+        mac("context.compaction.reserveTokens", 4_096),
+        mac("context.compaction.keepRecentTokens", 100),
         // Scoped built-in extension settings: the form Tron persists for the shared built-in list.
-        extensions: ["-builtin:llama.cpp"],
-      }, { cwd, scope: "global", projectTrusted: false });
+        mac("sources.extensions", ["-builtin:llama.cpp"]),
+      ], { actor: { kind: "ui", id: "corpus-device" } });
       const authEvents: Array<{ topic: string; payload: Record<string, unknown> }> = [];
       const auth = new AuthBroker(settingsRuntime, (_clientId: string, topic: string, payload: JsonValue) => {
         authEvents.push({ topic, payload: payload as Record<string, unknown> });

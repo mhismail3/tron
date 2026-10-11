@@ -18,39 +18,8 @@ final class SettingsTrustCoordinator {
         let scope: String
     }
 
-    private struct SettingsUpdateParams: Codable {
-        let patch: JSONValue
-        let scope: String
-        let cwd: String?
-        let sessionId: String?
-        let commandId: String
-    }
-
     private struct TrustInspectParams: Codable {
         let cwd: String
-    }
-
-    private struct TrustSetParams: Encodable {
-        let cwd: String
-        let decision: Bool?
-        let commandId: String
-
-        private enum CodingKeys: String, CodingKey {
-            case cwd
-            case decision
-            case commandId
-        }
-
-        func encode(to encoder: Encoder) throws {
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(cwd, forKey: .cwd)
-            if let decision {
-                try container.encode(decision, forKey: .decision)
-            } else {
-                try container.encodeNil(forKey: .decision)
-            }
-            try container.encode(commandId, forKey: .commandId)
-        }
     }
 
     private struct SettingsLoadToken {
@@ -129,21 +98,19 @@ final class SettingsTrustCoordinator {
         }
     }
 
-    func updateSettings(_ patch: JSONValue, target: SettingsTarget, sessionID: String? = nil) async throws {
+    /// Writes a settings screen's patch through the one change path,
+    /// `settings.change` (gateway docs/settings-model.md 5.2).
+    func updateSettings(_ patch: JSONValue, target: SettingsTarget) async throws {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
-        let params = SettingsUpdateParams(
-            patch: patch,
-            scope: target.scope.rawValue,
-            cwd: target.cwd,
-            sessionId: sessionID,
-            commandId: commandID
-        )
-        let _: JSONValue = try await mutationExecutor.performValue(
-            method: "settings.update",
-            commandID: commandID
-        ) {
-            try await client.requestValue("settings.update", params)
+        let params = try SettingsPatchChanges.params(patch: patch, target: target, commandID: commandID)
+        if params.objectValue?["changes"]?.arrayValue?.isEmpty == false {
+            let _: JSONValue = try await mutationExecutor.performValue(
+                method: "settings.change",
+                commandID: commandID
+            ) {
+                try await client.requestValue("settings.change", params)
+            }
         }
         try requireProfile(admittedProfileGeneration)
         _ = await refreshSettings(target: target)
@@ -160,15 +127,29 @@ final class SettingsTrustCoordinator {
         return value
     }
 
+    /// Trust for one project is the Mac-layer key `permissions.projectTrust`
+    /// qualified by that project; it changes through `settings.change`, whose
+    /// outcome carries the resulting trust inspection.
     func setTrust(target: TrustTarget, decision: Bool?) async throws -> JSONValue {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
-        let params = TrustSetParams(cwd: target.cwd, decision: decision, commandId: commandID)
-        let value = try await mutationExecutor.performValue(method: "trust.set", commandID: commandID) {
-            try await client.requestValue("trust.set", params)
+        var change: [String: JSONValue] = [
+            "key": .string("permissions.projectTrust"), "layer": .string("mac"),
+        ]
+        if let decision { change["op"] = .string("set"); change["value"] = .bool(decision) } else { change["op"] = .string("unset") }
+        let params: JSONValue = .object([
+            "commandId": .string(commandID),
+            "target": .object(["kind": .string("project"), "cwd": .string(target.cwd)]),
+            "changes": .array([.object(change)]),
+        ])
+        let value = try await mutationExecutor.performValue(method: "settings.change", commandID: commandID) {
+            try await client.requestValue("settings.change", params)
         }
         try requireProfile(admittedProfileGeneration)
-        return value
+        guard let inspection = value.objectValue?["changes"]?.arrayValue?.first?.objectValue?["result"] else {
+            throw GatewayFailure(code: "invalid_response", message: "The trust change returned no trust inspection.", retryable: false, details: nil)
+        }
+        return inspection
     }
 
     func noteSettingsChanged() {

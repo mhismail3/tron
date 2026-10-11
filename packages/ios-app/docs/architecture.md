@@ -678,8 +678,13 @@ without advancing that generation, so a visible `.task(id:)` performs one initia
 and one read per actual invalidation rather than feeding its own reload loop.
 `SettingsTrustCoordinator` is the sole owner of target-keyed disposable settings values,
 per-target read admission, settings and trust event revisions, settings request/mutation
-construction, and trust inspection/mutation. Clearing a saved trust decision sends an explicit
-JSON `null`, while `true` and `false` remain distinct decisions. It uses the shared
+construction, and trust inspection/mutation. Every settings write goes through the Gateway's one
+change path, `settings.change` (gateway `docs/settings-model.md`): a trust decision is the
+`permissions.projectTrust` key for the project target, and its change outcome carries the resulting
+trust inspection; clearing a saved decision is an `unset`, while `true` and `false` remain distinct
+decisions. Today's hand-built settings screens still build pi-document patches, and
+`SettingsPatchChanges` turns each patch into key changes, refusing a path it does not know; it is
+deleted with those screens when the generic renderer replaces them (#769). It uses the shared
 confirmed-mutation executor, and profile retirement synchronously revokes suspended work
 and clears settings projections. Project Trust treats an accepted decision receipt as command
 outcome, not the latest visible inspection: under its original presentation namespace it rejoins a
@@ -1137,7 +1142,7 @@ its Script and then its Result show their first eight lines (`ToolTextHeadPrevie
 Admitted display descriptors use the existing session-bound display presentation route; no nested call becomes a
 canonical transcript row or independent receipt. MCP tool names use the projected server/tool identity, resource
 and search tools remain generic result cards. Manage Session → Available Tools turns tools on or off for one chat
-(`session.setTools`); it groups `session.resources` tools as Built-in, Tron, each package, local extensions and each
+(a Chat-layer `tools.active` change through `settings.change`); it groups `session.resources` tools as Built-in, Tron, each package, local extensions and each
 MCP server (from the `namespace` object), omits hidden exposures, and is the only Manage Session list of tools. Its rows carry no icon and a two-line description; only the switch toggles a tool, and the rest of the row opens the shared resource detail sheet with the full description and the tool's declared inputs. Routed assistant rows use physical provider/model attribution;
 virtual model names are marked in the model and session selectors without replacing physical attribution. Bash keeps
 Pi's empty result empty rather than inventing `(no output)`. Bash commands wrap to the available width
@@ -1538,8 +1543,8 @@ additionally requires authenticated `home-memory-browser.v1` and the chapter
 list `home-chapter-list.v1`; settings/context require only `home.v1`. Memory Settings
 uses the existing progressive model-selection row and ModelPicker, filtered to
 registered, available physical models. Selection captures the mounted picker
-profile/lifecycle before sending `configureMemory` through the existing receipt
-owner. Choices stay Applying until the exact latest canonical status read
+profile/lifecycle before sending the memory model (`model.ref[role=memory]`, a Home
+profile key, through `settings.change`) via the existing receipt owner. Choices stay Applying until the exact latest canonical status read
 converges, not merely until the configure receipt is terminal; an old installed
 model frame cannot admit a duplicate choice during that gap. It shows spend as
 information, configuration/pause/block state and explicit
