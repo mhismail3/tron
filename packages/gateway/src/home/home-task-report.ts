@@ -57,6 +57,14 @@ export function parseHomeTaskReport(value: unknown): HomeTaskReport {
   return report;
 }
 
+/** The refusal text while subagent runs the task started are live. It names the count and
+ * the remedy; a refused report seals nothing and the turn continues. */
+export function reportLiveRunsRefusal(count: number): string {
+  const runs = count === 1 ? "1 subagent run this task started is" : `${count} subagent runs this task started are`;
+  const pronoun = count === 1 ? "it" : "them";
+  return `Report refused: ${runs} still live. Wait for ${pronoun} (subagent status, or a blocking bg_wait) or stop ${pronoun}, then report.`;
+}
+
 /** One immutable result belongs to one worker operation, not to a slot-wide map.
  * Append evidence before sealing; failure leaves no false accepted result. */
 export class HomeTaskReportOwner {
@@ -119,7 +127,7 @@ export class HomeTaskReportOwner {
    * worker session shows no aborted reply. */
   tool(sessionId: () => string, operationId: () => string | undefined,
     append: (report: HomeTaskReport) => Promise<string>): ToolDefinition {
-    return { name: "report", label: "Report", description: "Seal the task's explicit immutable result with acceptance evidence. Ends this task immediately; do no work afterwards.",
+    return { name: "report", label: "Report", description: "Seal the task's explicit immutable result with acceptance evidence. Ends this task immediately; do no work afterwards. Refused while a subagent run this task started is still live: wait for it or stop it first.",
       parameters: PARAMETERS, executionMode: "sequential",
       execute: async (_id, request) => {
         const entryId = await this.accept(sessionId(), operationId(), request, append);

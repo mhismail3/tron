@@ -2,6 +2,7 @@ import { lstat, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
+import type { ExtensionRunLifecycleState } from "../protocol/types.js";
 import { delegatedArtifactPathAllowed, DELEGATED_PROVIDER_TOOL_NAME } from "../sessions/delegated-provider.js";
 import { HOME_TASK_MARKER } from "./home-task-report.js";
 import { HOME_TASK_PRODUCER_REFUSAL_REASON, HOME_TASK_SEALED_REASON } from "./home-task-worker-extension.js";
@@ -19,6 +20,20 @@ export interface HomeTaskSubagents {
 }
 
 export interface HomeTaskSubagentsEntry { receiptId: string; operationId: string; stoppedAtEnd: number | null }
+
+/** A live subagent run of a task's worker, as task status shows it. Projected from the live
+ * slot on each read and never persisted with the task. */
+export interface HomeTaskSubagentRun {
+  runId: string;
+  agent: string;
+  state: ExtensionRunLifecycleState;
+  startedAt: string;
+  lastActivityAt: string | null;
+}
+/** The live runs in task status: at most `HOME_TASK_STATUS_RUN_LIMIT` of them, newest first,
+ * with `total` counting every live run. Empty once the task has settled. */
+export interface HomeTaskSubagentRuns { total: number; runs: HomeTaskSubagentRun[] }
+export const HOME_TASK_STATUS_RUN_LIMIT = 20;
 
 /** How long task-end settlement waits for the runs it stopped to become terminal. A
  * stopped runner aborts its request and writes its terminal status within seconds; a

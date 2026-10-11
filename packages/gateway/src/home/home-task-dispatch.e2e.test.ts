@@ -264,7 +264,7 @@ describe("Home task bounded backlogs", () => {
   }, 30_000);
 
   it("delivers a never-fit report by reference before its successor and reads immutable bounded pages", async () => {
-    const f = await fixture(undefined, false, 6_000); const model = f.faux.getModel();
+    const f = await fixture(undefined, false, 6_500); const model = f.faux.getModel();
     const owner = f.registry.homeOwner();
     await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
     f.faux.setResponses([fauxAssistantMessage([reportCall("large", "🦊".repeat(16384))], { stopReason: "toolUse" })]);

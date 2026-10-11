@@ -850,8 +850,9 @@ default. The choice is never persisted with the task record.
   preflight, and the same ceiling bounds the subagent join ([Subagent runs](#subagent-runs)).
   No user-configurable limit exists.
 - Task workers load the same Tron-managed subagent provider as ordinary chats; Home
-  does not. A worker may launch subagents, foreground or async. Every run its session
-  starts is owned by the task operation ([Subagent runs](#subagent-runs)).
+  does not. A worker may launch subagents, foreground, async or workflows. Every run its
+  session starts is owned by the task operation, and its `report` waits for them
+  ([Subagent runs](#subagent-runs)).
 - The first-party task extension admits `subagent` launches, even `async:false`, which
   the pinned configuration can force async, and the read-only management of the
   verified `0.76.1-tron.6` provider: `guide`, `children.list`, `status`, `list`, `get`,
@@ -925,6 +926,15 @@ task record:
 it is `0`. Every Home result header states both counts. Settlement emits
 `home.task.subagents`.
 
+**Report waits for live runs.** `report` is refused while any run the task started is live,
+by the settlement liveness rule above, including a live child of a completed workflow. The
+refusal is an ordinary tool error that names the live count and the remedy: wait for the runs
+(`subagent` status, or a blocking `bg_wait`) or stop them, then report. It seals nothing and the
+turn continues. A stop request is not an ended run: a run stays live until its status is
+terminal, so a report after `stop` waits for that terminal status. Settlement therefore has no
+live run to stop when a report is accepted; it stops live runs only when the worker ends
+without a report, or on Stop and the deadline.
+
 Provider completion notices reach a task worker as context of its operation. No turn
 starts after settlement: the provider suppresses idle wakes, and no Gateway guard is
 added. The no-turn checks in `home-task-subagents.e2e.test.ts` cover that property.
@@ -933,8 +943,10 @@ added. The no-turn checks in `home-task-subagents.e2e.test.ts` cover that proper
 **The `report` tool** takes `resultId`, a claimed `outcome` (`progress`,
 `needs-input`, `final`), `text` (at most 64 KiB UTF-8) and `evidence` (at most 64
 strings of 4,096 bytes; payload at most 128 KiB). It supplies no task, Home, session
-or cost identity. Acceptance appends one immutable `tron-home-task-report`, seals
-it, and requests an exact Stop without awaiting it from the tool that joins.
+or cost identity. It is refused while a run the task started is live
+([Subagent runs](#subagent-runs)); the check runs at the seal, inside the report owner's
+mutex, so a refused report never seals. Acceptance appends one immutable
+`tron-home-task-report`, seals it, and requests an exact Stop without awaiting it from the tool that joins.
 Settlement joins that Stop before publishing the result. RuntimeSlot's settlement
 owns the single terminal receipt write and notifies the task observer after it. The
 task lease alone acknowledges the operation marker, and only the exact task
@@ -1034,11 +1046,18 @@ work. One per-process result is shared by every task surface.
   A never-initialized listing returns `{ items: [] }`
   without creating authority.
 - **`home.taskStatus`** returns the record, the exact active operation, spend, the
-  immutable result, `workerModel` and `subagents` (see [Subagent runs](#subagent-runs)): the worker session's current `{ provider, id }`, read
+  immutable result, `workerModel`, `subagents` (see [Subagent runs](#subagent-runs)) and
+  `subagentRuns`. `workerModel` is the worker session's current `{ provider, id }`, read
   from its canonical `model_change` entries. A running worker answers from its live slot; a
   settled one reads its conversation file, through the same evidence cut as recovery. It is
   `null` before the worker records a model or when it has no conversation file. It is a read
-  projection and is never persisted with the record. Viewing never changes control. Home's
+  projection and is never persisted with the record. `subagentRuns` is `{ total, runs }`: the
+  worker's live runs while the task is active, read from the live slot under the same liveness
+  rule as the report gate. `runs` holds at most 20 entries, newest first, each `{ runId, agent,
+  state, startedAt, lastActivityAt }`; `total` counts every live run. A settled task lists none,
+  and nothing is persisted: the task record stays strict v1. The field is additive, so released
+  iOS decodes the status without it. A run's `state` is its own lifecycle, or a live workflow
+  child's when the run's own work has ended. Viewing never changes control. Home's
   `task` tool exposes `status`, `steer` and `stop`, only for tasks bound to the
   enabled Home's identity and generation; it can never reconfirm, revoke or decide.
   Status follows Home across disable and re-enable but never transfers control.
@@ -1232,7 +1251,7 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.resumeMemory` | `commandId` | receipted | Clears pause and or block, re-reads canonical deltas and restarts the pump without awaiting catch-up. A memory that is neither paused nor blocked refuses with conflict. An empty Home resumes without creating a store. |
 | `home.reconfirmPermissions` | `commandId` | receipted | Re-stamps active standing scopes to the current epoch. See [Authorization](#authorization). |
 | `home.taskList` | `limit?` (1–50, default 20), `cursor?` (at most 1,024 characters) | read | Maintainer summary; see [Control and spend status](#control-and-spend-status). |
-| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record, active operation, spend, immutable result, worker model. |
+| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record, active operation, spend, immutable result, worker model, subagent counts and live subagent runs. |
 | `home.taskPermissions` | none | read | Strict scopes, requests, decisions and grants with the revision. Refuses before the first dispatch, never granting permission. |
 | `home.steerTask` | `commandId`, `taskId`, `operationId`, `text` (at most 64 KiB) | receipted | Steers the exact active operation. It cannot start a successor. |
 | `home.stopTask` | `commandId`, `taskId`, `operationId` | receipted | Persists the exact Stop intent and joins terminal settlement. Repeatable after settlement without repeating cancellation. |
@@ -1453,7 +1472,7 @@ without a retained artifact.
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on the chosen model and level; an omitted model keeps the default; unregistered, virtual, unusable and unsupported choices, and thinking without a model, are refused before any task or session; the refusal list is bounded and reaches Home; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries; frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
 | `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
-| `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; Stop and the 24-hour deadline stop an async run; a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows stopped on report and on Stop, and a child that outlives its completed workflow stopped by run id; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |
+| `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |
 | `src/home/home-wake-inbox.integration.test.ts` | frozen-owner cuts for claim, admission, terminal and acknowledgement; route replacement; redelivery | `HOME_WAKE_REPORT=<artifact-path>` | `HOME_WAKE_REPORT=<artifact-path> npx vitest run src/home/home-wake-inbox.integration.test.ts` |
 | `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice; the ninth wake is refused and says Home is waiting; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | none (faux provider; reports under the fixture) | `npx vitest run src/home/home-wake.e2e.test.ts` |
 | `src/home/home-system-prompt.e2e.test.ts` | every request of an activation carries one identical Home system prompt, framed at the request seam | none | `npx vitest run src/home/home-system-prompt.e2e.test.ts` |

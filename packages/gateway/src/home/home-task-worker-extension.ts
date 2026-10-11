@@ -40,7 +40,7 @@ export function createHomeTaskWorkerExtension(input: {
   ownsSubagentRun: (runId: string) => boolean;
 }): ExtensionFactory {
   return pi => {
-    pi.on("before_agent_start", event => ({ systemPrompt: `${event.systemPrompt}\n\nThis is a finite Home task. Work directly with project tools and finish with an explicit report and acceptance evidence. You may launch subagents; the task stops and joins every async run it started before it settles. Do not start scheduled or mission work, which outlives the task. The fixed internal deadline stops this operation; an ordinary final reply is not task success.` }));
+    pi.on("before_agent_start", event => ({ systemPrompt: `${event.systemPrompt}\n\nThis is a finite Home task. Work directly with project tools and finish with an explicit report and acceptance evidence. A brief's instruction to delegate is the operator's request to delegate: when it asks for subagents, launch them as it says. You may launch subagents (foreground, async or workflows), and the task owns every run it starts. report is refused while one of them is live: wait for it (subagent status, or a blocking bg_wait) or stop it, then report. Settlement stops and joins any async run still live. Do not start scheduled or mission work, which outlives the task. The fixed internal deadline stops this operation; an ordinary final reply is not task success.` }));
     pi.on("tool_call", event => {
       if (input.reportSealed()) return { block: true, reason: HOME_TASK_SEALED_REASON };
       let reason: HomeTaskProducerRefusal | undefined;

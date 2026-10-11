@@ -52,8 +52,8 @@ import { SessionContextWindowPolicy } from "../providers/context-window-policy.j
 import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
-import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProjection, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS } from "../home/home-task-subagents.js";
-import { HOME_TASK_MARKER, HOME_TASK_REPORT, type HomeTaskReportOwner } from "../home/home-task-report.js";
+import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProjection, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
+import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
@@ -65,6 +65,7 @@ import type {
   CommandInfo,
   ExtensionRunActivity,
   ExtensionRunChild,
+  ExtensionRunLifecycleState,
   ExtensionToolOrigin,
   SessionProcessActivity,
   SessionProcessHistoryPage,
@@ -1548,10 +1549,33 @@ export class RuntimeSlot {
    * dashboard row stuck in the running phase. A settled paused run owns no live
    * process, so it stops being live work and a drain blocker. */
   private hasDetachedDashboardWork(): boolean {
-    for (const activity of this.extensionActivities.values()) {
-      if (this.extensionActivityOwnsLiveWork(activity)) return true;
-    }
-    return false;
+    return this.liveExtensionActivities().length > 0;
+  }
+
+  /** The activities that own live work under the one liveness rule below. Dashboard
+   * accounting, drain, settlement and the report gate all read this list. */
+  private liveExtensionActivities(): ExtensionRunActivity[] {
+    return [...this.extensionActivities.values()].filter(activity => this.extensionActivityOwnsLiveWork(activity));
+  }
+
+  /** The live subagent runs this worker shows in task status. Read from the same live
+   * projection as the report gate and settlement, never persisted. The run id is the
+   * provider's; a run not yet published is identified by its launch call. */
+  liveSubagentRuns(): HomeTaskSubagentRun[] {
+    return this.liveExtensionActivities().map(activity => ({
+      runId: activity.runId ?? activity.toolCallId,
+      agent: activity.children[0]?.label ?? activity.title,
+      state: this.liveSubagentRunState(activity),
+      startedAt: activity.startedAt,
+      lastActivityAt: activity.lastActivityAt ?? null,
+    }));
+  }
+
+  /** The state a live run shows: its own while it owns live work, else its first live workflow child's. */
+  private liveSubagentRunState(activity: ExtensionRunActivity): ExtensionRunLifecycleState {
+    if (activity.lifecycle && this.extensionActivityOwnsOwnLiveWork(activity)) return activity.lifecycle.state;
+    const [child] = this.liveWorkflowChildren(activity);
+    return child ? (child.lifecycle ?? child.status) : activity.status;
   }
 
   /** One liveness rule for detached extension work, shared by dashboard
@@ -2034,6 +2058,10 @@ export class RuntimeSlot {
           directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition,
           ...(this.taskWorker ? [this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.activeOperationId : undefined,
             async report => {
+              // A sealed report decides the outcome, so no task-owned run may still be live then: settlement
+              // would stop it after the outcome was fixed. Refuse under the liveness rule settlement uses.
+              const live = this.liveExtensionActivities().length;
+              if (live > 0) throw new GatewayError("conflict", reportLiveRunsRefusal(live), true);
               await this.persistCanonicalCustomEntry(HOME_TASK_REPORT, JSON.parse(JSON.stringify(report)), report.receiptId,
                 this.operationWork.get(report.operationId));
               const entry = this.sessionManager.getBranch().find(candidate => candidate.type === "custom"
