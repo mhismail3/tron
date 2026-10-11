@@ -105,6 +105,7 @@ async function fixture(label: string, observation?: ObservationModel): Promise<F
     agentDir,
     tronHome,
     idleRuntimeMs: 60_000,
+    gatewayModelRuntime: runtime,
     modelRuntimeFactory: async () => runtime,
     trust,
     broadcast: () => {},
@@ -433,7 +434,9 @@ describe("Tron Home learned profile", () => {
       const intent = ["Review the change.", "", "Preferences applied:", ...cited.map((line) => `- ${line.replace(/^- /, "")}`)].join("\n");
       return fauxAssistantMessage(fauxToolCall("delegate", { taskId: "profile-task-0001", intent, target: f.project }, { id: "delegate-call-0001" }), { stopReason: "toolUse" });
     };
-    await homeActivation(f, "review it", [delegate, say("delegated")]);
+    const activation = await homeActivation(f, "review it", [delegate, say("delegated")]);
+    const result = activation.last.messages.filter(message => message.role === "toolResult" && message.toolName === "delegate");
+    expect(result, JSON.stringify(result)).toMatchObject([{ isError: false }]);
     await waitFor(() => f.captured.some((request) => !request.home && request.blob.includes("Preferences applied")) || undefined, "the worker's first request", { boundMs: 60_000 });
     const worker = f.captured.find((request) => !request.home && request.blob.includes("Preferences applied"))!;
     expect(worker.blob).toContain(`note ${item!.id}`);

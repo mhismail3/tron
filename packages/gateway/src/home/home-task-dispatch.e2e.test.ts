@@ -88,7 +88,10 @@ describe("Home task authorization RPC", () => {
   }
   async function refused(f: Awaited<ReturnType<typeof fixture>>, taskId: string, intent = "Finite work") {
     let refusal: any;
-    try { const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent, target: f.cwd }); await run.completion; }
+    // These durable-authorization journeys also run after an unmaterialized Home
+    // has been evicted. Choose a model explicitly rather than reading that absent chat.
+    const model = f.faux.getModel();
+    try { const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent, target: f.cwd, model: { provider: model.provider, id: model.id } }); await run.completion; }
     catch (error) { refusal = error; }
     expect(refusal).toMatchObject({ code: "grant-required", requestId: expect.any(String) });
     expect(refusal.requestId.length).toBeGreaterThan(0);
@@ -435,7 +438,8 @@ describe("Home task cold reconciliation", () => {
     expect(await readFile(authorizationPath, "utf8")).toBe(beforeAuthority);
     expect(providers).toBe(2);
     expect(f.notifications).toHaveLength(1);
-    await expect(recovered.homeOwner().dispatchTask(f.home.sessionId, { taskId: run.taskId, intent: "Finite work", target: f.cwd })).rejects.toThrow(/already exists/);
+    await expect(recovered.homeOwner().dispatchTask(f.home.sessionId, { taskId: run.taskId, intent: "Finite work", target: f.cwd,
+      model: { provider: f.faux.getModel().provider, id: f.faux.getModel().id } })).rejects.toThrow(/already exists/);
     const again = await f.restart();
     expect(await again.homeOwner().taskResult(run.taskId)).toEqual(task);
     expect(f.notifications).toHaveLength(1);

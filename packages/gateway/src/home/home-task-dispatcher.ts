@@ -187,8 +187,8 @@ export class HomeTaskDispatcher {
       // Trust is rechecked by the neutral creation/admission boundary too.
       lease = await dispatch.createWorker(task.target, reports);
       const { slot } = lease;
-      // The slot's own configuration owners record the choice in the worker's transcript
-      // before its first prompt. An omitted model keeps the session's default.
+      // Home resolves an omitted model from its live chat. The slot's normal
+      // configuration owners record that admitted choice before the first prompt.
       if (choice.model) await slot.setModel(choice.model.provider, choice.model.id);
       if (choice.thinking !== undefined) await slot.setThinking(choice.thinking);
       task = { ...task, revision: task.revision + 1, lifecycle: "active", sessionId: slot.id, operationId,
