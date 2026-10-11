@@ -434,8 +434,11 @@ describe("Tron Home learned profile", () => {
       const intent = ["Review the change.", "", "Preferences applied:", ...cited.map((line) => `- ${line.replace(/^- /, "")}`)].join("\n");
       return fauxAssistantMessage(fauxToolCall("delegate", { taskId: "profile-task-0001", intent, target: f.project }, { id: "delegate-call-0001" }), { stopReason: "toolUse" });
     };
-    const activation = await homeActivation(f, "review it", [delegate, say("delegated")]);
-    const result = activation.last.messages.filter(message => message.role === "toolResult" && message.toolName === "delegate");
+    await homeActivation(f, "review it", [delegate, say("delegated")]);
+    // The next provider request may already fold the tool result into episodic
+    // memory. Acceptance lives in the canonical transcript, not that projection.
+    const result = f.slot.canonicalSessionEntries().flatMap(entry => entry.type === "message"
+      && entry.message.role === "toolResult" && entry.message.toolName === "delegate" ? [entry.message] : []);
     expect(result, JSON.stringify(result)).toMatchObject([{ isError: false }]);
     await waitFor(() => f.captured.some((request) => !request.home && request.blob.includes("Preferences applied")) || undefined, "the worker's first request", { boundMs: 60_000 });
     const worker = f.captured.find((request) => !request.home && request.blob.includes("Preferences applied"))!;
