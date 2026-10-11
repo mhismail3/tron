@@ -309,12 +309,13 @@ function respond(context: TranscriptContext, nodeBytes: number, compactor: Fixtu
     compactor.feedbackTurns += 1;
     return fauxAssistantMessage(pad("short", nodeBytes - 40));
   }
-  const leaf = /Compress this message into one line, in at most \d+ bytes:\n([\s\S]*)$/u.exec(text);
+  const leaf = /Compress this message into one line of content only, in at most \d+ bytes\. Do not add a role label; Tron attaches the canonical kind:\n([\s\S]*)$/u.exec(text);
   const merge = /Merge these two lines into one, in at most \d+ bytes:\n([\s\S]*)$/u.exec(text);
   const body = (leaf?.[1] ?? merge?.[1] ?? text).replace(/\s+/gu, " ").trim();
   if (leaf) compactor.levelZeroBodies.push(body);
   const overshoot = body.length % 5 === 0;
-  const line = pad(body.slice(0, 100), overshoot ? nodeBytes + 100 : nodeBytes - 60);
+  const content = body.replace(/^(?:user|talk|echo|event):\s*/u, "");
+  const line = pad(content.slice(0, 100), overshoot ? nodeBytes + 100 : nodeBytes - 60);
   // One in three summaries carries a second line, so the prompt's context lines
   // have to be flattened (the view is one line per part).
   return fauxAssistantMessage(compactor.calls % 3 === 0 ? `${line}\nLINEBREAK-${compactor.calls}` : line);
@@ -333,7 +334,7 @@ async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}): 
   const sessionId = manager.getSessionId();
   const workspace = new TronWorkspace(home);
   owners.push(workspace);
-  const faux = fauxProvider({ provider: `tron-episodic-${label}`, models: [{ id: "compactor", reasoning: false }] });
+  const faux = fauxProvider({ provider: `tron-episodic-${label}`, tokensPerSecond: 0, models: [{ id: "compactor", reasoning: false }] });
   const modelRuntime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
   modelRuntime.registerNativeProvider(faux.provider);
   const model = faux.getModel();
