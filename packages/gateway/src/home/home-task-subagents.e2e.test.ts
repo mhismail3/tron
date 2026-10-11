@@ -95,6 +95,93 @@ function launchedAsyncDir(context: FauxContext, toolCallId: string): string {
 }
 
 describe("Home task subagents", () => {
+  it.each(["error", "stop"] as const)("proves no-report owner settlement after %s from bound canonical receipts, not terminal zero runs", async ending => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    f.faux.setResponses([
+      holdingAsyncLaunch("async-launch"),
+      async () => {
+        await waitFor(() => child.heldRequests() === 1, "child live before parent error", bound);
+        if (ending === "stop") {
+          child.releaseHeld();
+          const slot = await f.registry.acquire(run.sessionId);
+          await waitFor(() => !slot.catalogHasActiveSubagents, "child completed before no-report parent", bound);
+        }
+        return fauxAssistantMessage("Parent ended without a report", { stopReason: ending,
+          ...(ending === "error" ? { errorMessage: "fixture failure" } : {}) });
+      },
+    ]);
+    const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, {
+      taskId: "owner-no-report", intent: "Finite work", target: f.cwd,
+      model: { provider: f.model.provider, id: f.model.id },
+    });
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome: "unknown", reason: "no-report" });
+    const status = await f.registry.homeOwner().taskStatus(run.taskId);
+    const stoppedAtEnd = ending === "error" ? 1 : 0;
+    expect(status).toMatchObject({ subagents: { started: 1, stoppedAtEnd }, subagentRuns: { total: 0, runs: [] },
+      ownerSettlement: { taskId: run.taskId, sessionId: run.sessionId, operationId: run.operationId, stoppedAtEnd,
+        markerEntryId: expect.any(String), terminalEntryId: expect.any(String), settlementEntryId: expect.any(String) } });
+    const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "async-launch");
+    expect(await asyncState(launch!.details!.asyncDir as string)).toBe(ending === "error" ? "stopped" : "complete");
+    if (ending === "error") await waitFor(() => child.abortedRequests() === 1, "joined child request closed", bound);
+
+    // Corrupt real fixture transcript bytes, not a mock proof object. The status
+    // consumer must refuse despite the terminal task's synthetic zero-run list.
+    const slot = await f.registry.acquire(run.sessionId);
+    const path = slot.sessionFile!;
+    const original = await readFile(path, "utf8");
+    const rows = original.trimEnd().split("\n").map(line => JSON.parse(line));
+    const markerId = status.ownerSettlement!.markerEntryId;
+    const terminalId = status.ownerSettlement!.terminalEntryId;
+    const settlementId = status.ownerSettlement!.settlementEntryId;
+    const cases: Array<[string, (entries: any[]) => void]> = [
+      ["missing settlement", entries => entries.splice(entries.findIndex(row => row.id === settlementId), 1)],
+      ["missing terminal", entries => entries.splice(entries.findIndex(row => row.id === terminalId), 1)],
+      ["missing start", entries => entries.splice(entries.findIndex(row => row.data?.receiptKind === "start"), 1)],
+      ["start invocation mismatch", entries => { entries.find(row => row.data?.receiptKind === "start").data.invocationId = "other"; }],
+      ["marker generation mismatch", entries => { entries.find(row => row.id === markerId).data.generation += 1; }],
+      ["settlement before terminal", entries => {
+        const index = entries.findIndex(row => row.id === settlementId);
+        const [settlement] = entries.splice(index, 1); entries.splice(entries.findIndex(row => row.id === terminalId), 0, settlement);
+      }],
+      ["failed settlement", entries => { entries.find(row => row.id === settlementId).data.stoppedAtEnd = null; }],
+      ["malformed settlement", entries => { entries.find(row => row.id === settlementId).data.stoppedAtEnd = "1"; }],
+      ["settlement operation mismatch", entries => { entries.find(row => row.id === settlementId).data.operationId = "other"; }],
+      ["marker task mismatch", entries => { entries.find(row => row.id === markerId).data.taskId = "other"; }],
+      ["marker session mismatch", entries => { entries.find(row => row.id === markerId).data.sessionId = "other"; }],
+      ["marker operation mismatch", entries => { entries.find(row => row.id === markerId).data.operationId = "other"; }],
+      ["terminal operation mismatch", entries => { entries.find(row => row.id === terminalId).data.operationId = "other"; }],
+      ["terminal session mismatch", entries => { entries.find(row => row.id === terminalId).data.sessionId = "other"; }],
+      ["terminal task mismatch", entries => { entries.find(row => row.id === terminalId).data.origin.ownerId = "other"; }],
+      ["unknown invocation lifecycle", entries => { entries.find(row => row.id === terminalId).data.lifecycle = "outcomeUnknown"; }],
+      ["malformed invocation", entries => { entries.find(row => row.id === terminalId).data.sequence = "2"; }],
+      ["duplicate settlement", entries => { entries.push({ ...entries.find(row => row.id === settlementId), id: "duplicate" }); }],
+      ["work after settlement", entries => { entries.push({ ...entries.find(row => row.id === terminalId), id: "late-work" }); }],
+    ];
+    try {
+      for (const [name, corrupt] of cases) {
+        const changed = structuredClone(rows); corrupt(changed);
+        await writeFile(path, changed.map(row => JSON.stringify(row)).join("\n") + "\n");
+        expect((await f.registry.homeOwner().taskStatus(run.taskId)).ownerSettlement, name).toBeNull();
+      }
+    } finally { await writeFile(path, original); }
+    expect((await f.registry.homeOwner().taskStatus(run.taskId)).ownerSettlement).toEqual(status.ownerSettlement);
+
+    // Replace the durable task identity while the canonical read is in flight.
+    const taskDir = join(f.tronHome, "gateway/home/tasks");
+    const taskPath = join(taskDir, (await readdir(taskDir)).find(name => name.endsWith(`-${run.taskId}.json`))!);
+    const taskBytes = await readFile(taskPath, "utf8");
+    const read = f.registry.readTaskEvidence.bind(f.registry);
+    const gate = vi.spyOn(f.registry, "readTaskEvidence").mockImplementationOnce(async sessionId => {
+      const entries = await read(sessionId);
+      await writeFile(taskPath, JSON.stringify({ ...JSON.parse(taskBytes), operationId: "replacement-operation" }));
+      return entries;
+    });
+    try { await expect(f.registry.homeOwner().taskStatus(run.taskId)).rejects.toThrow(/changed during status inspection/); }
+    finally { gate.mockRestore(); await writeFile(taskPath, taskBytes); }
+  }, 60_000);
+
   it("joins a foreground and an async run before a reported task settles, and counts both", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);

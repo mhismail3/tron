@@ -13,7 +13,7 @@ import { homeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
 import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
-import { HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "./home-task-subagents.js";
+import { HOME_TASK_SUBAGENTS, HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, parseHomeTaskSubagentsEntry, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "./home-task-subagents.js";
 import type { HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
 import { basename } from "node:path";
 
@@ -33,7 +33,11 @@ export type HomeTaskRecoveryStatus = { available: true } | { available: false; r
 export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice { taskId: string; intent: string; target: string; title?: string }
 /** The durable record plus the worker's model from its own transcript. The model is
  * projected per read, never persisted with the task. */
-export type HomeTaskStatus = HomeTaskRecord & HomeTaskDisplay & { workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns };
+export interface HomeTaskOwnerSettlement {
+  taskId: string; sessionId: string; operationId: string;
+  markerEntryId: string; terminalEntryId: string; settlementEntryId: string; stoppedAtEnd: number;
+}
+export type HomeTaskStatus = HomeTaskRecord & HomeTaskDisplay & { workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns; ownerSettlement: HomeTaskOwnerSettlement | null };
 export interface HomeTaskControlRequest { taskId: string; operationId: string }
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord> }
 const reportDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -372,7 +376,66 @@ export class HomeTaskDispatcher {
   async status(taskId: string): Promise<HomeTaskStatus> {
     const task = await this.result(taskId);
     const workerModel = task.sessionId ? await this.sessions.taskWorkerModel(task.sessionId) ?? null : null;
-    return { ...task, ...await this.display(task), workerModel, subagents: await this.subagents(task), subagentRuns: await this.liveSubagentRuns(task) };
+    const status = { ...task, ...await this.display(task), workerModel, subagents: await this.subagents(task),
+      subagentRuns: await this.liveSubagentRuns(task), ownerSettlement: await this.ownerSettlement(task) };
+    // Neither a transcript read nor a prior terminal projection fences a replaced
+    // task identity. Recheck after every projection await, without updating spend.
+    if (task.lifecycle === "terminal" && task.terminalEvidence?.reason === "no-report") {
+      const current = await this.store.read(taskId);
+      if (!current || current.taskId !== task.taskId || current.sessionId !== task.sessionId
+        || current.operationId !== task.operationId || current.homeId !== task.homeId || current.generation !== task.generation
+        || current.lifecycle !== task.lifecycle || JSON.stringify(current.terminalEvidence) !== JSON.stringify(task.terminalEvidence)) {
+        throw new GatewayError("conflict", "Task identity or lifecycle changed during status inspection");
+      }
+    }
+    return status;
+  }
+
+  /** A no-report result says nothing about success. Only a durable, ordered cut
+   * proves this worker ended and joined its children; terminal run counts are synthetic. */
+  private async ownerSettlement(task: HomeTaskRecord): Promise<HomeTaskOwnerSettlement | null> {
+    if (task.lifecycle !== "terminal" || task.terminalEvidence?.outcome !== "unknown"
+      || task.terminalEvidence.reason !== "no-report" || !task.sessionId || !task.operationId
+      || task.terminalEvidence.sessionId !== task.sessionId) return null;
+    try {
+      const entries = await this.sessions.readTaskEvidence(task.sessionId);
+      const markers = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
+      const terminals = entries.filter(entry => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
+        && (entry.data as { receiptKind?: unknown } | null)?.receiptKind === "terminal");
+      const settlements = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_SUBAGENTS);
+      if (markers.length !== 1 || terminals.length !== 1 || settlements.length !== 1) return null;
+      const marker = markers[0]!, terminal = terminals[0]!, settlement = settlements[0]!;
+      if (marker.type !== "custom" || terminal.type !== "custom" || settlement.type !== "custom") return null;
+      await this.validateMarkerEvidence(task.sessionId, marker.data);
+      const binding = marker.data as { taskId: string; operationId: string; homeId: string; generation: number };
+      if (binding.taskId !== task.taskId || binding.operationId !== task.operationId
+        || binding.homeId !== task.homeId || binding.generation !== task.generation) return null;
+      const receipt = parseInvocationReceipt(terminal.data);
+      if (!receipt || receipt.receiptKind !== "terminal" || receipt.operationId !== task.operationId
+        || receipt.sessionId !== task.sessionId || receipt.source !== "plain" || receipt.lifecycle === "outcomeUnknown"
+        || receipt.receiptId !== `terminal:${receipt.invocationId}` || receipt.origin?.kind !== "gateway"
+        || receipt.origin.ownerId !== task.taskId || receipt.origin.confidence !== "boundary") return null;
+      const starts = entries.filter(entry => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
+        && (entry.data as { receiptKind?: unknown } | null)?.receiptKind === "start");
+      if (starts.length !== 1 || starts[0]?.type !== "custom") return null;
+      const start = parseInvocationReceipt(starts[0].data);
+      if (!start || start.receiptKind !== "start" || start.invocationId !== receipt.invocationId
+        || start.operationId !== task.operationId || start.sessionId !== task.sessionId || start.source !== "plain"
+        || start.origin.kind !== receipt.origin.kind || start.origin.ownerId !== receipt.origin.ownerId
+        || start.origin.confidence !== receipt.origin.confidence || start.origin.title !== receipt.origin.title) return null;
+      const fact = parseHomeTaskSubagentsEntry(settlement.data, task.operationId);
+      if (fact.stoppedAtEnd === null || entries.indexOf(marker) >= entries.indexOf(terminal)
+        || entries.indexOf(starts[0]) >= entries.indexOf(terminal) || entries.indexOf(terminal) >= entries.indexOf(settlement)
+        || entries.at(-1)?.id !== settlement.id) return null;
+      const counts = homeTaskSubagentsProjection(entries, task.operationId);
+      if (fact.stoppedAtEnd > counts.started) return null;
+      return { taskId: task.taskId, sessionId: task.sessionId, operationId: task.operationId,
+        markerEntryId: marker.id, terminalEntryId: terminal.id, settlementEntryId: settlement.id, stoppedAtEnd: fact.stoppedAtEnd };
+    } catch {
+      // Missing, malformed, or racing canonical bytes are absence of proof, not
+      // authority to repair the transcript or infer settlement from zero counts.
+      return null;
+    }
   }
 
   /** The list page of the newest tasks, each with its display. Reads each listed record once more, so
