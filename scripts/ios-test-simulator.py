@@ -1126,24 +1126,9 @@ def sweep_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
     return "released"
 
 
-def delete_unowned(arguments: argparse.Namespace) -> int:
-    """Delete exactly one explicitly named simulator only when no lane owns it."""
-    if not re.fullmatch(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}", arguments.udid):
-        raise DestinationError("refusing malformed simulator UUID")
-    dev_udid = development_udid(arguments)
-    document = inventory()
-    current = find_device(document, arguments.udid)
-    if current is None:
-        raise DestinationError(f"simulator UUID not found: {arguments.udid}")
-    if current[1].get("name") != arguments.name:
-        raise DestinationError(f"simulator name does not match the requested exact name {arguments.name!r}")
-    initial_runtime = current[0]
-    initial_device_type = current[1].get("deviceTypeIdentifier")
-    if arguments.udid == dev_udid:
-        raise DestinationError("refusing the remembered Development simulator")
 
-    # An unreadable marker could conceal ownership, so fail closed rather than
-    # treating missing, malformed or symlinked ownership data as proof of none.
+def assert_target_unowned(arguments: argparse.Namespace) -> None:
+    """Fail closed if any discovered lane claims the target or is ambiguous."""
     frontier = [arguments.discovery_root]
     for _ in range(SWEEP_DEPTH + 1):
         below: list[Path] = []
@@ -1173,19 +1158,35 @@ def delete_unowned(arguments: argparse.Namespace) -> int:
                 raise DestinationError(f"cannot inspect simulator ownership directory {directory}: {error}") from error
         frontier = below
 
+
+def delete_unowned(arguments: argparse.Namespace) -> int:
+    """Delete exactly one explicitly named simulator only when no lane owns it."""
+    if not re.fullmatch(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}", arguments.udid):
+        raise DestinationError("refusing malformed simulator UUID")
+    dev_udid = development_udid(arguments)
+    document = inventory()
+    current = find_device(document, arguments.udid)
+    if current is None:
+        raise DestinationError(f"simulator UUID not found: {arguments.udid}")
+    if current[1].get("name") != arguments.name:
+        raise DestinationError(f"simulator name does not match the requested exact name {arguments.name!r}")
+    initial_runtime = current[0]
+    initial_device_type = current[1].get("deviceTypeIdentifier")
+    if arguments.udid == dev_udid:
+        raise DestinationError("refusing the remembered Development simulator")
+
+
     # Re-read ownership-sensitive evidence immediately before the destructive
     # boundary; never infer that a device is unowned from its name or state.
     if arguments.udid == development_udid(arguments):
         raise DestinationError("refusing the remembered Development simulator")
-    if any(marker.get("udid", "").casefold() == arguments.udid.casefold()
-           for marker_path in marker_paths(arguments.discovery_root)
-           if (marker := load_marker(marker_path)) is not None):
-        raise DestinationError("simulator became claimed by a test lane")
+    assert_target_unowned(arguments)
     current = find_device(inventory(), arguments.udid)
     if current is None or current[1].get("name") != arguments.name:
         raise DestinationError("requested simulator identity changed during cleanup")
     if current[1].get("state") == "Booted":
         simctl("shutdown", arguments.udid, timeout=arguments.shutdown_timeout_seconds)
+    assert_target_unowned(arguments)
     if arguments.udid == development_udid(arguments):
         raise DestinationError("refusing the remembered Development simulator")
     current = find_device(inventory(), arguments.udid)

@@ -105,6 +105,11 @@ def run():
         settled={"sessionId":"old-owner","lifecycle":"terminal","terminalEvidence":{"outcome":"final","reason":"explicit-report","sessionId":"old-owner"},"subagents":{"started":0,"stoppedAtEnd":0},"subagentRuns":{"total":0,"runs":[]}}
         data=assert_refused("malformed or missing terminal evidence refuses",lambda:fixture({"first":{"items":[terminal("bad"),terminal("missing")]}},{"bad":{**settled,"terminalEvidence":None}}),"refusing handoff")
         assert [c["params"].get("taskId") for c in data["calls"] if c["method"]=="home.taskStatus"]==["bad"]
+        gitdir=Path(git(worktree,"rev-parse","--path-format=absolute","--git-common-dir"))
+        merge_marker=gitdir/"MERGE_HEAD"
+        data=assert_refused("merge in progress refuses without creating lock files",lambda:(fixture({"first":{"items":[terminal("owner")]}},{"owner":settled}),merge_marker.write_text("unknown\n")),"MERGE_HEAD")
+        merge_marker.unlink()
+        assert not (gitdir/"work"/"handoff.lock").exists()
 
         # stoppedAtEnd=0 is a naturally finished subagent set, not indeterminate.
         git(repo,"worktree","remove","--force",str(worktree)); git(repo,"worktree","add",str(worktree),"feat/41-fixture")
@@ -165,7 +170,7 @@ def run():
         ref=call("handoff","41","--session","new-owner","--reason","settled owner"); data=json.loads(state.read_text())
         evidence.append({"case":"matching finished owner behind unrelated terminal row and later page transfers without force","exit":ref.returncode,"stderr":ref.stderr.strip(),"gatewayCalls":data["calls"]})
         if ref.returncode==0:
-            assert [c["method"] for c in data["calls"]]==["home.taskList","home.taskList","home.taskStatus"]
+            assert [c["method"] for c in data["calls"]]==["home.taskList","home.taskStatus","home.taskList","home.taskStatus"]
             handed=git(worktree,"rev-parse","HEAD"); assert git(worktree,"rev-parse","origin/feat/41-fixture")==handed
             assert len(data["writes"])==1 and "old-owner" in data["comments"][0] and "new-owner" in data["comments"][0]
             assert {line.split()[0] for line in refs_before} <= {line.split()[0] for line in git(repo,"for-each-ref","--format=%(refname) %(objectname)").splitlines()}

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import fcntl
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import subprocess
@@ -13,6 +14,16 @@ from gh import Gh
 
 class HandoffError(RuntimeError):
     pass
+
+
+@contextmanager
+def common_dir_lock(path: Path):
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
 
 
 def git(repo: Path, *args: str, check: bool = True) -> str:
@@ -74,13 +85,14 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, f
         raise HandoffError(f"claimed worktree is on {current_branch}, not {branch}")
     head = git(worktree, "rev-parse", "HEAD")
     if remote_head != head:
-        known = subprocess.run(["git", "cat-file", "-e", f"{remote_head}^{{commit}}"], cwd=worktree).returncode == 0
-        parents = git(worktree, "rev-list", "--parents", "-n", "1", remote_head).split() if known else []
-        message = git(worktree, "show", "-s", "--format=%B", remote_head) if known else ""
-        if not (len(parents) == 2 and parents[1] == head
-                and f"{claim.ISSUE_TRAILER}: {number}" in message
-                and f"{claim.SESSION_TRAILER}: {session}" in message
-                and f"Work-Handoff-From: " in message):
+        # A remote object is not proof until cat-file succeeds. Exact trailers,
+        # tree identity, and one-parent topology identify only our accepted commit.
+        accepted = _handoff_trailers(worktree, remote_head, number) if _commit_exists(worktree, remote_head) else None
+        parents = git(worktree, "rev-list", "--parents", "-n", "1", remote_head).split() if accepted else []
+        tree = git(worktree, "rev-parse", f"{remote_head}^{{tree}}") if accepted else ""
+        local_tree = git(worktree, "rev-parse", f"{head}^{{tree}}")
+        if not (accepted and len(parents) == 2 and parents[1] == head and tree == local_tree
+                and accepted.get(claim.SESSION_TRAILER) == session):
             raise HandoffError(f"local head {head} differs from remote claim head {remote_head}; synchronize manually")
     _, old = _claim_at(worktree, head, number)
     if not old:
@@ -112,14 +124,19 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, f
     issue = gh.run("issue", "view", str(number), "--json", "state")
     if '"OPEN"' not in issue:
         raise HandoffError(f"issue #{number} is not open")
-    git_dir = Path(git(worktree, "rev-parse", "--git-common-dir")).resolve()
-    lock_path = git_dir / "work" / "handoff.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    git_dir = Path(git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve()
+    if not git_dir.is_dir():
+        raise HandoffError("repository common Git directory is unavailable")
+    with common_dir_lock(git_dir):
+        # This descriptor lock creates no repository file and never dirties an
+        # otherwise-refused checkout.
+
         # Re-read both local and remote heads under lock; remote lease is the
         # cross-checkout concurrency fence.
         before = git(worktree, "rev-parse", "HEAD")
+        for marker in ("MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
+            if (git_dir / marker).exists():
+                raise HandoffError(f"refusing handoff while {marker} is in progress")
         if before != head:
             raise HandoffError("local head moved while preparing handoff")
         remote_heads = claim._remote_heads(worktree, remote)
@@ -129,11 +146,14 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, f
             # handoff commit reached the remote, but local update-ref did not.
             if remote_head and subprocess.run(["git", "cat-file", "-e", f"{remote_head}^{{commit}}"], cwd=worktree).returncode == 0:
                 parents = git(worktree, "rev-list", "--parents", "-n", "1", remote_head).split()
-                recovered = _claim_at(worktree, remote_head, number)
-                handoff_message = git(worktree, "show", "-s", "--format=%B", remote_head)
-                expected = (f"{claim.ISSUE_TRAILER}: {number}", f"{claim.SESSION_TRAILER}: {session}",
-                            f"Work-Handoff-From: {old}", f"Work-Handoff-Reason: {reason}", f"Work-Handoff-Pre-Head: {head}")
-                if len(parents) == 2 and parents[1] == head and recovered[1] == session and all(line in handoff_message for line in expected):
+                trailers = _handoff_trailers(worktree, remote_head, number)
+                tree = git(worktree, "rev-parse", f"{remote_head}^{{tree}}")
+                local_tree = git(worktree, "rev-parse", f"{head}^{{tree}}")
+                if (trailers and len(parents) == 2 and parents[1] == head and tree == local_tree
+                        and trailers.get(claim.SESSION_TRAILER) == session
+                        and trailers.get("Work-Handoff-From") == old
+                        and trailers.get("Work-Handoff-Reason") == reason
+                        and trailers.get("Work-Handoff-Pre-Head") == head):
                     git(worktree, "update-ref", f"refs/heads/{branch}", remote_head, head)
                     _audit_comment(gh, number, old, session, head, remote_head, reason)
                     print(f"recovered handoff #{number}: {old} → {session} at {remote_head}")
@@ -154,6 +174,29 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, f
         _audit_comment(gh, number, old, session, head, new_head, reason)
     print(f"handed off #{number}: {old} → {session} at {new_head}")
     return 0
+
+
+def _commit_exists(repo: Path, commit: str) -> bool:
+    return subprocess.run(["git", "cat-file", "-e", f"{commit}^{{commit}}"], cwd=repo,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def _handoff_trailers(repo: Path, commit: str, number: int) -> dict[str, str] | None:
+    if not _commit_exists(repo, commit):
+        return None
+    body = git(repo, "show", "-s", "--format=%B", commit)
+    trailers: dict[str, str] = {}
+    for line in body.splitlines():
+        key, marker, value = line.partition(":")
+        if marker:
+            if key.strip() in trailers:
+                return None
+            trailers[key.strip()] = value.strip()
+    required = (claim.ISSUE_TRAILER, claim.SESSION_TRAILER, "Work-Handoff-From",
+                "Work-Handoff-Reason", "Work-Handoff-Pre-Head")
+    if trailers.get(claim.ISSUE_TRAILER) != str(number) or any(not trailers.get(key) for key in required):
+        return None
+    return trailers
 
 
 def _latest_handoff(repo: Path, head: str, number: int, owner: str) -> tuple[str, str, str, str] | None:

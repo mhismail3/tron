@@ -474,6 +474,10 @@ if command in ('boot', 'shutdown', 'delete'):
             (Path(os.environ['FAKE_READER_VALUES']) / 'free-percent').write_text(consumed + '\\n')
     if command == 'shutdown' and os.environ.get('FAKE_DEVELOPMENT_ON_SHUTDOWN'):
         Path(os.environ['FAKE_DEVELOPMENT_ON_SHUTDOWN']).write_text(udid + '\\n')
+    if command == 'shutdown' and os.environ.get('FAKE_CLAIM_TARGET_ON_SHUTDOWN'):
+        marker_path = Path(os.environ['FAKE_CLAIM_TARGET_ON_SHUTDOWN'])
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        marker_path.write_text(json.dumps({'schema': 'tron.ios-test-simulator.v1', 'owner': 'tron-ios-test', 'udid': udid, 'name': 'late claim'}))
     found = False
     for runtime, devices in doc['devices'].items():
         for device in list(devices):
@@ -559,6 +563,8 @@ class UnownedSimulatorCleanupFixture(SimulatorHarness, unittest.TestCase):
         environment = self.contained_environment(self.root)
         environment.update({"TRON_IOS_XCRUN": str(self.fake_xcrun), "FAKE_SIMCTL_INVENTORY": str(self.inventory_path), "FAKE_SIMCTL_LOG": str(self.root / "simctl.log")})
         environment.update(self.reader_environment())
+        if hasattr(self, "late_claim"):
+            environment["FAKE_CLAIM_TARGET_ON_SHUTDOWN"] = str(self.late_claim)
         return subprocess.run(
             [sys.executable, str(SIMULATOR), "delete-unowned", "--udid", udid, "--name", name,
              "--discovery-root", str(self.root), "--default-state-dir", str(self.root),
@@ -575,6 +581,17 @@ class UnownedSimulatorCleanupFixture(SimulatorHarness, unittest.TestCase):
         devices = json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]
         self.assertEqual([device["udid"] for device in devices], [UDID_B])
         self.assertEqual(devices[0]["state"], "Booted")
+
+    def test_claim_appearing_during_shutdown_prevents_delete(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target]})
+        self.late_claim = self.root / "late-lane" / "simulator.json"
+        result = self.clean_command()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.late_claim.is_file())
+        devices = json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]
+        self.assertEqual(len(devices), 1)
+        self.assertEqual(devices[0]["state"], "Shutdown")
 
     def test_exact_cleanup_leaves_an_unrelated_lane_lease_and_marker_untouched(self) -> None:
         target = self.device(UDID_A, name="Orphan Test Simulator", state="Shutdown")[1]
@@ -631,7 +648,7 @@ class UnownedSimulatorCleanupFixture(SimulatorHarness, unittest.TestCase):
             fcntl.flock(lease.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             result = self.clean_command()
         self.assertNotEqual(result.returncode, 0, result.stdout)
-        self.assertIn("leased", result.stderr)
+        self.assertIn("ambiguous lane lease", result.stderr)
         self.assertTrue(any(device["udid"] == UDID_A for device in json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]))
 
     def test_requires_matching_uuid_and_name(self) -> None:

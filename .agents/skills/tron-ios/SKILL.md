@@ -144,7 +144,7 @@ reclaim simulators yourself.
   and disk, booted devices no lane owns, the remembered Development simulator,
   and `Simulator.app`. Run it before a final response. `lanes` lists lanes
   alone, `lane-remove NAME` reclaims one lane with its simulator and state, and
-  `clean` reclaims this lane's simulator, its runs and this worktree's products; exact unowned-simulator removal requires `scripts/tron-ios-test clean-unowned UUID NAME` and refuses Development, lane-owned, malformed or ambiguous ownership; it reads other lane leases without locking them;
+  `clean` reclaims this lane's simulator, its runs and this worktree's products; exact unowned-simulator removal requires `scripts/tron-ios-test clean-unowned UUID NAME` and refuses Development, lane-owned, malformed or ambiguous ownership; it reads other lane leases without locking them and repeats the same ownership scan after shutdown before deletion;
   the shared results root is never removed wholesale.
 - The remembered Development simulator (`scripts/tron-ios-simulator`) is only
   ever shut down by its own `stop`; no test tool deletes it. The simulators the

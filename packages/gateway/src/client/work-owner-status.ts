@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 import { resolveBindHost } from "../config.js";
+import type { JsonValue } from "../protocol/types.js";
 import { resolveTronHome } from "../tron-home.js";
 import { GatewayProtocolClient } from "./gateway-client.js";
 import { readLocalCredential } from "./local-credential.js";
 
 const settledEvidence = new Set([
-  "final:explicit-report", "interrupted:task-stop", "interrupted:stopped-before-conversation",
-  "limited:deadline", "limited:turn-limit",
+  "final:explicit-report", "final:cold-explicit-report",
+  "progress:explicit-report", "progress:cold-explicit-report",
+  "needs-input:explicit-report", "needs-input:cold-explicit-report",
+  "interrupted:task-stop", "interrupted:stopped-before-conversation",
+  "limited:deadline", "limited:length",
 ]);
 
 async function main(): Promise<void> {
@@ -14,22 +18,31 @@ async function main(): Promise<void> {
   if (!session) throw new Error("session id required");
   const tronHome = resolveTronHome();
   const port = Number(process.env.TRON_GATEWAY_PORT ?? (process.env.TRON_HOME_NAME === ".tron-dev" ? 9848 : 9847));
-  const host = resolveBindHost(process.env.TRON_GATEWAY_HOST ?? "tailscale");
+  const requestedHost = process.env.TRON_GATEWAY_HOST ?? "localhost";
+  const host = resolveBindHost(requestedHost);
+  if (!["localhost", "127.0.0.1", "::1"].includes(host)) {
+    throw new Error("owner status requires a trusted local Gateway address");
+  }
   const client = new GatewayProtocolClient(`ws://${host.includes(":") ? `[${host}]` : host}:${port}/v1/socket`,
     await readLocalCredential(tronHome));
   const deadline = Date.now() + 25_000;
+  const request = (method: string, params: Record<string, JsonValue>) => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("owner status deadline exceeded");
+    return client.request(method, params, Math.min(remaining, 4_000));
+  };
   try {
-    await client.connect(5_000);
+    await client.connect(Math.min(5_000, deadline - Date.now()));
     let cursor: string | undefined;
     for (let page = 0; page < 100 && Date.now() < deadline; page += 1) {
-      const result = await client.request("home.taskList", { limit: 50, ...(cursor ? { cursor } : {}) }) as {
+      const result = await request("home.taskList", { limit: 50, ...(cursor ? { cursor } : {}) }) as {
         items: Array<{ taskId: string; lifecycle?: string }>;
         nextCursor?: string;
       };
       for (const item of result.items) {
         // Status computes spend for active tasks; never call it while classifying live work.
         if (item.lifecycle !== "terminal") continue;
-        const task = await client.request("home.taskStatus", { taskId: item.taskId }) as {
+        const task = await request("home.taskStatus", { taskId: item.taskId }) as {
           sessionId?: string | null; lifecycle?: string;
           terminalEvidence?: { outcome?: string; reason?: string; sessionId?: string | null } | null;
           subagents?: { started?: number; stoppedAtEnd?: number | null };
@@ -40,13 +53,15 @@ async function main(): Promise<void> {
         const runs = task.subagentRuns;
         const evidence = task.terminalEvidence;
         const validCounts = Number.isSafeInteger(started) && (started as number) >= 0
-          && (stopped === null || (Number.isSafeInteger(stopped) && (stopped as number) >= 0 && (stopped as number) <= (started as number)));
+          && Number.isSafeInteger(stopped) && (stopped as number) >= 0 && (stopped as number) <= (started as number);
         const key = `${evidence?.outcome}:${evidence?.reason}`;
         const settledRuns = runs?.total === 0 && Array.isArray(runs.runs) && runs.runs.length === 0;
         const settled = task.sessionId === session && task.lifecycle === "terminal"
           && evidence?.sessionId === session && settledEvidence.has(key) && validCounts && settledRuns;
-        process.stdout.write(settled ? "settled\n" : "live-or-indeterminate\n");
-        return;
+        if (task.sessionId === session || evidence?.sessionId === session) {
+          process.stdout.write(settled ? "settled\n" : "live-or-indeterminate\n");
+          return;
+        }
       }
       cursor = result.nextCursor;
       if (!cursor) break;
