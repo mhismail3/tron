@@ -16,7 +16,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 // pong deadline on a healthy link (#700, #186). Frames already handed to the
 // socket may legitimately precede the pong; frames still queued must not.
 
-const NO_TAILSCALE_PATH: PeerPathReader = { lookup: async (): Promise<PeerPathLookup> => ({ peerPath: "unknown", peerRelay: "" }) };
+const NO_TAILSCALE_PATH: PeerPathReader = { lookup: async (): Promise<PeerPathLookup> => ({ peerPath: "unknown", peerPathSource: "not-tailscale", peerRelay: "" }) };
 
 const BACKLOG_TOPIC = "test.backlog";
 const BACKLOG_FRAMES = 12;
