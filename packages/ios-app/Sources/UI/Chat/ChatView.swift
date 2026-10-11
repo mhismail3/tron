@@ -2736,23 +2736,21 @@ struct ChatView: View {
             }
         }
         ToolbarItem(placement: .primaryAction) {
-            // A chat that claims the Home status manages Home from its gear; the
-            // ordinary Manage Session sheet's controls are refused for Home (#725).
-            let managesHome = manageHomeContext != nil
+            // The gear opens Settings in every chat, Home included; Manage Home
+            // replaces only the context ring's Manage Session sheet (#799).
             Button {
-                if !presentManageHome() { sessionPresentation.showSettings = true }
+                sessionPresentation.showSettings = true
             } label: {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                     .foregroundStyle(Color.tronEmerald)
             }
-            .accessibilityLabel(managesHome ? "Manage Home" : "Settings")
+            .accessibilityLabel("Settings")
         }
     }
 
-    /// Opens Manage Home when this chat claims the Home status. The gear and the
-    /// composer's context ring share this one rule; false leaves each control's
-    /// ordinary sheet to its caller.
+    /// Opens Manage Home when this chat claims the Home status. The composer's
+    /// context ring is its one caller; false leaves the ring's Manage Session sheet.
     private func presentManageHome() -> Bool {
         guard let (profileID, _) = manageHomeContext else { return false }
         homeSheet = HomeSheetRoute(profileID: profileID, destination: .manage)
@@ -2760,8 +2758,8 @@ struct ChatView: View {
     }
 
     /// The Home status this chat's route claims, with the profile that owns its
-    /// mutations. Decides what the gear button opens; nil keeps the ordinary
-    /// settings sheet. Home's state, controls and Stop live in Manage Home (#740).
+    /// mutations. Decides what the composer's context ring opens; nil keeps
+    /// Manage Session. Home's state, controls and Stop live in Manage Home (#740).
     private var manageHomeContext: (profileID: String, status: HomeStatusDTO)? {
         guard let profileID = composerScope?.profileID,
               profileID == model.profiles.selected?.id,
