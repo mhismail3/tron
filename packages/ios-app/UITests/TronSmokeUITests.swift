@@ -652,6 +652,8 @@ final class TronSmokeUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+        let homeControlCount = app.staticTexts["fixture.home-control-count"]
+        XCTAssertTrue(homeControlCount.waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["home-pinned-row"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
         // The Home chat's gear opens Settings, as it does in every chat (#799).
@@ -661,6 +663,7 @@ final class TronSmokeUITests: XCTestCase {
         gear.tap()
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
+        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Home Settings must not apply controls")
         keepScreenshot(named: "home-gear-settings-sheet")
         app.buttons["Done"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5), app.debugDescription)
@@ -673,6 +676,7 @@ final class TronSmokeUITests: XCTestCase {
         let mediumTop = done.frame.minY
         XCTAssertGreaterThan(mediumTop, windowHeight * 0.40, "Manage Home must open at its medium detent")
         keepScreenshot(named: "manage-home-medium")
+        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Manage Home must not apply controls")
         // It drags to large from the sheet title.
         let title = app.staticTexts["Manage Home"].firstMatch
         title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
@@ -714,6 +718,7 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
+        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening ordinary-chat Settings must not apply Home controls")
         keepScreenshot(named: "ordinary-chat-settings-sheet")
     }
 
@@ -1445,11 +1450,16 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["settings-section-model-expand"].tap()
         XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:4", timeout: 5))
         // The row's trailing value opens the catalog picker.
-        tapScrolling(any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch, in: app)
+        let modelCatalogRow = any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch
+        tapScrolling(modelCatalogRow, in: app)
         let lite = any["settings-option-Fixture Lite"]
         XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "settings-renderer-catalog")
         XCTAssertTrue(app.images["Selected"].exists, "The catalog marks the current value like the existing pickers")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2), "Opening and dismissing the catalog must not write settings")
+        tapScrolling(modelCatalogRow, in: app)
+        XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
         lite.tap()
         XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
         XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:0", timeout: 5))

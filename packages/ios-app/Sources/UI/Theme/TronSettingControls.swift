@@ -85,6 +85,24 @@ struct TronSelectionSheetRow<Destination: View>: View {
     }
 }
 
+/// The shared entry point for catalog-backed selection. Domain-specific
+/// destinations retain ownership of their search, paging, and selection rules.
+struct TronCatalogSelectionRow<Destination: View>: View {
+    let icon: String
+    let title: String
+    var detail: String? = nil
+    let value: String
+    var accessibilityLabel: String? = nil
+    var accent: Color = .tronEmerald
+    @ViewBuilder let destination: () -> Destination
+
+    var body: some View {
+        TronSelectionSheetRow(icon: icon, title: title, detail: detail, value: value,
+                              accessibilityLabel: accessibilityLabel, accent: accent,
+                              destination: destination)
+    }
+}
+
 struct TronSettingsInputScope: Equatable {
     var profile = 0
     var scope = 0

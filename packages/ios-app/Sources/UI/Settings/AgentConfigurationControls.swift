@@ -10,9 +10,9 @@ struct TronModelSelectionRow: View {
     var accent: Color = .tronPurple
 
     var body: some View {
-        TronSelectionSheetRow(icon: "cpu", title: "Model", detail: "Default for new sessions",
-                              value: SessionModelSelectionPresentation.modelName(selection, catalog: models),
-                              accessibilityLabel: navigationTitle, accent: accent) {
+        TronCatalogSelectionRow(icon: "cpu", title: "Model", detail: "Default for new sessions",
+                                value: SessionModelSelectionPresentation.modelName(selection, catalog: models),
+                                accessibilityLabel: navigationTitle, accent: accent) {
             ModelPicker(selection: $selection, models: models)
                 .tronNavigationTitle(navigationTitle, accent: accent)
         }

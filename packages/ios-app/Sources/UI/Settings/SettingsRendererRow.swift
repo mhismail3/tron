@@ -119,7 +119,7 @@ struct SettingsRendererRow: View {
                 readOnlyRow(subtitle: "Update Tron to edit this list")
             }
         case .catalog:
-            TronSelectionSheetRow(icon: "square.stack.3d.up", title: title, value: setting.display) {
+            TronCatalogSelectionRow(icon: "square.stack.3d.up", title: title, value: setting.display) {
                 SettingsCatalogPicker(setting: setting, target: target, title: title) { onChange($0) }
             }
         case .readOnly:
