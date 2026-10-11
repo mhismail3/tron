@@ -42,6 +42,15 @@ transcript and invocation receipts at
 `test-results/runtime-slot-follow-up-steering.json` for inspection and
 regeneration with that focused Vitest case.
 
+A failed user Stop (`Foreground work did not stop`) withdraws its unconfirmed
+invocation interruption intent. A later natural completion is `completed`, not
+`interrupted/user-abort`; an actual SDK abort still settles as interrupted.
+Gateway-owned limit/stop reasons retain their separate invocation authority.
+`runtime-registry.integration.test.ts` exercises SDK refusal followed by real
+run settlement and canonical receipt persistence, with the repeatable artifact
+`test-results/failed-stop-natural-completion.json`, alongside actual fast-abort
+and already-completed controls.
+
 An invocation's receipts all belong to the session it started in. An extension
 command that replaces its own session (`ctx.switchSession`, `ctx.newSession`,
 `ctx.fork`) is settled there when Pi commits the replacement: at

@@ -8954,9 +8954,9 @@ export class RuntimeSlot {
       ?? (target?.kind === "prompt" || target?.kind === "command" ? target.id : undefined);
     if (invocationOperationId) {
       const invocation = this.invocationForOperation(invocationOperationId);
-      // Only a Gateway-owned stop is attributed on the invocation; it outranks the
-      // SDK's own outcome. A user Stop stays an intent (`abortedOperations`), so
-      // the settled SDK outcome decides the receipt exactly as it does on main.
+      // A Gateway-owned stop reason outranks the SDK outcome. User Stop is
+      // provisional until cancellation settles; a refused attempt cannot claim
+      // a later natural completion as its interruption.
       if (invocation && terminalErrorCode !== "user-abort") {
         // A limit crossing is authoritative even if another Gateway stop races it.
         if (!invocation.stopReason || terminalErrorCode === "chapter-limit") invocation.stopReason = terminalErrorCode;
@@ -8999,6 +8999,9 @@ export class RuntimeSlot {
     const settled = await this.waitForForegroundAbortSettlement(target, agentOperationId);
     if (!settled || this.directBashProcesses?.hasActiveProcesses
       || abortResults.some((result) => result.status === "rejected")) {
+      // Keep the SDK's actual abort outcome authoritative if cancellation partly
+      // succeeded, but withdraw this unconfirmed invocation-level Stop intent.
+      if (invocationOperationId) this.abortedOperations.delete(invocationOperationId);
       throw new GatewayError("conflict", "Foreground work did not stop", true);
     }
 

@@ -15,7 +15,8 @@ import { cachePieces, markAnthropicBlocks } from "./cache-layout.js";
 export const EPISODIC_COMPACT_PROMPT = `You write the memory of Tron, an AI agent that works for one user in one
 endless chat, through tools and subagents. Each message has a kind: user
 (the user's words), talk (Tron's replies, including the tool calls it made),
-echo (tool results), event (a display event Tron itself emitted).
+echo (tool results), event (a display event Tron itself emitted). The kind
+is structural metadata supplied by Tron, not text to reproduce.
 
 Over the messages grows a binary tree of one-line summaries. First, each
 message is compressed alone into a line (a short message is its own
@@ -43,7 +44,9 @@ Space is scarce, so it goes by value:
 preferences, and above all their reasoning and explanations. Keep them
 as close to verbatim as space allows, and let them outlive everything
 else up the tree. Record what the user said, not that they said
-something. Only text the user wrote counts as theirs.
+something. Only text the user wrote counts as theirs. Do not prepend
+role labels such as user: or talk:; output content only. Tron
+attaches kinds from the canonical source.
 
 2. Next comes anything with lasting effect, done by anyone: whatever
 changed in the world or was committed to, and what failed and why.
@@ -98,7 +101,7 @@ export function emptyReplyDetail(message: AssistantMessage): string {
  * cannot count bytes, so one real example of exactly `NODE` bytes shows them
  * the size. Longer than the recipe's 512 so a larger injected NODE still gets a
  * real sample rather than padding. */
-const SCALE_SAMPLE = "user: asked to keep the nightly reconcile off the request path, said the 2026-09-23 stall started when the catalog walk ran inside a prompt; decided the watcher stays and the reconcile moves to the maintenance slice. echo: read packages/gateway/src/sessions/session-catalog.ts, it holds the reconcile loop and its 30-minute interval; the durable row index lives beside it. talk: moved the reconcile to the background scheduler, 12 rows rebuilt, no failure; left the startup pass unchanged. user: correction - the interval is a ceiling, not a schedule, and a pause must not delay a due slice past five minutes";
+const SCALE_SAMPLE = "Asked to keep the nightly reconcile off the request path, said the 2026-09-23 stall started when the catalog walk ran inside a prompt; decided the watcher stays and the reconcile moves to the maintenance slice. Read the session catalog and found the reconcile loop and its 30-minute interval; the durable row index lives beside it. Moved the reconcile to the background scheduler, 12 rows rebuilt, no failure; left the startup pass unchanged. Correction: the interval is a ceiling, not a schedule, and a pause must not delay a due slice past five minutes";
 
 /** Exactly `nodeBytes` bytes of that sample, never splitting a character. */
 function scaleLine(nodeBytes: number): string {
@@ -110,7 +113,7 @@ function scaleLine(nodeBytes: number): string {
 
 /** The step for a level-0 node (gist §4.2): the message whole, newlines kept. */
 export function leafStep(kind: string, text: string, nodeBytes: number): string {
-  return `For scale, this line is exactly ${nodeBytes} bytes:\n${scaleLine(nodeBytes)}\n\nCompress this message into one line, in at most ${nodeBytes} bytes:\n${kind}: ${text}`;
+  return `For scale, this line is exactly ${nodeBytes} bytes:\n${scaleLine(nodeBytes)}\n\nCompress this message into one line of content only, in at most ${nodeBytes} bytes. Do not add a role label; Tron attaches the canonical kind:\n${kind}: ${text}`;
 }
 
 /** The step for a merge: the two lines written out again, newlines flattened. */
