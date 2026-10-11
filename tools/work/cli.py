@@ -44,7 +44,7 @@ def main(argv: list) -> int:
     transfer.add_argument("issue", type=int)
     transfer.add_argument("--session", help="new owner session (default: WORK_SESSION_ID, PI_SESSION_ID)")
     transfer.add_argument("--reason", required=True, help="concise reason recorded in the public audit comment")
-    transfer.add_argument("--force-maintainer", action="store_true", help="override unknown owner state after typed interactive confirmation")
+    transfer.add_argument("--force-maintainer", action="store_true", help="override unknown owner state after exact interactive confirmation (including missing legacy owner)")
     check = commands.add_parser("verify", help="run the local checks the branch diff requires")
     check.add_argument("--tests", action="append", default=[], metavar="COMMAND",
                        help="integration or E2E command to run from the repository root; repeat for each")

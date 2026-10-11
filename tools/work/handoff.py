@@ -54,8 +54,8 @@ def _claim_at(repo: Path, head: str, number: int) -> tuple[str | None, str | Non
             key, _, value = trailer.partition(":")
             if value.strip():
                 fields.setdefault(key.strip(), value.strip())
-        if fields.get(claim.ISSUE_TRAILER) == str(number) and fields.get(claim.SESSION_TRAILER):
-            return parts[0], fields[claim.SESSION_TRAILER]
+        if fields.get(claim.ISSUE_TRAILER) == str(number):
+            return parts[0], fields.get(claim.SESSION_TRAILER)
     return None, None
 
 
@@ -94,9 +94,11 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, f
         if not (accepted and len(parents) == 2 and parents[1] == head and tree == local_tree
                 and accepted.get(claim.SESSION_TRAILER) == session):
             raise HandoffError(f"local head {head} differs from remote claim head {remote_head}; synchronize manually")
-    _, old = _claim_at(worktree, head, number)
-    if not old:
-        raise HandoffError(f"claim for #{number} has no valid owner trailer")
+    claim_commit, old = _claim_at(worktree, head, number)
+    if not claim_commit:
+        raise HandoffError(f"claim for #{number} has no valid issue trailer")
+    # Missing historical identity is unknown, never evidence that an owner is dead.
+    old = old or "unknown"
     if old == session:
         transition = _latest_handoff(worktree, head, number, session)
         if transition:

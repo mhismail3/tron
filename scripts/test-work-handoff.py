@@ -192,12 +192,75 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         assert len(json.loads(state.read_text())["writes"])==1
         evidence.append({"case":"repeat owner is idempotent, one audit, unchanged head/ref","exit":retry.returncode})
 
-        # Existing override guards and confirmed PTY takeover remain represented.
+        # A legacy claim with no owner is unknown, not evidence of a dead session.
+        git(repo,"worktree","remove","--force",str(worktree)); git(repo,"checkout","main"); git(repo,"checkout","-B","feat/41-fixture")
+        git(repo,"commit","--allow-empty","-m","Legacy claim\n\nWork-Claim-Issue: 41"); git(repo,"push","--force","-u","origin","feat/41-fixture")
+        git(repo,"checkout","main"); git(repo,"worktree","add",str(worktree),"feat/41-fixture")
+        (worktree/"tracked.txt").write_text("unstaged bytes\n"); (worktree/"staged.txt").write_text("staged bytes\n")
+        git(worktree,"add","staged.txt"); (worktree/"untracked.txt").write_bytes(b"untracked\x00bytes")
+        missing_owner_head=git(worktree,"rev-parse","HEAD")
+        fixture(); before=refuse_snapshot(); r=call("handoff","41","--session","new-owner","--reason","legacy recovery")
+        after=refuse_snapshot(); evidence.append({"case":"missing owner refuses automatically without writes","exit":r.returncode,"stderr":r.stderr.strip()})
+        assert r.returncode and "unknown" in r.stderr and before[:2]==after[:2] and before[2]["writes"]==after[2]["writes"] and before[3:]==after[3:]
+        r=call("handoff","41","--session","new-owner","--reason","legacy recovery","--force-maintainer")
+        evidence.append({"case":"missing owner force requires TTY","exit":r.returncode,"stderr":r.stderr.strip()}); assert r.returncode and "interactive terminal" in r.stderr
+        fixture(); pid,terminal_fd=pty.fork()
+        if pid==0:
+            os.chdir(worktree); os.execve(sys.executable,[sys.executable,str(cli),"handoff","41","--session","new-owner","--reason","legacy recovery","--force-maintainer"],env)
+        output=b""; deadline=time.monotonic()+30
+        while time.monotonic()<deadline and b"> " not in output:
+            ready,_,_=select.select([terminal_fd],[],[],1)
+            if ready:
+                try: output+=os.read(terminal_fd,4096)
+                except OSError: break
+        os.write(terminal_fd,b"HANDOFF #41 FROM old-owner\n")
+        while time.monotonic()<deadline:
+            ready,_,_=select.select([terminal_fd],[],[],1)
+            if ready:
+                try: output+=os.read(terminal_fd,4096)
+                except OSError: break
+            waited,status=os.waitpid(pid,os.WNOHANG)
+            if waited: break
+        else: os.kill(pid,9); _,status=os.waitpid(pid,0)
+        code=os.waitstatus_to_exitcode(status); evidence.append({"case":"missing owner rejects confirmation naming fabricated owner","exit":code,"output":output.decode(errors="replace")[-1000:]}); assert code!=0
+        mismatch_after=refuse_snapshot()
+        assert git(worktree,"rev-parse","HEAD")==missing_owner_head and before[:2]==mismatch_after[:2]
+        assert before[2]["writes"]==mismatch_after[2]["writes"] and before[2]["comments"]==mismatch_after[2]["comments"] and before[3:]==mismatch_after[3:]
+        fixture(); pid,terminal_fd=pty.fork()
+        if pid==0:
+            os.chdir(worktree); os.execve(sys.executable,[sys.executable,str(cli),"handoff","41","--session","new-owner","--reason","legacy recovery","--force-maintainer"],env)
+        output=b""; deadline=time.monotonic()+30
+        while time.monotonic()<deadline and b"> " not in output:
+            ready,_,_=select.select([terminal_fd],[],[],1)
+            if ready:
+                try: output+=os.read(terminal_fd,4096)
+                except OSError: break
+        os.write(terminal_fd,b"HANDOFF #41 FROM unknown\n")
+        while time.monotonic()<deadline:
+            ready,_,_=select.select([terminal_fd],[],[],1)
+            if ready:
+                try: output+=os.read(terminal_fd,4096)
+                except OSError: break
+            waited,status=os.waitpid(pid,os.WNOHANG)
+            if waited: break
+        else: os.kill(pid,9); _,status=os.waitpid(pid,0)
+        code=os.waitstatus_to_exitcode(status); evidence.append({"case":"unknown-owner TTY confirmation succeeds with audit","exit":code,"output":output.decode(errors="replace")[-1000:]}); assert code==0
+        comments=json.loads(state.read_text())["comments"]; handed=git(worktree,"rev-parse","HEAD")
+        after=refuse_snapshot()
+        assert before[3:]==after[3:], "successful recovery changed worktree index or dirty bytes"
+        assert git(worktree,"rev-parse","origin/feat/41-fixture")==handed
+        trailers=git(worktree,"show","-s","--format=%B",handed)
+        assert len(comments)==1 and "unknown" in comments[0] and "new-owner" in comments[0] and handed in comments[0]
+        assert "Work-Handoff-From: unknown" in trailers and "Work-Handoff-Reason: legacy recovery" in trailers and f"Work-Handoff-Pre-Head: {missing_owner_head}" in trailers
+        writes_before=len(json.loads(state.read_text())["writes"]); retry=call("handoff","41","--session","new-owner","--reason","ignored retry reason")
+        assert retry.returncode==0 and git(worktree,"rev-parse","HEAD")==handed and len(json.loads(state.read_text())["writes"])==writes_before
+        evidence.append({"case":"unknown-owner repeat is idempotent","exit":retry.returncode})
+        # Existing override remains available for a known owner.
         git(repo,"worktree","remove","--force",str(worktree)); git(repo,"checkout","main"); git(repo,"checkout","-B","feat/41-fixture")
         git(repo,"commit","--allow-empty","-m","Claim\n\nWork-Claim-Issue: 41\nWork-Claim-Session: old-owner"); git(repo,"push","--force","-u","origin","feat/41-fixture")
         git(repo,"checkout","main"); git(repo,"worktree","add",str(worktree),"feat/41-fixture")
         fixture(); r=call("handoff","41","--session","new-owner","--reason","owner settled")
-        evidence.append({"case":"unknown owner refused without writes","exit":r.returncode,"stderr":r.stderr.strip()}); assert r.returncode and "unknown" in r.stderr
+        evidence.append({"case":"unknown owner state refuses without writes","exit":r.returncode,"stderr":r.stderr.strip()}); assert r.returncode and "unknown" in r.stderr
         r=call("handoff","41","--session","new-owner","--reason","owner settled","--force-maintainer")
         evidence.append({"case":"force requires TTY","exit":r.returncode,"stderr":r.stderr.strip()}); assert r.returncode and "interactive terminal" in r.stderr
         git(worktree,"commit","--allow-empty","-m","Claim retry\n\nWork-Claim-Issue: 41\nWork-Claim-Session: old-owner"); git(worktree,"push","--force-with-lease")
@@ -219,7 +282,7 @@ os.execv({real_git!r}, [{real_git!r}, *args])
             waited,status=os.waitpid(pid,os.WNOHANG)
             if waited: break
         else: os.kill(pid,9); _,status=os.waitpid(pid,0)
-        code=os.waitstatus_to_exitcode(status); evidence.append({"case":"TTY force takeover succeeds with audit","exit":code,"output":output.decode(errors="replace")[-1000:]}); assert code==0
+        code=os.waitstatus_to_exitcode(status); evidence.append({"case":"known-owner TTY force takeover succeeds with audit","exit":code,"output":output.decode(errors="replace")[-1000:]}); assert code==0
         comments=json.loads(state.read_text())["comments"]; handed=git(worktree,"rev-parse","HEAD")
         assert len(comments)==1 and "old-owner" in comments[0] and "new-owner" in comments[0] and handed in comments[0]
         writes_before=len(json.loads(state.read_text())["writes"]); retry=call("handoff","41","--session","new-owner","--reason","ignored retry reason")
