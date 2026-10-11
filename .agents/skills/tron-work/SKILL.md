@@ -22,7 +22,15 @@ when the user wants the page. Report a `work:` error as is; do not retry with st
    the epic's rules.
 2. **Claim.** `scripts/tron work start <issue>`, then work only in the worktree it
    prints. It refuses a closed, blocked, or already-claimed issue; report that and
-   stop rather than working around it.
+   stop rather than working around it. For an abandoned claim, use
+   `scripts/tron work handoff <issue> --reason TEXT` only after authoritative settled-owner proof;
+   indeterminate owners refuse. A legacy claim with no owner is `unknown` and
+   never proves settlement; a maintainer can recover it only with
+   `--force-maintainer` and the exact interactive confirmation
+   `HANDOFF #<issue> FROM unknown`. This records an unknown prior owner without
+   asserting session identity or liveness. Handoff also requires local and remote
+   heads to match (except verified partial-handoff recovery); it does not accept
+   divergent or merely unpushed local heads, even with force.
 3. **Implement.** Ship the code, its owning docs, and the integration or E2E test
    that proves it. For a bug, add or extend a test that reproduces it and show it
    failing before the fix. Commit on the task branch; merge `origin/main` rather
