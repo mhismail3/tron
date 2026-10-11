@@ -6,8 +6,10 @@ import { join } from "node:path";
 /** A scripted OpenAI-compatible child model for real managed-provider children.
  * A request whose messages contain `HOLD-CHILD` stays open until the test releases
  * it or its client disconnects, so a run is demonstrably live until the test
- * stops it. Every other request answers `CHILD-DONE` at once. The server counts
- * client disconnects of held requests: that is the proof a child was cut off. */
+ * stops it. A request containing `ASK-SUPERVISOR` is held the same way, then answers
+ * with a `contact_supervisor` call that blocks until the parent replies. Every other
+ * request answers `CHILD-DONE` at once. The server counts client disconnects of held
+ * requests: that is the proof a child was cut off. */
 export interface ChildModelServer {
   port: number;
   heldRequests: () => number;
@@ -32,7 +34,12 @@ export async function startChildModelServer(): Promise<ChildModelServer> {
       if (body.length > MAX_REQUEST_BYTES) { response.writeHead(413).end(); return; }
     }
     const messages = (JSON.parse(body) as { messages?: unknown }).messages;
-    const holds = JSON.stringify(messages).includes("HOLD-CHILD");
+    const text = JSON.stringify(messages);
+    // A tool result in the request means the held call already answered (the parent's reply
+    // to a supervisor request), so the child's next request finishes its turn.
+    const answeredByTool = Array.isArray(messages) && messages.some(message => (message as { role?: unknown }).role === "tool");
+    const asksSupervisor = !answeredByTool && text.includes("ASK-SUPERVISOR");
+    const holds = !answeredByTool && (text.includes("HOLD-CHILD") || asksSupervisor);
     if (holds) {
       held += 1;
       // The response closes early only when the client disconnects (an abort).
@@ -46,13 +53,12 @@ export async function startChildModelServer(): Promise<ChildModelServer> {
       if (response.destroyed) return;
     }
     response.writeHead(200, { "content-type": "text/event-stream" });
-    const chunks = [
-      { role: "assistant", content: "CHILD-DONE" },
-      {},
-    ];
+    const chunks = asksSupervisor
+      ? [{ role: "assistant", tool_calls: [{ index: 0, id: "call-ask", type: "function", function: { name: "contact_supervisor", arguments: JSON.stringify({ reason: "need_decision", message: "ASK-SUPERVISOR: proceed?" }) } }] }, {}]
+      : [{ role: "assistant", content: "CHILD-DONE" }, {}];
     chunks.forEach((delta, index) => {
       response.write(`data: ${JSON.stringify({ id: "task-child", object: "chat.completion.chunk", created: 1, model: "child",
-        choices: [{ index: 0, delta, finish_reason: index === chunks.length - 1 ? "stop" : null }] })}\n\n`);
+        choices: [{ index: 0, delta, finish_reason: index === chunks.length - 1 ? (asksSupervisor ? "tool_calls" : "stop") : null }] })}\n\n`);
     });
     response.end("data: [DONE]\n\n");
   });

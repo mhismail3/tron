@@ -856,27 +856,39 @@ default. The choice is never persisted with the task record.
 - The first-party task extension admits `subagent` launches, even `async:false`, which
   the pinned configuration can force async, and the read-only management of the
   verified `0.76.1-tron.6` provider: `guide`, `children.list`, `status`, `list`, `get`,
-  `models`, and supervisor `status`, `pending`, `list`. It admits `stop` and `interrupt`
-  only for a run this session's canonical history launched, addressed by `id` or
-  `runId` and never by `dir`. It refuses every other mutating management action
-  (steer, resume, create, worktree, schedule and the rest), revival, the schedule tool,
-  any launch that attaches a mission (`mission` other than `false`, or `missionId`,
-  since a mission outlives its run), and `bg_wait` with `nonBlocking: true`, whose
-  durable subscription can wake the session after report. The blocking `bg_wait` is
-  aborted and joined with the operation. Unknown versions or owners refuse all
-  subagent, supervisor and `bg_wait` calls. A later pin requires a new explicit review
-  before this gate changes. Nested codemode calls cross the same gate.
+  `models`, and supervisor `status`, `pending`, `list`. It admits the run controls
+  `steer`, `resume`, `interrupt`, `stop`, and `command.status`, `command.yield`,
+  `command.cancel`, only for a run this session's canonical history owns, addressed by
+  `id` or `runId` and never by `dir`. A workflow's child is owned through its workflow's
+  run, so it is controlled by that run's `id` and `index`. A `resume` is owned when it
+  starts: the run it returns is a canonical launch of the task. It admits a supervisor
+  `reply` only with `replyTo` naming a request whose child run is owned; a reply with
+  `to` or no `replyTo` names no request the gate can prove, so it is refused. It refuses
+  every other mutating management action (create, update, worktree, schedule, budget and
+  the rest), a run the task did not start, `dir` targets, revival of a run the task
+  did not start, the schedule tool, any launch or control that attaches a mission
+  (`mission` other than `false`, or `missionId`, since a mission outlives its run), and
+  `bg_wait` with `nonBlocking: true`, whose durable subscription can wake the session
+  after report. The blocking `bg_wait` is aborted and joined with the operation. Unknown
+  versions or owners refuse all subagent, supervisor and `bg_wait` calls. A later pin
+  requires a new explicit review before this gate changes. Nested codemode calls cross
+  the same gate.
 - Trusted extensions are not a sandbox. If detached-work tracking still sees
   task-session work after the subagent join, the outcome is `unknown` with
   `detached-work-outlived-task`, never a clean-termination claim.
+- A task waits across turns while it owns live work (see [Task waits](#task-waits-across-turns)).
+  Only the task's own turns and its provider wakes run in its operation; a wake that
+  arrives while the task is not waiting is refused as before.
 
 ### Subagent runs
 
 A task owns every subagent run its worker session starts. The worker session is created
 for one task and never reused, so its runs end with the task. Ownership is canonical:
-a launch is a `subagent` call without an `action` that the gate admitted, and an async
-run is identified by the `asyncDir` in its launch result. Runs are never tracked by a
-slot-wide map that outlives the session.
+a launch is a `subagent` call without an `action` that the gate admitted, a resume is a
+launch of the run it returns, and an async run is identified by the `asyncDir` in its
+launch result. A supervisor request is the task's when its child run is owned, and its
+`subagent_supervisor_request` message names that run. Runs are never tracked by a
+slot-wide map that outlives the session, and no field is persisted to prove ownership.
 
 Per run, the states are:
 
@@ -926,8 +938,8 @@ counted as `noticesUndelivered` in `home.task.subagents`; a non-zero count is th
 The counts are projections read from canonical evidence and are never persisted with the
 task record:
 
-- `started` counts the subagent launches the task admitted. A call the gate blocked never
-  counts. A provider that rejects an admitted launch before creating a run still counts,
+- `started` counts the subagent launches the task admitted, and each resume it admitted
+  (a resume starts a new run). A call the gate blocked never counts. A provider that rejects an admitted launch before creating a run still counts,
   because its result carries no run identity to tell the two apart.
 - `stoppedAtEnd` counts the async runs and workflow children the Gateway stopped at
   settlement. Foreground runs end with the operation abort and are not Gateway stops.
@@ -937,18 +949,32 @@ task record:
 it is `0`. Every Home result header states both counts. Settlement emits
 `home.task.subagents`.
 
+**Task waits across turns.** A task turn that ends normally (its final assistant message
+stopped with `stop`, not `length`, `error` or `aborted`) without a report, while the task
+owns live work, does not settle the task. The task holds its operation open between turns.
+The provider's wake for that work starts the task's next turn in the same operation: a
+run's completion notice, or a supervisor request from one of its children. The next turn
+reports under the task's own operation, so its `report` seals the task, and a further
+wake may start a further turn. The task settles on a report, on Stop, at the 24-hour
+deadline, on a failed or aborted turn, or at a turn end with no live owned run and no
+report. Stop and the deadline settle the waiting task at once; the live runs are stopped
+and joined as at any settlement. The hold is in memory only: a restart leaves a waiting
+task to cold reconciliation, which reports `detached-work-outlived-task` for a live run.
+A live run of a waiting task is listed by `home.taskStatus`.
+
 **Report waits for live runs.** `report` is refused while any run the task started is live,
 by the settlement liveness rule above, including a live child of a completed workflow. The
 refusal is an ordinary tool error that names the live count and the remedy: wait for the runs
 (`subagent` status, or a blocking `bg_wait`) or stop them, then report. It seals nothing and the
 turn continues. A stop request is not an ended run: a run stays live until its status is
 terminal, so a report after `stop` waits for that terminal status. Settlement therefore has no
-live run to stop when a report is accepted; it stops live runs only when the worker ends
-without a report, or on Stop and the deadline.
+live run to stop when a report is accepted; it stops live runs on Stop, at the deadline,
+or on a failed or aborted turn, never on a turn that ends with live work and no report.
 
 Provider completion notices reach a task worker as context of its operation. No turn
-starts after settlement: the provider suppresses idle wakes, and no Gateway guard is
-added. The no-turn checks in `home-task-subagents.e2e.test.ts` cover that property.
+starts after settlement: a wake starts a turn only while the task holds its operation open
+between turns, and the no-turn checks in `home-task-subagents.e2e.test.ts` cover that
+property.
 
 
 **The `report` tool** takes `resultId`, a claimed `outcome` (`progress`,
