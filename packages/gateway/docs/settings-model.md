@@ -1,7 +1,7 @@
 # Settings model
 
-**Status: design doc.** Nothing here is implemented yet unless a section says
-"today". Epic #758 tracks the work; the slices in [Slices](#9-slices) are filed
+**Status: design doc, being implemented.** Nothing here is implemented yet
+unless a section says "today" or "implemented". Epic #758 tracks the work; the slices in [Slices](#9-slices) are filed
 under it as Proposed. This stays a design doc ([decision 1](#101-decisions)).
 As each slice lands, the matching parts of [Migration](#8-migration-from-today)
 and [Slices](#9-slices) are deleted, and those two sections go away when the
@@ -488,7 +488,38 @@ widens what agents may do, so its widen floor is `approve`, and only `ui`
 writes it. The maintainer's own tap is that approval (F3). Nothing about it is
 special-cased.
 
-### 4.3 How far today's code is from this
+### 4.3 Implemented: the schema and the resolver
+
+Slice 3 (#761) implements this section. The schema is
+`packages/gateway/src/admin/settings-schema.ts` (value types in
+`settings-types.ts`); the resolver is `settings-resolver.ts`, fed by
+`SettingsModel` (`settings-model.ts`), which loads each store from its owner;
+`settings.resolve` serves it. What the code fixes that the tables above leave
+open:
+
+- **Instances.** A fixed qualifier is part of the declared id
+  (`model.ref[role=worker]`). A dynamic `model` qualifier is resolved for the
+  target's effective chat model; a `project` qualifier for the target's project,
+  or for every saved trust decision on the Mac target. A pi binding may name a
+  per-model `qualified` path (`modelThinkingLevels`, `compaction.modelOverrides`):
+  that instance is read across every layer before the plain key, exactly as pi
+  resolves `modelOverrides ?? ordinary` on its merged settings.
+- **Relative values.** pi's `defaultTools` `+name`/`-name` lists modify the value
+  below them. That is the value type's `compose`, so the resolver still takes the
+  top applied layer and composes it over the layer below.
+- **Which keys a target shows.** A key appears for a target that has at least one
+  of its allowed layers, so Home-only profile keys never appear on an ordinary
+  chat.
+- **The Project store's location.** Tron gives pi the chat's canonical cwd, and
+  pi reads `.pi/` there with no upward search, so that is the Project store the
+  resolver reads. A linked worktree resolves its own `.pi/`. A chat started in a
+  subdirectory of a worktree today reads the subdirectory's `.pi/`, not the
+  worktree root's; moving it to the root (Q27) changes what pi loads and is left
+  to slice 4.
+- **Home memory model.** Until slice 9 moves it to `profile.json`, the Profile
+  layer of `model.ref[role=memory]` is read from `home.json` through `HomeOwner`.
+
+### 4.4 How far today's code is from this
 
 - `SettingsService` (`packages/gateway/src/admin/settings-service.ts`) has
   hand-written validators per key (`applyPatch`, `:267-356`), a computed
@@ -1050,7 +1081,6 @@ was added after the first numbering; it lands after slice 4 and before slice 8.
 |---|---|---|---|---|---|
 | 1 | One door per chat: the ordinary-chat gear opens Manage Session, and Settings is a row inside it | S | iOS | | #759 |
 | 2 | Clear names and the shared badge component on today's rows | S | iOS | | #760 |
-| 3 | The schema and `settings.resolve`: layers, provenance, display metadata, an untrusted project shown as not applied, capability clamping | L | Gateway | | #761 |
 | 4 | One change path: `settings.change`, the record (kept forever), undo and Apply again, history; today's setters migrate; Project writes are written and staged, never committed | L | Gateway, iOS | 3 | #762 |
 | 5 | Tiers: floors with the maintainer's overrides, the one-step web mark, approval by tap with 24-hour expiry and the requester told, and the `settings` tool | L | Gateway, iOS | 4 | #763 |
 | 6 | Outside changes: stores compared with the record, "Changed outside Tron" with Apply again, notification by floor, git-state badges | M | Gateway, iOS | 4 | #764 |

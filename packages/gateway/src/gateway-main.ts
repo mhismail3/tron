@@ -12,6 +12,7 @@ import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
 import { SettingsService } from "./admin/settings-service.js";
+import { SettingsModel } from "./admin/settings-model.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
 import { HookResources } from "./admin/hook-resources.js";
@@ -177,6 +178,13 @@ const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
 const settings = new SettingsService(config.agentDir, modelRuntime, false);
+const settingsModel = new SettingsModel({
+  agentDir: config.agentDir,
+  tronHome: config.tronHome,
+  trust,
+  modelRuntime,
+  homeMemoryModel: async () => (await sessions.homeOwner()?.memoryStatus())?.model,
+});
 const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
@@ -773,6 +781,7 @@ const service = new GatewayService({
   terminals: terminal,
   trust,
   settings,
+  settingsModel,
   modelConfig,
   packages,
   hookResources,

@@ -166,6 +166,7 @@ import { projectHookRegistrations } from "./hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
 import { boundedUtf8Prefix } from "../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
+import type { ChatStore } from "../admin/settings-resolver.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
 // admitted the first property from the exact-owned status file. A payload key
@@ -1283,6 +1284,21 @@ export class RuntimeSlot {
   get modelRuntime(): ModelRuntime {
     this.assertNoTrustReload();
     return this.runtime.session.modelRuntime;
+  }
+
+  /** This chat's Chat layer as its session record holds it (settings-model.md
+   * 3.2): the model, thinking, explicit context window and active tools. */
+  settingsChatLayer(): ChatStore {
+    this.assertNoTrustReload();
+    const session = this.runtime.session;
+    const policy = this.contextPolicies.get(session)?.snapshot();
+    return {
+      ...(session.model ? { model: { provider: session.model.provider, id: session.model.id } } : {}),
+      thinking: session.thinkingLevel,
+      ...(policy && policy.override !== null ? { contextWindow: { model: `${policy.model.provider}/${policy.model.id}`, value: policy.override } } : {}),
+      tools: session.getActiveToolNames(),
+      settings: {},
+    };
   }
 
   /** Actionable work only; decorative presentation must not block trust/delete.

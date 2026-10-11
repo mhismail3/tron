@@ -710,6 +710,28 @@ not projected, and `settings.update` ignores them; values already in `settings.j
 untouched. `telemetry.install` remains because the SDK uses it to gate provider
 attribution headers.
 
+`settings.resolve { target, keys? }` is the settings model's resolver
+([docs/settings-model.md](docs/settings-model.md), advertised as
+`settings-model.v1`). `target` is `{ kind: "mac" }`, `{ kind: "project", cwd }`,
+`{ kind: "session", sessionId }` (the client must have opened the session) or
+`{ kind: "home" }` (Home's profile). Every key declared once in
+`src/admin/settings-schema.ts` is returned with `{ value, display, layer,
+applied, reason?, badges, layers[] }`, where `layers[]` lists each layer the
+target has and what it holds. The resolver (`src/admin/settings-resolver.ts`)
+takes the topmost layer that the target has, that holds the key, that the key
+allows, and that is applied: Chat, then Home profile, then Project (`.pi/` at the
+canonical cwd pi reads), then Mac (`<tronHome>/agent/settings.json` and
+`trust.json`), then Built-in. An untrusted project's values are returned with
+`applied: false, reason: "untrusted"` and never apply; reading them is JSON
+parsing only. A value stored at a layer the key does not allow is reported in
+`diagnostics` and ignored. A thinking level the resolved model does not support
+resolves to pi's closest level with a Clamped badge. Redacted keys (`httpProxy`)
+return only "Set" or "Not set". The schema is checked against the pinned pi
+settings reference (`settings-model.integration.test.ts`), so a pi upgrade that
+adds a key, or lets an agent-directory-only key move, fails that test.
+`settings.update` validates each patched value with its schema entry and refuses a
+key the written layer does not allow.
+
 `modules.list` reports Tron's built-in extensions for Settings without opening a
 session. It returns one row per entry of the single `TRON_MODULES` definition
 that `RuntimeSlot` also registers (`tron-modules.ts`: stable name, one-line

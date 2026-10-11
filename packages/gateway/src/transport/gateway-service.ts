@@ -12,6 +12,8 @@ import { runtimeIdentity } from "./runtime-identity.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_BROWSER_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
 import { admitHomeMemoryPage, admitHomeMemoryEvidence } from "../home/home-memory-browser.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
+import type { SettingsModel } from "../admin/settings-model.js";
+import type { SettingsTarget } from "../admin/settings-resolver.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -156,6 +158,18 @@ async function awaitWhileClientConnected<T>(operation: Promise<T>, signal?: Abor
   });
 }
 
+/** Advertised when `settings.resolve` serves the settings model (docs/settings-model.md). */
+export const SETTINGS_MODEL_CAPABILITY = "settings-model.v1";
+
+function settingsTarget(raw: unknown): SettingsTarget {
+  const target = object(raw, "target");
+  const kind = oneOf(target.kind, "target.kind", ["mac", "project", "session", "home"] as const);
+  rejectUnknownFields(target, kind === "project" ? ["kind", "cwd"] : kind === "session" ? ["kind", "sessionId"] : ["kind"], "target");
+  if (kind === "project") return { kind, cwd: string(target.cwd, "target.cwd", { max: 4_096 }) };
+  if (kind === "session") return { kind, sessionId: string(target.sessionId, "target.sessionId", { max: 200 }) };
+  return { kind };
+}
+
 function rejectUnknownFields(params: Record<string, unknown>, allowed: readonly string[], label: string): void {
   if (Object.keys(params).some((key) => !allowed.includes(key))) {
     throw new GatewayError("invalid_request", `${label} contains unknown fields`);
@@ -273,6 +287,8 @@ export interface GatewayServiceDependencies {
   terminals: TerminalService;
   trust: TrustService;
   settings: SettingsService;
+  /** The settings model's resolver and (later) its one change path (docs/settings-model.md). */
+  settingsModel: SettingsModel;
   modelConfig: ModelConfigService;
   packages: PackageService;
   /** Session-free hook listings for a scope; never opens or registers a session. */
@@ -417,6 +433,7 @@ export class GatewayService {
         "session-export.v2",
         "auth.v1",
         "settings.v1",
+        SETTINGS_MODEL_CAPABILITY,
         "packages.v1",
         MODULES_CAPABILITY,
         HOOKS_CAPABILITY,
@@ -1945,6 +1962,20 @@ export class GatewayService {
           return { loggedOut: true };
         });
 
+      case "settings.resolve": {
+        rejectUnknownFields(params, ["target", "keys"], method);
+        const target = settingsTarget(params.target);
+        const keys = params.keys === undefined ? undefined : arrayOfStrings(params.keys, "keys", 200);
+        if (target.kind === "project") target.cwd = await this.dependencies.trust.canonicalDirectory(target.cwd);
+        if (target.kind !== "session") return safeJson(await this.dependencies.settingsModel.resolve(target, undefined, keys));
+        const slot = await this.openedSlot(client, { sessionId: target.sessionId });
+        return safeJson(await this.dependencies.settingsModel.resolve(target, {
+          cwd: slot.cwd,
+          home: this.dependencies.home?.chapterStateFor(target.sessionId).homeId !== undefined,
+          chat: slot.settingsChatLayer(),
+          modelRuntime: slot.modelRuntime,
+        }, keys));
+      }
       case "settings.get": {
         const cwd = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();
         const scope = params.scope === undefined ? "project" : oneOf(params.scope, "scope", ["global", "project"] as const);

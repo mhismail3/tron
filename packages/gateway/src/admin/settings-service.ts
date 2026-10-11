@@ -1,17 +1,17 @@
 import { join } from "node:path";
 import { SettingsManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
+import { KEYS } from "./settings-schema.js";
 import { assertNewModelChoice } from "../providers/openai-model-eligibility.js";
 import { contextWindowLimits, contextWindowMinimum, contextWindowPreferences, MAX_CONTEXT_PREFERENCES, parseContextModelKey, validateContextWindow } from "../providers/context-window-policy.js";
-import { resolveCompactionPolicy, COMPACTION_POLICY_INSTRUCTION_LIMIT, COMPACTION_THINKING_LEVELS } from "../runtime/compaction-policy.js";
+import { resolveCompactionPolicy } from "../runtime/compaction-policy.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { updateJsonLocked } from "../util/json.js";
-import { arrayOfStrings, boolean, integer, object, oneOf, string } from "../util/validation.js";
+import { object, string } from "../util/validation.js";
 
 interface SettingsDocument extends Record<string, unknown> {}
 type SettingsScope = "global" | "project";
 
-const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const SETTINGS_DOCUMENT_BYTES = 256 * 1_024;
 const SETTINGS_DOCUMENT_NODES = 15_000;
 const SETTINGS_DOCUMENT_OBJECT_DEPTH = 11;
@@ -74,17 +74,6 @@ function merge(base: Record<string, unknown>, override: Record<string, unknown>)
   return result;
 }
 
-function nullableString(value: unknown, name: string, maximum: number): string | null {
-  return value === null ? null : string(value, name, { max: maximum });
-}
-
-function rawString(value: unknown, name: string, maximum: number): string {
-  if (typeof value !== "string" || value.length > maximum) {
-    throw new GatewayError("invalid_request", `${name} must be a string no longer than ${maximum} characters`);
-  }
-  return value;
-}
-
 function redactSettingsDocument(document: Record<string, unknown>): Record<string, unknown> {
   const redacted = structuredClone(document);
   delete redacted.httpProxy;
@@ -92,21 +81,33 @@ function redactSettingsDocument(document: Record<string, unknown>): Record<strin
   return redacted;
 }
 
-function setNullable(target: SettingsDocument, key: string, value: unknown): void {
-  if (value === null || value === undefined) delete target[key];
-  else target[key] = value;
+function patchValue(patch: Record<string, unknown>, path: readonly string[]): { present: boolean; value?: unknown } {
+  let current: unknown = patch;
+  for (const segment of path) {
+    if (typeof current !== "object" || current === null || Array.isArray(current) || !(segment in current)) return { present: false };
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return { present: true, value: current };
 }
 
-function validatePackageSource(value: unknown, name: string): unknown {
-  if (typeof value === "string") return string(value, name, { max: 2_000 });
-  const packageValue = object(value, name);
-  const result: Record<string, unknown> = { source: string(packageValue.source, `${name}.source`, { max: 2_000 }) };
-  if (packageValue.autoload !== undefined) result.autoload = boolean(packageValue.autoload, `${name}.autoload`);
-  for (const key of ["extensions", "skills", "prompts", "themes"] as const) {
-    if (packageValue[key] !== undefined) result[key] = arrayOfStrings(packageValue[key], `${name}.${key}`, 500);
+function setPath(document: SettingsDocument, path: readonly string[], value: unknown): void {
+  let current: Record<string, unknown> = document;
+  for (const segment of path.slice(0, -1)) {
+    const child = current[segment];
+    current = current[segment] = child && typeof child === "object" && !Array.isArray(child) ? child as Record<string, unknown> : {};
   }
-  return result;
+  current[path[path.length - 1]!] = value;
 }
+
+function unsetPath(document: SettingsDocument, path: readonly string[]): void {
+  let current: unknown = document;
+  for (const segment of path.slice(0, -1)) {
+    if (!current || typeof current !== "object") return;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  if (current && typeof current === "object") delete (current as Record<string, unknown>)[path[path.length - 1]!];
+}
+
 
 /** Canonical Pi settings projection with explicit global/project ownership. */
 export class SettingsService {
@@ -220,7 +221,7 @@ export class SettingsService {
     if (inherited?.drainErrors().length) throw new GatewayError("conflict", "Canonical settings could not be loaded");
     const global = inherited?.getGlobalSettings() as Record<string, unknown> | undefined;
     await updateJsonLocked<SettingsDocument>(path, {}, (current) => {
-      const next = this.applyPatch(current, patch);
+      const next = this.applyPatch(current, patch, options.scope);
       if ("modelContextWindows" in patch) {
         const delta = object(patch.modelContextWindows, "modelContextWindows");
         if (Object.keys(delta).length > MAX_CONTEXT_PREFERENCES) throw new GatewayError("invalid_request", "Too many context window preferences");
@@ -264,8 +265,30 @@ export class SettingsService {
     return this.get(options.cwd, options.scope === "project" && options.projectTrusted);
   }
 
-  private applyPatch(current: SettingsDocument, patch: Record<string, unknown>): SettingsDocument {
+  /** Applies a pi-document-shaped patch. Each value is validated by its
+   * settings-schema entry, at the layer the scope writes; a key the layer does
+   * not allow is refused (settings-model.md F1). `null` unsets a value. */
+  private applyPatch(current: SettingsDocument, patch: Record<string, unknown>, scope: SettingsScope): SettingsDocument {
     const next: SettingsDocument = structuredClone(current);
+    const layer = scope === "global" ? "mac" : "project";
+    for (const key of KEYS) {
+      const binding = key.layers.mac?.store === "pi" ? key.layers.mac : key.layers.project?.store === "pi" ? key.layers.project : undefined;
+      if (!binding || binding.store !== "pi" || binding.path.includes("{model}")) continue;
+      const found = patchValue(patch, binding.path);
+      if (!found.present) continue;
+      if (!key.layers[layer]) {
+        throw new GatewayError("invalid_request", `${key.label} cannot be set at the ${layer === "mac" ? "Mac" : "Project"} layer`);
+      }
+      if (key.id === "setup.sessionDir" && !this.allowSessionDirectoryChange) {
+        throw new GatewayError(
+          "conflict",
+          "Change sessionDir only while the Gateway is stopped; restart is required before a new canonical session directory can be used.",
+          false,
+        );
+      }
+      if (found.value === null) unsetPath(next, binding.path);
+      else setPath(next, binding.path, key.type.validate(found.value, binding.path.join(".")));
+    }
     if ("defaultModel" in patch) {
       if (patch.defaultModel === null) {
         delete next.defaultProvider;
@@ -279,107 +302,7 @@ export class SettingsService {
         next.defaultModel = id;
       }
     }
-    if ("defaultThinkingLevel" in patch) {
-      if (patch.defaultThinkingLevel === null) delete next.defaultThinkingLevel;
-      else next.defaultThinkingLevel = oneOf(patch.defaultThinkingLevel, "defaultThinkingLevel", thinkingLevels);
-    }
-    if ("defaultTools" in patch) {
-      if (patch.defaultTools === null) delete next.defaultTools;
-      else {
-        const tools = arrayOfStrings(patch.defaultTools, "defaultTools", 500);
-        if (tools.some((name) => !/^[+-]?[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(name))) {
-          throw new GatewayError("invalid_request", "defaultTools entries must be tool names or +name/-name modifiers");
-        }
-        next.defaultTools = tools;
-      }
-    }
-    if ("codemode" in patch) next.codemode = this.nested(next.codemode, patch.codemode, "codemode", {
-      mode: (value) => oneOf(value, "codemode.mode", ["on", "only"] as const),
-      inlineBudget: (value) => integer(value, "codemode.inlineBudget", 0, 1_000_000),
-    });
-    if ("thinkingBudgets" in patch) {
-      if (patch.thinkingBudgets === null) delete next.thinkingBudgets;
-      else {
-        const budgets = object(patch.thinkingBudgets, "thinkingBudgets");
-        const value: Record<string, number> = {};
-        for (const key of ["minimal", "low", "medium", "high"] as const) {
-          if (budgets[key] !== undefined) value[key] = integer(budgets[key], `thinkingBudgets.${key}`, 0, 10_000_000);
-        }
-        next.thinkingBudgets = value;
-      }
-    }
-    if ("transport" in patch) next.transport = oneOf(patch.transport, "transport", ["sse", "websocket", "websocket-cached", "auto"] as const);
-    if ("compaction" in patch) next.compaction = this.nested(next.compaction, patch.compaction, "compaction", {
-      enabled: (value) => boolean(value, "compaction.enabled"),
-      reserveTokens: (value) => integer(value, "compaction.reserveTokens", 1_024, 1_000_000),
-      keepRecentTokens: (value) => integer(value, "compaction.keepRecentTokens", 0, 1_000_000),
-      thinkingLevel: (value) => oneOf(value, "compaction.thinkingLevel", COMPACTION_THINKING_LEVELS),
-      instructions: (value) => rawString(value, "compaction.instructions", COMPACTION_POLICY_INSTRUCTION_LIMIT),
-    });
-    if ("branchSummary" in patch) next.branchSummary = this.nested(next.branchSummary, patch.branchSummary, "branchSummary", {
-      reserveTokens: (value) => integer(value, "branchSummary.reserveTokens", 1_024, 1_000_000),
-    });
-    if ("retry" in patch) {
-      const retry = object(patch.retry, "retry");
-      const existing = object(next.retry ?? {}, "existing retry");
-      const validated: Record<string, unknown> = { ...existing };
-      if (retry.enabled !== undefined) validated.enabled = boolean(retry.enabled, "retry.enabled");
-      if (retry.maxRetries !== undefined) validated.maxRetries = integer(retry.maxRetries, "retry.maxRetries", 0, 20);
-      if (retry.baseDelayMs !== undefined) validated.baseDelayMs = integer(retry.baseDelayMs, "retry.baseDelayMs", 0, 300_000);
-      if (retry.provider !== undefined) validated.provider = this.nested(existing.provider, retry.provider, "retry.provider", {
-        timeoutMs: (value) => integer(value, "retry.provider.timeoutMs", 1_000, 3_600_000),
-        maxRetries: (value) => integer(value, "retry.provider.maxRetries", 0, 20),
-        maxRetryDelayMs: (value) => integer(value, "retry.provider.maxRetryDelayMs", 0, 300_000),
-      });
-      next.retry = validated;
-    }
-    if ("httpIdleTimeoutMs" in patch) next.httpIdleTimeoutMs = integer(patch.httpIdleTimeoutMs, "httpIdleTimeoutMs", 1_000, 3_600_000);
-    if ("websocketConnectTimeoutMs" in patch) setNullable(next, "websocketConnectTimeoutMs", patch.websocketConnectTimeoutMs === null ? null : integer(patch.websocketConnectTimeoutMs, "websocketConnectTimeoutMs", 1_000, 300_000));
-    if ("steeringMode" in patch) next.steeringMode = oneOf(patch.steeringMode, "steeringMode", ["all", "one-at-a-time"] as const);
-    if ("followUpMode" in patch) next.followUpMode = oneOf(patch.followUpMode, "followUpMode", ["all", "one-at-a-time"] as const);
-    if ("defaultProjectTrust" in patch) next.defaultProjectTrust = oneOf(patch.defaultProjectTrust, "defaultProjectTrust", ["ask", "always", "never"] as const);
-    if ("images" in patch) next.images = this.nested(next.images, patch.images, "images", {
-      autoResize: (value) => boolean(value, "images.autoResize"),
-      blockImages: (value) => boolean(value, "images.blockImages"),
-    });
-    if ("enabledModels" in patch) setNullable(next, "enabledModels", patch.enabledModels === null ? null : arrayOfStrings(patch.enabledModels, "enabledModels", 500));
-    if ("shellPath" in patch) setNullable(next, "shellPath", nullableString(patch.shellPath, "shellPath", 4_096));
-    if ("shellCommandPrefix" in patch) setNullable(next, "shellCommandPrefix", nullableString(patch.shellCommandPrefix, "shellCommandPrefix", 4_096));
-    if ("npmCommand" in patch) setNullable(next, "npmCommand", patch.npmCommand === null ? null : arrayOfStrings(patch.npmCommand, "npmCommand", 20));
-    if ("sessionDir" in patch) {
-      if (!this.allowSessionDirectoryChange) {
-        throw new GatewayError(
-          "conflict",
-          "Change sessionDir only while the Gateway is stopped; restart is required before a new canonical session directory can be used.",
-          false,
-        );
-      }
-      setNullable(next, "sessionDir", nullableString(patch.sessionDir, "sessionDir", 4_096));
-    }
-    for (const key of ["extensions", "skills", "prompts", "themes"] as const) {
-      if (key in patch) next[key] = arrayOfStrings(patch[key], key, 500);
-    }
-    if ("packages" in patch) {
-      if (!Array.isArray(patch.packages) || patch.packages.length > 500) throw new GatewayError("invalid_request", "packages must be an array with at most 500 entries");
-      next.packages = patch.packages.map((value, index) => validatePackageSource(value, `packages[${index}]`));
-    }
-    if ("httpProxy" in patch) setNullable(next, "httpProxy", nullableString(patch.httpProxy, "httpProxy", 4_096));
-    if ("enableInstallTelemetry" in patch) next.enableInstallTelemetry = boolean(patch.enableInstallTelemetry, "enableInstallTelemetry");
     return next;
   }
 
-  private nested(
-    existing: unknown,
-    raw: unknown,
-    name: string,
-    validators: Record<string, (value: unknown) => unknown>,
-  ): Record<string, unknown> {
-    const patch = object(raw, name);
-    const value: Record<string, unknown> = { ...object(existing ?? {}, `existing ${name}`) };
-    for (const [key, validate] of Object.entries(validators)) {
-      if (name === "compaction" && patch[key] === null) delete value[key];
-      else if (patch[key] !== undefined) value[key] = validate(patch[key]);
-    }
-    return value;
-  }
 }
