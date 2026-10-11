@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import type { GatewayWorkHandle } from "../sessions/gateway-work-registry.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
-import type { OwnedOperationTerminal } from "../sessions/runtime-slot.js";
+import { TASK_STOP_WAITING, type OwnedOperationTerminal } from "../sessions/runtime-slot.js";
 import { OwnedSessionDispatch, type OwnedOperationDeadline } from "../sessions/owned-session-dispatch.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/invocation-receipts.js";
 import { GatewayError } from "../errors.js";
@@ -264,9 +264,11 @@ export class HomeTaskDispatcher {
             if (entry.type !== "custom" || entry.customType !== INVOCATION_RECEIPT_TYPE) return false;
             const receipt = parseInvocationReceipt(entry.data);
             return receipt?.receiptKind === "terminal" && receipt.lifecycle === "interrupted"
-              && receipt.operationId === operationId && receipt.invocationId === outcome.terminal.invocationId && receipt.sessionId === slot.id;
+              && receipt.operationId === outcome.terminal.operationId && receipt.invocationId === outcome.terminal.invocationId && receipt.sessionId === slot.id;
           });
-        const interrupted = interruption !== undefined;
+        // A Stop that landed between turns interrupted no turn, so it has no interruption receipt to
+        // pin: the waiting terminal and the durable stop intent are its proof.
+        const interrupted = interruption !== undefined || (outcome.state === "terminal" && outcome.terminal.errorCode === TASK_STOP_WAITING);
         // Stop intent is append-only. Qualify before entering the store update:
         // missing proof is not namespace corruption or a publication attempt.
         const stoppedBeforeConversation = cut.state === "absent";

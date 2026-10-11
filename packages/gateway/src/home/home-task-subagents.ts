@@ -72,10 +72,11 @@ function customMessageText(content: unknown): string {
 const SETTLED_RUN_STATES = new Set(["complete", "failed", "partial", "stopped", "rejected"]);
 const MAXIMUM_STATUS_BYTES = 64 * 1024;
 
-/** A launch is a `subagent` call with no `action` that the task admitted: the gate
- * blocked the others before the provider saw them. A provider that then rejects the
- * launch before creating a run still counts as admitted, because its result carries
- * no run identity to tell the two apart. Management calls never count. */
+/** A launch is a `subagent` call with no `action` that the task admitted, or a `resume`
+ * the task admitted (on its own run, which starts a new run the task then owns): the gate
+ * blocked the others before the provider saw them. A provider that then rejects an admitted
+ * call before creating a run still counts as admitted, because its result carries no run
+ * identity to tell the two apart. Other management calls never count. */
 export function homeTaskSubagentLaunches(runEntries: readonly FileEntry[]): Array<{ toolCallId: string; asyncDir: string | undefined }> {
   const launchCalls = new Set<string>();
   for (const entry of runEntries) {
@@ -83,7 +84,7 @@ export function homeTaskSubagentLaunches(runEntries: readonly FileEntry[]): Arra
     for (const block of entry.message.content as unknown as Array<Record<string, unknown>>) {
       if (block.type !== "toolCall" || block.name !== DELEGATED_PROVIDER_TOOL_NAME || typeof block.id !== "string") continue;
       const args = block.arguments as Record<string, unknown> | null;
-      if (args && typeof args === "object" && args.action === undefined) launchCalls.add(block.id);
+      if (args && typeof args === "object" && (args.action === undefined || args.action === "resume")) launchCalls.add(block.id);
     }
   }
   const launches: Array<{ toolCallId: string; asyncDir: string | undefined }> = [];
