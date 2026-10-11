@@ -127,6 +127,46 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             "the reply left the transcript across background/foreground: \(app.debugDescription)"
         )
         keepScreenshot(app, name: "424-real-ui-conversation-after-background")
+
+        // Reopen the same retained session from the dashboard after the real
+        // transport is gone. This exercises a fresh ChatView opening while the
+        // Gateway lifecycle is disconnected, not the already-open blackhole
+        // control (which is covered separately and passes unchanged main).
+        app.buttons["Back"].tap()
+        let sessionRow = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")
+        ).firstMatch
+        XCTAssertTrue(waitForHittable(sessionRow, timeout: 60), app.debugDescription)
+        try setProxyMode(fixture, mode: "blackhole")
+        defer { try? setProxyMode(fixture, mode: "pass") }
+        // Open immediately, before the liveness deadline retires the socket. The
+        // opening's actual Gateway request is then interrupted by the path loss.
+        sessionRow.tap()
+        let opening = app.otherElements["Opening conversation"]
+        XCTAssertTrue(opening.waitForExistence(timeout: 15),
+                      "the session row did not mount a fresh opening: \(app.debugDescription)")
+        XCTAssertTrue(
+            app.staticTexts["Gateway connection unavailable"].waitForExistence(timeout: 60),
+            "the real connection loss was not surfaced: \(app.debugDescription)"
+        )
+        let retry = app.buttons["Retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 60),
+                      "the interrupted open did not expose recovery: \(app.debugDescription)")
+        keepScreenshot(app, name: "393-simulator-interrupted-open-before-retry")
+        retry.tap()
+        Thread.sleep(forTimeInterval: 3)
+        keepScreenshot(app, name: "393-simulator-disconnected-retry")
+        XCTAssertFalse(opening.exists,
+                       "Retry while disconnected must not replace recovery with an opening spinner")
+        XCTAssertTrue(app.staticTexts["Waiting for connection"].exists)
+        // Navigation intentionally retired the old snapshot; this new route
+        // cannot claim a retained transcript until it synchronizes.
+        try setProxyMode(fixture, mode: "pass")
+        let retainedReply = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+        XCTAssertTrue(retainedReply.waitForExistence(timeout: 60),
+                      "the waiting route did not resume without another tap: \(app.debugDescription)")
+        XCTAssertFalse(app.staticTexts["Waiting for connection"].exists)
+        keepScreenshot(app, name: "393-simulator-reconnected-without-retry")
     }
 
     @MainActor
@@ -325,6 +365,23 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     private func waitForHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: element)
         return XCTWaiter().wait(for: [hittable], timeout: timeout) == .completed
+    }
+
+    @MainActor
+    private func setProxyMode(_ fixture: RealGatewayUIFixture, mode: String) throws {
+        let token = try XCTUnwrap(ProcessInfo.processInfo.environment["TRON_E2E_PROXY_TOKEN"])
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "http://\(fixture.host):\(fixture.port)/_fixture/control")))
+        request.httpMethod = "POST"
+        request.setValue(token, forHTTPHeaderField: "x-tron-fixture-token")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["mode": mode])
+        let completed = expectation(description: "fixture proxy \(mode)")
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            XCTAssertNil(error)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+            completed.fulfill()
+        }.resume()
+        wait(for: [completed], timeout: 15)
     }
 
     @MainActor
