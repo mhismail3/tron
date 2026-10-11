@@ -1685,6 +1685,13 @@ time and chapter in a metadata card, the canonical text in a reading card, and
 its entry reference in the footer. Pagination replaces one page; a chapter's
 memory is the same browser filtered by `sessionId`. Canonical text is selectable.
 Loading, empty, blocked and retryable error states use shared presentation owners.
+The shared `tronTopBlurSurface` establishes full available width **before** attaching
+edge chrome. `tronScrollEdgeChrome` and document underlap delegate to that same
+owner: a native scroll viewport can fill a sheet while SwiftUI otherwise sizes its
+overlay to a short loading row, producing a sharp central tint column. Do not fix
+that by replacing the native material, painting an opaque page, or sizing each
+screen's placeholder. The native sheet retains safe areas, rounded clipping,
+detents and toolbar ownership; loading changes only content, not chrome geometry.
 
 
 

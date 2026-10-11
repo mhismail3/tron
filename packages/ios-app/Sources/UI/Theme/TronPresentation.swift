@@ -148,21 +148,13 @@ private struct TronPresentationModifier: ViewModifier {
 /// Applying these preferences at the app root does not reliably bind the
 /// scroll view to navigation chrome across sheet presentation boundaries.
 private struct TronScrollEdgeChromeModifier: ViewModifier {
-    @Environment(\.tronTopBlurStyle) private var topBlurStyle
-
     func body(content: Content) -> some View {
         content
             // Keep both edges softly graduated. The hard top style produces
             // an opaque cutoff on physical iOS 27 hardware instead of Tron's
             // established translucent blur into navigation chrome.
             .scrollEdgeEffectStyle(.soft, for: .all)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
-            .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
-            .overlay(alignment: .top) {
-                if let topBlurStyle {
-                    TronTopBlurOverlay(style: topBlurStyle)
-                }
-            }
+            .tronTopBlurSurface()
     }
 }
 

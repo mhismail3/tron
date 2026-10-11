@@ -114,6 +114,129 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
     }
 
+    /// A delayed socket response must not shrink the scroll viewport (and its
+    /// edge material) to the loading row's intrinsic width. Exercise the real
+    /// managed parent/child sheet stack, not a replica of its layout.
+    @MainActor
+    func testHomeSheetLoadingSurfaceRemainsFullWidth() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-presentation-loading"]
+            if appearance == "dark" { app.launchArguments.append("-home-dark") }
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            let ring = app.buttons["session-context-button"]
+            XCTAssertTrue(waitForLabel(ring, containing: "Manage Home", timeout: 10))
+            XCTAssertTrue(waitForEnabled(ring, timeout: 10))
+            ring.tap()
+            let done = app.buttons["home-sheet-done-manage"]
+            XCTAssertTrue(done.waitForExistence(timeout: 5))
+            let mediumY = done.frame.midY
+            XCTAssertGreaterThan(mediumY, app.windows.firstMatch.frame.height * 0.4)
+            assertHomeLoadingSurface(app, name: "\(appearance)-manage-medium")
+            XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 10))
+            XCTAssertEqual(done.frame.midY, mediumY, accuracy: 2, "Loading must not move sheet chrome")
+            keepScreenshot(named: "sheet-\(appearance)-manage-loaded")
+            tapManageRow(app, "home-manage-tasks")
+            let taskDone = app.buttons["home-sheet-done-tasks"]
+            XCTAssertTrue(taskDone.waitForExistence(timeout: 5))
+            assertHomeLoadingSurface(app, name: "\(appearance)-tasks-medium")
+            let title = app.staticTexts["Tasks"].firstMatch
+            title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
+                thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                taskDone.frame.midY < mediumY - 100
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 3), .completed)
+            assertHomeLoadingSurface(app, name: "\(appearance)-tasks-large")
+            XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 10))
+            keepScreenshot(named: "sheet-\(appearance)-tasks-loaded-large")
+            taskDone.tap()
+            XCTAssertTrue(done.waitForExistence(timeout: 5))
+            done.tap()
+            XCTAssertTrue(ring.waitForExistence(timeout: 5))
+            ring.tap()
+            XCTAssertTrue(done.waitForExistence(timeout: 5))
+            assertHomeLoadingSurface(app, name: "\(appearance)-manage-reopened")
+            app.staticTexts["Manage Home"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+            let manageExpanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                done.frame.midY < mediumY - 100
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [manageExpanded], timeout: 3), .completed)
+            assertHomeLoadingSurface(app, name: "\(appearance)-manage-large")
+            done.tap()
+            XCTAssertTrue(ring.waitForExistence(timeout: 5))
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testNestedHomeTasksErrorRetriesWithoutMovingChrome() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-tasks-error"]
+            if appearance == "dark" { app.launchArguments.append("-home-dark") }
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            tapManageRow(app, "home-manage-tasks")
+            XCTAssertTrue(app.buttons["Reload"].waitForExistence(timeout: 5))
+            let done = app.buttons["home-sheet-done-tasks"]
+            let y = done.frame.midY
+            keepScreenshot(named: "sheet-\(appearance)-tasks-error")
+            app.buttons["Reload"].tap()
+            XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
+            XCTAssertEqual(done.frame.midY, y, accuracy: 2)
+            keepScreenshot(named: "sheet-\(appearance)-tasks-retried")
+            done.tap()
+            XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 5))
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    private func assertHomeLoadingSurface(_ app: XCUIApplication, name: String) {
+        let loading = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Loading Home…")).firstMatch
+        XCTAssertTrue(loading.waitForExistence(timeout: 3))
+        keepScreenshot(named: "sheet-\(name)-loading")
+        let scroll = app.scrollViews.firstMatch
+        XCTAssertGreaterThan(scroll.frame.width, app.windows.firstMatch.frame.width * 0.9,
+                             "The sheet viewport and its edge material must not inherit the loading row's intrinsic width")
+        XCTAssertLessThan(loading.frame.height, 40, "The short loading label must not wrap at normal Dynamic Type")
+        // Accessibility reports the full ScrollView even when its overlay is
+        // intrinsically narrow. Compare the actual material above the title,
+        // away from text, controls and rounded corners; no device-specific golden.
+        let title = app.staticTexts["Tasks"].exists ? app.staticTexts["Tasks"].firstMatch : app.staticTexts["Manage Home"].firstMatch
+        let screenshot = XCUIScreen.main.screenshot().image
+        let y = title.frame.minY - 12
+        let width = app.windows.firstMatch.frame.width
+        let center = sheetPixel(screenshot, point: CGPoint(x: width * 0.5, y: y), windowWidth: width)
+        for x in [0.25, 0.75] {
+            let side = sheetPixel(screenshot, point: CGPoint(x: width * x, y: y), windowWidth: width)
+            XCTAssertLessThan(zip(center, side).map { abs($0 - $1) }.max() ?? 1, 0.035,
+                              "The edge material must cover the full sheet, not an opaque central column (\(name))")
+        }
+    }
+
+    private func sheetPixel(_ image: UIImage, point: CGPoint, windowWidth: CGFloat) -> [Double] {
+        guard let source = image.cgImage else { XCTFail("Missing screenshot pixels"); return [] }
+        let scale = CGFloat(source.width) / windowWidth
+        let area = CGRect(x: point.x * scale - 4, y: point.y * scale - 4, width: 9, height: 9)
+        guard let crop = source.cropping(to: area) else { XCTFail("Missing material sample"); return [] }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return pixel.prefix(3).map { Double($0) / 255 }
+    }
+
     @MainActor
     func testHomeSheetsLoadingEmptyBlockedErrorAndReload() {
         continueAfterFailure = false
