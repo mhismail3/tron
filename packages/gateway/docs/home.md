@@ -820,13 +820,17 @@ admission. A task ID never replays an accepted prompt.
 against the Gateway's model runtime before the task record, namespace initialization or
 worker exists. The model must be registered, usable (its provider has credentials) and not
 virtual. The thinking level must be one that model supports; the SDK would otherwise clamp
-it silently. A `thinking` without a `model` is refused. A refusal is `invalid_request`, its
+it silently. An omitted model resolves from Home's live chat model and thinking level;
+`thinking` alone overrides that inherited level. The operating context names the same live
+chat model and thinking at activation preparation. A refusal is `invalid_request`, its
 `details.reason` is `unregistered-model`, `virtual-model`, `unavailable-model`,
-`unsupported-thinking`, `thinking-requires-model` or `invalid-model`, and its message names at
+`unsupported-thinking` or `invalid-model`, and its message names at
 most twenty valid models, the fixed and usable ones. An accepted choice is applied through the
 worker slot's `setModel` and `setThinking` after `createWorker` and before the first prompt,
-so the worker's canonical JSONL records it. An omitted model keeps the worker session's
-default. The choice is never persisted with the task record.
+so the worker's canonical JSONL records it. This is request admission through the existing
+configuration owner, not a new settings layer. The choice is never persisted with the task
+record. Unknown task IDs return `not_found` (including a not-yet-created task namespace);
+foreign Home identities and damaged namespaces still refuse rather than masquerading as missing.
 
 - A task worker has normal project tools and resources plus `report`, and cannot
   replace its owned session. Its canonical `tron-home-task` marker binds the task,
@@ -1480,7 +1484,7 @@ without a retained artifact.
 | `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; `session.setTools` restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |
 | `src/episodic/home-source.e2e.test.ts` | cross-chapter replay, restart, navigation and frozen-cut proof | `test-results/home-memory/continuity.json` | `npx vitest run src/episodic/home-source.e2e.test.ts` |
-| `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on the chosen model and level; an omitted model keeps the default; unregistered, virtual, unusable and unsupported choices, and thinking without a model, are refused before any task or session; the refusal list is bounded and reaches Home; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
+| `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on the chosen model and level; an omitted model inherits Home's live model/thinking, thinking alone overrides that level, and the provider request names Home's identity; unknown task IDs return not_found; unregistered, virtual, unusable and unsupported choices are refused before any task or session; the refusal list is bounded and reaches Home; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries; frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
 | `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
 | `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a run's late completion notice recorded before the settlement fact, with nothing appended after it, and a notice the bound never records counted without changing the outcome; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |

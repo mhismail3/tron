@@ -376,8 +376,11 @@ export class HomeTaskDispatcher {
 
   async result(taskId: string): Promise<HomeTaskRecord> {
     await this.assertAvailable();
-    let task = await this.store.read(taskId);
-    if (!task) throw new GatewayError("conflict", "Referenced task is missing");
+    let task = await this.store.read(taskId).catch(error => {
+      if (error instanceof HomeTaskStoreError && error.code === "not-initialized") return undefined;
+      throw error;
+    });
+    if (!task) throw new GatewayError("not_found", "No task with this id");
     if (task.lifecycle === "active" && task.sessionId && task.operationId) {
       const slot = await this.sessions.acquire(task.sessionId);
       task = await this.store.update(taskId, current => {

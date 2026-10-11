@@ -32,6 +32,7 @@ import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type
 import { HOME_MAX_CHAPTERS, HOME_HARD_BYTES, HOME_HARD_ENTRIES, HOME_SOFT_BYTES, HOME_SOFT_ENTRIES, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
 import type { HomeDiagnostic, HomeDiagnosticRecord } from "./home-diagnostic.js";
 import { homeSystemPrompt } from "./tron-home-extension.js";
+import { HOME_TASK_THINKING_LEVELS } from "./home-task-worker-choice.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 
 /** One Gateway installation keeps at most one Home. */
@@ -241,7 +242,19 @@ export class HomeOwner {
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) {
       throw new GatewayError("conflict", "Task dispatch is unavailable for this Home");
     }
-    return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, request);
+    const choice = request.model ? request : { ...request, ...await this.currentChatChoice(sessionId),
+      ...(request.thinking === undefined ? {} : { thinking: request.thinking }) };
+    if (this.record !== record) throw new GatewayError("conflict", "Home changed during task admission");
+    return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, choice);
+  }
+
+  /** Read the live session, not designation-time defaults or a learned note. The
+   * dispatcher admits this choice through its existing worker configuration path. */
+  private async currentChatChoice(sessionId: string) {
+    const snapshot = (await this.options.taskSessions.acquire(sessionId)).snapshot();
+    const thinking = HOME_TASK_THINKING_LEVELS.find(level => level === snapshot.thinkingLevel);
+    if (!snapshot.model || thinking === undefined) throw new GatewayError("conflict", "Home chat model is unavailable");
+    return { model: { provider: snapshot.model.provider, id: snapshot.model.id }, thinking };
   }
 
   /** Post-listen startup only (see `RuntimeRegistry.recoverHomeTasks`). Recovery
@@ -286,8 +299,12 @@ export class HomeOwner {
     await this.taskOwner();
     const record = this.record;
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw new GatewayError("conflict", "Home task control is unavailable");
-    const task = await this.tasks.store.read(request.taskId);
-    if (!task || task.homeId !== record.homeId) throw new GatewayError("conflict", "Home task identity changed");
+    const task = await this.tasks.store.read(request.taskId).catch(error => {
+      if (error instanceof HomeTaskStoreError && error.code === "not-initialized") return undefined;
+      throw error;
+    });
+    if (!task) throw new GatewayError("not_found", "No task with this id");
+    if (task.homeId !== record.homeId) throw new GatewayError("conflict", "Home task identity changed");
     if (request.action === "status") return this.taskStatus(request.taskId);
     if (request.action === "report") {
       if (!Number.isSafeInteger(request.offset) || request.offset < 0 || !Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 4096) throw new GatewayError("invalid_request", "Invalid report page");
@@ -863,7 +880,7 @@ export class HomeOwner {
     if (!policy) {
       policy = new HomeRequestPolicy({
         prepareMemoryView: (activation: HomeActivationIdentity, signal: AbortSignal | undefined) => this.memoryView(activation, signal),
-        prepareSystemPrompt: (base: string) => homeSystemPrompt(base, this.options.knowledge),
+        prepareSystemPrompt: async (base: string) => homeSystemPrompt(base, this.options.knowledge, await this.currentChatChoice(sessionId)),
         ...(this.options.requestDiagnostic ? { onRecord: this.options.requestDiagnostic } : {}),
       });
       this.policies.set(sessionId, policy);
