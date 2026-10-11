@@ -1,11 +1,10 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redact } from "../transport/logger.js";
-import { classifyPeer, readTailscaleStatus, type TailscalePeer } from "../transport/tailscale-peer.js";
+import { classifyPeer, readTailscaleStatus, runBoundedCommand, type TailscalePeer, type BoundedCommand, type BoundedCommandResult } from "../transport/tailscale-peer.js";
 import { resolveTronHome } from "../tron-home.js";
 
 /**
@@ -28,7 +27,6 @@ const MAX_LOGS_SECTION_BYTES = 4 * 1_024 * 1_024;
 const MAX_SECTION_BYTES = 256 * 1_024;
 const MAX_DEVICE_EXPORT_BYTES = 512 * 1_024;
 const MAX_DEVICE_EXPORTS = 3;
-const MAX_COMMAND_OUTPUT_BYTES = 8 * 1_024 * 1_024;
 /** A two-hour `log show` measured about 20 s on a busy Mac. */
 const LOG_SHOW_TIMEOUT_MS = 90_000;
 const MAC_VERIFY_TIMEOUT_MS = 180_000;
@@ -45,16 +43,6 @@ const TAILSCALE_PATH_LINE = /magicsock/iu;
 /** Files written by the payload store, per channel. */
 const PAYLOAD_DOCUMENTS = ["current.json", "previous.json", "deployment-state.json", "update-progress.json"] as const;
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
-
-interface BoundedCommandResult {
-  /** Exit code, or null when the command never ran to completion. */
-  code: number | null;
-  timedOut: boolean;
-  output: string;
-  error?: string;
-}
-
-type BoundedCommand = (tool: string, args: readonly string[], timeoutMs: number) => Promise<BoundedCommandResult>;
 
 export interface HealthResult {
   status?: number;
@@ -90,25 +78,6 @@ interface GatewayProcess {
 interface PairedDevice {
   readonly id: string;
   readonly names: readonly string[];
-}
-
-function runBounded(tool: string, args: readonly string[], timeoutMs: number): Promise<BoundedCommandResult> {
-  return new Promise((resolvePromise) => {
-    execFile(tool, [...args], { timeout: timeoutMs, maxBuffer: MAX_COMMAND_OUTPUT_BYTES, encoding: "utf8" }, (error, stdout) => {
-      if (!error) {
-        resolvePromise({ code: 0, timedOut: false, output: stdout });
-        return;
-      }
-      const failure = error as NodeJS.ErrnoException & { killed?: boolean };
-      const code = typeof failure.code === "number" ? failure.code : null;
-      resolvePromise({
-        code,
-        timedOut: failure.killed === true,
-        output: stdout,
-        ...(code === null ? { error: failure.message } : {}),
-      });
-    });
-  });
 }
 
 async function readHealthBounded(url: string): Promise<HealthResult> {
@@ -373,6 +342,9 @@ async function tailscaleSection(tronHome: string, since: string, runCommand: Bou
       `path=${path}`,
       `endpoint=${endpoint ?? "unknown"}`,
       `lastSeen=${peer === undefined ? "unknown" : peerField(peer, "LastSeen") ?? "unknown"}`,
+      `lastHandshake=${peer === undefined ? "unknown" : peerField(peer, "LastHandshake") ?? "unknown"}`,
+      `rxBytes=${peer === undefined ? "unknown" : peerField(peer, "RxBytes") ?? "unknown"}`,
+      `txBytes=${peer === undefined ? "unknown" : peerField(peer, "TxBytes") ?? "unknown"}`,
     ].join(" "));
   }
   lines.push("### network-extension path lines");
@@ -421,7 +393,7 @@ async function collectDiagnosticBundle(options: DiagnosticBundleOptions = {}): P
   const now = options.now ?? new Date();
   const windowStartMs = now.getTime() - sinceMs;
   const tronHome = options.tronHome ?? resolveTronHome();
-  const runCommand = options.runCommand ?? runBounded;
+  const runCommand = options.runCommand ?? runBoundedCommand;
   const readHealth = options.readHealth ?? readHealthBounded;
   const logsDirectory = join(tronHome, "logs");
   const logs = await logsSection(logsDirectory, windowStartMs);
