@@ -57,7 +57,7 @@ def run():
         credential.write_text(json.dumps({"version":2,"bearerToken":TOKEN,"purpose":"local-wrapper-health","lastUpdated":"2025-01-01T00:00:00.000Z"}))
         credential.chmod(0o600)
         remote=root/"remote.git"; state=root/"gateway.json"; gh=root/"gh"; port_file=root/"port"
-        gh.write_text('#!/usr/bin/env python3\nimport json,os,sys\np=os.environ["FIXTURE"]; s=json.load(open(p)); a=sys.argv[1:]\nif a[:2]==["repo","view"]: print(json.dumps({"nameWithOwner":"fixture/project","owner":{"login":"fixture"}}))\nelif a[:3]==["issue","view","41"]: print(json.dumps({"state":"OPEN","comments":s["comments"]}))\nelif a[:1]==["api"]: print("\\n".join(s["comments"]))\nelif a[:2]==["issue","comment"]: s["comments"].append(sys.stdin.read()); s["writes"].append("comment"); json.dump(s,open(p,"w"))\nelse: raise SystemExit("unexpected gh: "+repr(a))\n')
+        gh.write_text('#!/usr/bin/env python3\nimport json,os,sys\np=os.environ["FIXTURE"]; s=json.load(open(p)); a=sys.argv[1:]\nif a[:2]==["issue","comment"] and os.environ.get("RECOVERY_FAIL_AUDIT") and not os.path.exists(os.environ["RECOVERY_FAIL_AUDIT"]): open(os.environ["RECOVERY_FAIL_AUDIT"],"w").close(); raise SystemExit("fixture audit failure")\nif a[:2]==["repo","view"]: print(json.dumps({"nameWithOwner":"fixture/project","owner":{"login":"fixture"}}))\nelif a[:3]==["issue","view","41"]: print(json.dumps({"state":"OPEN","comments":s["comments"]}))\nelif a[:1]==["api"]: print("\\n".join(s["comments"]))\nelif a[:2]==["issue","comment"]: s["comments"].append(sys.stdin.read()); s["writes"].append("comment"); json.dump(s,open(p,"w"))\nelse: raise SystemExit("unexpected gh: "+repr(a))\n')
         gh.chmod(0o755)
         git_bin=root/"git-bin"; git_bin.mkdir()
         real_git=shutil.which("git")
@@ -65,9 +65,16 @@ def run():
         git_wrapper=git_bin/"git"
         fail_update_once=root/"fail-update-ref-once"
         git_wrapper.write_text(f'''#!/usr/bin/env python3
-import os, sys
+import os, sys, subprocess
 from pathlib import Path
 args = sys.argv[1:]
+if args[:1] == ["push"] and os.environ.get("RECOVERY_REMOTE_RACE"):
+    subprocess.run([{real_git!r}, "--git-dir", os.environ["RECOVERY_REMOTE"], "update-ref",
+                    "refs/heads/feat/41-fixture", os.environ["RECOVERY_REMOTE_RACE"]], check=True)
+if args[:1] == ["push"] and os.environ.get("RECOVERY_LOCAL_RACE"):
+    result = subprocess.run([{real_git!r}, "update-ref", "refs/heads/feat/41-fixture",
+                             os.environ["RECOVERY_LOCAL_RACE"]], capture_output=True)
+    Path(os.environ["RECOVERY_RACE_RESULT"]).write_text(str(result.returncode))
 marker = Path(os.environ["FAIL_UPDATE_REF_ONCE"])
 if args[:1] == ["update-ref"] and not marker.exists():
     marker.write_text("failed\\n")
@@ -109,6 +116,127 @@ os.execv({real_git!r}, [{real_git!r}, *args])
             if not output.exists(): raise RuntimeError(f"WebSocket fixture did not bind {bind_host}")
             return output.read_text()
         env["TRON_GATEWAY_PORT"]=start_gateway("127.0.0.1", port_file)
+
+        terminal=lambda i:{"taskId":i,"lifecycle":"terminal"}
+        settled={"operationId":"operation-natural","sessionId":"old-owner","lifecycle":"terminal","terminalEvidence":{"outcome":"final","reason":"explicit-report","sessionId":"old-owner"},"subagents":{"started":0,"stoppedAtEnd":0},"subagentRuns":{"total":0,"runs":[]},"ownerSettlement":None}
+        def recovery_journeys():
+            # Recovery is deliberately separate from handoff: it publishes an exact, clean
+            # descendant candidate without rewriting history or implying acceptance.
+            git(repo,"worktree","remove","--force",str(worktree))
+            git(repo,"checkout","main"); git(repo,"checkout","-B","feat/41-fixture")
+            git(repo,"commit","--allow-empty","-m","Claim\n\nWork-Claim-Issue: 41\nWork-Claim-Session: old-owner")
+            git(repo,"push","--force","-u","origin","feat/41-fixture")
+            git(repo,"checkout","main"); git(repo,"worktree","add",str(worktree),"feat/41-fixture")
+            (worktree/"candidate.txt").write_text("unpublished candidate bytes\n")
+            git(worktree,"add","candidate.txt"); git(worktree,"commit","-m","unpublished candidate")
+            candidate=git(worktree,"rev-parse","HEAD"); remote_expected=git(worktree,"rev-parse","refs/remotes/origin/feat/41-fixture")
+            fixture({"first":{"items":[terminal("owner")]}},{"owner":settled})
+            recovery_args=("recover","41","--expected-local",candidate,"--expected-remote",remote_expected,"--reason","recover settled clean candidate")
+            bad_exact=call("recover","41","--expected-local","0"*40,"--expected-remote",remote_expected,"--reason",recovery_args[-1])
+            evidence.append({"case":"recovery refuses mismatched exact local head","exit":bad_exact.returncode,"stderr":bad_exact.stderr.strip()})
+            assert bad_exact.returncode and "expected local head" in bad_exact.stderr, bad_exact.stderr
+            def settled_fixture(value=None):
+                fixture({"first":{"items":[terminal("owner")]}},{"owner":value if value is not None else settled})
+            def recovery_snapshot():
+                return (git(worktree,"rev-parse","HEAD"), git(repo,"ls-remote","--heads","origin"),
+                        git(worktree,"--no-optional-locks","status","--porcelain"),
+                        (worktree/"candidate.txt").read_bytes(),
+                        Path(git(worktree,"rev-parse","--path-format=absolute","--git-path","index")).read_bytes())
+            def refuse_recovery(name, expected, arguments=None):
+                before=recovery_snapshot(); writes=json.loads(state.read_text())["writes"]
+                result=call(*(arguments or recovery_args))
+                evidence.append({"case":name,"exit":result.returncode,"stderr":result.stderr.strip()})
+                assert result.returncode and expected in result.stderr, result.stderr
+                assert recovery_snapshot()==before, name+" changed candidate, index or refs"
+                assert json.loads(state.read_text())["writes"]==writes, name+" wrote an audit"
+                assert not Path(git(worktree,"rev-parse","--path-format=absolute","--git-path","index.lock")).exists()
+                return result
+
+            # Ordinary handoff remains closed until the explicitly requested recovery.
+            ordinary=call("handoff","41","--reason","still guarded")
+            assert ordinary.returncode and "differs from remote" in ordinary.stderr
+            evidence.append({"case":"ordinary handoff still refuses unpublished candidate","exit":ordinary.returncode})
+            for name,value in [
+                ("unknown owner", None),
+                ("active owner", {**settled,"lifecycle":"active"}),
+                ("remaining child", {**settled,"subagentRuns":{"total":1,"runs":[{}]}}),
+                ("missing terminal evidence", {**settled,"terminalEvidence":None}),
+                ("settlement changed during preparation", [settled,settled,{**settled,"lifecycle":"active"}]),
+            ]:
+                if value is None: fixture()
+                else: settled_fixture(value)
+                refuse_recovery(name,"refusing recovery" if name!="settlement changed during preparation" else "settlement changed")
+            settled_fixture()
+            (worktree/"candidate.txt").write_text("dirty bytes\n")
+            refuse_recovery("dirty candidate refused","clean worktree")
+            (worktree/"candidate.txt").write_text("unpublished candidate bytes\n")
+            (worktree/"untracked").write_text("preserve untracked")
+            refuse_recovery("untracked candidate refused","clean worktree")
+            assert (worktree/"untracked").read_text()=="preserve untracked"; (worktree/"untracked").unlink()
+            operation=Path(git(worktree,"rev-parse","--path-format=absolute","--git-path","CHERRY_PICK_HEAD"))
+            operation.write_text(remote_expected+"\n")
+            refuse_recovery("unfinished Git operation refused","CHERRY_PICK_HEAD")
+            assert operation.read_text()==remote_expected+"\n"; operation.unlink()
+            lock=Path(git(worktree,"rev-parse","--path-format=absolute","--git-path","HEAD.lock"))
+            lock.write_text("foreign writer")
+            refuse_recovery("foreign Git lock preserved","Git writer holds HEAD")
+            assert lock.read_text()=="foreign writer"; lock.unlink()
+            changed_claim=git(worktree,"commit-tree","HEAD^{tree}","-p",candidate,"-m",
+                              "Claim replacement\n\nWork-Claim-Issue: 41\nWork-Claim-Session: other-owner")
+            git(worktree,"update-ref","refs/heads/feat/41-fixture",changed_claim,candidate)
+            refuse_recovery("changed local head refused","expected local head")
+            refuse_recovery("different candidate claim refused","same known claim",
+                            ("recover","41","--expected-local",changed_claim,"--expected-remote",remote_expected,"--reason","candidate changed"))
+            git(worktree,"update-ref","refs/heads/feat/41-fixture",candidate,changed_claim)
+            divergent=git(worktree,"commit-tree","HEAD^{tree}","-p","main","-m","divergent remote")
+            # Copy the object to the fixture bare repository without updating the claim.
+            git(worktree,"push","origin",divergent+":refs/heads/fixture-object")
+            git(remote,"update-ref","refs/heads/feat/41-fixture",divergent,remote_expected)
+            refuse_recovery("changed remote refused","expected remote head")
+            refuse_recovery("divergent exact heads refused","not an ancestor",
+                            ("recover","41","--expected-local",candidate,"--expected-remote",divergent,"--reason","divergence refused"))
+            git(remote,"update-ref","refs/heads/feat/41-fixture",remote_expected,divergent)
+            env["PATH"]=str(git_bin)+os.pathsep+env.get("PATH","")
+            fail_update_once.write_text("handoff partial-update fixture already exercised\n")
+            env["RECOVERY_REMOTE"]=str(remote); env["RECOVERY_REMOTE_RACE"]=divergent
+            raced=call(*recovery_args)
+            evidence.append({"case":"remote race at actual push rejected by exact lease","exit":raced.returncode,"stderr":raced.stderr.strip()})
+            assert raced.returncode and "publication refused" in raced.stderr, raced.stderr
+            assert git(remote,"rev-parse","refs/heads/feat/41-fixture")==divergent
+            assert git(worktree,"rev-parse","HEAD")==candidate and not json.loads(state.read_text())["writes"]
+            del env["RECOVERY_REMOTE_RACE"]
+            git(remote,"update-ref","refs/heads/feat/41-fixture",remote_expected,divergent)
+            env["RECOVERY_LOCAL_RACE"]=changed_claim; env["RECOVERY_RACE_RESULT"]=str(root/"local-race")
+            env["RECOVERY_FAIL_AUDIT"]=str(root/"failed-audit-once")
+            partial=call(*recovery_args)
+            evidence.append({"case":"accepted candidate with failed audit is preserved","exit":partial.returncode,"stderr":partial.stderr.strip()})
+            assert partial.returncode and "fixture audit failure" in partial.stderr, partial.stderr
+            assert git(worktree,"rev-parse","HEAD")==candidate and git(remote,"rev-parse","refs/heads/feat/41-fixture")==candidate
+            assert not json.loads(state.read_text())["writes"]
+            recovered=call(*recovery_args); recovery_state=json.loads(state.read_text())
+            evidence.append({"case":"settled clean descendant recovery publishes without acceptance","exit":recovered.returncode,"stdout":recovered.stdout.strip(),"stderr":recovered.stderr.strip()})
+            assert recovered.returncode==0, recovered.stderr
+            assert git(worktree,"rev-parse","refs/remotes/origin/feat/41-fixture")==candidate
+            assert git(worktree,"rev-parse","HEAD")==candidate
+            assert len(recovery_state["writes"])==1 and "unverified" in recovery_state["comments"][0].lower()
+            assert int((root/"local-race").read_text())!=0, "concurrent Git writer escaped the candidate ref lock"
+            del env["RECOVERY_LOCAL_RACE"]
+            retry=call(*recovery_args)
+            assert retry.returncode==0 and len(json.loads(state.read_text())["writes"])==1, retry.stderr
+            evidence.append({"case":"exact recovery retry leaves candidate and one audit","exit":retry.returncode})
+            # The unchanged former owner still must pass ordinary handoff admission.
+            assert claim.existing_claims(repo,"origin","main",41)[0].session=="old-owner"
+            transfer=call("handoff","41","--reason","candidate recovered and ready for review")
+            assert transfer.returncode==0, transfer.stderr
+            assert claim.existing_claims(repo,"origin","main",41)[0].session=="new-owner"
+            git(worktree,"merge-base","--is-ancestor",candidate,"HEAD")
+            assert (worktree/"candidate.txt").read_text()=="unpublished candidate bytes\n"
+            evidence.append({"case":"ordinary handoff after recovery preserves candidate ancestry","exit":transfer.returncode,"head":git(worktree,"rev-parse","HEAD")})
+            print(f"Passed {len(evidence)} handoff and recovery journeys; evidence: {artifact}")
+
+        if "--recovery-only" in sys.argv:
+            recovery_journeys()
+            return
 
         # Reject an arbitrary literal before loading the local credential or opening a socket.
         fixture()
@@ -364,7 +492,8 @@ os.execv({real_git!r}, [{real_git!r}, *args])
             assert {line.split()[0] for line in refs_before} <= {line.split()[0] for line in git(repo,"for-each-ref","--format=%(refname) %(objectname)").splitlines()}
         else:
             raise AssertionError(ref.stderr)
-        print(f"Passed {len(evidence)} handoff journeys; evidence: {artifact}")
+
+        recovery_journeys()
     finally:
       for process in servers:
         process.terminate()
