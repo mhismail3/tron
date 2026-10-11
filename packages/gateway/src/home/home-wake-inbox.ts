@@ -211,7 +211,7 @@ export class WakeInboxOwner {
             operationId, routeGeneration: route.routeGeneration } });
         // A permanently oversized report is acknowledged by its immutable
         // reference, never by a truncated payload or an unbounded tool read.
-        if (cost(message()) > envelope.freshTokens - cost(count)) content = `${header}: immutable report, ${Buffer.byteLength(result.text)} bytes. Read the full immutable report through task action report with offset/limit pages.`;
+        if (cost(message()) > envelope.freshTokens - cost(count)) content = `${header}: immutable report, ${Buffer.byteLength(result.text)} bytes. Read the full immutable report through task action report with taskId=${task.taskId} and offset/limit pages.`;
         const selectedMessage = message(); const selectedTokens = cost(selectedMessage);
         const selectedBytes = canonicalMessageBytes(selectedMessage);
         if (selectedTokens > tokens || selectedBytes > bytes) break;

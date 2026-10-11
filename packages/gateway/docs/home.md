@@ -1156,7 +1156,8 @@ do not drain the inbox.
   at 160 characters), outcome, subagent counts and elapsed milliseconds; it then presents
   the accepted report text and evidence items without serializing the canonical task or
   report record. Task/session identities, immutable report reference and terminal proof
-  remain in `details`.
+  remain in `details`. A never-fit report includes its task paging handle in the
+  reference text, because model payloads do not expose custom-message details.
 - **Ceiling (#749).** At most eight consecutive wake activations run with no user message
   between them. The count is derived from the canonical result messages: distinct
   operations that delivered results after the last user message, across chapters, read
