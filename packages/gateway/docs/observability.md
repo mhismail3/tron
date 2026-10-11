@@ -538,6 +538,12 @@ before the `chat.geometry.*`, `chat.viewport.transition` and
 only as a last resort. A composer flag missing from an export was therefore a
 repeat, or was reclaimed ahead of geometry — not a control the app never sampled.
 
+## Extension presentation callback diagnostics
+
+| Signal | Where to inspect | Meaning / action | Regression |
+| --- | --- | --- | --- |
+| `extensionPresentation.diagnostics` with `semantic.<operation>` | Session snapshot; oversized-widget integration failure includes the complete bounded presentation projection | A void extension callback was rejected without escaping into an unawaited timer. Inspect the host epoch, status and diagnostics together to distinguish rejection from a missing producer; a wait timeout alone does not establish either cause. | `runtime-registry.integration.test.ts`: oversized/JSON-dense widget timer must reach its completion status and leave widgets empty; timeout retains the projection and original cause. |
+
 ## Mac payload build diagnostics
 
 | Signal | Where to inspect | Meaning / action | Regression |
