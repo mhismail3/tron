@@ -57,21 +57,18 @@ struct ChatRoutes: ViewModifier {
     let onUseEditorRequest: (ComposerEditorRequest) -> Void
     let onKeepEditorRequest: (ComposerEditorRequest) -> Void
     @Binding var homeSheet: HomeSheetRoute?
-    /// The chat's canonical Stop authority, shown inside Manage Home (#740).
-    /// Nil only for fixtures that never present a Home sheet.
-    var homeStop: HomeSheetStopControl?
     @Environment(AppModel.self) private var model
     @State private var forkNavigation = ChatForkNavigationOwner()
 
     func body(content: Content) -> some View {
         content
             .tronManagedSheet(item: $homeSheet, identity: { $0.id }, onDismiss: completeStagedNavigationAfterDismissal) { route in
-                HomeSheet(destination: route.destination, profileID: route.profileID, stop: homeStop,
-                          onOpenChapter: { chapterSessionID in
-                              // Read-only chapter open: stage a profile-fenced ordinary
-                              // route, dismiss the sheet, navigate on its dismissal.
-                              guard let staged = try? model.navigationRouteForHomeChapter(
-                                  profileID: route.profileID, sessionID: chapterSessionID) else { return }
+                HomeSheet(destination: route.destination, profileID: route.profileID, sessionID: route.sessionID,
+                          onOpenSession: { openedSessionID in
+                              // Read-only open of a chapter or worker chat: stage a profile-fenced
+                              // ordinary route, dismiss the sheet, navigate on its dismissal.
+                              guard let staged = try? model.navigationRouteForHomeSession(
+                                  profileID: route.profileID, sessionID: openedSessionID) else { return }
                               forkNavigation.stage(staged)
                               homeSheet = nil
                           })

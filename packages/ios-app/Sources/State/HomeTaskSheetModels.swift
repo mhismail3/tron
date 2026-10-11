@@ -18,7 +18,11 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
         let taskId: String
         let createdAt: Int
         let updatedAt: Int
-        let title: String
+        /// The worker's name, else the brief's first line; absent on an older Gateway.
+        let title: String?
+        /// The target directory's last path component.
+        let project: String?
+        let workerSessionId: String?
         let target: String
         let lifecycle: HomeTaskLifecycle
         let outcome: HomeTaskOutcome?
@@ -28,7 +32,10 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
         var id: String { taskId }
         var valid: Bool {
             homeID(taskId) && safeHomeCount(createdAt) && safeHomeCount(updatedAt) && updatedAt >= createdAt
-                && title.unicodeScalars.count <= 160 && homeText(title, bytes: 640) && homeText(target, bytes: 4096)
+                && (title.map { $0.unicodeScalars.count <= 160 && homeText($0, bytes: 640) } ?? true)
+                && (project.map { homeText($0, bytes: 512) } ?? true)
+                && (workerSessionId.map(homeID) ?? true)
+                && homeText(target, bytes: 4096)
                 && target.hasPrefix("/") && ((lifecycle == .terminal) == (outcome != nil)) && (spend?.valid ?? true)
         }
     }
@@ -68,6 +75,11 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
     let createdAt: Int
     let updatedAt: Int
     let intent: Intent
+    /// The worker's name, else the brief's first line; absent on an older Gateway.
+    let title: String?
+    let project: String?
+    /// The worker chat Home delegated this task to; opened read-only from the task.
+    let workerSessionId: String?
     let target: String
     let lifecycle: HomeTaskLifecycle
     /// Stop and steer are fenced by this operation ID alone.
@@ -75,6 +87,30 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
     let spend: HomeTaskSpendDTO?
     let terminalEvidence: Terminal?
     let wake: Wake?
+    /// The worker's current model, read by the Gateway; absent on an older Gateway.
+    let workerModel: ModelRef?
+    let subagents: Subagents?
+    let subagentRuns: SubagentRuns?
+
+    /// Subagent launches the task admitted; `stoppedAtEnd` is nil when the Gateway cannot prove it.
+    struct Subagents: Decodable, Equatable, Sendable {
+        let started: Int
+        let stoppedAtEnd: Int?
+    }
+    /// The worker's live runs, newest first, at most 20 of `total`. Empty once the task settles.
+    struct SubagentRuns: Decodable, Equatable, Sendable {
+        struct Run: Decodable, Equatable, Sendable, Identifiable {
+            let runId: String
+            let agent: String
+            /// The run's own lifecycle state, shown as the pill's label.
+            let state: String
+            let startedAt: String
+            let lastActivityAt: String?
+            var id: String { runId }
+        }
+        let total: Int
+        let runs: [Run]
+    }
 
     static func decode(_ value: JSONValue, taskID: String) throws -> Self {
         let task = try value.decode(Self.self)
@@ -82,10 +118,16 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
               safeHomeCount(task.createdAt), safeHomeCount(task.updatedAt), task.updatedAt >= task.createdAt,
               homeText(task.intent.text, bytes: 65536), homeText(task.target, bytes: 4096),
               task.target.hasPrefix("/"), task.spend?.valid ?? true,
+              task.title.map({ $0.unicodeScalars.count <= 160 && homeText($0, bytes: 640) }) ?? true,
+              task.project.map({ homeText($0, bytes: 512) }) ?? true,
+              task.workerSessionId.map(homeID) ?? true,
               (task.lifecycle == .terminal) == (task.terminalEvidence != nil),
               (task.lifecycle == .terminal) == (task.wake != nil),
               task.operationId.map(homeID) ?? true, task.lifecycle != .active || task.operationId != nil,
-              task.wake.map({ $0.routeGeneration > 0 }) ?? true else { throw invalidHomeTask() }
+              task.wake.map({ $0.routeGeneration > 0 }) ?? true,
+              task.subagents.map({ $0.started >= 0 && ($0.stoppedAtEnd ?? 0) >= 0 }) ?? true,
+              task.subagentRuns.map({ $0.total >= 0 && $0.runs.count <= 20 && $0.runs.count <= $0.total }) ?? true,
+              task.workerModel.map({ !$0.provider.isEmpty && !$0.id.isEmpty }) ?? true else { throw invalidHomeTask() }
         return task
     }
 }
@@ -187,4 +229,28 @@ private func homeID(_ value: String) -> Bool {
 }
 private func invalidHomeTask() -> GatewayFailure {
     GatewayFailure(code: "invalid_response", message: "Home returned invalid task or permission metadata. Reload from the Gateway.", retryable: false, details: nil)
+}
+
+/// The task rows' and detail's derived text: one title rule and one state pill,
+/// so the list and the detail name a task the same way.
+enum HomeTaskPresentation {
+    /// The worker's name, else the brief's first non-empty line, else the project.
+    static func title(title: String?, briefText: String?, project: String?) -> String {
+        if let title, !title.isEmpty { return title }
+        if let line = briefText?.split(whereSeparator: \.isNewline).map({ $0.trimmingCharacters(in: .whitespaces) }).first(where: { !$0.isEmpty }) {
+            return String(line.prefix(80))
+        }
+        return project ?? "Untitled task"
+    }
+
+    /// Active, Pending, Stopped (interrupted), or Finished with the outcome named.
+    static func stateLabel(lifecycle: HomeTaskLifecycle, outcome: HomeTaskOutcome?) -> String {
+        switch lifecycle {
+        case .pending: return "Pending"
+        case .active: return "Active"
+        case .terminal:
+            if outcome == .interrupted { return "Stopped" }
+            return "Finished · \((outcome?.rawValue ?? "unknown").replacingOccurrences(of: "-", with: " ").capitalized)"
+        }
+    }
 }

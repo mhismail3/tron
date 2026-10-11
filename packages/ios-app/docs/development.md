@@ -42,7 +42,7 @@ and old reads arriving after a completion refresh. A user action captures the
 profile/lifecycle authority before its asynchronous task starts; mutations are
 not cancelled with presentation reads. Hosted `TronSmokeUITests` Manage Home
 journeys mount production chat and cover represented states, the existing Stop
-owner (now a sheet row), active-response pause, resume, disable,
+owner (the composer's Stop; Manage Home has no Stop row), active-response pause, resume, disable,
 background/reconnect and explicit unresolved completion.
 `testManageHomeRejectsStaleRouteAction` retains an actual mounted sheet
 callback, authenticates a successor profile, and proves the old
@@ -63,8 +63,8 @@ These simulator stills are not VoiceOver, animation, live Gateway or physical-de
 
 `testHomeCrossSurfaceProofMatrix` is the cross-surface proof for the Home stack. In one
 hosted run it mounts the production chat in light and dark, at normal and accessibility
-Dynamic Type, opens Manage Home from the composer context ring and each child sheet from it (memory
-settings, Home context, browse memory, chapters, tasks and permissions) and captures each. It proves background
+Dynamic Type, opens Manage Home from the composer context ring and each child sheet from it (Home context,
+memory, chapters, tasks and permissions) and captures each. It proves background
 and a hosted reconnect on the tasks sheet each start a fresh authoritative read:
 `fixture.home-task-list-reads` counts the Gateway's `home.taskList` calls. The Home
 fixture forwards scene transitions to the lifecycle as production does, and
@@ -80,15 +80,28 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeStatesAndStopOwner \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeAcceptedControlContinuesInBackground \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeBackgroundReconnectAndUnresolvedCompletion \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeRejectsStaleRouteAction \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskListStopSteerAndRedelivery \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskDetailOpensWorkerChat \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomePermissionRevokeRequiresConfirmation \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetDismissesWhenProfileSwitches \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowCapabilityDesignationAndExactProfileRoute \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeRolloverPendingRoutesSendAndFollowsSuccessor \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetsLoadingEmptyBlockedErrorAndReload \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeContextShowsBreakdownWithoutRawIdentifiers \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeMemoryRowDetailOpensExactEvidence \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChaptersSealedOpensTranscriptActiveBrowsesMemory \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeMemoryModelRowSelectsPhysicalModel \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSettingsRefusalAndEmptyCatalogAndBrowserCapability \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeMainSheetStructure \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeSubSheetsOpenAtMedium \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeSheetCaptureMatrix \
+  --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeUnresolvedDisableRetainsCompletionControl \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomePauseResumeDisableKeepsChat \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatStatusPollingResumesAfterCoveredManageHomeSheet \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetDismissesWhenProfileSwitches \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeRolloverPendingRoutesSendAndFollowsSuccessor \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowCapabilityDesignationAndExactProfileRoute \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeChatStatusPollingResumesAfterCoveredManageHomeSheet \
   --only-testing TronMobileUITests/TronSmokeUITests/testComposerContextRingOpensManageHomeInHomeAndManageSessionElsewhere \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeIsNotAnOrdinarySessionRowWhileWorking \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomePinnedRowNamesRunningDesignationAsUpdate

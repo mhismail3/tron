@@ -223,13 +223,7 @@ struct ChatView: View {
                 guard let target = presentationTarget else { return }
                 model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
             },
-            homeSheet: $homeSheet,
-            // Manage Home's Stop reads the chat's canonical operation authority
-            // live, never an ID captured when the sheet was presented (#740).
-            homeStop: HomeSheetStopControl(
-                canStop: { admitsLiveSessionCommands && selectedAuthoritativeSnapshot?.operation != nil },
-                perform: abortCurrentOperation
-            )
+            homeSheet: $homeSheet
         ))
         .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in
@@ -2753,7 +2747,7 @@ struct ChatView: View {
     /// context ring is its one caller; false leaves the ring's Manage Session sheet.
     private func presentManageHome() -> Bool {
         guard let (profileID, _) = manageHomeContext else { return false }
-        homeSheet = HomeSheetRoute(profileID: profileID, destination: .manage)
+        homeSheet = HomeSheetRoute(profileID: profileID, sessionID: sessionID, destination: .manage)
         return true
     }
 
