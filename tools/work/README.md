@@ -101,6 +101,6 @@ and idempotent recovery after a partial close. Regenerable evidence is written t
 
 `python3 scripts/test-work-handoff.py` exercises handoff through the real CLI and Git
 in an isolated fixture. It checks unknown owner refusal, non-interactive force refusal,
-that refusal leaves dirty files untouched, and missing-worktree refusal without recreation.
-Evidence is written to
+TTY-confirmed takeover through real Git, dirty-file preservation, exact public audit
+contents, idempotent retry, and missing-worktree refusal without recreation. Evidence is written to
 `test-results/work-handoff.json`.

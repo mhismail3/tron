@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Process-level claim-handoff checks with real Git and an isolated gh fixture."""
 from __future__ import annotations
-import json, os, shutil, subprocess, sys, tempfile
+import json, os, pty, select, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,6 +18,7 @@ def run():
         def git(cwd,*args): return subprocess.run(["git",*args],cwd=cwd,env=env,check=True,capture_output=True,text=True).stdout.strip()
         git(repo,"init","-b","main"); git(repo,"config","user.name","Fixture"); git(repo,"config","user.email","fixture@example.invalid")
         (repo/".github").mkdir(); shutil.copy(ROOT/".github/work.json",repo/".github/work.json")
+        (repo/"scripts").mkdir(); shutil.copy(ROOT/"scripts/personal-info-guard.sh",repo/"scripts/personal-info-guard.sh")
         git(repo,"add",".github/work.json"); git(repo,"commit","-m","base")
         git(remote.parent,"init","--bare",str(remote)); git(repo,"remote","add","origin",str(remote)); git(repo,"push","origin","main")
         git(repo,"checkout","-b","feat/41-fixture"); git(repo,"commit","--allow-empty","-m","Claim\n\nWork-Claim-Issue: 41\nWork-Claim-Session: old-owner")
@@ -36,11 +37,49 @@ def run():
         evidence.append({"case":"force requires TTY","exit":r.returncode,"stderr":r.stderr.strip()})
         assert r.returncode and "interactive terminal" in r.stderr and git(worktree,"rev-parse","HEAD")==before
         assert (worktree/"dirty.txt").read_text()=="keep me\n"
+        # A real PTY is required for the maintainer-only override. This journey
+        # exercises the CLI, Git push/ref CAS, public audit, dirty preservation,
+        # and same-transition retry idempotency without contacting production.
+        pid, terminal = pty.fork()
+        if pid == 0:
+            os.chdir(worktree)
+            os.execve(sys.executable, [sys.executable, str(cli), "handoff", "41", "--session", "new-owner",
+                "--reason", "fixture takeover", "--force-maintainer"], env)
+        output = b""
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and b"> " not in output:
+            ready, _, _ = select.select([terminal], [], [], 1)
+            if ready:
+                try: output += os.read(terminal, 4096)
+                except OSError: break
+        os.write(terminal, b"HANDOFF #41 FROM old-owner\n")
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([terminal], [], [], 1)
+            if ready:
+                try: output += os.read(terminal, 4096)
+                except OSError: break
+            waited, status = os.waitpid(pid, os.WNOHANG)
+            if waited: break
+        else:
+            os.kill(pid, 9); _, status = os.waitpid(pid, 0)
+        code = os.waitstatus_to_exitcode(status)
+        evidence.append({"case":"TTY force takeover succeeds with audit", "exit":code, "output":output.decode(errors="replace")[-1000:]})
+        assert code == 0, output.decode(errors="replace")
+        handed = git(worktree,"rev-parse","HEAD")
+        assert git(worktree,"rev-parse","origin/feat/41-fixture") == handed
+        assert (worktree/"dirty.txt").read_text()=="keep me\n"
+        comments=json.loads(state.read_text())["comments"]
+        assert len(comments)==1 and "old-owner" in comments[0] and "new-owner" in comments[0] and "fixture takeover" in comments[0] and handed in comments[0]
+        writes_before=len(json.loads(state.read_text())["writes"])
+        retry=call("handoff","41","--session","new-owner","--reason","ignored retry reason")
+        assert retry.returncode == 0, retry.stderr
+        assert len(json.loads(state.read_text())["writes"]) == writes_before
+        evidence.append({"case":"repeat same transition adds no audit writes", "exit":retry.returncode})
         git(repo,"worktree","remove","--force",str(worktree))
         r=call("handoff","41","--session","new-owner","--reason","owner settled")
         evidence.append({"case":"missing worktree refuses without recreation","exit":r.returncode,"stderr":r.stderr.strip()})
         assert r.returncode and "worktree is missing" in r.stderr and not worktree.exists()
-        assert json.loads(state.read_text())["writes"]==[]
-        print(f"Passed {len(evidence)} handoff refusal journeys; evidence: {artifact}")
+        assert len(json.loads(state.read_text())["writes"]) == writes_before
+        print(f"Passed {len(evidence)} handoff journeys; evidence: {artifact}")
     finally: artifact.write_text(json.dumps(evidence,indent=2)+"\n")
 if __name__=="__main__": run()
