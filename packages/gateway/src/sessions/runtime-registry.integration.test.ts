@@ -9044,7 +9044,7 @@ export default function (pi) {
     expect(existsSync(markerPath) ? readFileSync(markerPath, "utf8") : undefined, "a marker write landed after dispose").toEqual(markerAtDispose);
   });
 
-  it("keeps main's interrupted receipt when a Stop fails and the run then completes on its own", async () => {
+  it("records completed when SDK Stop fails before cancellation and the real run finishes naturally", async () => {
     const root = await temporaryRoot("tron-abort-failed-stop-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -9073,22 +9073,26 @@ export default function (pi) {
     await agentAdmitted;
     const session = (slot as unknown as { runtime: { session: { abort(): Promise<void> } } }).runtime.session;
     const sdkAbort = session.abort.bind(session);
+    // Inject refusal only at the SDK cancellation boundary. The Registry, Pi
+    // session/model run, event settlement, and canonical receipt I/O remain real.
     session.abort = async () => { throw new Error("abort refused"); };
     try {
       await expect(slot.abort("agent")).rejects.toThrow(/did not stop/);
     } finally {
       session.abort = sdkAbort;
+      release();
+      await prompt;
     }
-    release();
-    await prompt;
     await waitFor(() => !slot.isBusy, "the slot to go idle");
     const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
     const terminals = entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.receiptKind === "terminal");
-    // The user Stop intent outlives the failed attempt. This matches main, which
-    // records the same receipt; whether a failed Stop should instead record
-    // completed is a separate main-branch decision.
     expect(terminals).toHaveLength(1);
-    expect(terminals[0]?.data).toMatchObject({ lifecycle: "interrupted", errorCode: "user-abort" });
+    await mkdir("test-results", { recursive: true });
+    await writeFile("test-results/failed-stop-natural-completion.json", JSON.stringify({
+      lifecycle: terminals[0]?.data.lifecycle, errorCode: terminals[0]?.data.errorCode ?? null,
+    }, null, 2));
+    expect(terminals[0]?.data).toMatchObject({ lifecycle: "completed" });
+    expect(terminals[0]?.data.errorCode).toBeUndefined();
   });
 
   it("records a completed receipt for a Stop that arrives after a natural completion", async () => {
