@@ -171,7 +171,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         try setProxyMode(fixture, mode: "await-intercepted")
         XCTAssertTrue(app.buttons["Conversation unavailable"].waitForExistence(timeout: 30),
                       "a Gateway rejection must leave a persistent inline failure over retained rows")
-        Thread.sleep(forTimeInterval: 13) // Exceed the existing catch-up notice lifetime.
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: transientNotice
+        )], timeout: 30), .completed,
+                       "the transient catch-up notice must retire before qualifying persistent failure")
         keepScreenshot(app, name: "393-simulator-persistent-gateway-failure")
         XCTAssertTrue(app.buttons["Conversation unavailable"].isHittable)
         XCTAssertTrue(sameRouteReply.isHittable, "Gateway failure covered the retained transcript")
