@@ -1015,6 +1015,27 @@ task record:
 it is `0`. Every Home result header states both counts. Settlement emits
 `home.task.subagents`.
 
+**Owner lifecycle is not work success.** For a terminal `unknown:no-report` task,
+`home.taskStatus.ownerSettlement` is either `null` or a bounded read-only proof:
+`{ taskId, sessionId, operationId, markerEntryId, terminalEntryId, settlementEntryId,
+stoppedAtEnd }`. The dispatcher reads a durable canonical file cut and requires a
+unique exact task marker, matching Gateway invocation start/terminal receipts, and
+an ordered subagent settlement receipt at the end of the cut. The marker binds the
+task, Home generation, session and operation; the invocation binds the same session,
+operation and Gateway task origin. Missing, malformed, ambiguous, mismatched or
+racing evidence stays unproven. A terminal invocation with unknown lifecycle and a
+failed child settlement (`stoppedAtEnd: null`) also refuse. A successful join may
+record zero stops when children finished naturally. No async settlement receipt is
+not proof, even when projected live-run counts are zero: terminal `subagentRuns` is
+synthetic. Task identity/lifecycle is rechecked after projection awaits. The local
+claim helper rechecks status and the same operation/proof before returning `settled`;
+other unknown reasons (including cold recovery, detached work and failed stops)
+remain excluded. This never turns `unknown` into a successful work outcome or grants
+control of another task. The proof requires an updated Gateway and rebuilt helper;
+an old Gateway remains fail-closed. The canonical corruption/race regression is in
+`home-task-subagents.e2e.test.ts`; `scripts/test-work-handoff.py` exercises the built
+helper and real claim command, including refusal preservation and status races.
+
 **Task waits across turns.** A task turn that ends normally (its final assistant message
 stopped with `stop`, not `length`, `error` or `aborted`) without a report, while the task
 owns live work, does not settle the task. The task holds its operation open between turns.
@@ -1352,7 +1373,7 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.resumeMemory` | `commandId` | receipted | Clears pause and or block, re-reads canonical deltas and restarts the pump without awaiting catch-up. A memory that is neither paused nor blocked refuses with conflict. An empty Home resumes without creating a store. |
 | `home.reconfirmPermissions` | `commandId` | receipted | Re-stamps active standing scopes to the current epoch. See [Authorization](#authorization). |
 | `home.taskList` | `limit?` (1–50, default 20), `cursor?` (at most 1,024 characters) | read | Maintainer summary: each row with its `title`, `project` and `sessionId`, and the result's exact `counts` (`active`, `finished`) over the whole store; see [Control and spend status](#control-and-spend-status). |
-| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record (its `sessionId` is the worker session), `title`, `project`, active operation, spend, immutable result, worker model, subagent counts and live subagent runs. |
+| `home.taskStatus` | `taskId` (at most 160 characters) | read | Record (its `sessionId` is the worker session), `title`, `project`, active operation, spend, immutable result, worker model, subagent counts, live subagent runs and nullable canonical owner-settlement proof. |
 | `home.taskPermissions` | none | read | Strict scopes, requests, decisions and grants with the revision. Refuses before the first dispatch, never granting permission. |
 | `home.steerTask` | `commandId`, `taskId`, `operationId`, `text` (at most 64 KiB) | receipted | Steers the exact active operation. It cannot start a successor. |
 | `home.stopTask` | `commandId`, `taskId`, `operationId` | receipted | Persists the exact Stop intent and joins terminal settlement. Repeatable after settlement without repeating cancellation. |
