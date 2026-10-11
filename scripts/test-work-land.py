@@ -42,6 +42,10 @@ def fixture_gh() -> None:
             # Advance main after the first publication. land must remerge and republish.
             advance_main(state)
             response = pull(7, state["first_head"])
+        elif state.get("remote_unavailable_on_second_patch"):
+            # Lose only this fixture's remote transport after publication, not its data.
+            git(state, "remote", "set-url", "origin", str(Path(state["root"]) / "unavailable.git"))
+            response = pull(7, actual)
         elif state["foreign_on_second_patch"]:
             foreign_commit(state)
             response = pull(7, git(state, "rev-parse", "refs/heads/feature"))
@@ -172,6 +176,21 @@ def run() -> None:
                              "stdout": result.stdout, "stderr": result.stderr})
             assert result.returncode != 0 and "publication state is uncertain" in result.stderr, evidence[-1]
             assert "someone else pushed" not in result.stderr
+            assert json.loads((root / "github.json").read_text())["merge_sha"] is None
+
+            run_git("checkout", "-b", "feature-unavailable", "origin/main")
+            run_git("commit", "--allow-empty", "-m", "unavailable-control")
+            run_git("push", "origin", "HEAD:refs/heads/feature-unavailable")
+            state.update({"branch": "feature-unavailable", "patch_count": 0,
+                          "first_head": run_git("rev-parse", "HEAD"), "actual_head": "", "merge_sha": None,
+                          "stale_forever": False, "remote_unavailable_on_second_patch": True})
+            (root / "github.json").write_text(json.dumps(state))
+            result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=90)
+            evidence.append({"case": "remote observation failure refuses with uncertainty", "exit": result.returncode,
+                             "stdout": result.stdout, "stderr": result.stderr})
+            assert result.returncode != 0 and "could not confirm remote branch" in result.stderr, evidence[-1]
+            assert "publication state is uncertain" in result.stderr
+            assert json.loads((root / "github.json").read_text())["merge_sha"] is None
         print(f"Passed {len(evidence)} real-CLI land publication assertions; evidence: {artifact}")
     finally:
         artifact.write_text(json.dumps(evidence, indent=2) + "\n")

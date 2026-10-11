@@ -81,7 +81,7 @@ deletes the local branch and the remote branch with a lease on the proven head.
 - **Unverified code is merged.** The squash merge names the verified commit, so GitHub
   refuses it if the branch changed. A base that moved is re-merged and re-verified first.
   After publishing, land checks the remote branch and, when the PR response is stale,
-  re-reads the PR at most three times. A different remote SHA is a foreign branch move;
+  re-reads the PR at most twice (three observations including publication). A different remote SHA is a foreign branch move;
   an unchanged expected remote SHA paired with a persistently stale PR is reported as
   uncertain and must be observed again by rerunning land. Neither path weakens the
   exact-SHA merge request. A base that moves in the instant between the final check and
@@ -100,7 +100,8 @@ repository when a change touches Git, GitHub or cleanup behavior.
 `python3 scripts/test-work-land.py` exercises land through the real CLI, temporary Git
 remote, and process-level GitHub fixture. It covers a base advance followed by a stale
 PR PATCH response and fresh PR observation, refusal of a genuine remote branch move,
-and truthful uncertainty when the PR projection remains stale. Evidence is written to
+and truthful uncertainty when the PR projection remains stale or the remote ref cannot
+be read. Evidence is written to
 `test-results/work-land.json`; the fixture repository, home, and temporary files are
 removed on exit.
 
