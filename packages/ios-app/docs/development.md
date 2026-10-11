@@ -941,7 +941,35 @@ The other real-boundary owners are:
 - `scripts/ios-gateway-e2e-test all` runs `TronMobileE2ETests`
   (`RealGatewayPiBoundaryTests`) against a real Gateway fixture.
 - `scripts/ios-gateway-e2e-test run-ui` runs the real-app journeys in
-  `UITests/RealGateway`, each against a fresh fixture.
+  `UITests/RealGateway`, each against a fresh fixture. The focused
+  `TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground`
+  journey first keeps the route mounted across a real proxy blackhole, then
+  holds the replacement `session.open` response after foreground admission. It
+  requires the pinned transcript to remain present without the full opening
+  surface and its reply frame to remain within three points of the pre-loss
+  position. In that same mounted route it types a full unsent draft, requires the
+  composer keyboard to remain visible through transport retirement and held
+  replacement, checks composer geometry, then types without refocusing to prove
+  retained responder/caret ownership. It waits for the transient app notice to
+  expire before checking the visible persistent recovery pill. `reject-open`
+  asks the real Gateway for an absent session and forwards its actual `not_found`
+  response: the inline failure and Retry remain usable over retained rows after
+  the catch-up notice lifetime, and Retry restores command admission. No proxy
+  response fabricates a Gateway error.
+  The long prompt permits a real non-tail reader gesture; the test targets the
+  conversation scroll view, not the separate one-point status-bar scroll owner.
+  Its anchor stays within three points through loss and a held replacement open.
+  `replace-held-open` discards that old socket/answer and holds the next transport's
+  open too, so the test observes both sides of the in-flight replacement before
+  allowing synchronization and returning to the tail. It separately navigates
+  back, reopens during a blackhole, taps Retry offline, verifies waiting rather
+  than a spinner, and requires automatic opening when the path returns.
+  `393-simulator-*` xcresult attachments show these scenarios. Navigation retires
+  the prior snapshot; only the same-route cases qualify retention. These are
+  simulator/network-boundary checks, not physical-device or exhaustive scheduler
+  interleaving proof. The Gateway's `rpc.error`/`rpc.completed` records identify
+  the actual rejected `session.open`; phone `session.open.failure` records
+  distinguish Gateway answers from transport-local failures.
 - `TronMobileProfiling` (scheme `Tron Device Performance`) holds the
   performance-measurement scenarios. It is never a validation gate; see
   [performance-baseline.md](performance-baseline.md).

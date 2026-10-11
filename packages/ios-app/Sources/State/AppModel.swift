@@ -245,7 +245,8 @@ final class AppModel {
     /// unresolved. The UI must not infer "unpaired" from the temporary default.
     var hasResolvedLaunchState: Bool { lifecycle.hasResolvedLaunchState }
     var gatewayInfo: GatewayInfo? { lifecycle.gatewayInfo }
-    private var gatewayConnectionID: Int? { lifecycle.connectionID }
+    /// Disposable transport identity for presentation attempts; never command authority.
+    var gatewayConnectionID: Int? { lifecycle.connectionID }
     private var sessionCatalog = SessionCatalogCoordinator()
     private let dashboardConnections: DashboardGatewayConnectionPool
     private let sessionSearch = SessionSearchCoordinator()
@@ -1686,7 +1687,9 @@ final class AppModel {
                 role: .warning,
                 priority: .high,
                 title: lifecycle.noPathPresentation?.label ?? "Gateway connection unavailable",
-                message: "Your conversation and draft are retained. Retry Connection and Logs are available in Settings.",
+                // App-scoped recovery may appear during a first open, before
+                // this route ever received a transcript. Do not promise retention.
+                message: "Retry Connection and Logs are available in Settings.",
                 lifetime: .automatic(.seconds(8))
             )
         )
@@ -5573,6 +5576,10 @@ extension AppModel: SessionPresentationStoreDelegate {
         target: SessionPresentationTarget
     ) {
         composerDrafts.failOperation(operationID, target: target)
+    }
+
+    func hasFailedConversationSynchronization(sessionID: String) -> Bool {
+        sessionPresentation.hasFailedSynchronization(for: sessionID)
     }
 
     func retryConversationSynchronization(target: SessionPresentationIdentity) async -> Bool {

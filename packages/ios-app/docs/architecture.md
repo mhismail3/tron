@@ -1508,6 +1508,25 @@ immediate revocation; revoking this iPhone also removes its local profile.
 
 ## Presentation parity
 
+An interrupted initial chat open has a distinct `waitingForConnection` phase.
+The opening owner starts no open lease or timeout without lifecycle admission;
+Retry while disconnected remains waiting rather than turning a cancellation into
+an unexplained spinner. Retirement of the opening's captured transport is
+resumable on the existing connected callback, not a second reconnect loop.
+A same-session installed transcript with a retained authoritative snapshot stays
+visible independently of subscription admission. Its persistent recovery treatment
+uses the shared transcript notice and Retry pills in the route's usable viewport,
+above the edge blur—not in the flipped transcript or a new structural inset.
+It reads lifecycle admission and the synchronization owner's existing exact-target,
+connection-generation failure latch; transient app notices do not own this state.
+Retry on a failed mounted synchronization uses that owner's retry operation. A
+fresh route without a snapshot keeps the full empty-state treatment and never
+claims retention. Gateway failures on an unchanged admitted transport remain
+explicit failures; replacing the transport makes interrupted opens resumable.
+The real-UI pairing/chat journey checks pinned and anchored continuity, draft and
+responder preservation, persistent inline failures, disconnected Retry, and a
+transport replacement while a previous open response is still held.
+
 Home uses the ordinary `ChatView` transcript, composer, route and focus owners;
 there is no Home header bar (#740). The composer context ring of a
 chat that claims the Home status opens Manage Home (its gear opens Settings, #799), where the state pill, memory line and every Home
