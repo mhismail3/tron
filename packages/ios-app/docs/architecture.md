@@ -726,7 +726,12 @@ show; the push flags stage the relay's payload through `PushNotificationTap.admi
 `floors` scenario of `HostedProjectTrustFixture`).
 The generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is
 `SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
-in `TronPresentation.swift`. It sends
+in `TronPresentation.swift`. Its bounded, expandable section cards stay mounted in
+an ordinary vertical stack, like Settings: lazy eviction of expanding glass cards
+can continuously invalidate SwiftUI's layout graph during a scroll. The fixture-schema
+and secret/list journeys exercise scrolling through those cards and subsequent editing;
+a main-thread sample distinguishes this layout hang from a Gateway request timeout.
+It sends
 `SettingsRendererContract` (version 1; `toggle`, `choice`, `number`, `text`, `secret`,
 `list`, `catalog`, `readOnly`) with `settings.resolve` and renders whatever comes back: sections in Gateway order
 with their summary (essential values, overrides with a layer badge, waiting approvals, recent

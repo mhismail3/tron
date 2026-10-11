@@ -41,7 +41,10 @@ struct SettingsRendererView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 20) {
+            // These bounded section cards own expanding glass surfaces and editor
+            // state. Keep them mounted while scrolling, like the Settings owner:
+            // lazy eviction can repeatedly invalidate the glass layout graph.
+            VStack(alignment: .leading, spacing: 20) {
                 TronSearchBar(text: $search, prompt: "Search settings")
                 if let resolution {
                     content(resolution)
@@ -100,7 +103,7 @@ struct SettingsRendererView: View {
                 .tronGlassSurface(accent: .tronEmerald)
                 .accessibilityIdentifier("settings-renderer-all")
             if showsAll {
-                // One child of the lazy stack: its sections reuse the summary sections' ids.
+                // One child group: its sections reuse the summary sections' ids.
                 VStack(alignment: .leading, spacing: 20) {
                     ForEach(Self.sections(resolution)) { section in
                         TronSettingsGroup(section.title, detail: section.note) {
