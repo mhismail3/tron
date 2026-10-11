@@ -931,7 +931,7 @@ one on every delegation.
 - Trusted extensions are not a sandbox. If detached-work tracking still sees
   task-session work after the subagent join, the outcome is `unknown` with
   `detached-work-outlived-task`, never a clean-termination claim.
-- A task waits across turns while it owns live work (see [Task waits](#task-waits-across-turns)).
+- A task waits across turns while it owns live work (see [Subagent runs](#subagent-runs)).
   Only the task's own turns and its provider wakes run in its operation; a wake that
   arrives while the task is not waiting is refused as before.
 
