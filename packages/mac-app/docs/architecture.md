@@ -59,9 +59,13 @@ profile starts.
 User Quit is owned by `MacQuitCoordinator`, reached through AppKit's deferred
 termination callback. It reads the exact Stable Gateway PID, command and process
 start identity, sends one authenticated receipt-backed `gateway.stop` command,
-then waits until that process is gone with no replacement PID. Only then does it
-join native-host retirement. An unavailable response, runtime change, failed
-Gateway exit or failed native drain keeps the wrapper open; there is no forced
+then waits until that process is gone with no replacement PID. The drain itself
+is unbounded: only after `gateway.stopped` records that exact PID does a five-
+second exit-stall deadline begin. If it expires, Quit fails closed and keeps
+Tron open; the wrapper never kills the intentional-stop process because launchd
+could relaunch it as a crash. Only confirmed process disappearance joins
+native-host retirement. An unavailable response, runtime change, failed Gateway
+exit or failed native drain keeps the wrapper open; there is no forced
 termination, automatic retry or permission bypass. A manual retry for the same
 captured runtime reuses its command ID. A retry after the Gateway has stopped
 resumes at native-host retirement only while the Login Item stays enabled and

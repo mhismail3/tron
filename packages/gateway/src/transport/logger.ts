@@ -42,6 +42,8 @@ export interface LogRecord {
   /** Retired legacy connection instance IDs. */
   instanceIds?: readonly string[];
   commandId?: string;
+  /** Process identity for lifecycle records observed across supervisor boundaries. */
+  pid?: number;
   /** A named lifecycle step, such as a startup checkpoint. */
   step?: string;
   /** Sanitized transport request correlation; never a session or payload ID. */
@@ -103,7 +105,7 @@ export interface LogRecord {
   error?: LogError;
 }
 
-export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "boundary" | "chapterOrdinal" | "crossingBytes" | "crossingEntries" | "settledBytes" | "settledEntries"> {
+export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "boundary" | "chapterOrdinal" | "crossingBytes" | "crossingEntries" | "settledBytes" | "settledEntries" | "pid"> {
   event?: string;
   source?: string;
   kind?: string;
@@ -344,6 +346,7 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(counterField(value.settledEntries) !== undefined ? { settledEntries: value.settledEntries } : {}),
     ...(typeof value.cause === "string" ? { cause: boundedDiagnosticID(value.cause).slice(0, 64) } : {}),
     ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
+    ...(Number.isSafeInteger(value.pid) && Number(value.pid) > 0 ? { pid: Number(value.pid) } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
     ...(typeof value.stages === "string" ? { stages: boundedStages(value.stages) } : {}),
     ...(typeof value.stage === "string" ? { stage: boundedDiagnosticID(value.stage).slice(0, 64) } : {}),

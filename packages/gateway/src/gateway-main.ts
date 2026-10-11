@@ -583,7 +583,7 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
   // The last record of this process: the next process's gateway.started
   // follows after launchd and the launcher.
   const recordStopped = (code: number): void => logger.log(code === 0 ? "info" : "warning", `Gateway stopped (exit ${code}) after ${Math.round(performance.now() - stoppingAt)} ms of shutdown`, {
-    event: "gateway.stopped", source: "lifecycle", code: String(code), durationMs: performance.now() - stoppingAt,
+    event: "gateway.stopped", source: "lifecycle", code: String(code), pid: process.pid, durationMs: performance.now() - stoppingAt,
   });
   logger.log("info", `Stopping gateway (${reason})`, { event: "gateway.stopping", source: "lifecycle" });
   const forced = drainAcceptedWork ? undefined : setTimeout(() => { recordStopped(1); exitAfterShutdown(1, gatewayLogPath); }, 15_000);
