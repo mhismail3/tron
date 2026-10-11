@@ -152,7 +152,7 @@ describe("Home task subagents", () => {
     const missionFiles = (await readdir(missionRoot, { recursive: true })).filter(path => path.endsWith(".json"));
     const missionRows = await Promise.all(missionFiles.map(async path => JSON.parse(await readFile(join(missionRoot, path), "utf8")) as {
       status: string; runs: Array<{ runId: string; status: string }>;
-    })));
+    }));
     const linkedMissions = missionRows.filter(row => row.runs.some(run => run.runId === runId));
     const evidence = { runState: await asyncState(launch!.details!.asyncDir as string),
       missions: linkedMissions.map(row => ({ status: row.status, run: row.runs.find(run => run.runId === runId)?.status })) };
