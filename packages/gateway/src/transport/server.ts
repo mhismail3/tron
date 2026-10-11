@@ -3393,7 +3393,7 @@ export class GatewayServer {
       // A reader that rejects must still leave a record: the silence is the
       // point, the path is the detail.
       peer: this.peerPaths.lookup(connection.remoteAddress)
-        .catch((): PeerPathLookup => ({ peerPath: "unknown", peerRelay: "" })),
+        .catch((): PeerPathLookup => ({ peerPath: "unknown", peerPathSource: "cli-failed", peerRelay: "" })),
     };
     connection.silence = episode;
     void episode.peer.then((peer) => {
@@ -3401,9 +3401,12 @@ export class GatewayServer {
       episode.reported = true;
       // The message reports the silence observed at detection; the resume
       // record carries the episode's full duration.
-      this.options.logger.log("warning", `Client ${connection.id} has sent nothing for ${episode.detectedMs}ms (unansweredPingMs=${episode.detectedPingMs ?? "none"} peerPath=${peer.peerPath} peerRelay=${peer.peerRelay || "none"})`, {
+      this.options.logger.log("warning", `Client ${connection.id} has sent nothing for ${episode.detectedMs}ms (unansweredPingMs=${episode.detectedPingMs ?? "none"} peerPath=${peer.peerPath} peerPathSource=${peer.peerPathSource} peerRelay=${peer.peerRelay || "none"})`, {
         event: "connection.inbound-silent", source: "transport", connectionId: connection.id, ...connection.peer,
-        peerPath: peer.peerPath, peerRelay: peer.peerRelay,
+        peerPath: peer.peerPath, peerPathSource: peer.peerPathSource, peerRelay: peer.peerRelay,
+        ...(peer.peerLastHandshake !== undefined ? { peerLastHandshake: peer.peerLastHandshake } : {}),
+        ...(peer.peerRxBytes !== undefined ? { peerRxBytes: peer.peerRxBytes } : {}),
+        ...(peer.peerTxBytes !== undefined ? { peerTxBytes: peer.peerTxBytes } : {}),
       });
       if (episode.resumedAt !== undefined) this.logInboundResumed(connection, episode);
     });
