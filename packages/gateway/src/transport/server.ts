@@ -710,6 +710,14 @@ type UpgradePhase = "request" | "auth" | "handshake" | "hello";
  * (the developer loopback default). The phone names the same two real legs. */
 export type ConnectionTransport = "lan" | "tailscale" | "primary";
 
+interface HttpConnectionTrace {
+  acceptedAt: number;
+  handled: boolean;
+  transportEnd: "reset" | "timeout" | "fin" | "none";
+  code?: string;
+  tlsFailed?: boolean;
+}
+
 /** One `http.upgrade` record is written per upgrade, at whichever point it ends:
  * hello, a refusal, or the peer leaving before hello. */
 interface UpgradeTrace {
@@ -717,6 +725,7 @@ interface UpgradeTrace {
   transport: ConnectionTransport;
   /** The TCP accept, before Node parsed the upgrade request. */
   acceptAt: number;
+  transportTrace: HttpConnectionTrace | undefined;
   /** The upgrade handler entry; the auth phase is measured from here. */
   startedAt: number;
   /** Null until the credential wait settles. */
@@ -1044,9 +1053,9 @@ export class GatewayServer {
    * cause: a socket the Gateway destroys is not a peer departure. */
   private readonly pendingUpgrades = new Set<() => void>();
   private readonly httpConnectionsByAddress = new Map<string, number>();
-  /** The TCP accept instant per HTTP socket, so an upgrade record can say how
-   * long the request waited before Node dispatched it. */
-  private readonly httpSocketAcceptedAt = new WeakMap<object, number>();
+  /** One physical accept owns the trace; its TLS wrapper shares it. No request
+   * contents or peer address are retained in diagnostic records. */
+  private readonly httpSocketTraces = new WeakMap<object, HttpConnectionTrace>();
   private readonly httpAdmission: HttpTransportAdmission;
   /** The transport's only Tailscale reader; it shares one bounded status read
    * between every socket that goes silent in the same window. */
@@ -1127,7 +1136,8 @@ export class GatewayServer {
     const listenerLimits = HTTP_LISTENER_LIMITS;
     this.server = createServer(httpListenerOptions(listenerLimits), (request, response) => void this.handleHttp(request, response, this.primaryTransport));
     this.server.timeout = listenerLimits.idleTimeout;
-    this.server.on("connection", (socket) => this.admitHttpConnection(socket, maximumHttpConnections));
+    this.server.on("connection", (socket) => this.admitHttpConnection(socket, maximumHttpConnections, this.primaryTransport));
+    this.server.on("clientError", (error, socket) => this.httpClientError(error, socket));
     // The LAN listener shares this transport's admission, capacity, heartbeat,
     // revocation and hello; only its address, its certificate and the routes it
     // refuses are its own.
@@ -1137,8 +1147,10 @@ export class GatewayServer {
         logger: options.logger,
         port: options.port,
         listenerLimits,
-        onConnection: (socket) => this.admitHttpConnection(socket, maximumHttpConnections),
-        onSecureConnection: (socket) => this.adoptAcceptedSocketTime(socket),
+        onConnection: (socket) => this.admitHttpConnection(socket, maximumHttpConnections, "lan"),
+        onSecureConnection: (socket) => { this.adoptAcceptedSocketTrace(socket); },
+        onClientError: (error, socket) => this.httpClientError(error, socket),
+        onTlsClientError: (error, socket) => this.noteTransportError(error, socket, true),
         onRequest: (request, response) => void this.handleHttp(request, response, "lan"),
         onUpgrade: (request, socket, head) => void this.handleUpgrade(request, socket, head, "lan"),
       });
@@ -1208,7 +1220,7 @@ export class GatewayServer {
 
   /** Every physical socket of every listener enters here, so the capacity bound
    * counts the Gateway's whole HTTP surface, not one address. */
-  private admitHttpConnection(socket: Duplex, maximumHttpConnections: number): void {
+  private admitHttpConnection(socket: Duplex, maximumHttpConnections: number, transport: ConnectionTransport): void {
     const address = acceptedSocketAddress(socket);
     const addressConnections = this.httpConnectionsByAddress.get(address) ?? 0;
     if (this.httpSockets.size >= maximumHttpConnections
@@ -1220,32 +1232,82 @@ export class GatewayServer {
       return;
     }
     this.httpSockets.add(socket);
-    this.httpSocketAcceptedAt.set(socket, performance.now());
+    const trace: HttpConnectionTrace = { acceptedAt: performance.now(), handled: false, transportEnd: "none" };
+    this.httpSocketTraces.set(socket, trace);
+    this.observeTransportEnd(socket, trace);
     this.httpConnectionsByAddress.set(address, addressConnections + 1);
     socket.once("close", () => {
       this.httpSockets.delete(socket);
-      // `httpSocketAcceptedAt` is a WeakMap: the accept time it holds for this
-      // socket's upgrade is released with the socket, so it needs no delete.
+      if (!trace.handled) {
+        const bytesRead = (socket as { bytesRead?: number }).bytesRead ?? 0;
+        const reason = trace.tlsFailed ? "tls_error"
+          : trace.code && trace.code !== "HPE_INVALID_EOF_STATE" && trace.code !== "ERR_HTTP_REQUEST_TIMEOUT" ? "invalid_http"
+          : bytesRead === 0 ? "silent" : transport === "lan" ? "incomplete_tls_or_http" : "partial_http";
+        this.options.logger.log("warning", "Accepted connection closed before an HTTP handler", {
+          event: "http.connection-unused", source: "transport", transport, reason,
+          acceptToCloseMs: performance.now() - trace.acceptedAt, bytesRead,
+          transportEnd: trace.transportEnd, ...(trace.code ? { code: trace.code } : {}),
+        });
+      }
       const count = this.httpConnectionsByAddress.get(address)!;
       if (count === 1) this.httpConnectionsByAddress.delete(address);
       else this.httpConnectionsByAddress.set(address, count - 1);
     });
   }
 
-  /** Carries the accept time recorded at `connection` to the `TLSSocket` a TLS
-   * listener later hands the upgrade handler: `tls.Server` does not give the
-   * wrapped socket back, and a lookup that misses reports zero elapsed time for
-   * every lane upgrade — exactly the TLS handshake the field exists to show. */
-  private adoptAcceptedSocketTime(socket: Duplex): void {
+  /** A TLS wrapper and its accepted socket share one trace and one close
+   * record. The bounded live socket set is already the admission authority. */
+  private adoptAcceptedSocketTrace(socket: Duplex): HttpConnectionTrace | undefined {
+    const existing = this.httpSocketTraces.get(socket);
+    if (existing) return existing;
     const address = acceptedSocketAddress(socket);
     const port = acceptedSocketPort(socket);
-    if (port === undefined) return;
+    if (port === undefined) return undefined;
     for (const accepted of this.httpSockets) {
       if (acceptedSocketPort(accepted) !== port || acceptedSocketAddress(accepted) !== address) continue;
-      const acceptedAt = this.httpSocketAcceptedAt.get(accepted);
-      if (acceptedAt !== undefined) this.httpSocketAcceptedAt.set(socket, acceptedAt);
-      return;
+      const trace = this.httpSocketTraces.get(accepted);
+      if (trace) {
+        this.httpSocketTraces.set(socket, trace);
+        this.observeTransportEnd(socket, trace);
+      }
+      return trace;
     }
+    return undefined;
+  }
+
+  private observeTransportEnd(socket: Duplex, trace: HttpConnectionTrace): void {
+    // Install before ws: its socket error handler consumes the TCP error rather
+    // than forwarding it to WebSocket's error event.
+    socket.on("error", (error) => this.noteTransportError(error, socket));
+    socket.once("timeout", () => { if (trace.transportEnd !== "reset") trace.transportEnd = "timeout"; });
+    socket.once("end", () => { if (trace.transportEnd === "none") trace.transportEnd = "fin"; });
+  }
+
+  private noteTransportError(error: Error, socket: Duplex, tls = false): void {
+    const trace = this.adoptAcceptedSocketTrace(socket);
+    if (!trace) return;
+    const code = (error as NodeJS.ErrnoException).code;
+    // Only platform error identifiers, never error messages or rawPacket.
+    if (code && /^[A-Z][A-Z0-9_]{0,63}$/u.test(code)) trace.code = code;
+    if (code === "ECONNRESET") trace.transportEnd = "reset";
+    else if (code === "ETIMEDOUT" || code === "ERR_HTTP_REQUEST_TIMEOUT" || code === "ERR_TLS_HANDSHAKE_TIMEOUT") trace.transportEnd = "timeout";
+    if (tls) trace.tlsFailed = true;
+  }
+
+  private httpClientError(error: Error, socket: Duplex): void {
+    this.noteTransportError(error, socket);
+    // Owning clientError replaces Node's default responder (including HTTPS's
+    // TLS-error retirement). Preserve its response/header guard and immediate
+    // destroy; ending an incomplete TLS handshake can otherwise hang forever.
+    const code = (error as NodeJS.ErrnoException).code;
+    const activeResponse = (socket as Duplex & { _httpMessage?: ServerResponse })._httpMessage;
+    if (socket.writable && !activeResponse?.headersSent && (code?.startsWith("HPE_") || code === "ERR_HTTP_REQUEST_TIMEOUT")) {
+      const status = code === "HPE_HEADER_OVERFLOW" ? "431 Request Header Fields Too Large"
+        : code === "HPE_CHUNK_EXTENSIONS_OVERFLOW" ? "413 Payload Too Large"
+        : code === "ERR_HTTP_REQUEST_TIMEOUT" ? "408 Request Timeout" : "400 Bad Request";
+      socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+    }
+    socket.destroy(error);
   }
 
   private async publishResources(): Promise<void> {
@@ -1550,6 +1612,8 @@ export class GatewayServer {
   }
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse, transport: ConnectionTransport): Promise<void> {
+    const trace = this.adoptAcceptedSocketTrace(request.socket);
+    if (trace) trace.handled = true;
     // Node's server timeout covers idle request/socket time, while this
     // response timeout also retires a stream stalled after its headers were
     // written. Route leases still own exact reader/viewer release.
@@ -1947,11 +2011,14 @@ export class GatewayServer {
   }
 
   private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, transport: ConnectionTransport): Promise<void> {
+    const transportTrace = this.adoptAcceptedSocketTrace(socket);
+    if (transportTrace) transportTrace.handled = true;
     const remoteAddress = request.socket.remoteAddress ?? "unknown";
     // One record per upgrade, written wherever this attempt ends.
     const trace: UpgradeTrace = {
       transport,
-      acceptAt: this.httpSocketAcceptedAt.get(socket) ?? performance.now(),
+      acceptAt: transportTrace?.acceptedAt ?? performance.now(),
+      transportTrace,
       startedAt: performance.now(),
       authMs: null,
       handshakeAt: null,
@@ -3221,7 +3288,8 @@ export class GatewayServer {
       connection.isLocal ? "debug" : "info",
       `Client ${connection.id} connection closed after ${Math.max(0, Math.round(closedAt - connection.admittedAt))}ms (${detail}; ${outbound.completedFrames}/${outbound.acceptedFrames} outbound frames completed, ${outbound.queuedBytes} queued bytes; lastInboundAgeMs=${progressAge(connection.lastInboundAt, closedAt)} lastWriteProgressAgeMs=${progressAge(connection.lastWriteProgressAt, closedAt)} queuedFrames=${outbound.queuedFrames} queuedBytes=${outbound.queuedBytes} completedFrames=${outbound.completedFrames})${closeHostEvidence}`,
       { event: "connection.closed", source: "transport", connectionId: connection.id, ...connection.peer,
-        durationMs: Math.max(0, closedAt - connection.admittedAt) },
+        durationMs: Math.max(0, closedAt - connection.admittedAt),
+        transportEnd: connection.upgrade.transportTrace?.transportEnd ?? "none" },
     );
     clearTimeout(connection.closeDeadline);
     this.retireConnectionWork(connection);
