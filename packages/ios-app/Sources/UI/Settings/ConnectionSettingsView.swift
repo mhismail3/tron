@@ -593,6 +593,15 @@ struct GatewayConnectionDetailView: View {
                         ) {
                             GatewayConnectionStatusBadge(state: status)
                         }
+                        if let lastConnectedAt = model.dashboardLastConnectedAt(for: currentProfile.id) {
+                            TronSettingsDivider(accent: statusColor)
+                            TronValueRow(
+                                icon: "clock",
+                                title: "Last connected",
+                                detail: lastConnectedAt.formatted(date: .abbreviated, time: .shortened),
+                                accent: statusColor
+                            )
+                        }
                         if let stopReason = profileStopReason {
                             TronSettingsDivider(accent: .tronError)
                             TronValueRow(
