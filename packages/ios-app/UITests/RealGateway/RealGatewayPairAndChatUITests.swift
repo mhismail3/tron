@@ -30,7 +30,8 @@ import XCTest
 /// fixture argument.
 final class RealGatewayPairAndChatUITests: XCTestCase {
     /// The prompt this journey sends; its text is asserted from the transcript.
-    private let prompt = "Fixture journey: verify the real Gateway round trip"
+    private let prompt = "Fixture journey: verify the real Gateway round trip\n"
+        + (1...18).map { "Continuity anchor line \($0): keep this conversation visible." }.joined(separator: "\n")
     /// The first tokens the faux provider streams, so the reply is readable while
     /// the fixture is still delivering it.
     private let replyPrefix = "Streaming response starts now"
@@ -105,13 +106,33 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // Keep this route mounted: unlike navigating back to the dashboard,
         // retiring its transport must not retire the last installed transcript.
         let sameRouteReply = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+        composer.tap()
+        var unsentDraft = "Unsent recovery draft: keep every word and the keyboard."
+        composer.typeText(unsentDraft)
+        XCTAssertEqual(composer.value as? String, unsentDraft,
+                       "the retained route must expose the complete unsent draft")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10),
+                      "the composer keyboard must be present before transport retirement")
         let replyFrameBeforeLoss = sameRouteReply.frame
+        let composerFrameBeforeLoss = composer.frame
         try setProxyMode(fixture, mode: "blackhole")
         defer { try? setProxyMode(fixture, mode: "pass") }
         XCTAssertTrue(app.staticTexts["Gateway connection unavailable"].waitForExistence(timeout: 60),
                       "the real transport did not retire: \(app.debugDescription)")
         XCTAssertTrue(sameRouteReply.exists, "connection retirement removed the mounted transcript")
+        XCTAssertEqual(composer.value as? String, unsentDraft,
+                       "transport retirement must preserve the entire unsent draft")
+        XCTAssertTrue(app.keyboards.firstMatch.exists,
+                      "transport retirement must not dismiss the active composer keyboard")
         keepScreenshot(app, name: "393-simulator-same-route-transport-retired")
+        let transientNotice = app.descendants(matching: .any).matching(identifier: "in-app-notice-card").firstMatch
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: transientNotice
+        )], timeout: 20), .completed)
+        keepScreenshot(app, name: "393-simulator-retained-after-transient-notice")
+        XCTAssertTrue(app.buttons["Waiting for connection"].isHittable,
+                      "the mounted chat must keep its visible inline lifecycle reason after the transient notice expires")
+        XCTAssertTrue(sameRouteReply.isHittable, "recovery must not cover the retained reply")
         try setProxyMode(fixture, mode: "pass")
         try setProxyMode(fixture, mode: "hold-open")
         // Foreground admission owns an immediate attempt; the response barrier
@@ -128,8 +149,92 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                        "a retained conversation must not be hidden by the full opening surface")
         XCTAssertEqual(sameRouteReply.frame.minY, replyFrameBeforeLoss.minY, accuracy: 3,
                        "the pinned transcript moved while its replacement open was held")
+        XCTAssertEqual(composer.value as? String, unsentDraft,
+                       "the replacement open must preserve the full draft")
+        XCTAssertTrue(app.keyboards.firstMatch.exists,
+                      "the held replacement open must preserve the active composer keyboard")
+        XCTAssertEqual(composer.frame.minY, composerFrameBeforeLoss.minY, accuracy: 3)
+        XCTAssertEqual(composer.frame.height, composerFrameBeforeLoss.height, accuracy: 3)
+        // Type without refocusing: a visible keyboard alone does not prove the
+        // same draft still owns its responder/caret after replacement.
+        app.typeText(" Still editing.")
+        unsentDraft += " Still editing."
+        XCTAssertEqual(composer.value as? String, unsentDraft)
         try setProxyMode(fixture, mode: "pass")
         XCTAssertTrue(sameRouteReply.waitForExistence(timeout: 60))
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), "replacement authority did not become ready")
+
+        // A definitive answer from the real Gateway is not transport loss. The
+        // proxy asks for an absent session, then forwards the actual rejection.
+        try setProxyMode(fixture, mode: "reject-open")
+        try setProxyMode(fixture, mode: "close", code: 1012)
+        try setProxyMode(fixture, mode: "await-intercepted")
+        XCTAssertTrue(app.buttons["Conversation unavailable"].waitForExistence(timeout: 30),
+                      "a Gateway rejection must leave a persistent inline failure over retained rows")
+        Thread.sleep(forTimeInterval: 13) // Exceed the existing catch-up notice lifetime.
+        keepScreenshot(app, name: "393-simulator-persistent-gateway-failure")
+        XCTAssertTrue(app.buttons["Conversation unavailable"].isHittable)
+        XCTAssertTrue(sameRouteReply.isHittable, "Gateway failure covered the retained transcript")
+        XCTAssertEqual(composer.value as? String, unsentDraft)
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertFalse(app.otherElements["Opening conversation"].exists)
+        try setProxyMode(fixture, mode: "pass")
+        XCTAssertTrue(waitForHittable(app.buttons["Retry"], timeout: 10))
+        app.buttons["Retry"].tap()
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), "explicit retry did not restore command authority")
+
+        // A real reader detaches from the tail; this is not a short transcript
+        // that happens to fit in the viewport. Scrolling intentionally dismisses
+        // the keyboard, separately from the pinned keyboard-preservation checks.
+        let transcriptScroll = app.scrollViews.containing(
+            NSPredicate(format: "label CONTAINS %@", "real Gateway round trip")
+        ).firstMatch
+        XCTAssertTrue(transcriptScroll.exists)
+        // The separate status-bar scroll owner is a 1-point UIScrollView; target
+        // the actual conversation and keep the gesture above the keyboard.
+        let readerStart = transcriptScroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+        let readerEnd = transcriptScroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48))
+        readerStart.press(forDuration: 0.1, thenDragTo: readerEnd)
+        readerStart.press(forDuration: 0.1, thenDragTo: readerEnd)
+        keepScreenshot(app, name: "393-simulator-reader-detaches")
+        XCTAssertTrue(app.buttons["Catch up"].waitForExistence(timeout: 10),
+                      "the reader did not leave the pinned tail: \(app.debugDescription)")
+        XCTAssertTrue(sent.isHittable)
+        let anchorFrame = sent.frame
+        try setProxyMode(fixture, mode: "blackhole")
+        XCTAssertTrue(app.buttons["Waiting for connection"].waitForExistence(timeout: 60))
+        XCTAssertEqual(sent.frame.minY, anchorFrame.minY, accuracy: 3,
+                       "transport retirement moved the anchored reader")
+        try setProxyMode(fixture, mode: "pass")
+        try setProxyMode(fixture, mode: "hold-open")
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(waitForBackground(app, timeout: 60))
+        app.activate()
+        XCTAssertTrue(waitForForeground(app, timeout: 90))
+        try setProxyMode(fixture, mode: "await-intercepted")
+        keepScreenshot(app, name: "393-simulator-anchored-replacement-held")
+        XCTAssertTrue(sent.isHittable)
+        XCTAssertEqual(sent.frame.minY, anchorFrame.minY, accuracy: 3,
+                       "replacement open repinned the anchored reader")
+        XCTAssertEqual(composer.value as? String, unsentDraft)
+        XCTAssertFalse(app.otherElements["Opening conversation"].exists)
+        // Retire an in-flight replacement before its held answer can install.
+        // The replacement transport must win without publishing a stale failure.
+        try setProxyMode(fixture, mode: "replace-held-open")
+        try setProxyMode(fixture, mode: "await-intercepted")
+        keepScreenshot(app, name: "393-simulator-replacement-transport-open-held")
+        XCTAssertTrue(sent.isHittable)
+        XCTAssertEqual(sent.frame.minY, anchorFrame.minY, accuracy: 3)
+        XCTAssertFalse(app.buttons["Conversation unavailable"].exists)
+        XCTAssertFalse(app.otherElements["Opening conversation"].exists)
+        try setProxyMode(fixture, mode: "pass")
+        XCTAssertTrue(waitForEnabled(send, timeout: 60))
+        XCTAssertEqual(sent.frame.minY, anchorFrame.minY, accuracy: 3)
+        XCTAssertEqual(composer.value as? String, unsentDraft)
+        XCTAssertFalse(app.staticTexts["Conversation unavailable"].exists)
+        XCTAssertTrue(app.buttons["Catch up"].exists)
+        app.buttons["Catch up"].tap()
+        XCTAssertTrue(waitForHittable(sameRouteReply, timeout: 30))
 
         // A real background and foreground, the transitions a phone performs.
         // The app must reach a background session before it is activated again,
@@ -397,13 +502,15 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    private func setProxyMode(_ fixture: RealGatewayUIFixture, mode: String) throws {
+    private func setProxyMode(_ fixture: RealGatewayUIFixture, mode: String, code: Int? = nil) throws {
         let token = try XCTUnwrap(ProcessInfo.processInfo.environment["TRON_E2E_PROXY_TOKEN"])
         var request = URLRequest(url: try XCTUnwrap(URL(string: "http://\(fixture.host):\(fixture.port)/_fixture/control")))
         request.httpMethod = "POST"
         request.setValue(token, forHTTPHeaderField: "x-tron-fixture-token")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["mode": mode])
+        var control: [String: Any] = ["mode": mode]
+        if let code { control["code"] = code }
+        request.httpBody = try JSONSerialization.data(withJSONObject: control)
         let completed = expectation(description: "fixture proxy \(mode)")
         URLSession.shared.dataTask(with: request) { _, response, error in
             XCTAssertNil(error)

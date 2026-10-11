@@ -1513,12 +1513,19 @@ The opening owner starts no open lease or timeout without lifecycle admission;
 Retry while disconnected remains waiting rather than turning a cancellation into
 an unexplained spinner. Retirement of the opening's captured transport is
 resumable on the existing connected callback, not a second reconnect loop.
-The waiting surface reuses the conversation-unavailable typography, spacing and
-Retry control, and never claims that a newly navigated route retained a transcript.
-Gateway failures on the unchanged admitted transport remain explicit failures.
-The real-UI pairing/chat journey covers interrupted open, disconnected Retry and
-automatic re-opening; anchored-scroll and retained-transcript failure coverage
-remain separate requirements of #393.
+A same-session installed transcript with a retained authoritative snapshot stays
+visible independently of subscription admission. Its persistent recovery treatment
+uses the shared transcript notice and Retry pills in the route's usable viewport,
+above the edge blur—not in the flipped transcript or a new structural inset.
+It reads lifecycle admission and the synchronization owner's existing exact-target,
+connection-generation failure latch; transient app notices do not own this state.
+Retry on a failed mounted synchronization uses that owner's retry operation. A
+fresh route without a snapshot keeps the full empty-state treatment and never
+claims retention. Gateway failures on an unchanged admitted transport remain
+explicit failures; replacing the transport makes interrupted opens resumable.
+The real-UI pairing/chat journey checks pinned and anchored continuity, draft and
+responder preservation, persistent inline failures, disconnected Retry, and a
+transport replacement while a previous open response is still held.
 
 Home uses the ordinary `ChatView` transcript, composer, route and focus owners;
 there is no Home header bar (#740). The composer context ring of a

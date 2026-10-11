@@ -5578,6 +5578,10 @@ extension AppModel: SessionPresentationStoreDelegate {
         composerDrafts.failOperation(operationID, target: target)
     }
 
+    func hasFailedConversationSynchronization(sessionID: String) -> Bool {
+        sessionPresentation.hasFailedSynchronization(for: sessionID)
+    }
+
     func retryConversationSynchronization(target: SessionPresentationIdentity) async -> Bool {
         guard connectionState == .connected, sessionPresentation.mountedTarget == target else { return false }
         return await sessionPresentation.retryMountedSynchronization(target: target)

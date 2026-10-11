@@ -145,6 +145,11 @@ struct ChatView: View {
     private var contentSurface: some View {
         transcript
             .overlay(alignment: .top) { topBlur }
+            // Recovery is route chrome, not flipped/edge-to-edge transcript
+            // content. Keep it in the native usable viewport above the blur.
+            .overlay(alignment: .top) {
+                if hasRetainedTranscript { openingSurface }
+            }
             .overlay {
                 // The inset and native navigation/keyboard layout propose the
                 // same usable region to this overlay as to the transcript.
@@ -1234,7 +1239,11 @@ struct ChatView: View {
             orientation: transcriptOrientation,
             scrollPosition: $transcriptScrollPosition,
             earlierRow: { installed in earlierMessagesChip(installed: installed) },
-            openingSurface: { openingSurface },
+            openingSurface: {
+                Group {
+                    if !hasRetainedTranscript { openingSurface }
+                }
+            },
             onEditQueuedMessage: { sessionPresentation.queuedMessageEditor = .init(id: $0) },
             onClearQueuedMessages: { Task { await clearQueuedMessages() } },
             onMoveQueuedMessage: { id, offset in
@@ -1816,7 +1825,37 @@ struct ChatView: View {
         presentationActivity.allowsViewportObservation
     }
 
+    /// Display continuity belongs to the same-session snapshot, not to the
+    /// disposable subscription that is replaced while reconnecting.
+    private var hasRetainedTranscript: Bool {
+        guard let installed = transcriptPresentation.installed,
+              installed.tag.sessionID == sessionID,
+              model.authoritativeSnapshot(for: sessionID)?.sessionId == sessionID,
+              composerScope.map({ $0.profileID == model.profiles.selected?.id }) ?? true else { return false }
+        return true
+    }
+
     @ViewBuilder private var openingSurface: some View {
+        if hasRetainedTranscript && !model.admitsSessionPresentationOpen {
+            openingUnavailableSurface(
+                title: "Waiting for connection",
+                message: "This conversation will resume when the Mac reconnects."
+            )
+        } else if hasRetainedTranscript && model.hasFailedConversationSynchronization(sessionID: sessionID) {
+            openingUnavailableSurface(
+                title: "Conversation unavailable",
+                message: "The conversation could not catch up. Retry to reconnect the live view."
+            )
+        } else if hasRetainedTranscript {
+            if case .failed(let message) = sessionPresentation.open.phase {
+                openingUnavailableSurface(title: "Conversation unavailable", message: message)
+            }
+        } else {
+            openingPhaseSurface
+        }
+    }
+
+    @ViewBuilder private var openingPhaseSurface: some View {
         switch sessionPresentation.open.phase {
         case .opening, .positioning, .revealing, .presenting:
             ZStack {
@@ -1850,7 +1889,35 @@ struct ChatView: View {
         }
     }
 
-    private func openingUnavailableSurface(title: String, message: String) -> some View {
+    @ViewBuilder private func openingUnavailableSurface(title: String, message: String) -> some View {
+        if hasRetainedTranscript {
+            VStack {
+                HStack(spacing: 8) {
+                    TranscriptNotice(title: title, detailBody: message,
+                                     icon: "exclamationmark.triangle.fill", tone: .warning)
+                    Button("Retry") {
+                        Task {
+                            if model.hasFailedConversationSynchronization(sessionID: sessionID),
+                               let target = model.presentationTarget(for: sessionID) {
+                                _ = await model.retryConversationSynchronization(target: target)
+                            } else {
+                                await beginOpeningPresentation(retryingFailure: true)
+                            }
+                        }
+                    }
+                        .buttonStyle(.plain)
+                        .chatTranscriptPill()
+                }
+                .padding(.horizontal, 12)
+                Spacer().allowsHitTesting(false)
+            }
+            .padding(.top, 12)
+        } else {
+            openingEmptyUnavailableSurface(title: title, message: message)
+        }
+    }
+
+    private func openingEmptyUnavailableSurface(title: String, message: String) -> some View {
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Color.tronError)
