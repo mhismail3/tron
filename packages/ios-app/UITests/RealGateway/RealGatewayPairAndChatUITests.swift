@@ -102,6 +102,35 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         )
         keepScreenshot(app, name: "424-real-ui-pair-prompt-streamed-reply")
 
+        // Keep this route mounted: unlike navigating back to the dashboard,
+        // retiring its transport must not retire the last installed transcript.
+        let sameRouteReply = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+        let replyFrameBeforeLoss = sameRouteReply.frame
+        try setProxyMode(fixture, mode: "blackhole")
+        defer { try? setProxyMode(fixture, mode: "pass") }
+        XCTAssertTrue(app.staticTexts["Gateway connection unavailable"].waitForExistence(timeout: 60),
+                      "the real transport did not retire: \(app.debugDescription)")
+        XCTAssertTrue(sameRouteReply.exists, "connection retirement removed the mounted transcript")
+        keepScreenshot(app, name: "393-simulator-same-route-transport-retired")
+        try setProxyMode(fixture, mode: "pass")
+        try setProxyMode(fixture, mode: "hold-open")
+        // Foreground admission owns an immediate attempt; the response barrier
+        // below proves that the new subscription has not finished installing.
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(waitForBackground(app, timeout: 60))
+        app.activate()
+        XCTAssertTrue(waitForForeground(app, timeout: 90))
+        try setProxyMode(fixture, mode: "await-intercepted")
+        keepScreenshot(app, name: "393-simulator-same-route-reopen-held")
+        XCTAssertTrue(sameRouteReply.exists,
+                      "subscription replacement discarded the same-session transcript")
+        XCTAssertFalse(app.otherElements["Opening conversation"].exists,
+                       "a retained conversation must not be hidden by the full opening surface")
+        XCTAssertEqual(sameRouteReply.frame.minY, replyFrameBeforeLoss.minY, accuracy: 3,
+                       "the pinned transcript moved while its replacement open was held")
+        try setProxyMode(fixture, mode: "pass")
+        XCTAssertTrue(sameRouteReply.waitForExistence(timeout: 60))
+
         // A real background and foreground, the transitions a phone performs.
         // The app must reach a background session before it is activated again,
         // which is what retires the socket and reconnects (the harness asserts

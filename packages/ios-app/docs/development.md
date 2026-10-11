@@ -943,12 +943,17 @@ The other real-boundary owners are:
 - `scripts/ios-gateway-e2e-test run-ui` runs the real-app journeys in
   `UITests/RealGateway`, each against a fresh fixture. The focused
   `TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground`
-  journey also blackholes the real proxy while reopening a conversation, taps
-  Retry offline, verifies an explicit waiting state instead of a spinner, then
-  restores the path and requires automatic opening without another tap. Its
-  `393-simulator-*` xcresult attachments show those states. Navigating back
-  retired the prior snapshot; this case does not assert offline retention of it
-  or anchored-scroll continuity.
+  journey first keeps the route mounted across a real proxy blackhole, then
+  holds the replacement `session.open` response after foreground admission. It
+  requires the pinned transcript to remain present without the full opening
+  surface and its reply frame to remain within three points of the pre-loss
+  position. It separately navigates back, reopens during a blackhole, taps Retry
+  offline, verifies an explicit waiting state instead of a spinner, then restores
+  the path and requires automatic opening without another tap. Its
+  `393-simulator-*` xcresult attachments show both scenarios. The navigation case
+  retires the prior snapshot; only the same-route case qualifies retention. This
+  journey does not yet qualify anchored-scroll continuity, draft/keyboard identity,
+  or Gateway-failure versus transport-failure races.
 - `TronMobileProfiling` (scheme `Tron Device Performance`) holds the
   performance-measurement scenarios. It is never a validation gate; see
   [performance-baseline.md](performance-baseline.md).
