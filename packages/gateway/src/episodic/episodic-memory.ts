@@ -707,7 +707,7 @@ export class EpisodicMemory {
     // A merged line has no single speaker. Do not scan its entire historical
     // span on every render, or claim a model-written sentence is user-authored.
     const kind = span === 1 ? this.messages.get(start)?.kind : "summary";
-    return `${kind ?? "summary"}: ${viewLine(text)}`;
+    return `${kind ?? "summary"}: ${span === 1 ? viewLine(text) : text.replace(/\n+/gu, " ")}`;
   }
 
   private setNode(record: EpisodicNodeRecord): void {
