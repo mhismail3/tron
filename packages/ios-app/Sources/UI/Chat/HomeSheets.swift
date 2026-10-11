@@ -74,6 +74,15 @@ struct HomeMemoryOrigin: Hashable, Sendable {
     let chapterOrdinal: Int?
 }
 
+/// A Home control's admission, captured when the user taps it. A confirmation
+/// covers its sheet, which then stops being active, so the confirmed command runs
+/// under the identity and authority the tap admitted rather than re-reading them.
+struct HomeControlAdmission {
+    let identity: HomeSheetReadIdentity
+    let coordinator: PresentationActivityCoordinator
+    let authority: HomeMutationCoordinator.Authority
+}
+
 /// A Home sheet the chat presents for one profile. Choosing another destination
 /// for that profile replaces the open sheet; the chat's route owner releases the
 /// chat, and with it this sheet, when the selected profile changes.
@@ -122,6 +131,7 @@ struct HomeSheet: View {
     @State var childDestination: HomeSheetDestination?
     @State var mutationFailure: String?
     @State var confirmingDisable = false
+    @State var disableAdmission: HomeControlAdmission?
     @State private var sliderPresentation = ConfigurationSliderPresentation()
 
     init(destination: HomeSheetDestination, profileID: String, sessionID: String? = nil,
@@ -268,17 +278,28 @@ struct HomeSheet: View {
 
     /// Accepted domain commands keep the chat's authority rules: acquire once
     /// for the mounted profile, then let the coordinator own receipt resolution.
-    func perform(_ command: HomeMutationCoordinator.Command) {
+    func admitControl() -> HomeControlAdmission? {
         guard let identity, let coordinator, active,
-              let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
+              let authority = try? model.homeMutations.authority(profileID: profileID) else { return nil }
+        return HomeControlAdmission(identity: identity, coordinator: coordinator, authority: authority)
+    }
+
+    func perform(_ command: HomeMutationCoordinator.Command) {
+        guard let admission = admitControl() else { return }
+        run(command, admission)
+    }
+
+    func run(_ command: HomeMutationCoordinator.Command, _ admission: HomeControlAdmission) {
         Task { @MainActor in
             do {
-                try await model.performHomeControl(command, authority: authority)
-                guard self.identity == identity, coordinator.activity(for: identity.surfaceToken).allowsDataPublication else { return }
+                try await model.performHomeControl(command, authority: admission.authority)
+                guard self.identity == admission.identity,
+                      admission.coordinator.activity(for: admission.identity.surfaceToken).allowsDataPublication else { return }
                 mutationFailure = nil
                 refreshAfterMutation()
             } catch {
-                guard self.identity == identity, coordinator.activity(for: identity.surfaceToken).allowsDataPublication,
+                guard self.identity == admission.identity,
+                      admission.coordinator.activity(for: admission.identity.surfaceToken).allowsDataPublication,
                       !(error is CancellationError) else { return }
                 mutationFailure = error.localizedDescription
             }

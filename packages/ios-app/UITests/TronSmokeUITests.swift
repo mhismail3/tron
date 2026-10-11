@@ -453,9 +453,9 @@ final class TronSmokeUITests: XCTestCase {
         choice.tap()
         XCTAssertTrue(choice.waitForExistence(timeout: 5))
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "fixture/memory-b", timeout: 5))
-        choice.tap() // Receipt is terminal while the fresh canonical status is still loading.
-        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Selected"), object: choice)
-        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 5), .completed)
+        choice.tap() // The receipt is terminal while the covered sheet cannot re-read status: the choice stays applying.
+        let applying = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Applying configuration"), object: choice)
+        XCTAssertEqual(XCTWaiter.wait(for: [applying], timeout: 5), .completed)
         choice.tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
         let done = try? XCTUnwrap(app.buttons.matching(identifier: "Done").allElementsBoundByIndex.first(where: \.isHittable))
@@ -833,18 +833,20 @@ final class TronSmokeUITests: XCTestCase {
         openManageHome(app)
         tapManageRow(app, "home-manage-pause")
         let state = app.descendants(matching: .any)["home-manage-state"]
-        XCTAssertTrue(waitForLabel(state, containing: "unresolved", timeout: 8))
+        // The unresolved command is the Memory row's subtitle; the state pill keeps the Home phase.
+        let memoryRow = app.descendants(matching: .any)["home-manage-memory-browser"]
+        XCTAssertTrue(waitForLabel(memoryRow, containing: "unresolved", timeout: 8))
         keepScreenshot(named: "manage-home-unresolved")
         XCUIDevice.shared.press(.home)
         app.activate()
         XCTAssertTrue(state.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(waitForLabel(state, containing: "unresolved", timeout: 5))
+        XCTAssertTrue(waitForLabel(memoryRow, containing: "unresolved", timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-pause"].exists)
         tapManageRow(app, "home-manage-check-completion")
         // The first check finds the receipt still pending and must not claim completion.
         XCTAssertTrue(waitForLabel(state, containing: "unresolved", timeout: 5))
         tapManageRow(app, "home-manage-check-completion")
-        XCTAssertTrue(waitForLabel(state, containing: "Memory paused", timeout: 5))
+        XCTAssertTrue(waitForLabel(state, containing: "Paused", timeout: 5))
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
         keepScreenshot(named: "manage-home-reconnected-paused")
         app.terminate()

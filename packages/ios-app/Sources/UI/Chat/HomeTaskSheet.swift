@@ -21,13 +21,18 @@ struct HomeTaskSheet: View {
     @State var steering = ""
     @State var expiry = Date.now
     @State var briefExpanded = false
-    @State var revoking: HomeRevocation?
+    @State var revoking: PendingRevocation?
 
-    /// A standing scope or one-use grant the user is about to revoke.
-    enum HomeRevocation: Identifiable {
-        case scope(String), grant(String)
+    /// A standing scope or one-use grant the user is about to revoke, with the
+    /// admission its tap captured before the confirmation covered this sheet.
+    struct PendingRevocation: Identifiable {
+        enum Target {
+            case scope(String), grant(String)
+        }
+        let target: Target
+        let admission: HomeControlAdmission
         var id: String {
-            switch self {
+            switch target {
             case .scope(let id): "scope.\(id)"
             case .grant(let id): "grant.\(id)"
             }
@@ -89,14 +94,14 @@ struct HomeTaskSheet: View {
         .tronManagedSheet(item: $child, identity: { "home.\(profileID).\($0.id)" }) {
             HomeSheet(destination: $0, profileID: profileID, onOpenSession: onOpenSession)
         }
-        .tronManagedSheet(item: $revoking, identity: { "home.\(profileID).revoke.\($0.id)" }) { target in
+        .tronManagedSheet(item: $revoking, identity: { "home.\(profileID).revoke.\($0.id)" }) { pending in
             TronConfirmationSheet(
-                title: target.title,
-                message: target.message,
+                title: pending.target.title,
+                message: pending.target.message,
                 confirmTitle: "Revoke",
                 destructive: true,
                 icon: "lock.slash",
-                onConfirm: { mutate(target.command) }
+                onConfirm: { run(pending.target.command, pending.admission) }
             )
         }
         .onDisappear { owner.retire() }
@@ -405,22 +410,39 @@ struct HomeTaskSheet: View {
         }
     }
 
-    func mutate(_ command: HomeMutationCoordinator.Command) {
+    /// Admits a mutation against the installed read; nil while the read is not current.
+    func admitMutation() -> HomeControlAdmission? {
         guard canMutate, let identity, let coordinator,
-              let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
+              let authority = try? model.homeMutations.authority(profileID: profileID) else { return nil }
+        return HomeControlAdmission(identity: identity, coordinator: coordinator, authority: authority)
+    }
+
+    func mutate(_ command: HomeMutationCoordinator.Command) {
+        guard let admission = admitMutation() else { return }
+        run(command, admission)
+    }
+
+    func run(_ command: HomeMutationCoordinator.Command, _ admission: HomeControlAdmission) {
         let intent = requestID
         Task { @MainActor in
             do {
-                try await model.performHomeControl(command, authority: authority)
-                guard self.identity == identity, self.requestID == intent,
-                      coordinator.activity(for: identity.surfaceToken).allowsPresentationPublication else { return }
+                try await model.performHomeControl(command, authority: admission.authority)
+                guard self.identity == admission.identity, self.requestID == intent,
+                      admission.coordinator.activity(for: admission.identity.surfaceToken).allowsPresentationPublication else { return }
                 failure = nil; steering = ""; reload()
             } catch {
-                guard self.identity == identity, self.requestID == intent,
-                      coordinator.activity(for: identity.surfaceToken).allowsPresentationPublication, !(error is CancellationError) else { return }
+                guard self.identity == admission.identity, self.requestID == intent,
+                      admission.coordinator.activity(for: admission.identity.surfaceToken).allowsPresentationPublication,
+                      !(error is CancellationError) else { return }
                 failure = error.localizedDescription
             }
         }
+    }
+
+    /// Asks before a revocation; the tap's admission carries the mutation through the confirmation.
+    func requestRevocation(_ target: PendingRevocation.Target) {
+        guard let admission = admitMutation() else { return }
+        revoking = PendingRevocation(target: target, admission: admission)
     }
 
     private var checkCompletionRow: some View {

@@ -227,17 +227,18 @@ struct HostedHomeDashboardFixture: View {
                 promptRoute = await gateway.lastPromptRoute()
                 openedSession = await gateway.lastOpenedSession()
                 // Requested once. A hosted reconnect is a new connection identity, which the mounted
-                // sheet must observe by re-reading, so it fires after the first read. A profile switch
-                // fires after the second, so a test can observe the presented sheet first (its reload).
+                // sheet must observe by re-reading, so it fires after the second read (Manage Home's,
+                // then the Tasks sheet's). A profile switch fires after the third (its reload), so a
+                // test can observe the presented sheet first.
                 if !reconnectRequested {
-                    if arguments.contains("-home-switch-profile-after-task-list"), taskListReads >= 2 {
+                    if arguments.contains("-home-switch-profile-after-task-list"), taskListReads >= 3 {
                         reconnectRequested = true
                         let other = GatewayProfile(id: "competing-profile", label: "Other Mac", host: "other.example.test", port: 9847, machineId: profile.machineId)
                         do {
                             try model.profiles.save(other, token: "other-fixture-token", selecting: false)
                             await model.switchGateway(other)
                         } catch { self.error = error.localizedDescription }
-                    } else if arguments.contains("-home-reconnect-after-task-list"), taskListReads >= 1 {
+                    } else if arguments.contains("-home-reconnect-after-task-list"), taskListReads >= 2 {
                         reconnectRequested = true
                         do { try await model.connectHostedGateway(profile: profile, token: "fixture-token") }
                         catch { self.error = error.localizedDescription }

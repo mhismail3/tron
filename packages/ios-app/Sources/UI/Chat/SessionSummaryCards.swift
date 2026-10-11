@@ -117,6 +117,10 @@ struct SessionModelSummaryCard<Controls: View, Footer: View>: View {
                 }
             }
             .padding(14)
+            // Names the model header only: an identifier on the whole card would replace
+            // the identifiers of the controls and footer it contains.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("session-model-summary")
             TronSettingsDivider(accent: .tronPurple)
             controls()
             TronSettingsDivider(accent: .tronPurple)
@@ -125,10 +129,6 @@ struct SessionModelSummaryCard<Controls: View, Footer: View>: View {
         .controlSize(.small)
         .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.14)
         .tronSettingsVisualTheme(accent: .tronPurple)
-        // Keep the card a container: an identifier on a plain stack would replace
-        // its children's identifiers (the footer row, the compact control).
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("session-model-summary")
     }
 
     private var actionLayout: AnyLayout {

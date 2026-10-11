@@ -200,22 +200,23 @@ bounded chapter metadata, tasks and permissions, and disable/check-completion �
 and opens each existing Home destination as a managed child sheet with its own
 read owner. `HomeStatusLinePresentation` is the one source of the sheet's state
 and memory lines. Mutations go through the `HomeMutationCoordinator` authority.
-The sheet subsumed the former Home header bar and its overflow menu (#740):
-Stop response lives in its state card, bound to the chat's live canonical
-operation authority. The Chapters child sheet reads `home.chapterList`
-(gated on `home-chapter-list.v1`) and shows the whole ledger — state, size
-against the shared soft/hard limits via `HomeChapterPresentation`, date range —
-and opens a present chapter read-only through a profile-fenced ordinary route
-staged on sheet dismissal (`ChatRoutes.completeStagedNavigationAfterDismissal`).
+The sheet subsumed the former Home header bar and its overflow menu (#740); the
+composer's Stop is the only Stop (#811), and Manage Home has no Stop row. The
+Chapters child sheet reads `home.chapterList` (gated on `home-chapter-list.v1`),
+lists one row per chapter, and its detail shows the chapter's contents, size
+against the shared soft limit, Browse this chapter's memory, and — for a sealed
+chapter only — the read-only transcript, staged as a profile-fenced ordinary
+route on sheet dismissal (`ChatRoutes.completeStagedNavigationAfterDismissal`).
 The next-prompt preview, delivered-context viewing and the learned-profile view
 are follow-up Gateway reads.
 
-`HomeSheetReadOwner` owns one disposable manage/settings/context/browser/evidence read
-per managed sheet. Its idle/loading/loaded/failed state carries the request's
+`HomeSheetReadOwner` owns one disposable manage/context/chapter/memory/task/evidence read
+per managed sheet; the main sheet's load carries status, context, chapters, the first
+task page and permissions together. Its idle/loading/loaded/failed state carries the request's
 identity and the caller's request-intent ID; changing intent invalidates success,
 error and loading even before SwiftUI starts the replacement task.
-`AppModel.readHomeSheet` admits only the typed status, memory-page and canonical-
-evidence queries, capturing and rechecking the focused profile, connection and
+`AppModel.readHomeSheet` admits only the typed manage, context, chapter, memory-page,
+task, permission and canonical-evidence queries, capturing and rechecking the focused profile, connection and
 lifecycle generation. The sheet additionally checks its exact managed token and
 current activity across every await. Cover/background retires pending reads;
 uncover/reconnect starts a fresh request. Installed parent frames can remain
@@ -1533,24 +1534,37 @@ background/reconnect in the live invocation. An unresolved Disable retains the
 completion control even after authoritative status says Disabled; confirmed
 Disable returns the ring to Manage Session without replacing chat.
 App restart reads current Gateway status, without claiming or replaying an old
-command. Memory model configuration uses the same receipt path; its settings UI
-is a separate sheet. Manage Home opens Memory Settings, Chapters, Home Context
-and Browse Memory through the shared managed-sheet chrome. The browser
+command. Memory model configuration uses the same receipt path, and its picker is a row of the
+model card (#811), not a separate sheet. Manage Home is the main sheet of the Home
+chat, built from Manage Session's own components: `SessionContextUsageCard` (the
+stats card, with the state pill on its header row), `SessionModelConfigurationCard`
+(model, thinking and context window through the ordinary session RPCs, with the
+Memory model row as its footer), a rows container for the Home sub-sheets, and a
+bottom container for pause/resume and disable. The settings-approvals section
+(#758) inserts between the stats card and the model card. Every Home sub-sheet
+opens at medium and drags to large, through the shared managed-sheet chrome.
+Its Memory row, Chapters, Tasks and Permissions read the same single load. The browser
 additionally requires authenticated `home-memory-browser.v1` and the chapter
-list `home-chapter-list.v1`; settings/context require only `home.v1`. Memory Settings
-uses the existing progressive model-selection row and ModelPicker, filtered to
-registered, available physical models. Selection captures the mounted picker
+list `home-chapter-list.v1`; the context sheet requires only `home.v1`. The memory
+picker is the existing progressive model-selection row and ModelPicker, filtered
+to registered, available physical models. Selection captures the mounted picker
 profile/lifecycle before sending `configureMemory` through the existing receipt
 owner. Choices stay Applying until the exact latest canonical status read
 converges, not merely until the configure receipt is terminal; an old installed
-model frame cannot admit a duplicate choice during that gap. It shows spend as
-information, configuration/pause/block state and explicit
-unresolved receipt checks, never budgets or cache/storage controls. The context
-inspector shows the activation's effective token/window, memory line/byte counts,
-start entry and refusal metadata from `home.status`, not SDK canonical usage or
-prompt/memory bodies. Browser cards distinguish summary, capped/omitted projection
-and canonical evidence, label attribution/date/omissions and expose source
-session/entry identity. Pagination replaces one page; canonical text is selectable.
+model frame cannot admit a duplicate choice during that gap. Its row shows spend as information and the
+configuration/pause/block state, with explicit unresolved receipt checks, never
+budgets or cache/storage controls. The Home Context
+sheet reads `home.context`: one bar of the context window split by its breakdown
+sections (instructions, about you, memory, this chapter, task results, input),
+with a legend row per section and the free remainder. It shows no entry IDs or
+byte counts, and falls back to the plain request sizes when the Gateway omits
+`breakdown`. The breakdown is an estimate, never SDK canonical usage or
+prompt/memory bodies. Browser rows show the summary (or projection), a role glyph, and the
+relative time and chapter; a row opens a detail sheet with the summary, the
+projection, and one standard row to Exact Evidence. Evidence shows its role,
+time and chapter in a metadata card, the canonical text in a reading card, and
+its entry reference in the footer. Pagination replaces one page; a chapter's
+memory is the same browser filtered by `sessionId`. Canonical text is selectable.
 Loading, empty, blocked and retryable error states use shared presentation owners.
 
 
@@ -2745,7 +2759,14 @@ milliseconds; spend shows the task's input and output token counts, or is unavai
 an unknown outcome nor a last assistant reply is labeled success.
 
 `HomeTaskSheet` uses the same managed chrome, glass cards, typography, loading,
-placeholder and action owners as the other Home sheets. It first reads status to
+placeholder and action owners as the other Home sheets. Task rows show a title
+(the worker's name, else the brief's first line, else the project), the project,
+a state pill, and the relative update time, with no spend. The task detail shows
+the brief (six lines, then Show all), the result, the worker (its model, subagent
+launches, and live runs with their state pills), spend when reported, and
+standard action rows: Open worker chat, Stop, Steer and Redeliver. Task
+permissions are a Manage Home row: standing scopes, one-use grants and pending
+requests, each a row with a state pill, and Revoke asks for confirmation. It first reads status to
 show the task-only recovery fence and reason without issuing a fenced list or
 permission read. An empty uninitialized task list does not imply a permission
 grant: permission listing may refuse `not-initialized`. The menu requires the

@@ -3,7 +3,7 @@ import TronMobileCore
 
 /// Task permissions: standing scopes, one-use grants and pending requests, each a
 /// group of standard rows. Revoking is destructive and asks first.
-extension HomeTaskSheet.HomeRevocation {
+extension HomeTaskSheet.PendingRevocation.Target {
     var title: String {
         switch self {
         case .scope: "Revoke this scope?"
@@ -41,7 +41,7 @@ extension HomeTaskSheet {
                     rowGroup(permissions.scopes) { scope in
                         permissionRow(title: "All trusted projects", detail: scope.id,
                                       pill: scope.active ? ("Active", Color.tronEmerald) : ("Revoked", Color.tronSlate)) {
-                            if scope.active { revokeButton(label: "Revoke scope \(scope.id)") { revoking = .scope(scope.id) } }
+                            if scope.active { revokeButton(label: "Revoke scope \(scope.id)") { requestRevocation(.scope(scope.id)) } }
                         }
                     }
                 }
@@ -53,7 +53,7 @@ extension HomeTaskSheet {
                     rowGroup(permissions.grants) { grant in
                         permissionRow(title: grant.target, detail: "Expires \(Date(timeIntervalSince1970: Double(grant.expiresAt) / 1000).formatted())",
                                       pill: Self.grantPill(grant.state)) {
-                            if grant.state == .available { revokeButton(label: "Revoke grant \(grant.id)") { revoking = .grant(grant.id) } }
+                            if grant.state == .available { revokeButton(label: "Revoke grant \(grant.id)") { requestRevocation(.grant(grant.id)) } }
                         }
                     }
                 }

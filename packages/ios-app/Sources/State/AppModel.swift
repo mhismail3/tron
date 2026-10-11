@@ -4764,6 +4764,11 @@ final class AppModel {
                 throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the memory browser.", retryable: false, details: nil)
             }
         }
+        func optionalRead<Value>(_ value: () async throws -> Value) async throws -> Value? {
+            do { return try await value() }
+            catch is CancellationError { throw CancellationError() }
+            catch { return nil }
+        }
         func chapterListCapable() -> Bool {
             lifecycle.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
         }
@@ -4775,10 +4780,17 @@ final class AppModel {
             let status = try HomeStatusDTO.decode(try await read("home.status"))
             let context = try HomeContextDTO.decode(try await read("home.context"))
             let chapters = chapterListCapable() ? try await readChapterList() : nil
-            let tasks = status.admitsTaskReads
-                ? try HomeTaskPageDTO.decode(try await read("home.taskList", .object(["limit": .number(20)]))) : nil
-            let permissions = status.admitsTaskReads
-                ? try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions")) : nil
+            // A refused task or permission read leaves its row "Unavailable"; the sheet still loads.
+            var tasks: HomeTaskPageDTO?
+            var permissions: HomeTaskPermissionsDTO?
+            if status.admitsTaskReads {
+                tasks = try await optionalRead {
+                    try HomeTaskPageDTO.decode(try await read("home.taskList", .object(["limit": .number(20)])))
+                }
+                permissions = try await optionalRead {
+                    try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions"))
+                }
+            }
             return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks, permissions: permissions))
         case .context:
             return .context(try HomeContextDTO.decode(try await read("home.context")))

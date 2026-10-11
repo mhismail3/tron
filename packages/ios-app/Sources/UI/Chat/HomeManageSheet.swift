@@ -57,34 +57,25 @@ extension HomeSheet {
         ) {
             memoryModelPicker(status)
         } label: {
+            // The identifier sits on the row inside the link: a card-level identifier
+            // would replace the link's own (SessionModelSummaryCard names its container).
             TronSettingsRow(icon: "cpu", title: "Memory model",
                             subtitle: status.memory.configured ? spend : "Choose a memory model before sending",
                             accent: .tronPurple) {
                 TronInlineActionLabel(name)
             }
+            .accessibilityIdentifier("home-memory-model-row")
+            .accessibilityValue(name)
         }
-        .accessibilityIdentifier("home-memory-model-row")
-        .accessibilityValue(name)
     }
 
+    /// The picker is its own managed child: a choice is admitted under the picker's
+    /// surface, so it stays valid while this sheet is covered by the picker.
     func memoryModelPicker(_ status: HomeStatusDTO) -> some View {
-        Group {
-            if models.isEmpty {
-                TronPlaceholderState(title: "No available memory models", detail: "Register a physical model on this Gateway.",
-                                     icon: "cpu", actionTitle: "Reload") { reload() }
-            } else {
-                ModelPicker(selection: Binding(get: { status.memory.model }, set: { selectMemoryModel($0, status: status) }),
-                            models: models, selectionAvailability: modelSelectionAvailability)
-            }
+        HomeMemoryModelPicker(profileID: profileID, current: status.memory.model, models: models,
+                              availability: modelSelectionAvailability) {
+            refreshAfterMutation()
         }
-        .tronNavigationTitle("Memory Model", accent: .tronPurple)
-        .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)
-        .controlSize(.regular)
-        // A refused model choice is raised where the choice was made, on the picker.
-        .alert("Home change", isPresented: Binding(get: { mutationFailure != nil },
-                                                   set: { if !$0 { mutationFailure = nil } })) {
-            Button("OK", role: .cancel) { mutationFailure = nil }
-        } message: { Text(mutationFailure ?? "") }
     }
 
     var modelSelectionAvailability: ModelSelectionAvailability {
@@ -93,28 +84,6 @@ extension HomeSheet {
               case .loaded(let read, .manage(_)) = owner.state,
               read.requestID == request.id, read.identity == identity else { return .applying }
         return .ready
-    }
-
-    func selectMemoryModel(_ selection: ModelRef?, status: HomeStatusDTO) {
-        // Receipt retirement is not projection convergence. The installed read
-        // must own the current intent before another model choice is admitted.
-        guard modelSelectionAvailability.canSelect,
-              case .loaded(_, .manage(let current)) = owner.state, current.status.memory.model == status.memory.model,
-              let selection, selection != current.status.memory.model, models.contains(where: { $0.ref == selection }),
-              let identity, let coordinator, active,
-              let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
-        Task { @MainActor in
-            do {
-                try await model.performHomeControl(.configureMemory(selection), authority: authority)
-                guard self.identity == identity, coordinator.activity(for: identity.surfaceToken).allowsDataPublication else { return }
-                mutationFailure = nil
-                refreshAfterMutation()
-            } catch {
-                guard self.identity == identity, coordinator.activity(for: identity.surfaceToken).allowsDataPublication,
-                      !(error is CancellationError) else { return }
-                mutationFailure = error.localizedDescription
-            }
-        }
     }
 
     /// The Home sub-sheets, each a standard chevron row in the rows container. A row's
@@ -190,7 +159,11 @@ extension HomeSheet {
                     .disabled(mutating)
                     .accessibilityIdentifier("home-manage-check-completion")
                 } else {
-                    Button { confirmingDisable = true } label: {
+                    Button {
+                        guard let admission = admitControl() else { return }
+                        disableAdmission = admission
+                        confirmingDisable = true
+                    } label: {
                         TronSettingsRow(icon: "house.slash", title: "Disable Home",
                                         subtitle: "Stops activations; history is preserved",
                                         accent: .tronError, titleColor: .tronError)
@@ -208,7 +181,7 @@ extension HomeSheet {
                 confirmTitle: "Disable Home",
                 destructive: true,
                 icon: "house.slash",
-                onConfirm: { perform(.disable) }
+                onConfirm: { if let disableAdmission { run(.disable, disableAdmission) } }
             )
         }
     }
@@ -229,5 +202,71 @@ extension HomeSheet {
 
     func divider(accent: Color = .tronSessionTeal) -> some View {
         TronSettingsDivider(accent: accent)
+    }
+}
+
+/// The memory model picker: the ordinary ModelPicker over the physical catalog.
+/// A choice is the `home.configureMemory` receipt, admitted under this picker's own
+/// presentation surface; a refused choice is raised here, where it was made.
+struct HomeMemoryModelPicker: View {
+    let profileID: String
+    let current: ModelRef?
+    let models: [ModelSummary]
+    let availability: ModelSelectionAvailability
+    /// Called once the choice is accepted, so the presenting sheet re-reads its status.
+    let onApplied: () -> Void
+    @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivityCoordinator) private var coordinator
+    @Environment(\.tronPresentationSurfaceToken) private var token
+    @State private var failure: String?
+    /// The choice being applied. It is shown at once and released when the status
+    /// converges on it, or when the Gateway refuses it.
+    @State private var pending: ModelRef?
+
+    private var shown: ModelRef? { pending ?? current }
+
+    var body: some View {
+        Group {
+            if models.isEmpty {
+                TronPlaceholderState(title: "No available memory models", detail: "Register a physical model on this Gateway.",
+                                     icon: "cpu")
+            } else {
+                ModelPicker(selection: Binding(get: { shown }, set: { choose($0) }),
+                            models: models, selectionAvailability: availability)
+            }
+        }
+        .onChange(of: current) { _, value in
+            if value == pending { pending = nil }
+        }
+        .tronNavigationTitle("Memory Model", accent: .tronPurple)
+        .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)
+        .controlSize(.regular)
+        .alert("Home change", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+            Button("OK", role: .cancel) { failure = nil }
+        } message: { Text(failure ?? "") }
+    }
+
+    private func choose(_ selection: ModelRef?) {
+        // Receipt retirement is not projection convergence: the installed status must
+        // own the current intent, so a choice is refused until it is available.
+        guard availability.canSelect, let selection, selection != shown,
+              models.contains(where: { $0.ref == selection }),
+              let identity = model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token),
+              let coordinator,
+              let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
+        pending = selection
+        Task { @MainActor in
+            do {
+                try await model.performHomeControl(.configureMemory(selection), authority: authority)
+                guard coordinator.activity(for: identity.surfaceToken).allowsDataPublication else { return }
+                failure = nil
+                onApplied()
+            } catch {
+                pending = nil
+                guard coordinator.activity(for: identity.surfaceToken).allowsDataPublication,
+                      !(error is CancellationError) else { return }
+                failure = error.localizedDescription
+            }
+        }
     }
 }
