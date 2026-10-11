@@ -1117,9 +1117,9 @@ export function createDeployTimeline(home, commandId, { operation = "update", no
       phaseStartedAt = now();
       if (states.terminal.has(state)) timeline.finish(state, error);
     },
-    mark(event, message) {
+    mark(event, message, level = "info", fields = {}) {
       if (finished) return;
-      appendDeployRecord(home, "info", event, message, { commandId, durationMs: since(phaseStartedAt) });
+      appendDeployRecord(home, level, event, message, { commandId, durationMs: since(phaseStartedAt), ...fields });
     },
     finish(state, error) {
       if (finished) return;
@@ -1962,8 +1962,11 @@ export async function waitForReplacement({
   throw error;
 }
 
-export async function waitForDrainedReplacement({ oldProcess, replacement, expected, oldEpoch, relaunchLimitMs = RELAUNCH_LIMIT_MS, startupLimitMs = STARTUP_LIMIT_MS, onDrainComplete }) {
-  await waitForDrainCompletion(oldProcess, replacement.readExactProcess, replacement.sleep);
+export async function waitForDrainedReplacement({ oldProcess, replacement, expected, oldEpoch, relaunchLimitMs = RELAUNCH_LIMIT_MS, startupLimitMs = STARTUP_LIMIT_MS, onDrainComplete, onExitStalled }) {
+  await waitForDrainCompletion(oldProcess, replacement.readExactProcess, replacement.sleep, {
+    readListener: replacement.readListener,
+    onExitStalled,
+  });
   onDrainComplete?.();
   return waitForReplacement({
     oldProcess,
@@ -2095,17 +2098,54 @@ export async function captureLocalListenerProcess(port, runCommand = runBounded)
  * listener, and port state are never transition evidence after capture: the
  * candidate startup deadline begins only after the exact old PID/start pair is
  * gone or replaced. */
+// The old Gateway keeps its port while it drains accepted work, for as long as
+// that takes, and closes it only when its shutdown begins. The rest of its
+// shutdown is disposal and its own exit, so a process still alive this long
+// after releasing the port is stuck inside its exit (#729), and launchd cannot
+// relaunch until it is gone. The Gateway's exit watcher normally ends it within
+// seconds; this bound also covers an old Gateway that predates that watcher.
+export const DRAIN_EXIT_STALL_LIMIT_MS = 30_000;
+
 export async function waitForDrainCompletion(
   oldProcess,
   readExactProcess,
   sleep = (milliseconds) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds)),
+  {
+    readListener,
+    stallLimitMs = DRAIN_EXIT_STALL_LIMIT_MS,
+    now = () => performance.now(),
+    onExitStalled,
+    killProcess = (pid) => process.kill(pid, "SIGKILL"),
+  } = {},
 ) {
   if (!oldProcess || !Number.isSafeInteger(oldProcess.pid) || oldProcess.pid < 1 || !oldProcess.startIdentity) {
     throw new Error("old Gateway listener process identity is unavailable");
   }
+  let releasedAt;
+  let killed = false;
   while (true) {
     const current = await readExactProcess(oldProcess.pid);
-    if (!current || current.pid !== oldProcess.pid || current.startIdentity !== oldProcess.startIdentity) return current;
+    if (!sameProcess(current, oldProcess)) return current;
+    if (readListener && !killed) {
+      let listener;
+      let listenerKnown = true;
+      try { listener = await readListener(); } catch { listenerKnown = false; }
+      if (!listenerKnown || sameProcess(listener, oldProcess)) {
+        releasedAt = undefined;
+      } else {
+        releasedAt ??= now();
+        const releasedForMs = now() - releasedAt;
+        if (releasedForMs >= stallLimitMs) {
+          // Re-read the exact identity immediately before signalling: a PID
+          // that exited and was reused is never ours to kill.
+          const exact = await readExactProcess(oldProcess.pid);
+          if (!sameProcess(exact, oldProcess)) return exact;
+          onExitStalled?.({ pid: oldProcess.pid, releasedForMs: Math.round(releasedForMs) });
+          try { killProcess(oldProcess.pid); } catch { /* exited between the read and the signal */ }
+          killed = true;
+        }
+      }
+    }
     await sleep(500);
   }
 }
@@ -2298,6 +2338,12 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
           oldProcessGone = true;
           paths.timeline?.mark("deploy.old-process-exited", "Previous Gateway process exited after draining");
         },
+        onExitStalled: ({ pid, releasedForMs }) => paths.timeline?.mark(
+          "deploy.old-process-stalled",
+          `Previous Gateway pid ${pid} was still alive ${releasedForMs} ms after releasing its listener; killing that exact process`,
+          "warning",
+          { pid, releasedForMs },
+        ),
       });
       // /health admits warmup only; authenticated system.info is the promotion proof.
       const confirmed = requireAuthenticatedRuntimeInfo(
@@ -2932,6 +2978,12 @@ async function rollback({ paths, host, port, token, timeoutMs, commandId, replac
         relaunchLimitMs: timeoutMs,
         startupLimitMs: STARTUP_LIMIT_MS,
         onDrainComplete: () => { oldProcessGone = true; },
+        onExitStalled: ({ pid, releasedForMs }) => paths.timeline?.mark(
+          "deploy.old-process-stalled",
+          `Previous Gateway pid ${pid} was still alive ${releasedForMs} ms after releasing its listener; killing that exact process`,
+          "warning",
+          { pid, releasedForMs },
+        ),
       });
       await writeState(paths, {
         state: "rolled-back", channel: paths.channel, version: target.version,

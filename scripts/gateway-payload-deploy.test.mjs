@@ -9,7 +9,12 @@ import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { after, test } from "node:test";
 
-import { payloadFingerprint, buildSourcePayload, stagePayload, runBounded } from "./gateway-payload-deploy.mjs";
+import {
+  payloadFingerprint, buildSourcePayload, stagePayload, runBounded,
+  captureLocalProcess, captureLocalListenerProcess, waitForDrainCompletion,
+} from "./gateway-payload-deploy.mjs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 
 // One chmod process per tree: a per-entry walk of a fixture's ~9k npm files
 // costs more than the test it cleans up after.
@@ -238,3 +243,67 @@ test("runBounded settles at the kill deadline when a descendant retains pipes", 
   );
   assert.ok(Date.now() - started < 4_000);
 });
+
+// #729: an old Gateway that finished its shutdown but stayed inside its own
+// exit kept the deploy at `draining` forever. Each case below is a real
+// process with a real TCP listener, read through the deploy's own ps/lsof
+// probes. The old Gateway's port stays open while it drains accepted work and
+// closes only when its shutdown begins.
+async function oldGatewayFixture({ releaseAfterMs, then }) {
+  const program = `
+    const server = require("node:net").createServer().listen(0, "127.0.0.1", () => {
+      process.stdout.write(server.address().port + "\\n");
+      setTimeout(() => server.close(() => {
+        if (${JSON.stringify(then)} === "exit") process.exit(0);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+      }), ${releaseAfterMs});
+    });`;
+  const child = spawn(process.execPath, ["-e", program], { stdio: ["ignore", "pipe", "ignore"] });
+  const exited = once(child, "exit");
+  const [line] = await once(child.stdout, "data");
+  const port = Number(String(line).trim());
+  let identity;
+  for (let attempt = 0; attempt < 50 && !identity; attempt++) {
+    identity = await captureLocalListenerProcess(port);
+    if (!identity) await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.equal(identity?.pid, child.pid);
+  return { child, exited, port, identity };
+}
+
+async function waitWithin(promise, boundMs, label) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} did not settle within ${boundMs} ms`)), boundMs); })]);
+  } finally { clearTimeout(timer); }
+}
+
+for (const scenario of [
+  { name: "a draining old Gateway is never killed while it still holds its port", releaseAfterMs: 2_500, then: "exit", killed: false },
+  { name: "an old Gateway that exits after releasing its port is not signalled", releaseAfterMs: 100, then: "exit", killed: false },
+  { name: "an old Gateway stuck in exit after releasing its port is killed once its stall limit passes", releaseAfterMs: 100, then: "hang", killed: true },
+]) {
+  test(`drain wait: ${scenario.name}`, async () => {
+    const fixture = await oldGatewayFixture(scenario);
+    const stalls = [];
+    try {
+      await waitWithin(waitForDrainCompletion(fixture.identity, (pid) => captureLocalProcess(pid), undefined, {
+        readListener: () => captureLocalListenerProcess(fixture.port),
+        stallLimitMs: 1_000,
+        onExitStalled: (stall) => stalls.push(stall),
+      }), 20_000, "drain wait");
+      const [code, signal] = await waitWithin(fixture.exited, 5_000, "old Gateway exit");
+      if (scenario.killed) {
+        assert.equal(signal, "SIGKILL");
+        assert.equal(stalls.length, 1);
+        assert.equal(stalls[0].pid, fixture.identity.pid);
+        assert.ok(stalls[0].releasedForMs >= 1_000);
+      } else {
+        assert.deepEqual([code, signal], [0, null]);
+        assert.deepEqual(stalls, []);
+      }
+    } finally {
+      if (fixture.child.exitCode === null && fixture.child.signalCode === null) fixture.child.kill("SIGKILL");
+    }
+  });
+}

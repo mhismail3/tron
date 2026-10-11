@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OWNED_OPERATION_DEADLINE_MS } from "../sessions/owned-session-dispatch.js";
@@ -66,31 +66,63 @@ async function workflowChildRunId(workflowDir: string): Promise<string> {
 const holdingAsyncLaunch = (id: string, task = "HOLD-CHILD background search") =>
   fauxAssistantMessage([fauxToolCall("subagent", { agent: "task-child", task, async: true }, { id })], { stopReason: "toolUse" });
 
+/** The model's context as the faux provider passes it to a scripted response. */
+type FauxContext = { messages: Array<Record<string, any>> };
+/** The reply one tool call received, as the model reads it. */
+function toolResultText(context: FauxContext, toolCallId: string): { isError: boolean; text: string } | undefined {
+  const result = context.messages.find(message => message.role === "toolResult" && message.toolCallId === toolCallId);
+  if (!result) return undefined;
+  return { isError: result.isError === true, text: result.content.find((item: { type: string }) => item.type === "text")?.text ?? "" };
+}
+/** A canonical entry's text, as the model reads it. */
+function entryText(entry: { content?: unknown }): string {
+  const content = entry.content;
+  return typeof content === "string" ? content
+    : (content as Array<{ type?: string; text?: string }>).filter(part => part.type === "text").map(part => part.text ?? "").join("\n");
+}
+/** The async run directory a launch returned. A run's id is its directory name. */
+function launchedAsyncDir(context: FauxContext, toolCallId: string): string {
+  const result = context.messages.find(message => message.role === "toolResult" && message.toolCallId === toolCallId);
+  const asyncDir = (result?.details as { asyncDir?: unknown } | undefined)?.asyncDir;
+  if (typeof asyncDir !== "string") throw new Error(`launch ${toolCallId} returned no async run`);
+  return asyncDir;
+}
+
 describe("Home task subagents", () => {
   it("joins a foreground and an async run before a reported task settles, and counts both", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
+    const seen: { refusal?: { isError: boolean; text: string } } = {};
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", { agent: "task-child", task: "CHILD-DONE foreground check", async: false }, { id: "fg-launch" })], { stopReason: "toolUse" }),
       holdingAsyncLaunch("async-launch"),
-      // The report waits until the async child is live, so the stop has a run to join.
-      async () => { await waitFor(() => child.heldRequests() === 1, "async child live before the report", bound); return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); },
+      async () => {
+        await waitFor(() => child.heldRequests() === 1, "async child live before the report", bound);
+        return fauxAssistantMessage([reportCall("report-early")], { stopReason: "toolUse" });
+      },
+      async (context: FauxContext) => {
+        // The report waits for the live async run: it is refused, and the run ends before the report is retried.
+        seen.refusal = toolResultText(context, "call-report-early");
+        child.releaseHeld();
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "async run ended before the report", bound);
+        return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      },
     ]);
     const run = await dispatch(f);
     const result = await run.completion;
+    expect(seen.refusal).toMatchObject({ isError: true });
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     const launches = await launchResults(f.registry, run.sessionId);
     const background = launches.find(launch => launch.toolCallId === "async-launch");
     expect(launches.find(launch => launch.toolCallId === "fg-launch")).toMatchObject({ isError: false });
     expect(background?.details?.asyncDir).toEqual(expect.any(String));
-    // The Gateway stopped the still-running async run through the provider and joined it
-    // before the task settled: its terminal status is on disk when the result is read.
-    expect(await asyncState(background!.details!.asyncDir as string)).toBe("stopped");
-    await waitFor(() => child.abortedRequests() === 1, "stopped async child request closed", bound);
+    expect(await asyncState(background!.details!.asyncDir as string)).toBe("complete");
+    expect(child.abortedRequests()).toBe(0);
     const slot = await f.registry.acquire(run.sessionId);
     expect(slot.catalogHasActiveSubagents).toBe(false);
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 2, stoppedAtEnd: 1 } });
-    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.subagents", started: 2, stoppedAtEnd: 1 }));
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 2, stoppedAtEnd: 0 } });
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.subagents", started: 2, stoppedAtEnd: 0 }));
   }, 60_000);
 
   it("stops a running async run when the task is stopped, and no turn starts after settlement", async () => {
@@ -125,22 +157,35 @@ describe("Home task subagents", () => {
     expect(slot.isBusy).toBe(false);
   }, 60_000);
 
-  it("settles an async workflow run and the child it holds before a reported task settles", async () => {
+  it("waits for an async workflow and the child it holds before a reported task settles, and counts the workflow", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
     await writeFile(join(f.cwd, "hold-workflow.js"), HELD_WORKFLOW_SCRIPT);
+    const seen: { refusal?: { isError: boolean; text: string } } = {};
     f.faux.setResponses([
       holdingWorkflowLaunch("workflow-launch"),
-      async () => { await waitFor(() => child.heldRequests() === 1, "workflow child live before the report", bound); return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); },
+      async () => {
+        await waitFor(() => child.heldRequests() === 1, "workflow child live before the report", bound);
+        return fauxAssistantMessage([reportCall("report-early")], { stopReason: "toolUse" });
+      },
+      async (context: FauxContext) => {
+        seen.refusal = toolResultText(context, "call-report-early");
+        child.releaseHeld();
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "workflow ended before the report", bound);
+        return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      },
     ]);
     const run = await dispatch(f);
     const result = await run.completion;
+    expect(seen.refusal).toMatchObject({ isError: true });
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "workflow-launch");
-    // The workflow run and its child were stopped through the provider before the task settled.
-    expect(await asyncState(launch!.details!.asyncDir as string)).toBe("stopped");
-    await waitFor(() => child.abortedRequests() === 1, "stopped workflow child request closed", bound);
-    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
+    const workflowDir = launch!.details!.asyncDir as string;
+    expect(await asyncState(workflowDir)).toBe("complete");
+    expect(await asyncState(join(dirname(workflowDir), await workflowChildRunId(workflowDir)))).toBe("complete");
+    expect(child.abortedRequests()).toBe(0);
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
   }, 60_000);
 
   it("stops a running async workflow when the task is stopped, and its held child with it", async () => {
@@ -164,17 +209,21 @@ describe("Home task subagents", () => {
     expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
   }, 60_000);
 
-  it("stops a workflow's async child that outlives its completed workflow, before the task settles", async () => {
+  it("stops a workflow's async child that outlives its completed workflow when the task ends without a report", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
     await writeFile(join(f.cwd, "detached-workflow.js"), DETACHED_WORKFLOW_SCRIPT);
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./detached-workflow.js", async: true }, { id: "workflow-launch" })], { stopReason: "toolUse" }),
-      async () => { await waitFor(() => child.heldRequests() === 1, "detached child live before the report", bound); return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); },
+      // A final reply with the child still live is not a report: settlement stops the child by its run id.
+      async () => {
+        await waitFor(() => child.heldRequests() === 1, "detached child live before the final reply", bound);
+        return fauxAssistantMessage("Finished without a report.");
+      },
     ]);
     const run = await dispatch(f);
     const result = await run.completion;
-    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    expect(result.terminalEvidence).toMatchObject({ outcome: "unknown", reason: "no-report" });
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "workflow-launch");
     const workflowDir = launch!.details!.asyncDir as string;
     // The workflow itself had completed; its child was stopped by run id and joined before settlement.
@@ -184,10 +233,10 @@ describe("Home task subagents", () => {
     expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
   }, 60_000);
 
-  it("starts no turn when an async run completes while its task reports", async () => {
+  it("starts no turn when an async run completes before its task reports", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
-    // The async child finishes on its own just as the task reports. Its completion is
+    // The async child finishes while the worker is still working. Its completion is
     // producer context: it must not wake the sealed task into another model request.
     let reports = 0;
     let unexpectedTurns = 0;
@@ -196,6 +245,8 @@ describe("Home task subagents", () => {
       async () => {
         await waitFor(() => child.heldRequests() === 1, "async child live before the report", bound);
         child.releaseHeld();
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "async run ended before the report", bound);
         reports += 1;
         return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
       },
@@ -321,7 +372,7 @@ describe("Home task subagents", () => {
     const gate = new Promise<void>(resolve => { release = resolve; });
     f.faux.setResponses([
       holdingAsyncLaunch("async-launch"),
-      async () => { await gate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); },
+      async () => { await gate; return fauxAssistantMessage("Finished without a report."); },
     ]);
     const run = await dispatch(f);
     const slot = await f.registry.acquire(run.sessionId);
@@ -349,7 +400,7 @@ describe("Home task subagents", () => {
     const gate = new Promise<void>(resolve => { release = resolve; });
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./detached-workflow.js", async: true }, { id: "workflow-launch" })], { stopReason: "toolUse" }),
-      async () => { await gate; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); },
+      async () => { await gate; return fauxAssistantMessage("Finished without a report."); },
     ]);
     const run = await dispatch(f);
     const slot = await f.registry.acquire(run.sessionId);
@@ -369,5 +420,190 @@ describe("Home task subagents", () => {
     const childDir = join(dirname(workflowDir), await workflowChildRunId(workflowDir));
     child.releaseHeld();
     await waitFor(async () => (await asyncState(childDir)) === "complete", "orphaned workflow child finishes", bound);
+  }, 60_000);
+
+  it("refuses a report while an async run is live, keeps the task active, and accepts the report once the run has completed", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    const seen: { refusal?: { isError: boolean; text: string }; runDir?: string } = {};
+    f.faux.setResponses([
+      holdingAsyncLaunch("async-launch"),
+      async () => {
+        await waitFor(() => child.heldRequests() === 1, "async child live before the report", bound);
+        return fauxAssistantMessage([reportCall("report-early")], { stopReason: "toolUse" });
+      },
+      async (context: FauxContext) => {
+        // The refusal is an ordinary tool error, and the turn continues to this request.
+        seen.refusal = toolResultText(context, "call-report-early");
+        seen.runDir = launchedAsyncDir(context, "async-launch");
+        expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ lifecycle: "active" });
+        child.releaseHeld();
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "async run ended before the late report", bound);
+        return fauxAssistantMessage([reportCall("report-late")], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(seen.refusal).toMatchObject({ isError: true, text: expect.stringMatching(/^Report refused: 1 subagent run .* still live/) });
+    expect(await asyncState(seen.runDir!)).toBe("complete");
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    expect(result.reportRef).toMatchObject({ resultId: "report-late" });
+    // The run ended on its own before the report, so the Gateway stopped nothing at settlement.
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+    expect(child.abortedRequests()).toBe(0);
+  }, 60_000);
+
+  it("accepts a report once the worker has stopped its own async run", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    const seen: { stop?: { isError: boolean; text: string }; runDir?: string } = {};
+    f.faux.setResponses([
+      holdingAsyncLaunch("async-launch"),
+      async (context: FauxContext) => {
+        await waitFor(() => child.heldRequests() === 1, "async child live", bound);
+        seen.runDir = launchedAsyncDir(context, "async-launch");
+        return fauxAssistantMessage([fauxToolCall("subagent", { action: "stop", id: basename(seen.runDir) }, { id: "own-stop" })], { stopReason: "toolUse" });
+      },
+      async (context: FauxContext) => {
+        seen.stop = toolResultText(context, "own-stop");
+        // A stop request returns before the run has ended. The run is live until its status is terminal, so the
+        // worker waits for it, then reports.
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "stopped run ended before the report", bound);
+        return fauxAssistantMessage([reportCall("report-after-stop")], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(seen.stop).toMatchObject({ isError: false });
+    expect(await asyncState(seen.runDir!)).toBe("stopped");
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    expect(result.reportRef).toMatchObject({ resultId: "report-after-stop" });
+    // The worker's own stop is not a Gateway stop: settlement had no live run to stop.
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+  }, 60_000);
+
+  it("refuses a report while a completed workflow's async child is live, and accepts it once the child has ended", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    await writeFile(join(f.cwd, "detached-workflow.js"), DETACHED_WORKFLOW_SCRIPT);
+    const seen: { refusal?: { isError: boolean; text: string }; workflowDir?: string } = {};
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./detached-workflow.js", async: true }, { id: "workflow-launch" })], { stopReason: "toolUse" }),
+      async () => {
+        await waitFor(() => child.heldRequests() === 1, "detached child live before the report", bound);
+        return fauxAssistantMessage([reportCall("report-early")], { stopReason: "toolUse" });
+      },
+      async (context: FauxContext) => {
+        seen.refusal = toolResultText(context, "call-report-early");
+        seen.workflowDir = launchedAsyncDir(context, "workflow-launch");
+        child.releaseHeld();
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "workflow child ended before the late report", bound);
+        return fauxAssistantMessage([reportCall("report-late")], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(seen.refusal).toMatchObject({ isError: true, text: expect.stringMatching(/^Report refused: 1 subagent run .* still live/) });
+    // The workflow had completed, so only its child kept the run live.
+    expect(await asyncState(seen.workflowDir!)).toBe("complete");
+    expect(await asyncState(join(dirname(seen.workflowDir!), await workflowChildRunId(seen.workflowDir!)))).toBe("complete");
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    expect(result.reportRef).toMatchObject({ resultId: "report-late" });
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+  }, 60_000);
+
+  it("records a run's late completion notice before the settlement fact, and nothing follows the fact", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    await writeFile(join(f.cwd, "hold-workflow.js"), HELD_WORKFLOW_SCRIPT);
+    const seen: { workflowDir?: string } = {};
+    f.faux.setResponses([
+      holdingWorkflowLaunch("workflow-launch"),
+      async (context: FauxContext) => {
+        await waitFor(() => child.heldRequests() === 1, "workflow child live", bound);
+        seen.workflowDir = launchedAsyncDir(context, "workflow-launch");
+        // The workflow completes with its child. Its completion notice is written after the run became
+        // terminal, so the report races it unless settlement records the notice first.
+        child.releaseHeld();
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "workflow ended before the report", bound);
+        return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    const slot = await f.registry.acquire(run.sessionId);
+    const entries = slot.canonicalSessionEntries();
+    const runId = basename(seen.workflowDir!);
+    const notice = entries.findIndex(entry => entry.type === "custom_message" && entry.customType === "subagent-notify" && entryText(entry).includes(runId));
+    const receipt = entries.findIndex(entry => entry.type === "custom" && entry.customType === "tron.context-delivery.v4"
+      && (entry.data as { targetEntryId?: string })?.targetEntryId === entries[notice]?.id);
+    const fact = entries.findIndex(entry => entry.type === "custom" && entry.customType === "tron-home-task-subagents");
+    expect(notice).toBeGreaterThanOrEqual(0);
+    // Settlement recorded the notice and its delivery before its fact and evidence cut.
+    expect(receipt).toBeGreaterThan(notice);
+    expect(fact).toBeGreaterThan(receipt);
+    expect(fact).toBe(entries.length - 1);
+    // A canonical read after settlement sees no further append from the run.
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    expect(slot.canonicalSessionEntries()).toHaveLength(entries.length);
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+  }, 60_000);
+
+  it("settles without a completion notice the bound never records, counts it, and keeps the outcome", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    let stopJoin: ReturnType<typeof captureTimer> | undefined;
+    f.faux.setResponses([
+      holdingAsyncLaunch("async-launch"),
+      async () => {
+        await waitFor(() => child.heldRequests() === 1, "async child live", bound);
+        child.releaseHeld();
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "async run ended before the report", bound);
+        // The provider's notice never reaches canonical evidence: settlement sees no notice for the run.
+        const canonical = slot.canonicalSessionEntries.bind(slot);
+        vi.spyOn(slot, "canonicalSessionEntries").mockImplementation(() =>
+          canonical().filter(entry => !(entry.type === "custom_message" && entry.customType === "subagent-notify")));
+        // Captured from the report on, so the armed 60 s timer is the settlement's own stop-join bound.
+        stopJoin = captureTimer(HOME_TASK_SUBAGENT_STOP_JOIN_MS);
+        return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    await waitFor(() => stopJoin?.armed() === true, "notice join bounded", bound);
+    stopJoin!.expire();
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.subagents", started: 1, stoppedAtEnd: 0, noticesUndelivered: 1 }));
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+  }, 60_000);
+
+  it("lists a live subagent run in task status until settlement, then lists none", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    const seen: { live?: any; runId?: string } = {};
+    f.faux.setResponses([
+      holdingAsyncLaunch("async-launch"),
+      async (context: FauxContext) => {
+        await waitFor(() => child.heldRequests() === 1, "async child live", bound);
+        seen.runId = basename(launchedAsyncDir(context, "async-launch"));
+        seen.live = await f.registry.homeOwner().taskStatus("task-one");
+        child.releaseHeld();
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "async run ended before the report", bound);
+        return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    await run.completion;
+    expect(seen.live).toMatchObject({ subagentRuns: { total: 1, runs: [
+      { runId: seen.runId, agent: "task-child", state: "running", startedAt: expect.any(String) },
+    ] } });
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagentRuns: { total: 0, runs: [] } });
   }, 60_000);
 });

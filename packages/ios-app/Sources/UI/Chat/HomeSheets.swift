@@ -27,6 +27,12 @@ enum HomeSheetDestination: Identifiable {
         switch self { case .tasks, .task, .permissions, .grant: true; default: false }
     }
 
+    /// Manage Home opens at medium and drags to large, exactly like Manage
+    /// Session (#799); its child Home sheets keep their full-height detent.
+    var detents: Set<PresentationDetent> {
+        if case .manage = self { [.medium, .large] } else { [.large] }
+    }
+
 }
 
 /// A Home sheet the chat presents for one profile. Choosing another destination
@@ -106,7 +112,7 @@ struct HomeSheet: View {
             else { NavigationStack { sheetContent } }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.large])
+        .presentationDetents(destination.detents)
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)
         .onDisappear { owner.retire() }
