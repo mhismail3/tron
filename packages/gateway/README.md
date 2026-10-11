@@ -97,6 +97,15 @@ and mobile clients treat that as a retryable transport failure: every Mac must
 run a Gateway that sends the typed close before the phone can stop retrying it
 and name the build to update.
 
+Protocol v8 replaces the per-setting RPCs (`settings.update`,
+`session.setModel`/`setThinking`/`setContextWindow`/`setTools`, `trust.set`,
+`home.configureMemory`) with the one settings change path
+([settings model](docs/settings-model.md)). It has no v7 runtime path, so an
+older iPhone app is refused with the typed mismatch close rather than failing on
+a removed RPC. The v7 to v8 step is the same one-time transition as v6 to v7:
+the deployed v7 update helper cannot promote a strictly v8 candidate, so it uses
+the manual local Release reinstall runbook, Mac first, then the iPhone app.
+
 Tron Gateway is the minimal always-running Mac service behind the Tron iPhone
 app. It embeds the pinned Pi SDK through supported SDK exports. User-facing copy
 calls the product and agent **Tron**; source may use Pi-specific names only where
@@ -1461,7 +1470,7 @@ Files are 0600. It never accepts a client filesystem path, reads session content
 - `POST /v1/sessions/:sessionId/live-views/:id` — open a disposable viewer with `{generation}`
 - `GET /v1/sessions/:sessionId/live-views/:id/frame` — latest JPEG or a body-free waiting/unchanged response
 - `DELETE /v1/sessions/:sessionId/live-views/:id` — close the exact viewer; last native viewer requests joined suspension, never browser automation shutdown
-- `GET /v1/socket` — authenticated protocol version 7 WebSocket
+- `GET /v1/socket` — authenticated protocol version 8 WebSocket
 
 Bearer admission is linearized with the paired-device document under the
 DeviceStore mutex: the credential check and synchronous HTTP/upgrade registration
@@ -1724,7 +1733,7 @@ Authorized device names are projected from one Gateway-owned record: a validated
 Every WebSocket starts with:
 
 ```json
-{"type":"hello","protocolVersion":7}
+{"type":"hello","protocolVersion":8}
 ```
 
 The hello, pairing response, and authenticated `system.info` identify the runtime

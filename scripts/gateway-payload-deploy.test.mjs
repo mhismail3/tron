@@ -156,7 +156,7 @@ async function buildPreflightFixture(root) {
   await mkdir(join(payload, "app", "node_modules", "node-pty", "prebuilds", `darwin-${process.arch}`), { recursive: true });
   await mkdir(join(payload, "runtime"), { recursive: true });
   await writeFile(join(payload, "app", "dist", "index.js"), "x".repeat(1_024));
-  await writeFile(join(payload, "app", "dist", "version.js"), "export const PROTOCOL_VERSION = 7; export const MIN_PROTOCOL_VERSION = 7;\n");
+  await writeFile(join(payload, "app", "dist", "version.js"), "export const PROTOCOL_VERSION = 8; export const MIN_PROTOCOL_VERSION = 8;\n");
   await writeFile(join(payload, "app", "package.json"), "{}\n");
   await writeFile(join(payload, "app", "package-lock.json"), "{}\n");
   await writeFile(join(payload, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
@@ -171,7 +171,7 @@ async function buildPreflightFixture(root) {
   const fingerprint = await payloadFingerprint(payload);
   await writeFile(join(payload, "manifest.json"), JSON.stringify({
     schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "preflight",
-    gatewayVersion: "1", protocolVersion: "7", minProtocolVersion: "7", nodeVersion: "22",
+    gatewayVersion: "1", protocolVersion: "8", minProtocolVersion: "8", nodeVersion: "22",
     sourceRevision: "0123456789abcdef0123456789abcdef01234567", runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef",
     payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files",
   }));

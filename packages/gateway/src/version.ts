@@ -1,10 +1,11 @@
 import { lstatSync, readFileSync } from "node:fs";
 
 export const GATEWAY_VERSION = "0.1.0-beta.8";
-// Protocol v5 makes fork-boundary gap metadata explicit. There is no
-// v4 runtime path: every mobile peer must understand the typed projection.
-export const PROTOCOL_VERSION = 7;
-export const MIN_PROTOCOL_VERSION = 7;
+// Protocol v8 replaces the per-setting RPCs with settings.change (#762). There
+// is no v7 runtime path: an older client is refused with the typed mismatch
+// close, which names the side to update, instead of failing on removed RPCs.
+export const PROTOCOL_VERSION = 8;
+export const MIN_PROTOCOL_VERSION = 8;
 // Application-defined close code for a hello whose protocol the peer cannot
 // speak. The version range it names travels in the close reason, so every
 // client that decodes the code can name the stale side (mirrors iOS

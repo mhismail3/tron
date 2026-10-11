@@ -186,7 +186,7 @@ async function fixture(options: {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await waitFor(() => socket.readyState === WebSocket.OPEN, "socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 8 }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "hello");
     return {
       frames,

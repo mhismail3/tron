@@ -98,7 +98,7 @@ async function startGateway(): Promise<Harness> {
     sessions: { unsubscribeClient: vi.fn() } as never,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as never,
     service: {
-      info: () => ({ protocolVersion: 7 }),
+      info: () => ({ protocolVersion: 8 }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       invoke: vi.fn(),
@@ -132,7 +132,7 @@ async function startGateway(): Promise<Harness> {
       const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
       sockets.push(socket);
       await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 8 }));
       await waitFor(() => records("connection.opened").length === before + 1, "connection opened record");
       return socket;
     },
