@@ -570,7 +570,8 @@ final class GatewayLifecycleCoordinator {
         // socket no longer admits.
         cancelDeferredProjection()
         if countsAsTransportFailure {
-            connectionFailureClassifier.failedAttempt(nil, code: code)
+            // An established socket loss starts a recovery episode; it does not
+            // classify a failed reconnect attempt as having opened its transport.
             delegate?.lifecycleConnectionFailurePresentationDidChange()
             delegate?.lifecycleRecordDiagnostic(event: "reconnect.failure", message: "code=\(code)")
         }

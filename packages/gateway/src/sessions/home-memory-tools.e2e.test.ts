@@ -462,7 +462,7 @@ describe.sequential("Tron Home memory tools end to end", () => {
       toolResultMessages: (f.requests.at(-1)?.roles ?? []).filter((role) => role === "toolResult").length,
     };
     report.cases.push({ case: "zoom", ...row });
-    expect(row.children).toBe("0+2|user: zoom-m0 talk: reply-r0\n2+2|user: zoom-m2 talk: reply-r2");
+    expect(row.children).toBe("0+2|summary: user: zoom-m0 talk: reply-r0\n2+2|summary: user: zoom-m2 talk: reply-r2");
     expect(row.halves).toBe("0+1|user: zoom-m0\n1+1|talk: reply-r0");
     expect(row.message).toBe("2+0|user: zoom-m2");
     expect(row.misaligned).toBe("No line 1+2.");

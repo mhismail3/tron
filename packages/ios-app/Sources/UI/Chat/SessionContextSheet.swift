@@ -188,31 +188,13 @@ struct SessionContextSheet: View {
     @State private var capturedNoticeScope: InAppNoticeScope?
     @State private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
     @State private var presentation: SessionContextPresentation?
-    @State private var pendingModelSelection: SessionPendingModelSelection?
-    @State private var pendingContextWindow: SessionPendingSetting<Int?>?
-    @State private var pendingThinking: SessionPendingSetting<String>?
     @State private var sliderPresentation = ConfigurationSliderPresentation()
-    @State private var settingContextWindow = false
     @State private var forkNavigation = ChatForkNavigationOwner()
 
     init(sessionID: String, initialHistoryEntryID: String? = nil, onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void) {
         self.sessionID = sessionID
         self.initialHistoryEntryID = initialHistoryEntryID
         self.onForkCreated = onForkCreated
-    }
-
-    // Observe revision only while a choice awaits projection, never for ordinary
-    // streaming. A completed receipt may be superseded without changing a value.
-    private var pendingConfigurationRevision: Int? {
-        guard pendingModelSelection != nil || pendingThinking != nil || pendingContextWindow != nil else { return nil }
-        return model.authoritativeSnapshot(for: sessionID)?.revision
-    }
-
-    private var configurationConnectionReason: String? {
-        guard let target = model.presentationTarget(for: sessionID), model.admitsLiveSessionCommands(target) else {
-            return "Waiting for the conversation to synchronize."
-        }
-        return nil
     }
 
     private var presentationSource: SessionContextPresentation? {
@@ -255,7 +237,7 @@ struct SessionContextSheet: View {
                             }
                         }
                         SessionContextUsageCard(snapshot: snapshot)
-                        modelSummaryCard(snapshot)
+                        modelConfigurationCard(snapshot)
                         sessionSection(snapshot)
                         exportSection
                     } else {
@@ -326,9 +308,6 @@ struct SessionContextSheet: View {
                     Color.clear
                         .onChange(of: presentationSource, initial: true) { _, value in
                             reconcilePresentation(value)
-                        }
-                        .onChange(of: pendingConfigurationRevision) { _, _ in
-                            reconcilePresentation(presentationSource)
                         }
                 }
             }
@@ -460,7 +439,6 @@ struct SessionContextSheet: View {
             : (compacting || snapshot.phase == .compacting) ? "In progress" : "")
     }
 
-    private var configurationRowAccent: Color { .tronPurple }
     private var sessionRowAccent: Color { .tronSessionTeal }
     private var exportRowAccent: Color { .tronSlate }
 
@@ -485,165 +463,25 @@ struct SessionContextSheet: View {
         ) { destination = .processHistory }
     }
 
-    private func modelSelection(_ snapshot: SessionContextPresentation) -> Binding<ModelRef?> {
-        Binding(
-            get: {
-                SessionModelSelectionPresentation.displayed(pending: pendingModelSelection, authoritative: snapshot.model)
-            },
-            set: { selection in
-                guard let selection, pendingModelSelection == nil, pendingThinking == nil, !settingContextWindow,
-                      selection != SessionModelSelectionPresentation.displayed(
-                        pending: pendingModelSelection, authoritative: snapshot.model
-                      ),
-                      let current = model.sessionContextPresentation(for: sessionID),
-                      current.runtimeGeneration == snapshot.runtimeGeneration,
-                      current.configurationLockedReason == nil,
-                      current.model == snapshot.model else { return }
-                let pending = SessionPendingModelSelection(selection, snapshot: current)
-                pendingModelSelection = pending
-                pendingContextWindow = nil
-                pendingThinking = nil
-                Task {
-                    do {
-                        guard let admitted = model.sessionContextPresentation(for: sessionID),
-                              pending.admitted(in: admitted) != nil, admitted.model == current.model,
-                              admitted.configurationLockedReason == nil else {
-                            pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
-                            return
-                        }
-                        let revision = try await model.setModel(selection, sessionID: sessionID)
-                        pendingModelSelection = pendingModelSelection?.confirming(pending.id, revision: revision)
-                        if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
-                    } catch is CancellationError {
-                        // Refused receipt replay is terminal for this intent;
-                        // uncertain accepted outcomes use outcome_unknown instead.
-                        pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
-                    } catch {
-                        pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
-                        surfaceActionError(error)
-                    }
-                }
-            }
-        )
-    }
-
-    private func modelSummaryCard(_ snapshot: SessionContextPresentation) -> some View {
-        let thinkingScope = SessionThinkingEditScope(snapshot)
-        let lockedReason = configurationConnectionReason ?? snapshot.configurationLockedReason
-        let displayedThinking = pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel
-        let selection = modelSelection(snapshot)
-        let catalog = model.providerCatalog(for: .session(id: sessionID))?.models ?? []
-        return SessionModelSummaryCard(
-            selection: selection,
-            catalog: catalog,
-            selectionAvailability: (pendingThinking != nil || settingContextWindow || pendingModelSelection != nil)
-                ? .applying : lockedReason.map(ModelSelectionAvailability.blocked) ?? .ready,
-            automaticCompactionEnabled: snapshot.automaticCompactionEnabled
-        ) {
-            TronThinkingSelectionRow(
-                selection: Binding(
-                    get: { displayedThinking },
-                    set: { level in
-                        guard level != displayedThinking, pendingModelSelection == nil, pendingThinking == nil, !settingContextWindow,
-                              presentationActivity.allowsPresentationPublication,
-                              let current = model.sessionContextPresentation(for: sessionID),
-                              thinkingScope.admits(level, in: current),
-                              (pendingThinking?.admitted(in: current)?.value ?? current.thinkingLevel) == displayedThinking else { return }
-                        let pending = SessionPendingSetting(level, snapshot: snapshot)
-                        pendingThinking = pending
-                        Task {
-                            do {
-                                // The task may start after a runtime/model replacement.
-                                guard let current = model.sessionContextPresentation(for: sessionID),
-                                      thinkingScope.admits(level, in: current), pendingModelSelection == nil else {
-                                    pendingThinking = pendingThinking?.rejecting(pending.id)
-                                    return
-                                }
-                                let revision = try await model.setThinking(level, sessionID: sessionID)
-                                pendingThinking = pendingThinking?.confirming(pending.id, revision: revision)
-                                if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
-                            } catch {
-                                pendingThinking = pendingThinking?.rejecting(pending.id)
-                                surfaceActionError(error)
-                            }
-                        }
-                    }
-                ),
-                levels: snapshot.availableThinkingLevels,
-                accent: configurationRowAccent
-            )
-            .id(thinkingScope)
-            .disabled(lockedReason != nil || pendingModelSelection != nil || pendingThinking != nil || settingContextWindow)
-            if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
-               let policy = snapshot.contextWindowPolicy {
-                let pendingWindow = pendingContextWindow?.admitted(in: snapshot)
-                TronSettingsDivider(accent: configurationRowAccent)
-                ContextWindowSelectionRow(
-                    selection: Binding(
-                        get: { pendingWindow.map(\.value) ?? policy.override },
-                        set: { value in
-                            // Bind the request to the model shown when the
-                            // control was rendered. A late tap after a model
-                            // switch must never mutate the replacement model.
-                            guard !settingContextWindow, pendingModelSelection == nil, pendingThinking == nil,
-                                  let current = model.sessionContextPresentation(for: sessionID),
-                                  current.configurationLockedReason == nil,
-                                  current.runtimeGeneration == snapshot.runtimeGeneration,
-                                  current.contextWindowPolicy?.model == policy.model else { return }
-                            let pending = SessionPendingSetting(value, snapshot: snapshot)
-                            pendingContextWindow = pending
-                            settingContextWindow = true
-                            Task {
-                                defer { settingContextWindow = false }
-                                do {
-                                    guard let admission = model.authoritativeSnapshot(for: sessionID),
-                                          admission.runtimeGeneration == snapshot.runtimeGeneration,
-                                          admission.contextWindowPolicy?.model == policy.model else { return }
-                                    let revision = try await model.setContextWindow(value, for: policy.model, sessionID: sessionID, expectedRevision: admission.revision, expectedRuntimeGeneration: admission.runtimeGeneration)
-                                    pendingContextWindow = pendingContextWindow?.confirming(pending.id, revision: revision)
-                                    if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
-                                } catch {
-                                    pendingContextWindow = pendingContextWindow?.rejecting(pending.id)
-                                    surfaceActionError(error)
-                                }
-                            }
-                        }
-                    ),
-                    limits: ContextWindowLimits(
-                        minimum: policy.minimum,
-                        maximum: policy.maximum,
-                        default: policy.default,
-                        longContextThreshold: nil
-                    ),
-                    inheritedValue: policy.default,
-                    effectiveValue: pendingWindow.map { $0.value ?? policy.default } ?? policy.effective,
-                    resetLabel: "Use configured default",
-                    warning: policy.warning,
-                    source: pendingWindow == nil ? policy.source : "pending",
-                    accent: configurationRowAccent
-                )
-                .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey)")
-                .disabled(lockedReason != nil || settingContextWindow || pendingModelSelection != nil || pendingThinking != nil)
-            }
-        } compactAction: {
-            compactButton(snapshot)
+    private func modelConfigurationCard(_ snapshot: SessionContextPresentation) -> some View {
+        SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot, onError: { surfaceActionError($0) }) {
+            automaticCompactionRow(snapshot)
         }
     }
 
     private func reconcilePresentation(_ value: SessionContextPresentation?) {
         if presentation != value { presentation = value }
-        pendingModelSelection = SessionModelSelectionPresentation.reconciledPending(
-            pending: pendingModelSelection,
-            authoritative: value?.model,
-            runtimeGeneration: value?.runtimeGeneration,
-            revision: pendingConfigurationRevision
-        )
-        pendingContextWindow = pendingContextWindow?.reconciled(
-            authoritative: value?.contextWindowPolicy?.override, snapshot: value, revision: pendingConfigurationRevision
-        )
-        pendingThinking = pendingThinking?.reconciled(
-            authoritative: value?.thinkingLevel ?? "", snapshot: value, revision: pendingConfigurationRevision
-        )
+    }
+
+    private func automaticCompactionRow(_ snapshot: SessionContextPresentation) -> some View {
+        TronSettingsRow(
+            icon: "rectangle.compress.vertical",
+            title: "Automatic Compaction",
+            subtitle: SessionCompactionControlPolicy.automaticStatus(snapshot.automaticCompactionEnabled),
+            accent: .tronPurple
+        ) {
+            compactButton(snapshot)
+        }
     }
 
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
