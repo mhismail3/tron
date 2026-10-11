@@ -10927,18 +10927,15 @@ export default function (pi) {
     const statePath = join(root, "state.json");
     const pidFile = join(root, "server.pid");
     const childPidFile = join(root, "child.pid");
+    const readyPath = join(root, "ready");
     await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
     await writeFile(statePath, JSON.stringify({ tools: [{ name: "echo", description: "Fixture", inputSchema: { type: "object", properties: {} } }] }));
     await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {
-      slow: { command: process.execPath, args: [fixtureScript, "stdio", statePath, pidFile, childPidFile, "30000"], exposure: "direct" },
+      slow: { command: process.execPath, args: [fixtureScript, "stdio", statePath, pidFile, childPidFile, "30000", readyPath], exposure: "direct" },
     } }));
     const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = agentDir;
     const faux = fauxProvider({ provider: "tron-pi-mcp-slow-start", tokensPerSecond: 10_000 });
-    faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("mcp__slow__echo", {}, { id: "slow-start-call" })], { stopReason: "toolUse" }),
-      fauxAssistantMessage("slow MCP completed"),
-    ]);
     const modelRuntimeFactory = async () => {
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
       runtime.registerNativeProvider(faux.provider);
@@ -10956,16 +10953,19 @@ export default function (pi) {
       const slot = await registry.create(cwd);
       const model = faux.getModel();
       await slot.setModel(model.provider, model.id);
-      const prompt = slot.prompt("call the slow MCP server");
       await waitFor(() => existsSync(pidFile) && existsSync(childPidFile), "the starting MCP process and child");
       serverPid = Number(await readFile(pidFile, "utf8"));
       childPid = Number(await readFile(childPidFile, "utf8"));
+      // Prove disposal races a live initialization, not an already timed-out server.
+      expect(existsSync(readyPath)).toBe(false);
+      process.kill(serverPid, 0);
+      process.kill(childPid, 0);
       await registry.dispose();
       registries.splice(registries.indexOf(registry), 1);
-      await prompt.catch(() => {});
       await waitFor(() => [serverPid, childPid].every(pid => {
         try { process.kill(pid!, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
       }), "the starting MCP process group to exit after runtime disposal");
+      expect(existsSync(readyPath)).toBe(false);
       await mkdir(join(process.cwd(), "test-results"), { recursive: true });
       await writeFile(join(process.cwd(), "test-results", "pi-sdk-mcp-startup-dispose.json"), `${JSON.stringify({ disposedDuringStartup: true, serverPid, childPid, processGroupReaped: true }, null, 2)}\n`);
     } finally {

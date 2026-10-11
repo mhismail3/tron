@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFileSync, watch } from "node:fs";
 import readline from "node:readline";
 
-const [transport, statePath, pidPath, childPidPath, startupDelayArgument] = process.argv.slice(2);
+const [transport, statePath, pidPath, childPidPath, startupDelayArgument, readyPath] = process.argv.slice(2);
 const state = () => JSON.parse(readFileSync(statePath, "utf8"));
 if (pidPath && transport === "stdio") await import("node:fs/promises").then(({ writeFile }) => writeFile(pidPath, String(process.pid)));
 if (childPidPath) {
@@ -11,6 +11,7 @@ if (childPidPath) {
   await import("node:fs/promises").then(({ writeFile }) => writeFile(childPidPath, String(child.pid)));
 }
 if (startupDelayArgument) await new Promise(resolve => setTimeout(resolve, Number(startupDelayArgument)));
+if (readyPath) await import("node:fs/promises").then(({ writeFile }) => writeFile(readyPath, "ready"));
 
 function dispatch(message) {
   const params = message.params ?? {};

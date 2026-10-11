@@ -21,8 +21,8 @@ runtimes. Runtime disposal runs Pi's `session_shutdown`, which closes registered
 connections; if extension shutdown exceeds Tron's 5-second disposal grace, Tron
 invalidates the Pi session synchronously. The RuntimeRegistry integration test
 `reaps a slow-starting MCP stdio process and its child when the runtime is disposed`
-checks that this fallback also retires a process group whose stdio server has not
-completed startup. The `runtime.dispose-timeout` warning is the production signal
+checks that normal Pi shutdown retires a live process group whose stdio server has
+not completed startup. Session invalidation alone is not proof of process cleanup. The `runtime.dispose-timeout` warning is the production signal
 for shutdown cleanup that exceeds the grace; Tron cannot directly count surviving
 MCP child processes through Pi's public runtime API.
 
