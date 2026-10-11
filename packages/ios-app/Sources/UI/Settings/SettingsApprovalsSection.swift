@@ -151,7 +151,7 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
     @ViewBuilder
     private func expiryText(_ request: SettingsApprovalRequest) -> some View {
         if let date = request.expiryDate {
-            Text("Expires \(date, style: .relative)")
+            Text("Expires \(date, format: .relative(presentation: .named))")
         } else {
             Text("Expires \(request.expiresAt)")
         }

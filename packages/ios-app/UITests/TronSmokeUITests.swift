@@ -345,6 +345,52 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 5))
     }
 
+    /// Manage Home's pending settings changes (settings-model.md 5.5): each row
+    /// is decided by its own digest-bound Approve or Decline, and a decided row leaves.
+    @MainActor
+    func testManageHomeSettingsApprovalsApproveAndDecline() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-settings-approvals"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        let header = app.descendants(matching: .any)["settings-approvals-header"]
+        XCTAssertTrue(header.waitForExistence(timeout: 5), app.debugDescription)
+        let approveRow = app.descendants(matching: .any)["settings-approval-settings-request-approve"]
+        let declineRow = app.descendants(matching: .any)["settings-approval-settings-request-decline"]
+        XCTAssertTrue(approveRow.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(declineRow.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["settings-approval-settings-request-chat"].exists,
+                       "A chat agent's request belongs to that chat's Manage Session, not Manage Home")
+        // The exact change, who asked and the confirm text, all Gateway text.
+        for text in ["Not set → Trusted", "Asked by Home", "Asked by Home task nightly-sync", "/work/other", "Trusting a project lets its files run"] {
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.waitForExistence(timeout: 5), text)
+        }
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Expires in")).firstMatch.exists, "The expiry reads as a relative time")
+        keepScreenshot(named: "home-settings-approvals-pending")
+
+        tapScrolling(app.buttons["settings-approval-approve-settings-request-approve"], in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-decisions"], containing: "approved:settings-request-approve", timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+        XCTAssertTrue(approveRow.waitForNonExistence(timeout: 5))
+
+        tapScrolling(app.buttons["settings-approval-decline-settings-request-decline"], in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-decisions"], containing: "declined:settings-request-decline", timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:2", timeout: 5))
+        XCTAssertTrue(header.waitForNonExistence(timeout: 5), "No pending Home change leaves the approvals section empty")
+        keepScreenshot(named: "home-settings-approvals-decided")
+    }
+
+    /// Scrolls the sheet until the control is hittable, then taps it.
+    @MainActor
+    private func tapScrolling(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<4 where !element.isHittable { app.swipeUp() }
+        element.tap()
+    }
+
     /// Cross-surface proof, one hosted run: Manage Home in light/dark at normal and
     /// accessibility Dynamic Type (each combination is captured once) and all five
     /// child sheets; then background and a hosted reconnect on the tasks sheet,
@@ -915,6 +961,32 @@ final class TronSmokeUITests: XCTestCase {
         thinking.tap()
         XCTAssertTrue(app.descendants(matching: .any)["thinking-level-slider"].waitForExistence(timeout: 3))
         keepScreenshot(named: "post-stop-configuration-ready")
+    }
+
+    /// Manage Session's pending change for this chat: a decline is recorded by the
+    /// Gateway, and the chat's approvals section then renders nothing.
+    @MainActor
+    func testManageSessionSettingsApprovalDecline() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-session-settings-approvals"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        let row = app.descendants(matching: .any)["settings-approval-settings-session-request"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["settings-approval-settings-other-request"].exists,
+                       "Another chat's request does not show in this chat's Manage Session")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "read, bash → read, bash, fetch_page")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Asked by A chat's agent")).firstMatch.exists)
+        keepScreenshot(named: "session-settings-approval-pending")
+
+        tapScrolling(app.buttons["settings-approval-decline-settings-session-request"], in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "declined:settings-session-request", timeout: 5))
+        XCTAssertTrue(row.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["settings-approvals-header"].waitForNonExistence(timeout: 5))
+        keepScreenshot(named: "session-settings-approval-declined")
     }
 
     @MainActor

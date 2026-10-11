@@ -107,6 +107,56 @@ final class TronProjectTrustUITests: XCTestCase {
         XCTAssertTrue(counts(app, id: "fixture.trust-replacement", contain: "sets:0 commands:0 repeats:0"))
     }
 
+    /// Permissions › Floors (settings-model.md 5.4): lowering a floor is an approve-tier
+    /// change that waits for the maintainer's confirm; raising it applies at once.
+    @MainActor
+    func testPermissionFloorsLowerNeedsConfirmAndRaiseApplies() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-project-trust-fixture", "-project-trust-scenario", "floors"]
+        app.launch()
+        defer { app.terminate() }
+        let row = app.descendants(matching: .any)["permission-floor-permissions.floor|direction=widen|key=permissions.projectTrust"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(counts(app, contain: "floor:approve previews:0 applies:0"), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Project trust (widen)"].exists && app.staticTexts["Built-in"].exists, app.debugDescription)
+
+        // Lowering: the dry run carries confirm text, and nothing is applied until confirmed.
+        choose(app, row: row, option: "permission-floor-choice-quiet")
+        let confirm = app.buttons["permission-floor-confirm"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(counts(app, contain: "floor:approve previews:1 applies:0"), app.debugDescription)
+        keepScreenshot(app, name: "758-permission-floor-lower-confirm")
+        confirm.tap()
+        XCTAssertTrue(counts(app, contain: "floor:quiet previews:1 applies:1"), app.debugDescription)
+        XCTAssertTrue(waitForValue(row.buttons.firstMatch, "Quiet"), app.debugDescription)
+        // The override is now the Mac layer's, named by the row's layer badge.
+        XCTAssertTrue(app.staticTexts["Mac"].waitForExistence(timeout: 5), app.debugDescription)
+
+        // Raising: the dry run needs no confirm, so the choice applies directly.
+        choose(app, row: row, option: "permission-floor-choice-approve")
+        XCTAssertTrue(counts(app, contain: "floor:approve previews:2 applies:2"), app.debugDescription)
+        XCTAssertFalse(app.buttons["permission-floor-confirm"].firstMatch.exists)
+        XCTAssertTrue(waitForValue(row.buttons.firstMatch, "Approve"), app.debugDescription)
+        keepScreenshot(app, name: "758-permission-floor-raise-applied")
+    }
+
+    @MainActor
+    private func choose(_ app: XCUIApplication, row: XCUIElement, option: String) {
+        let menu = row.buttons.firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), app.debugDescription)
+        menu.tap()
+        let choice = app.buttons[option]
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
+        choice.tap()
+    }
+
+    @MainActor
+    private func waitForValue(_ element: XCUIElement, _ expected: String) -> Bool {
+        let condition = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expected), object: element)
+        return XCTWaiter.wait(for: [condition], timeout: 10) == .completed
+    }
+
     @MainActor
     private func acceptTrustThenBlock(_ app: XCUIApplication) {
         app.buttons["Trust Project"].tap()

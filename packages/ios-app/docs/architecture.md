@@ -708,6 +708,11 @@ is pending. Settings › Permissions (`PermissionFloorsSettingsView`) lists ever
 badge, and sets or unsets one through `settings.change`: a dry run first, and when the dry run's
 tier is approve (lowering a floor) the Gateway's `confirm` text is shown and the change is sent
 only on the maintainer's tap. The three tiers are F3's fixed vocabulary; the rest is served.
+Hosted journeys: `TronSmokeUITests.testManageHomeSettingsApprovalsApproveAndDecline` and
+`testManageSessionSettingsApprovalDecline` (the `-home-settings-approvals` and
+`-session-settings-approvals` fixture flags, each with a request from another scope that must not
+show), and `TronProjectTrustUITests.testPermissionFloorsLowerNeedsConfirmAndRaiseApplies` (the
+`floors` scenario of `HostedProjectTrustFixture`).
 `ProviderAuthCoordinator` likewise solely owns typed-target
 provider/model catalogs, per-target paging admission, event-only provider invalidation,
 auth prompt/event parsing, browser-callback submission, and operation-to-target retention through

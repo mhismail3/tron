@@ -10,6 +10,7 @@ struct HostedSessionConfigurationFixture: View {
     @State private var ready = false
     @State private var presented = false
     @State private var deliveredSupersededReceipt = false
+    @State private var decisionState = "none"
     @State private var error: String?
     private let socket: HostedSessionConfigurationSocket
     private let profile: GatewayProfile
@@ -34,7 +35,8 @@ struct HostedSessionConfigurationFixture: View {
                 capabilities: [], diagnostics: [], semanticState: .init(statuses: [:], working: .init(message: nil, visible: false),
                     hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
                 surfaces: [], pendingInteractions: []), diagnostics: [])
-        socket = HostedSessionConfigurationSocket(snapshot: snapshot)
+        socket = HostedSessionConfigurationSocket(snapshot: snapshot,
+            settingsApprovals: ProcessInfo.processInfo.arguments.contains("-session-settings-approvals"))
         _model = State(initialValue: AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { [socket] _ in socket }),
             profiles: profiles,
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "session-configuration-fixture"))))
@@ -60,6 +62,7 @@ struct HostedSessionConfigurationFixture: View {
                             Task { deliveredSupersededReceipt = (try? await socket.completeSupersededThinking()) == true }
                         }
                         if deliveredSupersededReceipt { Text("Superseded receipt delivered") }
+                        Text("decisions:\(decisionState)").accessibilityIdentifier("fixture.session-settings-decisions")
                     }.padding()
                 }
         }
@@ -76,6 +79,12 @@ struct HostedSessionConfigurationFixture: View {
                 ready = true
             } catch { self.error = String(describing: error) }
         }
+        .task {
+            while !Task.isCancelled {
+                decisionState = await socket.decisionSummary()
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
     }
 }
 
@@ -86,7 +95,30 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     private var pending: [Data] = []
     private var closed = false
     private var pendingThinking: (id: String, revision: Int)?
-    init(snapshot: SessionSnapshot) { self.snapshot = snapshot }
+    private var approvals: [JSONValue] = []
+    private var decisions: [String] = []
+    init(snapshot: SessionSnapshot, settingsApprovals: Bool) {
+        self.snapshot = snapshot
+        // This chat's agent's request shows in its Manage Session; another chat's does not.
+        approvals = settingsApprovals ? ["configuration-fixture", "other-session"].map { sessionID in
+            .object([
+                "requestId": .string(sessionID == "other-session" ? "settings-other-request" : "settings-session-request"),
+                "digest": .string(String(repeating: sessionID == "other-session" ? "e" : "c", count: 64)),
+                "createdAt": .string("2026-01-01T00:00:00.000Z"), "expiresAt": .string(Date.now.addingTimeInterval(23 * 60 * 60).formatted(.iso8601)),
+                "target": .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
+                "actor": .object(["kind": .string("agent"), "id": .string(sessionID), "sessionId": .string(sessionID)]),
+                "requester": .string("A chat's agent"), "reason": .string("The page said to"),
+                "changes": .array([.object([
+                    "changeId": .string("change-\(sessionID)"), "key": .string("tools.active"),
+                    "label": .string("Active tools"), "layer": .string("chat"), "op": .string("set"), "tier": .string("approve"),
+                    "tierBasis": .object([:]), "before": .array([.string("read"), .string("bash")]),
+                    "after": .array([.string("read"), .string("bash"), .string("fetch_page")]),
+                    "display": .object(["before": .string("read, bash"), "after": .string("read, bash, fetch_page")]),
+                ])]),
+            ])
+        } : []
+    }
+    func decisionSummary() -> String { decisions.isEmpty ? "none" : decisions.joined(separator: ",") }
     func resume() async { }
     func ping() async throws { }
     func send(_ data: Data) async throws {
@@ -110,6 +142,17 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             snapshot.revision += 1
             pendingThinking = (id, snapshot.revision)
             return // Hold the original success while a second client supersedes it.
+        case "settings.approvals":
+            result = .object(["requests": .array(approvals)])
+        case "settings.decide":
+            let params = frame.objectValue?["params"]?.objectValue ?? [:]
+            guard let requestID = params["requestId"]?.stringValue, let digest = params["digest"]?.stringValue,
+                  let approved = params["approved"]?.boolValue,
+                  let index = approvals.firstIndex(where: { $0.objectValue?["requestId"]?.stringValue == requestID && $0.objectValue?["digest"]?.stringValue == digest })
+            else { throw GatewayFailure(code: "conflict", message: "Approval refused", retryable: false, details: nil) }
+            approvals.remove(at: index)
+            decisions.append("\(approved ? "approved" : "declined"):\(requestID)")
+            result = .object(["requestId": .string(requestID), "approved": .bool(approved)])
         case "model.list": result = .object(["models": .array([])])
         case "provider.list": result = .object(["providers": .array([])])
         case "session.workspace.inspect": result = .object(["cwd": .string("/workspace"), "exists": .bool(true), "isGitRepository": .bool(false)])
