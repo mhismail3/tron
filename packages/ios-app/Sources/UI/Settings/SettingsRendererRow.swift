@@ -14,7 +14,10 @@ struct SettingsRendererRow: View {
     let onChange: (JSONValue?) -> Void
 
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var options: [SettingsOption]?
+    @State private var dynamicRange: SettingsRange?
+    @State private var optionsGeneration = 0
     @State private var showsHelp = false
 
     private var presentation: SettingsKeyPresentation? { setting.presentation }
@@ -25,7 +28,13 @@ struct SettingsRendererRow: View {
 
     private struct OptionsLoadID: Hashable {
         let key: String
+        let target: JSONValue
         let dependencies: String
+        let foreground: Int
+    }
+
+    private var numberRange: SettingsRange? {
+        presentation?.optionsSource == nil ? presentation?.range : dynamicRange
     }
 
     var body: some View {
@@ -35,8 +44,24 @@ struct SettingsRendererRow: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(settingsRowIdentifier(setting))
-        .task(id: OptionsLoadID(key: setting.id, dependencies: dependencyDisplay)) {
-            guard presentation?.optionsSource != nil, control == .choice else { return }
+        .onChange(of: dependencyDisplay) { _, _ in
+            optionsGeneration &+= 1
+            options = nil
+            dynamicRange = nil
+        }
+        .onChange(of: presentationActivity) { _, _ in
+            optionsGeneration &+= 1
+            options = nil
+            dynamicRange = nil
+        }
+        .onDisappear { optionsGeneration &+= 1 }
+        .task(id: PresentationActivityTaskID(
+            source: OptionsLoadID(key: setting.id, target: target, dependencies: dependencyDisplay,
+                                  foreground: model.foregroundReconciliationGeneration),
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentation?.optionsSource != nil, control == .choice || control == .number,
+                  presentationActivity.allowsPresentationPublication else { return }
             await loadOptions()
         }
     }
@@ -48,9 +73,9 @@ struct SettingsRendererRow: View {
             TronToggleRow(icon: "switch.2", title: title, detail: setting.display,
                           isOn: Binding(get: { setting.value?.boolValue == true }, set: { onChange(.bool($0)) }))
         case .choice:
-            let choices = options ?? presentation?.options?.map {
+            let choices = presentation?.optionsSource != nil ? (options ?? []) : (presentation?.options?.map {
                 SettingsOption(value: $0.value, label: $0.label, detail: nil, disabledReason: nil)
-            } ?? []
+            } ?? [])
             if choices.isEmpty {
                 // A source with nothing to offer (a model that does not think) is a value, not a menu.
                 readOnlyRow(subtitle: options == nil ? nil : "No options for the current choice")
@@ -67,8 +92,15 @@ struct SettingsRendererRow: View {
                 }
             }
         case .number:
-            TronNumberSettingRow(icon: "number", title: title, detail: rangeText,
-                                 value: Binding(get: { setting.value?.intValue ?? 0 }, set: { onChange(.number(Double($0))) }))
+            if let range = numberRange, range.supportsIntegerSlider,
+               case .number(let raw) = setting.value, let value = Int(exactly: raw) {
+                SettingsNumberSelectionRow(title: title, value: value, display: setting.display, range: range) {
+                    onChange(.number(Double($0)))
+                }
+            } else {
+                readOnlyRow(subtitle: presentation?.optionsSource != nil && options == nil
+                            ? nil : "Update Tron to edit this number")
+            }
         case .text:
             SettingsRendererTextRow(title: title, value: setting.value?.stringValue ?? "", onCommit: { onChange(.string($0)) })
         case .secret:
@@ -103,12 +135,6 @@ struct SettingsRendererRow: View {
                 .multilineTextAlignment(.trailing)
                 .textSelection(.enabled)
         }
-    }
-
-    private var rangeText: String? {
-        guard let range = presentation?.range else { return nil }
-        let unit = range.unit.map { " \($0)" } ?? ""
-        return "\(Int(range.min))–\(Int(range.max))\(unit)"
     }
 
     @ViewBuilder
@@ -158,12 +184,28 @@ struct SettingsRendererRow: View {
     }
 
     private func loadOptions() async {
+        optionsGeneration &+= 1
+        let ticket = optionsGeneration
+        let activity = presentationActivity
+        let identity = model.knowledgePresentationIdentity
+        let foreground = model.foregroundReconciliationGeneration
+        // Never keep choices for a previous dependency value visible while its replacement loads.
+        options = nil
+        dynamicRange = nil
+        @MainActor func isCurrent() -> Bool {
+            ticket == optionsGeneration && !Task.isCancelled
+                && activity == presentationActivity && activity.allowsPresentationPublication
+                && identity == model.knowledgePresentationIdentity
+                && foreground == model.foregroundReconciliationGeneration
+        }
         do {
             let response = try await model.settingsOptions(target: target, key: setting.key, qualifiers: setting.qualifiers, query: nil)
-            guard !Task.isCancelled else { return }
+            guard isCurrent() else { return }
             options = response.options
+            dynamicRange = response.range
         } catch {
-            // The row stays on its static choices or its display; options are a disposable read.
+            // Options are disposable; stale failures must not publish or hide a newer result.
+            guard isCurrent() else { return }
         }
     }
 }
@@ -209,6 +251,8 @@ private struct SettingsCatalogPicker: View {
     @State private var query = ""
     @State private var options: [SettingsOption]?
     @State private var loadError: String?
+    @State private var requestGeneration = 0
+    @Environment(\.tronPresentationActivity) private var presentationActivity
 
     var body: some View {
         ScrollView(.vertical) {
@@ -244,16 +288,42 @@ private struct SettingsCatalogPicker: View {
             .padding(20)
         }
         .tronNavigationTitle(title)
-        .task(id: query) {
+        .onChange(of: query) { _, _ in
+            requestGeneration &+= 1
+            options = nil
+            loadError = nil
+        }
+        .onChange(of: presentationActivity) { _, _ in
+            requestGeneration &+= 1
+            options = nil
+            loadError = nil
+        }
+        .onDisappear { requestGeneration &+= 1 }
+        .task(id: PresentationActivityTaskID(source: query, presentationActive: presentationActivity.allowsPresentationPublication)) {
+            guard presentationActivity.allowsPresentationPublication else { return }
+            requestGeneration &+= 1
+            let ticket = requestGeneration
+            let activity = presentationActivity
+            let identity = model.knowledgePresentationIdentity
+            let foreground = model.foregroundReconciliationGeneration
+            // A result for the previous search must not remain selectable while the new one loads.
+            options = nil
+            loadError = nil
+            @MainActor func isCurrent() -> Bool {
+                ticket == requestGeneration && !Task.isCancelled
+                    && activity == presentationActivity && activity.allowsPresentationPublication
+                    && identity == model.knowledgePresentationIdentity
+                    && foreground == model.foregroundReconciliationGeneration
+            }
             do {
                 let response = try await model.settingsOptions(target: target, key: setting.key, qualifiers: setting.qualifiers,
                                                                query: query.isEmpty ? nil : query)
-                guard !Task.isCancelled else { return }
+                guard isCurrent() else { return }
                 options = response.options
-                loadError = nil
             } catch is CancellationError {
                 return
             } catch {
+                guard isCurrent() else { return }
                 loadError = error.localizedDescription
             }
         }

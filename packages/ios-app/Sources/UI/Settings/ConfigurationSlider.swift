@@ -79,6 +79,7 @@ extension EnvironmentValues {
 struct ConfigurationSliderRequest {
     enum Editor {
         case contextWindow(ContextWindowSliderRequest)
+        case number(SettingsNumberSliderRequest)
         case choice(SettingsChoiceSliderRequest)
     }
     let session: ConfigurationSliderPresentation.Session
@@ -119,6 +120,9 @@ private struct ConfigurationSliderHost: ViewModifier {
                             switch request.editor {
                             case .contextWindow(let editor):
                                 ContextWindowSliderEditor(request: editor, anchor: request, source: source,
+                                                          availableSize: geometry.size, presentation: presentation)
+                            case .number(let editor):
+                                SettingsNumberSliderEditor(request: editor, anchor: request, source: source,
                                                           availableSize: geometry.size, presentation: presentation)
                             case .choice(let editor):
                                 SettingsChoiceSliderEditor(request: editor, anchor: request, source: source,
@@ -174,6 +178,7 @@ struct ConfigurationSliderContainer<Content: View>: View {
         let preferredHeight: CGFloat
         switch anchor.editor {
         case .contextWindow: preferredHeight = contextPanelHeight
+        case .number: preferredHeight = choicePanelHeight
         case .choice: preferredHeight = choicePanelHeight
         }
         let height = min(preferredHeight, max(1, availableSize.height - 24))

@@ -71,6 +71,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var model = "pro"
     private var thinking = "high"
     private var retries = 6
+    private var invalidValue = ""
     private var transport = "sse"
     private var blockImages = false
     private var focusMode = "calm"
@@ -112,7 +113,13 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 presentation: presentation("Block images", "Images are not sent to the model.", 10, "essential", "toggle")),
             key("run.retry.maxRetries", group: "run", subgroup: "Retry", value: .number(Double(retries)), display: "\(retries) retries",
                 layer: "mac", presentation: presentation("Retries", "How many times a failed request is retried.", 10, "essential", "number",
-                    extra: ["range": .object(["min": .number(0), "max": .number(10), "unit": .string("retries")])])),
+                    extra: ["range": .object(["min": .number(0), "max": .number(100), "unit": .string("retries")]),
+                            "optionsSource": .object(["name": .string("fixture.retryRange"), "dependsOn": .array([])])])),
+            key("run.futureNumber", group: "run", value: .number(1), display: "Future numeric value",
+                presentation: presentation("Future number", "An unsupported numeric range remains visible.", 30, "advanced", "number",
+                    extra: ["range": .object(["min": .number(0), "max": .number(1e30)])])),
+            key("lab.invalidValue", group: "lab", value: .string(invalidValue), display: invalidValue.isEmpty ? "Ready" : invalidValue,
+                presentation: presentation("Validation", "A fixture value used to prove Gateway refusal.", 5, "essential", "text")),
             key("run.transport", group: "run", value: .string(transport), display: transport == "sse" ? "Server-sent events" : "WebSocket",
                 presentation: presentation("Transport", "How requests reach the provider.", 20, "advanced", "choice",
                     extra: ["options": .array([choice("sse", "Server-sent events"), choice("websocket", "WebSocket")])])),
@@ -152,6 +159,10 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 .object(["value": .object(["provider": .string("fixture"), "id": .string("pro")]), "label": .string("Fixture Pro"), "detail": .string("fixture")]),
                 .object(["value": .object(["provider": .string("fixture"), "id": .string("lite")]), "label": .string("Fixture Lite"), "detail": .string("fixture")]),
             ])])
+        case "run.retry.maxRetries":
+            return .object(["key": .string(key), "source": .string("fixture.retryRange"), "dependsOn": .array([]),
+                            "options": .array([]), "range": .object(["min": .number(0), "max": .number(10),
+                            "step": .number(2), "unit": .string("retries")])])
         case "model.thinking":
             // A model without reasoning offers no levels.
             let levels = model == "pro" ? [("off", "Off"), ("low", "Low"), ("medium", "Medium"), ("high", "High")] : []
@@ -169,10 +180,10 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         let value = change["value"]
         let dryRun = params["dryRun"]?.boolValue == true
         // Validation is the Gateway's: the client holds no copy of a key's rules.
-        if key == "run.retry.maxRetries", let number = value?.intValue, !(0...10).contains(number) {
+        if key == "lab.invalidValue", value?.stringValue == "rejected" {
             return .object(["dryRun": .bool(true), "status": .string("applied"), "tier": .string("quiet"), "changes": .array([.object([
                 "changeId": .string(""), "key": .string(key), "layer": .string("mac"), "status": .string("failed"), "tier": .string("quiet"),
-                "error": .object(["code": .string("invalid_request"), "message": .string("Retries must be between 0 and 10")]),
+                "error": .object(["code": .string("invalid_request"), "message": .string("Fixture value rejected")]),
             ])])])
         }
         if !dryRun {
@@ -180,6 +191,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             case "model.ref": model = value?.objectValue?["id"]?.stringValue ?? model
             case "model.thinking": thinking = value?.stringValue ?? thinking
             case "run.retry.maxRetries": retries = value?.intValue ?? retries
+            case "lab.invalidValue": invalidValue = value?.stringValue ?? invalidValue
             case "run.transport": transport = value?.stringValue ?? transport
             case "context.images.block": blockImages = value?.boolValue ?? blockImages
             case "lab.focusMode": focusMode = value?.stringValue ?? focusMode

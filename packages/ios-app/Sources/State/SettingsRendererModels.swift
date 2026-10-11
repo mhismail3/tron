@@ -53,6 +53,16 @@ struct SettingsRange: Decodable, Equatable, Sendable {
     let max: Double
     let step: Double?
     let unit: String?
+
+    /// Representation safety, not key validation: unsupported numeric metadata
+    /// stays visible read-only instead of trapping during Double → Int conversion.
+    var supportsIntegerSlider: Bool {
+        let exactLimit = 9_007_199_254_740_991.0
+        guard min >= 0, max >= min, max <= exactLimit,
+              Int(exactly: min) != nil, Int(exactly: max) != nil else { return false }
+        guard let step else { return true }
+        return step > 0 && step <= exactLimit && Int(exactly: step) != nil
+    }
 }
 
 struct SettingsOptionsSource: Decodable, Equatable, Sendable {

@@ -1093,8 +1093,15 @@ two RPCs (the Gateway README has the shapes). What the code fixes that 7.2 and
   `catalog` and `readOnly`. Secret entry is write-only and never prefilled;
   ordered string lists support add, remove and reorder. Unknown list item
   kinds remain visible read-only. Ordered choices reuse the app's existing anchored
-  slider through `SettingsChoiceSlider`; legacy thinking rows use that same
-  primitive. Catalog rows mark the current value with the standard checkmark.
+  slider through `SettingsChoiceSlider`; bounded integer numbers use
+  `SettingsNumberSlider` with the served range, unit and step. A dynamic range
+  replaces the static declaration; unsupported numeric representations remain
+  visible read-only. Legacy thinking rows use the shared choice primitive;
+  context-window consolidation onto the number primitive remains outstanding.
+  Catalog rows mark the current value with the standard checkmark. Options reads
+  carry managed presentation activity and an exact request fence through both
+  success and failure publication; changing a dependency clears old choices before
+  fetching replacements.
 - **A dynamic source wins over static choices.** A key with both (the chat's
   thinking) serves its source's options from `settings.options`; the static
   list stays in `presentation.options`. A model without reasoning offers no
@@ -1225,7 +1232,7 @@ was added after the first numbering; it lands after slice 4 and before slice 8.
 | 5 | Tiers: floors with the maintainer's overrides, the one-step web mark, approval by tap with 24-hour expiry and the requester told, Approve and Decline on the push, and the `settings` tool. Implemented ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)); the push actions need the relay's category release deployed first ([decision 35](#101-decisions)) | L | Gateway, iOS, push relay | 4 | #763 |
 | 6 | Outside changes: stores compared with the record, "Changed outside Tron" with Apply again, notification by floor, git-state badges | M | Gateway, iOS | 4 | #764 |
 | 7 | Fixed-at-start values carry provenance, with "Use the current default"; live keys reach open chats; Chat-layer values for every key that allows Chat; per-direction timing | M | Gateway, iOS | 3, 4 | #765 |
-| 14 | The generic renderer: served schema, control primitives, `settings.options`, `dryRun` validation, badges and section summaries from the resolver, negotiation with fallback to read-only. Implemented ([7.5a](#75a-implemented-the-renderer-contract)) except moving `ContextWindowSlider` and the remaining `AgentConfigurationControls` onto the primitives | L | Gateway, iOS | 3, 4 | #780 |
+| 14 | The generic renderer: served schema, control primitives, `settings.options`, `dryRun` validation, badges and section summaries from the resolver, negotiation with fallback to read-only. Partially implemented ([7.5a](#75a-implemented-the-renderer-contract)), including the bounded-number slider and stale-options fencing; `ContextWindowSlider` and remaining `AgentConfigurationControls` consolidation and real-screen parity evidence remain | L | Gateway, iOS | 3, 4 | #780 |
 | 8 | Manage Session and Manage Home show the sections through the generic renderer (D1, D2, D5, D6, D7) | L | iOS | 2, 7, 14 | #766 |
 | 9 | The Home profile becomes a typed layer for the Home chat: worker model and thinking "same as Home" filled into `delegate` by Home, memory model, task budgets | M | Gateway, iOS | 4 | #767 |
 | 10 | The Project card in Manage Session: the Project layer with git-state badges, trust, and outside changes | M | iOS | 6, 8 | #768 |

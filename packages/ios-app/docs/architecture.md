@@ -734,19 +734,28 @@ subgroup headings), All settings, and search over label, id, help and display. A
 does not implement, or a missing presentation, renders the `display` read-only; an unknown
 badge kind is neutral; a group no section declares is shown under its id, so a value is never
 hidden. Choices with an `optionsSource` and catalogs come from `settings.options`, re-requested
-when a key in `dependsOn` changes. `orderedChoice` uses `SettingsChoiceSlider.swift`,
-the same anchored `ConfigurationSliderContainer` and track used by existing thinking
-rows; the Gateway supplies its values and labels. Both callers share one editor,
-including its native motion, Dynamic Type, VoiceOver adjustment, cancellation and
-commit-on-dismiss lifecycle. Catalogs use the existing selected-value checkmark. `SettingsValueEditors.swift`
+when a key in `dependsOn` changes. `orderedChoice` uses `SettingsChoiceSlider.swift`, and bounded integer `number`
+settings use `SettingsNumberSlider.swift`; both use the same anchored
+`ConfigurationSliderContainer` and track as existing thinking and context-window
+rows. The Gateway supplies number bounds, unit and step as well as choice values
+and labels. Dynamic number ranges replace static metadata and are re-requested
+with their dependencies. Unsupported numeric representations stay read-only.
+The number journey proves that a served 0–10 range wins over a static 0–100
+range, opening does not write, and an unrepresentable future range remains visible.
+Editors use the established motion, Dynamic Type, VoiceOver adjustment,
+cancellation and commit-on-dismiss lifecycle. Context-window and remaining
+legacy-control consolidation is still outstanding; sharing the host is not full
+renderer parity. Catalogs use the existing selected-value checkmark. `SettingsValueEditors.swift`
 hosts write-only secret replacement and ordered string-list add/remove/reorder in
 standard progressive sheets, fields, groups, rows and action capsules. Secret drafts
 start empty and are cleared on submission/disappearance; list drafts have local row
 identity and write only on Save. Unknown item kinds stay read-only. The
 `testSettingsRendererSecretAndListEditors` journey reopens both editors against the
 fixture socket to prove redaction and persisted ordering.
-`testSettingsRendererOrderedChoiceUsesSharedSlider` exercises a served choice through
-selection and persistence; the legacy Agent Defaults journey protects that caller.
+`testSettingsRendererOrderedChoiceUsesSharedSlider` exercises a served choice and
+`testSettingsRendererNumberUsesSharedSlider` exercises a served number through selection
+and persistence; the legacy Agent Defaults journey protects the existing
+AgentConfigurationControls callers, which share the same choice and value-row primitives.
 Every edit is a `settings.change` dry run first: a refusal
 shows under its row and nothing is applied, and a change with `confirm` text asks first.
 `SettingsTrustCoordinator` owns the generic reads and the receipt-bound change, which the

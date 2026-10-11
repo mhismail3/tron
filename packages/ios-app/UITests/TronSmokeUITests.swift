@@ -1091,17 +1091,21 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-renderer-run-expanded")
 
         // An invalid value: the Gateway's dry run refuses it under the row; nothing applies.
-        let field = retries.textFields.firstMatch
+        // Numeric controls now share the anchored slider; exercise the Gateway's
+        // negative validation through the fixture's text setting instead.
+        tapScrolling(app.buttons["settings-section-lab-expand"], in: app)
+        let invalid = any["settings-row-lab.invalidValue"]
+        scrollTo(invalid, in: app)
+        let field = invalid.textFields.firstMatch
         tapScrolling(field, in: app)
         field.tap()
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3) + "99\n")
-        XCTAssertTrue(any["settings-row-run.retry.maxRetries-error"].waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Retries must be between 0 and 10")).firstMatch.exists)
+        field.typeText("rejected\n")
+        XCTAssertTrue(any["settings-row-lab.invalidValue-error"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fixture value rejected")).firstMatch.exists)
         XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2))
         keepScreenshot(named: "settings-renderer-invalid")
 
         // The new key in the new subgroup, the unknown control and the read-only secret.
-        tapScrolling(app.buttons["settings-section-lab-expand"], in: app)
         scrollTo(any["settings-row-lab.focusMode"], in: app)
         XCTAssertTrue(showsText("Experiments", in: app), "A subgroup the app never heard of")
         XCTAssertTrue(showsText("New", in: app), "An unknown badge kind renders neutrally with its label")
@@ -1113,7 +1117,8 @@ final class TronSmokeUITests: XCTestCase {
 
         // Switching to a model without thinking: the options are asked for again, and there are none.
         XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:-1", timeout: 2), "Collapsed rows ask for nothing")
-        tapScrolling(app.buttons["settings-section-model-expand"], in: app)
+        for _ in 0..<10 where !app.buttons["settings-section-model-expand"].isHittable { app.swipeDown() }
+        app.buttons["settings-section-model-expand"].tap()
         XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:4", timeout: 5))
         // The row's trailing value opens the catalog picker.
         tapScrolling(any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch, in: app)
@@ -1171,6 +1176,45 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(slider.waitForNonExistence(timeout: 5))
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
         XCTAssertTrue(showsText("Off", in: app))
+    }
+
+    /// A schema number uses the same anchored slider interaction and saves its
+    /// bounded numeric value through the fixture Gateway.
+    @MainActor
+    func testSettingsRendererNumberUsesSharedSlider() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        XCTAssertTrue(any["settings-section-run"].waitForExistence(timeout: 10))
+        tapScrolling(app.buttons["settings-section-run-expand"], in: app)
+        let row = any["settings-row-run.retry.maxRetries"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-number-row")
+        tapScrolling(row.buttons.firstMatch.buttons.firstMatch, in: app)
+        let slider = any["settings-number-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "A schema number uses the shared bounded slider")
+        keepScreenshot(named: "settings-renderer-number-expanded")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:0", timeout: 2),
+                      "Opening the editor must not write an override")
+        slider.coordinate(withNormalizedOffset: CGVector(dx: 1.0, dy: 0.5)).tap()
+        let outside = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80)))
+        outside.tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        let numberButton = any["settings-row-run.retry.maxRetries"].buttons.matching(identifier: "settings-number-control").firstMatch
+        XCTAssertEqual(numberButton.value as? String, "10 retries",
+                       "The served dynamic range wins over the static 0–100 declaration")
+        keepScreenshot(named: "settings-renderer-number-persisted")
+        let future = any["settings-row-run.futureNumber"]
+        XCTAssertTrue(future.waitForExistence(timeout: 5))
+        XCTAssertTrue(future.staticTexts["Future numeric value"].exists)
+        XCTAssertFalse(future.buttons["settings-number-control"].exists,
+                       "An out-of-representation range must stay visible read-only, never trap")
+        keepScreenshot(named: "settings-renderer-number-unsupported")
     }
 
     /// Write-only replacement and ordered-list operations cross the real client
