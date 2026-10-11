@@ -365,7 +365,12 @@ def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comm
     issue = _issue(gh, repository, number)
     labels = {label["name"] for label in issue.get("labels", [])}
     if config["dashboard"]["epicLabel"] in labels:
-        raise TrackingError(f"#{number} is an epic; work issue close refuses epics")
+        # Read every page before any write; a finished first page is not a finished epic.
+        children = gh.rest_pages(f"repos/{repository}/issues/{number}/sub_issues?per_page=100")
+        unfinished = [child["number"] for child in children if child.get("state") != "closed"]
+        if unfinished:
+            raise TrackingError(f"#{number} has unfinished sub-issues: "
+                                + ", ".join(f"#{child}" for child in unfinished))
     posted = any(marker in (comment.get("body") or "")
                  for comment in gh.rest_pages(f"repos/{repository}/issues/{number}/comments"))
     is_open = issue.get("state") == "open"

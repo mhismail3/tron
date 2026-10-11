@@ -2871,7 +2871,20 @@ async function applyPayloadInternal(value, paths) {
     await writeProgress(paths, "building", value.commandId);
     let built;
     try {
-      built = await buildSourcePayload({ paths, config, candidateVersion: value.candidateVersion });
+      // The configured checkout is already executable trusted build input.
+      // Use its current builder now, not the copy inside yesterday's payload;
+      // this installed helper still owns promotion, readiness and rollback.
+      const scriptsRoot = await noSymlinkDirectory(join(config.sourceRoot, "scripts"));
+      const sourceUpdaterPath = join(scriptsRoot, "gateway-payload-deploy.mjs");
+      const sourceUpdater = await import(pathToFileURL(sourceUpdaterPath).href);
+      if (typeof sourceUpdater.buildSourcePayload !== "function") {
+        throw new Error("trusted source updater does not export buildSourcePayload");
+      }
+      paths.timeline?.mark("deploy.source-builder", "Building with the trusted checkout updater", "info", {
+        builderSha256: createHash("sha256").update(await readFile(sourceUpdaterPath)).digest("hex"),
+      });
+      built = await sourceUpdater.buildSourcePayload({ paths, config, candidateVersion: value.candidateVersion });
+      payloadManifest(built?.manifest, { channel: value.channel, version: value.candidateVersion });
     } catch (error) {
       await writeProgress(paths, "failure", value.commandId, error?.message ?? error).catch(() => {});
       throw error;

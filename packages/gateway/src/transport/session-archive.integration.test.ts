@@ -9,6 +9,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { DeviceStore } from "../security/device-store.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { SessionSearchAllowanceLedger } from "../sessions/session-search-allowance.js";
 import { SessionSearchIndex } from "../sessions/session-search-index.js";
 import { SessionSearchService } from "../sessions/session-search-service.js";
 import { CommandReceiptStore } from "./command-receipts.js";
@@ -77,6 +78,8 @@ async function fixture(options: {
   settings?: Record<string, unknown>;
   /** Wires a real search index and service into GatewayService. */
   search?: boolean;
+  /** Delayed Jev boundary used by search-publication integration cases. */
+  jev?: { evaluate: (...args: any[]) => Promise<any> };
   /** Runs after startup admission but before attention recovery, which is the
    * window the real Gateway already serves from. */
   duringStartupRecovery?: (registry: RuntimeRegistry, cwd: string) => Promise<void>;
@@ -119,6 +122,7 @@ async function fixture(options: {
   let current: Stack | undefined;
   let server: GatewayServer | undefined;
   let searchService: SessionSearchService | undefined;
+  let searchAllowance: SessionSearchAllowanceLedger | undefined;
   const start = async (): Promise<Stack> => {
     server = undefined;
     const registry = new RuntimeRegistry({
@@ -149,7 +153,8 @@ async function fixture(options: {
     // The search owner is optional in the Gateway, so only the traversal that
     // exercises the search projection pays for a real index and coordinator.
     if (options.search) {
-      searchService = new SessionSearchService(registry, await SessionSearchIndex.open(join(root, "gateway", "session-search.sqlite")));
+      if (options.jev) searchAllowance = await SessionSearchAllowanceLedger.open(join(root, "gateway", "session-search-jev-allowance.sqlite"));
+      searchService = new SessionSearchService(registry, await SessionSearchIndex.open(join(root, "gateway", "session-search.sqlite")), options.jev as never, searchAllowance);
     }
     const uploads = {
       acquire: vi.fn(),
@@ -191,6 +196,7 @@ async function fixture(options: {
       await current.server.close();
       await searchService?.close();
       searchService = undefined;
+      searchAllowance = undefined;
       await current.registry.dispose();
       await current.receipts.dispose();
       current = undefined;
@@ -274,7 +280,7 @@ async function fixture(options: {
     await settle();
     return { id, file, entryId };
   };
-  return { root, agentDir, cwd, sessionDirectory, devices, paired, faux, runtimeFactory, listChanged, archiveDiagnostic, logs, connect, coldSession, rawSession, settle, restart, current: () => current! };
+  return { root, agentDir, cwd, sessionDirectory, devices, paired, faux, runtimeFactory, listChanged, archiveDiagnostic, logs, connect, coldSession, rawSession, settle, restart, current: () => current!, searchService: () => searchService! };
 }
 
 /** An extension-owned trigger that starts a turn of its own. */
@@ -449,6 +455,52 @@ const search = async (client: Client, query: string) => {
 };
 
 describe("session archive over the real Gateway", () => {
+  for (const change of ["unrelated", "appended", "deleted"] as const) {
+    const changedCandidate = change !== "unrelated";
+    const name = change === "deleted" ? "drops a deleted candidate after delayed ranking"
+      : changedCandidate ? "revalidates a changed candidate after delayed ranking" : "publishes search after an unrelated session append during ranking";
+    archiveCase(name, async () => {
+      let rankStarted!: () => void;
+      let releaseRank!: () => void;
+      const started = new Promise<void>((resolve) => { rankStarted = resolve; });
+      const delayed = new Promise<void>((resolve) => { releaseRank = resolve; });
+      const f = await fixture({
+        search: true,
+        jev: { evaluate: async () => {
+          rankStarted();
+          await delayed;
+          return { answers: { r0: { type: "score", score: 2 } }, estimatedCostCents: 0 };
+        } },
+      });
+      f.searchService().setPolicy({ enabled: true, perQueryMicroCents: 300_000, dailyMicroCents: 300_000, policyRevision: 1 });
+      const candidate = await f.rawSession("publication-candidate", "publication-candidate-session");
+      const before = await f.searchService().search({ query: "publication-candidate", maxResults: 10 });
+      const beforeHit = before.results.find((item) => item.sessionId === candidate.id)!;
+      const unrelated = changedCandidate ? undefined : await f.rawSession("unrelated-before-search", "publication-unrelated-session");
+      const target = changedCandidate ? candidate : unrelated!;
+      const slot = await f.current().registry.acquire(target.id);
+      const pending = f.searchService().search({ query: "publication-candidate", maxResults: 10, remoteRanking: true, remoteConsent: true });
+      try {
+        await started;
+        if (change === "deleted") await f.current().registry.delete(target.id);
+        else {
+          await slot.prompt("appended while ranking");
+          await waitFor(() => !slot.snapshot().isStreaming && slot.snapshot().configurationBlocker === null, "concurrent append settles");
+        }
+      } finally {
+        releaseRank();
+      }
+      const result = await pending;
+      const hit = result.results.find((item) => item.sessionId === candidate.id);
+      if (change === "deleted") expect(hit).toBeUndefined();
+      else {
+        expect(hit, JSON.stringify(result)).toBeDefined();
+        expect(hit?.anchorRevision.branchDigest).not.toBeUndefined();
+        if (changedCandidate) expect(hit?.anchorRevision.branchDigest).not.toBe(beforeHit.anchorRevision.branchDigest);
+      }
+      return { changedCandidate, resultCount: result.results.length, candidateReturned: Boolean(hit), refreshedRevision: hit?.anchorRevision.branchDigest !== beforeHit.anchorRevision.branchDigest };
+    });
+  }
   archiveCase("keeps an archived session searchable and marked archived", async () => {
     const f = await fixture({ search: true });
     const client = await f.connect();

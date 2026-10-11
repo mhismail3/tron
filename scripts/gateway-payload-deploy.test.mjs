@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 
-import { chmod, cp, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
@@ -216,6 +216,100 @@ test("tron-dev candidate source stages through the real payload manifest validat
       assert.equal(staged.sourceRevision, head);
       assert.equal(staged.version, version);
     }
+  } finally {
+    await makeTreeWritable(root);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// #722: the installed apply CLI must use today's trusted source builder, not
+// yesterday's copied build implementation. The fixture builder stages a real
+// immutable payload; the installed helper still owns credential and promotion
+// admission. No listener, launcher, or live home is involved.
+test("source apply uses the trusted checkout builder and retains installed promotion admission", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-updater-")));
+  try {
+    const payload = await makePreflightFixture(join(root, "source-payload"));
+    const checkout = join(root, "checkout");
+    const home = join(root, "home");
+    const scratch = join(root, "tmp");
+    const deploy = fileURLToPath(new URL("./gateway-payload-deploy.mjs", import.meta.url));
+    await mkdir(scratch);
+    for (const marker of ["packages/gateway/package.json", "packages/gateway/package-lock.json",
+      "packages/gateway/scripts/ensure-node-pty-helper.mjs", "scripts/gateway-install-inputs.mjs"]) {
+      await mkdir(dirname(join(checkout, marker)), { recursive: true });
+      await writeFile(join(checkout, marker), "{}\n");
+    }
+    const sourceBuilder = join(checkout, "scripts/gateway-payload-deploy.mjs");
+    await writeFile(sourceBuilder, `
+      import { stagePayload } from ${JSON.stringify(new URL("./gateway-payload-deploy.mjs", import.meta.url).href)};
+      export async function buildSourcePayload({ paths, candidateVersion }) {
+        return stagePayload({ home: paths.home, channel: paths.channel,
+          source: ${JSON.stringify(payload)}, version: candidateVersion });
+      }
+      export function applyPayload() { throw new Error("source must not own apply"); }
+    `);
+    await mkdir(join(home, "gateway"), { recursive: true });
+    await writeFile(join(home, "gateway/update-config.json"), JSON.stringify({
+      schema: 1, kind: "tron-gateway-update-config", sourceRoot: checkout,
+      updatedAt: new Date().toISOString(),
+    }));
+    const channelRoot = join(home, "gateway/payloads/stable");
+    const environment = {
+      PATH: process.env.PATH, HOME: home, TMPDIR: scratch,
+      TRON_DATA_DIR: home, TRON_GATEWAY_SUPERVISED: "1", TRON_GATEWAY_CHANNEL: "stable",
+      TRON_GATEWAY_HEALTH_HOST: "127.0.0.1",
+    };
+    const invoke = version => execFileAsync(process.execPath, [deploy, "apply", "--channel", "stable",
+      "--mode", "source", "--candidate-version", version, "--command-id", `source-build-${version}`],
+    { env: environment, timeout: 120_000 });
+    // It must reach the installed credential gate after the source's new build
+    // behavior has published a candidate. The old helper fails before staging.
+    await assert.rejects(invoke("new-builder"), error => {
+      assert.match(error.stderr, /local Gateway credential is missing or unsafe/);
+      return true;
+    });
+    const candidate = JSON.parse(await readFile(join(channelRoot, "versions/new-builder/manifest.json"), "utf8"));
+    assert.equal(candidate.version, "new-builder");
+    assert.equal(candidate.payloadFingerprint, await payloadFingerprint(join(channelRoot, "versions/new-builder")));
+    assert.equal((await lstat(join(channelRoot, "versions/new-builder"))).mode & 0o222, 0);
+    await assert.rejects(readFile(join(channelRoot, "current.json")), { code: "ENOENT" });
+    let progress = JSON.parse(await readFile(join(channelRoot, "update-progress.json"), "utf8"));
+    assert.equal(progress.state, "failure");
+    assert.equal(progress.commandId, "source-build-new-builder");
+    const records = (await readFile(join(home, "logs/deploy.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);
+    const builderRecord = records.find(record => record.event === "deploy.source-builder");
+    assert.ok(builderRecord, "the build owner must be diagnosable in the deployment timeline");
+    assert.equal(builderRecord.commandId, "source-build-new-builder");
+    assert.match(builderRecord.builderSha256, /^[a-f0-9]{64}$/);
+
+    // Even a source builder returning a real but subsequently corrupted artifact
+    // cannot bypass the installed helper's fingerprint check or publish selection.
+    await writeFile(join(home, "gateway/local-auth.json"), JSON.stringify({
+      version: 2, purpose: "local-wrapper-health", bearerToken: "f".repeat(32), lastUpdated: new Date().toISOString(),
+    }), { mode: 0o600 });
+    await writeFile(sourceBuilder, `
+      import { stagePayload } from ${JSON.stringify(new URL("./gateway-payload-deploy.mjs", import.meta.url).href)};
+      import { chmod, writeFile } from "node:fs/promises";
+      import { join } from "node:path";
+      export async function buildSourcePayload({ paths, candidateVersion }) {
+        const result = await stagePayload({ home: paths.home, channel: paths.channel,
+          source: ${JSON.stringify(payload)}, version: candidateVersion });
+        const file = join(result.root, "app/dist/index.js");
+        await chmod(file, 0o600);
+        await writeFile(file, "tampered".repeat(200));
+        await chmod(file, 0o444);
+        return result;
+      }
+    `);
+    await assert.rejects(invoke("corrupt-builder"), error => {
+      assert.match(error.stderr, /fingerprint/);
+      return true;
+    });
+    await assert.rejects(readFile(join(channelRoot, "current.json")), { code: "ENOENT" });
+    progress = JSON.parse(await readFile(join(channelRoot, "update-progress.json"), "utf8"));
+    assert.equal(progress.state, "failure");
+    assert.equal(progress.commandId, "source-build-corrupt-builder");
   } finally {
     await makeTreeWritable(root);
     await rm(root, { recursive: true, force: true });
