@@ -656,7 +656,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(homeControlCount.waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["home-pinned-row"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
-        // The Home chat's gear opens Settings, as it does in every chat (#799).
+        // Home retains its direct Settings gear; ordinary chats use Manage Session.
         let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(app.navigationBars.buttons["Manage Home"].exists)
@@ -708,14 +708,20 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Manage Home"].exists)
         keepScreenshot(named: "home-chapter-read-only")
         // Opening a chapter replaced the single chat route, so Back returns to the
-        // dashboard; the ordinary chat keeps the ordinary settings sheet from its gear.
+        // dashboard; an ordinary chat's gear opens Manage Session, then Settings.
         app.buttons["Back"].tap()
         let ordinary = app.buttons["session-row-home-shell-fixture:ordinary-session"]
         XCTAssertTrue(ordinary.waitForExistence(timeout: 10), app.debugDescription)
         ordinary.tap()
         XCTAssertTrue(app.staticTexts["Ordinary session chat"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Manage Home"].exists)
-        app.buttons["Settings"].tap()
+        let ordinaryGear = app.navigationBars.buttons["Manage Session"]
+        XCTAssertTrue(ordinaryGear.waitForExistence(timeout: 5), app.debugDescription)
+        ordinaryGear.tap()
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 5))
+        let settings = app.buttons["manage-session-settings"]
+        reveal(settings, in: app)
+        settings.tap()
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
         XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening ordinary-chat Settings must not apply Home controls")
@@ -1114,6 +1120,26 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertGreaterThan(manageSessionDone.frame.minY, app.windows.firstMatch.frame.height * 0.40, "Manage Session opens at medium (the detent Manage Home matches)")
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
         keepScreenshot(named: "ordinary-ring-manage-session")
+        manageSessionDone.tap()
+        let gear = app.navigationBars.buttons["Manage Session"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 5), "The ordinary gear must name and open Manage Session")
+        gear.tap()
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(app.buttons["Done"].firstMatch.frame.minY, app.windows.firstMatch.frame.height * 0.40)
+        keepScreenshot(named: "ordinary-gear-manage-session")
+        let settings = app.buttons["manage-session-settings"]
+        reveal(settings, in: app)
+        XCTAssertTrue(settings.isHittable, app.debugDescription)
+        settings.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "ordinary-manage-settings-child")
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 5), "Settings dismisses back to its Manage Session owner")
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Ordinary session chat"].waitForExistence(timeout: 5))
+        app.buttons["Back"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5),
+                      "Opening and dismissing management sheets must not apply Home controls")
     }
 
     /// Opening an inherited context window must not create a Chat override.
