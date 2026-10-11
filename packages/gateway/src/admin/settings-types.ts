@@ -26,7 +26,8 @@ export type Control = typeof CONTROLS[number];
 /** The renderer contract the Gateway speaks (doc 7.5). A client names the
  * controls it implements and its version; anything else falls back. */
 export const RENDERER_CONTRACT_VERSION = 1;
-export type QualifierName = "role" | "model" | "provider" | "tool" | "project" | "connection" | "key" | "direction";
+export const QUALIFIER_NAMES = ["role", "model", "provider", "tool", "project", "connection", "key", "direction"] as const;
+export type QualifierName = typeof QUALIFIER_NAMES[number];
 export type Qualifiers = Partial<Record<QualifierName, string>>;
 
 export interface ModelRefValue { provider: string; id: string }

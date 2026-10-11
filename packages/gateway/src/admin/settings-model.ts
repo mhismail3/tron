@@ -5,7 +5,7 @@ import { clampThinkingLevel, getSupportedThinkingLevels, type Model, type Thinki
 import { SettingsManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { contextWindowLimits, parseContextModelKey, validateContextWindow } from "../providers/context-window-policy.js";
-import { assertNewModelChoice } from "../providers/openai-model-eligibility.js";
+import { assertNewModelChoice, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { updateJsonLocked } from "../util/json.js";
@@ -14,7 +14,7 @@ import type { TrustService } from "./trust-service.js";
 import type { Actor, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
 import { readBinding, resolveSettings, targetLayers, type ChatStore, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
-import { builtinValue, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, builtinValue, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
 
 /** What a session target contributes: its Chat layer and whether it is Home's chat. */
@@ -57,6 +57,66 @@ export class SettingsModel {
     const stores = await this.stores(target, session);
     const runtime = session?.modelRuntime ?? this.dependencies.modelRuntime;
     return resolveSettings(target, stores, { format: formatContext(runtime), options: optionSources(runtime), ...(keys ? { keys } : {}) });
+  }
+
+  /** `settings.options` (docs/settings-model.md 7.5): the choices a key's control offers. */
+  async options(target: SettingsTarget, session: SessionSettingsSource | undefined, request: SettingsOptionsRequest): Promise<SettingsOptionsResult> {
+    const key = KEYS.find(candidate => candidate.id === request.key);
+    if (!key) throw new GatewayError("invalid_request", `Unknown setting ${request.key}`);
+    if (!key.optionsSource) {
+      if (!key.type.options) throw new GatewayError("invalid_request", `${key.label} has no options to choose from`);
+      return { key: key.id, source: "static", dependsOn: [], options: key.type.options.map(option => ({ value: option.value, label: option.label })) };
+    }
+    const { name, dependsOn } = key.optionsSource;
+    const runtime = session?.modelRuntime ?? this.dependencies.modelRuntime;
+    const base = { key: key.id, source: name, dependsOn: [...dependsOn] };
+    switch (name) {
+      case "catalog.models":
+        return { ...base, ...await this.catalogModelOptions(runtime, request) };
+      case "catalog.thinkingLevels": {
+        const model = await this.followedModel(target, session, runtime, request.qualifiers);
+        const supported = model ? getSupportedThinkingLevels(model) : [];
+        // pi reports only "off" for a model without reasoning: there is no level to offer.
+        const levels = supported.length === 1 && supported[0] === "off" ? [] : supported;
+        const labels = new Map(schemaKey("model.thinking[role=chat]").type.options!.map(option => [option.value, option.label]));
+        return { ...base, options: levels.map(level => ({ value: level, label: labels.get(level) ?? level })) };
+      }
+      case "catalog.contextWindow": {
+        // The bounds `settings.change` validates the value against (contextWindowValue).
+        const model = await this.followedModel(target, session, runtime, request.qualifiers);
+        const limits = model && contextWindowLimits(model);
+        return { ...base, options: [], ...(limits ? { range: { min: limits.minimum, max: limits.maximum, unit: "tokens" as const } } : {}) };
+      }
+      default:
+        throw new GatewayError("unsupported", `${name} is not a settings option source`);
+    }
+  }
+
+  /** The registered model a model-qualified option list follows: its `model`
+   * qualifier, else the target's resolved chat model (doc 7.5). */
+  private async followedModel(target: SettingsTarget, session: SessionSettingsSource | undefined, runtime: ModelRuntime, qualifiers: Qualifiers | undefined): Promise<Model<any> | undefined> {
+    if (qualifiers?.model !== undefined) {
+      const ref = parseContextModelKey(qualifiers.model);
+      return runtime.getModel(ref.provider, ref.id);
+    }
+    const resolution = await this.resolve(target, session, ["model.ref[role=chat]"]);
+    const chat = resolution.keys.find(key => key.key === "model.ref[role=chat]")?.value as ModelRefValue | undefined;
+    return chat ? runtime.getModel(chat.provider, chat.id) : undefined;
+  }
+
+  private async catalogModelOptions(runtime: ModelRuntime, request: SettingsOptionsRequest): Promise<Pick<SettingsOptionsResult, "options" | "nextCursor">> {
+    const models = await catalogModelEntries(runtime);
+    const query = request.query?.toLowerCase();
+    const matching = query ? models.filter(model => [model.name, model.id, model.provider].some(field => field.toLowerCase().includes(query))) : models;
+    const offset = request.cursor === undefined ? 0 : catalogCursorOffset(request.cursor);
+    const limit = request.limit ?? 50;
+    return {
+      options: matching.slice(offset, offset + limit).map(model => ({
+        value: { provider: model.provider, id: model.id }, label: model.name, detail: model.provider,
+        ...(model.available ? {} : { disabledReason: "Not available for this account" }),
+      })),
+      ...(offset + limit < matching.length ? { nextCursor: String(offset + limit) } : {}),
+    };
   }
 
   async stores(target: SettingsTarget, session?: SessionSettingsSource): Promise<SettingsStores> {
@@ -155,6 +215,51 @@ async function readJsonObject(path: string): Promise<Record<string, unknown>> {
 
 export function formatContext(runtime: ModelRuntime): FormatContext {
   return { modelName: (ref) => runtime.getModel(ref.provider, ref.id)?.name };
+}
+
+export interface SettingsOptionsRequest {
+  key: string;
+  qualifiers?: Qualifiers;
+  query?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface SettingsOption { value: unknown; label: string; detail?: string; disabledReason?: string }
+
+export interface SettingsOptionsResult {
+  key: string;
+  /** The key's option source, or `static` for its declared choices. */
+  source: string;
+  dependsOn: string[];
+  options: SettingsOption[];
+  range?: { min: number; max: number; unit: "tokens" };
+  /** An opaque cursor for the next page of a catalog. */
+  nextCursor?: string;
+}
+
+/** The registered models as the model picker lists them: the display name, and
+ * whether this account can use each one (the same test `model.list` applies). */
+async function catalogModelEntries(runtime: ModelRuntime): Promise<Array<{ provider: string; id: string; name: string; available: boolean }>> {
+  const eligibility = openAIModelEligibility(runtime);
+  await eligibility?.refresh();
+  const providerIds = new Set(runtime.getModels().map(model => model.provider));
+  const available = new Set((await Promise.all([...providerIds].map(async providerId => {
+    try { return await runtime.getAvailable(providerId); }
+    catch { return []; }
+  }))).flat().map(model => `${model.provider}\0${model.id}`));
+  const projected = runtime.getModels().map(model => ({
+    provider: model.provider, id: model.id,
+    name: eligibility?.displayName(model.provider, model.id) ?? model.name,
+    available: available.has(`${model.provider}\0${model.id}`) && (eligibility?.isEligibleInRuntime(runtime, model.provider, model.id) ?? true),
+  }));
+  return eligibility?.orderAccountModels(projected) ?? projected;
+}
+
+/** The catalog cursor is the offset of the next page, as a decimal string. */
+function catalogCursorOffset(cursor: string): number {
+  if (!/^(0|[1-9][0-9]{0,8})$/u.test(cursor)) throw new GatewayError("invalid_request", "Invalid settings options cursor");
+  return Number(cursor);
 }
 
 /** Named option sources (doc 4.1 `optionsSource`). Capability clamping uses

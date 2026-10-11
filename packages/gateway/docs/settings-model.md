@@ -1071,6 +1071,28 @@ Unknown fields, badge kinds and section ids are ignored or shown neutrally. The
 rule: **never crash, never hide a value**. Every key always arrives with its
 `display`, so the worst case for an old client is a read-only row.
 
+### 7.5a Implemented: the renderer contract
+
+Slice 14 (#780) serves the contract above. The Gateway half is
+`settings-presentation.ts` beside the resolver, `SettingsModel.options` and the
+two RPCs (the Gateway README has the shapes). What the code fixes that 7.2 and
+7.5 leave open:
+
+- **Presentation is per instance.** Every resolved key instance carries its
+  key's `presentation`, read from the schema with no per-key code; the
+  negotiated `control` and its `note` are the only per-client fields.
+- **No renderer, no controls.** A client that sends no `renderer` is treated as
+  implementing no control: every editable key is read-only with "Update Tron to
+  edit", and every value still arrives with its `display`.
+- **Summaries are for the target.** `pending` and `recent` list only requests
+  and record entries for the same target; `recent` scans the newest 200 record
+  entries. An `override` is any applied value above Built-in until slice 7
+  (#765) marks values fixed at start from a default apart.
+- **A dynamic source wins over static choices.** A key with both (the chat's
+  thinking) serves its source's options from `settings.options`; the static
+  list stays in `presentation.options`. A model without reasoning offers no
+  thinking options.
+
 ### 7.6 Hand-built screens
 
 Hand-built only where a generic row cannot work: guided flows, inventories with

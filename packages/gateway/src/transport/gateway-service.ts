@@ -17,6 +17,8 @@ import type { ApprovalRequest } from "../admin/settings-approvals.js";
 import type { Actor } from "../admin/settings-record.js";
 import { schemaKey } from "../admin/settings-schema.js";
 import type { SettingsTarget } from "../admin/settings-resolver.js";
+import { RECENT_SCAN_LIMIT, actorLabel, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
+import { QUALIFIER_NAMES, type Qualifiers } from "../admin/settings-types.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -185,17 +187,20 @@ function mutationSessionId(params: Record<string, unknown>): string | undefined 
   return undefined;
 }
 
+function settingsQualifiers(raw: unknown, label: string): Qualifiers {
+  const qualifiers = object(raw, label);
+  rejectUnknownFields(qualifiers, [...QUALIFIER_NAMES], label);
+  for (const [name, value] of Object.entries(qualifiers)) string(value, `${label}.${name}`, { max: 4_096 });
+  return qualifiers as Qualifiers;
+}
+
 function settingsChangeRequest(raw: unknown, label: string): ChangeRequest {
   const change = object(raw, label);
   rejectUnknownFields(change, ["key", "qualifiers", "layer", "op", "value", "expected"], label);
-  const qualifiers = change.qualifiers === undefined ? undefined : object(change.qualifiers, `${label}.qualifiers`);
-  if (qualifiers) {
-    rejectUnknownFields(qualifiers, ["role", "model", "provider", "tool", "project", "connection", "key", "direction"], `${label}.qualifiers`);
-    for (const [name, value] of Object.entries(qualifiers)) string(value, `${label}.qualifiers.${name}`, { max: 4_096 });
-  }
+  const qualifiers = change.qualifiers === undefined ? undefined : settingsQualifiers(change.qualifiers, `${label}.qualifiers`);
   return {
     key: string(change.key, `${label}.key`, { max: 200 }),
-    ...(qualifiers ? { qualifiers: qualifiers as NonNullable<ChangeRequest["qualifiers"]> } : {}),
+    ...(qualifiers ? { qualifiers } : {}),
     layer: oneOf(change.layer, `${label}.layer`, ["chat", "profile", "project", "mac"] as const),
     op: oneOf(change.op, `${label}.op`, ["set", "unset"] as const),
     ...("value" in change ? { value: change.value } : {}),
@@ -203,13 +208,13 @@ function settingsChangeRequest(raw: unknown, label: string): ChangeRequest {
   };
 }
 
-function actorLabel(actor: Actor): string {
-  return actor.kind === "home" ? "Home" : actor.kind === "worker" ? "A Home task worker" : actor.kind === "agent" ? "A chat's agent" : "You";
-}
-
-/** Who asked, as the iPhone's approval row names it. */
-function requesterLabel(actor: Actor): string {
-  return actor.kind === "worker" && actor.taskId ? `Home task ${actor.taskId}` : actorLabel(actor);
+/** The controls a client names with `settings.resolve` (doc 7.5). Its version is
+ * checked, and the response names the version this Gateway speaks. */
+function settingsRendererControls(raw: unknown): string[] {
+  const renderer = object(raw, "renderer");
+  rejectUnknownFields(renderer, ["version", "controls"], "renderer");
+  integer(renderer.version, "renderer.version", 1, Number.MAX_SAFE_INTEGER);
+  return arrayOfStrings(renderer.controls, "renderer.controls", 32);
 }
 
 /** A pending request as the iPhone shows it: the diff it would approve. */
@@ -1992,17 +1997,28 @@ export class GatewayService {
         });
 
       case "settings.resolve": {
-        rejectUnknownFields(params, ["target", "keys"], method);
+        rejectUnknownFields(params, ["target", "keys", "renderer"], method);
         const target = await this.canonicalSettingsTarget(params.target);
         const keys = params.keys === undefined ? undefined : arrayOfStrings(params.keys, "keys", 200);
-        if (target.kind !== "session") return safeJson(await this.dependencies.settingsModel.resolve(target, undefined, keys));
-        const slot = await this.openedSlot(client, { sessionId: target.sessionId });
-        return safeJson(await this.dependencies.settingsModel.resolve(target, {
-          cwd: slot.cwd,
-          home: slot.isHomeChapter,
-          chat: slot.settingsChatLayer(),
-          modelRuntime: slot.modelRuntime,
-        }, keys));
+        const controls = params.renderer === undefined ? undefined : settingsRendererControls(params.renderer);
+        const resolution = await this.dependencies.settingsModel.resolve(target, await this.readSettingsSession(client, target), keys);
+        const history = await this.dependencies.settingsChanges.history({ limit: RECENT_SCAN_LIMIT });
+        return safeJson(presentResolution(resolution, {
+          ...(controls ? { controls } : {}), ...(keys ? { keys } : {}),
+          approvals: await this.dependencies.settingsChanges.pendingApprovals(),
+          history: history.entries,
+        }));
+      }
+      case "settings.options": {
+        rejectUnknownFields(params, ["target", "key", "qualifiers", "query", "cursor", "limit"], method);
+        const target = await this.canonicalSettingsTarget(params.target);
+        return safeJson(await this.dependencies.settingsModel.options(target, await this.readSettingsSession(client, target), {
+          key: string(params.key, "key", { max: 200 }),
+          ...(params.qualifiers === undefined ? {} : { qualifiers: settingsQualifiers(params.qualifiers, "qualifiers") }),
+          ...(params.query === undefined ? {} : { query: string(params.query, "query", { max: 200 }) }),
+          ...(params.cursor === undefined ? {} : { cursor: string(params.cursor, "cursor", { max: 40 }) }),
+          ...(params.limit === undefined ? {} : { limit: integer(params.limit, "limit", 1, 200) }),
+        }));
       }
       case "settings.change":
         return this.mutation(client, method, params, async (workToken) => {
@@ -2317,6 +2333,14 @@ export class GatewayService {
       throw new GatewayError("invalid_request", "Open the session before reading its live runtime projection");
     }
     if (!release) throw new GatewayError("busy", "Session runtime is no longer available", true);
+  }
+
+  /** A session target's settings source from the chat the client subscribed to: its
+   * cwd, Home flag, Chat layer and model runtime. Other targets read no session. */
+  private async readSettingsSession(client: ClientContext, target: SettingsTarget): Promise<SessionSettingsSource | undefined> {
+    if (target.kind !== "session") return undefined;
+    const slot = await this.openedSlot(client, { sessionId: target.sessionId });
+    return { cwd: slot.cwd, home: slot.isHomeChapter, chat: slot.settingsChatLayer(), modelRuntime: slot.modelRuntime };
   }
 
   private async canonicalSettingsTarget(raw: unknown): Promise<SettingsTarget> {

@@ -738,6 +738,22 @@ resolves to pi's closest level with a Clamped badge. Redacted keys (`httpProxy`)
 return only "Set" or "Not set". The schema is checked against the pinned pi
 settings reference (`settings-model.integration.test.ts`), so a pi upgrade that
 adds a key, or lets an agent-directory-only key move, fails that test.
+With `renderer: { version, controls[] }` (doc 7.5) each key also carries
+`presentation` (`label`, `help`, `order`, `importance`, the negotiated `control`
+and `note`, `valueKind`, static `options`, `range`, `optionsSource`, `confirm`,
+`redacted`), and the response carries `renderer: { version }` and `sections[]`,
+each with the summary doc 7.2 describes: `essential` values, `overrides` above
+Built-in with their layer, `pending` approvals for this target and `recent`
+agent changes (three, then `moreRecent`). The control is the declared one when
+the client names it, else its fallback, else `readOnly` with the note "Update
+Tron to edit"; a client that sends no `renderer` gets every editable key
+read-only, always with its `display`. Presentation and summaries are
+`src/admin/settings-presentation.ts`. `settings.options { target, key,
+qualifiers?, query?, cursor?, limit? }` serves a key's choices: its static
+options, or its `optionsSource` (`catalog.models`, searchable and paged;
+`catalog.thinkingLevels` for the `model` qualifier or the target's chat model,
+empty for a model without reasoning; `catalog.contextWindow` as a `range` with
+the bounds `settings.change` enforces).
 `settings.change { commandId, target, fence?, changes[], reason?, dryRun?,
 applyAgainOf? }` is the one path every setting changes through
 ([docs/settings-model.md](docs/settings-model.md) 5). Each change is `{ key,

@@ -5,11 +5,17 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { fauxProvider } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "./trust-service.js";
-import { SettingsModel } from "./settings-model.js";
+import { SettingsChangePath, SettingsModel } from "./settings-model.js";
+import { SettingsChangeRecord, type ChangeEntry } from "./settings-record.js";
+import { SettingsApprovals } from "./settings-approvals.js";
 import { KEYS, UNDECLARED_PI_SETTINGS, type KeyDeclaration } from "./settings-schema.js";
-import type { Resolution, ResolvedKey } from "./settings-resolver.js";
+import type { Resolution, ResolvedKey, SettingsTarget } from "./settings-resolver.js";
+import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
+import { CONTROLS } from "./settings-types.js";
+import { contextWindowLimits } from "../providers/context-window-policy.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
@@ -21,6 +27,7 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
  * settings reference. The resolved report is retained as an artifact.
  */
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-resolve.json");
+const RENDERER_ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-renderer.integration.json");
 const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
 afterEach(async () => {
@@ -47,7 +54,10 @@ async function fixture() {
   const sessionDir = join(root, "sessions");
   const project = join(root, "project");
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(join(project, ".pi"), { recursive: true })]);
-  const faux = fauxProvider({ provider: "tron-settings-model", tokensPerSecond: 10_000, models: [{ id: "reasoner", reasoning: true, contextWindow: 200_000 }] });
+  const faux = fauxProvider({
+    provider: "tron-settings-model", tokensPerSecond: 10_000,
+    models: [{ id: "reasoner", reasoning: true, contextWindow: 200_000 }, { id: "plain", reasoning: false }],
+  });
   const model = faux.getModel();
   const modelKey = `${model.provider}/${model.id}`;
   const runtimeFactory = async () => {
@@ -87,12 +97,17 @@ async function fixture() {
     agentDir, tronHome, trust, modelRuntime,
     homeMemoryModel: async () => ({ provider: model.provider, id: model.id }),
   });
+  const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), new SettingsApprovals(tronHome), {
+    setTrust: async (project, decision) => trust.setAndApply(project, decision,
+      async inspection => { await registry.reloadProject(inspection.cwd, inspection.effectiveDecision === true, false); },
+      async inspection => { await registry.commitProjectReload(inspection.cwd); }),
+  }, agentDir);
   const service = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
-    modelRuntime, trust, settingsModel, sessions: registry, receipts: new CommandReceiptStore(tronHome),
+    modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome),
     broadcast: () => {}, globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
-  return { root, tronHome, agentDir, project, trust, registry, service, settingsModel, model, modelKey };
+  return { root, tronHome, agentDir, project, trust, registry, service, settingsModel, settingsChanges, model, modelKey, faux };
 }
 
 /** What pi's own SettingsManager resolves for each key it owns: the oracle. */
@@ -299,5 +314,192 @@ describe("the schema against the pinned pi settings", () => {
       "permissions.defaultProjectTrust": manager.getDefaultProjectTrust(), "setup.installTelemetry": manager.getEnableInstallTelemetry(),
     };
     for (const [id, expected] of Object.entries(builtins)) expect(KEYS.find(key => key.id === id)?.builtin, id).toEqual(expected);
+  });
+});
+
+describe("settings renderer contract", () => {
+  const transcript: Array<{ case: string; response: unknown }> = [];
+  afterAll(async () => {
+    await mkdir(dirname(RENDERER_ARTIFACT), { recursive: true });
+    await writeFile(RENDERER_ARTIFACT, `${JSON.stringify(transcript, null, 2)}\n`);
+  });
+
+  let command = 0;
+  const commandId = () => `settings-renderer-${String(++command).padStart(4, "0")}`;
+  const macTarget: SettingsTarget = { kind: "mac" };
+  type Fixture = Awaited<ReturnType<typeof fixture>>;
+  type Options = { key: string; source: string; dependsOn: string[]; options: Array<{ value: unknown; label: string; detail?: string; disabledReason?: string }>; range?: unknown; nextCursor?: string };
+
+  /** The presented resolution for a target, with the renderer the client names (if any). */
+  const resolveWith = (f: Fixture, target: Record<string, unknown>, renderer?: Record<string, unknown>) =>
+    f.service.invoke(subscribed(), "settings.resolve", { target, ...(renderer ? { renderer } : {}) }) as unknown as Promise<PresentedResolution>;
+  const presentedRow = (resolution: PresentedResolution, key: string, qualifiers?: Record<string, string>): PresentedKey =>
+    row(resolution, key, qualifiers) as PresentedKey;
+  const section = (resolution: PresentedResolution, id: string) => {
+    const found = resolution.sections.find(candidate => candidate.id === id);
+    if (!found) throw new Error(`section ${id} was not presented`);
+    return found;
+  };
+  /** A maintainer's change through the RPC: the iPhone's own tap, as the Mac target. */
+  const maintainerChange = (f: Fixture, changes: unknown[], dryRun = false) =>
+    f.service.invoke(subscribed(), "settings.change", { commandId: commandId(), target: macTarget, changes, ...(dryRun ? { dryRun: true } : {}) }) as
+      Promise<{ dryRun?: true; status: string; tier: string; changes: Array<Record<string, unknown>> }>;
+  const options = (f: Fixture, request: Record<string, unknown>, target: Record<string, unknown> = macTarget) =>
+    f.service.invoke(subscribed(), "settings.options", { target, ...request }) as Promise<Options>;
+
+  it("negotiates each key's control with the client, and shows every key read-only with its display when no renderer is named", async () => {
+    const f = await fixture();
+    const everything = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    expect(everything.renderer).toEqual({ version: 1 });
+    expect(presentedRow(everything, "model.thinking[role=chat]", { model: f.modelKey }).presentation).toMatchObject({
+      control: "choice", valueKind: "orderedChoice", options: expect.arrayContaining([{ value: "high", label: "High" }]),
+    });
+    expect(presentedRow(everything, "run.retry.maxRetries").presentation).toMatchObject({
+      control: "number", importance: "essential", label: "Retries", range: { min: 0, max: 20, unit: "retries" },
+    });
+    expect(presentedRow(everything, "run.retry.maxRetries").presentation.note).toBeUndefined();
+
+    // A client that speaks only toggles: a choice with no fallback, and a catalog whose fallback is read-only.
+    const toggles = await resolveWith(f, macTarget, { version: 1, controls: ["hologram", "toggle"] });
+    expect(presentedRow(toggles, "model.thinking[role=chat]", { model: f.modelKey }).presentation).toMatchObject({ control: "readOnly", note: UPDATE_TRON_NOTE });
+    expect(presentedRow(toggles, "model.ref[role=chat]").presentation).toMatchObject({ control: "readOnly", note: UPDATE_TRON_NOTE });
+    expect(presentedRow(toggles, "context.compaction.enabled").presentation).toMatchObject({ control: "toggle" });
+    expect(presentedRow(toggles, "context.compaction.enabled").presentation.note).toBeUndefined();
+    transcript.push({ case: "negotiation: every control, toggles only", response: { all: presentedRow(everything, "run.retry.maxRetries"), toggles: presentedRow(toggles, "model.ref[role=chat]") } });
+
+    // No renderer: every editable key is read-only with the note, and every key still carries its display.
+    const declared = new Map(KEYS.map(key => [key.id, key.control]));
+    const plain = await resolveWith(f, macTarget);
+    expect(plain.renderer).toEqual({ version: 1 });
+    for (const key of plain.keys) {
+      expect(typeof key.display, key.key).toBe("string");
+      const note = declared.get(key.key) === "readOnly" ? undefined : UPDATE_TRON_NOTE;
+      expect(key.presentation, key.key).toMatchObject({ control: "readOnly", ...(note ? { note } : {}) });
+      expect(key.presentation.note, key.key).toBe(note);
+    }
+    expect(presentedRow(plain, "run.retry.maxRetries")).toMatchObject({ display: "5 retries", presentation: { control: "readOnly", note: UPDATE_TRON_NOTE } });
+
+    // Unknown renderer fields are refused; the version must be a positive integer.
+    await expect(f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, renderer: { version: 1, controls: [], extra: true } }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    await expect(f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, renderer: { version: 0, controls: [] } }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("serves each section's essential values, overrides, pending approvals and recent agent changes", async () => {
+    const f = await fixture();
+    const before = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    const model = section(before, "model");
+    expect(model).toMatchObject({ title: "Model", order: 10 });
+    expect(model.summary.essential.map(entry => entry.key)).toEqual(["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]);
+    expect(model.summary.essential[1]).toMatchObject({ qualifiers: { role: "chat", model: f.modelKey }, label: "Thinking", display: expect.any(String) });
+    // A section the target has no key in is not presented at all.
+    expect(before.sections.map(entry => entry.id)).not.toContain("accounts");
+
+    // A maintainer's own Mac-layer change is an override, named by its layer; it is not an agent change.
+    const tapped = await maintainerChange(f, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6, expected: 5 }]);
+    expect(tapped.status).toBe("applied");
+    const afterTap = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    expect(section(afterTap, "run").summary.overrides).toContainEqual({
+      key: "run.retry.maxRetries", label: "Retries", display: "6 retries", layer: "mac", layerLabel: "Mac",
+    });
+    expect(section(afterTap, "run").summary.recent).toEqual([]);
+
+    // A quiet change by a chat's agent, with its reason, is recent.
+    await f.settingsChanges.change(macTarget, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 7, expected: 6 }],
+      { actor: { kind: "agent", id: "chat-1", sessionId: "chat-1" }, reason: "The provider is flaky today" });
+    const afterAgent = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    const run = section(afterAgent, "run");
+    expect(run.summary.recent).toEqual([{
+      changeId: expect.any(String), key: "run.retry.maxRetries", label: "Retries", actor: "A chat's agent",
+      reason: "The provider is flaky today", at: expect.any(String),
+    }]);
+    expect(run.summary.moreRecent).toBe(0);
+    expect(run.summary.overrides).toContainEqual(expect.objectContaining({ key: "run.retry.maxRetries", display: "7 retries", layerLabel: "Mac" }));
+    transcript.push({ case: "section summary: run", response: run });
+
+    // An approve-tier request by Home is held: pending in its section, for this target only.
+    const held = await f.settingsChanges.change(macTarget, [{ key: "permissions.projectTrust", qualifiers: { project: join(f.root, "other") }, layer: "mac", op: "set", value: true }],
+      { actor: { kind: "home", id: "home" }, reason: "The maintainer asked me to work there" });
+    expect(held).toMatchObject({ status: "pending", tier: "approve" });
+    const withPending = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
+    expect(section(withPending, "permissions").summary.pending).toEqual([{
+      requestId: held.approval!.requestId, requester: "Home", labels: ["Trust for this project"],
+    }]);
+    const otherTarget = await resolveWith(f, { kind: "project", cwd: f.project });
+    expect(section(otherTarget, "permissions").summary.pending).toEqual([]);
+    transcript.push({ case: "section summary: permissions pending", response: section(withPending, "permissions") });
+  });
+
+  it("covers only the named keys when a keys filter is given", async () => {
+    const f = await fixture();
+    const filtered = await f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, keys: ["run.retry.maxRetries"], renderer: { version: 1, controls: ["number"] } }) as unknown as PresentedResolution;
+    expect(filtered.keys.map(key => key.key)).toEqual(["run.retry.maxRetries"]);
+    expect(filtered.sections.map(entry => entry.id)).toEqual(["run"]);
+    expect(section(filtered, "run").summary.essential).toEqual([{ key: "run.retry.maxRetries", label: "Retries", display: "5 retries" }]);
+  });
+
+  it("serves option lists that follow the target's model, page catalogs, and refuse keys with no options", async () => {
+    const f = await fixture();
+    const reasoner = f.settingsModel.modelRuntime.getModel(f.model.provider, f.model.id)!;
+    const plain = f.settingsModel.modelRuntime.getModel(f.model.provider, "plain")!;
+    const plainKey = `${plain.provider}/${plain.id}`;
+
+    // Thinking levels: the target's chat model's own levels, labelled as the schema labels them.
+    const levels = await options(f, { key: "model.thinking[role=chat]" });
+    expect(levels).toMatchObject({ source: "catalog.thinkingLevels", dependsOn: ["model.ref[role=chat]"] });
+    expect(levels.options.map(option => option.value)).toEqual(getSupportedThinkingLevels(reasoner));
+    expect(levels.options).toContainEqual({ value: "high", label: "High" });
+
+    // A named model is followed instead: a model without reasoning offers no thinking level.
+    const followed = await options(f, { key: "model.thinking[role=chat]", qualifiers: { model: plainKey } });
+    expect(followed.options).toEqual([]);
+    // Switching the chat model re-requests: the same key now follows the new chat model.
+    await maintainerChange(f, [{ key: "model.ref[role=chat]", layer: "mac", op: "set", value: { provider: plain.provider, id: plain.id } }]);
+    expect((await options(f, { key: "model.thinking[role=chat]" })).options).toEqual([]);
+    expect((await options(f, { key: "model.thinking[role=chat]", qualifiers: { model: f.modelKey } })).options.length).toBeGreaterThan(0);
+
+    // The context window range is the bounds settings.change validates against.
+    const window = await options(f, { key: "model.contextWindow", qualifiers: { model: f.modelKey } });
+    expect(window).toMatchObject({ source: "catalog.contextWindow", options: [], range: { min: contextWindowLimits(reasoner)!.minimum, max: 200_000, unit: "tokens" } });
+    const tooLarge = await maintainerChange(f, [{ key: "model.contextWindow", qualifiers: { model: f.modelKey }, layer: "mac", op: "set", value: 200_001 }], true);
+    expect(tooLarge.changes[0]).toMatchObject({ status: "failed", error: { code: "invalid_request", message: expect.stringContaining("Context window must be") } });
+
+    // Models: a provider query narrows the catalog to the faux provider, and pages by an opaque cursor.
+    const all = await options(f, { key: "model.ref[role=chat]", query: f.model.provider, limit: 200 });
+    expect(all.options.map(option => option.value)).toEqual(expect.arrayContaining([{ provider: f.model.provider, id: "plain" }, { provider: f.model.provider, id: f.model.id }]));
+    expect(all.options.every(option => option.detail === f.model.provider)).toBe(true);
+    const firstPage = await options(f, { key: "model.ref[role=chat]", query: f.model.provider, limit: 1 });
+    expect(firstPage.options).toEqual([all.options[0]]);
+    expect(firstPage.nextCursor).toBe("1");
+    const secondPage = await options(f, { key: "model.ref[role=chat]", query: f.model.provider.toUpperCase(), limit: 1, cursor: firstPage.nextCursor });
+    expect(secondPage.options).toEqual([all.options[1]]);
+    expect(secondPage.nextCursor).toBeUndefined();
+    expect((await options(f, { key: "model.ref[role=chat]", query: "no-such-model-anywhere" })).options).toEqual([]);
+
+    // A static choice: its declared options, in declared order.
+    const transport = await options(f, { key: "run.transport" });
+    expect(transport).toMatchObject({ source: "static", dependsOn: [], options: [
+      { value: "auto", label: "Automatic" }, { value: "sse", label: "SSE" }, { value: "websocket", label: "WebSocket" }, { value: "websocket-cached", label: "WebSocket (cached)" },
+    ] });
+
+    // Refused: an unknown key, a key with neither options nor a source, and a malformed cursor.
+    await expect(options(f, { key: "no.such.key" })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(options(f, { key: "run.retry.maxRetries" })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(options(f, { key: "model.ref[role=chat]", cursor: "not-a-cursor" })).rejects.toMatchObject({ code: "invalid_request" });
+    transcript.push({ case: "options", response: { levels, followed, window, firstPage, transport } });
+  });
+
+  it("refuses an out-of-range value in a dry run, names the error, and changes nothing", async () => {
+    const f = await fixture();
+    const settingsFile = join(f.agentDir, "settings.json");
+    const beforeFile = await readFile(settingsFile, "utf8");
+    const dryRun = await maintainerChange(f, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 99 }], true);
+    expect(dryRun).toMatchObject({ dryRun: true, changes: [{ key: "run.retry.maxRetries", layer: "mac", status: "failed",
+      error: { code: "invalid_request", message: expect.stringContaining("run.retry.maxRetries must be an integer from 0 through 20") } }] });
+    expect(await readFile(settingsFile, "utf8")).toBe(beforeFile);
+    const history = await f.service.invoke(subscribed(), "settings.history", { limit: 50 }) as unknown as { entries: ChangeEntry[] };
+    expect(history.entries).toEqual([]);
+    transcript.push({ case: "dry run refused", response: dryRun });
   });
 });
