@@ -43,6 +43,7 @@ def main(argv: list) -> int:
     transfer = commands.add_parser("handoff", help="transfer a claim after authoritative owner settlement proof")
     transfer.add_argument("issue", type=int)
     transfer.add_argument("--session", help="new owner session (default: WORK_SESSION_ID, PI_SESSION_ID)")
+    transfer.add_argument("--reason", required=True, help="concise reason recorded in the public audit comment")
     transfer.add_argument("--force-maintainer", action="store_true", help="override unknown owner state after typed interactive confirmation")
     check = commands.add_parser("verify", help="run the local checks the branch diff requires")
     check.add_argument("--tests", action="append", default=[], metavar="COMMAND",
@@ -106,7 +107,7 @@ def main(argv: list) -> int:
         if args.command == "start":
             return start.run(Gh(root), Path.cwd(), config, args.issue, args.session)
         if args.command == "handoff":
-            return handoff.run(Gh(root), Path.cwd(), config, args.issue, args.session, args.force_maintainer)
+            return handoff.run(Gh(root), Path.cwd(), config, args.issue, args.session, args.force_maintainer, args.reason)
         if args.command == "verify":
             base_ref = f"{config['claim']['remote']}/{config['claim']['baseBranch']}"
             return 0 if verify.verify(root, config, args.tests, base_ref) else 1

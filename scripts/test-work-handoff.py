@@ -12,7 +12,7 @@ def run():
       with tempfile.TemporaryDirectory(prefix="tron-work-handoff-") as d:
         root=Path(d); repo=root/"repo"; repo.mkdir(); home=root/"home"; home.mkdir(); tmp=root/"tmp"; tmp.mkdir()
         remote=root/"remote.git"; state=root/"gh.json"; gh=root/"gh"
-        gh.write_text('#!/usr/bin/env python3\nimport json,os,sys\np=os.environ["FIXTURE"]\ns=json.load(open(p))\na=sys.argv[1:]\nif a[:2]==["repo","view"]: print(json.dumps({"nameWithOwner":"fixture/project","owner":{"login":"fixture"}}))\nelif a[:3]==["issue","view","41"]: print(json.dumps({"state":"OPEN","comments":s["comments"]}))\nelif a[:2]==["issue","comment"]: s["comments"].append(sys.stdin.read()); s["writes"].append("comment"); json.dump(s,open(p,"w"))\nelse: raise SystemExit("unexpected gh: "+repr(a))\n')
+        gh.write_text('#!/usr/bin/env python3\nimport json,os,sys\np=os.environ["FIXTURE"]\ns=json.load(open(p))\na=sys.argv[1:]\nif a[:2]==["repo","view"]: print(json.dumps({"nameWithOwner":"fixture/project","owner":{"login":"fixture"}}))\nelif a[:3]==["issue","view","41"]: print(json.dumps({"state":"OPEN","comments":s["comments"]}))\nelif a[:1]==["api"]: print("\\n".join(s["comments"]))\nelif a[:2]==["issue","comment"]: s["comments"].append(sys.stdin.read()); s["writes"].append("comment"); json.dump(s,open(p,"w"))\nelse: raise SystemExit("unexpected gh: "+repr(a))\n')
         gh.chmod(0o755)
         env={**os.environ,"HOME":str(home),"TMPDIR":str(tmp),"WORK_GH":str(gh),"FIXTURE":str(state),"WORK_SESSION_ID":"new-owner","GIT_CONFIG_NOSYSTEM":"1","GIT_CONFIG_GLOBAL":os.devnull,"PYTHONDONTWRITEBYTECODE":"1"}
         def git(cwd,*args): return subprocess.run(["git",*args],cwd=cwd,env=env,check=True,capture_output=True,text=True).stdout.strip()
@@ -29,15 +29,15 @@ def run():
         cli=ROOT/"tools/work/cli.py"
         def call(*args, input=None): return subprocess.run([sys.executable,str(cli),*args],cwd=worktree if worktree.exists() else repo,env=env,input=input,capture_output=True,text=True,timeout=30)
         before=git(worktree,"rev-parse","HEAD");
-        r=call("handoff","41","--session","new-owner")
+        r=call("handoff","41","--session","new-owner","--reason","owner settled")
         evidence.append({"case":"unknown owner refused without writes","exit":r.returncode,"stderr":r.stderr.strip()})
         assert r.returncode and "unknown" in r.stderr and git(worktree,"rev-parse","HEAD")==before and json.loads(state.read_text())["writes"]==[]
-        r=call("handoff","41","--session","new-owner","--force-maintainer")
+        r=call("handoff","41","--session","new-owner","--reason","owner settled","--force-maintainer")
         evidence.append({"case":"force requires TTY","exit":r.returncode,"stderr":r.stderr.strip()})
         assert r.returncode and "interactive terminal" in r.stderr and git(worktree,"rev-parse","HEAD")==before
         assert (worktree/"dirty.txt").read_text()=="keep me\n"
         git(repo,"worktree","remove","--force",str(worktree))
-        r=call("handoff","41","--session","new-owner")
+        r=call("handoff","41","--session","new-owner","--reason","owner settled")
         evidence.append({"case":"missing worktree refuses without recreation","exit":r.returncode,"stderr":r.stderr.strip()})
         assert r.returncode and "worktree is missing" in r.stderr and not worktree.exists()
         assert json.loads(state.read_text())["writes"]==[]

@@ -557,7 +557,7 @@ class UnownedSimulatorCleanupFixture(SimulatorHarness, unittest.TestCase):
 
     def clean_command(self, udid: str = UDID_A, name: str = "Orphan Test Simulator") -> subprocess.CompletedProcess[str]:
         environment = self.contained_environment(self.root)
-        environment.update({"TRON_IOS_XCRUN": str(self.fake_xcrun), "FAKE_SIMCTL_INVENTORY": str(self.inventory_path)})
+        environment.update({"TRON_IOS_XCRUN": str(self.fake_xcrun), "FAKE_SIMCTL_INVENTORY": str(self.inventory_path), "FAKE_SIMCTL_LOG": str(self.root / "simctl.log")})
         environment.update(self.reader_environment())
         return subprocess.run(
             [sys.executable, str(SIMULATOR), "delete-unowned", "--udid", udid, "--name", name,
@@ -576,31 +576,49 @@ class UnownedSimulatorCleanupFixture(SimulatorHarness, unittest.TestCase):
         self.assertEqual([device["udid"] for device in devices], [UDID_B])
         self.assertEqual(devices[0]["state"], "Booted")
 
+    def test_exact_cleanup_leaves_an_unrelated_lane_lease_and_marker_untouched(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Shutdown")[1]
+        other = self.device(UDID_B, name="Tron iOS Tests (other)", state="Shutdown")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target, other]})
+        lane = self.root / "ios-test-other"
+        lane.mkdir()
+        marker = self.owned_marker(UDID_B, name="Tron iOS Tests (other)")
+        marker_path = lane / "simulator.json"
+        lease_path = lane / "lease.lock"
+        marker_path.write_text(json.dumps(marker))
+        lease_path.write_text("{}\n")
+        marker_before, lease_before = marker_path.read_bytes(), lease_path.read_bytes()
+        result = self.clean_command()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(marker_path.read_bytes(), marker_before)
+        self.assertEqual(lease_path.read_bytes(), lease_before)
+        self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [other])
+
     def test_refuses_owned_live_development_and_malformed_targets(self) -> None:
-        cases = ("owned", "development", "malformed")
-        for case in cases:
+        cases = (("owned", "claimed by lane marker"), ("development", "Development"), ("malformed", "unreadable"))
+        for case, expected in cases:
             with self.subTest(case=case):
                 target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]
                 self.write_inventory(devices={RUNTIME_ID: [target]})
+                lane = self.root / "ios-test-active"
+                shutil.rmtree(lane, ignore_errors=True)
+                self.development.unlink(missing_ok=True)
                 if case == "owned":
-                    lane = self.root / "ios-test-active"
                     lane.mkdir()
                     (lane / "simulator.json").write_text(json.dumps(self.owned_marker(UDID_A)))
                     (lane / "lease.lock").write_text("")
-                    # Hold an actual advisory lock to prove a live lane is refused.
-                    with (lane / "lease.lock").open("r+") as lease:
-                        fcntl.flock(lease.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        result = self.clean_command()
                 elif case == "development":
-                    self.development.write_text(UDID_A + "\\n")
-                    result = self.clean_command()
+                    self.development.write_text(UDID_A + "\n")
                 else:
-                    lane = self.root / "ios-test-bad"
                     lane.mkdir()
                     (lane / "simulator.json").write_text("not json")
-                    result = self.clean_command()
+                (self.root / "simctl.log").unlink(missing_ok=True)
+                result = self.clean_command()
                 self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn(expected, result.stderr)
                 self.assertTrue(any(device["udid"] == UDID_A for device in json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]))
+                calls = (self.root / "simctl.log").read_text().splitlines() if (self.root / "simctl.log").exists() else []
+                self.assertFalse(any(call.startswith(("shutdown ", "delete ")) for call in calls))
 
     def test_refuses_markerless_live_lane_lease(self) -> None:
         target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]

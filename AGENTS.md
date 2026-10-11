@@ -285,8 +285,9 @@ owned by [tools/work/README.md](tools/work/README.md); the
 GitHub writes only through `scripts/tron work`, never `gh` mutations.
 
 - **See the state:** `scripts/tron work dashboard`.
-- **Transfer a claim:** `scripts/tron work handoff <issue>` requires authoritative proof
-  that the prior owner is settled; unknown state refuses. `--force-maintainer` requires
+- **Transfer a claim:** `scripts/tron work handoff <issue> --reason TEXT` requires authoritative proof
+  that the prior owner is settled; unknown state refuses. The audit comment records the exact
+  transition SHA and reason. `--force-maintainer` requires
   a real terminal and exact typed confirmation. It preserves the branch, worktree and
   dirty files; never recreate a missing worktree to make a handoff succeed.
 - **Pick work:** the issue the user names, or any open, unclaimed, non-epic issue.

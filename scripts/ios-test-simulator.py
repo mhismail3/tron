@@ -1137,6 +1137,8 @@ def delete_unowned(arguments: argparse.Namespace) -> int:
         raise DestinationError(f"simulator UUID not found: {arguments.udid}")
     if current[1].get("name") != arguments.name:
         raise DestinationError(f"simulator name does not match the requested exact name {arguments.name!r}")
+    initial_runtime = current[0]
+    initial_device_type = current[1].get("deviceTypeIdentifier")
     if arguments.udid == dev_udid:
         raise DestinationError("refusing the remembered Development simulator")
 
@@ -1154,10 +1156,17 @@ def delete_unowned(arguments: argparse.Namespace) -> int:
                 if marker is not None and marker["udid"].casefold() == arguments.udid.casefold():
                     raise DestinationError(f"refusing simulator claimed by lane marker: {marker_path}")
             lease_path = directory / LEASE_NAME
+            if lease_path.is_symlink():
+                raise DestinationError(f"refusing symlinked lane lease: {lease_path}")
             if lease_path.exists():
-                with lease_hold(lease_path) as held:
-                    if not held:
-                        raise DestinationError(f"refusing cleanup while a test lane is leased: {lease_path.parent}")
+                try:
+                    lease_text = lease_path.read_text(encoding="utf-8")
+                except OSError as error:
+                    raise DestinationError(f"cannot inspect lane lease {lease_path}: {error}") from error
+                if parse_lease(lease_text) is None:
+                    raise DestinationError(f"refusing ambiguous lane lease: {lease_path}")
+                if lease_holder(lease_path, table=process_table()) != "idle":
+                    raise DestinationError(f"refusing cleanup while a test lane is leased: {lease_path.parent}")
             try:
                 below.extend(child for child in directory.iterdir() if child.is_dir() and not child.is_symlink())
             except OSError as error:
@@ -1182,6 +1191,8 @@ def delete_unowned(arguments: argparse.Namespace) -> int:
     current = find_device(inventory(), arguments.udid)
     if current is None or current[1].get("name") != arguments.name or current[1].get("state") != "Shutdown":
         raise DestinationError("requested simulator is no longer safely deletable")
+    if current[0] != initial_runtime or current[1].get("deviceTypeIdentifier") != initial_device_type:
+        raise DestinationError("requested simulator identity changed during cleanup")
     simctl("delete", arguments.udid)
     print(f"deleted explicitly requested unowned simulator {arguments.name} ({arguments.udid})")
     return 0

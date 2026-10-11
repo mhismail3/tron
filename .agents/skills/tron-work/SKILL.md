@@ -23,7 +23,7 @@ when the user wants the page. Report a `work:` error as is; do not retry with st
 2. **Claim.** `scripts/tron work start <issue>`, then work only in the worktree it
    prints. It refuses a closed, blocked, or already-claimed issue; report that and
    stop rather than working around it. For an abandoned claim, use
-   `scripts/tron work handoff <issue>` only after authoritative settled-owner proof;
+   `scripts/tron work handoff <issue> --reason TEXT` only after authoritative settled-owner proof;
    indeterminate owners refuse. `--force-maintainer` is reserved for a maintainer
    who can provide interactive typed confirmation.
 3. **Implement.** Ship the code, its owning docs, and the integration or E2E test
