@@ -19,6 +19,7 @@ const TAILSCALE_LOOKUP_TIMEOUT_MS = 2_000;
  * costs one CLI run, not one per socket. */
 const TAILSCALE_RESULT_REUSE_MS = 10_000;
 const MAXIMUM_STATUS_BYTES = 1_024 * 1_024;
+const MAXIMUM_COMMAND_OUTPUT_BYTES = 8 * 1_024 * 1_024;
 
 /** Tailscale's own path kinds. `offline` is a peer Tailscale knows but cannot
  * reach; `unknown` is no answer at all (no CLI, a timeout, or an address that
@@ -27,16 +28,20 @@ export type PeerPath = "direct" | "relay" | "offline" | "unknown";
 
 export interface PeerPathLookup {
   peerPath: PeerPath;
+  peerPathSource: "tailscale-status" | "cli-failed" | "not-tailscale" | "not-in-status" | "timeout";
   /** The relay actually carrying the path, or empty when the peer is not
    * using one (direct or offline). */
   peerRelay: string;
+  peerLastHandshake?: string;
+  peerRxBytes?: number;
+  peerTxBytes?: number;
 }
 
 export interface PeerPathReader {
   lookup(remoteAddress: string): Promise<PeerPathLookup>;
 }
 
-interface TailscaleStatusResult {
+export interface BoundedCommandResult {
   /** Exit code, or null when the command never ran to completion. */
   code: number | null;
   timedOut: boolean;
@@ -44,7 +49,8 @@ interface TailscaleStatusResult {
   error?: string;
 }
 
-type TailscaleStatusCommand = (tool: string, args: readonly string[], timeoutMs: number) => Promise<TailscaleStatusResult>;
+export type BoundedCommand = (tool: string, args: readonly string[], timeoutMs: number,
+  options?: { env?: NodeJS.ProcessEnv; maxBuffer?: number }) => Promise<BoundedCommandResult>;
 
 /** The fields of one `tailscale status --json` peer that Tron reads. */
 export interface TailscalePeer {
@@ -55,6 +61,9 @@ export interface TailscalePeer {
   readonly CurAddr?: unknown;
   readonly Relay?: unknown;
   readonly LastSeen?: unknown;
+  readonly LastHandshake?: unknown;
+  readonly RxBytes?: unknown;
+  readonly TxBytes?: unknown;
 }
 
 export interface TailscaleStatus {
@@ -67,7 +76,7 @@ export interface TailscaleStatus {
 
 export type TailscaleStatusRead =
   | { readonly ok: true; readonly status: TailscaleStatus }
-  | { readonly ok: false; readonly failures: readonly string[] };
+  | { readonly ok: false; readonly failures: readonly string[]; readonly reason: "timeout" | "cli-failed" };
 
 function isPeer(value: unknown): value is TailscalePeer {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -76,17 +85,23 @@ function isPeer(value: unknown): value is TailscalePeer {
 /** One `tailscale status --json` read through the documented candidates, used
  * by both owning readers. `ok: false` carries why each candidate failed, for
  * the diagnostic bundle's "no usable Tailscale CLI" line. Never rejects. */
-export async function readTailscaleStatus(run: TailscaleStatusCommand, timeoutMs: number): Promise<TailscaleStatusRead> {
+export async function readTailscaleStatus(run: BoundedCommand, timeoutMs: number): Promise<TailscaleStatusRead> {
   const failures: string[] = [];
+  let timedOut = false;
   for (const candidate of TAILSCALE_CLI_CANDIDATES) {
-    let result: TailscaleStatusResult;
+    let result: BoundedCommandResult;
     try {
-      result = await run(candidate, ["status", "--json"], timeoutMs);
+      // The app binary otherwise enters GUI mode under launchd (no TERM).
+      // The status owner supplies this to every runner, including diagnose.
+      result = await run(candidate, ["status", "--json"], timeoutMs, {
+        env: { ...process.env, TAILSCALE_BE_CLI: "1" }, maxBuffer: MAXIMUM_STATUS_BYTES,
+      });
     } catch {
       failures.push(`${candidate}: command failed`);
       continue;
     }
     if (result.code !== 0 || result.timedOut) {
+      timedOut ||= result.timedOut;
       failures.push(`${candidate}: ${result.timedOut ? "timed out" : result.error ?? `exit ${result.code ?? "none"}`}`);
       continue;
     }
@@ -112,13 +127,13 @@ export async function readTailscaleStatus(run: TailscaleStatusCommand, timeoutMs
       failures.push(`${candidate}: unreadable status document`);
     }
   }
-  return { ok: false, failures };
+  return { ok: false, failures, reason: timedOut ? "timeout" : "cli-failed" };
 }
 
 /** One peer's path, shared by the transport's silence records and the
  * diagnostic bundle so both describe the same peer the same way. `offline`
  * outranks a remembered address: a peer Tailscale cannot reach uses no path. */
-export function classifyPeer(peer: TailscalePeer | undefined): PeerPathLookup {
+export function classifyPeer(peer: TailscalePeer | undefined): Pick<PeerPathLookup, "peerPath" | "peerRelay"> {
   if (peer === undefined) return { peerPath: "unknown", peerRelay: "" };
   if (peer.Online === false) return { peerPath: "offline", peerRelay: "" };
   if (peer.Online !== true) return { peerPath: "unknown", peerRelay: "" };
@@ -141,9 +156,10 @@ function isTailscaleAddress(address: string): boolean {
   return numbers[0] === 100 && second >= 64 && second <= 127;
 }
 
-function runStatus(tool: string, args: readonly string[], timeoutMs: number): Promise<TailscaleStatusResult> {
+export const runBoundedCommand: BoundedCommand = (tool, args, timeoutMs, options) => {
   return new Promise((resolve) => {
-    execFile(tool, [...args], { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: MAXIMUM_STATUS_BYTES, encoding: "utf8" }, (error, stdout) => {
+    execFile(tool, [...args], { timeout: timeoutMs, killSignal: "SIGKILL",
+      maxBuffer: MAXIMUM_COMMAND_OUTPUT_BYTES, ...options, encoding: "utf8" }, (error, stdout) => {
       if (!error) {
         resolve({ code: 0, timedOut: false, output: stdout });
         return;
@@ -161,20 +177,33 @@ function runStatus(tool: string, args: readonly string[], timeoutMs: number): Pr
 }
 
 export class TailscalePeerPaths implements PeerPathReader {
-  private cached?: { at: number; peers: readonly TailscalePeer[] } | undefined;
-  private inFlight?: Promise<readonly TailscalePeer[]> | undefined;
+  private cached?: { at: number; status: TailscaleStatusRead } | undefined;
+  private inFlight?: Promise<TailscaleStatusRead> | undefined;
 
   constructor(
-    private readonly run: TailscaleStatusCommand = runStatus,
+    private readonly run: BoundedCommand = runBoundedCommand,
     private readonly now: () => number = () => performance.now(),
   ) {}
 
   async lookup(remoteAddress: string): Promise<PeerPathLookup> {
     // A dual-stack listener reports an IPv4 peer as `::ffff:100.x.y.z`.
     const address = remoteAddress.startsWith("::ffff:") ? remoteAddress.slice(7) : remoteAddress;
-    if (!isTailscaleAddress(address)) return { peerPath: "unknown", peerRelay: "" };
-    const peers = await this.status();
-    return classifyPeer(peers.find((candidate) => Array.isArray(candidate.TailscaleIPs) && candidate.TailscaleIPs.includes(address)));
+    if (!isTailscaleAddress(address)) return { peerPath: "unknown", peerPathSource: "not-tailscale", peerRelay: "" };
+    const status = await this.status();
+    if (!status.ok) {
+      return { peerPath: "unknown", peerPathSource: status.reason, peerRelay: "" };
+    }
+    const peer = status.status.peers.find((candidate) => Array.isArray(candidate.TailscaleIPs) && candidate.TailscaleIPs.includes(address));
+    if (peer === undefined) return { peerPath: "unknown", peerPathSource: "not-in-status", peerRelay: "" };
+    const handshake = typeof peer.LastHandshake === "string"
+      && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u.test(peer.LastHandshake)
+      && Number.isFinite(Date.parse(peer.LastHandshake)) ? new Date(peer.LastHandshake).toISOString() : undefined;
+    return {
+      ...classifyPeer(peer), peerPathSource: "tailscale-status",
+      ...(handshake !== undefined ? { peerLastHandshake: handshake } : {}),
+      ...(typeof peer.RxBytes === "number" && Number.isSafeInteger(peer.RxBytes) && peer.RxBytes >= 0 ? { peerRxBytes: peer.RxBytes } : {}),
+      ...(typeof peer.TxBytes === "number" && Number.isSafeInteger(peer.TxBytes) && peer.TxBytes >= 0 ? { peerTxBytes: peer.TxBytes } : {}),
+    };
   }
 
   /** One read per reuse window and one read in flight. The read is bounded by
@@ -185,30 +214,29 @@ export class TailscalePeerPaths implements PeerPathReader {
    * SIGKILL at its own timeout, so one ignored SIGTERM cannot leave a process
    * running per reuse window. A failed read is cached like a successful one, so
    * a missing CLI cannot spawn a process per silent socket. */
-  private status(): Promise<readonly TailscalePeer[]> {
+  private status(): Promise<TailscaleStatusRead> {
     const cached = this.cached;
-    if (cached !== undefined && this.now() - cached.at < TAILSCALE_RESULT_REUSE_MS) return Promise.resolve(cached.peers);
+    if (cached !== undefined && this.now() - cached.at < TAILSCALE_RESULT_REUSE_MS) return Promise.resolve(cached.status);
     if (this.inFlight !== undefined) return this.inFlight;
-    const read = new Promise<readonly TailscalePeer[]>((resolve) => {
-      const deadline = setTimeout(() => resolve([]), TAILSCALE_LOOKUP_TIMEOUT_MS);
+    const read = new Promise<TailscaleStatusRead>((resolve) => {
+      const deadline = setTimeout(() => resolve({ ok: false, failures: ["status timed out"], reason: "timeout" }), TAILSCALE_LOOKUP_TIMEOUT_MS);
       deadline.unref();
-      void this.read().then((peers) => {
+      void this.read().then((status) => {
         clearTimeout(deadline);
-        resolve(peers);
+        resolve(status);
       });
-    }).then((peers) => {
-      this.cached = { at: this.now(), peers };
+    }).then((status) => {
+      this.cached = { at: this.now(), status };
       this.inFlight = undefined;
-      return peers;
+      return status;
     });
     this.inFlight = read;
     return read;
   }
 
-  /** Never rejects: every failure is an empty peer list, which reads as
-   * `unknown`. One candidate failing falls through to the next. */
-  private async read(): Promise<readonly TailscalePeer[]> {
-    const outcome = await readTailscaleStatus(this.run, TAILSCALE_LOOKUP_TIMEOUT_MS);
-    return outcome.ok ? outcome.status.peers : [];
+  /** One candidate failing falls through to the next; the bounded read retains
+   * failure categories so silence records distinguish a timeout from no CLI. */
+  private async read(): Promise<TailscaleStatusRead> {
+    return readTailscaleStatus(this.run, TAILSCALE_LOOKUP_TIMEOUT_MS);
   }
 }

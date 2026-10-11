@@ -220,6 +220,13 @@ export class EpisodicMemory {
         });
       }
       memory.view = await foldViewSliced(memory.messages.size, limits.viewBytes, part => memory.partBytes(part), address => memory.nodes.has(address));
+      // Older stores contain model-written role prefixes. Revoke them through the
+      // same durable projection invalidation path as changed source, so Home can
+      // rebuild under current canonical attribution without showing stale text.
+      const invalidSummaries = [...memory.nodes.values()]
+        .filter(node => node.kind === "summary" && invalidSummaryText(node.text))
+        .map(node => nodeAddress(node.level, node.index));
+      if (invalidSummaries.length > 0) await memory.invalidateNodes(invalidSummaries);
       await memory.repairOrphanedDependencies();
       memory.assertConsistent();
       await memory.repairCatalogMismatch();
@@ -338,7 +345,7 @@ export class EpisodicMemory {
       add({ level: part.level - 1, index: part.index * 2 + 1, start: part.start + half, span: half });
     };
     for (const part of this.view) add(part);
-    const lines = parts.map(part => `${nodeAddress(part.level, part.index)}|${viewLine(this.nodes.get(nodeAddress(part.level, part.index))?.text)}`);
+    const lines = parts.map(part => `${nodeAddress(part.level, part.index)}|${this.attributedViewLine(part.start, part.span, this.nodes.get(nodeAddress(part.level, part.index))?.text)}`);
     const text = lines.join("\n");
     return { text, lines: lines.length, bytes: utf8Bytes(text) };
   }
@@ -454,7 +461,7 @@ export class EpisodicMemory {
     const half = n / 2;
     return [id, id + half].map((start) => {
       const node = this.nodes.get(nodeAddress(level - 1, start / half));
-      return `${start}+${half}|${node ? viewLine(node.text) : EPISODIC_PLACEHOLDER}`;
+      return `${start}+${half}|${node ? this.attributedViewLine(start, half, node.text) : EPISODIC_PLACEHOLDER}`;
     });
   }
 
@@ -727,6 +734,14 @@ export class EpisodicMemory {
     if (previous) this.liveBytes -= Buffer.byteLength(`${JSON.stringify(previous)}\n`);
     this.messages.set(record.index, record);
     this.liveBytes += Buffer.byteLength(`${JSON.stringify(record)}\n`);
+  }
+
+  private attributedViewLine(start: number, span: number, text: string | undefined): string {
+    if (text === undefined) return EPISODIC_PLACEHOLDER;
+    // A merged line has no single speaker. Do not scan its entire historical
+    // span on every render, or claim a model-written sentence is user-authored.
+    const kind = span === 1 ? this.messages.get(start)?.kind : "summary";
+    return `${kind ?? "summary"}: ${span === 1 ? viewLine(text) : text.replace(/\n+/gu, " ")}`;
   }
 
   private setNode(record: EpisodicNodeRecord): void {
@@ -1099,8 +1114,12 @@ export class EpisodicMemory {
       this.usageSinceOpen.cacheWrite += message.usage?.cacheWrite ?? 0;
       // Durable before the next call: a crash must not lose recorded spend.
       await this.saveState();
+      const text = summarizerText(message);
+      if (invalidSummaryText(text)) {
+        throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail: "the compactor echoed role labels or summarizer repair instructions" });
+      }
       const verdict = classifyReply(message);
-      if (verdict === "ok") return summarizerText(message);
+      if (verdict === "ok") return text;
       if (verdict === "permanent") {
         throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail: message.errorMessage ?? emptyReplyDetail(message) });
       }
@@ -1294,5 +1313,11 @@ export class EpisodicMemory {
 /** One view line's text: newlines flattened to single spaces (gist §5.1), and
  * the placeholder for a part whose node is not built. */
 function viewLine(text: string | undefined): string {
-  return text === undefined ? EPISODIC_PLACEHOLDER : text.replace(/\n+/gu, " ");
+  return text === undefined ? EPISODIC_PLACEHOLDER : text.replace(/^(?:user|talk|echo|event|assistant|tool):\s/iu, "").replace(/\n+/gu, " ");
+}
+
+/** Model-generated metadata and echoed size-repair prompts are never summary content. */
+function invalidSummaryText(text: string): boolean {
+  return /(?:^|;\s*)(?:user|talk|echo|event|assistant|tool):\s/iu.test(text)
+    || /(?:the corrected line must|output only (?:that |the )?line|that line is \d+ bytes; the limit is|end where it is cut|compress this message into one line|merge these two lines into one)/iu.test(text);
 }
