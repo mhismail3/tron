@@ -42,7 +42,11 @@ admission. The complete cold graph is validated before the SDK-selected branch
 is retained. Hidden, delegated, tool, thinking, and abandoned-branch entries are
 not indexed. Malformed, oversized, or interrupted files report partial coverage
 rather than an empty corpus. Fork anchors retain the selected-branch gap ordinal
-rather than a fabricated zero.
+rather than a fabricated zero. A result is re-cut immediately before publication
+after optional ranking: unrelated session publications do not invalidate the
+search, and changed result sessions are revalidated against the current branch
+so stale or removed passages are dropped and surviving lexical hits carry a
+fresh anchor revision.
 
 Semantic and Jev ranking states are explicit: neither is silently represented
 as lexical success. Semantic readiness requires the signed NaturalLanguage
