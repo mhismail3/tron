@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -145,6 +145,20 @@ describe("Home task subagents", () => {
     expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "async-launch");
     expect(await asyncState(launch!.details!.asyncDir as string)).toBe("stopped");
+    // Default launches create provider-owned missions. Task settlement must join
+    // the exact run's mission update too, or active records escape terminal retention.
+    const runId = basename(launch!.details!.asyncDir as string);
+    const missionRoot = join(f.agentDir, "missions", "projects");
+    const missionFiles = (await readdir(missionRoot, { recursive: true })).filter(path => path.endsWith(".json"));
+    const missionRows = await Promise.all(missionFiles.map(async path => JSON.parse(await readFile(join(missionRoot, path), "utf8")) as {
+      status: string; runs: Array<{ runId: string; status: string }>;
+    }));
+    const linkedMissions = missionRows.filter(row => row.runs.some(run => run.runId === runId));
+    const evidence = { runState: await asyncState(launch!.details!.asyncDir as string),
+      missions: linkedMissions.map(row => ({ status: row.status, run: row.runs.find(run => run.runId === runId)?.status })) };
+    await mkdir("test-results", { recursive: true });
+    await writeFile("test-results/stopped-subagent-mission.json", JSON.stringify(evidence, null, 2));
+    expect(evidence).toEqual({ runState: "stopped", missions: [{ status: "cancelled", run: "stopped" }] });
     await waitFor(() => child.abortedRequests() === 1, "stopped async child request closed", bound);
     expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
     // Nothing follows settlement: no model request and no canonical entry after it.
