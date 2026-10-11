@@ -964,6 +964,17 @@ command. Each selector is `TronMobileUITests/<Class>/<method>`. After a source
 edit, rerun `build` (incremental) and then `run`; the runner refuses products
 built from another source state.
 
+Pending-configuration browsing has separate light and dark XCTest cases:
+`testConfigurationFeedbackExplainsLockAndPendingWithoutBlockingBrowsing` and
+`testConfigurationFeedbackExplainsLockAndPendingWithoutBlockingBrowsingInDark`.
+Both call the same complete journey, with one app launch and one teardown per
+case. Keep both in settings acceptance: selected-model disabling, live search,
+dismissal, and superseded-receipt recovery remain identical. This isolates
+XCTest's keyboard/animation observer lifecycle rather than disabling animation
+or extending waits. A log saying `App animations complete notification not
+received` is an automation-readiness failure, not evidence that a Gateway
+request took 60 seconds; retain the result and diagnose it if it recurs.
+
 The other real-boundary owners are:
 
 - `scripts/ios-gateway-e2e-test all` runs `TronMobileE2ETests`
