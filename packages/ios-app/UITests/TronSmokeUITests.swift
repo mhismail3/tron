@@ -844,7 +844,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-pause"].exists)
         tapManageRow(app, "home-manage-check-completion")
         // The first check finds the receipt still pending and must not claim completion.
-        XCTAssertTrue(waitForLabel(state, containing: "unresolved", timeout: 5))
+        XCTAssertTrue(waitForLabel(memoryRow, containing: "unresolved", timeout: 5))
         tapManageRow(app, "home-manage-check-completion")
         XCTAssertTrue(waitForLabel(state, containing: "Paused", timeout: 5))
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
