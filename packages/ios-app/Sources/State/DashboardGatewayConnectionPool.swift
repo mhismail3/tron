@@ -82,30 +82,19 @@ final class DashboardGatewayConnectionPool {
     static let POOL_UNREACHABLE_AFTER = 3
     /// The longest wait between attempts for an unreachable background profile.
     static let POOL_MAX_RETRY: Duration = .seconds(300)
-    /// A background entry's curve before it is unreachable: the selected
-    /// profile's progression (2 s, ×1.7, 15 s cap) without jitter. It is not
-    /// jittered so a pool wait is deterministic and its cap is a floor rather
-    /// than a nominal average; the selected profile's lifecycle keeps its own
-    /// jittered curve.
-    private static let reconnectDelayPolicy = ReconnectDelayPolicy(
-        initialSeconds: ReconnectDelayPolicy.standard.initialSeconds,
-        multiplier: ReconnectDelayPolicy.standard.multiplier,
-        maximumSeconds: ReconnectDelayPolicy.standard.maximumSeconds,
-        jitterFraction: 0,
-        nextUnitInterval: { 0.5 }
-    )
-    /// The curve a pool entry adopts once `POOL_UNREACHABLE_AFTER` attempts have
-    /// failed in a row: four times longer each step, up to `POOL_MAX_RETRY`,
-    /// still without jitter so the five-minute cap is a floor. It continues
-    /// from the nominal delay the standard phase reached, so the switch never
-    /// shortens a wait.
-    private static let unreachableReconnectDelayPolicy = ReconnectDelayPolicy(
-        initialSeconds: ReconnectDelayPolicy.standard.initialSeconds,
-        multiplier: 4,
-        maximumSeconds: Double(POOL_MAX_RETRY.components.seconds),
-        jitterFraction: 0,
-        nextUnitInterval: { 0.5 }
-    )
+    /// Profile-owned recovery survives retirement; entries borrow this exact state.
+    private final class RecoveryState {
+        let identity: DashboardPoolProfileIdentity
+        let token: String
+        var failedAttempts = 0
+        var lastConnectedAt: Date?
+        var stopReason: String?
+
+        init(profile: GatewayProfile, token: String) {
+            identity = DashboardPoolProfileIdentity(profile)
+            self.token = token
+        }
+    }
 
     private struct Entry {
         let profile: GatewayProfile
@@ -136,18 +125,7 @@ final class DashboardGatewayConnectionPool {
         var refreshRequestGeneration: Int
         var refreshRetryAttempt: Int
         var refreshFailedAttempts: Int
-        var connectionFailureClassifier: GatewayConnectionFailureClassifier
-        /// The message of the non-retryable failure that stopped this profile,
-        /// or nil while it is retrying. The state alone is `.offline` for a
-        /// background profile, and that profile is not the selected one whose
-        /// stop the detail view already reads: without this, half of the F-3
-        /// requirement (which build must update) has nowhere to render.
-        var stopReason: String?
-        /// The pool's own count of this entry's attempts that failed in a row.
-        /// Only a successful attempt clears it; it decides when the retry curve
-        /// escalates, unlike the display classifier, which stops counting an
-        /// outage as never-opened as soon as one attempt opened a transport.
-        var consecutiveFailedAttempts: Int
+        let recovery: RecoveryState
         /// The loop that owns `reconnectTask`, and the loop whose attempt is in
         /// flight. They are identities, not flags: a retired loop must not
         /// clear its successor's marker, and the stall watchdog reads them to
@@ -164,6 +142,9 @@ final class DashboardGatewayConnectionPool {
     private var entries: [String: Entry] = [:]
     private var generation = 0
     private var retirementTasks: [String: (generation: Int, task: Task<Void, Never>)] = [:]
+    /// Profile-owned recovery survives background transport retirement. Identity
+    /// fences prevent a replaced/removed profile from inheriting its history.
+    private var recoveryStates: [String: RecoveryState] = [:]
     private var nonRetryableProfiles = Set<String>()
 
     init(
@@ -195,15 +176,31 @@ final class DashboardGatewayConnectionPool {
         )
         let desired = profiles.filter { admittedIDs.contains($0.id) && token($0) != nil }
         let desiredIDs = Set(desired.map(\.id))
+        for (profileID, recovery) in Array(recoveryStates) {
+            guard let profile = profiles.first(where: { $0.id == profileID }),
+                  desiredIDs.contains(profileID), profile.isEnabled, token(profile) != nil,
+                  recovery.identity == DashboardPoolProfileIdentity(profile),
+                  recovery.token == token(profile) else {
+                recoveryStates[profileID] = nil
+                nonRetryableProfiles.remove(profileID)
+                continue
+            }
+        }
         for profileID in Array(entries.keys) {
             guard let profile = desired.first(where: { $0.id == profileID }),
                   let current = entries[profileID],
                   let currentToken = token(profile) else {
-                if !desiredIDs.contains(profileID) { stop(profileID: profileID) }
+                if !desiredIDs.contains(profileID) {
+                    recoveryStates[profileID] = nil
+                    nonRetryableProfiles.remove(profileID)
+                    stop(profileID: profileID)
+                }
                 continue
             }
             if DashboardPoolProfileIdentity(current.profile) != DashboardPoolProfileIdentity(profile)
                 || current.token != currentToken {
+                recoveryStates[profileID] = nil
+                nonRetryableProfiles.remove(profileID)
                 stop(profileID: profileID)
             }
         }
@@ -212,9 +209,9 @@ final class DashboardGatewayConnectionPool {
         }
     }
 
-    /// Retires every entry: the pool holds nothing until the next `reconcile`,
-    /// which starts fresh entries and connects at once. That is why a real
-    /// foreground cycle needs no backoff acceleration here.
+    /// Retires transport entries. Background suspension preserves profile-owned
+    /// recovery so foreground reconciliation resumes the same escalation rather
+    /// than giving an offline Mac another burst of immediate attempts.
     ///
     /// `endedBy` names who ended the open episodes. The scene suspension that
     /// parks every pool entry is a `background` retirement; the projection
@@ -237,7 +234,11 @@ final class DashboardGatewayConnectionPool {
     /// while it retries or is connected. It is the pool's own record of why
     /// that profile's entry stopped, which `state` alone cannot carry (F-3).
     func stopReason(for profileID: String) -> String? {
-        entries[profileID]?.stopReason
+        entries[profileID]?.recovery.stopReason
+    }
+
+    func lastConnectedAt(for profileID: String) -> Date? {
+        recoveryStates[profileID]?.lastConnectedAt
     }
 
     func infoSnapshot(for profileID: String) -> GatewayInfo? {
@@ -412,6 +413,8 @@ final class DashboardGatewayConnectionPool {
             guard let self else { return nil }
             return self.stallGuard(profileID: profile.id)
         }
+        let recovery = recoveryStates[profile.id] ?? RecoveryState(profile: profile, token: token)
+        recoveryStates[profile.id] = recovery
         entries[profile.id] = Entry(
             profile: profile,
             token: token,
@@ -419,14 +422,15 @@ final class DashboardGatewayConnectionPool {
             recorder: recorder,
             connectionID: nil,
             gatewayInfo: nil,
-            state: .connecting,
+            state: nonRetryableProfiles.contains(profile.id) || recovery.failedAttempts >= Self.POOL_UNREACHABLE_AFTER
+                ? .offline : (recovery.failedAttempts > 0 ? .reconnecting : .connecting),
             catalog: SessionCatalogCoordinator(),
             task: nil,
             refreshTask: nil,
             reconnectTask: nil,
             eventTask: nil,
             reconnectSchedule: GatewayReconnectSchedule(
-                clock: clock, delayPolicy: Self.reconnectDelayPolicy
+                clock: clock
             ),
             reconnectWaiting: false,
             networkPathSatisfied: true,
@@ -436,19 +440,21 @@ final class DashboardGatewayConnectionPool {
             refreshRequestGeneration: 0,
             refreshRetryAttempt: 0,
             refreshFailedAttempts: 0,
-            connectionFailureClassifier: GatewayConnectionFailureClassifier(),
-            stopReason: nil,
-            consecutiveFailedAttempts: 0,
+            recovery: recovery,
             reconnectLoopID: nil,
             attemptInFlightLoopID: nil
         )
         publish(profileID: profile.id)
+        guard !nonRetryableProfiles.contains(profile.id) else { return }
         let task = Task { @MainActor [weak self] in
             await retirementBarrier?.value
             guard let self,
                   !Task.isCancelled,
                   self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
-            let failurePresentationGeneration = self.entries[profile.id]?.connectionFailureClassifier.beginAttempt()
+            if recovery.failedAttempts > 0 {
+                self.scheduleReconnect(profileID: profile.id, generation: generation)
+                return
+            }
             let diagnosticSequence = await client.latestDiagnosticSequence()
             guard self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
             let startedAt = self.clock.now()
@@ -483,9 +489,9 @@ final class DashboardGatewayConnectionPool {
                     )
                 }
                 self.entries[profile.id]?.reconnectSchedule.reset()
-                self.entries[profile.id]?.connectionFailureClassifier.reset()
-                self.entries[profile.id]?.consecutiveFailedAttempts = 0
-                self.entries[profile.id]?.stopReason = nil
+                recovery.failedAttempts = 0
+                recovery.lastConnectedAt = Date()
+                recovery.stopReason = nil
                 self.entries[profile.id]?.connectionID = connectionID
                 self.entries[profile.id]?.gatewayInfo = identity.info
                 self.entries[profile.id]?.state = .connecting
@@ -525,7 +531,7 @@ final class DashboardGatewayConnectionPool {
                 guard self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 self.nonRetryableProfiles.insert(profile.id)
                 self.entries[profile.id]?.gatewayInfo = nil
-                self.entries[profile.id]?.stopReason = failure.message
+                recovery.stopReason = failure.message
                 self.entries[profile.id]?.state = failure.code == "identity_mismatch" ? .identityMismatch : .offline
                 self.recordAttempt(
                     profileID: profile.id,
@@ -548,16 +554,8 @@ final class DashboardGatewayConnectionPool {
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 let diagnostic = await client.latestHandshakeDiagnostic(after: diagnosticSequence)
                 guard self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
-                if let failurePresentationGeneration {
-                    _ = self.entries[profile.id]?.connectionFailureClassifier.failedAttempt(
-                        diagnostic,
-                        code: GatewayDiagnosticFailure.code(error),
-                        attemptGeneration: failurePresentationGeneration
-                    )
-                }
-                let failedState = self.entries[profile.id]?.connectionFailureClassifier.noPath
-                    .map { DashboardServerConnectionState.noPath($0.interface) } ?? .reconnecting
-                self.entries[profile.id]?.consecutiveFailedAttempts += 1
+                recovery.failedAttempts += 1
+                let failedState = self.failedConnectionState(profileID: profile.id)
                 self.recordAttempt(
                     profileID: profile.id,
                     generation: generation,
@@ -587,6 +585,7 @@ final class DashboardGatewayConnectionPool {
         endedBy: GatewayEpisodeEnd = .stopped
     ) {
         guard let entry = entries.removeValue(forKey: profileID) else { return }
+        if endedBy != .background { recoveryStates[profileID] = nil }
         entry.task?.cancel()
         entry.refreshTask?.cancel()
         entry.reconnectTask?.cancel()
@@ -715,7 +714,6 @@ final class DashboardGatewayConnectionPool {
         case "transport.disconnected":
             guard isCurrent(profileID: profileID, client: entry.client, generation: generation),
                   entries[profileID]?.connectionID == delivery.connectionID else { return }
-            entries[profileID]?.connectionFailureClassifier.failedAttempt(nil, code: "transport")
             entries[profileID]?.recorder.noteDisconnected(
                 profileID: profileID, lifecycleGeneration: generation,
                 foreground: true, cause: "transport"
@@ -783,7 +781,11 @@ final class DashboardGatewayConnectionPool {
         let token = entry.token
         let generation = entry.generation
         nonRetryableProfiles.remove(profileID)
+        let recovery = entry.recovery
         stop(profileID: profileID)
+        recovery.failedAttempts = 0
+        recovery.stopReason = nil
+        recoveryStates[profileID] = recovery
         start(profile: profile, token: token, generation: generation)
     }
 
@@ -821,19 +823,11 @@ final class DashboardGatewayConnectionPool {
             while !Task.isCancelled {
                 guard let self, let waitingEntry = self.entries[profileID], waitingEntry.generation == generation else { return }
                 if shouldWait {
-                    // The escalation only starts at the threshold. Below it the
-                    // entry follows the standard progression, so a blip is
-                    // retried on the same curve the selected profile uses
-                    // rather than the base interval for ever; at the threshold
-                    // it keeps the nominal delay it reached and grows by 4.
-                    self.entries[profileID]?.reconnectSchedule.adopt(
-                        delayPolicy: self.isUnreachable(profileID: profileID)
-                            ? Self.unreachableReconnectDelayPolicy
-                            : Self.reconnectDelayPolicy
-                    )
                     self.entries[profileID]?.reconnectWaiting = true
                     delayStartedAt = clock.now()
-                    let delayCompleted = await waitingEntry.reconnectSchedule.afterFailure()
+                    let delayCompleted = await waitingEntry.reconnectSchedule.afterFailure(
+                        delay: Self.retryDelay(failedAttempts: waitingEntry.recovery.failedAttempts)
+                    )
                     guard !Task.isCancelled else { return }
                     // The wait ended while the path was gone: park the entry. Its
                     // backoff is over, so a path return has to find no task here
@@ -856,7 +850,6 @@ final class DashboardGatewayConnectionPool {
                 // ends; the stall watchdog reads this identity to tell a running
                 // attempt from a parked loop.
                 self.entries[profileID]?.attemptInFlightLoopID = loopID
-                let failurePresentationGeneration = self.entries[profileID]?.connectionFailureClassifier.beginAttempt()
                 let diagnosticSequence = await entry.client.latestDiagnosticSequence()
                 guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                 do {
@@ -880,9 +873,9 @@ final class DashboardGatewayConnectionPool {
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     self.entries[profileID]?.gatewayInfo = info
                     entry.reconnectSchedule.reset()
-                    self.entries[profileID]?.connectionFailureClassifier.reset()
-                    self.entries[profileID]?.consecutiveFailedAttempts = 0
-                    self.entries[profileID]?.stopReason = nil
+                    entry.recovery.failedAttempts = 0
+                    entry.recovery.lastConnectedAt = Date()
+                    entry.recovery.stopReason = nil
                     self.entries[profileID]?.state = .connecting
                     self.publish(profileID: profileID)
                     let connectionID = identity.id
@@ -924,7 +917,7 @@ final class DashboardGatewayConnectionPool {
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     self.nonRetryableProfiles.insert(profileID)
                     self.entries[profileID]?.gatewayInfo = nil
-                    self.entries[profileID]?.stopReason = failure.message
+                    entry.recovery.stopReason = failure.message
                     self.entries[profileID]?.state = failure.code == "identity_mismatch" ? .identityMismatch : .offline
                     self.recordAttempt(
                         profileID: profileID,
@@ -950,15 +943,9 @@ final class DashboardGatewayConnectionPool {
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     let diagnostic = await entry.client.latestHandshakeDiagnostic(after: diagnosticSequence)
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
-                    if let failurePresentationGeneration {
-                        _ = self.entries[profileID]?.connectionFailureClassifier.failedAttempt(
-                            diagnostic,
-                            code: GatewayDiagnosticFailure.code(error),
-                            attemptGeneration: failurePresentationGeneration
-                        )
-                    }
                     let failureCode = GatewayDiagnosticFailure.code(error)
-                    self.entries[profileID]?.consecutiveFailedAttempts += 1
+                    entry.recovery.failedAttempts += 1
+                    let failedState = self.failedConnectionState(profileID: profileID)
                     self.recordAttempt(
                         profileID: profileID,
                         generation: generation,
@@ -971,8 +958,6 @@ final class DashboardGatewayConnectionPool {
                         succeeded: false,
                         connectionID: nil
                     )
-                    let failedState = self.entries[profileID]?.connectionFailureClassifier.noPath
-                        .map { DashboardServerConnectionState.noPath($0.interface) } ?? .reconnecting
                     self.entries[profileID]?.state = failedState
                     self.publish(profileID: profileID)
                     shouldWait = true
@@ -982,15 +967,19 @@ final class DashboardGatewayConnectionPool {
         entries[profileID]?.reconnectTask = task
     }
 
-    /// Whether this entry has failed `POOL_UNREACHABLE_AFTER` attempts in a
-    /// row. The count is the pool's own and only a successful attempt clears
-    /// it: the display classifier's never-opened counter stops counting as soon
-    /// as any attempt of the outage opened a transport (the dropped socket of a
-    /// secondary Mac, a hello timeout, a 503), which is exactly the run the
-    /// retry curve still has to escalate.
-    private func isUnreachable(profileID: String) -> Bool {
-        guard let entry = entries[profileID] else { return false }
-        return entry.consecutiveFailedAttempts >= Self.POOL_UNREACHABLE_AFTER
+    private func failedConnectionState(profileID: String) -> DashboardServerConnectionState {
+        guard let recovery = entries[profileID]?.recovery else { return .reconnecting }
+        return recovery.failedAttempts >= Self.POOL_UNREACHABLE_AFTER ? .offline : .reconnecting
+    }
+
+    /// The same count controls label and delay, including after scene retirement.
+    private static func retryDelay(failedAttempts: Int) -> Duration {
+        let standardSteps = min(2, max(0, failedAttempts - 1))
+        let escalatedSteps = min(3, max(0, failedAttempts - POOL_UNREACHABLE_AFTER))
+        let seconds = ReconnectDelayPolicy.standard.initialSeconds
+            * pow(ReconnectDelayPolicy.standard.multiplier, Double(standardSteps))
+            * pow(4, Double(escalatedSteps))
+        return .seconds(min(Double(POOL_MAX_RETRY.components.seconds), seconds))
     }
 
     /// Why no attempt is in flight or scheduled, for the stall watchdog. `nil`
@@ -1385,7 +1374,7 @@ final class DashboardGatewayConnectionPool {
             profileID: profileID,
             sessions: entry.catalog.sessions,
             state: entry.state,
-            stopReason: entry.stopReason
+            stopReason: entry.recovery.stopReason
         )
         delegate?.dashboardPoolDidUpdateArchivedCount(
             profileID: profileID,

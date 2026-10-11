@@ -1066,6 +1066,24 @@ export interface HomeChapterSummary {
   sealedAt?: string;
   bytes?: number;
   entries?: number;
+  /** What the chapter holds, read from its canonical history and memory. Absent when the
+   * chapter's history could not be read; a chapter with no file has zero counts. */
+  contents?: HomeChapterContents;
+}
+
+/** A chapter's contents as `home.chapterList` answers them. Counts are canonical entries:
+ * `userMessages` are maintainer messages, `homeReplies` Home's replies, and `tasksDelegated`
+ * the `delegate` calls the chapter's history accepted. */
+export interface HomeChapterContents {
+  /** Canonical timestamps of the chapter's first and last entries. */
+  firstAt?: string;
+  lastAt?: string;
+  userMessages: number;
+  homeReplies: number;
+  tasksDelegated: number;
+  /** At most 5 of the chapter's newest memory summaries, each at most 120 characters.
+   * Empty when Home's memory is not open. */
+  topics: string[];
 }
 
 /** `home.chapterList`: the whole chapter ledger in ledger (ordinal) order, with
@@ -1242,10 +1260,30 @@ export type HomeContextProjection =
     viewBytes?: number;
     effectiveTokens?: number;
     contextWindow?: number;
+    /** The request's effective size by section, present with the sizes above. */
+    breakdown?: HomeContextBreakdown;
     /** This activation's own refusal, when it was refused. */
     lastRefusalReason?: string;
     lastRefusalDetail?: string;
   };
+
+/** One section of a Home request's effective size. Tokens are estimates; the sections
+ * sum to the breakdown's `effectiveTokens`. */
+export interface HomeContextSection {
+  id: "instructions" | "profile" | "memory" | "chapter" | "results" | "input";
+  tokens: number;
+  /** The section's own unit: profile notes, memory summary lines, chapter entries or
+   * task results. Absent for instructions and input. */
+  count?: number;
+}
+
+/** The last request an activation prepared, by section. */
+export interface HomeContextBreakdown {
+  activation: { state: "running" | "settled"; kind: "user" | "wake"; startedAt: string };
+  contextWindow: number;
+  effectiveTokens: number;
+  sections: HomeContextSection[];
+}
 
 export interface HomeDesignation {
   homeId: string;
@@ -1253,13 +1291,28 @@ export interface HomeDesignation {
   generation: number;
 }
 
+/** The name a task is shown by: its worker session's name when set, else its brief's first
+ * non-empty line, and at most 80 characters. */
+export interface HomeTaskDisplay {
+  title: string;
+  /** The target directory's last path component. */
+  project: string;
+}
+
+/** Exact task counts over the whole task store, independent of any page. `active` covers every
+ * non-terminal lifecycle (`pending` and `active`); `finished` covers `terminal`. */
+export interface HomeTaskCounts {
+  active: number;
+  finished: number;
+}
+
 /** home.taskList: bounded newest-first task metadata; no canonical reports. */
-export interface HomeTaskSummary {
+export interface HomeTaskSummary extends HomeTaskDisplay {
   taskId: string;
   createdAt: number;
   updatedAt: number;
-  /** At most 160 Unicode code points from the immutable intent. */
-  title: string;
+  /** The worker session the task dispatched (the task's `sessionId`), or null before dispatch. */
+  sessionId: string | null;
   target: string;
   lifecycle: "pending" | "active" | "terminal";
   outcome: "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown" | null;
@@ -1270,4 +1323,6 @@ export interface HomeTaskSummary {
 export interface HomeTaskPage {
   items: HomeTaskSummary[];
   nextCursor?: string;
+  /** Exact counts for the whole store, read with this page; never capped by `limit`. */
+  counts: HomeTaskCounts;
 }

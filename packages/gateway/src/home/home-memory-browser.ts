@@ -5,7 +5,12 @@ import type { HomeMemoryEvidence, HomeMemoryItem } from "../protocol/types.js";
 export const HOME_MEMORY_PAGE_BYTES = 128 * 1024;
 const TEXT_CHARS = 4096;
 
-export interface HomeMemoryPageRequest { limit: number; cursor?: { revision: string; offset: number; limit: number } }
+export interface HomeMemoryPageRequest {
+  limit: number;
+  cursor?: { revision: string; offset: number; limit: number };
+  /** Only this chapter's rows, when present. */
+  sessionId?: string;
+}
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid();
@@ -29,9 +34,10 @@ function digest(value: unknown): string {
 function invalid(): never { throw new GatewayError("invalid_request", "Invalid Home memory read parameters"); }
 
 export function admitHomeMemoryPage(params: Record<string, unknown>): HomeMemoryPageRequest {
-  keys(params, ["limit", "cursor"]);
+  keys(params, ["limit", "cursor", "sessionId"]);
   const limit = params.limit === undefined ? 20 : integer(params.limit, 1, 50);
-  if (params.cursor === undefined) return { limit };
+  const sessionId = params.sessionId === undefined ? undefined : identity(params.sessionId);
+  if (params.cursor === undefined) return sessionId === undefined ? { limit } : { limit, sessionId };
   if (typeof params.cursor !== "string" || params.cursor.length > 1024 || !/^[A-Za-z0-9_-]+$/.test(params.cursor)) invalid();
   let decoded: unknown;
   try { decoded = JSON.parse(Buffer.from(params.cursor, "base64url").toString("utf8")); } catch { invalid(); }
@@ -39,7 +45,7 @@ export function admitHomeMemoryPage(params: Record<string, unknown>): HomeMemory
   keys(cursor, ["revision", "offset", "limit"]);
   const admitted = { revision: digest(cursor.revision), offset: integer(cursor.offset, 1), limit: integer(cursor.limit, 1, 50) };
   if (admitted.limit !== limit || encodeHomeMemoryCursor(admitted) !== params.cursor) invalid();
-  return { limit, cursor: admitted };
+  return sessionId === undefined ? { limit, cursor: admitted } : { limit, cursor: admitted, sessionId };
 }
 
 export function encodeHomeMemoryCursor(cursor: { revision: string; offset: number; limit: number }): string {

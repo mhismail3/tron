@@ -4722,6 +4722,15 @@ export class RuntimeRegistry {
     return change?.type === "model_change" ? { provider: change.provider, id: change.modelId } : undefined;
   }
 
+  /** The worker session's canonical name. A live slot answers from its projection; a settled
+   * one from the catalog's index of its file, so no transcript is parsed. */
+  async taskWorkerName(sessionId: string): Promise<string | undefined> {
+    const live = this.slots.get(sessionId);
+    if (live) return live.snapshot().name;
+    const path = await this.homeSessionFile(sessionId);
+    return path ? this.sessionCatalog.row(path)?.name : undefined;
+  }
+
   /** The worker's subagent facts for one operation, read like its model. */
   async taskWorkerSubagents(sessionId: string, operationId: string): Promise<HomeTaskSubagents> {
     return homeTaskSubagentsProjection(await this.taskWorkerEntries(sessionId), operationId);

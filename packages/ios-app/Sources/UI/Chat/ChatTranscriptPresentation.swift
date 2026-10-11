@@ -731,6 +731,7 @@ struct ChatPhysicalTailEvidence: Equatable, Sendable {
 }
 
 enum ChatOpenPresentationPhase: Equatable {
+    case waitingForConnection
     case opening
     case positioning
     /// The physical positioning lift is resolving behind the opaque opening
@@ -789,6 +790,11 @@ struct ChatOpenPresentationState: Equatable {
         guard sessionID == self.sessionID, epoch == self.epoch, phase == .presented else { return false }
         phase = .ready
         return true
+    }
+
+    mutating func waitForConnection(sessionID: String, epoch: Int) {
+        guard sessionID == self.sessionID, epoch == self.epoch else { return }
+        phase = .waitingForConnection
     }
 
     mutating func fail(sessionID: String, epoch: Int, message: String) -> Bool {

@@ -19,7 +19,7 @@ enum ChatOpeningSurfacePolicy {
     static func showsOpaqueCover(phase: ChatOpenPresentationPhase) -> Bool {
         switch phase {
         case .opening, .positioning, .revealing, .presenting: true
-        case .presented, .ready, .failed: false
+        case .waitingForConnection, .presented, .ready, .failed: false
         }
     }
 

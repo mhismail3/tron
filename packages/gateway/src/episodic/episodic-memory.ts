@@ -376,18 +376,28 @@ export class EpisodicMemory {
       || message.sourceDigest !== evidence.sourceDigest) throw homeMemoryRevisionChanged();
   }
 
+  /**
+   * One page of catalog rows in index order. A chapter-filtered page keeps the catalog's own
+   * indices, so a continuation names the same rows, and its revision binds the chapter: a
+   * continuation under another chapter, or after any change, is `home-memory-revision-changed`.
+   */
   browserPage(request: HomeMemoryPageRequest): HomeMemoryPage {
     this.assertOpen();
-    const revision = this.browserRevision();
+    const chapter = request.sessionId;
+    const revision = chapter === undefined ? this.browserRevision() : episodicDigest(JSON.stringify([this.browserRevision(), chapter]));
     if (request.cursor && request.cursor.revision !== revision) throw homeMemoryRevisionChanged();
+    const matches = (index: number): boolean => chapter === undefined || this.messages.get(index)!.sessionId === chapter;
     const offset = request.cursor?.offset ?? 0;
     if (offset > this.messages.size || request.cursor && offset === this.messages.size) throw homeMemoryRevisionChanged();
-    const result: HomeMemoryPage = { homeId: this.dependencies.sessionId, revision, totalItems: this.messages.size, items: [] };
+    let totalItems = 0;
+    for (let index = 0; index < this.messages.size; index += 1) if (matches(index)) totalItems += 1;
+    const result: HomeMemoryPage = { homeId: this.dependencies.sessionId, revision, totalItems, items: [] };
     let position = offset;
     // Leave room for the largest cursor and page metadata. Each row is bounded
     // independently, so one row always fits and no cursor can strand a row.
     let bytes = Buffer.byteLength(JSON.stringify(result)) + 1024;
     for (; position < this.messages.size && result.items.length < request.limit; position += 1) {
+      if (!matches(position)) continue;
       const message = this.messages.get(position)!;
       const item = homeMemoryItem(message, this.nodes.get(nodeAddress(0, position)));
       const size = Buffer.byteLength(JSON.stringify(item)) + 1;
@@ -395,7 +405,31 @@ export class EpisodicMemory {
       bytes += size; result.items.push(item);
     }
     if (!result.items.length && position < this.messages.size) throw new GatewayError("unsupported", "Home memory row exceeds the browser bound");
-    if (position < this.messages.size) result.nextCursor = encodeHomeMemoryCursor({ revision, offset: position, limit: request.limit });
+    let next = position;
+    while (next < this.messages.size && !matches(next)) next += 1;
+    if (next < this.messages.size) result.nextCursor = encodeHomeMemoryCursor({ revision, offset: next, limit: request.limit });
+    return result;
+  }
+
+  /**
+   * The newest summary texts of each listed session's messages, newest first: at most
+   * `limit` per session, from the catalog's own level-0 nodes (the summaries browserPage
+   * shows). One reverse pass over the catalog, so the cost is the catalog's size, not the
+   * number of sessions. Unbuilt summaries are skipped, never placeholders.
+   */
+  recentSummaries(sessionIds: readonly string[], limit: number): Map<string, string[]> {
+    this.assertOpen();
+    const result = new Map(sessionIds.map(sessionId => [sessionId, [] as string[]]));
+    let open = result.size;
+    for (let index = this.messages.size - 1; index >= 0 && open > 0; index -= 1) {
+      const message = this.messages.get(index)!;
+      const summaries = result.get(message.sessionId);
+      if (!summaries || summaries.length >= limit) continue;
+      const node = this.nodes.get(nodeAddress(0, index));
+      if (!node) continue;
+      summaries.push(node.text);
+      if (summaries.length === limit) open -= 1;
+    }
     return result;
   }
 
