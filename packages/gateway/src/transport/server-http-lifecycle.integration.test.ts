@@ -64,7 +64,7 @@ async function fixture(maximumHttpRequests = 128) {
     service: { info: () => ({ protocolVersion: 7 }), releaseClient: vi.fn() } as any,
     logger: logger as any,
     // Never the host's Tailscale CLI: only silence records read the path.
-    peerPathReader: { lookup: async () => ({ peerPath: "unknown" as const, peerRelay: "" }) },
+    peerPathReader: { lookup: async () => ({ peerPath: "unknown" as const, peerPathSource: "not-tailscale" as const, peerRelay: "" }) },
   });
   const serverSockets: Socket[] = [];
   // Observe the actual transport terminal boundary, not a scheduling delay or
