@@ -781,7 +781,15 @@ a failed change left untouched; an ignored `.pi/`, no repository or a locked ind
 leaves the write unstaged with the reason), trust (`TrustService.setAndApply` with
 the project runtime reload), Home's memory model (`HomeOwner`, physical models only),
 and a session's Chat layer through its slot lane (`setModel`, `setThinking`,
-`setContextWindow`, `setTools`). A Chat-layer change needs `fence: {
+`setContextWindow`, `setTools`, and `setChatRunSetting`). Live Run keys with a
+concrete schema Built-in are resolved at prompt/request admission; explicit
+Chat values live in branch-local `tron.settings.v1` entries, survive fork/resume,
+and unset back to current defaults. The runtime overlays operational fields
+without reloading fixed resources or saving defaults. Its own running settings
+tool appends in the lane it already owns. Optional Run fields without a complete
+fallback remain unsupported at the Chat layer until replacement semantics can
+clear them safely; full timing/provenance acceptance is still outstanding.
+A Chat-layer change needs `fence: {
 runtimeGeneration, model?, revision? }`, the runtime the client read; the lane's
 idle, chapter and fence guards are unchanged, and the receipt's work entry is the
 session's. Keys with no writer (`setup.sessionDir`) cannot change while the Gateway

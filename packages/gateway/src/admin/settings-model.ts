@@ -14,7 +14,7 @@ import type { TrustService } from "./trust-service.js";
 import type { Actor, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
 import { readBinding, resolveSettings, targetLayers, type ChatStore, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
-import { KEYS, builtinValue, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, builtinValue, floorFor, floorInstances, hasRuntimeRunApplier, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
 
 /** What a session target contributes: its Chat layer and whether it is Home's chat. */
@@ -57,6 +57,24 @@ export class SettingsModel {
     const stores = await this.stores(target, session);
     const runtime = session?.modelRuntime ?? this.dependencies.modelRuntime;
     return resolveSettings(target, stores, { format: formatContext(runtime), options: optionSources(runtime), ...(keys ? { keys } : {}) });
+  }
+
+  /** Resolve operational defaults at a request boundary, never by reloading the
+   * whole SDK manager (which would also change fixed resource/shell settings).
+   * A declared built-in makes every overlay complete, including an unset Chat
+   * value. Optional SDK values need replacement semantics, not merge overrides. */
+  async liveRunSettings(sessionId: string, session: SessionSettingsSource): Promise<Record<string, unknown>> {
+    const keys = KEYS.filter(hasRuntimeRunApplier);
+    const resolved = await this.resolve({ kind: "session", sessionId }, session, keys.map(key => key.id));
+    const settings: Record<string, unknown> = {};
+    for (const row of resolved.keys) {
+      const key = schemaKey(row.key);
+      const binding = key.layers.chat;
+      if (binding?.store !== "chat-settings") continue;
+      const value = await key.type.validate(row.value, key.id);
+      setPath(settings, binding.path, value);
+    }
+    return settings;
   }
 
   /** `settings.options` (docs/settings-model.md 7.5): the choices a key's control offers. */
@@ -299,6 +317,7 @@ export interface ChatAppliers {
   setThinking(level: string): Promise<number>;
   setContextWindow(model: ModelRefValue, value: number | null): Promise<number>;
   setTools(tools: string[]): Promise<void>;
+  setSetting(key: string, value: unknown): Promise<number>;
 }
 
 export interface ChangeContext {
@@ -689,7 +708,7 @@ export class SettingsChangePath {
       if (request.layer === "chat" && chatModel) qualifiers.model = `${chatModel.provider}/${chatModel.id}`;
       else throw new GatewayError("invalid_request", `${key.label} needs a model qualifier`);
     }
-    if (binding.store === "chat-settings" || binding.store === "profile") {
+    if (binding.store === "profile" || (binding.store === "chat-settings" && !hasRuntimeRunApplier(key))) {
       throw new GatewayError("unsupported", `${key.label} has no writable ${LAYER_LABELS[request.layer]} store yet`);
     }
     let after: unknown;
@@ -773,6 +792,10 @@ export class SettingsChangePath {
           await this.writers.configureHomeMemory(ref);
         }
         return {};
+      case "chat-settings": {
+        if (!context.session || target.kind !== "session") throw new GatewayError("invalid_request", "A Chat-layer change needs its open session");
+        return { revision: await context.session.appliers.setSetting(plan.key.id, value) };
+      }
       case "chat": {
         const appliers = context.session?.appliers;
         if (!appliers || target.kind !== "session") throw new GatewayError("invalid_request", "A Chat-layer change needs its open session");

@@ -90,9 +90,10 @@ async function fixture() {
   const modelRuntime = await modelRuntimeFactory();
   const trust = new TrustService(agentDir);
   await trust.set(project, true);
+  const runtimeEvents: Array<{ sessionId: string; topic: string; payload: unknown }> = [];
   const registry = new RuntimeRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
-    broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    broadcast: (sessionId, topic, payload) => { runtimeEvents.push({ sessionId, topic, payload }); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("SETTINGS-GATE-LINE") }),
     homeWebTransport: {
       fetcher: async () => new Response("<html><head><title>Page</title></head><body><article><p>A page body long enough to extract as readable text, repeated. A page body long enough to extract as readable text, repeated.</p></article></body></html>", { status: 200, headers: { "content-type": "text/html" } }),
@@ -181,7 +182,7 @@ async function fixture() {
   };
   return {
     canonicalOutcomes, root, agentDir, tronHome, project, other, trust, registry, service, pushes, broadcasts, run, settle, history, approvals, decide,
-    macDocument, designateHome, chat, advance: (ms: number) => { clock += ms; },
+    macDocument, designateHome, chat, faux, modelRuntimeFactory, modelRuntime, runtimeEvents, advance: (ms: number) => { clock += ms; },
   };
 }
 
@@ -190,6 +191,123 @@ const retries = (value: number, expected: number) => ({
 });
 
 describe("settings risk gate", () => {
+  it("open chats follow live retry defaults while a canonical Chat override stays local and can be unset", async () => {
+    const f = await fixture();
+    const mac = (maxRetries: number) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "mac" }, changes: [
+        { key: "run.retry.maxRetries", layer: "mac", op: "set", value: maxRetries },
+        { key: "run.retry.baseDelayMs", layer: "mac", op: "set", value: 1 },
+      ],
+    });
+    await mac(0);
+    const first = await f.chat();
+    const second = await f.chat();
+    const attempts = async (slot: typeof first) => {
+      let count = 0;
+      f.faux.setResponses(Array.from({ length: 5 }, () => async () => {
+        count += 1;
+        return fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 service unavailable" });
+      }));
+      await slot.prompt("exercise retry policy");
+      await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "retry run settled");
+      return count;
+    };
+    expect(await attempts(first)).toBe(1);
+    await mac(1);
+    expect(await attempts(first)).toBe(2);
+    expect(f.runtimeEvents.findLast(event => event.sessionId === first.id && event.topic === "session.diagnostic")?.payload)
+      .toMatchObject({ data: { code: "settings-run-applied", retry: { maxRetries: 1 } } });
+    const changeChat = (op: "set" | "unset") => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: first.id },
+      fence: { runtimeGeneration: first.snapshot().runtimeGeneration, model: MODEL },
+      changes: [{ key: "run.retry.maxRetries", layer: "chat", op, ...(op === "set" ? { value: 0 } : {}) }],
+    });
+    await changeChat("set");
+    expect(first.settingsChatLayer().settings).toMatchObject({ retry: { maxRetries: 0 } });
+    await mac(2);
+    expect(await attempts(first)).toBe(1);
+    expect(await attempts(second)).toBe(3);
+    await changeChat("unset");
+    expect(await attempts(first)).toBe(3);
+    expect((await f.macDocument()).retry).toMatchObject({ maxRetries: 2 });
+    const changes = (await f.history()).filter(entry => entry.layer === "chat" && entry.key === "run.retry.maxRetries");
+    expect(changes.map(entry => entry.op)).toEqual(expect.arrayContaining(["set", "unset"]));
+    transcript.push({ case: "live retry settings", steps: [{ chat: first.id, changes, mac: await f.macDocument() }] });
+  });
+  it("Home's actual provider requests follow transport and retry-delay defaults, then a Chat override and its unset", async () => {
+    const f = await fixture();
+    const home = await f.designateHome();
+    const requests: Array<{ transport?: string; maxRetryDelayMs?: number }> = [];
+    const request = async () => {
+      f.faux.setResponses([async (_context, options) => {
+        requests.push({ transport: options?.transport, maxRetryDelayMs: options?.maxRetryDelayMs });
+        return fauxAssistantMessage("Home settings observed");
+      }]);
+      await home.prompt("observe request controls");
+      await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home request settled");
+      return requests.at(-1);
+    };
+    expect(await request()).toEqual({ transport: "auto", maxRetryDelayMs: 60_000 });
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [
+      { key: "run.transport", layer: "mac", op: "set", value: "sse" },
+      { key: "run.retry.provider.maxRetryDelayMs", layer: "mac", op: "set", value: 17 },
+    ] });
+    expect(await request()).toEqual({ transport: "sse", maxRetryDelayMs: 17 });
+    const change = (op: "set" | "unset") => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: home.id },
+      fence: { runtimeGeneration: home.snapshot().runtimeGeneration, model: MODEL }, changes: [
+        { key: "run.transport", layer: "chat", op, ...(op === "set" ? { value: "websocket" } : {}) },
+      ],
+    });
+    await change("set");
+    expect(await request()).toEqual({ transport: "websocket", maxRetryDelayMs: 17 });
+    await change("unset");
+    expect(await request()).toEqual({ transport: "sse", maxRetryDelayMs: 17 });
+    transcript.push({ case: "Home request settings", steps: requests });
+  });
+
+  it("an agent records its own live override without deadlocking; fork and cold resume retain it without changing Mac defaults", async () => {
+    const f = await fixture();
+    const slot = await f.chat();
+    const changed = await f.run(slot, "limit retries in this chat only", [{ name: "settings", args: {
+      action: "change", reason: "Keep this task bounded", changes: [
+        { key: "run.retry.maxRetries", layer: "chat", op: "set", value: 0 },
+      ],
+    } }]);
+    expect(f.settle(changed.results)).toMatchObject({ status: "applied", tier: "quiet" });
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 3 });
+    expect(slot.settingsChatLayer().settings).toEqual({ retry: { maxRetries: 0 } });
+    const point = slot.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
+    const fork = await slot.fork(point.id, "at");
+    expect(slot.settingsChatLayer().settings).toEqual({ retry: { maxRetries: 0 } });
+    const file = slot.runtime.session.sessionManager.getSessionFile()!;
+    const canonical = (await readFile(file, "utf8")).split("\n").filter(Boolean).map(line => JSON.parse(line));
+    expect(canonical).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.settings.v1",
+      data: expect.objectContaining({ settings: { retry: { maxRetries: 0 } } }) }));
+    await f.registry.dispose();
+    const reopened = new RuntimeRegistry({
+      agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(reopened);
+    await reopened.initialize();
+    await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut() || undefined, "resumed catalog cut");
+    settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime,
+      sessions: reopened, home: () => reopened.homeOwner(), registry: reopened });
+    const resumed = await reopened.acquire(fork.sessionId);
+    expect(resumed.settingsChatLayer().settings).toEqual({ retry: { maxRetries: 0 } });
+    let attempts = 0;
+    f.faux.setResponses(Array.from({ length: 4 }, () => async () => {
+      attempts += 1;
+      return fauxAssistantMessage("", { stopReason: "error", errorMessage: "503 service unavailable" });
+    }));
+    await resumed.prompt("prove the resumed override");
+    await waitFor(() => resumed.snapshot().configurationBlocker === null || undefined, "resumed run settled");
+    expect(attempts).toBe(1);
+    transcript.push({ case: "canonical chat override fork/resume", steps: [{ fork: fork.sessionId, attempts,
+      settings: resumed.settingsChatLayer().settings, mac: await f.macDocument() }] });
+  });
+
   it("an ordinary chat's agent: quiet from a clean run and after bash, notify after an undeclared third-party tool, approve for a notify floor after web", async () => {
     const f = await fixture();
     const slot = await f.chat();

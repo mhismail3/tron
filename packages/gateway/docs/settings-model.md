@@ -359,18 +359,36 @@ The **effect point** is a separate field: `next-turn`, `next-request`,
 `new-chat`, `reload` or `restart`. The row shows it when a change does not take
 effect at once ("Applies after restart").
 
-**Today.** Fixed-at-start already holds for the model, thinking and context
-window through session entries, and for resources through Reload, but no
-provenance is recorded. Only compaction policy follows live: a compaction change
-through `settings.change` refreshes it for open chats (`GatewayService.settingsChanged`).
-Each runtime builds its own `SettingsManager` when it starts
-(`runtime-slot.ts:1924`), so, as far as the code reads, retry, transport and
-queue modes reach an open chat only when its runtime is rebuilt. That is
-inferred; slice 7 verifies and fixes it. pi's `SettingsManager.applyOverrides`
-is the inspected candidate for Chat-layer Run values. For Home, Tron passes no
-`SettingsManager` (`runtime-slot.ts:1924,1952`) and pi's session services
-create their own (`pi-coding-agent` `dist/core/sdk.js:76`), so the override
-path must reach that one too.
+**Current implementation.** Fixed-at-start holds for model, thinking and
+context window through session entries, and for resources through Reload;
+fixed-value provenance and its reset action are still unfinished. Compaction
+changes refresh open chats through `GatewayService.settingsChanged`.
+
+Run declarations with a concrete Built-in and a Chat settings binding resolve
+again before a prompt and before each provider request. The runtime overlays
+only these operational fields on the actual session's `SettingsManager`,
+including Home's SDK-created manager; it does not reload fixed resources or
+save defaults. Agent queue modes and request transport/retry-delay options also
+receive that projection because the SDK copies those controls at construction.
+The `prepareRequest` wrapper composes with Home's existing request guard.
+
+An explicit Run override is a branch-local `tron.settings.v1` custom entry
+containing the Chat settings document; fork and cold resume read that canonical
+entry, never the change record. Unsetting removes the key, so the next request
+resolves the current lower layer. The session's own settings tool can append an
+override within its already-owned run lane without recursively acquiring that
+lane. iPhone changes retain the idle, runtime/model fence and chapter guards.
+`settings-gate.e2e.test.ts` proves changed retry counts in an already-open chat,
+Chat isolation, unset, agent self-edit, fork/cold-resume persistence without
+Mac-default writes, and Home's actual provider transport/retry-delay options.
+The bounded `settings-run-applied` session diagnostic shows the runtime policy
+at request admission, rather than merely the defaults a settings read resolves.
+
+This is not complete timing support: optional SDK fields without a concrete
+Built-in (provider retry timeout/count and WebSocket timeout), image-direction
+policy, and fixed-value provenance still need their runtime owners. Optional
+Chat writes remain refused: `applyOverrides` deep-merges and skips undefined,
+so pretending that an unset clears a previously applied value would be wrong.
 
 **No sticky defaults (verified).** pi 1.0.4's `AgentSession.setModel(model, options)`
 and `setThinkingLevel(level, options)` write `defaultModel` and

@@ -18,7 +18,8 @@ import {
   isInstalledDelegatedTool,
   trustedDelegatedController,
 } from "./delegated-provider.js";
-import type { AgentMessage, AgentTurnDecision } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AgentTurnDecision, StreamFn } from "@earendil-works/pi-agent-core";
+import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings } from "./chat-settings.js";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
@@ -1326,7 +1327,12 @@ export class RuntimeSlot {
       home: this.isHomeChapter,
       chat: this.settingsChatLayer(),
       modelRuntime: this.modelRuntime,
-      appliers: { setModel: busy, setThinking: busy, setContextWindow: busy, setTools: busy },
+      appliers: {
+        setModel: busy, setThinking: busy, setContextWindow: busy, setTools: busy,
+        // This tool already owns the running lane. It records the override;
+        // request admission applies it, never a mutation of the active request.
+        setSetting: (key: string, value: unknown) => this.persistChatRunSetting(key, value),
+      },
     });
     const actor = (toolCallId: string): Actor => {
       const kind = this.liveProfile() === "home" ? "home" : this.taskWorker ? "worker" : "agent";
@@ -1353,8 +1359,44 @@ export class RuntimeSlot {
       thinking: session.thinkingLevel,
       ...(policy && policy.override !== null ? { contextWindow: { model: `${policy.model.provider}/${policy.model.id}`, value: policy.override } } : {}),
       tools: session.getActiveToolNames(),
-      settings: {},
+      settings: readChatSettings(session.sessionManager.getBranch()),
     };
+  }
+
+  private async applyLiveRunSettings(session: AgentSession): Promise<void> {
+    const owners = this.dependencies.settings();
+    if (!owners) return;
+    if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed before settings application");
+    const settings = await owners.model.liveRunSettings(this.id, {
+      cwd: this.cwd, home: this.isHomeChapter, chat: this.settingsChatLayer(), modelRuntime: session.modelRuntime,
+    });
+    if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during settings resolution");
+    session.settingsManager.applyOverrides(settings);
+    // These SDK controls are copied when Agent is created, not read from its
+    // SettingsManager during queue draining. Never use setters that save defaults.
+    session.agent.steeringMode = session.settingsManager.getSteeringMode();
+    session.agent.followUpMode = session.settingsManager.getFollowUpMode();
+    session.agent.transport = session.settingsManager.getTransport();
+    session.agent.maxRetryDelayMs = session.settingsManager.getProviderRetrySettings().maxRetryDelayMs;
+  }
+
+  private async persistChatRunSetting(key: string, value: unknown): Promise<number> {
+    this.assertChapterWritable();
+    const settings = changeChatSetting(readChatSettings(this.sessionManager.getBranch()), key, value);
+    const receiptId = randomUUID();
+    await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings }), receiptId);
+    this.revision += 1;
+    this.publishSnapshot();
+    return this.revision;
+  }
+
+  async setChatRunSetting(key: string, value: unknown, initiatingWorkToken?: string,
+    expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<number> {
+    return this.lane.run(async () => {
+      this.assertConfigurationIdle(initiatingWorkToken);
+      if (expectation) this.assertConfigurationExpectation(expectation);
+      return this.persistChatRunSetting(key, value);
+    });
   }
 
   /** Actionable work only; decorative presentation must not block trust/delete.
@@ -2157,7 +2199,25 @@ export class RuntimeSlot {
         : undefined;
       const homeRequestPolicy = this.homeRequestPolicy;
       compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir, home ? { disabled: true } : {});
-      const baseStream = created.session.agent.streamFunction;
+      const providerStream = created.session.agent.streamFunction;
+      const baseStream: StreamFn = (model, context, options) => providerStream(model, context, this.dependencies.settings()
+        ? { ...options, transport: created.session.settingsManager.getTransport(),
+            maxRetryDelayMs: created.session.settingsManager.getProviderRetrySettings().maxRetryDelayMs }
+        : options);
+      const prepareRequest = created.session.agent.prepareRequest;
+      created.session.agent.prepareRequest = async (request, signal) => {
+        if (signal?.aborted) throw new Error("Request cancelled before settings resolution");
+        await this.applyLiveRunSettings(created.session);
+        if (signal?.aborted) throw new Error("Request cancelled during settings resolution");
+        if (this.dependencies.settings()) {
+          this.emit("session.diagnostic", safeJson({
+            code: "settings-run-applied", retry: created.session.settingsManager.getRetrySettings(),
+            transport: created.session.agent.transport,
+            steeringMode: created.session.agent.steeringMode, followUpMode: created.session.agent.followUpMode,
+          }));
+        }
+        return (await prepareRequest?.(request, signal)) ?? undefined;
+      };
       // The guard is INNERMOST, so it validates the exact request the
       // provider-facing base stream receives: after `abortAwareStream` and after
       // the compaction policy's summary-focus rewrite. Installed outermost, it
@@ -8293,6 +8353,7 @@ export class RuntimeSlot {
       }
       if (!session.isStreaming) {
         await session.settingsManager.flush();
+        await this.applyLiveRunSettings(session);
         this.compactionPolicies.get(session)?.applyBudgets();
         this.contextPolicies.get(session)?.apply();
       }

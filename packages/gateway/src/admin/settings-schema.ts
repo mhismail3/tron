@@ -460,6 +460,13 @@ export function builtinValue(key: KeyDeclaration, qualifiers: Partial<Record<Qua
   return key.builtinFor ? key.builtinFor(qualifiers) : key.builtin;
 }
 
+/** Runtime merge overlays can follow/unset a value only when its declaration
+ * supplies a complete fallback. Optional SDK fields require replacement support. */
+export function hasRuntimeRunApplier(key: KeyDeclaration): boolean {
+  return key.group === "run" && key.timing === "live" && key.layers.chat?.store === "chat-settings"
+    && key.builtin !== undefined;
+}
+
 export function timingFor(key: KeyDeclaration, direction: Direction): Timing {
   return typeof key.timing === "string" ? key.timing : key.timing[direction];
 }

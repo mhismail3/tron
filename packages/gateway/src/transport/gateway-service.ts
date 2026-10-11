@@ -2371,6 +2371,7 @@ export class GatewayService {
           return slot.setContextWindow(model.provider, model.id, value, integer(fence!.revision, "fence.revision", 0, Number.MAX_SAFE_INTEGER), runtimeGeneration, workToken);
         },
         setTools: (tools) => slot.setTools(tools, workToken),
+        setSetting: (key, value) => slot.setChatRunSetting(key, value, workToken, expectation()),
       },
     };
   }
