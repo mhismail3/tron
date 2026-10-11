@@ -1573,7 +1573,16 @@ authoritative and includes the active command ID and rollback availability.
 `gateway.update.config` separately accepts only a trusted repository `sourceRoot` and
 optional `artifactRoot`; both are checked as absolute, non-symlinked directories before
 being stored in `gateway/update-config.json`. It invokes no client-supplied command or
-path. The LaunchAgent-owned helper reads that projection only: source mode invokes the
+path. The LaunchAgent-owned helper reads that projection only. In source mode it imports
+`buildSourcePayload` from the configured trusted checkout's `scripts/gateway-payload-deploy.mjs`,
+so changes to build logic take effect on that rebuild, not the following one. The installed
+helper retains the operation lock, progress, manifest/fingerprint admission, selection,
+readiness and rollback; it never delegates `apply` to source code. Missing source build
+exports or incompatible candidate contracts fail closed without a fallback to stale build
+logic. `deploy.source-builder` records the selected builder file's SHA-256 alongside the
+command ID. `node --test scripts/gateway-payload-deploy.test.mjs` exercises a newer source
+builder through the real apply CLI, immutable staging, failure progress, and rejection of a
+corrupted candidate before selection. The source builder invokes the
 repository's local TypeScript compiler with its checked-in config and a private temporary
 `outDir` (it never writes the trusted repository's `packages/gateway/dist`), then stages
 only verified output. The helper copies the active payload once into a private
