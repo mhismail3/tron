@@ -122,11 +122,11 @@ def _remote_heads(repo: Path, remote: str) -> dict:
 
 
 def claim_commit(repo: Path, range_base: str, head: str, number: int) -> Optional[ClaimCommit]:
-    """The claim commit of `number` in `range_base..head`, if any."""
-    # Branch-only commits, oldest first; the first carrying this issue's
-    # trailer is the claim. Merges from the base branch add only base commits.
+    """The latest valid claim on the first-parent path in `range_base..head`."""
+    # Handoffs append an empty commit on the owning branch. Newest first makes
+    # that canonical trailer authoritative while excluding merged side history.
     keys = ",".join(f"key={key}" for key in (ISSUE_TRAILER, SESSION_TRAILER))
-    log = _git(repo, "log", "--reverse", f"--format=%(trailers:{keys},separator=%x00)%x1e",
+    log = _git(repo, "log", "--first-parent", f"--format=%(trailers:{keys},separator=%x00)%x1e",
                f"{range_base}..{head}").stdout
     for record in log.split("\x1e"):
         fields = {}

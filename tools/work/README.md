@@ -13,6 +13,7 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | Command | Does |
 | --- | --- |
 | `start <issue>` | Claims an open, unclaimed, non-epic issue: pushes a claim commit to `claim.remote`, sets Status In progress, comments the claim, and creates the worktree `../tron-worktrees/<issue>-<slug>` on `<type>/<issue>-<slug>`. A session resumes its own claim. |
+| `handoff <issue> [--session ID] [--force-maintainer]` | Transfers the existing claim in place; preserves the worktree and dirty files. Owner state is currently treated as unknown unless an authoritative settlement source is available, so handoff refuses by default. Maintainer override requires a real TTY and exact typed confirmation. |
 | `verify [--tests CMD]...` | Runs the checks the branch's paths require, then each `--tests` command, on the current commit. Exit 0 when all pass. |
 | `land --summary-file <md> [--title T] [--tests CMD]... [--dry-run]` | Merges `origin/main` in, verifies the merged tree, pushes the branch, opens or updates its pull request (title = `--title` or the issue title; body = the summary file, verbatim), squash-merges at the verified commit, deletes the remote branch, and closes the issue as completed with Status Done. Prints `merged: <commit>`. |
 | `cleanup [--all] [--dry-run]` | Removes a task worktree and its branches once its pull request merged at its head (or its issue is closed and it holds only its claim commit). Names what it keeps and why. |
@@ -69,7 +70,9 @@ deletes the local branch and the remote branch with a lease on the proven head.
 ## Failure modes this protects
 
 - **A claim is taken twice.** The claim is a remote branch created without force; the
-  smallest branch name wins the race and the loser deletes only its own ref.
+  smallest branch name wins the race and the loser deletes only its own ref. `handoff`
+  appends the new owner trailer using an exact remote expected-head lease and updates
+  the local branch only at its expected old head.
 - **A foreign session's claim is changed.** `issue close` refuses when another session
   holds a claim on the issue.
 - **Public text leaks personal data.** Issues, comments, and pull request text pass the
@@ -95,3 +98,9 @@ and Git with a process-level GitHub fixture in an isolated temporary home. It co
 completed epics, unfinished children on later pages, failed reads, foreign claims,
 and idempotent recovery after a partial close. Regenerable evidence is written to
 `test-results/work-close.json`; the fixture repository and home are removed on exit.
+
+`python3 scripts/test-work-handoff.py` exercises handoff through the real CLI and Git
+in an isolated fixture. It checks unknown owner refusal, non-interactive force refusal,
+that refusal leaves dirty files untouched, and missing-worktree refusal without recreation.
+Evidence is written to
+`test-results/work-handoff.json`.
