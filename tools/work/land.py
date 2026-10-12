@@ -241,7 +241,8 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
                 print("  would mark the pull request ready for review first, if it is a draft")
             print(f"  would push {branch} to {remote}, open or update the pull request into {base}, "
                   f"squash-merge it at {head[:12]}, delete {remote}/{branch}"
-                  + (f" and close #{number} as completed with Status Done" if number else ""))
+                  + (f" and close #{number} as completed with Status Done (left open while it has open sub-issues)"
+                     if number else ""))
             return 0
 
         # A commit already merged from this branch is not landed again: a second pull request would duplicate it.
@@ -259,7 +260,7 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
         pull = _published_pull_request(gh, root, repository, remote, branch, head, pull)
         if _base_moved(root, remote, base, head):
             continue
-        if pull["draft"]:
+        if pull.get("draft"):
             if not ready:
                 raise LandError(f"pull request #{pull['number']} is a draft; rerun land with --ready to mark it "
                                 "ready for review and merge. Nothing was merged.")
@@ -288,7 +289,7 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
             print(f"issue:   {_finish_issue(gh, root, config, repository, number)}")
     except (GhError, tracking.TrackingError, LandError) as error:
         raise LandError(f"merged as {merge_sha}, but the rest did not finish: {error}. "
-                        f"Finish by hand: close #{number} as completed, set its Status to Done, "
-                        f"and delete {remote}/{branch} if it remains.") from error
+                        f"Finish by hand: close #{number} with work issue close (it refuses an epic with open "
+                        f"sub-issues), and delete {remote}/{branch} if it remains.") from error
     print(f"merged:  {merge_sha}")
     return 0
