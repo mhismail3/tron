@@ -1,0 +1,444 @@
+import { createHash, randomUUID } from "node:crypto";
+import { watch, type FSWatcher } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { GatewayError } from "../errors.js";
+import { AsyncMutex } from "../util/async-mutex.js";
+import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { readJsonDocument } from "../util/json.js";
+import { gitHeadState, projectSettingsPath, stagedBlob } from "./project-settings-writer.js";
+import type { ChangeEntry, GitResult, SettingsChangeRecord } from "./settings-record.js";
+import type { OutsideMark } from "./settings-resolver.js";
+import { KEYS, builtinValue, floorFor, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { formatStoredSetting, type Qualifiers, type Tier } from "./settings-types.js";
+
+/**
+ * Outside changes (docs/settings-model.md 5.6, foundation F2).
+ *
+ * The stores Tron does not own exclusively are compared with what Tron last
+ * observed in them: the Mac `settings.json` and `trust.json`, and each known
+ * project's `.pi/settings.json`. A per-key difference Tron did not write is one
+ * `outside` record entry, whatever caused it (a hand edit, a pull, a revert, a
+ * stash, a branch switch, the pi CLI): there are no per-git-case rules.
+ *
+ * Comparison is by content digest on every settings read and on a file event,
+ * so dropped or coalesced events and rename-replace writes cannot hide a change.
+ * Tron's own writes bracket the store (`begin`/`end`): a scan never runs while
+ * Tron is writing, and `end` adopts Tron's values as observed with the change id
+ * that wrote them, which is what later offers Apply again.
+ *
+ * This owner keeps only the last observed values and their provenance in
+ * `<tronHome>/gateway/settings/observed.json`; values are always read from the
+ * stores (F2), and the record stays audit only.
+ */
+
+export type ObservedStore = { kind: "mac" } | { kind: "trust" } | { kind: "project"; root: string };
+
+/** The bound on known projects, least recently read first out. */
+export const OBSERVED_PROJECT_LIMIT = 64;
+const STAGED_LIMIT = 20;
+
+interface ObservedValue { key: string; qualifiers?: Qualifiers; value?: unknown; hash?: string }
+
+interface StoreState {
+  digest: string;
+  values: Record<string, ObservedValue>;
+  /** The Tron change that wrote each instance's current value. */
+  tron: Record<string, string>;
+  /** The latest outside change of each instance since Tron last wrote it. */
+  outside: Record<string, OutsideMark>;
+  /** Project stores: Tron's staged writes not yet seen in `HEAD`. */
+  staged?: Array<{ changeId: string; path: string; blob: string }>;
+  head?: string | null;
+  seen: string;
+}
+
+interface ObservedDocument { version: 1; stores: Record<string, StoreState> }
+
+export interface OutsideObserver {
+  outside(entries: readonly ChangeEntry[]): void | Promise<void>;
+}
+
+export interface ObservedReaders {
+  /** pi's own reader for the Mac `settings.json`, so parse rules match the runtime. */
+  mac(): Promise<Record<string, unknown>>;
+  project(root: string): Promise<Record<string, unknown> | undefined>;
+  floors(): Promise<FloorOverrides>;
+}
+
+/** One planned write the change path brackets: its observed store and instance. */
+export interface PlannedWrite { store: ObservedStore; instance: string; changeId: string; value: unknown }
+
+export function storeId(store: ObservedStore): string {
+  return store.kind === "project" ? `project:${store.root}` : store.kind;
+}
+
+export function instanceId(key: string, qualifiers: Qualifiers | undefined): string {
+  const sorted = Object.fromEntries(Object.entries(qualifiers ?? {}).sort(([left], [right]) => left.localeCompare(right)));
+  return `${key}\u0000${JSON.stringify(sorted)}`;
+}
+
+/** The observed store and instance a change to `binding` at `layer` writes, or
+ * undefined for stores Tron owns exclusively (Chat, Profile, floors, Home memory). */
+export function observedInstance(key: KeyDeclaration, layer: string, binding: Binding, qualifiers: Qualifiers, projectRoot: string | undefined): { store: ObservedStore; instance: string } | undefined {
+  const fixed = key.fixed ?? {};
+  if (binding.store === "trust") {
+    return qualifiers.project === undefined ? undefined : { store: { kind: "trust" }, instance: instanceId(key.id, { ...fixed, project: qualifiers.project }) };
+  }
+  if (binding.store !== "pi" && binding.store !== "pi-model-ref") return undefined;
+  const store: ObservedStore | undefined = layer === "mac" ? { kind: "mac" } : layer === "project" && projectRoot ? { kind: "project", root: projectRoot } : undefined;
+  if (!store) return undefined;
+  const modelQualified = binding.store === "pi" && qualifiers.model !== undefined
+    && (binding.qualified !== undefined || binding.path.includes("{model}"));
+  return { store, instance: instanceId(key.id, modelQualified ? { ...fixed, model: qualifiers.model! } : fixed) };
+}
+
+function readPath(document: unknown, path: readonly string[]): unknown {
+  let current = document;
+  for (const segment of path) {
+    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined;
+    if (!Object.prototype.hasOwnProperty.call(current, segment)) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function modelsAt(document: Record<string, unknown>, path: readonly string[]): string[] {
+  const container = readPath(document, path.slice(0, path.indexOf("{model}")));
+  return container && typeof container === "object" && !Array.isArray(container) ? Object.keys(container) : [];
+}
+
+/** Every key instance a pi settings document holds at a layer, from the schema. */
+export function piInstances(document: Record<string, unknown>, layer: "mac" | "project"): Map<string, ObservedValue> {
+  const values = new Map<string, ObservedValue>();
+  const add = (key: KeyDeclaration, qualifiers: Qualifiers, value: unknown) => {
+    if (value === undefined) return;
+    values.set(instanceId(key.id, qualifiers), { key: key.id, ...(Object.keys(qualifiers).length ? { qualifiers } : {}), value });
+  };
+  for (const key of KEYS) {
+    const binding = key.layers[layer];
+    const fixed = (key.fixed ?? {}) as Qualifiers;
+    if (binding?.store === "pi-model-ref") {
+      const provider = document.defaultProvider, id = document.defaultModel;
+      if (typeof provider === "string" && typeof id === "string") add(key, fixed, { provider, id });
+    }
+    if (binding?.store !== "pi") continue;
+    for (const path of [binding.path, ...(binding.qualified ? [binding.qualified] : [])]) {
+      if (!path.includes("{model}")) { add(key, fixed, readPath(document, path)); continue; }
+      for (const model of modelsAt(document, path)) {
+        add(key, { ...fixed, model }, readPath(document, path.map(segment => segment === "{model}" ? model : segment)));
+      }
+    }
+  }
+  return values;
+}
+
+function trustInstances(document: Record<string, unknown>): Map<string, ObservedValue> {
+  const key = schemaKey("permissions.projectTrust");
+  const values = new Map<string, ObservedValue>();
+  for (const [project, decision] of Object.entries(document)) {
+    if (typeof decision !== "boolean") continue;
+    const qualifiers = { ...(key.fixed ?? {}), project };
+    values.set(instanceId(key.id, qualifiers), { key: key.id, qualifiers, value: decision });
+  }
+  return values;
+}
+
+const digestOf = (text: string | undefined) => text === undefined ? "" : createHash("sha256").update(text).digest("hex");
+const equal = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+
+/** Redacted keys are compared by digest; their values never enter observed state or audit. */
+function observed(value: ObservedValue): ObservedValue {
+  if (!schemaKeyOrUndefined(value.key)?.redacted || value.value === undefined) return value;
+  const { value: secret, ...rest } = value;
+  return { ...rest, hash: createHash("sha256").update(JSON.stringify(secret)).digest("hex") };
+}
+const fingerprint = (value: ObservedValue | undefined) => value === undefined ? null : value.hash ?? JSON.stringify(value.value ?? null);
+function schemaKeyOrUndefined(id: string): KeyDeclaration | undefined { return KEYS.find(key => key.id === id); }
+
+export class OutsideChanges {
+  private readonly mutex = new AsyncMutex();
+  private readonly writing = new Map<string, number>();
+  private document: ObservedDocument | undefined;
+  private observer: OutsideObserver | undefined;
+  private readonly watchers = new Map<string, FSWatcher>();
+  private readonly timers = new Map<string, NodeJS.Timeout>();
+  private watching = false;
+  private failed: ((error: unknown) => void) | undefined;
+
+  constructor(
+    private readonly tronHome: string,
+    private readonly agentDir: string,
+    private readonly record: SettingsChangeRecord,
+    private readonly readers: ObservedReaders,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
+
+  get path(): string { return join(this.tronHome, "gateway", "settings", "observed.json"); }
+
+  observe(observer: OutsideObserver): void {
+    if (this.observer && this.observer !== observer) throw new Error("Outside changes already have an observer");
+    this.observer = observer;
+  }
+
+  /** Compare each store with what Tron last observed; record what changed outside. */
+  async reconcile(stores: readonly ObservedStore[]): Promise<void> {
+    const entries: ChangeEntry[] = [];
+    await this.mutex.run(async () => {
+      const document = await this.load();
+      for (const store of stores) {
+        if (store.kind === "project") this.watchProject(store.root);
+        if ((this.writing.get(storeId(store)) ?? 0) > 0) continue;
+        entries.push(...await this.compare(document, store));
+      }
+      if (entries.length) await this.record.append(entries);
+      await this.save(document);
+    });
+    if (entries.length) await this.observer?.outside(entries);
+  }
+
+  /**
+   * File events prompt a rescan so an outside change pushes without waiting for
+   * a read. Events are lossy (rename-replace, coalescing), so they carry no
+   * content: the rescan compares digests. Directories are watched, never files.
+   */
+  startWatching(failed: (error: unknown) => void): void {
+    this.watching = true;
+    this.failed = failed;
+    this.watchDirectory("agent", this.agentDir, name => name === "settings.json" || name === "trust.json", [{ kind: "mac" }, { kind: "trust" }]);
+  }
+
+  dispose(): void {
+    this.watching = false;
+    for (const watcher of this.watchers.values()) watcher.close();
+    for (const timer of this.timers.values()) clearTimeout(timer);
+    this.watchers.clear();
+    this.timers.clear();
+  }
+
+  private watchProject(root: string): void {
+    if (!this.watching || this.watchers.has(`project:${root}`)) return;
+    if (this.watchers.size > OBSERVED_PROJECT_LIMIT) return;
+    // `.pi/` may not exist yet; its parent's events include its creation.
+    this.watchDirectory(`project:${root}`, join(root, ".pi"), name => name === "settings.json", [{ kind: "project", root }])
+      || this.watchDirectory(`project:${root}`, root, name => name === ".pi", [{ kind: "project", root }]);
+  }
+
+  private watchDirectory(id: string, directory: string, relevant: (name: string) => boolean, stores: ObservedStore[]): boolean {
+    try {
+      const watcher = watch(directory, { persistent: false }, (_event, name) => {
+        if (name !== null && !relevant(String(name))) return;
+        clearTimeout(this.timers.get(id));
+        this.timers.set(id, setTimeout(() => {
+          this.timers.delete(id);
+          void this.reconcile(stores).catch(error => this.failed?.(error));
+        }, 250));
+      });
+      watcher.on("error", () => { watcher.close(); this.watchers.delete(id); });
+      this.watchers.set(id, watcher);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Marks of the latest outside change per instance for a store, for its rows. */
+  async marks(store: ObservedStore): Promise<Record<string, OutsideMark>> {
+    const document = await this.mutex.run(() => this.load());
+    return { ...(document.stores[storeId(store)]?.outside ?? {}) };
+  }
+
+  /** Tron starts writing these stores: no scan may read them until `end`. */
+  begin(writes: readonly PlannedWrite[]): void {
+    for (const id of new Set(writes.map(write => storeId(write.store)))) this.writing.set(id, (this.writing.get(id) ?? 0) + 1);
+  }
+
+  /**
+   * Tron finished writing. Instances that now hold the value Tron wrote are
+   * Tron's (with their change id and staged blob); a planned write that did not
+   * land (rolled back) is adopted silently; any other difference happened
+   * outside meanwhile and is recorded.
+   */
+  async end(writes: readonly PlannedWrite[], applied: ReadonlyMap<string, { git?: GitResult; changeId: string }>): Promise<void> {
+    const entries: ChangeEntry[] = [];
+    await this.mutex.run(async () => {
+      const document = await this.load();
+      const byStore = new Map<string, { store: ObservedStore; writes: PlannedWrite[] }>();
+      for (const write of writes) {
+        const id = storeId(write.store);
+        byStore.set(id, { store: write.store, writes: [...(byStore.get(id)?.writes ?? []), write] });
+      }
+      try {
+        for (const { store, writes: storeWrites } of byStore.values()) {
+          const planned = new Map(storeWrites.map(write => [write.instance, write]));
+          entries.push(...await this.compare(document, store, planned, applied));
+        }
+        if (entries.length) await this.record.append(entries);
+        await this.save(document);
+      } finally {
+        for (const id of byStore.keys()) {
+          const count = (this.writing.get(id) ?? 1) - 1;
+          if (count > 0) this.writing.set(id, count); else this.writing.delete(id);
+        }
+      }
+    });
+    if (entries.length) await this.observer?.outside(entries);
+  }
+
+  private async load(): Promise<ObservedDocument> {
+    if (this.document) return this.document;
+    const stored = await readJsonDocument(this.path, value => {
+      const candidate = value as ObservedDocument;
+      if (!candidate || candidate.version !== 1 || typeof candidate.stores !== "object" || candidate.stores === null) {
+        throw new GatewayError("conflict", "Observed settings state is invalid");
+      }
+      return candidate;
+    }, 16 * 1024 * 1024);
+    this.document = stored ?? { version: 1, stores: {} };
+    return this.document;
+  }
+
+  private async save(document: ObservedDocument): Promise<void> {
+    // Bound the known projects: the least recently read leave first.
+    const projects = Object.entries(document.stores).filter(([id]) => id.startsWith("project:"))
+      .sort(([, left], [, right]) => left.seen.localeCompare(right.seen));
+    for (const [id] of projects.slice(0, Math.max(0, projects.length - OBSERVED_PROJECT_LIMIT))) delete document.stores[id];
+    await durableAtomicWriteJson(this.path, document);
+  }
+
+  private async raw(store: ObservedStore): Promise<string | undefined> {
+    const path = store.kind === "mac" ? join(this.agentDir, "settings.json")
+      : store.kind === "trust" ? join(this.agentDir, "trust.json") : projectSettingsPath(store.root);
+    try { return await readFile(path, "utf8"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+  }
+
+  private async values(store: ObservedStore, text: string | undefined): Promise<Map<string, ObservedValue> | undefined> {
+    if (store.kind === "trust") {
+      if (text === undefined || !text.trim()) return new Map();
+      try {
+        const parsed = JSON.parse(text) as unknown;
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? trustInstances(parsed as Record<string, unknown>) : undefined;
+      } catch { return undefined; }
+    }
+    if (store.kind === "mac") {
+      try { return piInstances(await this.readers.mac(), "mac"); } catch { return undefined; }
+    }
+    // An unparseable project file (merge markers) has unknown values: keep the
+    // last observed ones until it parses again, rather than reporting removals.
+    const document = await this.readers.project(store.root).catch(() => undefined);
+    return document === undefined ? undefined : piInstances(document, "project");
+  }
+
+  /** One store's comparison. With `planned`, the bracketed writes are Tron's. */
+  private async compare(document: ObservedDocument, store: ObservedStore, planned?: ReadonlyMap<string, PlannedWrite>, applied?: ReadonlyMap<string, { git?: GitResult; changeId: string }>): Promise<ChangeEntry[]> {
+    const id = storeId(store);
+    const text = await this.raw(store);
+    const digest = digestOf(text);
+    const at = this.now().toISOString();
+    let state = document.stores[id];
+    const git = store.kind === "project" ? await gitHeadState(store.root) : undefined;
+    if (state && !planned && state.digest === digest && (!git || git.head === (state.head ?? null))) {
+      state.seen = at;
+      return [];
+    }
+    const current = await this.values(store, text);
+    if (!current) {
+      if (state) state.seen = at;
+      return [];
+    }
+    if (!state) {
+      // First sight is the baseline: nothing to compare with yet.
+      document.stores[id] = {
+        digest, values: Object.fromEntries([...current].map(([instance, value]) => [instance, observed(value)])), tron: {}, outside: {},
+        ...(git ? { head: git.head, staged: [] } : {}), seen: at,
+      };
+      if (!planned) return [];
+      state = document.stores[id]!;
+    }
+    const entries: ChangeEntry[] = [];
+    const floors = await this.readers.floors().catch(() => ({} as FloorOverrides));
+    const instances = new Set([...Object.keys(state.values), ...current.keys()]);
+    for (const instance of instances) {
+      const before = state.values[instance];
+      const after = current.has(instance) ? observed(current.get(instance)!) : undefined;
+      const write = planned?.get(instance);
+      if (write) {
+        const landed = write.value === undefined ? after === undefined : after !== undefined && fingerprint(after) === fingerprint(observed({ key: after.key, value: write.value }));
+        const recorded = applied?.get(write.changeId);
+        if (landed && recorded) {
+          // The recorded entry that holds this value (an approval's fact, not its request).
+          state.tron[instance] = recorded.changeId;
+          delete state.outside[instance];
+          if (store.kind === "project" && recorded.git?.staged && recorded.git.blob) {
+            state.staged = [...(state.staged ?? []).filter(item => item.changeId !== recorded.changeId),
+              { changeId: recorded.changeId, path: recorded.git.path, blob: recorded.git.blob }].slice(-STAGED_LIMIT);
+          }
+        }
+        continue;
+      }
+      if (fingerprint(before) === fingerprint(after)) continue;
+      const entry = this.outsideEntry(store, (after ?? before)!, before, after, state.tron[instance], floors, git, at);
+      entries.push(entry);
+      state.outside[instance] = {
+        changeId: entry.changeId, applyAgain: state.tron[instance] !== undefined,
+        before: entry.redacted ? "Set" : formatStoredSetting(schemaKeyOrUndefined(entry.key)?.type, before?.value),
+        after: entry.redacted ? (after ? "Set" : "Not set") : formatStoredSetting(schemaKeyOrUndefined(entry.key)?.type, after?.value),
+      };
+      delete state.tron[instance];
+    }
+    state.values = Object.fromEntries([...current].map(([instance, value]) => [instance, observed(value)]));
+    state.digest = digest;
+    state.seen = at;
+    if (git) {
+      if (git.head !== (state.head ?? null)) entries.push(...await this.committed(store as Extract<ObservedStore, { kind: "project" }>, state, git.head, at));
+      state.head = git.head;
+    }
+    return entries;
+  }
+
+  private outsideEntry(store: ObservedStore, value: ObservedValue, before: ObservedValue | undefined, after: ObservedValue | undefined,
+    replaced: string | undefined, floors: FloorOverrides, git: { head: string | null; branch: string | null; root: string; path: string } | undefined, at: string): ChangeEntry {
+    const key = schemaKeyOrUndefined(value.key);
+    const qualifiers = value.qualifiers ?? {};
+    const builtin = key ? builtinValue(key, qualifiers) : undefined;
+    const redacted = key?.redacted === true;
+    const direction = key?.direction && !redacted ? key.direction(before?.value ?? builtin, after?.value ?? builtin) : "widen";
+    // An outside change cannot be gated: its tier, the key's floor for its
+    // direction, decides only whether it pushes (doc 5.6).
+    const { floor, source } = key ? floorFor(key, direction, floors) : { floor: "notify" as Tier, source: "code" as const };
+    const file = store.kind === "mac" ? join(this.agentDir, "settings.json") : store.kind === "trust" ? join(this.agentDir, "trust.json") : projectSettingsPath(store.root);
+    return {
+      changeId: randomUUID(), at, actor: { kind: "outside", id: file },
+      target: store.kind === "project" ? { kind: "project", cwd: store.root } : { kind: "mac" },
+      layer: store.kind === "project" ? "project" : "mac", key: value.key,
+      ...(Object.keys(qualifiers).length ? { qualifiers } : {}),
+      op: after === undefined ? "unset" : "set",
+      ...(redacted ? { changed: true as const, redacted: true as const } : {
+        ...(before?.value === undefined ? {} : { before: before.value }), ...(after?.value === undefined ? {} : { after: after.value }),
+      }),
+      tier: floor, tierBasis: { direction, floor, floorSource: source, web: false, risk: null },
+      status: "outside",
+      ...(replaced ? { refersTo: replaced } : {}),
+      ...(git ? { git: { root: git.root, path: git.path, staged: false, ...(git.head ? { head: git.head } : {}), ...(git.branch ? { branch: git.branch } : {}) } } : {}),
+    };
+  }
+
+  /** A commit that holds Tron's staged blob appends `committed` to that change (doc 5.7). */
+  private async committed(store: Extract<ObservedStore, { kind: "project" }>, state: StoreState, head: string | null, at: string): Promise<ChangeEntry[]> {
+    if (!head || !state.staged?.length) return [];
+    const facts: ChangeEntry[] = [];
+    const remaining: NonNullable<StoreState["staged"]> = [];
+    for (const item of state.staged) {
+      const blob = await stagedBlob(store.root, `HEAD:${item.path}`);
+      const found = blob === item.blob ? await this.record.entry(item.changeId) : undefined;
+      if (!found) { remaining.push(item); continue; }
+      facts.push({
+        ...found.entry, changeId: randomUUID(), at, status: "committed", refersTo: item.changeId,
+        git: { ...(found.entry.git ?? { root: store.root, path: item.path, staged: true }), head },
+      });
+    }
+    state.staged = remaining;
+    return facts;
+  }
+}

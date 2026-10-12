@@ -440,11 +440,20 @@ private struct SettingsChangeDetailView: View {
                     }
                     detailValue("When", entry.at)
                     if let git = entry.git {
-                        detailValue("When written", git.staged ? "Staged" : (git.reason ?? "Not staged"))
+                        if entry.status == "outside" || entry.status == "committed" {
+                            if let head = git.head { detailValue("Commit", String(head.prefix(12)) + (git.branch.map { " on \($0)" } ?? "")) }
+                        } else {
+                            detailValue("When written", git.staged ? "Staged" : (git.reason ?? "Not staged"))
+                        }
                         if let warning = git.warning { detailValue("Staging warning", warning) }
                     }
                     if let failure = entry.failure { detailValue("Failure", failure) }
-                    if entry.redacted != true && entry.status == "applied" {
+                    if entry.status == "outside", entry.redacted != true, entry.refersTo != nil {
+                        Button(undoing ? "Applying…" : "Apply again") { Task { await performApplyAgain() } }
+                            .buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronEmerald))
+                            .disabled(undoing)
+                            .accessibilityIdentifier("settings.change.applyAgain")
+                    } else if entry.redacted != true && entry.status == "applied" {
                         Button(undoing ? "Undoing…" : "Undo") { showingUndo = true }
                             .buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronEmerald))
                             .disabled(undoing)
@@ -529,6 +538,22 @@ private struct SettingsChangeDetailView: View {
         } catch {
             guard identity == model.knowledgePresentationIdentity,
                   presentationActivity.allowsDataPublication else { return }
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func performApplyAgain() async {
+        guard !undoing, model.selectedGatewayProfileID() == profileID else { return }
+        undoing = true
+        actionError = nil; undoConflict = nil
+        defer { undoing = false }
+        let identity = model.knowledgePresentationIdentity
+        do {
+            try await model.applySettingsChangeAgain(entry.changeId)
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
+            dismiss()
+        } catch {
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
             actionError = error.localizedDescription
         }
     }

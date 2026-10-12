@@ -45,6 +45,9 @@ export interface GitResult {
   reason?: string;
   blob?: string;
   warning?: string;
+  /** An outside change or commit fact: the repository's `HEAD` commit and branch then. */
+  head?: string;
+  branch?: string;
 }
 
 export interface ChangeEntry {
@@ -175,6 +178,16 @@ export class SettingsChangeRecord {
         if (entry.refersTo === changeId) facts.unshift(entry);
         else if (entry.changeId === changeId && !entry.refersTo) return { entry, facts };
       }
+    }
+    return undefined;
+  }
+
+  /** Any entry by its own id, a later fact included (an outside change refers to the value it replaced). */
+  async find(changeId: string): Promise<ChangeEntry | undefined> {
+    const index = await this.index();
+    for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0; segmentIndex -= 1) {
+      const found = (await this.segmentLines(index.segments[segmentIndex]!.name)).find(entry => entry.changeId === changeId);
+      if (found) return found;
     }
     return undefined;
   }

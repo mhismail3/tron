@@ -265,7 +265,8 @@ struct SettingsRendererView: View {
                 externalControl: externalControlKeys.contains(setting.key),
                 dependencyDisplay: Self.dependencyDisplay(setting, in: resolution),
                 error: rowErrors[setting.id],
-                onChange: { value in change(setting, value: value) }
+                onChange: { value in change(setting, value: value) },
+                onApplyAgain: { changeID in applyAgain(changeID, rowID: setting.id) }
             )
             // Keep the presenting control's identity while its accepted change
             // completes; replacing it with read-only would retire its child sheet.
@@ -422,6 +423,31 @@ struct SettingsRendererView: View {
             } else {
                 previewingID = nil
                 commit(change, rowID: setting.id)
+            }
+        }
+    }
+
+    /// Apply again is an accepted command like `commit`: unstructured, then a disposable reload.
+    private func applyAgain(_ changeID: String, rowID: String) {
+        guard changingID == nil, previewingID == nil, presentationActivity.allowsDataPublication else { return }
+        changingID = rowID
+        let identity = model.knowledgePresentationIdentity
+        let requestTarget = target
+        let admittedSurface = surfaceToken
+        Task { @MainActor in
+            defer { changingID = nil }
+            do {
+                try await model.applySettingsChangeAgain(changeID)
+                guard identity == model.knowledgePresentationIdentity, requestTarget == target,
+                      admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
+                rowErrors[rowID] = nil
+                reloadTick &+= 1
+            } catch is CancellationError {
+                return
+            } catch {
+                guard identity == model.knowledgePresentationIdentity, requestTarget == target,
+                      admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
+                rowErrors[rowID] = error.localizedDescription
             }
         }
     }

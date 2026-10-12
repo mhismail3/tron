@@ -12,6 +12,7 @@ import type { JsonValue } from "../protocol/types.js";
 import type { TrustService } from "./trust-service.js";
 import { loadPackageProvides, type InstalledPackage } from "./package-provides.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { instanceId, type OutsideChanges, type PlannedWrite } from "./settings-outside.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 interface PackageUpdateProjection {
@@ -92,9 +93,12 @@ export class PackageService {
     private readonly broadcast: (topic: string, payload: JsonValue) => void,
     private readonly workRegistry?: GatewayWorkRegistry,
     private readonly managedSubagents?: ManagedSubagents,
+    /** Package entries are written by this owner, not the settings change path;
+     * bracketing them keeps them from reading as outside changes (settings-model.md 5.6). */
+    private readonly outside?: OutsideChanges,
   ) {}
 
-  private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<{ manager: DefaultPackageManager; settings: SettingsManager }> {
+  private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<{ manager: DefaultPackageManager; settings: SettingsManager; cwd: string }> {
     const trust = requireProjectTrust
       ? await this.trust.requireResolved(cwdInput)
       : await this.trust.inspect(cwdInput).then((inspection) => ({ cwd: inspection.cwd, trusted: inspection.effectiveDecision === true }));
@@ -105,7 +109,7 @@ export class PackageService {
     if (settings.drainErrors().length > 0) {
       throw new GatewayError("conflict", "Canonical package settings could not be loaded");
     }
-    return { manager: new DefaultPackageManager({ cwd: trust.cwd, agentDir: this.agentDir, settingsManager: settings }), settings };
+    return { manager: new DefaultPackageManager({ cwd: trust.cwd, agentDir: this.agentDir, settingsManager: settings }), settings, cwd: trust.cwd };
   }
 
   private async flushSettings(settings: SettingsManager): Promise<void> {
@@ -208,6 +212,10 @@ export class PackageService {
           this.broadcast("packages.progress", { operationId, event } as unknown as JsonValue);
         });
         const { settings } = managed;
+        const writes: PlannedWrite[] = [{ store: local ? { kind: "project", root: managed.cwd } : { kind: "mac" },
+          instance: instanceId("sources.packages", {}), changeId: operationId, value: undefined }];
+        this.outside?.begin(writes);
+        try {
         if (action === "install") {
           if (source === undefined) throw new GatewayError("invalid_request", "Package source is required");
           await this.validateInstallSource(source, cwd);
@@ -231,6 +239,10 @@ export class PackageService {
           this.ensureConfiguredSource(manager, source, local);
           mutationAdmitted = true;
           await manager.install(source, { local });
+        }
+        } finally {
+          // Unrecorded writes are adopted as observed, never as outside changes.
+          await this.outside?.end(writes, new Map());
         }
         this.broadcast("packages.completed", { operationId, success: true });
       } catch (error) {

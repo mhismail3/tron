@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -9,6 +9,7 @@ import { TrustService } from "./trust-service.js";
 import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "./settings-record.js";
 import { SettingsApprovals } from "./settings-approvals.js";
+import { OutsideChanges } from "./settings-outside.js";
 import { SettingsRiskEvaluator, type SettingsRiskInput } from "./settings-risk.js";
 import { JEV_MAX_ESTIMATED_CHARGE_CENTS } from "../knowledge/jev-client.js";
 import type { Resolution } from "./settings-resolver.js";
@@ -27,8 +28,10 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-change.json");
 const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
+const outsides: OutsideChanges[] = [];
 const transcript: Array<{ case: string; detail: unknown }> = [];
 afterEach(async () => {
+  for (const outside of outsides.splice(0)) outside.dispose();
   await Promise.all(registries.splice(0).map(registry => registry.dispose().catch(() => {})));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
   await mkdir(dirname(ARTIFACT), { recursive: true });
@@ -69,6 +72,10 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
   await registry.initialize();
   const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime });
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
+  // Production wiring: every read reconciles outside changes (doc 5.6).
+  const outside = new OutsideChanges(tronHome, agentDir, record, settingsModel.observedReaders);
+  settingsModel.observeOutside(outside);
+  outsides.push(outside);
   const settingsChanges = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
     ...(options.assessRisk ? { assessRisk: options.assessRisk } : {}),
     setTrust: async (project, decision) => {
@@ -78,9 +85,12 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
     },
   }, agentDir);
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
+  // The relay boundary: what would be pushed to the maintainer's iPhone.
+  const pushes: Array<{ sourceId: string; title: string; message: string }> = [];
+  const notifications = { enqueue: async (push: { sourceId: string; title: string; message: string }) => { pushes.push(push); } };
   const service = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
-    modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome),
+    modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome), notifications,
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
@@ -97,7 +107,7 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
     return entries;
   };
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
-  return { root, tronHome, agentDir, trust, registry, service, record, settingsChanges, broadcasts, change, history, macDocument, faux };
+  return { root, tronHome, agentDir, trust, registry, service, record, settingsChanges, broadcasts, pushes, outside, change, history, macDocument, faux };
 }
 
 async function gitProject(root: string, name: string) {
@@ -443,5 +453,169 @@ describe("settings.change", () => {
     const all = await f.history();
     expect(all[0]!.after).toBe(22 % 20);
     transcript.push({ case: "paging", detail: { pages, segments: files.length } });
+  });
+});
+
+/**
+ * Outside changes (docs/settings-model.md 5.6, 5.7; #764) against the real Mac
+ * file and real git repositories: per-key `outside` entries, Tron's own writes
+ * never echo, rename-replace and missed events are caught by digest, git state
+ * badges, commit facts, Apply again, and pushes decided by each key's floor.
+ */
+describe("outside changes", () => {
+  type Row = { key: string; value: unknown; layer: string; badges: Array<{ label: string; detail?: string; action?: { kind: string; changeId?: string } }> };
+  const rows = async (f: Awaited<ReturnType<typeof fixture>>, target: Record<string, unknown>, keys: string[]) =>
+    (await f.service.invoke(client(), "settings.resolve", { target, keys }) as unknown as { keys: Row[] }).keys;
+  const row = async (f: Awaited<ReturnType<typeof fixture>>, target: Record<string, unknown>, key: string) => (await rows(f, target, [key]))[0]!;
+  const outsideEntries = async (f: Awaited<ReturnType<typeof fixture>>) => (await f.history()).filter(entry => entry.status === "outside");
+  const label = (r: Row, text: string) => r.badges.find(badge => badge.label === text);
+
+  it("records one outside entry per hand-edited Mac key, never Tron's own write, and catches rename-replace", async () => {
+    const f = await fixture();
+    await row(f, { kind: "mac" }, "run.retry.maxRetries"); // the first read is the baseline
+
+    // A Tron write: no outside entry (negative control), on this read and the next.
+    await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6 }]);
+    expect(await outsideEntries(f)).toEqual([]);
+    expect(label(await row(f, { kind: "mac" }, "run.retry.maxRetries"), "Changed outside Tron")).toBeUndefined();
+
+    // A hand edit of two keys: exactly one entry per key, the live value follows the file.
+    const document = await f.macDocument();
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...document, retry: { maxRetries: 9 }, transport: "sse" }));
+    const edited = await row(f, { kind: "mac" }, "run.retry.maxRetries");
+    await row(f, { kind: "mac" }, "run.retry.maxRetries"); // a second read records nothing more
+    const first = await outsideEntries(f);
+    expect(first.map(entry => [entry.key, entry.before, entry.after, entry.actor.kind]).sort()).toEqual([
+      ["run.retry.maxRetries", 6, 9, "outside"], ["run.transport", undefined, "sse", "outside"],
+    ]);
+    expect(edited.value).toBe(9);
+    // It replaced Tron's value, so the row offers Apply again with the diff.
+    const changed = label(edited, "Changed outside Tron")!;
+    expect(changed.detail).toBe("Mac: 6 retries → 9 retries");
+    expect(changed.action).toMatchObject({ kind: "applyAgain", changeId: first.find(entry => entry.key === "run.retry.maxRetries")!.changeId });
+    // A value Tron never wrote shows the change without Apply again.
+    expect(label(await row(f, { kind: "mac" }, "run.transport"), "Changed outside Tron")!.action).toBeUndefined();
+
+    // Apply again is an ordinary audited change; the row clears.
+    const again = await f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: changed.action!.changeId }) as unknown as { status: string; changes: Array<{ changeId: string }> };
+    expect(again.status).toBe("applied");
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
+    expect((await f.history())[0]).toMatchObject({ applyAgainOf: changed.action!.changeId, after: 6, actor: { kind: "ui" } });
+    expect(label(await row(f, { kind: "mac" }, "run.retry.maxRetries"), "Changed outside Tron")).toBeUndefined();
+    // A stale Apply again (the store moved on) is refused, not applied.
+    await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: changed.action!.changeId })).rejects.toMatchObject({ code: "conflict" });
+
+    // An editor's rename-replace write is detected like any other.
+    const temporary = join(f.agentDir, "settings.json.swp");
+    await writeFile(temporary, JSON.stringify({ ...(await f.macDocument()), retry: { maxRetries: 2 } }));
+    await rename(temporary, join(f.agentDir, "settings.json"));
+    expect((await row(f, { kind: "mac" }, "run.retry.maxRetries")).value).toBe(2);
+    expect((await outsideEntries(f)).filter(entry => entry.key === "run.retry.maxRetries").map(entry => entry.after)).toEqual([2, 9]);
+
+    // A redacted key is recorded as changed, never with its value.
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), httpProxy: "http://user:secret@proxy.invalid" }));
+    await row(f, { kind: "mac" }, "run.httpProxy");
+    const proxy = (await outsideEntries(f)).find(entry => entry.key === "run.httpProxy")!;
+    expect(proxy).toMatchObject({ redacted: true, changed: true });
+    expect(JSON.stringify(proxy)).not.toContain("secret");
+    expect(await readFile(f.outside.path, "utf8")).not.toContain("secret");
+    transcript.push({ case: "outside mac", detail: await outsideEntries(f) });
+  });
+
+  it("a file event alone records the change and pushes by floor: quiet keys never push", async () => {
+    const f = await fixture();
+    f.outside.startWatching(() => {});
+    await row(f, { kind: "mac" }, "run.retry.maxRetries");
+    const until = async (done: () => boolean | Promise<boolean>) => {
+      for (let attempt = 0; attempt < 100 && !(await done()); attempt += 1) await new Promise(resolve => setTimeout(resolve, 50));
+    };
+    // Quiet floor: recorded and broadcast, not pushed.
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), retry: { maxRetries: 8 } }));
+    await until(() => f.broadcasts.some(event => event.topic === "settings.changed" && JSON.stringify(event.payload).includes("run.retry.maxRetries")));
+    expect((await f.record.page({ limit: 10 })).entries.map(entry => [entry.key, entry.status])).toEqual([["run.retry.maxRetries", "outside"]]);
+    expect(f.pushes).toEqual([]);
+    // Adding a package (a widening with a notify floor) pushes.
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), packages: ["npm:outside-package"] }));
+    await until(() => f.pushes.length > 0);
+    expect(f.pushes).toEqual([expect.objectContaining({ title: "Changed outside Tron", message: expect.stringContaining("Packages") })]);
+  });
+
+  it("a git project: staged, committed, unstaged, stash, restore, branch switches and a pull", async () => {
+    const f = await fixture();
+    const project = await gitProject(f.root, "repo");
+    await f.trust.set(project, true);
+    const target = { kind: "project", cwd: project };
+    const transport = async () => row(f, target, "run.transport");
+    const read = async () => JSON.parse(await readFile(join(project, ".pi", "settings.json"), "utf8")) as Record<string, unknown>;
+    await transport();
+    const baseline = (await outsideEntries(f)).length; // trust was set by hand before the first read
+
+    // A staged Tron edit: Staged, then a commit appends `committed` and the badge drops to Project.
+    const written = await f.change(target, [{ key: "run.transport", layer: "project", op: "set", value: "websocket" }]);
+    expect(label(await transport(), "Staged")).toBeDefined();
+    git(project, "commit", "-q", "-m", "transport");
+    const committedRow = await transport();
+    expect(committedRow.badges.map(badge => badge.label)).toEqual(["Project"]);
+    const committed = (await f.history()).find(entry => entry.status === "committed")!;
+    expect(committed).toMatchObject({ refersTo: written.changes[0]!.changeId, git: { head: git(project, "rev-parse", "HEAD").trim() } });
+
+    // Unstaging keeps the value: Uncommitted, and no outside entry.
+    await f.change(target, [{ key: "run.transport", layer: "project", op: "set", value: "auto" }]);
+    git(project, "restore", "--staged", ".pi/settings.json");
+    const unstaged = await transport();
+    expect(unstaged.value).toBe("auto");
+    expect(label(unstaged, "Uncommitted")).toBeDefined();
+    expect((await outsideEntries(f)).length).toBe(baseline);
+
+    // A stash drops Tron's value: one outside entry with Apply again; the live value follows the working tree.
+    git(project, "stash", "-q");
+    const stashed = await transport();
+    expect(stashed.value).toBe("websocket");
+    const stash = (await outsideEntries(f)).slice(0, (await outsideEntries(f)).length - baseline);
+    expect(stash.map(entry => [entry.key, entry.before, entry.after])).toEqual([["run.transport", "auto", "websocket"]]);
+    expect(stash[0]!.git).toMatchObject({ head: git(project, "rev-parse", "HEAD").trim(), branch: "main" });
+    const apply = label(stashed, "Changed outside Tron")!.action!;
+    expect(apply.kind).toBe("applyAgain");
+    // Apply again re-writes and re-stages through the change path.
+    const reapplied = await f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: apply.changeId }) as unknown as { changes: Array<{ git?: Record<string, unknown> }> };
+    expect(reapplied.changes[0]!.git).toMatchObject({ staged: true });
+    expect((await read()).transport).toBe("auto");
+    expect(git(project, "diff", "--cached", "--name-only").trim()).toBe(".pi/settings.json");
+    git(project, "stash", "drop", "-q");
+
+    // `git restore --staged --worktree` drops it again: one more outside entry with Apply again.
+    git(project, "restore", "--staged", "--worktree", ".pi/settings.json");
+    const restored = await transport();
+    expect(restored.value).toBe("websocket");
+    expect(label(restored, "Changed outside Tron")!.action!.kind).toBe("applyAgain");
+    expect((await outsideEntries(f)).length).toBe(baseline + 2);
+
+    // A branch switch that carries an uncommitted edit changes no value: nothing recorded.
+    await f.change(target, [{ key: "run.transport", layer: "project", op: "set", value: "sse" }]);
+    git(project, "switch", "-q", "-c", "carry");
+    expect((await transport()).value).toBe("sse");
+    expect((await outsideEntries(f)).length).toBe(baseline + 2);
+    // A branch switch that drops it (committed on one branch only): one outside entry with Apply again.
+    git(project, "commit", "-q", "-am", "sse on carry");
+    git(project, "switch", "-q", "main");
+    const switched = await transport();
+    expect(switched.value).toBe("websocket");
+    expect(label(switched, "Changed outside Tron")!.action!.kind).toBe("applyAgain");
+    expect((await outsideEntries(f))[0]).toMatchObject({ key: "run.transport", before: "sse", after: "websocket", git: { branch: "main" } });
+
+    // A pull (fast-forward from a clone): the change lists its commit; a quiet key does not push,
+    // a new package (notify on widening) does.
+    const clone = join(f.root, "clone");
+    git(f.root, "clone", "-q", project, clone);
+    await writeFile(join(clone, ".pi", "settings.json"), `${JSON.stringify({ transport: "auto", packages: ["npm:pulled"] }, null, 4)}\n`);
+    git(clone, "commit", "-q", "-am", "upstream settings");
+    const pushesBefore = f.pushes.length;
+    git(project, "pull", "-q", "--ff-only", clone, "main");
+    await transport();
+    const pulled = (await outsideEntries(f)).filter(entry => entry.git?.head === git(project, "rev-parse", "HEAD").trim());
+    expect(pulled.map(entry => [entry.key, entry.tier]).sort()).toEqual([["run.transport", "quiet"], ["sources.packages", "notify"]]);
+    expect(f.pushes.slice(pushesBefore)).toEqual([expect.objectContaining({ message: expect.stringContaining("Packages") })]);
+    expect(f.pushes.slice(pushesBefore).some(push => push.message.includes("Transport"))).toBe(false);
+    transcript.push({ case: "outside git", detail: await outsideEntries(f) });
   });
 });

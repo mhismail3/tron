@@ -9,7 +9,8 @@ import { assertNewModelChoice, openAIModelEligibility } from "../providers/opena
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { updateJsonLocked } from "../util/json.js";
-import { writeProjectSettings } from "./project-settings-writer.js";
+import { projectGitState, readProjectDocument, writeProjectSettings } from "./project-settings-writer.js";
+import { observedInstance, type ObservedReaders, type ObservedStore, type OutsideChanges, type PlannedWrite } from "./settings-outside.js";
 import type { TrustService } from "./trust-service.js";
 import type { Actor, ActorKind, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
@@ -41,7 +42,26 @@ export interface SettingsModelDependencies {
  * Reading an untrusted project's `.pi/settings.json` is pure JSON parsing.
  */
 export class SettingsModel {
+  private outside: OutsideChanges | undefined;
+
   constructor(private readonly dependencies: SettingsModelDependencies) {}
+
+  /** The outside-change owner every settings read reconciles through (doc 5.6). */
+  observeOutside(outside: OutsideChanges): void {
+    if (this.outside && this.outside !== outside) throw new Error("Settings already have an outside-change owner");
+    this.outside = outside;
+  }
+
+  /** The readers the outside-change owner compares with: the same parse rules as resolution. */
+  get outsideChanges(): OutsideChanges | undefined { return this.outside; }
+
+  get observedReaders(): ObservedReaders {
+    return {
+      mac: async () => this.piDocuments(this.dependencies.agentDir).global,
+      project: async (root) => (await readProjectDocument(root)).document,
+      floors: () => this.floorOverrides(),
+    };
+  }
 
   get modelRuntime(): ModelRuntime { return this.dependencies.modelRuntime; }
 
@@ -54,8 +74,8 @@ export class SettingsModel {
     return join(this.dependencies.tronHome, "gateway", "settings", "floors.json");
   }
 
-  async resolve(target: SettingsTarget, session?: SessionSettingsSource, keys?: readonly string[]): Promise<Resolution> {
-    const stores = await this.stores(target, session);
+  async resolve(target: SettingsTarget, session?: SessionSettingsSource, keys?: readonly string[], options: { storeState?: boolean } = {}): Promise<Resolution> {
+    const stores = await this.stores(target, session, options);
     const runtime = session?.modelRuntime ?? this.dependencies.modelRuntime;
     return resolveSettings(target, stores, { format: formatContext(runtime), options: optionSources(runtime), ...(keys ? { keys } : {}) });
   }
@@ -68,7 +88,9 @@ export class SettingsModel {
     settings: ReturnType<SettingsManager["getSettings"]>; requestPins: Record<string, FixedSetting>;
   }> {
     const keys = KEYS.filter(hasRuntimeRequestApplier);
-    const resolved = await this.resolve({ kind: "session", sessionId }, session, keys.map(key => key.id));
+    // The provider-request boundary reads values only: outside comparison and git
+    // state belong to settings reads and file events, not to every model request.
+    const resolved = await this.resolve({ kind: "session", sessionId }, session, keys.map(key => key.id), { storeState: false });
     const settings: Record<string, unknown> = {};
     const requestPins = structuredClone(previousPins);
     for (const row of resolved.keys) {
@@ -148,16 +170,21 @@ export class SettingsModel {
     };
   }
 
-  async stores(target: SettingsTarget, session?: SessionSettingsSource): Promise<SettingsStores> {
+  async stores(target: SettingsTarget, session?: SessionSettingsSource, options: { storeState?: boolean } = {}): Promise<SettingsStores> {
+    const storeState = options.storeState !== false;
     if (target.kind === "session" && !session) throw new GatewayError("invalid_request", "A session target needs its session");
+    const cwd = target.kind === "project" ? target.cwd : target.kind === "session" && !session!.home ? session!.cwd : undefined;
+    // The Project store is `.pi/` at the cwd Tron gives pi, which is where pi
+    // reads it (pi settings-manager has no upward search).
+    const inspection = cwd === undefined ? undefined : await this.dependencies.trust.inspect(cwd);
+    const observed: ObservedStore[] = [{ kind: "mac" }, { kind: "trust" }, ...(inspection ? [{ kind: "project" as const, root: inspection.cwd }] : [])];
+    // Every read compares the stores with what Tron last observed first (F2):
+    // file events are only prompts, so a dropped event cannot hide a change.
+    if (storeState) await this.outside?.reconcile(observed);
     const mac = this.piDocuments(this.dependencies.agentDir).global;
     const trust = await this.trustDecisions();
     let project: SettingsStores["project"];
-    const cwd = target.kind === "project" ? target.cwd : target.kind === "session" && !session!.home ? session!.cwd : undefined;
-    if (cwd !== undefined) {
-      // The Project store is `.pi/` at the cwd Tron gives pi, which is where pi
-      // reads it (pi settings-manager has no upward search).
-      const inspection = await this.dependencies.trust.inspect(cwd);
+    if (inspection) {
       const documents = this.piDocuments(inspection.cwd);
       project = {
         root: inspection.cwd,
@@ -165,8 +192,13 @@ export class SettingsModel {
         ...(documents.projectUnreadable ? { unreadable: true as const } : {}),
         applied: inspection.effectiveDecision === true,
         ...(inspection.effectiveDecision === true ? {} : { reason: "untrusted" as const }),
+        ...(storeState ? { git: await projectGitState(inspection.cwd) } : {}),
       };
     }
+    const outside = this.outside && storeState ? {
+      mac: { ...await this.outside.marks({ kind: "mac" }), ...await this.outside.marks({ kind: "trust" }) },
+      ...(inspection ? { project: await this.outside.marks({ kind: "project", root: inspection.cwd }) } : {}),
+    } : undefined;
     const home = target.kind === "home" || (target.kind === "session" && session!.home);
     const layers = targetLayers(target, { home, project: project !== undefined });
     return {
@@ -174,6 +206,7 @@ export class SettingsModel {
       mac,
       trust,
       floors: await this.floorOverrides(),
+      ...(outside ? { outside } : {}),
       ...(project ? { project } : {}),
       ...(session ? { chat: session.chat } : {}),
       ...(home ? { profile: await this.homeProfile() } : {}),
@@ -554,6 +587,26 @@ export class SettingsChangePath {
     }], { ...context, undoOf: changeId, ...(session ? { session } : {}) });
   }
 
+  /**
+   * Apply again (doc 5.3, 5.6): writes back the value Tron had written before an
+   * outside change replaced or removed it. An ordinary change through the same
+   * path and gate, never automatic; refused when the store moved on since.
+   */
+  async applyAgain(changeId: string, context: Omit<ChangeContext, "applyAgainOf" | "undoOf">, session?: ChangeContext["session"]) {
+    const entry = await this.record.find(changeId);
+    if (!entry || entry.status !== "outside") throw new GatewayError("not_found", "No such outside change");
+    if (entry.redacted) throw new GatewayError("conflict", "A hidden value cannot be applied again: it was never recorded");
+    const replaced = entry.refersTo ? await this.record.entry(entry.refersTo) : undefined;
+    if (!replaced || replaced.entry.redacted) throw new GatewayError("conflict", "This outside change did not replace a value Tron wrote");
+    const value = replaced.entry.after;
+    return this.change(entry.target, [{
+      key: entry.key, ...(entry.qualifiers ? { qualifiers: entry.qualifiers } : {}), layer: entry.layer,
+      op: value === undefined ? "unset" : "set", ...(value === undefined ? {} : { value }),
+      // The outside value is what the maintainer saw; a newer change refuses.
+      expected: entry.after === undefined ? null : entry.after,
+    }], { ...context, applyAgainOf: changeId, ...(session ? { session } : {}) });
+  }
+
   history(input: { cursor?: string; limit?: number; key?: string; status?: string; actor?: ActorKind | "agents"; layer?: Exclude<LayerId, "builtin">; section?: string }) {
     return this.record.page({
       ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {}),
@@ -717,6 +770,26 @@ export class SettingsChangePath {
    * records one entry per change, shaped by `shape` (an approval's facts). */
   private async applyAll(target: SettingsTarget, stores: SettingsStores, planned: readonly Planned[], context: ChangeContext, shape: (entry: ChangeEntry) => ChangeEntry) {
     const ordered = [...planned].sort((a, b) => STORE_ORDER[a.binding.store] - STORE_ORDER[b.binding.store]);
+    // Bracket the stores Tron does not own exclusively, so its own write is
+    // never an outside change and later offers Apply again (doc 5.6).
+    const outside = this.model.outsideChanges;
+    const writes: PlannedWrite[] = ordered.flatMap(plan => {
+      const observed = observedInstance(plan.key, plan.request.layer, plan.binding, plan.qualifiers, stores.project?.root);
+      return observed ? [{ ...observed, changeId: plan.changeId, value: plan.after }] : [];
+    });
+    const landed = new Map<string, { git?: GitResult; changeId: string }>();
+    outside?.begin(writes);
+    try {
+      const result = await this.applyBracketed(target, stores, ordered, context, shape);
+      // The original entry holds the value (an approval's fact refers to it).
+      for (const done of result) landed.set(done.plan.changeId, { ...(done.git ? { git: done.git } : {}), changeId: done.plan.changeId });
+      return result;
+    } finally {
+      await outside?.end(writes, landed);
+    }
+  }
+
+  private async applyBracketed(target: SettingsTarget, stores: SettingsStores, ordered: readonly Planned[], context: ChangeContext, shape: (entry: ChangeEntry) => ChangeEntry) {
     const applied: Array<{ plan: Planned; revision?: number; git?: GitResult; result?: unknown }> = [];
     let failure: { plan: Planned; error: GatewayError } | undefined;
     for (const plan of ordered) {

@@ -18,7 +18,7 @@ import type { Actor, ChangeEntry } from "../admin/settings-record.js";
 import { SECTIONS, schemaKey } from "../admin/settings-schema.js";
 import type { SettingsTarget } from "../admin/settings-resolver.js";
 import { RECENT_SCAN_LIMIT, actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
-import { QUALIFIER_NAMES, type Qualifiers } from "../admin/settings-types.js";
+import { QUALIFIER_NAMES, maxTier, type Qualifiers } from "../admin/settings-types.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -438,6 +438,23 @@ export class GatewayService {
     dependencies.settingsChanges?.observe({
       applied: (target, changes, context) => this.settingsChanged(target, changes, context),
       approvals: (event) => this.settingsApprovalsChanged(event),
+    });
+    // Outside changes reach the same after-apply effects and broadcast, one store at a time.
+    dependencies.settingsModel.outsideChanges?.observe({
+      outside: async (entries) => {
+        const outside = entries.filter(entry => entry.status === "outside");
+        for (const file of new Set(outside.map(entry => entry.actor.id))) {
+          const group = outside.filter(entry => entry.actor.id === file);
+          await this.settingsChanged(group[0]!.target, group.map(entry => ({
+            changeId: entry.changeId, key: entry.key, ...(entry.qualifiers ? { qualifiers: entry.qualifiers } : {}),
+            layer: entry.layer, status: entry.status, tier: entry.tier,
+          })), { actor: group[0]!.actor, tier: maxTier(...group.map(entry => entry.tier)) });
+        }
+        const committed = entries.filter(entry => entry.status === "committed");
+        if (committed.length) dependencies.broadcast("settings.changed", safeJson({
+          changeIds: committed.map(entry => entry.changeId), keys: [...new Set(committed.map(entry => entry.key))], layer: "project", target: committed[0]!.target,
+        }));
+      },
     });
   }
 
@@ -2031,7 +2048,7 @@ export class GatewayService {
       }
       case "settings.change":
         return this.mutation(client, method, params, async (workToken) => {
-          rejectUnknownFields(params, ["commandId", "target", "fence", "changes", "reason", "dryRun", "applyAgainOf"], method);
+          rejectUnknownFields(params, ["commandId", "target", "fence", "changes", "reason", "dryRun"], method);
           const target = await this.canonicalSettingsTarget(params.target);
           if (!Array.isArray(params.changes)) throw new GatewayError("invalid_request", "changes must be an array");
           const changes = params.changes.map((raw, index) => settingsChangeRequest(raw, `changes[${index}]`));
@@ -2043,7 +2060,6 @@ export class GatewayService {
             ...(params.reason === undefined ? {} : { reason: boundedText(params.reason, "reason", 2_000) }),
             commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
             ...(params.dryRun === true ? { dryRun: true } : {}),
-            ...(params.applyAgainOf === undefined ? {} : { applyAgainOf: string(params.applyAgainOf, "applyAgainOf", { max: 100 }) }),
             ...(session ? { session } : {}),
           });
           return safeJson(result);
@@ -2061,6 +2077,16 @@ export class GatewayService {
             commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
           }, session);
           return safeJson(result);
+        });
+      case "settings.applyAgain":
+        // Apply again is offered on an outside change that replaced or removed a
+        // value Tron wrote (docs/settings-model.md 5.6); it is never automatic.
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "changeId"], method);
+          return safeJson(await this.dependencies.settingsChanges.applyAgain(string(params.changeId, "changeId", { max: 100 }), {
+            actor: { kind: "ui", id: client.identity },
+            commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
+          }));
         });
       case "settings.approvals": {
         rejectUnknownFields(params, [], method);
@@ -2393,13 +2419,22 @@ export class GatewayService {
    * step 6), and for a notify-tier change an agent made, the push with Undo (5.4). */
   private async settingsChanged(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; tier: string; reason?: string; approved?: true }): Promise<void> {
     if (changes.length === 0) return;
-    if (context.tier === "notify" && context.actor.kind !== "ui" && !context.approved) {
+    if (context.actor.kind === "outside") {
+      // An outside change is already in its store: its floor decides only
+      // whether it pushes (docs/settings-model.md 5.6, F3).
+      const loud = changes.filter(change => change.tier !== "quiet");
+      if (loud.length) {
+        const what = [...new Set(loud.map(change => schemaKey(change.key).label))].join(", ");
+        void this.settingsPush(context.actor, `settings-outside:${changes[0]!.changeId}`, "explicit", "Changed outside Tron",
+          `${what} changed outside Tron in ${context.actor.id}. Review it in Tron.`);
+      }
+    } else if (context.tier === "notify" && context.actor.kind !== "ui" && !context.approved) {
       const what = changes.map(change => schemaKey(change.key).label).join(", ");
       void this.settingsPush(context.actor, `settings-applied:${changes[0]!.changeId}`, "explicit", "Setting changed",
         `${actorLabel(context.actor)} changed ${what}${context.reason ? `: ${context.reason}` : ""}. Undo it in Tron.`);
     }
     const cwd = target.kind === "project" ? target.cwd : undefined;
-    if (context.actor.kind === "ui" || context.approved === true) {
+    if (context.actor.kind === "ui" || context.actor.kind === "outside" || context.approved === true) {
       // A chat/Home requester can edit a default layer. Scope follows the
       // changed store, not the target through which the request arrived.
       const imageLayers = new Set(changes.filter(change => change.key === "context.images.block").map(change => change.layer));

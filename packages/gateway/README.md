@@ -768,8 +768,7 @@ options, or its `optionsSource` (`catalog.models`, searchable and paged;
 `catalog.thinkingLevels` for the `model` qualifier or the target's chat model,
 empty for a model without reasoning; `catalog.contextWindow` as a `range` with
 the bounds `settings.change` enforces).
-`settings.change { commandId, target, fence?, changes[], reason?, dryRun?,
-applyAgainOf? }` is the one path every setting changes through
+`settings.change { commandId, target, fence?, changes[], reason?, dryRun? }` is the one path every setting changes through
 ([docs/settings-model.md](docs/settings-model.md) 5). Each change is `{ key,
 qualifiers?, layer, op: "set" | "unset", value?, expected? }`. The Gateway
 validates it against the key's schema entry (type, allowed layer, writer, and the
@@ -838,6 +837,26 @@ changes are labeled Outside Tron, not You. Native clients need no key-formatting
 `settings.undo { commandId, changeId, fence? }` writes `before` back as an
 ordinary change, refused with the current value when the store no longer holds
 `after`, and refused for a redacted change, which has no `before`.
+`settings.applyAgain { commandId, changeId }` names an `outside` entry that
+replaced or removed a value Tron wrote and writes that value back through the same
+path and gate (with `applyAgainOf`), refused when the store moved on since.
+
+Outside changes (docs/settings-model.md 5.6) are owned by
+`src/admin/settings-outside.ts`. Every settings read, and a debounced directory
+event on the Mac agent directory or a known project's `.pi/`, compares the Mac
+`settings.json`, `trust.json` and each known project's `.pi/settings.json` (at
+most 64, least recently read out) by content digest with the per-key values Tron
+last observed in `<tronHome>/gateway/settings/observed.json`. Each differing key
+instance becomes one `outside` entry (redacted keys by digest only) with the
+repository `HEAD` and branch for a project file; an entry that replaced a value
+Tron wrote refers to that change and offers Apply again. Tron's own writes, the
+change path and package installs, bracket the store so they never echo. The tier
+is the key's floor for its direction and decides only whether it pushes. A commit
+whose `.pi/settings.json` blob is Tron's staged blob appends `committed` to that
+change. Rows carry `Changed outside Tron` (with Apply again), and a Project value's
+git state as `Staged`, `Uncommitted` or `Local only`. The provider-request
+boundary reads values only. `models.json` and `mcp.json` hold no schema key, so
+they are not compared.
 
 Every change gets a tier, and the tier is enforced (docs/settings-model.md 5.4,
 5.5). It is `max(floor + web, riskModel)` capped at approve: the key's floor for

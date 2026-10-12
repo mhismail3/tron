@@ -57,6 +57,8 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
         let staged: Bool
         let reason: String?
         let warning: String?
+        let head: String?
+        let branch: String?
     }
 
     let tier: String
@@ -65,6 +67,8 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
     let status: String
     let failure: String?
     let undoOf: String?
+    /// A later fact's subject: for an outside change, the Tron change whose value it replaced.
+    let refersTo: String?
     let applyAgainOf: String?
     let presentation: Presentation?
 

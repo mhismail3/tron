@@ -1,5 +1,7 @@
 import { KEYS, SECTIONS, builtinValue, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_LABELS, type FormatContext, type LayerId, type Qualifiers } from "./settings-types.js";
+import type { ProjectGitState } from "./project-settings-writer.js";
+import { instanceId } from "./settings-outside.js";
 
 /**
  * The one resolver (docs/settings-model.md section 3, foundation F4).
@@ -48,7 +50,12 @@ export interface ProjectStore {
   unreadable?: true;
   applied: boolean;
   reason?: "untrusted";
+  /** The store's git state, which badges each Project value (doc 5.7). */
+  git?: ProjectGitState;
 }
+
+/** The latest outside change of a key instance since Tron last wrote it (doc 5.6). */
+export interface OutsideMark { changeId: string; applyAgain: boolean; before: string; after: string }
 
 /** Every store the target's layers read, loaded by their owners (doc 3.2). */
 export interface SettingsStores {
@@ -63,6 +70,8 @@ export interface SettingsStores {
   trust: Record<string, boolean>;
   /** The maintainer's floor overrides (Mac policy, doc 5.4). */
   floors: FloorOverrides;
+  /** Outside-change marks by layer and key instance (doc 5.6). */
+  outside?: Partial<Record<"mac" | "project", Record<string, OutsideMark>>>;
 }
 
 /** Capability-constrained option sources (doc 3.6, 7.5). */
@@ -71,7 +80,7 @@ export interface OptionSources {
   clamp(source: string, dependency: unknown, value: unknown): unknown;
 }
 
-export interface Badge { kind: string; label: string; detail?: string; action?: { kind: string; label: string } }
+export interface Badge { kind: string; label: string; detail?: string; action?: { kind: string; label: string; changeId?: string } }
 
 export interface LayerValue {
   layer: LayerId;
@@ -306,6 +315,7 @@ function resolveInstance(
     badges.push({ kind: "state", label: "Not applied (untrusted)", detail: `${LAYER_LABELS[notApplied.layer]}: ${format(notApplied.value)}`,
       action: { kind: "reviewTrust", label: "Review trust" } });
   }
+  badges.push(...storeStateBadges(key, qualifiers, stores, format));
   // Capability clamping (doc 3.6): a value its dependency does not support
   // resolves to the closest supported one, named by a Clamped badge.
   if (key.optionsSource && value !== undefined && layer !== "chat") {
@@ -349,6 +359,39 @@ function resolveInstance(
     ...(fixedAt ? { fixedAt } : {}),
     layers: key.redacted ? layerValues.map(({ value: _value, ...rest }) => rest) : layerValues,
   };
+}
+
+/** Store-state badges (doc 5.6, 5.7): a Project value's git state, and a value
+ * changed outside Tron with Apply again where it replaced a value Tron wrote. */
+function storeStateBadges(key: KeyDeclaration, qualifiers: Qualifiers, stores: SettingsStores, format: (value: unknown) => string): Badge[] {
+  const badges: Badge[] = [];
+  const projectBinding = key.layers.project;
+  const git = stores.project?.git;
+  if (projectBinding && git && stores.layers.includes("project")) {
+    const at = (document: Record<string, unknown>) => {
+      const view = { ...stores, project: { ...stores.project!, document } };
+      return readBinding(view, "project", projectBinding, qualifiers, true, key.id) ?? readBinding(view, "project", projectBinding, qualifiers, false, key.id);
+    };
+    const working = at(stores.project!.document);
+    if (git.kind === "local") {
+      if (working !== undefined) badges.push({ kind: "state", label: "Local only", detail: `Project: ${git.reason}` });
+    } else {
+      const committed = at(git.head ?? {});
+      if (JSON.stringify(working ?? null) !== JSON.stringify(committed ?? null)) {
+        const staged = JSON.stringify(at(git.index ?? {}) ?? null) === JSON.stringify(working ?? null);
+        badges.push({ kind: "state", label: staged ? "Staged" : "Uncommitted", detail: `Project: ${format(working)}; committed: ${format(committed)}` });
+      }
+    }
+  }
+  for (const layer of ["project", "mac"] as const) {
+    if (!stores.layers.includes(layer) || !key.layers[layer]) continue;
+    const marks = stores.outside?.[layer];
+    const mark = marks?.[instanceId(key.id, qualifiers)] ?? marks?.[instanceId(key.id, key.fixed ?? {})];
+    if (!mark) continue;
+    badges.push({ kind: "state", label: "Changed outside Tron", detail: `${LAYER_LABELS[layer]}: ${mark.before} → ${mark.after}`,
+      ...(mark.applyAgain ? { action: { kind: "applyAgain", label: "Apply again", changeId: mark.changeId } } : {}) });
+  }
+  return badges;
 }
 
 /** The layers a target has (doc 3.3): a target has a layer when it has its store. */

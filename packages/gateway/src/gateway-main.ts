@@ -15,6 +15,7 @@ import { SettingsService } from "./admin/settings-service.js";
 import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
 import { SettingsRiskEvaluator } from "./admin/settings-risk.js";
 import { SettingsChangeRecord } from "./admin/settings-record.js";
+import { OutsideChanges } from "./admin/settings-outside.js";
 import { SettingsApprovals } from "./admin/settings-approvals.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
@@ -191,6 +192,11 @@ const settingsModel = new SettingsModel({
   modelRuntime,
   homeMemoryModel: async () => (await sessions.homeOwner()?.memoryStatus())?.model,
 });
+const settingsRecord = new SettingsChangeRecord(config.tronHome);
+// Outside changes (docs/settings-model.md 5.6): every settings read compares the
+// Mac and Project stores with what Tron last observed; file events only prompt.
+const outsideSettings = new OutsideChanges(config.tronHome, config.agentDir, settingsRecord, settingsModel.observedReaders);
+settingsModel.observeOutside(outsideSettings);
 const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
@@ -526,6 +532,7 @@ const packages = new PackageService(
   (topic, payload) => transport?.broadcast(topic, payload),
   workRegistry,
   managedSubagents,
+  outsideSettings,
 );
 // Hook listings load extensions for a scope without a session; the owner never
 // touches a runtime, so no session or global registration is involved.
@@ -592,6 +599,7 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
   stopping = true;
   const stopDrainId = drainAcceptedWork ? sessions.administrativeDrainSnapshot().drainId : undefined;
   service.dispose();
+  outsideSettings.dispose();
   const stoppingAt = performance.now();
   // The last record of this process: the next process's gateway.started
   // follows after launchd and the launcher.
@@ -797,7 +805,7 @@ async function runStopDrain(): Promise<void> {
 // The one settings change path (docs/settings-model.md 5). Agents reach it
 // through the `settings` tool; the slots read it late-bound from the registry.
 const settingsRisk = new SettingsRiskEvaluator(jevClient);
-const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(config.tronHome), new SettingsApprovals(config.tronHome), {
+const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(config.tronHome), {
   assessRisk: async (input, signal) => {
     try { return await settingsRisk.assess(input, signal); }
     catch (error) {
@@ -860,6 +868,9 @@ const service = new GatewayService({
   ),
   ...(sessionSearch ? { sessionSearch } : {}),
 });
+outsideSettings.startWatching(error => logger.log("warning", "Outside settings comparison failed", {
+  event: "settings.outside.failed", source: "settings", error: error instanceof Error ? error.message : String(error),
+}));
 transport = new GatewayServer({
   host: config.host,
   port: config.port,

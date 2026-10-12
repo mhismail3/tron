@@ -88,6 +88,8 @@ struct SettingsBadge: Decodable, Hashable, Sendable {
     struct Action: Decodable, Hashable, Sendable {
         let kind: String
         let label: String
+        /// The record entry an action applies to (Apply again names its outside change).
+        var changeId: String? = nil
     }
     let kind: String
     let label: String

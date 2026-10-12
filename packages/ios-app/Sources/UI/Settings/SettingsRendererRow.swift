@@ -13,6 +13,8 @@ struct SettingsRendererRow: View {
     let dependencyDisplay: String
     let error: String?
     let onChange: (JSONValue?) -> Void
+    /// Apply again on an outside change this row's badge names (settings-model.md 5.6).
+    var onApplyAgain: ((String) -> Void)? = nil
 
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -186,6 +188,15 @@ struct SettingsRendererRow: View {
                                 .buttonStyle(.plain)
                                 .accessibilityIdentifier("\(settingsRowIdentifier(setting))-\(action.kind)")
                         }
+                    }
+                }
+                // Apply again acts on the change record, like Undo in Changes:
+                // it is offered wherever the Gateway serves it, at its own layer.
+                ForEach(Array(badges.compactMap(\.action).filter { $0.kind == "applyAgain" }.enumerated()), id: \.offset) { _, action in
+                    if let changeID = action.changeId, let onApplyAgain {
+                        Button { onApplyAgain(changeID) } label: { TronInlineActionLabel(action.label) }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("\(settingsRowIdentifier(setting))-applyAgain")
                     }
                 }
                 if showsHelp, let help = presentation?.help {

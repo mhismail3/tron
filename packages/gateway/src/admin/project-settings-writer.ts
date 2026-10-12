@@ -106,3 +106,47 @@ async function stage(repository: string | null, path: string, relativePath: stri
     ...(warnings.length ? { warning: warnings.join("; ") } : {}),
   };
 }
+
+/** The repository holding a project's `.pi/settings.json`, its `HEAD` commit and
+ * branch, for outside-change entries and commit facts (doc 5.6, 5.7). Undefined
+ * outside a repository. */
+export async function gitHeadState(root: string): Promise<{ root: string; path: string; head: string | null; branch: string | null } | undefined> {
+  const top = await git(root, ["rev-parse", "--show-toplevel"]);
+  if (!top.ok) return undefined;
+  const repository = top.stdout.trim();
+  const head = await git(repository, ["rev-parse", "--verify", "-q", "HEAD"]);
+  const branch = await git(repository, ["branch", "--show-current"]);
+  return {
+    root: repository, path: relative(repository, projectSettingsPath(root)),
+    head: head.ok ? head.stdout.trim() : null, branch: branch.ok && branch.stdout.trim() ? branch.stdout.trim() : null,
+  };
+}
+
+/** The blob id git holds for a revision spec (`HEAD:<path>`, `:<path>`), if any. */
+export async function stagedBlob(root: string, spec: string): Promise<string | undefined> {
+  const blob = await git(root, ["rev-parse", "--verify", "-q", spec]);
+  return blob.ok ? blob.stdout.trim() : undefined;
+}
+
+export type ProjectGitState =
+  | { kind: "local"; reason: "not in a git repository" | ".pi is ignored by git" }
+  | { kind: "repo"; head?: Record<string, unknown>; index?: Record<string, unknown> };
+
+/** The Project store's git state, from which the resolver badges each value
+ * Project, Staged, Uncommitted or Local only (doc 5.7). A side that is absent or
+ * cannot be parsed is an empty document. */
+export async function projectGitState(root: string): Promise<ProjectGitState> {
+  const state = await gitHeadState(root);
+  if (!state) return { kind: "local", reason: "not in a git repository" };
+  if ((await git(state.root, ["check-ignore", "-q", "--", state.path])).ok) return { kind: "local", reason: ".pi is ignored by git" };
+  const show = async (spec: string) => {
+    const result = await git(state.root, ["show", spec]);
+    if (!result.ok || !result.stdout.trim()) return undefined;
+    try {
+      const value = JSON.parse(result.stdout.replace(/^\uFEFF/u, "")) as unknown;
+      return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+    } catch { return undefined; }
+  };
+  const [head, index] = await Promise.all([state.head ? show(`HEAD:${state.path}`) : undefined, show(`:${state.path}`)]);
+  return { kind: "repo", ...(head ? { head } : {}), ...(index ? { index } : {}) };
+}

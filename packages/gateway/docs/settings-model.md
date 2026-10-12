@@ -920,10 +920,8 @@ F2. The Gateway compares each store it resolves from with the record:
 - each known project's `.pi/settings.json` and `.pi/mcp.json`, for every
   project with an open chat or a dashboard entry.
 
-Today nothing does this; the only signal is the post-write `settings.changed`
-broadcast (`gateway-service.ts:1977`). File events are lossy (editors
-rename-replace, events drop), so the comparison rescans by content digest and
-treats events only as a prompt to rescan.
+File events are lossy (editors rename-replace, events drop), so the comparison
+rescans by content digest and treats events only as a prompt to rescan.
 
 When a store's value for a key differs from the value last logged for it:
 
@@ -954,6 +952,51 @@ switch that drops a value Tron wrote is an outside change with Apply again
 ([Q25](#101-decisions)). A branch switch that carries the edit along changes no
 value, so nothing is recorded beyond the badge the git state now gives
 ([5.7](#57-project-writes)).
+
+### 5.6a Implemented: outside changes
+
+`OutsideChanges` (`src/admin/settings-outside.ts`) owns comparison. It keeps the
+per-key values Tron last observed in each compared store, with the change that
+wrote each one, in `<tronHome>/gateway/settings/observed.json`; the record stays
+audit only. Every settings read reconciles the target's stores first, and a
+debounced directory event (Mac agent directory, each known project's `.pi/`)
+prompts the same comparison, so neither a dropped event nor a rename-replace hides
+a change. The provider-request boundary reads values only. Compared stores are the
+Mac `settings.json` and `trust.json` and each known project's `.pi/settings.json`
+(projects whose settings were read, at most 64). `models.json` and `mcp.json`
+carry no schema key, so there is no per-key diff to record for them.
+
+- A store's first sight is its baseline. Afterwards each differing key instance is
+  one `outside` entry (actor `outside`, the file as its id, the target `mac` or the
+  project, `HEAD` and branch for a repository file). Redacted keys are compared by
+  digest and recorded as changed only.
+- Tron's writers bracket the store: the change path and the package owner call
+  `begin` before writing and `end` after, so a comparison never reads a half-written
+  Tron change and Tron's value is adopted with its change id. A planned write that
+  did not land (rolled back) is adopted silently; any other difference found then
+  is still an outside change.
+- An outside entry that replaced or removed a value Tron wrote refers to that
+  change (`refersTo`); its row badge `Changed outside Tron` then carries the Apply
+  again action with the entry id. `settings.applyAgain` writes Tron's value back
+  as an ordinary change with `applyAgainOf`, expecting the outside value, so a
+  newer change refuses it.
+- The tier is the key's floor for the change's direction and decides only the
+  push ("Changed outside Tron"), listing only the keys whose tier is not quiet.
+  After-apply effects and the `settings.changed` broadcast are the same as for
+  any change. The risk model is not consulted: an outside change has no requester
+  to disclose.
+- Project rows carry their git state from `HEAD`, the index and the working file:
+  no extra badge when the value matches `HEAD`, otherwise `Staged` or
+  `Uncommitted`, and `Local only` outside a repository or for an ignored `.pi/`.
+  When `HEAD` holds the blob Tron staged, `committed` with the commit is appended
+  to that change.
+
+The real-boundary journey is the `outside changes` block of
+`src/admin/settings-change.integration.test.ts`: Mac hand edits (one entry per
+key, no echo of Tron's write, rename-replace, redaction, Apply again and its stale
+refusal), a file event alone with quiet versus notify pushes, and a temp
+repository through staged, committed, unstaged, stash, restore, a carrying and a
+dropping branch switch, and a fast-forward pull.
 
 ### 5.7 Project writes
 
