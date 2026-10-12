@@ -472,7 +472,11 @@ Each activation waits for and freezes the preceding view before provider admissi
 - **Summarizer.** An injected dependency resolved from the Gateway-wide model
   runtime, never from a session. It returns summary content only: Home labels each
   leaf line from its canonical item kind, labels multi-message lines as summaries rather than a single speaker, and refuses
-  echoed role labels or compactor repair instructions. Older invalid stored
+  echoed role labels or compactor repair instructions. Rejected output receives
+  same-conversation corrective feedback within the shared five-attempt size/content
+  bound; it is never stored or selected as a shortest candidate. If no valid
+  candidate survives, memory stays blocked until supported operator recovery.
+  Older invalid stored
   summaries are revoked through the episodic projection and rebuilt on demand.
 - **Checkpoints.** Opening the store publishes a checkpoint only when the episodic
   store's threshold is crossed, not on every open

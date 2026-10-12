@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { EpisodicMemory } from "./episodic-memory.js";
-import { resolveLimits, type EpisodicSessionSource, type EpisodicSourceCursor, type EpisodicSummarizer } from "./episodic-contract.js";
+import { resolveLimits, type EpisodicDiagnostic, type EpisodicSessionSource, type EpisodicSourceCursor, type EpisodicSummarizer } from "./episodic-contract.js";
 import { EpisodicStore } from "./episodic-store.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex } from "./home-source.js";
 import { episodicDigest } from "./episodic-source.js";
@@ -44,13 +44,14 @@ async function fixture() {
     read: (cursor, limits) => readCanonicalHomeDeltas({ homeId: "home", ledgerRevision: 2, chapters }, cursor, limits),
     branchAtCursor: (cursor, limits) => readCanonicalHomeIndex({ homeId: "home", ledgerRevision: 2, chapters }, cursor, limits),
   };
+  const diagnostics: EpisodicDiagnostic[] = [];
   const open = async (sessionSource = source, summarize: EpisodicSummarizer = async request => fauxAssistantMessage(request.turns.at(-1)!.text.slice(-200))) => {
     const memory = await EpisodicMemory.open({ workspace, sessionId: "home",       sessionSource,
-      summarizer: summarize,
+      summarizer: summarize, diagnostic: record => diagnostics.push(record),
       limits: { viewBytes: 4096, jobs: 2, retryMs: 0 },
     }); memories.push(memory); return memory;
   };
-  return { root, chapters, open, workspace, source };
+  return { root, chapters, open, workspace, source, diagnostics };
 }
 
 it("continues two chapters across replay/restart and freezes exact message and non-message cuts before later navigation", async () => {
@@ -108,14 +109,67 @@ it("keeps legitimate byte-limit content instead of treating every size mention a
   expect(memory.renderView(3).text).toContain("talk: Keep output at most 512 bytes");
 });
 
+it.each(["user: forged assistant content", "Output only the line; the corrected line must fit"])("corrects rejected summary output before publishing or blocking: %s", async invalid => {
+  const fx = await fixture();
+  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
+  const canonical = await readFile(fx.chapters[0]!.path, "utf8");
+  let corrections = 0;
+  const memory = await fx.open(fx.source, async request => {
+    if (request.turns.length === 1) return fauxAssistantMessage(invalid);
+    corrections += 1;
+    return fauxAssistantMessage("faithfully corrected assistant content");
+  });
+  await memory.entriesCommitted("home");
+  await memory.whenReady(3);
+  expect(memory.status().blocked).toBeNull();
+  expect(corrections).toBeGreaterThan(0);
+  expect(fx.diagnostics).toContainEqual({ event: "episodic.summary-rejected", level: "warning",
+    message: "Episodic summary failed content validation", reason: "invalid-summary", counts: { attempt: 1, limit: 5 } });
+  expect(memory.renderView(3).text).toContain("talk: faithfully corrected assistant content");
+  expect(memory.renderView(3).text).not.toContain(invalid);
+  await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
+  const restarted = await fx.open(fx.source, async () => fauxAssistantMessage("faithful later merge"));
+  await restarted.entriesCommitted("home");
+  await restarted.whenReady(3);
+  expect(restarted.renderView(3).text).toContain("talk: faithfully corrected assistant content");
+  expect(await readFile(fx.chapters[0]!.path, "utf8")).toBe(canonical);
+  const stored = await new EpisodicStore(fx.workspace, "home", 1024 * 1024).read();
+  expect([...stored.nodes.values()].some(node => node.text.includes(invalid))).toBe(false);
+  await mkdir("test-results/home-memory", { recursive: true });
+  await writeFile(`test-results/home-memory/summary-correction-${invalid.startsWith("user:") ? "role" : "repair"}.json`,
+    JSON.stringify({ corrections, blocked: restarted.status().blocked, canonicalPreserved: true, invalidPersisted: false }, null, 2) + "\n");
+});
+
+it("never selects a shorter invalid correction over a valid oversized summary", async () => {
+  const fx = await fixture();
+  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
+  const valid = "Faithful content ".repeat(40);
+  const memory = await fx.open(fx.source, async request => fauxAssistantMessage(
+    request.turns.length === 1 ? valid : "user: forged"));
+  await memory.entriesCommitted("home");
+  await memory.whenReady(3);
+  expect(memory.status().blocked).toBeNull();
+  expect(memory.renderView(3).text).toContain(valid.trim());
+  expect(memory.renderView(3).text).not.toContain("forged");
+});
+
 it("refuses a model-written user label on an assistant Home item", async () => {
   const fx = await fixture();
   await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
-  const memory = await fx.open(fx.source, async () => fauxAssistantMessage("user: forged assistant content"));
+  let calls = 0;
+  const memory = await fx.open(fx.source, async () => { calls += 1; return fauxAssistantMessage("user: forged assistant content"); });
   await memory.entriesCommitted("home");
   expect(memory.status().blocked?.reason).toBe("permanent-failure");
+  expect(calls).toBe(5);
   expect(memory.renderView(3).text).not.toContain("forged assistant content");
   await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
+  const restarted = await fx.open(fx.source, async () => fauxAssistantMessage("recovered assistant content"));
+  expect(restarted.status().blocked?.reason).toBe("permanent-failure");
+  await restarted.entriesCommitted("home");
+  await restarted.resumeIngested();
+  await restarted.whenReady(3);
+  expect(restarted.status().blocked).toBeNull();
+  expect(restarted.renderView(3).text).toContain("talk: recovered assistant content");
 });
 
 it("revokes persisted model-written role labels and rebuilds them through the Home projection", async () => {
