@@ -97,15 +97,15 @@ export class PackageService {
   private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<{ manager: DefaultPackageManager; settings: SettingsManager }> {
     const trust = requireProjectTrust
       ? await this.trust.requireResolved(cwdInput)
-      : await this.trust.inspect(cwdInput).then((inspection) => ({ cwd: inspection.cwd, trusted: inspection.effectiveDecision === true }));
-    const settings = SettingsManager.create(trust.cwd, this.agentDir, { projectTrusted: trust.trusted });
+      : await this.trust.inspect(cwdInput).then((inspection) => ({ cwd: inspection.cwd, projectDir: inspection.projectDir, trusted: inspection.effectiveDecision === true }));
+    const settings = SettingsManager.create(trust.projectDir, this.agentDir, { projectTrusted: trust.trusted });
     // The SDK deliberately exposes load failures through drainErrors rather than
     // throwing from getters. Never let a malformed settings file look like an
     // empty package inventory or authorize a mutation against that false view.
     if (settings.drainErrors().length > 0) {
       throw new GatewayError("conflict", "Canonical package settings could not be loaded");
     }
-    return { manager: new DefaultPackageManager({ cwd: trust.cwd, agentDir: this.agentDir, settingsManager: settings }), settings };
+    return { manager: new DefaultPackageManager({ cwd: trust.cwd, projectDir: trust.projectDir, agentDir: this.agentDir, settingsManager: settings }), settings };
   }
 
   private async flushSettings(settings: SettingsManager): Promise<void> {

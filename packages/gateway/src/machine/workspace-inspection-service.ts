@@ -281,6 +281,18 @@ async function repositoryRoot(cwd: string): Promise<string | undefined> {
   return await realpath(value);
 }
 
+/**
+ * The Project root of a canonical chat cwd: the directory whose `.pi/` is the
+ * Project layer, keys project trust and is the SDK session's `projectDir`
+ * (settings-model decision 31). It is the realpath of the enclosing Git
+ * worktree's top level, so each linked worktree is its own Project, and the cwd
+ * itself outside a repository. The chat keeps its own cwd for tools and
+ * context files.
+ */
+export async function projectRoot(cwd: string): Promise<string> {
+  return (await repositoryRoot(cwd)) ?? cwd;
+}
+
 async function statusInspectionFromRoot(workspaceRoot: string): Promise<WorkspaceRepositoryInspection | undefined> {
   const root = await repositoryRoot(workspaceRoot);
   if (!root) return undefined;

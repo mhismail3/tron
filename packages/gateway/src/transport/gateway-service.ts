@@ -1950,7 +1950,7 @@ export class GatewayService {
         const scope = params.scope === undefined ? "project" : oneOf(params.scope, "scope", ["global", "project"] as const);
         if (scope === "global") return safeJson(this.dependencies.settings.get(cwd, false));
         const inspection = await this.dependencies.trust.inspect(cwd);
-        return safeJson(this.dependencies.settings.get(inspection.cwd, inspection.effectiveDecision === true));
+        return safeJson(this.dependencies.settings.get(inspection.projectDir, inspection.effectiveDecision === true));
       }
       case "settings.update":
         return this.mutation(client, method, params, async () => {
@@ -1958,11 +1958,11 @@ export class GatewayService {
           const cwdInput = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();
           const resolved = scope === "project"
             ? await this.dependencies.trust.requireResolved(cwdInput)
-            : { cwd: await this.dependencies.trust.canonicalDirectory(cwdInput), trusted: false };
+            : await this.dependencies.trust.canonicalDirectory(cwdInput).then((cwd) => ({ cwd, projectDir: cwd, trusted: false }));
           const settingsSlot = scope === "project" && params.sessionId !== undefined ? await this.openedSlot(client, params) : undefined;
-          if (settingsSlot && settingsSlot.cwd !== resolved.cwd) throw new GatewayError("conflict", "Settings session belongs to a different project");
+          if (settingsSlot && settingsSlot.projectDir !== resolved.projectDir) throw new GatewayError("conflict", "Settings session belongs to a different project");
           const result = await this.dependencies.settings.update(params.patch, {
-            cwd: resolved.cwd,
+            cwd: resolved.projectDir,
             scope,
             projectTrusted: scope === "project" && resolved.trusted,
             ...(settingsSlot ? { modelRuntime: settingsSlot.modelRuntime } : {}),
@@ -1972,7 +1972,7 @@ export class GatewayService {
             this.dependencies.globalProviderResources.requestReload();
           }
           if (params.patch && typeof params.patch === "object" && "compaction" in params.patch) {
-            this.dependencies.sessions.refreshCompactionPolicies(scope, resolved.cwd);
+            this.dependencies.sessions.refreshCompactionPolicies(scope, resolved.projectDir);
           }
           this.dependencies.broadcast("settings.changed", { scope, cwd: resolved.cwd });
           return safeJson(result);
@@ -1986,11 +1986,11 @@ export class GatewayService {
             string(params.cwd, "cwd", { max: 4_096 }),
             decision,
             async (inspection) => this.dependencies.sessions.reloadProject(
-              inspection.cwd,
+              inspection.projectDir,
               inspection.effectiveDecision === true,
               false,
             ),
-            async (inspection) => this.dependencies.sessions.commitProjectReload(inspection.cwd),
+            async (inspection) => this.dependencies.sessions.commitProjectReload(inspection.projectDir),
           );
           this.dependencies.broadcast("trust.changed", safeJson(result));
           return safeJson(result);
@@ -2566,7 +2566,7 @@ export class GatewayService {
     if (!cwd) throw new GatewayError("invalid_request", "Project MCP scope requires cwd");
     const resolved = await this.dependencies.trust.requireResolved(cwd);
     if (!resolved.trusted) throw new GatewayError("unauthenticated", "Project MCP servers require a trusted project");
-    return { scope, cwd: resolved.cwd, trusted: true };
+    return { scope, cwd: resolved.projectDir, trusted: true };
   }
 
   private async modelRuntime(params: Record<string, unknown>): Promise<ModelRuntime> {

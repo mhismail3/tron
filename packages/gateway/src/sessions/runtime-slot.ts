@@ -1292,6 +1292,12 @@ export class RuntimeSlot {
     return this.sessionManager.getCwd();
   }
 
+  /** The Project root the live runtime loaded its Project layer from. Trust and
+   * Project-layer reloads address every chat of one root together. */
+  get projectDir(): string {
+    return this.runtime.session.projectDir;
+  }
+
   get modelRuntime(): ModelRuntime {
     this.assertNoTrustReload();
     return this.runtime.session.modelRuntime;
@@ -1956,7 +1962,9 @@ export class RuntimeSlot {
       // Tron modules plus tron-home.
       // Home delegates only through Home tasks, never through managed pi-subagents.
       const managedSubagents = home ? undefined : this.dependencies.managedSubagents;
-      const settingsManager = home ? undefined : SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
+      // The Project layer is the root's `.pi/` (settings-model decision 31); the
+      // chat keeps its cwd for tools, context files and session grouping.
+      const settingsManager = home ? undefined : SettingsManager.create(trust.projectDir, this.dependencies.agentDir, { projectTrusted: trust.trusted });
       const managedLoaderOptions = settingsManager ? await managedSubagents?.loaderOptions(settingsManager,
         (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages)) : undefined;
       const extensionFactories = home
@@ -1987,6 +1995,7 @@ export class RuntimeSlot {
       const services = await createAgentSessionServices({
         ...(settingsManager ? { settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager } : {}),
         cwd: trust.cwd,
+        projectDir: trust.projectDir,
         agentDir: this.dependencies.agentDir,
         modelRuntime,
         resourceLoaderOptions: {

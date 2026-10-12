@@ -310,7 +310,7 @@ commands, or promote/restart a Gateway as part of this process.
 ### Tron-patched `pi-coding-agent`
 
 The Gateway needs the SDK's `projectDir` option (the Project layer is the
-worktree root's `.pi/`, settings-model decision 31), which no published
+worktree root's `.pi/`, see [Project root](#project-root)), which no published
 release has. Until one does, `pi-coding-agent` comes from a Tron-built tarball
 instead of the registry, at the same version as the rest of the family.
 `pi-coding-agent-patch.json` is its only owner. It records the upstream tag and
@@ -3317,6 +3317,30 @@ the current ordered set after unregistering old extension layers, so removing or
 reordering a contributor does not leave stale fields behind or disturb built-in
 providers. Project-scoped package and settings changes do not reload or mutate the
 global provider runtime.
+
+### Project root
+
+The Project layer is the `.pi/` of a chat's Project root, even for a chat started
+in a subdirectory (settings-model decision 31). `projectRoot()` in
+`src/machine/workspace-inspection-service.ts` is the only resolver: the realpath
+of `git rev-parse --show-toplevel` for the canonical chat cwd, so each linked
+worktree is its own Project, and the cwd itself outside a repository.
+`TrustService` resolves it with every inspection (`TrustInspection.projectDir`)
+and records, reads and re-reads the decision for the root, with
+`hasTrustRequiringProjectResources(cwd, projectDir)`. Each runtime build passes
+the root as the SDK's `projectDir` to `SettingsManager.create()` and
+`createAgentSessionServices()`, so Pi reads Project settings, packages,
+`.pi/{extensions,skills,prompts,themes}`, `SYSTEM.md` and built-in MCP
+configuration from the root and starts stdio MCP servers there; extensions read
+`ctx.projectDir`. The chat's own cwd still owns tools, context files
+(`AGENTS.md` from the cwd and its parents), session grouping and `ctx.cwd`.
+Trust changes and Project settings reload every live chat of the root
+(`RuntimeSlot.projectDir`); session-free package, hook and settings reads,
+compaction policy and project MCP administration use the same root.
+`src/sessions/project-root.integration.test.ts` proves a nested chat against a
+real repository, linked worktree, stdio MCP server and faux model, writing
+`test-results/project-root-864.json`. The SDK option comes from the
+[Tron-patched `pi-coding-agent`](#tron-patched-pi-coding-agent).
 
 ### Tron context and delegated children
 

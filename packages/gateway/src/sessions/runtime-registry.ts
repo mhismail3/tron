@@ -2905,8 +2905,8 @@ export class RuntimeRegistry {
   private async projectTrustReloading(cwdInput: string): Promise<boolean> {
     if (this.trustReloadProjects.size === 0) return false;
     try {
-      const cwd = await this.options.trust.canonicalDirectory(cwdInput);
-      return this.trustReloadProjects.has(cwd);
+      const { projectDir } = await this.options.trust.inspect(cwdInput);
+      return this.trustReloadProjects.has(projectDir);
     } catch (error) {
       if (this.trustReloadProjects.size > 0) return true;
       throw error;
@@ -2938,7 +2938,7 @@ export class RuntimeRegistry {
       // pass: there is no room to make for it.
       const existing = await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         const current = this.slots.get(sessionId);
@@ -2969,7 +2969,7 @@ export class RuntimeRegistry {
       const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       return await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Automation session was retired before publication", true);
         }
         if (this.slots.has(sessionId)) {
@@ -3027,7 +3027,7 @@ export class RuntimeRegistry {
       // pass: there is no room to make for it.
       await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         this.requireLiveSlotCapacity();
@@ -3041,7 +3041,7 @@ export class RuntimeRegistry {
       );
       const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       await this.mutex.run(() => {
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Session creation was retired before publication", true);
         }
         if (this.slots.has(manager.getSessionId())) {
@@ -3521,7 +3521,7 @@ export class RuntimeRegistry {
       ));
       await this.mutex.run(() => {
         if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration
-            || this.trustReloadProjects.has(entry.canonicalCwd)) {
+            || this.trustReloadProjects.has(slot!.projectDir)) {
           throw new GatewayError("busy", "Session runtime start was retired before publication", true);
         }
         const ambiguous = this.indexAmbiguousSessionIds();
@@ -3571,7 +3571,7 @@ export class RuntimeRegistry {
       // is a mutation whose owner settles it.
       return await this.coldLoadGate.run(undefined, () => this.mutex.run(async () => {
         this.assertSlotAdmissionOpen();
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         this.requireLiveSlotCapacity();
@@ -3613,17 +3613,19 @@ export class RuntimeRegistry {
     }
   }
 
-  async reloadProject(cwdInput: string, projectTrusted?: boolean, publish = true): Promise<void> {
-    const cwd = await this.options.trust.canonicalDirectory(cwdInput);
+  /** Reload every live runtime of one Project root (`TrustInspection.projectDir`),
+   * including chats in its subdirectories. */
+  async reloadProject(projectDirInput: string, projectTrusted?: boolean, publish = true): Promise<void> {
+    const projectDir = await this.options.trust.canonicalDirectory(projectDirInput);
     const transactional = !publish;
     const slots = await this.mutex.run(() => {
-      const current = [...this.slots.values()].filter((slot) => slot.cwd === cwd);
+      const current = [...this.slots.values()].filter((slot) => slot.projectDir === projectDir);
       if (current.some((slot) => slot.isBusy)) {
         throw new GatewayError("busy", "Stop active sessions before changing project trust", true);
       }
       if (transactional) {
         current.forEach((slot) => slot.beginTrustReload());
-        this.trustReloadProjects.add(cwd);
+        this.trustReloadProjects.add(projectDir);
       }
       return current;
     });
@@ -3662,18 +3664,18 @@ export class RuntimeRegistry {
     if (publish) slots.forEach((slot) => slot.commitReload());
   }
 
-  refreshCompactionPolicies(scope: "global" | "project", cwd: string): void {
+  refreshCompactionPolicies(scope: "global" | "project", projectDir: string): void {
     for (const slot of this.slots.values()) {
-      if (scope === "global" || slot.cwd === cwd) slot.refreshCompactionPolicy();
+      if (scope === "global" || slot.projectDir === projectDir) slot.refreshCompactionPolicy();
     }
   }
 
-  async commitProjectReload(cwdInput: string): Promise<void> {
-    const cwd = await this.options.trust.canonicalDirectory(cwdInput);
+  async commitProjectReload(projectDirInput: string): Promise<void> {
+    const projectDir = await this.options.trust.canonicalDirectory(projectDirInput);
     await this.mutex.run(() => {
-      const slots = [...this.slots.values()].filter((slot) => slot.cwd === cwd);
+      const slots = [...this.slots.values()].filter((slot) => slot.projectDir === projectDir);
       slots.forEach((slot) => slot.commitReload());
-      this.trustReloadProjects.delete(cwd);
+      this.trustReloadProjects.delete(projectDir);
     });
   }
 

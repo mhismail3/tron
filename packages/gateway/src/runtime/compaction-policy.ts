@@ -86,7 +86,7 @@ export class CompactionOperationPolicy {
   }
 
   refresh(): void {
-    const settings = SettingsManager.create(this.session.sessionManager.getCwd(), this.agentDir, { projectTrusted: this.session.settingsManager.isProjectTrusted() });
+    const settings = SettingsManager.create(this.session.projectDir, this.agentDir, { projectTrusted: this.session.settingsManager.isProjectTrusted() });
     if (settings.drainErrors().length) {
       this.warning = "Canonical compaction settings could not be loaded. The last valid configuration remains in use.";
       throw new GatewayError("conflict", this.warning);
