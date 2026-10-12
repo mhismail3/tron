@@ -64,6 +64,10 @@ describe("Home wakes on its own task results (#749)", () => {
     // Only the wake ran: no user message exists in this chapter, and the delivered result is the first entry of its turn.
     expect(userMessages(entries)).toHaveLength(0);
     expect(results(entries)).toHaveLength(1);
+    const delivered = results(entries)[0] as Entry & { content?: string };
+    expect(delivered.content).toMatch(/^Home task: Finite work \| outcome: final \| subagents: 0 started, 0 stopped at end \| duration: \d+ms\n\nVerified result\n\nEvidence:\n- focused check passed$/);
+    expect(delivered.content).not.toContain("task-wake");
+    expect(delivered.content).not.toContain('"taskId"');
     expect(entries.some(entry => entry.type === "message" && entry.message?.role === "assistant"
       && JSON.stringify(entry).includes("Summary for the maintainer"))).toBe(true);
     // One push for the wake: its turn's own terminal push. The inbox sends no wake notice, and no per-task push.
