@@ -594,7 +594,17 @@ open:
   Project layer is the worktree root's `.pi/`; moving it changes what pi loads
   (extensions, skills, prompts and settings, under trust), so it is a deliberate
   change of its own with a test, recorded on slice 6 (#764) and PR 798, not part
-  of slice 5.
+  of slice 5. The pinned SDK 1.0.4 and published 1.1.0 support explicit
+  settings/resource services with a separate `createAgentSession` cwd, but the
+  built-in `createMcpExtension` still loads configuration and resolves default
+  transport cwd from the extension's actual cwd. Its canonical `loadMcpConfig`
+  reader is not publicly exported. A real SDK session with a stdio MCP fixture
+  confirms that moving the services alone leaves MCP in the nested directory.
+  #764 therefore needs a supported Project-root/config-base option covering
+  MCP load, writeback and relative/default transport paths under root trust,
+  while keeping actual chat/tool/extension cwd and its instruction hierarchy.
+  Neither a dependency upgrade to 1.1.0 nor changing chat cwd meets that contract;
+  no partial split, private import, replacement parser or context wrapper ships.
 - **Home memory model.** Until slice 9 moves it to `profile.json`, the Profile
   layer of `model.ref[role=memory]` is read from `home.json` through `HomeOwner`.
 
