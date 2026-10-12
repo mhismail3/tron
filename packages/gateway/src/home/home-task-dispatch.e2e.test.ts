@@ -119,9 +119,17 @@ describe("Home task authorization RPC", () => {
     await home.prompt("Try the finite work");
     await waitFor(() => home.snapshot().configurationBlocker === null, "Home authorization refusal terminal");
     expect(modelRefusal).toMatchObject({ isError: true });
-    expect(JSON.stringify(modelRefusal)).toContain(requestId);
+    // The model entrypoint fixes its worker choice into the authorized brief.
+    // Bind the error to that exact durable request, not the lower-level raw brief.
+    const modelTask = await f.registry.homeOwner().taskResult("model-grant-request");
+    expect(modelTask.intent.text).toContain("Finite work");
+    expect(modelTask.intent.text).toContain("Worker choice: model");
+    const modelRequest = (await list()).requests.find((pending: any) => pending.request.intentDigest === modelTask.intentDigest);
+    expect(modelRequest).toBeDefined();
+    expect(JSON.stringify(modelRefusal)).toContain(modelRequest.id);
     expect(JSON.stringify(modelRefusal)).toContain("grant-required");
-    evidence.push({ case: "rpc-scope-revocation", requestId, permissions, modelRefusal });
+    expect(await refused(f, "model-grant-retry", modelTask.intent.text)).toBe(modelRequest.id);
+    evidence.push({ case: "rpc-scope-revocation", requestId, permissions, modelRefusal, modelRequest });
   });
   it("approves an exact one-use grant through RPC and refuses mismatches expiry and reuse", async () => {
     const { f, rpc, list } = await controls();

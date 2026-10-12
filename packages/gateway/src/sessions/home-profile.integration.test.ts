@@ -106,6 +106,7 @@ async function fixture(label: string, observation?: ObservationModel): Promise<F
     tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime,
+    gatewayModelRuntime: runtime,
     trust,
     broadcast: () => {},
     sessionSummaryChanged: () => {},
@@ -434,6 +435,12 @@ describe("Tron Home learned profile", () => {
       return fauxAssistantMessage(fauxToolCall("delegate", { taskId: "profile-task-0001", intent, target: f.project }, { id: "delegate-call-0001" }), { stopReason: "toolUse" });
     };
     await homeActivation(f, "review it", [delegate, say("delegated")]);
+    // A fast worker may already have woken a newer Home chapter. Inspect the
+    // exact invocation across captured requests, not whichever chapter is last.
+    const admission = f.captured.filter(request => request.home).flatMap(request => request.messages)
+      .find(message => message.role === "toolResult" && message.toolCallId === "delegate-call-0001");
+    expect(admission, JSON.stringify(admission)).toMatchObject({ isError: false, details: { taskId: "profile-task-0001",
+      sessionId: expect.any(String), operationId: expect.any(String) } });
     await waitFor(() => f.captured.some((request) => !request.home && request.blob.includes("Preferences applied")) || undefined, "the worker's first request", { boundMs: 60_000 });
     const worker = f.captured.find((request) => !request.home && request.blob.includes("Preferences applied"))!;
     expect(worker.blob).toContain(`note ${item!.id}`);

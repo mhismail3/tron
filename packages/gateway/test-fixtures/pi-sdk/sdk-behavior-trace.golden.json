@@ -409,6 +409,29 @@
       "type": "model_change"
     },
     {
+      "customType": "tron.settings.v1",
+      "data": {
+        "fixed": {
+          "model.ref[role=chat]": {
+            "at": "<timestamp>",
+            "from": "chat",
+            "ref": "<id>",
+            "value": {
+              "id": "<id>",
+              "provider": "tron-sdk-behavior-trace"
+            }
+          }
+        },
+        "receiptId": "<id>",
+        "requestPins": {},
+        "settings": {}
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
       "customType": "tron.chat-invocation.v1",
       "data": {
         "createdAt": "<timestamp>",

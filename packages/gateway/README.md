@@ -635,6 +635,9 @@ MCP tools from hyphenated fixture servers, tool search over the tool the
 codemode exposure keeps undeclared, steer and follow-up, abort, and manual
 compaction. Its normalized trace is compared byte-for-byte with
 `packages/gateway/test-fixtures/pi-sdk/sdk-behavior-trace.golden.json`.
+Its explicit Chat model selection also persists `tron.settings.v1` with the fixed
+model source/reference and command receipt before the following invocation.
+That settings lineage is canonical behavior, not noise to prune from the trace.
 
 The trace records each distinct provider request's declared tool names,
 system-prompt section headings, a hash of the normalized prompt text and how
