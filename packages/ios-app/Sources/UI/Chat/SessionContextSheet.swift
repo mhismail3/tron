@@ -222,7 +222,9 @@ struct SessionContextSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                // Bounded cards own nested sheets. Keep their presenters mounted
+                // while a child covers this scrolled, medium-detent surface.
+                VStack(alignment: .leading, spacing: 18) {
                     if let snapshot = displayedPresentation {
                         if model.connectionState == .connected,
                            let target = model.presentationTarget(for: sessionID),
@@ -243,18 +245,9 @@ struct SessionContextSheet: View {
                         }
                         SessionContextUsageCard(snapshot: snapshot)
                             .settingsApprovals(.session(sessionID))
-                        TronProgressiveSheetLink(
-                            accessibilityLabel: "Changes",
-                            identity: "manage-session.changes.\(sessionID)",
-                            accent: .tronEmerald,
-                            detents: .fixed([.medium, .large]),
-                            destination: { SettingsChangesView(scope: .session(sessionID, projectCWD: displayedPresentation?.cwd)) }
-                        ) {
-                            TronGlassCard(accent: .tronEmerald) {
-                                manageRow(icon: "clock.arrow.circlepath", title: "Changes",
-                                          subtitle: "This chat's settings changes and approvals", accent: .tronEmerald) {}
-                            }
-                        }
+                        SettingsChangesLink(scope: .session(sessionID, projectCWD: displayedPresentation?.cwd),
+                                            subtitle: "This chat and its project's settings changes", onOpenSession: onForkCreated)
+                            .tronGlassSurface(accent: .tronEmerald)
                         .accessibilityIdentifier("manage-session-changes")
                         modelConfigurationCard(snapshot)
                         SettingsRendererView(
@@ -262,7 +255,9 @@ struct SessionContextSheet: View {
                             writeLayer: "chat",
                             embedded: true,
                             ownedLayers: ["chat"],
-                            externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]
+                            externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"],
+                            projectCWD: displayedPresentation?.cwd,
+                            sectionSupplement: { AnyView(settingsSectionSupplement($0)) }
                         )
                         TronGlassCard(accent: .tronEmerald) {
                             manageRow(icon: "gearshape", title: "Settings",
@@ -516,6 +511,26 @@ struct SessionContextSheet: View {
         }
     }
 
+    @ViewBuilder
+    private func settingsSectionSupplement(_ section: String) -> some View {
+        if section == "context" {
+            manageRow(icon: "doc.text.magnifyingglass", title: "Agent Instructions",
+                      subtitle: "Delivered: complete assembled instructions", accent: sessionRowAccent) { destination = .agentInstructions }
+            divider()
+            manageRow(icon: "shippingbox", title: "Project Resources",
+                      subtitle: "Loaded skills, subagents, prompts, and commands", accent: sessionRowAccent) { destination = .projectResources }
+        } else if section == "tools" {
+            manageRow(icon: "wrench.and.screwdriver", title: "Available Tools",
+                      subtitle: "Loaded tools and this chat's active selection", accent: sessionRowAccent) { destination = .tools }
+        } else if section == "run" {
+            TronProgressiveSheetLink(accessibilityLabel: "Hooks", accent: sessionRowAccent,
+                destination: { HooksSettingsView(projectCWD: displayedPresentation?.cwd) }) {
+                TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks",
+                                subtitle: "Loaded event handlers", accent: sessionRowAccent)
+            }
+        }
+    }
+
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
         TronGlassCard(accent: sessionRowAccent) {
             VStack(spacing: 0) {
@@ -524,27 +539,6 @@ struct SessionContextSheet: View {
                     divider()
                 }
                 gitRow
-                divider()
-                manageRow(
-                    icon: "doc.text.magnifyingglass",
-                    title: "Agent Instructions",
-                    subtitle: "Read the complete assembled instructions",
-                    accent: sessionRowAccent
-                ) { destination = .agentInstructions }
-                divider()
-                manageRow(
-                    icon: "wrench.and.screwdriver",
-                    title: "Available Tools",
-                    subtitle: "Turn tools on or off for this chat",
-                    accent: sessionRowAccent
-                ) { destination = .tools }
-                divider()
-                manageRow(
-                    icon: "shippingbox",
-                    title: "Project Resources",
-                    subtitle: "Skills, subagents, prompts, and commands",
-                    accent: sessionRowAccent
-                ) { destination = .projectResources }
                 divider()
                 manageRow(
                     icon: "point.3.connected.trianglepath.dotted",

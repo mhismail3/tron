@@ -1,14 +1,41 @@
 import SwiftUI
 import TronMobileCore
 
+/// The feed owns its sheet chrome, rather than nesting a second navigation
+/// stack and Done button inside a progressive settings destination.
+struct SettingsChangesLink: View {
+    let scope: SettingsChangesScope
+    let subtitle: String
+    var accent: Color = .tronEmerald
+    var onOpenSession: ((AppModel.SessionNavigationRoute) -> Void)?
+    @State private var presented = false
+
+    var body: some View {
+        Button { presented = true } label: {
+            TronSettingsRow(icon: "clock.arrow.circlepath", title: "Changes", subtitle: subtitle, accent: accent)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Changes")
+        .tronManagedSheet(isPresented: $presented, identity: "settings.changes.\(scope.storageKey)") {
+            SettingsChangesView(scope: scope, onOpenSession: onOpenSession.map { callback in
+                { route in presented = false; callback(route) }
+            })
+        }
+    }
+}
+
 /// The native audit feed is a disposable projection of `settings.history`; all
 /// decisions continue through the existing receipt-bound settings owners.
 struct SettingsChangesView: View {
     let scope: SettingsChangesScope
+    var onOpenSession: ((AppModel.SessionNavigationRoute) -> Void)?
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @AppStorage("settings.changes.lastLookedAt") private var lastLookedAt = ""
+    @State private var previousLookedAt: Date?
+    @State private var visitStartedAt = Date()
+    @State private var lookedStorageKey: String?
+    @State private var installedLoadID: LoadID?
     @State private var entries: [SettingsChangeHistoryEntry] = []
     @State private var pending: [SettingsApprovalRequest] = []
     @State private var cursor: String?
@@ -17,14 +44,17 @@ struct SettingsChangesView: View {
     @State private var sectionFilter = ""
     @State private var keyFilter = ""
     @State private var statusFilter = ""
-    @State private var selected: SettingsChangeHistoryEntry?
+    @State private var selected: SelectedChange?
+    private struct SelectedChange {
+        let entry: SettingsChangeHistoryEntry
+        let profileID: String
+    }
     @State private var errorMessage: String?
     @State private var loading = false
     @State private var loadGeneration = 0
     @State private var busyIDs: Set<String> = []
     @State private var decisionConfirmation: PendingDecision?
     @State private var showingDecision = false
-    @State private var markedAsLooked = false
 
     private struct PendingDecision {
         let request: SettingsApprovalRequest
@@ -40,6 +70,8 @@ struct SettingsChangesView: View {
         let status: String
         let approvalsRevision: Int
         let foreground: Int
+        let identity: KnowledgePresentationIdentity
+        let settingsRevision: Int
     }
 
     var body: some View {
@@ -99,7 +131,10 @@ struct SettingsChangesView: View {
         .presentationDragIndicator(.hidden)
         .presentationDetents([.medium, .large])
         .tronManagedSheet(isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } }), identity: "settings.changes.detail") {
-            if let selected { SettingsChangeDetailView(entry: selected, scope: scope) }
+            if let selected {
+                SettingsChangeDetailView(entry: selected.entry, scope: scope, profileID: selected.profileID,
+                                         onOpenSession: onOpenSession)
+            }
         }
         .confirmationDialog(decisionConfirmation?.approved == true ? "Approve this change?" : "Decline this change?", isPresented: $showingDecision, titleVisibility: .visible) {
             if let item = decisionConfirmation {
@@ -115,11 +150,13 @@ struct SettingsChangesView: View {
         }
         .task(id: PresentationActivityTaskID(source: loadID, presentationActive: presentationActivity.allowsPresentationPublication)) {
             guard presentationActivity.allowsPresentationPublication else { return }
-            if !markedAsLooked {
-                lastLookedAt = ISO8601DateFormatter().string(from: Date())
-                markedAsLooked = true
+            if lookedStorageKey != lastLookStorageKey {
+                lookedStorageKey = lastLookStorageKey
+                previousLookedAt = UserDefaults.standard.string(forKey: lastLookStorageKey)
+                    .flatMap { ISO8601DateFormatter().date(from: $0) }
+                visitStartedAt = Date()
             }
-            await resetAndLoad()
+            if installedLoadID != loadID { await resetAndLoad() }
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active { loadGeneration &+= 1; loading = false }
@@ -131,49 +168,77 @@ struct SettingsChangesView: View {
     private var loadID: LoadID {
         LoadID(scope: scope, actor: actorFilter, layer: layerFilter, section: sectionFilter,
                key: keyFilter, status: statusFilter, approvalsRevision: model.settingsApprovalsRevision,
-               foreground: model.foregroundReconciliationGeneration)
+               foreground: model.foregroundReconciliationGeneration,
+               identity: model.knowledgePresentationIdentity, settingsRevision: model.settingsInvalidationGeneration)
+    }
+
+    private var lastLookStorageKey: String {
+        "settings.changes.lastLookedAt.\(model.selectedGatewayProfileID() ?? "offline").\(scope.storageKey)"
     }
 
     private var filters: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Menu {
-                    Button("Agents and outside", systemImage: actorFilter == "agents" ? "checkmark" : "person.2") { actorFilter = "agents" }
-                    Button("Everything", systemImage: actorFilter.isEmpty ? "checkmark" : "line.3.horizontal.decrease.circle") { actorFilter = "" }
-                } label: { filterCapsule(actorFilter.isEmpty ? "Everything" : "Agents and outside") }
-                Menu {
-                    Button("Any layer", systemImage: layerFilter.isEmpty ? "checkmark" : "square.3.layers.3d") { layerFilter = "" }
-                    ForEach(["mac", "project", "chat", "profile"], id: \.self) { layer in
-                        Button("\(layerLabel(layer))", systemImage: layerFilter == layer ? "checkmark" : "square.3.layers.3d") { layerFilter = layer }
-                    }
-                } label: { filterCapsule(layerFilter.isEmpty ? "Any layer" : layerLabel(layerFilter)) }
-                Menu {
-                    Button("Any status", systemImage: statusFilter.isEmpty ? "checkmark" : "circle") { statusFilter = "" }
-                    ForEach(["applied", "pending", "approved", "declined", "expired", "superseded", "failed", "outside", "committed"], id: \.self) { status in
-                        Button(status.capitalized, systemImage: statusFilter == status ? "checkmark" : "circle") { statusFilter = status }
-                    }
-                } label: { filterCapsule(statusFilter.isEmpty ? "Any status" : statusFilter.capitalized) }
+        TronSettingsGroup("Filters") {
+            TronSelectionRow(icon: "person.2", title: "Actor", value: actorLabel) {
+                Button("Agents and outside") { actorFilter = "agents" }
+                Button("Everything") { actorFilter = "" }
+                ForEach(["home", "worker", "agent", "outside", "ui"], id: \.self) { actor in
+                    Button(actor == "ui" ? "You" : actor.capitalized) { actorFilter = actor }
+                }
             }
-            HStack(spacing: 10) {
-                TextField("Section ID", text: $sectionFilter).textInputAutocapitalization(.never).autocorrectionDisabled()
-                TextField("Key ID", text: $keyFilter).textInputAutocapitalization(.never).autocorrectionDisabled()
+            .accessibilityIdentifier("settings-changes-actor")
+            if !actorFilter.isEmpty {
+                Button("Everything") { actorFilter = "" }
+                    .buttonStyle(.plain).padding(.horizontal, 16).padding(.bottom, 10)
             }
-            .font(TronTypography.secondaryCodeDescription)
-            .padding(12)
-            .background(Color.tronSurface.opacity(0.65), in: RoundedRectangle(cornerRadius: 14))
+            TronSettingsDivider()
+            TronSelectionRow(icon: "square.3.layers.3d", title: "Layer",
+                             value: layerFilter.isEmpty ? "Any layer" : layerLabel(layerFilter)) {
+                Button("Any layer") { layerFilter = "" }
+                ForEach(["mac", "project", "chat", "profile"], id: \.self) { layer in
+                    Button(layerLabel(layer)) { layerFilter = layer }
+                }
+            }
+            .accessibilityIdentifier("settings-changes-layer")
+            TronSettingsDivider()
+            TronSelectionRow(icon: "circle", title: "Status",
+                             value: statusFilter.isEmpty ? "Any status" : statusFilter.capitalized) {
+                Button("Any status") { statusFilter = "" }
+                ForEach(["applied", "pending", "approved", "declined", "expired", "superseded", "failed", "outside", "committed"], id: \.self) { status in
+                    Button(status.capitalized) { statusFilter = status }
+                }
+            }
+            .accessibilityIdentifier("settings-changes-status")
+            TronSettingsDivider()
+            TronSettingsRow(icon: "square.grid.2x2", title: "Section") {
+                TextField("Any section", text: $sectionFilter)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .font(TronTypography.secondaryCodeDescription)
+                    .accessibilityIdentifier("settings-changes-section")
+            }
+            TronSettingsDivider()
+            TronSettingsRow(icon: "key", title: "Key") {
+                TextField("Any key", text: $keyFilter)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .font(TronTypography.secondaryCodeDescription)
+                    .accessibilityIdentifier("settings-changes-key")
+            }
         }
     }
 
-    private func filterCapsule(_ title: String) -> some View {
-        Text(title)
-            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-            .padding(.horizontal, 11).padding(.vertical, 8)
-            .background(Color.tronEmerald.opacity(0.13), in: Capsule())
-            .foregroundStyle(Color.tronEmerald)
+    private var actorLabel: String {
+        switch actorFilter {
+        case "": "Everything"
+        case "agents": "Agents and outside"
+        case "ui": "You"
+        default: actorFilter.capitalized
+        }
     }
 
     private func historyRow(_ entry: SettingsChangeHistoryEntry) -> some View {
-        Button { selected = entry } label: {
+        Button {
+            guard let profileID = model.selectedGatewayProfileID() else { return }
+            selected = SelectedChange(entry: entry, profileID: profileID)
+        } label: {
             TronGlassCard(accent: entry.status == "failed" ? .tronError : .tronEmerald) {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(alignment: .firstTextBaseline) {
@@ -191,9 +256,9 @@ struct SettingsChangesView: View {
                         Text("·")
                         Text(entry.presentation?.layer ?? layerLabel(entry.layer))
                         Text("·")
-                        Text(entry.date ?? Date(), format: .relative(presentation: .named))
+                        if let date = entry.date { Text(date, format: .relative(presentation: .named)) }
                         Spacer()
-                        if let date = ISO8601DateFormatter().date(from: lastLookedAt), let entryDate = entry.date, entryDate > date {
+                        if let date = previousLookedAt, let entryDate = entry.date, entryDate > date {
                             Text("NEW").font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold)).foregroundStyle(Color.tronEmerald).accessibilityLabel("Since you last looked")
                         }
                     }
@@ -231,6 +296,7 @@ struct SettingsChangesView: View {
         loadGeneration &+= 1
         loading = false
         entries = []; pending = []; cursor = nil; errorMessage = nil
+        installedLoadID = nil
         await loadNextPage(reset: true)
     }
 
@@ -245,6 +311,7 @@ struct SettingsChangesView: View {
         let foreground = model.foregroundReconciliationGeneration
         let activity = presentationActivity
         let currentCursor = reset ? nil : cursor
+        let request = loadID
         do {
             async let pageTask = model.settingsHistory(cursor: currentCursor, actor: actorFilter.isEmpty ? nil : actorFilter,
                                                        layer: layerFilter.isEmpty ? nil : layerFilter,
@@ -254,7 +321,9 @@ struct SettingsChangesView: View {
             async let approvalsTask = model.allSettingsApprovals()
             let page = try await pageTask
             let approvals = try await approvalsTask
-            guard admits(ticket, identity: identity, foreground: foreground, activity: activity) else { return }
+            guard request == loadID, admits(ticket, identity: identity, foreground: foreground, activity: activity) else { return }
+            installedLoadID = request
+            UserDefaults.standard.set(ISO8601DateFormatter().string(from: visitStartedAt), forKey: lastLookStorageKey)
             let visible = page.entries.filter { $0.belongs(to: scope) }
             if reset { entries = visible } else {
                 let known = Set(entries.map(\.changeId))
@@ -265,10 +334,10 @@ struct SettingsChangesView: View {
             errorMessage = nil
         } catch is CancellationError {
         } catch {
-            guard admits(ticket, identity: identity, foreground: foreground, activity: activity) else { return }
+            guard request == loadID, admits(ticket, identity: identity, foreground: foreground, activity: activity) else { return }
             errorMessage = String(describing: error)
         }
-        if ticket == loadGeneration { loading = false }
+        if request == loadID, admits(ticket, identity: identity, foreground: foreground, activity: activity) { loading = false }
     }
 
     private func admits(_ ticket: Int, identity: KnowledgePresentationIdentity, foreground: Int, activity: PresentationSurfaceActivity) -> Bool {
@@ -285,20 +354,27 @@ struct SettingsChangesView: View {
     private func decide(_ request: SettingsApprovalRequest, approved: Bool) async {
         guard busyIDs.insert(request.requestId).inserted else { return }
         defer { busyIDs.remove(request.requestId) }
+        let identity = model.knowledgePresentationIdentity
         do {
             try await model.decideSettingsApproval(request, approved: approved)
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
             pending.removeAll { $0.requestId == request.requestId }
-        } catch { errorMessage = String(describing: error) }
+        } catch {
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func layerLabel(_ layer: String) -> String {
-        switch layer { case "mac": "Mac"; case "project": "Project"; case "chat": "Chat"; case "profile": "Home"; default: layer.capitalized }
+        switch layer { case "mac": "Mac"; case "project": "Project"; case "chat": "Chat"; case "profile": "Home profile"; default: layer.capitalized }
     }
 }
 
 private struct SettingsChangeDetailView: View {
     let entry: SettingsChangeHistoryEntry
     let scope: SettingsChangesScope
+    let profileID: String
+    var onOpenSession: ((AppModel.SessionNavigationRoute) -> Void)?
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -309,6 +385,16 @@ private struct SettingsChangeDetailView: View {
     @State private var generation = 0
     @State private var showingUndo = false
     @State private var undoing = false
+    @State private var openingSession = false
+    @State private var showingTask = false
+    @State private var installedIdentity: HistoryReadID?
+    private struct HistoryReadID: Hashable {
+        let identity: KnowledgePresentationIdentity
+        let foreground: Int
+    }
+    private var readID: HistoryReadID {
+        HistoryReadID(identity: model.knowledgePresentationIdentity, foreground: model.foregroundReconciliationGeneration)
+    }
 
     var body: some View {
         NavigationStack {
@@ -320,22 +406,52 @@ private struct SettingsChangeDetailView: View {
                     detailValue("Layer", entry.presentation?.layer ?? entry.layer)
                     if let reason = entry.reason, !reason.isEmpty { detailValue("Reason", reason) }
                     detailValue("Tier and status", "\(entry.tier.capitalized) · \(entry.status.capitalized)")
+                    if let basis = entry.tierBasis {
+                        detailValue("How the tier was reached",
+                            "Floor: \(basis.floor) (\(basis.floorSource)); direction: \(basis.direction). Web/browser raise: \(basis.web ? "one step" : "none"). Risk model: \(basis.risk ?? "not used").")
+                    }
+                    detailValue("Target", entry.target.sessionId ?? entry.target.cwd ?? entry.target.kind.capitalized)
+                    if let taskID = entry.actor.taskId { detailValue("Task", taskID) }
+                    if let sessionID = entry.actor.sessionId {
+                        detailValue("Requesting chat", sessionID)
+                        if onOpenSession != nil {
+                            Button { Task { await openSession(sessionID) } } label: {
+                                TronSettingsRow(icon: "bubble.left", title: "Open requesting chat", accent: .tronEmerald)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(openingSession || model.selectedGatewayProfileID() != profileID)
+                        }
+                    }
+                    if entry.actor.taskId != nil {
+                        Button { showingTask = true } label: {
+                            TronSettingsRow(icon: "checklist", title: "Open task", accent: .tronEmerald)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(model.selectedGatewayProfileID() != profileID)
+                    }
+                    detailValue("When", entry.at)
+                    if let git = entry.git {
+                        detailValue("When written", git.staged ? "Staged" : (git.reason ?? "Not staged"))
+                        if let warning = git.warning { detailValue("Staging warning", warning) }
+                    }
                     if let failure = entry.failure { detailValue("Failure", failure) }
-                    if entry.redacted != true && entry.before != nil && entry.status == "applied" {
+                    if entry.redacted != true && entry.status == "applied" {
                         Button(undoing ? "Undoing…" : "Undo") { showingUndo = true }
                             .buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronEmerald))
                             .disabled(undoing)
                     } else { Text("Not undoable").font(TronTypography.sans(size: TronTypography.sizeBodySM)).foregroundStyle(Color.tronTextSecondary) }
                     Text("Key history").font(TronTypography.headline).accessibilityAddTraits(.isHeader)
                     ForEach(history) { item in
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(item.date ?? Date(), format: .dateTime.year().month().day().hour().minute()).font(TronTypography.sans(size: TronTypography.sizeBodySM)).foregroundStyle(Color.tronTextSecondary)
-                            Text(item.presentation?.display.before ?? "—").font(TronTypography.secondaryCodeDescription)
-                            Text("→ \(item.presentation?.display.after ?? "—")").font(TronTypography.secondaryCodeDescription)
-                        }.frame(maxWidth: .infinity, alignment: .leading).padding(12).background(Color.tronSurface.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
+                        TronGlassCard(accent: .tronEmerald) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(item.at).font(TronTypography.sans(size: TronTypography.sizeBodySM)).foregroundStyle(Color.tronTextSecondary)
+                                Text(item.presentation?.display.before ?? "—").font(TronTypography.secondaryCodeDescription)
+                                Text("→ \(item.presentation?.display.after ?? "—")").font(TronTypography.secondaryCodeDescription)
+                            }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                        }
                     }
                     if cursor != nil {
-                        Button("Load key history") { Task { await loadHistory() } }.buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronEmerald))
+                        Button("Load key history") { Task { await loadHistory() } }.buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronEmerald)).disabled(loading)
                     }
                     if let errorMessage { TronSettingsNotice(message: errorMessage, title: "History unavailable") }
                     if loading && history.isEmpty { TronLoadingState(label: "Loading history…") }
@@ -345,7 +461,18 @@ private struct SettingsChangeDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: entry.title) }
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.foregroundStyle(Color.tronEmerald) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(Color.tronEmerald)
+                    }.accessibilityLabel("Done")
+                }
+            }
+        }
+        .tronManagedSheet(isPresented: $showingTask, identity: "settings.change.task") {
+            if let taskID = entry.actor.taskId {
+                HomeTaskSheet(destination: .task(taskID), profileID: profileID, onOpenSession: onOpenSession.map { _ in
+                    { sessionID in Task { await openSession(sessionID) } }
+                })
             }
         }
         .confirmationDialog("Undo this change?", isPresented: $showingUndo, titleVisibility: .visible) {
@@ -353,8 +480,17 @@ private struct SettingsChangeDetailView: View {
             Button("Cancel", role: .cancel) {}
         }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large])
-        .task(id: presentationActivity.allowsPresentationPublication) { if presentationActivity.allowsPresentationPublication { await loadHistory() } }
-        .onDisappear { generation &+= 1 }
+        .task(id: PresentationActivityTaskID(source: readID, presentationActive: presentationActivity.allowsPresentationPublication)) {
+            guard presentationActivity.allowsPresentationPublication else { return }
+            if installedIdentity != readID {
+                generation &+= 1; loading = false; history = []; cursor = nil; errorMessage = nil
+                await loadHistory()
+            }
+        }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            if !active { generation &+= 1; loading = false }
+        }
+        .onDisappear { generation &+= 1; loading = false }
     }
 
     private func detailValue(_ title: String, _ value: String) -> some View {
@@ -364,28 +500,62 @@ private struct SettingsChangeDetailView: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func openSession(_ sessionID: String) async {
+        guard !openingSession, let onOpenSession,
+              model.selectedGatewayProfileID() == profileID, presentationActivity.allowsDataPublication else { return }
+        let identity = model.knowledgePresentationIdentity
+        openingSession = true
+        defer { openingSession = false }
+        do {
+            let route = try await model.navigationRoute(profileID: profileID, sessionID: sessionID)
+            guard identity == model.knowledgePresentationIdentity,
+                  model.selectedGatewayProfileID() == profileID,
+                  presentationActivity.allowsDataPublication else { return }
+            showingTask = false
+            dismiss()
+            onOpenSession(route)
+        } catch {
+            guard identity == model.knowledgePresentationIdentity,
+                  presentationActivity.allowsDataPublication else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func performUndo() async {
-        guard !undoing else { return }
+        guard !undoing, model.selectedGatewayProfileID() == profileID else { return }
         undoing = true
         defer { undoing = false }
+        let identity = model.knowledgePresentationIdentity
         do {
             try await model.undoSettingsChange(entry)
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
             dismiss()
-        } catch { errorMessage = String(describing: error) }
+        } catch {
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func loadHistory() async {
-        guard !loading, presentationActivity.allowsPresentationPublication else { return }
+        guard !loading, model.selectedGatewayProfileID() == profileID,
+              presentationActivity.allowsPresentationPublication else { return }
         loading = true; generation &+= 1
         let ticket = generation; let activity = presentationActivity; let identity = model.knowledgePresentationIdentity
-        defer { if ticket == generation { loading = false } }
+        let foreground = model.foregroundReconciliationGeneration
+        func current() -> Bool {
+            ticket == generation && !Task.isCancelled && activity == presentationActivity
+                && activity.allowsPresentationPublication && identity == model.knowledgePresentationIdentity
+                && foreground == model.foregroundReconciliationGeneration
+        }
+        defer { if current() { loading = false } }
         do {
             let page = try await model.settingsHistory(cursor: cursor, actor: nil, layer: nil, section: nil, key: entry.key, status: nil)
-            guard ticket == generation, !Task.isCancelled, activity == presentationActivity,
-                  activity.allowsPresentationPublication, identity == model.knowledgePresentationIdentity else { return }
-            let rows = page.entries.filter { $0.belongs(to: scope) }
+            guard current() else { return }
+            installedIdentity = readID
+            let rows = page.entries.filter { $0.belongs(to: scope) && $0.qualifiers == entry.qualifiers }
             let known = Set(history.map(\.changeId)); history.append(contentsOf: rows.filter { !known.contains($0.changeId) })
             cursor = page.nextCursor
-        } catch { if ticket == generation { errorMessage = String(describing: error) } }
+        } catch is CancellationError { return
+        } catch { if current() { errorMessage = error.localizedDescription } }
     }
 }

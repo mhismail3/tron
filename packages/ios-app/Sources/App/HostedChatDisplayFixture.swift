@@ -351,6 +351,17 @@ private actor HostedHomeShellGateway {
                 anthropicModel("claude-haiku-5-5", name: "Claude Haiku 5.5", window: 200_000), model("memory-a", name: "Memory Model A"),
                 model("memory-b", name: "Memory Model B"), model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
         case "model.recent": return (.object(["models": .array([])]), nil)
+        case "settings.history":
+            let entries: [JSONValue] = ProcessInfo.processInfo.arguments.contains("-home-settings-history") ? [
+                .object(["changeId": .string("worker-setting"), "at": .string("2026-10-11T12:00:00Z"),
+                    "actor": .object(["kind": .string("worker"), "sessionId": .string("worker-session"), "taskId": .string("active")]),
+                    "target": .object(["kind": .string("home")]), "layer": .string("profile"), "key": .string("model.thinking[role=worker]"),
+                    "op": .string("set"), "before": .string("off"), "after": .string("high"), "tier": .string("notify"),
+                    "status": .string("applied"), "presentation": .object(["label": .string("Worker thinking"),
+                        "actor": .string("Worker"), "layer": .string("Home profile"), "section": .string("model"),
+                        "display": .object(["before": .string("Off"), "after": .string("High")])])])
+            ] : []
+            return (.object(["entries": .array(entries)]), nil)
         case "home.taskList":
             taskListReads += 1
             // Hold the real sheet's read at the socket boundary, not its view state.
@@ -594,7 +605,7 @@ private actor HostedHomeShellGateway {
         return .object(["keys": .array([workerThinkingKey, contextWindowKey, memoryKey]), "sections": .array([.object([
             "id": .string("model"), "title": .string("Model"), "order": .number(10),
             "summary": .object(["essential": .array([]), "overrides": .array([]), "pending": .array([]), "recent": .array([]), "moreRecent": .number(0)]),
-        ])])])
+        ]), .object(["id": .string("context"), "title": .string("Context"), "order": .number(20), "summary": .object([:])])])])
     }
 
     private func homeSettingsOptions(_ params: [String: JSONValue]) -> JSONValue {

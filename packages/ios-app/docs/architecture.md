@@ -713,11 +713,12 @@ workers') and Manage Session (this chat's): it re-reads `settings.approvals` on 
 executor, bound to the request's digest; a Chat-layer change carries the chat's last read
 runtime fence. Every word a row shows is Gateway text (`requester`, `label`, `display`,
 `confirm`), with the raw `before` and `after` one tap away, and it renders nothing when nothing
-is pending. Settings › Permissions (`PermissionFloorsSettingsView`) lists every
-`permissions.floor` instance from `settings.resolve` for the Mac target, titled by its scope
-badge, and sets or unsets one through `settings.change`: a dry run first, and when the dry run's
-tier is approve (lowering a floor) the Gateway's `confirm` text is shown and the change is sent
-only on the maintainer's tap. The three tiers are F3's fixed vocabulary; the rest is served.
+is pending. Settings › Permissions renders every `permissions.floor` instance through the
+generic renderer: Gateway labels, qualifiers, choices, source badges and reset actions remain
+authoritative. A dry run precedes a write; lowering a floor displays the Gateway's `confirm`
+text and sends only after the maintainer confirms. The duplicate floor picker and its Mac-only
+read/write adapters are removed, not retained as a second editor. The real hosted floor journey
+now drives this same generic control and preserves lowering-confirmation and direct-raising proof.
 The "Approval needed" push carries the `settings-approval` category (decision 35), registered by
 `AppDelegate` with Approve and Decline as foreground actions. `PushNotificationTap` admits the
 action only with that category and an admitted route; `AppModel.stageSettingsDecision` holds it
@@ -735,14 +736,27 @@ show; the push flags stage the relay's payload through `PushNotificationTap.admi
 `SettingsChangesView` is the native audit-feed owner for Settings, Manage Session and Manage Home.
 It reads one Gateway `settings.history` page at a time (an empty page with a cursor still enables
 continuation), intersects server actor/layer/section/key/status filters with the surface's Home or
-chat lineage, pins current approvals above newest-first history, and records a device-local last-look
-timestamp. Details fetch the selected key's history; undo and approval decisions use the existing
-receipt-backed `SettingsTrustCoordinator` paths. Project/outside/git reconciliation and Apply again
+chat lineage, and pins current approvals above newest-first history. Its managed sheet owns
+navigation/Done chrome. Last-look is per paired Mac and scope: badges compare against the previous
+visit while the current visit is saved only after a successful read. It never becomes audit truth.
+Feed and detail reads carry managed activity, profile/presentation identity, foreground generation
+and settings invalidation fences through every await. Details preserve key qualifiers when reading
+history and show the recorded tier basis, task/chat attribution and staging state; absent timestamps
+remain absent. Requesting-chat links capture the entry’s paired Mac and return a canonical navigation
+route to the owning Settings/Manage navigation callback. Task links reuse the managed Home task
+detail owner for the exact actor task ID. Neither route infers ownership from the currently selected
+Mac after a switch; hosted chat-route and task-detail journeys exercise both links. Undo and approval decisions use the existing receipt-backed
+`SettingsTrustCoordinator` paths. Undo validates per-change refusal and captures the Chat
+configuration admission when applicable, so an acknowledged envelope cannot hide a failed change.
+Project/outside/git reconciliation and Apply again
 remain unavailable because the required public SDK capability is missing (#764); the feed does not
 claim those capabilities.
 `TronSmokeUITests.testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt`
 exercises an empty page with a continuation cursor, then the feed/detail/undo journey against
-the hosted socket, including its exact `settings.undo` request.
+the hosted socket, including its exact `settings.undo` request. Additional hosted journeys cover
+previous-visit markers, refused undo retaining the current diff, intersected scope/filter pages and
+exact-digest approve/decline receipts. Their recorded red runs distinguish the last-look and undo
+regressions from subsequent successful validation.
 The generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is
 `SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
 in `TronPresentation.swift`. Its bounded, expandable section cards stay mounted in
@@ -1638,6 +1652,21 @@ immediate revocation; revoking this iPhone also removes its local profile.
 
 ## Presentation parity
 
+Settings/Manage/Project changes reuse `TronSettingsGroup`, `TronSettingsRow`,
+`TronSelectionRow`, `TronGlassCard`, shared typography/colors and the managed or
+progressive sheet owner; do not substitute local rounded-card backgrounds or
+duplicate navigation/Done chrome. `SessionModelSummaryCard` remains the shared
+Models/thinking/context presentation owner for both Manage surfaces.
+Prefer the existing real-app journeys over source-string checks or broad golden
+snapshots: `TronSmokeUITests` owns single-Done nesting, light/dark full-width
+loading/error material, medium Manage Home entry and pending/confirmed/refused
+Models behavior. `TronNewSessionUITests.testProjectDefaultBeforeFirstChatIsInheritedWithoutChatOverride`
+also checks Project/catalog sheet ownership while proving inheritance. Layout
+assertions use bounded tolerances only for the identified width/chrome risks;
+screenshots are diagnostic evidence, not substitutes for successful interaction.
+State-boundary integration tests supplement these journeys where the native
+fixture cannot establish store/runtime behavior.
+
 `ProjectSettingsContent` is the shared Project card behind Manage Session's
 Project settings row, the dashboard workspace header's context-menu action, and
 New Session's selected-workspace row. The last route edits a project before its
@@ -1665,7 +1694,11 @@ target. Hosted Mac-settings and offline navigation journeys protect the shared
 thinking editor, no-write dismissal and native flow reachability.
 
 Manage Session embeds the renderer for its exact Chat target; its Settings
-destination opens Mac settings. Fixed-source actions and live overrides go through the existing
+destination opens Mac settings. Its bounded cards use an ordinary stack so the
+shared Models presenter's lifetime cannot be ended by lazy eviction behind a
+nested sheet. The original popup acknowledgement/failure journeys reproduce the
+lazy-container failure and pass without relaxed assertions after that correction.
+Fixed-source actions and live overrides go through the existing
 settings mutation receipt owner, with runtime/model/revision captured from the
 admitted session and rechecked immediately before a send. Opening or dismissing
 never writes. The renderer uses the resolver's allowed layer list: other-layer
@@ -1674,7 +1707,11 @@ a Chat write. The hosted `testManageSessionUsesCurrentDefault` journey exercises
 reset through this actual route and reopens it to check the authoritative value;
 Gateway settings-gate coverage owns persistence and provider-effect proof.
 The shared Chat card keeps its domain receipt/revision adapter; the renderer
-owns the remaining keys and all source/reset rows.
+owns the remaining keys and all source/reset rows. Context supplements group delivered Agent
+Instructions and loaded Project Resources; Available Tools supplements Tools, while the schema
+keeps source/reset ownership for the shared tools control. Run contains the existing Hooks flow.
+Manage Home's Context section opens the existing next-request/delivered Home Context view; memory,
+chapters, tasks and permission requests retain their established domain owners.
 
 An interrupted initial chat open has a distinct `waitingForConnection` phase.
 The opening owner starts no open lease or timeout without lifecycle admission;

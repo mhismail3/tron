@@ -9,6 +9,8 @@ final class TronNewSessionUITests: XCTestCase {
         project.tap()
         let section = app.buttons["settings-section-model-expand"]
         XCTAssertTrue(section.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Project settings"].exists)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.filter(\.isHittable).count, 1)
         for _ in 0..<5 where !section.isHittable { app.swipeUp() }
         section.tap()
         let row = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
@@ -18,6 +20,8 @@ final class TronNewSessionUITests: XCTestCase {
         control.tap()
         let choice = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Project Pro'")).firstMatch
         XCTAssertTrue(choice.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.filter(\.isHittable).count, 1,
+                       "The nested catalog uses the canonical progressive sheet, not a second toolbar")
         choice.tap()
         XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:0 typed:0 projectWrites:1'"))
         evidence(app, "758-project-schema-default-before-first-chat")

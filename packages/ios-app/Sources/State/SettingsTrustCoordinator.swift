@@ -189,16 +189,19 @@ final class SettingsTrustCoordinator {
     }
 
     /// Undo is an accepted domain mutation and must use the shared receipt owner.
-    func undoSettingsChange(_ changeID: String, fence: JSONValue?) async throws {
+    func undoSettingsChange(_ changeID: String, fence: JSONValue?, admitSend: (() -> Bool)? = nil) async throws {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
         var fields: [String: JSONValue] = ["commandId": .string(commandID), "changeId": .string(changeID)]
         if let fence { fields["fence"] = fence }
         let params = JSONValue.object(fields)
-        _ = try await mutationExecutor.performValue(method: "settings.undo", commandID: commandID) {
-            try await client.requestValue("settings.undo", params)
+        let value = try await mutationExecutor.performValue(method: "settings.undo", commandID: commandID) {
+            if let admitSend, !admitSend() { throw CancellationError() }
+            return try await client.requestValue("settings.undo", params)
         }
         try requireProfile(admittedProfileGeneration)
+        try value.decode(SettingsChangeResult.self).throwIfRefused()
+        noteSettingsChanged()
     }
 
     /// The maintainer's decision on one pending change, bound to the exact diff
@@ -216,16 +219,6 @@ final class SettingsTrustCoordinator {
         }
         try requireProfile(admittedProfileGeneration)
         approvalsRevision &+= 1
-    }
-
-    /// `settings.resolve` for a target and keys (docs/settings-model.md 3.1).
-    func resolveSettings(target: JSONValue, keys: [String]) async throws -> SettingsResolution {
-        let admittedProfileGeneration = profileGeneration
-        let value = try await client.requestValue("settings.resolve", JSONValue.object([
-            "target": target, "keys": .array(keys.map(JSONValue.string)),
-        ]))
-        try requireProfile(admittedProfileGeneration)
-        return try value.decode(SettingsResolution.self)
     }
 
     /// `settings.resolve` for the generic renderer: the controls it implements are
@@ -285,22 +278,6 @@ final class SettingsTrustCoordinator {
         }
         try requireProfile(admittedProfileGeneration)
         try value.decode(SettingsChangeResult.self).throwIfRefused()
-    }
-
-    /// A dry run of one Mac-layer change: the tier and any `confirm` text the
-    /// maintainer's row shows before he makes it. Nothing is applied.
-    func previewMacChange(_ change: JSONValue) async throws -> SettingsChangePreview {
-        let result = try await previewChange(target: .object(["kind": .string("mac")]), change: change)
-        try result.throwIfRefused()
-        guard let tier = result.tier else {
-            throw GatewayFailure(code: "invalid_response", message: "The dry run returned no tier.", retryable: false, details: nil)
-        }
-        return SettingsChangePreview(tier: tier, confirm: result.changes.first?.confirm)
-    }
-
-    /// The maintainer's own Mac-layer change: his tap is the approval (F3).
-    func changeMac(_ change: JSONValue) async throws {
-        try await self.change(target: .object(["kind": .string("mac")]), change: change)
     }
 
     func noteTrustChanged() {

@@ -4387,16 +4387,13 @@ final class AppModel {
     }
 
     func undoSettingsChange(_ entry: SettingsChangeHistoryEntry) async throws {
-        var fence: JSONValue?
-        if entry.target.kind == "session", let sessionID = entry.target.sessionId,
-           let snapshot = authoritativeSnapshot(for: sessionID) {
-            fence = .object([
-                "runtimeGeneration": .string(snapshot.runtimeGeneration),
-                "model": try snapshot.model.map(JSONValue.encode) ?? .null,
-                "revision": .number(Double(snapshot.revision)),
-            ])
+        let target: JSONValue = .object(["kind": .string(entry.target.kind),
+            "sessionId": entry.target.sessionId.map(JSONValue.string) ?? .null])
+        let snapshot = entry.layer == "chat" ? try rendererConfigurationSnapshot(target) : nil
+        try await settingsTrust.undoSettingsChange(entry.changeId, fence: rendererConfigurationFence(snapshot)) { [weak self] in
+            guard let snapshot else { return true }
+            return self?.admitsConfigurationSend(snapshot) == true
         }
-        try await settingsTrust.undoSettingsChange(entry.changeId, fence: fence)
     }
 
     /// Approves or declines one pending change. A change to a chat's own Chat
@@ -4412,18 +4409,6 @@ final class AppModel {
             ])
         }
         try await settingsTrust.decideApproval(request, approved: approved, fence: fence)
-    }
-
-    func resolveMacSettings(keys: [String]) async throws -> SettingsResolution {
-        try await settingsTrust.resolveSettings(target: .object(["kind": .string("mac")]), keys: keys)
-    }
-
-    func previewMacSettingsChange(_ change: JSONValue) async throws -> SettingsChangePreview {
-        try await settingsTrust.previewMacChange(change)
-    }
-
-    func changeMacSetting(_ change: JSONValue) async throws {
-        try await settingsTrust.changeMac(change)
     }
 
     /// The generic settings renderer's reads and writes, for any target (settings-model.md 7.5).

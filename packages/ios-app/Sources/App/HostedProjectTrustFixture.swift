@@ -7,6 +7,7 @@ import TronMobileCore
 struct HostedProjectTrustFixture: View {
     @Environment(\.scenePhase) private var phase
     @State private var model: AppModel
+    @State private var presentationActivity = PresentationActivityCoordinator()
     @State private var ready = false
     @State private var error: String?
     @State private var originalCounts = ""
@@ -44,7 +45,7 @@ struct HostedProjectTrustFixture: View {
             VStack(spacing: 0) {
                 if ready {
                     if mountsFloors {
-                        NavigationStack { PermissionFloorsSettingsView() }
+                        NavigationStack { SettingsRendererView(target: .object(["kind": .string("mac")]), writeLayer: "mac") }
                             .tronSettingsLayout()
                     } else {
                         NavigationStack { TrustSettingsView(target: TrustTarget(cwd: "/fixture/project")) }
@@ -59,6 +60,7 @@ struct HostedProjectTrustFixture: View {
             }
         }
         .environment(model)
+        .environment(\.tronPresentationActivityCoordinator, presentationActivity)
         .tronPresentation()
         .preferredColorScheme(.dark)
         .task {
@@ -161,7 +163,12 @@ private actor ProjectTrustFixtureGateway {
             "display": .string(labels[floor] ?? floor), "layer": .string(floorOverride == nil ? "builtin" : "mac"), "applied": .bool(true),
             "layers": .array([.object(["layer": .string("mac")])]),
             "badges": .array([.object(["kind": .string("layer"), "label": .string(floorOverride == nil ? "Built-in" : "Mac")]),
-                              .object(["kind": .string("scope"), "label": .string("Project trust (widen)")])])])
+                              .object(["kind": .string("scope"), "label": .string("Project trust (widen)")])]),
+            "presentation": .object(["label": .string("Project trust (widen)"),
+                "help": .string("Lowering this floor requires your confirmation."), "order": .number(10), "importance": .string("advanced"),
+                "control": .string("choice"), "options": .array(["quiet", "notify", "approve"].map { tier in
+                    .object(["value": .string(tier), "label": .string(labels[tier]!)])
+                })])])
     }
 
     /// Lowering a floor is an approve-tier change carrying confirm text; raising
@@ -299,7 +306,6 @@ private actor ProjectTrustFixtureSocket: GatewaySocketConnection {
         else { receivers.removeFirst().resume(returning: data) }
     }
 }
-#endif
 
 /// Reads a fixture `settings.change` that changes project trust.
 func fixtureTrustChange(_ params: [String: JSONValue]) -> (cwd: JSONValue?, decision: Bool?, isTrust: Bool) {
@@ -315,3 +321,5 @@ func fixtureSettingsChangeResult(key: String, result: JSONValue? = nil, revision
     if let revision { change["revision"] = .number(Double(revision)) }
     return .object(["status": .string("applied"), "changes": .array([.object(change)])])
 }
+
+#endif

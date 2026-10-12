@@ -20,6 +20,9 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
+                    SettingsChangesLink(scope: .all, subtitle: "Review agent changes and pending approvals",
+                                        onOpenSession: onImported)
+                        .tronGlassSurface(accent: .tronEmerald)
                     // Settings owns only Mac defaults. Project and Chat editors
                     // retain their own targets; opening Settings never changes scope.
                     SettingsRendererView(
@@ -43,10 +46,6 @@ struct SettingsView: View {
                         settingsLink("Sessions", summary: "Dashboard list and subagent activity",
                                      icon: "slider.horizontal.2.square", accent: .tronEmerald) {
                             AppLocalBehaviorSettingsView()
-                        }
-                        settingsDivider(accent: .tronBlue)
-                        settingsLink("Changes", summary: "Review agent changes and pending approvals", icon: "clock.arrow.circlepath", accent: .tronBlue) {
-                            SettingsChangesView(scope: .all)
                         }
                     }
                 }
@@ -122,12 +121,6 @@ struct SettingsView: View {
             settingsLink("MCP Servers", summary: "Tool providers and authentication",
                          icon: "server.rack", accent: .tronCyan) {
                 MCPServersSettingsView(projectCWD: nil, sessionID: nil)
-            }
-        case "permissions":
-            settingsDivider(accent: .tronPurple)
-            settingsLink("Approval floors", summary: "How much of your attention agent changes need",
-                         icon: "hand.raised", accent: .tronPurple) {
-                PermissionFloorsSettingsView()
             }
         case "run":
             settingsDivider(accent: .tronPurple)

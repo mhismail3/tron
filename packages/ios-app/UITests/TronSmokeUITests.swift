@@ -191,6 +191,7 @@ final class TronSmokeUITests: XCTestCase {
             let done = app.buttons["home-sheet-done-tasks"]
             let y = done.frame.midY
             keepScreenshot(named: "sheet-\(appearance)-tasks-error")
+            assertManagedSheetSurface(app, title: "Tasks", name: "\(appearance)-tasks-error")
             app.buttons["Reload"].tap()
             XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
             XCTAssertEqual(done.frame.midY, y, accuracy: 2)
@@ -206,14 +207,22 @@ final class TronSmokeUITests: XCTestCase {
         let loading = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Loading Home…")).firstMatch
         XCTAssertTrue(loading.waitForExistence(timeout: 3))
         keepScreenshot(named: "sheet-\(name)-loading")
+        assertManagedSheetSurface(app, title: app.staticTexts["Tasks"].exists ? "Tasks" : "Manage Home", name: name)
+        XCTAssertLessThan(loading.frame.height, 40, "The short loading label must not wrap at normal Dynamic Type")
+    }
+
+    @MainActor
+    private func assertManagedSheetSurface(_ app: XCUIApplication, title: String, name: String) {
+        let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done"))
+        XCTAssertEqual(done.allElementsBoundByIndex.filter(\.isHittable).count, 1,
+                       "The active managed sheet owns one actionable dismissal control")
         let scroll = app.scrollViews.firstMatch
         XCTAssertGreaterThan(scroll.frame.width, app.windows.firstMatch.frame.width * 0.9,
                              "The sheet viewport and its edge material must not inherit the loading row's intrinsic width")
-        XCTAssertLessThan(loading.frame.height, 40, "The short loading label must not wrap at normal Dynamic Type")
         // Accessibility reports the full ScrollView even when its overlay is
         // intrinsically narrow. Compare the actual material above the title,
         // away from text, controls and rounded corners; no device-specific golden.
-        let title = app.staticTexts["Tasks"].exists ? app.staticTexts["Tasks"].firstMatch : app.staticTexts["Manage Home"].firstMatch
+        let title = app.staticTexts[title].firstMatch
         let screenshot = XCUIScreen.main.screenshot().image
         let y = title.frame.minY - 12
         let width = app.windows.firstMatch.frame.width
@@ -1512,7 +1521,10 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(switchModel.isEnabled, "Pending configuration must not block model browsing")
         XCTAssertEqual(switchModel.value as? String, "Applying configuration")
         keepScreenshot(named: "configuration-applying-\(appearance)")
-        switchModel.tap()
+        // Semantic lookup finds the enabled control, but XCTest reports this
+        // post-dismissal activation point as not hittable. Use its observed
+        // center; the assertions below still require real pending-state browsing.
+        switchModel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let selected = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
         XCTAssertTrue(selected.waitForExistence(timeout: 3))
         XCTAssertFalse(selected.isEnabled)
@@ -1682,6 +1694,9 @@ final class TronSmokeUITests: XCTestCase {
         let reset = app.buttons["settings-row-model.thinking_role_chat_-useCurrentDefault"]
         tapScrolling(reset, in: app)
         XCTAssertTrue(app.staticTexts["From default at start: High (Mac)"].waitForExistence(timeout: 5), app.debugDescription)
+        // Bring the summary below the native sheet chrome before collapsing;
+        // a partially clipped button can still report isHittable.
+        for _ in 0..<4 where expand.frame.minY < 160 { app.swipeDown() }
         tapScrolling(expand, in: app)
         XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
@@ -1763,6 +1778,112 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(decisions.label.contains("settings-other-request"),
                        "Another chat's request is never decided from this chat's push")
         XCTAssertTrue(app.descendants(matching: .any)["settings-approvals-header"].waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testSettingsChangesOpensRequestingChatOnItsOwningMac() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
+        app.launch(); defer { app.terminate() }
+        let more = app.buttons["settings-changes-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        more.tap()
+        let row = app.buttons["settings-change-fixture-change"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        tapScrolling(app.buttons["Open requesting chat"], in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-route"],
+                                  containing: "owned:true:fixture-chat", timeout: 5))
+    }
+
+    @MainActor
+    func testSettingsChangesOpensOwningHomeTask() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-settings-history"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-changes")
+        let row = app.buttons["settings-change-worker-setting"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        tapScrolling(app.buttons["Open task"], in: app)
+        XCTAssertTrue(app.buttons["home-sheet-done-task"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Settings model: continue epic #758"].waitForExistence(timeout: 5),
+                      "Open the audit actor's exact canonical task, not the task list")
+    }
+
+    @MainActor
+    func testSettingsChangesScopeFiltersAndApprovalReceipts() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-session", "-settings-changes-scope", "-settings-changes-approvals"]
+        app.launch(); defer { app.terminate() }
+        let approve = app.buttons["Approve"].firstMatch
+        XCTAssertTrue(approve.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(approve, in: app)
+        app.buttons["Approve change"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:1 approved:1", timeout: 5))
+        let decline = app.buttons["Decline"].firstMatch
+        tapScrolling(decline, in: app)
+        app.buttons["Decline change"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:2 approved:1", timeout: 5))
+        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        XCTAssertTrue(app.buttons["settings-change-project-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
+        for _ in 0..<8 where !app.buttons["Everything"].isHittable { app.swipeDown() }
+        app.buttons["Everything"].tap()
+        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
+        for _ in 0..<8 where !app.buttons["settings-changes-status"].isHittable { app.swipeDown() }
+        let statusControl = app.buttons.matching(NSPredicate(format: "label == %@", "Status")).allElementsBoundByIndex.last(where: \.isHittable)
+        XCTAssertNotNil(statusControl)
+        statusControl?.tap()
+        XCTAssertTrue(app.buttons["Failed"].waitForExistence(timeout: 3))
+        app.buttons["Failed"].tap()
+        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-fixture-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-project-change"].exists)
+        keepScreenshot(named: "758-changes-scoped-filter-intersection")
+    }
+
+    @MainActor
+    func testSettingsChangesLastLookUsesPreviousVisit() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
+        app.launch(); defer { app.terminate() }
+        let more = app.buttons["settings-changes-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        tapScrolling(more, in: app)
+        XCTAssertTrue(app.buttons["settings-change-fixture-change"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Since you last looked"].exists)
+        keepScreenshot(named: "758-changes-since-last-visit")
+    }
+
+    @MainActor
+    func testSettingsChangesUndoRefusalRetainsCurrentDiff() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-undo-refused"]
+        app.launch(); defer { app.terminate() }
+        let more = app.buttons["settings-changes-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        tapScrolling(more, in: app)
+        let entry = app.buttons["settings-change-fixture-change"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        tapScrolling(entry, in: app)
+        tapScrolling(app.buttons["Undo"], in: app)
+        app.buttons["Undo change"].tap()
+        XCTAssertTrue(app.staticTexts["Value moved on: current 8 retries, expected 6 retries"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["fixture.settings-changes-undos"].label, "undos:1")
+        keepScreenshot(named: "758-changes-undo-current-diff")
     }
 
     @MainActor

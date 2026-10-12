@@ -35,16 +35,8 @@ extension HomeSheet {
             )
             // Home-originated and Home-task settings requests belong to Manage Home.
             .settingsApprovals(.home)
-            TronProgressiveSheetLink(
-                accessibilityLabel: "Changes",
-                identity: "manage-home.changes",
-                accent: .tronSessionTeal,
-                detents: .fixed([.medium, .large]),
-                destination: { SettingsChangesView(scope: .home) }
-            ) {
-                TronSettingsRow(icon: "clock.arrow.circlepath", title: "Changes",
-                                subtitle: "Home and its workers' settings changes", accent: .tronSessionTeal)
-            }
+            SettingsChangesLink(scope: .home(sessionID), subtitle: "Home and its workers' settings changes", accent: .tronSessionTeal,
+                                onOpenSession: onOpenSession.map { callback in { route in callback(route.sessionID) } })
             .accessibilityIdentifier("home-manage-changes")
             SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot,
                                           onError: { error in
@@ -61,7 +53,15 @@ extension HomeSheet {
                 writeLayer: nil,
                 embedded: true,
                 ownedLayers: ["chat", "profile"],
-                externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]
+                externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"],
+                sectionSupplement: { section in
+                    AnyView(Group {
+                        if section == "context" {
+                            navigationRow(icon: "doc.text.magnifyingglass", title: "Home Context",
+                                          subtitle: "Next request and delivered context", destination: .context, id: "home-manage-context")
+                        }
+                    })
+                }
             )
         } else {
             TronLoadingState(label: "Loading Home chat…")
@@ -77,22 +77,19 @@ extension HomeSheet {
         let chapterList = model.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
         return TronGlassCard(accent: .tronSessionTeal) {
             VStack(spacing: 0) {
-                navigationRow(icon: "doc.text.magnifyingglass", title: "Home Context",
-                              subtitle: "What Home's requests carry", destination: .context, id: "home-manage-context")
                 if memoryBrowser {
-                    divider()
                     navigationRow(icon: "brain", title: "Memory",
                                   subtitle: HomeStatusLinePresentation.memory(status, summaries: summaries, unresolvedCommand: unresolved),
                                   destination: .memory(sessionID: nil), id: "home-manage-memory-browser")
                 }
                 if let chapter = status.chapter, chapterList {
-                    divider()
+                    if memoryBrowser { divider() }
                     navigationRow(icon: "book", title: "Chapters",
                                   subtitle: HomeManageRowPresentation.chapters(read.chapters, fallback: chapter),
                                   destination: .chapters, id: "home-manage-chapters")
                 }
                 if status.taskRecovery != nil {
-                    divider()
+                    if memoryBrowser || (status.chapter != nil && chapterList) { divider() }
                     navigationRow(icon: "checklist", title: "Tasks",
                                   subtitle: HomeManageRowPresentation.tasks(read.tasks, admitted: status.admitsTaskReads),
                                   destination: .tasks, id: "home-manage-tasks")

@@ -2,7 +2,7 @@ import Foundation
 import TronMobileCore
 
 /// Schema-formatted settings audit entry. The Gateway projection is disposable;
-/// the append-only record remains the source of truth.
+/// layer stores remain settings truth. Audit is only history and fenced undo.
 struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable {
     struct Actor: Decodable, Equatable, Sendable {
         let kind: String
@@ -41,7 +41,22 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
     let after: JSONValue?
     let redacted: Bool?
     let reason: String?
+    struct TierBasis: Decodable, Equatable, Sendable {
+        let direction: String
+        let floor: String
+        let floorSource: String
+        let web: Bool
+        let risk: String?
+    }
+    struct GitState: Decodable, Equatable, Sendable {
+        let staged: Bool
+        let reason: String?
+        let warning: String?
+    }
+
     let tier: String
+    let tierBasis: TierBasis?
+    let git: GitState?
     let status: String
     let failure: String?
     let undoOf: String?
@@ -60,8 +75,9 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
         switch scope {
         case .all:
             true
-        case .home:
-            actor.kind == "home" || actor.kind == "worker"
+        case .home(let sessionID):
+            actor.kind == "home" || actor.kind == "worker" || target.kind == "home"
+                || (target.kind == "session" && target.sessionId == sessionID)
         case .session(let id, let projectCWD):
             actor.sessionId == id || (target.kind == "session" && target.sessionId == id)
                 || (target.kind == "project" && target.cwd == projectCWD && projectCWD != nil)
@@ -73,7 +89,8 @@ extension SettingsApprovalRequest {
     func belongs(to scope: SettingsChangesScope) -> Bool {
         switch scope {
         case .all: true
-        case .home: actor.kind == "home" || actor.kind == "worker"
+        case .home(let sessionID): actor.kind == "home" || actor.kind == "worker" || target.kind == "home"
+            || (target.kind == "session" && target.sessionId == sessionID)
         case .session(let id, let projectCWD): actor.sessionId == id || (target.kind == "session" && target.sessionId == id)
             || (target.kind == "project" && target.cwd == projectCWD && projectCWD != nil)
         }
@@ -88,6 +105,14 @@ struct SettingsChangeHistoryPage: Decodable, Sendable {
 /// Native entry point ownership: global Settings, Home, or one chat.
 enum SettingsChangesScope: Hashable, Sendable {
     case all
-    case home
+    case home(String)
     case session(String, projectCWD: String?)
+
+    var storageKey: String {
+        switch self {
+        case .all: "all"
+        case .home: "home"
+        case .session(let id, let cwd): "session.\(id).\(cwd ?? "")"
+        }
+    }
 }

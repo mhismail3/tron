@@ -116,14 +116,17 @@ final class TronProjectTrustUITests: XCTestCase {
         app.launchArguments = ["-tron-project-trust-fixture", "-project-trust-scenario", "floors"]
         app.launch()
         defer { app.terminate() }
-        let row = app.descendants(matching: .any)["permission-floor-permissions.floor|direction=widen|key=permissions.projectTrust"]
+        let section = app.buttons["settings-section-permissions-expand"]
+        XCTAssertTrue(section.waitForExistence(timeout: 15), app.debugDescription)
+        section.tap()
+        let row = app.descendants(matching: .any)["settings-row-permissions.floor_direction_widen_key_permissions.projectTrust"]
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(counts(app, contain: "floor:approve previews:0 applies:0"), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Project trust (widen)"].exists && app.staticTexts["Built-in"].exists, app.debugDescription)
 
         // Lowering: the dry run carries confirm text, and nothing is applied until confirmed.
-        choose(app, row: row, option: "permission-floor-choice-quiet")
-        let confirm = app.buttons["permission-floor-confirm"].firstMatch
+        choose(app, row: row, option: "Quiet")
+        let confirm = app.buttons["Change setting"].firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(counts(app, contain: "floor:approve previews:1 applies:0"), app.debugDescription)
         keepScreenshot(app, name: "758-permission-floor-lower-confirm")
@@ -134,21 +137,22 @@ final class TronProjectTrustUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Mac"].waitForExistence(timeout: 5), app.debugDescription)
 
         // Raising: the dry run needs no confirm, so the choice applies directly.
-        choose(app, row: row, option: "permission-floor-choice-approve")
+        choose(app, row: row, option: "Approve")
         XCTAssertTrue(counts(app, contain: "floor:approve previews:2 applies:2"), app.debugDescription)
-        XCTAssertFalse(app.buttons["permission-floor-confirm"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["Change setting"].firstMatch.exists)
         XCTAssertTrue(waitForValue(row.buttons.firstMatch, "Approve"), app.debugDescription)
         keepScreenshot(app, name: "758-permission-floor-raise-applied")
     }
 
     @MainActor
     private func choose(_ app: XCUIApplication, row: XCUIElement, option: String) {
-        let menu = row.buttons.firstMatch
-        XCTAssertTrue(menu.waitForExistence(timeout: 5), app.debugDescription)
+        let menus = row.buttons.matching(NSPredicate(format: "label == %@", "Project trust (widen)"))
+        XCTAssertTrue(menus.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        guard let menu = menus.allElementsBoundByIndex.last else { return XCTFail("Missing native choice menu") }
         menu.tap()
         let choice = app.buttons[option]
         XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
-        choice.tap()
+        choice.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
     @MainActor
