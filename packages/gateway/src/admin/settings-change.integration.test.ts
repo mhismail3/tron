@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -379,6 +379,17 @@ describe("settings.change", () => {
     expect((await f.history({ key: "permissions.projectTrust" }))[0]).toMatchObject({ after: true, tier: "approve", tierBasis: { direction: "widen" } });
     await f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: granted.changes[0]!.changeId });
     expect((await f.trust.inspect(project)).savedDecision).toBeNull();
+
+    // Trust is keyed by the Project root: a Mac request naming a subdirectory
+    // reads, records and writes its worktree root's decision, so Tron's own
+    // write is not reported as an outside change.
+    const repository = await realpath(await gitProject(f.root, "rooted"));
+    const subdirectory = join(repository, "packages", "app");
+    await mkdir(subdirectory, { recursive: true });
+    const rooted = await f.change({ kind: "mac" }, [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: true, qualifiers: { project: subdirectory } }]);
+    expect(rooted.changes[0]).toMatchObject({ qualifiers: { project: repository } });
+    expect(await f.trust.inspect(subdirectory)).toMatchObject({ projectDir: repository, savedDecision: true });
+    expect((await f.history({ key: "permissions.projectTrust" })).some(entry => entry.actor?.kind === "outside")).toBe(false);
   });
 
   it("filters paged Changes by actor, layer and section without dropping older matches", async () => {

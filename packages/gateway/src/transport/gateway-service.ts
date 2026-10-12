@@ -2434,8 +2434,11 @@ export class GatewayService {
         `${actorLabel(context.actor)} changed ${what}${context.reason ? `: ${context.reason}` : ""}. Undo it in Tron.`);
     }
     // Project-layer effects address every live chat of the changed store's
-    // Project root (TrustInspection.projectDir), not only chats at one cwd.
-    const projectDir = target.kind === "project" ? (await this.dependencies.trust.inspect(target.cwd)).projectDir : undefined;
+    // Project root (TrustInspection.projectDir), not only chats at one cwd; a chat
+    // target's project layer is its own root.
+    const projectDir = target.kind === "project" ? (await this.dependencies.trust.inspect(target.cwd)).projectDir
+      : target.kind === "session" && changes.some(change => change.layer === "project")
+        ? (await this.slot({ sessionId: target.sessionId })).projectDir : undefined;
     if (context.actor.kind === "ui" || context.actor.kind === "outside" || context.approved === true) {
       // A chat/Home requester can edit a default layer. Scope follows the
       // changed store, not the target through which the request arrived.

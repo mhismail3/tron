@@ -46,6 +46,11 @@ export class SettingsModel {
 
   constructor(private readonly dependencies: SettingsModelDependencies) {}
 
+  /** The Project root that keys a path's Project store and trust decision. */
+  async projectRoot(path: string): Promise<string> {
+    return (await this.dependencies.trust.inspect(path)).projectDir;
+  }
+
   /** The outside-change owner every settings read reconciles through (doc 5.6). */
   observeOutside(outside: OutsideChanges): void {
     if (this.outside && this.outside !== outside) throw new Error("Settings already have an outside-change owner");
@@ -845,6 +850,12 @@ export class SettingsChangePath {
       qualifiers.project = stores.project.root;
     }
     if (key.qualifier === "project" && !qualifiers.project) throw new GatewayError("invalid_request", `${key.label} needs a project`);
+    // Trust is keyed by the Project root (TrustInspection.projectDir), so a path a
+    // Mac or Home request names reads, plans and writes its root's decision. A
+    // path that does not exist yet keeps its name; applying it fails as before.
+    if (key.qualifier === "project" && qualifiers.project !== stores.project?.root) {
+      qualifiers.project = await this.model.projectRoot(qualifiers.project!).catch(() => qualifiers.project!);
+    }
     if (key.qualifier === "key" && !floorInstances().some(instance => instance.key === qualifiers.key && instance.direction === qualifiers.direction)) {
       throw new GatewayError("invalid_request", `${key.label} names a setting and, when its floor differs by direction, that direction`);
     }
