@@ -30,7 +30,7 @@ export interface SettingsModelDependencies {
   tronHome: string;
   trust: Pick<TrustService, "inspect" | "canonicalDirectory">;
   modelRuntime: ModelRuntime;
-  /** The Home record's memory model; Home owns it (doc 6.1). */
+  /** Home's Profile memory model; Home owns its reader and applier (doc 6.1). */
   homeMemoryModel?: () => Promise<{ provider: string; id: string } | undefined>;
 }
 

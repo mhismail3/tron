@@ -33,6 +33,7 @@ import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type
 import { HOME_MAX_CHAPTERS, HOME_HARD_BYTES, HOME_HARD_ENTRIES, HOME_SOFT_BYTES, HOME_SOFT_ENTRIES, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
 import type { HomeDiagnostic, HomeDiagnosticRecord } from "./home-diagnostic.js";
 import { homeSystemPrompt } from "./tron-home-extension.js";
+import { HomeMemoryProfile } from "./home-memory-profile.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 
 /** One Gateway installation keeps at most one Home. */
@@ -73,9 +74,8 @@ export interface HomeRecord {
   model: ModelRef;
   createdAt: string;
   updatedAt: string;
-  /** Home's memory model. Absent until `settings.change` records one (`model.ref[role=memory]`): there
-   * are no defaults (decision D4), so an unconfigured memory refuses. */
-  memory?: { model: ModelRef; paused?: true };
+  /** Pause is chapter-independent lifecycle state. The model lives only in Profile. */
+  memory?: { paused?: true };
 }
 
 /** What the Home record says about one session id. `unnamed` means the record
@@ -184,6 +184,7 @@ export interface HomeOwnerOptions {
 export class HomeOwner {
   private readonly directory: string;
   private readonly recordPath: string;
+  private readonly memoryProfile: HomeMemoryProfile;
   private workspacePath: string;
   private readonly mutex = new AsyncMutex();
   /** Serializes durable record commits with model callbacks that arrive from a
@@ -215,6 +216,7 @@ export class HomeOwner {
   constructor(private readonly options: HomeOwnerOptions) {
     this.directory = join(options.tronHome, "gateway", "home");
     this.recordPath = join(this.directory, "home.json");
+    this.memoryProfile = new HomeMemoryProfile(options.tronHome);
     this.workspacePath = join(this.directory, "workspace");
     const store = new HomeTaskStore(options.tronHome, options.workspace, options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {});
     const authorization = new HomeTaskAuthorization({ store: store.authorization,
@@ -541,6 +543,13 @@ export class HomeOwner {
       // A malformed record can still coexist with an uncreated workspace. Its
       // existing parent is enough to canonicalize the future child identity.
       try { this.workspacePath = join(await realpath(this.directory), "workspace"); } catch { /* no Home directory yet */ }
+    }
+    try {
+      await this.memoryProfile.transfer(value => admitRecord(value) !== undefined);
+    } catch {
+      this.unavailable = "Home memory Profile transfer is incomplete or conflicts with its stores";
+      this.options.diagnostic?.({ outcome: "unavailable", reason: "memory-profile-transfer" });
+      return;
     }
     await this.load();
   }
@@ -1034,13 +1043,15 @@ export class HomeOwner {
       const memory = { ...record.memory, model: { ...input.model } };
       const owner = this.ownerFor(record.homeId);
       await owner.configure(memory);
-      await this.recordMutex.run(async () => {
-        const current = this.record;
-        if (!current || current.homeId !== record.homeId || !current.enabled) {
-          throw new GatewayError("conflict", "Tron Home changed while configuring its memory");
-        }
-        await this.writeLocked({ ...current, memory, updatedAt: new Date().toISOString() });
-      });
+      try { await this.memoryProfile.setModel(input.model); }
+      catch (error) {
+        // Never leave the open compactor on an unpublished choice. A failed
+        // first configuration is retired; the next read uses Profile only.
+        await this.releaseMemory();
+        const published = await this.memoryProfile.model();
+        if (published) await this.ownerFor(record.homeId).configure({ ...record.memory, model: published });
+        throw error;
+      }
       // Configuration is not a designation/profile transition.
       return this.memoryStatus();
     }));
@@ -1051,7 +1062,7 @@ export class HomeOwner {
    * refuse explicitly. The pump finishes accepted nodes, then stops admission. */
   async pauseMemory(): Promise<HomeMemoryStatus> {
     return this.clientControl("pauseMemory", () => this.mutex.run(async () => {
-      const record = this.requireEnabledMemory();
+      const record = await this.requireEnabledMemory();
       await this.commitMemoryPause(record, true);
       this.memory?.owner.notePause();
       return this.memoryStatus();
@@ -1062,10 +1073,10 @@ export class HomeOwner {
    * by the same store, so resuming never rebuilds them merely due to suspension. */
   async resumeMemory(): Promise<HomeMemoryStatus> {
     return this.clientControl("resumeMemory", () => this.mutex.run(async () => {
-      const record = this.requireEnabledMemory();
+      const record = await this.requireEnabledMemory();
       const owner = this.ownerFor(record.homeId);
-      await owner.configure(record.memory!);
-      if (!record.memory!.paused && !owner.status().blocked) {
+      await owner.configure({ ...record.memory, model: (await this.memoryProfile.model())! });
+      if (!record.memory?.paused && !owner.status().blocked) {
         throw new GatewayError("conflict", "Home memory is neither paused nor blocked");
       }
       await this.commitMemoryPause(record, false);
@@ -1078,23 +1089,23 @@ export class HomeOwner {
     }));
   }
 
-  private requireEnabledMemory(): HomeRecord {
+  private async requireEnabledMemory(): Promise<HomeRecord> {
     this.assertAvailable();
     const record = this.record;
     if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
     if (!record.enabled) throw new GatewayError("conflict", "Tron Home is disabled: designate it before controlling its memory");
-    if (!record.memory) throw new GatewayError("conflict", "Home memory is not configured: set the memory model (model.ref[role=memory]) with settings.change");
+    if (!await this.memoryProfile.model()) throw new GatewayError("conflict", "Home memory is not configured: set the memory model (model.ref[role=memory]) with settings.change");
     return record;
   }
 
   private async commitMemoryPause(record: HomeRecord, paused: boolean): Promise<void> {
     await this.options.sessions.serializeSessionMutation(homeSessionId(record), () => this.recordMutex.run(async () => {
-      const current = this.requireEnabledMemory();
+      const current = await this.requireEnabledMemory();
       if (current.homeId !== record.homeId) throw new GatewayError("conflict", "Tron Home changed during memory control");
-      if (Boolean(current.memory!.paused) === paused) return;
+      if (Boolean(current.memory?.paused) === paused) return;
       await this.writeLocked({
         ...current,
-        memory: { model: { ...current.memory!.model }, ...(paused ? { paused: true as const } : {}) },
+        memory: paused ? { paused: true } : {},
         updatedAt: new Date().toISOString(),
       });
     }));
@@ -1121,10 +1132,11 @@ export class HomeOwner {
     const record = this.record;
     if (!record) return { configured: false, open: false, paused: false };
     const paused = Boolean(record.memory?.paused);
+    const model = await this.memoryProfile.model();
     const owner = this.memory?.sessionId === record.homeId ? this.memory.owner : undefined;
-    if (owner?.open) return { ...owner.status(), paused };
-    const base: HomeMemoryStatus = record.memory
-      ? { configured: true, open: false, model: { ...record.memory.model } }
+    if (owner?.open && model) return { ...owner.status(), model, paused };
+    const base: HomeMemoryStatus = model
+      ? { configured: true, open: false, model }
       : { configured: false, open: false };
     base.paused = paused;
     const persisted = await (owner ?? this.ownerFor(record.homeId)).persistedState().catch(() => undefined);
@@ -1166,10 +1178,11 @@ export class HomeOwner {
       signal?.throwIfAborted();
       this.assertAvailable();
       const record = this.record;
-      if (!record?.memory) throw new GatewayError("conflict", "Home memory is not configured");
+      const model = await this.memoryProfile.model();
+      if (!record || !model) throw new GatewayError("conflict", "Home memory is not configured");
       const owner = this.ownerFor(record.homeId);
       try {
-        await owner.configure(record.memory);
+        await owner.configure({ ...record.memory, model });
         signal?.throwIfAborted();
         return await owner.browserRead(async memory => {
           const cursor = memory.browserCursor();
@@ -1262,10 +1275,11 @@ export class HomeOwner {
     if (!record || !record.enabled) {
       throw new HomeMemoryRefusal("memory-not-configured", "Tron Home is not enabled");
     }
-    if (!record.memory) {
+    const model = await this.memoryProfile.model();
+    if (!model) {
       throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
     }
-    if (record.memory.paused) {
+    if (record.memory?.paused) {
       throw new HomeMemoryRefusal("memory-paused", "Home memory is paused; resume memory before sending another input");
     }
     const owner = this.ownerFor(record.homeId);
@@ -1275,7 +1289,7 @@ export class HomeOwner {
     const path = await this.options.sessions.sessionFile(chapter.sessionId);
     const present = path ? await stat(path).then(() => true, error => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }) : false;
     if (!present && chapter.activationStarted) throw new HomeMemoryRefusal("memory-unavailable", "A started Home chapter has lost its canonical file");
-    await owner.configure(record.memory);
+    await owner.configure({ ...record.memory, model });
     let view: HomeActivationView;
     if (!present && chapter.ordinal === 1) {
       view = owner.emptyChapterView(signal);
@@ -1453,7 +1467,7 @@ export class HomeOwner {
           model: { ...model },
           // The memory's configuration is the user's decision about *how* Home
           // remembers, so a replacement chapter keeps it and its pause decision.
-          ...(existing?.memory ? { memory: { ...existing.memory, model: { ...existing.memory.model } } } : {}),
+          ...(existing?.memory ? { memory: { ...existing.memory } } : {}),
           createdAt: existing?.createdAt ?? now,
           updatedAt: now,
         };
@@ -1742,11 +1756,6 @@ function admitMemory(value: unknown): HomeRecord["memory"] | null {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  const model = record.model;
-  if (!hasOnlyKeys(record, ["model", "paused"]) || (record.paused !== undefined && record.paused !== true) || !model || typeof model !== "object" || Array.isArray(model)) return null;
-  const modelRecord = model as Record<string, unknown>;
-  if (!hasOnlyKeys(modelRecord, ["provider", "id"])
-    || !boundedString(modelRecord.provider, MAXIMUM_PROVIDER_BYTES)
-    || !boundedString(modelRecord.id, MAXIMUM_MODEL_ID_BYTES)) return null;
-  return { model: { provider: modelRecord.provider, id: modelRecord.id }, ...(record.paused === true ? { paused: true } : {}) };
+  if (!hasOnlyKeys(record, ["paused"]) || (record.paused !== undefined && record.paused !== true)) return null;
+  return record.paused === true ? { paused: true } : {};
 }

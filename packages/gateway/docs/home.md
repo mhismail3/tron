@@ -479,8 +479,16 @@ Each activation waits for and freezes the preceding view before provider admissi
   ([episodic-memory.md](episodic-memory.md)).
 - **Configuration.** There is no default model. The memory model is the Home
   profile key `model.ref[role=memory]`, changed through `settings.change`
-  ([settings-model.md](settings-model.md)); its applier writes `memory.model`
-  through `HomeOwner` and refuses virtual or unregistered models. The same model changes nothing.
+  ([settings-model.md](settings-model.md)); its applier writes `memory.model` in
+  `<tronHome>/gateway/home/profile.json` through `HomeOwner` and refuses virtual
+  or unregistered models. The same model changes nothing. `home.json` keeps only
+  memory pause state. Runtime reads never fall back to its former model field.
+  Before Home admission, a one-time transfer preserves the old configured model
+  and pause state, publishes an idempotent settings audit, then removes the old
+  model field. A bounded durable intent makes interrupted publication recoverable;
+  conflicting store bytes preserve both files and refuse Home with
+  `home.unavailable reason=memory-profile-transfer`. This is a startup transfer,
+  not a live migration command. No memory nodes, spend or credentials move.
 - **No budget.** Spend is bounded by construction
   ([episodic-memory.md](episodic-memory.md)): a summary is built when missing, with
   bounded tries, and rebuilt only after its source changes. `spentTokens` is

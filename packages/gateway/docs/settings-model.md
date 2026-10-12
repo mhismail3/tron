@@ -217,7 +217,7 @@ schema data (F1); no row here is an exception to a rule.
 | `transport`, `httpIdleTimeoutMs`, `websocketConnectTimeoutMs` | Run | Chat, Project, Mac | Live |
 | `httpProxy` | Run | Mac (pi reads it only there) | Restart |
 | pi `cacheWarming` (not exposed today) | Run | Mac (pi reads it only there) | Live |
-| Home memory model (`home.json` `memory.model`) → `model.ref[role=memory]` | Model | Profile | Live (next memory pass) |
+| Home memory model (`profile.json` `memory.model`) → `model.ref[role=memory]` | Model | Profile | Live (next memory pass) |
 | Worker model and thinking (new) → `model.ref[role=worker]`, `model.thinking[role=worker]` | Model | Profile | Read when Home delegates ([6.3](#63-worker-model-same-as-home)) |
 | `npmCommand` | Sources | Mac | Live |
 | `sessionDir` | Setup | Mac | Restart |
@@ -545,7 +545,7 @@ Provenance is not a field. It is part of every resolved value
 | `model.ref[role=worker]` | model | `role` | profile → `profile.json`; built-in `{ sameAs: "home" }` | read when Home delegates | notify | ui, home |
 | `model.thinking` | model | `role`, `model` | chat → `thinking_level_change`; profile (Home chat, and `role=worker` built-in `{ sameAs: "home" }`); project/mac → `defaultThinkingLevel`, `modelThinkingLevels`; summarizer → `compaction.thinkingLevel` | fixed (summarizer: live) / next-turn | quiet | ui, home, agent |
 | `model.contextWindow` | model | `model` | chat → `tron.context-window.v1`; project/mac → `modelContextWindows` | fixed / next-turn | quiet | ui, home, agent |
-| `model.ref[role=memory]` | model | `role` | profile → `profile.json` (today `home.json` `memory.model`) | live / next memory pass | notify | ui, home |
+| `model.ref[role=memory]` | model | `role` | profile → `profile.json` (`memory.model`) | live / next memory pass | notify | ui, home |
 | `context.compaction.reserveTokens` | context | `model` | chat; project/mac → `compaction.reserveTokens`, `compaction.modelOverrides` | live / next compaction | quiet | ui, home, agent |
 | `context.compaction.instructions` | context | | project/mac → `compaction.instructions` | live / next compaction | notify | ui, home |
 | `context.images.block` | context | | chat; project/mac → `images.blockImages` | narrow live, widen fixed / next-request | approve / quiet | ui, home, agent |
@@ -607,8 +607,9 @@ open:
   while keeping actual chat/tool/extension cwd and its instruction hierarchy.
   Neither a dependency upgrade to 1.1.0 nor changing chat cwd meets that contract;
   no partial split, private import, replacement parser or context wrapper ships.
-- **Home memory model.** Until slice 9 moves it to `profile.json`, the Profile
-  layer of `model.ref[role=memory]` is read from `home.json` through `HomeOwner`.
+- **Home memory model.** The Profile layer of `model.ref[role=memory]` reads
+  `profile.json` through `HomeOwner`. The one-time startup transfer and its
+  recovery contract are described in [6.1](#61-what-it-is).
 
 ### 4.4 How far today's code is from this
 
@@ -983,13 +984,18 @@ schema-declared Profile binding before exposing it. The document is capped at
 declared field is changed.
 
 This slice supports writing the schema keys already bound to the `profile`
-store. The memory model still uses the separate `home-memory` binding and
-`HomeOwner.configureMemory`; it remains in `home.json` `memory.model`
-(`packages/gateway/src/home/home-owner.ts:77`). Moving it to `profile.json`
-requires an owner-coordinated atomic transition across the settings applier and
-Home's persisted record. No migration or dual-store fallback is part of this
-slice. The Home chat's own model in `home.json` (`home-owner.ts:72`) stays: it
-is Home's Chat layer, carried across chapters.
+store. The memory model uses the `home-memory` applier behind
+`HomeOwner.configureMemory`, but its sole value store is now `profile.json`
+`memory.model`. `home.json` retains pause state, not a model copy. The approved
+one-time startup transfer runs before Home admission: a bounded durable intent
+fences the original and destination documents, publishes Profile and an immutable
+idempotent settings-audit segment, then removes the legacy field. Interrupted
+publication is completed on restart; conflicting bytes refuse Home without
+choosing a winner. There is no runtime legacy fallback, live migration endpoint,
+or memory-node transfer. The Home chat's own model in `home.json` stays: it is
+Home's Chat layer, carried across chapters. The real-registry regression in
+`home-context-data.e2e.test.ts` covers settings-ledger writes, restart, pause
+preservation, conflicting stores and the unindexed-audit crash cut.
 
 The design also names task budgets and scopes as Profile keys, but neither is
 currently declared in `settings-schema.ts`; this slice does not invent new
@@ -1291,7 +1297,7 @@ Re-verified against `main` at `b76f6ca80`.
 |---|---|
 | `admin/settings-service.ts:121-195` `get`: two documents plus an effective object | `settings.resolve` from the schema: every key with value, `display`, layer, applied flag, badges and section summaries, for a target (Mac, project, session or profile). `settings.get` is removed when its last client moves (no alias). |
 | `transport/gateway-service.ts` `settings.get` | Removed when its last client moves to `settings.resolve` (slices 8 and 11); `settings.options` and the served schema arrive with slice 14. |
-| `home/home-owner.ts:77` memory model in `home.json` (its applier is now behind `settings.change`) | `model.ref[role=memory]` in `profile.json`, applied by `HomeOwner`. |
+| Implemented: memory model in `profile.json`, applied by `HomeOwner` behind `settings.change` | One-time startup transfer consumes the legacy `home.json` model before admission; runtime has no fallback. |
 | `home/home-task-dispatcher.ts:190-193`, `home-task-worker-choice.ts`, `tron-home-extension.ts:29,77` ("omit both for the Gateway default") | Home's `delegate` handler fills omitted `model` and `thinking` from the profile (`sameAs: home`) before admission, clamping thinking to the model; an explicit choice wins with its reason ([6.3](#63-worker-model-same-as-home)). |
 | No per-chat Run values; `images.blockImages` read per request by pi but only from settings files | Chat-layer values in `tron.settings.v1` for every key that allows Chat, applied to the chat's own settings ([3.4](#34-timing)). |
 | `home/home-profile.ts:21-23` `delegation-default` notes | Kept as the *why*. Values move to typed keys. |

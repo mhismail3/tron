@@ -1,7 +1,9 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { createHash, randomUUID } from "node:crypto";
+import { durablePublishBoundedJson, syncDurably } from "../util/durable-json.js";
 import type { FixedSetting, SettingsTarget } from "./settings-resolver.js";
 import type { Direction, LayerId, Qualifiers, Tier } from "./settings-types.js";
 
@@ -76,7 +78,7 @@ export interface ChangeEntry {
 }
 
 export const SEGMENT_ENTRIES = 500;
-interface RecordIndex { version: 1; segments: Array<{ name: string; count: number }> }
+interface RecordIndex { version: 1; segments: Array<{ name: string; count: number; closed?: true }> }
 
 export class SettingsChangeRecord {
   private readonly mutex = new AsyncMutex();
@@ -95,7 +97,7 @@ export class SettingsChangeRecord {
       const index = await this.index();
       for (const entry of entries) {
         let segment = index.segments[index.segments.length - 1];
-        if (!segment || segment.count >= this.segmentEntries) {
+        if (!segment || segment.closed || segment.count >= this.segmentEntries) {
           segment = { name: String(index.segments.length).padStart(6, "0"), count: 0 };
           index.segments.push(segment);
         }
@@ -105,6 +107,38 @@ export class SettingsChangeRecord {
       const temporary = join(this.directory, "index.json.tmp");
       await writeFile(temporary, `${JSON.stringify(index)}\n`, "utf8");
       await rename(temporary, join(this.directory, "index.json"));
+    });
+  }
+
+  /** Startup transfers publish one immutable, identity-addressed segment. A crash
+   * between segment and index publication can be completed without duplicating the
+   * audit or consulting it as settings truth. Call before ordinary writers start. */
+  async appendOnce(entry: ChangeEntry): Promise<void> {
+    await this.mutex.run(async () => {
+      const name = `once-${createHash("sha256").update(entry.changeId).digest("hex")}`;
+      const path = join(this.directory, `${name}.jsonl`);
+      const index = await this.index();
+      const existing = await this.segmentLines(name);
+      if (existing.length && (existing.length !== 1 || JSON.stringify(existing[0]) !== JSON.stringify(entry))) {
+        throw new GatewayError("conflict", "The settings transfer audit conflicts with its intent");
+      }
+      if (!existing.length) {
+        const encoded = `${JSON.stringify(entry)}\n`;
+        if (Buffer.byteLength(encoded) > 1024 * 1024) throw new GatewayError("conflict", "The settings transfer audit exceeds its bound");
+        await mkdir(this.directory, { recursive: true, mode: 0o700 });
+        const temporary = `${path}.${randomUUID()}.tmp`;
+        try {
+          const file = await open(temporary, "wx", 0o600);
+          try { await file.writeFile(encoded); await syncDurably(file); } finally { await file.close(); }
+          await rename(temporary, path);
+          const directory = await open(this.directory, "r");
+          try { await syncDurably(directory); } finally { await directory.close(); }
+        } finally { await rm(temporary, { force: true }); }
+      }
+      if (!index.segments.some(segment => segment.name === name)) {
+        index.segments.push({ name, count: 1, closed: true });
+        await durablePublishBoundedJson(join(this.directory, "index.json"), index, 16 * 1024 * 1024);
+      }
     });
   }
 
