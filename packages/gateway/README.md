@@ -3347,7 +3347,8 @@ the root, with `hasTrustRequiringProjectResources(cwd, projectDir)`; a decision
 saved earlier for a subdirectory no longer applies, so such a chat asks once for
 its root. Tron Home's workspace is a standalone directory
 (`TrustServiceOptions.standaloneDirectories`): its explicit untrusted decision
-never reaches a repository that encloses the Tron home. Each runtime build passes
+never reaches a repository that encloses the Tron home, while a repository inside
+the workspace keeps its own root. Each runtime build passes
 the root as the SDK's `projectDir` to `SettingsManager.create()` and
 `createAgentSessionServices()`, so Pi reads Project settings, packages,
 `.pi/{extensions,skills,prompts,themes}`, `SYSTEM.md` and built-in MCP

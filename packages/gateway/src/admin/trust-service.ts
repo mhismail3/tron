@@ -46,12 +46,16 @@ export class TrustService {
     this.store = new ProjectTrustStore(agentDir);
   }
 
+  /** The Project root, except that a root enclosing a standalone directory stops
+   * at the cwd; a repository inside the standalone directory keeps its own root. */
   private async projectDirectory(cwd: string): Promise<string> {
+    const root = await projectRoot(cwd);
+    const within = (path: string, directory: string) => path === directory || path.startsWith(`${directory}${sep}`);
     for (const directory of this.options.standaloneDirectories ?? []) {
       const canonical = await realpath(directory).catch(() => resolve(directory));
-      if (cwd === canonical || cwd.startsWith(`${canonical}${sep}`)) return cwd;
+      if (within(cwd, canonical) && !within(root, canonical)) return cwd;
     }
-    return projectRoot(cwd);
+    return root;
   }
 
   async canonicalDirectory(path: string): Promise<string> {
@@ -126,8 +130,9 @@ export class TrustService {
   async set(path: string, decision: boolean | null): Promise<TrustInspection> {
     return this.mutationMutex.run(async () => {
       const cwd = await this.canonicalDirectory(path);
-      this.store.set(await this.projectDirectory(cwd), decision);
-      return this.inspectUnlocked(cwd);
+      const projectDir = await this.projectDirectory(cwd);
+      this.store.set(projectDir, decision);
+      return this.inspectUnlocked(cwd, projectDir);
     });
   }
 
