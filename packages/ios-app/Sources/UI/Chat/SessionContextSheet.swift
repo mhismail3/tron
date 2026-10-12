@@ -244,6 +244,14 @@ struct SessionContextSheet: View {
                         SessionContextUsageCard(snapshot: snapshot)
                             .settingsApprovals(.session(sessionID))
                         modelConfigurationCard(snapshot)
+                        SettingsRendererView(
+                            target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
+                            writeLayer: "chat",
+                            embedded: true,
+                            ownedKeysOnly: true,
+                            ownedLayers: ["chat"],
+                            excludedKeys: ["model.ref", "model.thinking", "model.contextWindow"]
+                        )
                         TronGlassCard(accent: .tronEmerald) {
                             manageRow(icon: "gearshape", title: "Settings",
                                       subtitle: "Values and defaults for this chat", accent: .tronEmerald) {

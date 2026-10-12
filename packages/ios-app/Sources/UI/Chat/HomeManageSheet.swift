@@ -43,12 +43,15 @@ extension HomeSheet {
                 }
             }) { EmptyView() }
             // The shared Chat card owns receipt + applied-revision reconciliation.
-            // Profile keys use the schema without duplicating those live Chat controls.
+            // Schema rows cover the remaining Chat and Profile keys without duplicating
+            // its model, thinking or context-window controls.
             SettingsRendererView(
                 target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
-                writeLayer: "profile",
+                writeLayer: nil,
                 embedded: true,
-                ownedKeysOnly: true
+                ownedKeysOnly: true,
+                ownedLayers: ["chat", "profile"],
+                excludedKeys: ["model.ref", "model.thinking", "model.contextWindow"]
             )
         } else {
             TronLoadingState(label: "Loading Home chat…")

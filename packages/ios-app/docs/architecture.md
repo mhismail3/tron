@@ -794,6 +794,13 @@ actions remain display-only badges, and a negotiated read-only row cannot reset.
 `testSettingsRendererUsesCurrentDefaultSourceAction` proves one applied unset
 against the hosted socket and preserves the unknown badge without dispatching it.
 This is primitive coverage; session-surface adoption still owns the runtime fence.
+Manage Session and Manage Home embed the same schema renderer for the keys not
+already represented by the shared Chat model/context card. Home admits both Chat
+and Profile layers; Manage Session admits Chat. Other resolved values remain
+visible with their served edit-at-layer route. Read-only previews are fenced by
+the exact renderer request, presentation activity, foreground reconciliation,
+and profile identity before publishing a refusal, error, confirmation or clearing
+loading state; accepted setting mutations keep their receipt owner.
 Every edit is a `settings.change` dry run first: a refusal
 shows under its row and nothing is applied, and a change with `confirm` text asks first.
 `SettingsTrustCoordinator` owns the generic reads and the receipt-bound change, which the

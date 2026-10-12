@@ -10,9 +10,13 @@ struct SettingsRendererView: View {
     let target: JSONValue
     let writeLayer: String?
     var embedded = false
-    /// A composed surface can retain its existing live Chat controls while this
-    /// renderer owns only its declared layer. Key membership stays schema-owned.
+    /// A composed surface can retain domain-owned controls; its remaining key
+    /// membership stays schema-owned, including values read-only at this surface.
     var ownedKeysOnly = false
+    /// Ordered from the layer this surface prefers to the next owned layer.
+    var ownedLayers: [String] = []
+    /// Keys represented by a domain-owned control elsewhere in the same card.
+    var excludedKeys: Set<String> = []
     var projectCWD: String? = nil
     /// Hand-built account, package and setup flows supplement schema rows, never replace them.
     var sectionSupplement: ((String) -> AnyView)? = nil
@@ -25,6 +29,7 @@ struct SettingsRendererView: View {
     @State private var resolution: SettingsResolution?
     @State private var loadError: String?
     @State private var loadGeneration = 0
+    @State private var previewGeneration = 0
     @State private var reloadTick = 0
     @State private var search = ""
     @State private var sliderPresentation = ConfigurationSliderPresentation()
@@ -91,9 +96,15 @@ struct SettingsRendererView: View {
             )
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
-            if !active { loadGeneration &+= 1 }
+            if !active {
+                loadGeneration &+= 1
+                previewGeneration &+= 1
+            }
         }
-        .onDisappear { loadGeneration &+= 1 }
+        .onDisappear {
+            loadGeneration &+= 1
+            previewGeneration &+= 1
+        }
         .task(id: PresentationActivityTaskID(
             source: LoadID(target: target, invalidationGeneration: model.settingsInvalidationGeneration,
                            foregroundGeneration: model.foregroundReconciliationGeneration, reloadTick: reloadTick),
@@ -132,7 +143,7 @@ struct SettingsRendererView: View {
             searchResults(resolution, query: query)
         } else if ownedKeysOnly {
             ForEach(Self.sections(resolution)) { section in
-                let keys = Self.keys(resolution, in: section.id).filter { writableLayer(for: $0) != nil }
+                let keys = Self.keys(resolution, in: section.id).filter { isVisibleSetting($0) }
                 if !keys.isEmpty {
                     TronSettingsGroup(section.title, detail: section.note) {
                         rows(keys, resolution: resolution)
@@ -274,7 +285,7 @@ struct SettingsRendererView: View {
 
     private func searchResults(_ resolution: SettingsResolution, query: String) -> some View {
         let matches = resolution.keys.filter { setting in
-            (!ownedKeysOnly || writableLayer(for: setting) != nil) &&
+            (!ownedKeysOnly || isVisibleSetting(setting)) &&
             [setting.presentation?.label, setting.key, setting.presentation?.help, setting.display]
                 .compactMap { $0 }
                 .contains { $0.localizedCaseInsensitiveContains(query) }
@@ -352,7 +363,14 @@ struct SettingsRendererView: View {
         }
     }
 
+    private func isVisibleSetting(_ setting: ResolvedSetting) -> Bool {
+        !excludedKeys.contains(setting.id) && !excludedKeys.contains(setting.key)
+    }
+
     private func writableLayer(for setting: ResolvedSetting) -> String? {
+        if !ownedLayers.isEmpty {
+            return ownedLayers.first { layer in setting.layers.contains(where: { $0.layer == layer }) }
+        }
         guard let writeLayer, setting.layers.contains(where: { $0.layer == writeLayer }) else { return nil }
         return writeLayer
     }
@@ -374,21 +392,30 @@ struct SettingsRendererView: View {
         if let value { object["value"] = value }
         let change = JSONValue.object(object)
         let identity = model.knowledgePresentationIdentity
+        let activity = presentationActivity
+        let foreground = model.foregroundReconciliationGeneration
+        previewGeneration &+= 1
+        let ticket = previewGeneration
         changingID = setting.id
         Task { @MainActor in
-            defer { if changingID == setting.id && pendingConfirmation == nil { changingID = nil } }
+            @MainActor func current() -> Bool {
+                ticket == previewGeneration && !Task.isCancelled
+                    && identity == model.knowledgePresentationIdentity
+                    && foreground == model.foregroundReconciliationGeneration
+                    && activity == presentationActivity && activity.allowsDataPublication
+            }
+            defer { if ticket == previewGeneration && changingID == setting.id && pendingConfirmation == nil { changingID = nil } }
             let preview: SettingsChangeResult
             do {
                 preview = try await model.previewSettingsChange(target: target, change: change)
             } catch is CancellationError {
                 return
             } catch {
-                guard identity == model.knowledgePresentationIdentity else { return }
+                guard current() else { return }
                 model.presentError(error)
                 return
             }
-            guard identity == model.knowledgePresentationIdentity,
-                  presentationActivity.allowsDataPublication else { return }
+            guard current() else { return }
             if let failure = preview.changes.first?.error {
                 rowErrors[setting.id] = failure.message
                 return
