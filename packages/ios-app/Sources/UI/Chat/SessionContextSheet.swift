@@ -241,7 +241,7 @@ struct SessionContextSheet: View {
                         modelConfigurationCard(snapshot)
                         TronGlassCard(accent: .tronEmerald) {
                             manageRow(icon: "gearshape", title: "Settings",
-                                      subtitle: "Settings for this chat and its project", accent: .tronEmerald) {
+                                      subtitle: "Values and defaults for this chat", accent: .tronEmerald) {
                                 destination = .settings
                             }
                             .accessibilityIdentifier("manage-session-settings")
@@ -328,10 +328,8 @@ struct SessionContextSheet: View {
                 Group {
                     switch route {
                     case .settings:
-                        SettingsView(scope: .project, projectSessionID: sessionID,
-                                     projectCWD: displayedPresentation?.cwd, onImported: handleForkCreated)
-                            // Root Settings owns its category palette, not the
-                            // teal theme inherited by Session destinations.
+                        SettingsRendererSheet(target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
+                                              writeLayer: "chat", projectCWD: displayedPresentation?.cwd)
                             .environment(\.tronSettingsVisualTheme, nil)
                     case .agentInstructions:
                         AgentInstructionsSheet(sessionID: sessionID)

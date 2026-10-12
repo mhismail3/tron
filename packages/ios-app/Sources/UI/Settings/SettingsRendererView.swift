@@ -9,6 +9,7 @@ import TronMobileCore
 struct SettingsRendererView: View {
     let target: JSONValue
     let writeLayer: String?
+    var projectCWD: String? = nil
 
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -25,6 +26,13 @@ struct SettingsRendererView: View {
     @State private var rowErrors: [String: String] = [:]
     @State private var changingID: String?
     @State private var pendingConfirmation: PendingConfirmation?
+    @State private var layerEditor: LayerEditor?
+
+    private enum LayerEditor: String, Identifiable {
+        case project, mac
+        var id: String { rawValue }
+        var title: String { self == .project ? "Edit at Project" : "Edit at Mac" }
+    }
 
     private struct PendingConfirmation {
         let change: JSONValue
@@ -75,6 +83,14 @@ struct SettingsRendererView: View {
             Button("Cancel", role: .cancel) { pendingConfirmation = nil }
         } message: { pending in
             Text(pending.message)
+        }
+        .tronManagedSheet(item: $layerEditor, identity: { "settings.layer.\($0.id)" }) { editor in
+            SettingsRendererSheet(
+                target: editor == .project && projectCWD != nil
+                    ? .object(["kind": .string("project"), "cwd": .string(projectCWD!)])
+                    : .object(["kind": .string("mac")]),
+                writeLayer: editor.rawValue
+            )
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active { loadGeneration &+= 1 }
@@ -206,7 +222,7 @@ struct SettingsRendererView: View {
             SettingsRendererRow(
                 setting: setting,
                 target: target,
-                editable: writeLayer != nil,
+                editable: writeLayer.map { layer in setting.layers.contains { $0.layer == layer } } == true,
                 dependencyDisplay: Self.dependencyDisplay(setting, in: resolution),
                 error: rowErrors[setting.id],
                 onChange: { value in change(setting, value: value) }
@@ -214,6 +230,14 @@ struct SettingsRendererView: View {
             // Keep the presenting control's identity while its accepted change
             // completes; replacing it with read-only would retire its child sheet.
             .disabled(changingID != nil)
+            if let writeLayer, !setting.layers.contains(where: { $0.layer == writeLayer }),
+               let editor = setting.layers.compactMap({ LayerEditor(rawValue: $0.layer) })
+                .first(where: { $0 != .project || projectCWD != nil }) {
+                Button { layerEditor = editor } label: { TronInlineActionLabel(editor.title) }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                    .padding(.bottom, 12)
+            }
         }
     }
 
@@ -300,7 +324,8 @@ struct SettingsRendererView: View {
     /// a refusal shows under the row and nothing is applied, and a change whose
     /// key has confirm text asks before it is made (doc 7.5).
     private func change(_ setting: ResolvedSetting, value: JSONValue?) {
-        guard let writeLayer, changingID == nil, presentationActivity.allowsPresentationPublication else { return }
+        guard let writeLayer, setting.layers.contains(where: { $0.layer == writeLayer }),
+              changingID == nil, presentationActivity.allowsPresentationPublication else { return }
         var object: [String: JSONValue] = [
             "key": .string(setting.key), "layer": .string(writeLayer), "op": .string(value == nil ? "unset" : "set"),
         ]
@@ -355,6 +380,36 @@ struct SettingsRendererView: View {
                 rowErrors[rowID] = error.localizedDescription
             }
         }
+    }
+}
+
+/// The same renderer on a managed native sheet; its caller owns the target,
+/// never a global/project scope picker.
+struct SettingsRendererSheet: View {
+    let target: JSONValue
+    let writeLayer: String
+    var projectCWD: String? = nil
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            SettingsRendererView(target: target, writeLayer: writeLayer, projectCWD: projectCWD)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .principal) { TronSheetTitle(title: "Settings") }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button { dismiss() } label: {
+                            Image(systemName: "checkmark")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(Color.tronEmerald)
+                        }
+                        .accessibilityLabel("Done")
+                        .accessibilityIdentifier("settings-renderer-done")
+                    }
+                }
+        }
+        .tronTopBlur(.sheet)
+        .presentationDragIndicator(.hidden)
     }
 }
 

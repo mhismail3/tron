@@ -1473,6 +1473,35 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "post-stop-configuration-ready")
     }
 
+    /// The real Manage Session route, not the renderer-only fixture: reset is
+    /// fenced to this chat, and reopening shows the authoritative new snapshot.
+    @MainActor
+    func testManageSessionUsesCurrentDefault() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        XCTAssertTrue(app.buttons["Release terminal settlement"].waitForExistence(timeout: 5))
+        app.buttons["Release terminal settlement"].tap()
+        tapScrolling(app.buttons["manage-session-settings"], in: app)
+        let expand = app.buttons["settings-section-model-expand"]
+        XCTAssertTrue(expand.waitForExistence(timeout: 5), app.debugDescription)
+        expand.tap()
+        let reset = app.buttons["settings-row-model.thinking_role_chat_-useCurrentDefault"]
+        tapScrolling(reset, in: app)
+        XCTAssertTrue(app.staticTexts["From default at start: High (Mac)"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["settings-renderer-done"].tap()
+        XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
+        tapScrolling(app.buttons["manage-session-settings"], in: app)
+        XCTAssertTrue(expand.waitForExistence(timeout: 5))
+        expand.tap()
+        XCTAssertTrue(app.staticTexts["From default at start: High (Mac)"].waitForExistence(timeout: 5))
+    }
+
     /// Manage Session's pending change for this chat: a decline is recorded by the
     /// Gateway, and the chat's approvals section then renders nothing.
     @MainActor

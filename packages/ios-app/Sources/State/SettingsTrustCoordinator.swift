@@ -228,26 +228,31 @@ final class SettingsTrustCoordinator {
 
     /// A dry run of one change to a target: its tier, any `confirm` text, and any
     /// refusal. Nothing is applied; the caller decides what a refusal shows.
-    func previewChange(target: JSONValue, change: JSONValue) async throws -> SettingsChangeResult {
+    func previewChange(target: JSONValue, change: JSONValue, fence: JSONValue? = nil) async throws -> SettingsChangeResult {
         let admittedProfileGeneration = profileGeneration
-        let value = try await client.requestValue("settings.change", JSONValue.object([
+        var params: [String: JSONValue] = [
             "commandId": .string(uuidSource.next().uuidString), "target": target,
             "changes": .array([change]), "dryRun": .bool(true),
-        ]))
+        ]
+        if let fence { params["fence"] = fence }
+        let value = try await client.requestValue("settings.change", JSONValue.object(params))
         try requireProfile(admittedProfileGeneration)
         return try value.decode(SettingsChangeResult.self)
     }
 
     /// One change to a target through the confirmed mutation path. A refusal the
     /// Gateway returns in its outcome is thrown, so nothing reads as applied.
-    func change(target: JSONValue, change: JSONValue) async throws {
+    func change(target: JSONValue, change: JSONValue, fence: JSONValue? = nil, admitSend: (() -> Bool)? = nil) async throws {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
-        let params: JSONValue = .object([
+        var fields: [String: JSONValue] = [
             "commandId": .string(commandID), "target": target, "changes": .array([change]),
-        ])
+        ]
+        if let fence { fields["fence"] = fence }
+        let params = JSONValue.object(fields)
         let value = try await mutationExecutor.performValue(method: "settings.change", commandID: commandID) {
-            try await client.requestValue("settings.change", params)
+            if let admitSend, !admitSend() { throw CancellationError() }
+            return try await client.requestValue("settings.change", params)
         }
         try requireProfile(admittedProfileGeneration)
         try value.decode(SettingsChangeResult.self).throwIfRefused()

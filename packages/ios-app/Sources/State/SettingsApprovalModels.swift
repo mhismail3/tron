@@ -110,6 +110,8 @@ struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
     let layer: String
     let applied: Bool
     let badges: [SettingsBadge]
+    struct Layer: Decodable, Equatable, Sendable { let layer: String }
+    let layers: [Layer]
     /// Absent from a Gateway that predates the renderer contract: the row is then read-only.
     let presentation: SettingsKeyPresentation?
 

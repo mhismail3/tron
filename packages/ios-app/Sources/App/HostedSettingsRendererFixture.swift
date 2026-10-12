@@ -225,8 +225,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                      badges: [JSONValue] = [], presentation: JSONValue) -> JSONValue {
         var object: [String: JSONValue] = [
             "key": .string(id), "group": .string(group), "display": .string(display), "layer": .string(layer), "applied": .bool(true),
+            "layers": .array([.object(["layer": .string("mac")])]),
             "badges": .array([.object(["kind": .string("layer"), "label": .string(layer == "mac" ? "Mac" : "Built-in")])] + badges),
-            "layers": .array([]), "presentation": presentation,
+            "presentation": presentation,
         ]
         if let subgroup { object["subgroup"] = .string(subgroup) }
         if let value { object["value"] = value }

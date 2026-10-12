@@ -1608,6 +1608,17 @@ immediate revocation; revoking this iPhone also removes its local profile.
 
 ## Presentation parity
 
+Manage Session's Settings destination uses `SettingsRendererSheet` for its exact
+Chat target. Fixed-source actions and live overrides go through the existing
+settings mutation receipt owner, with runtime/model/revision captured from the
+admitted session and rechecked immediately before a send. Opening or dismissing
+never writes. The renderer uses the resolver's allowed layer list: other-layer
+rows remain read-only and link to the Project or Mac editor rather than attempting
+a Chat write. The hosted `testManageSessionUsesCurrentDefault` journey exercises
+reset through this actual route and reopens it to check the authoritative value;
+Gateway settings-gate coverage owns persistence and provider-effect proof.
+The remaining Manage Home/card consolidation is tracked by settings epic #758.
+
 An interrupted initial chat open has a distinct `waitingForConnection` phase.
 The opening owner starts no open lease or timeout without lifecycle admission;
 Retry while disconnected remains waiting rather than turning a cancellation into

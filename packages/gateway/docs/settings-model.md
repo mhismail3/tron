@@ -442,7 +442,9 @@ recovery diagnostic.
 
 This is not complete timing support: propagation of an approved Mac/Project
 widening into existing chats uses the scoped canonical pin release above. End-to-end Chat reset
-adoption in the native session surfaces is also outstanding. The SDK's merge-only
+adoption is implemented in Manage Session's Settings destination, including the
+runtime/model/revision fence and reopening proof. Manage Home's generic settings
+adoption and the remaining inline card consolidation are still outstanding. The SDK's merge-only
 `applyOverrides` is not the owner of optional-field removal; the final provider
 boundary above is, after SDK default composition.
 

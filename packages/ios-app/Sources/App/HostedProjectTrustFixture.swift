@@ -159,6 +159,7 @@ private actor ProjectTrustFixtureGateway {
             "qualifiers": .object(["direction": .string("widen"), "key": .string("permissions.projectTrust")]),
             "group": .string("permissions"), "subgroup": .null, "value": .string(floor),
             "display": .string(labels[floor] ?? floor), "layer": .string(floorOverride == nil ? "builtin" : "mac"), "applied": .bool(true),
+            "layers": .array([.object(["layer": .string("mac")])]),
             "badges": .array([.object(["kind": .string("layer"), "label": .string(floorOverride == nil ? "Built-in" : "Mac")]),
                               .object(["kind": .string("scope"), "label": .string("Project trust (widen)")])])])
     }

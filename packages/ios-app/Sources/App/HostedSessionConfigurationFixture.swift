@@ -159,8 +159,43 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             try enqueue(.object(["type": .string("event"), "topic": .string("session.snapshot"),
                 "sessionId": .string(snapshot.sessionId), "payload": try JSONValue.encode(snapshot)]))
             result = .object(["aborted": .bool(true)])
+        case "settings.resolve":
+            result = .object(["keys": .array([.object([
+                "key": .string("model.thinking[role=chat]"), "group": .string("model"),
+                "value": .string(snapshot.thinkingLevel), "display": .string(snapshot.thinkingLevel.capitalized),
+                "layer": .string("chat"), "applied": .bool(true),
+                "layers": .array([.object(["layer": .string("chat"), "applied": .bool(true)])]),
+                "badges": .array([.object(["kind": .string("source"),
+                    "label": .string("From default at start: \(snapshot.thinkingLevel.capitalized) (Mac)"),
+                    "action": .object(["kind": .string("useCurrentDefault"), "label": .string("Use the current default")])])]),
+                "presentation": .object(["label": .string("Chat thinking"), "help": .string("Thinking for this chat."),
+                    "order": .number(10), "importance": .string("essential"), "control": .string("choice"),
+                    "options": .array([.object(["value": .string("off"), "label": .string("Off")]),
+                                       .object(["value": .string("high"), "label": .string("High")])])]),
+            ])]), "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10)])])])
         case "settings.change":
-            let change = frame.objectValue?["params"]?.objectValue?["changes"]?.arrayValue?.first?.objectValue
+            let params = frame.objectValue?["params"]?.objectValue ?? [:]
+            let change = params["changes"]?.arrayValue?.first?.objectValue
+            if change?["op"]?.stringValue == "unset" {
+                guard params["target"]?.objectValue?["sessionId"]?.stringValue == snapshot.sessionId,
+                      change?["key"]?.stringValue == "model.thinking[role=chat]", change?["layer"]?.stringValue == "chat",
+                      params["fence"]?.objectValue?["runtimeGeneration"]?.stringValue == snapshot.runtimeGeneration,
+                      params["fence"]?.objectValue?["model"] == (try JSONValue.encode(snapshot.model)) else {
+                    throw GatewayFailure(code: "invalid_request", message: "Expected a fenced Chat reset", retryable: false, details: nil)
+                }
+                if params["dryRun"]?.boolValue == true {
+                    result = .object(["tier": .string("quiet"), "changes": .array([.object([:])])])
+                } else {
+                    snapshot.thinkingLevel = "high"
+                    snapshot.revision += 1
+                    snapshot.eventSequence += 1
+                    decisions.append("reset:chat:\(snapshot.sessionId)")
+                    try enqueue(.object(["type": .string("event"), "topic": .string("session.snapshot"),
+                        "sessionId": .string(snapshot.sessionId), "payload": try JSONValue.encode(snapshot)]))
+                    result = fixtureSettingsChangeResult(key: "model.thinking[role=chat]", revision: snapshot.revision)
+                }
+                break
+            }
             guard change?["key"]?.stringValue == "model.thinking[role=chat]", change?["value"]?.stringValue == "high" else {
                 throw GatewayFailure(code: "invalid_request", message: "Expected a real changed Thinking selection", retryable: false, details: nil)
             }

@@ -4415,11 +4415,29 @@ final class AppModel {
     }
 
     func previewSettingsChange(target: JSONValue, change: JSONValue) async throws -> SettingsChangeResult {
-        try await settingsTrust.previewChange(target: target, change: change)
+        let snapshot = try rendererConfigurationSnapshot(target)
+        return try await settingsTrust.previewChange(target: target, change: change, fence: rendererConfigurationFence(snapshot))
     }
 
     func changeSetting(target: JSONValue, change: JSONValue) async throws {
-        try await settingsTrust.change(target: target, change: change)
+        let snapshot = try rendererConfigurationSnapshot(target)
+        try await settingsTrust.change(target: target, change: change, fence: rendererConfigurationFence(snapshot)) { [weak self] in
+            guard let snapshot else { return true }
+            return self?.admitsConfigurationSend(snapshot) == true
+        }
+    }
+
+    private func rendererConfigurationSnapshot(_ target: JSONValue) throws -> SessionSnapshot? {
+        guard target.objectValue?["kind"]?.stringValue == "session",
+              let sessionID = target.objectValue?["sessionId"]?.stringValue else { return nil }
+        return try configurationSnapshot(sessionID)
+    }
+
+    private func rendererConfigurationFence(_ snapshot: SessionSnapshot?) throws -> JSONValue? {
+        guard let snapshot else { return nil }
+        return .object(["runtimeGeneration": .string(snapshot.runtimeGeneration),
+                        "model": try snapshot.model.map(JSONValue.encode) ?? .null,
+                        "revision": .number(Double(snapshot.revision))])
     }
 
     func packageInventory(for target: PackageConfigurationTarget) -> PackageInventory? {
