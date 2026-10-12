@@ -737,7 +737,8 @@ struct ReadOnlySubagentSessionSheet: View {
     }
 
     private func transcript(_ store: ReadOnlySubagentSessionStore) -> some View {
-        ChatTranscriptViewport { insets in
+        let compactIDs = ChatNotificationRunSpacing.compactIDs(in: store.presentation.timeline.items)
+        return ChatTranscriptViewport { insets in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ChatTranscriptClearance(height: orientation.layoutClearance(for: insets).top)
@@ -765,7 +766,7 @@ struct ReadOnlySubagentSessionSheet: View {
                             .environment(\.chatTranscriptSheetRoutes, sheetRoutes)
                             // Transcript/tool semantics are not navigation chrome.
                             .environment(\.tronSettingsVisualTheme, nil)
-                            .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
+                            .padding(.bottom, compactIDs.contains(entry.item.id) ? 0 : ChatTranscriptLayoutConstants.rowSpacing)
                             #if HOSTED_TEST
                             .background { ChatHostedStableRowProbe(id: entry.item.id) }
                             #endif

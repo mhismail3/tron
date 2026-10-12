@@ -404,6 +404,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
         }
     }
 
+    let compactNotificationSpacingIDs: Set<String>
     let tag: ChatTranscriptProjectionTag
     let handoff: ChatTranscriptHandoffCommit
     let timeline: ChatTranscriptTimeline
@@ -504,6 +505,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
         runtimeIDSet = Set(runtimeItems.map(\.id))
         queueIDSet = Set(queuedMessages.map(\.id))
         let displayed = Array(timeline.items) + runtimeItems
+        compactNotificationSpacingIDs = ChatNotificationRunSpacing.compactIDs(in: displayed)
         let displayedIndex = Dictionary(
             displayed.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }

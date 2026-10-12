@@ -1598,6 +1598,22 @@ detents and toolbar ownership; loading changes only content, not chrome geometry
 
 
 
+Inbound Context details present the full message in the existing Markdown reading
+card. Known `tron.home-task-result.v1` report envelopes use their typed `details.report`
+when present, otherwise the released one-header/one-JSON-envelope text format;
+only version 1 with complete report identity, text, evidence and an admitted report
+outcome is unpacked. Final report is not a success claim. Plain, malformed and
+unknown shapes remain verbatim. The standard toolbar Info button opens technical
+metadata tables, evidence and complete report/context/content JSON inspectors;
+no canonical text, model input, or stored context is changed. This remains compatible
+with readable Gateway delivery text without introducing a second delivery format.
+
+Notification reading cards establish full content width before applying their
+existing surface. Contiguous notification runs omit only repeated eight-point
+turn clearance, using one policy in live and read-only transcripts. Each event
+retains its ID, order, individual accessibility action and 44-point target;
+conversation and tool rows end the run. This is not event deduplication.
+
 Subagent context uses the shared seafoam compact inbound pill: supervisor progress
 keeps **Subagent · Progress Update**, per-child workflow notes use **Subagent ·
 Child Update**, and other admitted subagent messages use **Subagent · Update**.

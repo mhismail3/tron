@@ -1214,7 +1214,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             // context-menu interaction, when the handoff added the ID.
             if isReplacementOverlay {
                 renderRow(item, installed: installed)
-                    .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
+                    .padding(.bottom, installed.compactNotificationSpacingIDs.contains(item.id) ? 0 : ChatTranscriptLayoutConstants.rowSpacing)
             } else {
                 ChatTranscriptEntranceRow(
                     state: state,
@@ -1230,7 +1230,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     }
                 ) {
                     renderRow(item, installed: installed)
-                        .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
+                        .padding(.bottom, installed.compactNotificationSpacingIDs.contains(item.id) ? 0 : ChatTranscriptLayoutConstants.rowSpacing)
                 }
             }
         }

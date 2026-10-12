@@ -941,6 +941,28 @@ the selected transport-open diagnostic distinguishes never-opened from opened fa
 
 ## Efficient focused tests
 
+The `TronSubagentParityUITests` presentation journeys exercise the actual chat and
+managed sheets with bounded transcript DTOs:
+
+- `testHomeResultReadableMessageAndNestedInfo`: legacy envelope, structured report
+  precedence (including Needs input), plain and malformed messages, Markdown and
+  toolbar Info/Done nested navigation in light/dark.
+- `testNotificationBodyFillsSheetWidth`: short HTTP 429 and multiline errors in
+  light/default and dark/accessibility text, measuring the actual reading card
+  against its sheet viewport.
+- `testAdjacentNotificationsKeepCompactIndependentTargets`: distinct chronological
+  events, 44-point row pitch, and a native tap beyond the visible glass inside the
+  event's own target. Restoring the old clearance fails at a 52-point pitch.
+- `testInterleavedNotificationsPreserveConversationAndToolBoundaries`: the same
+  errors separated by real rendered conversation and a tool call keep both events
+  and the intervening content.
+
+Run these with `scripts/tron-ios-test run --only-testing
+TronMobileUITests/TronSubagentParityUITests/<method>` after `build`. The retained
+`611-852-*` xcresult attachments are simulator captures, not physical-device or
+VoiceOver certification. The shared Home loading-surface journey remains the
+regression gate for sheet chrome; these card changes do not replace that owner.
+
 iOS validation is integration and end-to-end at real boundaries; there is no
 hosted unit-test target. Build the UI-validation products once, then run only
 the journeys that own the change, without rebuilding:
