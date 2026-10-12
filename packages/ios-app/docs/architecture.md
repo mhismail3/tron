@@ -1615,6 +1615,20 @@ immediate revocation; revoking this iPhone also removes its local profile.
 
 ## Presentation parity
 
+`ProjectSettingsContent` is the shared Project card behind Manage Session's
+Project settings row, the dashboard workspace header's context-menu action, and
+New Session's selected-workspace row. The last route edits a project before its
+first chat. Every route captures the Gateway and exact workspace; another Mac
+requires explicit Use This Server before any settings read/write. The card
+composes the generic Project-layer renderer with existing trust review and a
+bounded Git header. Workspace dirtiness is not a per-setting staging badge.
+The read carries managed activity, identity and a latest-request fence through
+trust and Git awaits. Native no-chat save/rejoin/create and real RuntimeRegistry
+inheritance journeys prove a project default remains Project provenance, not an
+explicit Chat override or Mac default. Separate Project/config-root support and
+outside/git-state/Apply-again acceptance remain blocked by #764; this UI does not
+infer a root, replay audit or claim that dependency is implemented.
+
 Settings is the Mac-layer surface, regardless of whether it was opened from the
 dashboard, an ordinary chat or Home. Its schema renderer owns Model, Context,
 Tools, Permissions, Run and supply-section keys, summaries and search. Native

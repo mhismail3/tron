@@ -96,6 +96,9 @@ struct HostedNewSessionFixture: View {
 
 private actor NewSessionFixtureGateway {
     private var creates = 0, typed = 0
+    private var projectModel: String?
+    private var projectWrites = 0
+    private var inheritedAtCreation = false
     private var held: CheckedContinuation<Void, Never>?
     struct Counts: Sendable { let creates: String; let trust: String }
     private let scenario: String
@@ -109,7 +112,7 @@ private actor NewSessionFixtureGateway {
     nonisolated func updates() -> AsyncStream<Counts> { AsyncStream { c in Task { await self.add(c) } } }
     private func add(_ c: AsyncStream<Counts>.Continuation) { streams.append(c); publish() }
     private func publish() {
-        let counts = Counts(creates: "creates:\(creates) typed:\(typed)", trust: "trusts:\(trusts) successor:\(successorTrusts) fallback:\(fallbackMatches) held:\(submissionHeld) released:\(submissionReleased) acceptedHeld:\(acceptedHeld)")
+        let counts = Counts(creates: "creates:\(creates) typed:\(typed)" + (scenario == "project-settings" ? " projectWrites:\(projectWrites) inherited:\(inheritedAtCreation)" : ""), trust: "trusts:\(trusts) successor:\(successorTrusts) fallback:\(fallbackMatches) held:\(submissionHeld) released:\(submissionReleased) acceptedHeld:\(acceptedHeld)")
         streams.forEach { $0.yield(counts) }
     }
     func holdSubmission() async {
@@ -131,11 +134,52 @@ private actor NewSessionFixtureGateway {
         await withCheckedContinuation { held = $0 }
     }
     func releaseTypedResult() { held?.resume(); held = nil }
+    private func projectResolution() -> JSONValue {
+        .object([
+            "target": .object(["kind": .string("project"), "cwd": .string("/fixture/original")]),
+            "layers": .array([.string("project"), .string("mac"), .string("builtin")]),
+            "keys": .array([.object([
+                "key": .string("model.ref[role=chat]"), "group": .string("model"),
+                "value": .object(["provider": .string("fixture"), "id": .string(projectModel ?? "builtin")]),
+                "display": .string(projectModel == nil ? "Built-in model" : "Project Pro"),
+                "layer": .string(projectModel == nil ? "builtin" : "project"), "applied": .bool(true),
+                "layers": .array([.object(["layer": .string("project"), "applied": .bool(true)])]),
+                "badges": .array([.object(["kind": .string("layer"), "label": .string(projectModel == nil ? "Built-in" : "Project")])]),
+                "presentation": .object(["label": .string("Model"), "help": .string("The default for new chats in this project."),
+                    "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
+                    "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
+            ])]),
+            "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10),
+                "summary": .object(["essential": .array([])])])]),
+            "diagnostics": .array([])
+        ])
+    }
+
     func handle(_ method: String, params: [String: JSONValue], replacement: Bool) -> JSONValue? {
         switch method {
-        case "settings.get": return .object(["effective": .object([:])])
+        case "settings.get":
+            return .object(["effective": projectModel.map { .object(["defaultModel": .object(["provider": .string("fixture"), "id": .string($0)])]) } ?? .object([:])])
+        case "settings.resolve":
+            guard scenario == "project-settings" else { return nil }
+            return projectResolution()
+        case "settings.options":
+            return .object(["key": .string("model.ref[role=chat]"), "source": .string("catalog.models"), "dependsOn": .array([]),
+                            "options": .array([.object(["value": .object(["provider": .string("fixture"), "id": .string("project-pro")]), "label": .string("Project Pro")])])])
         case "trust.inspect": return .object(["requiresDecision": .bool(scenario.hasPrefix("trust-") && !trustResolved), "effectiveDecision": scenario.hasPrefix("trust-") && !trustResolved ? .null : .bool(false)])
         case "settings.change":
+            if scenario == "project-settings" {
+                guard params["target"]?.objectValue?["kind"]?.stringValue == "project",
+                      params["target"]?.objectValue?["cwd"]?.stringValue == "/fixture/original",
+                      let change = params["changes"]?.arrayValue?.first?.objectValue,
+                      change["layer"]?.stringValue == "project",
+                      change["key"]?.stringValue == "model.ref[role=chat]" else { return nil }
+                if params["dryRun"]?.boolValue != true {
+                    projectModel = change["value"]?.objectValue?["id"]?.stringValue
+                    projectWrites += 1
+                    publish()
+                }
+                return fixtureSettingsChangeResult(key: "model.ref[role=chat]")
+            }
             let change = fixtureTrustChange(params)
             guard change.isTrust else { return nil }
             trusts += 1
@@ -145,7 +189,11 @@ private actor NewSessionFixtureGateway {
             return fixtureSettingsChangeResult(key: "permissions.projectTrust",
                                                result: .object(["requiresDecision": .bool(false), "effectiveDecision": .bool(false)]))
         case "git.inspect": return .object(["isRepository": .bool(true), "branch": .string("main"), "dirty": .bool(false), "branches": .array([.object(["name": .string("main"), "checkedOut": .bool(true)]), .object(["name": .string("fixture-base"), "checkedOut": .bool(false)])]), "commits": .array([])])
-        case "session.create": creates += 1; publish(); return .object(["sessionId": .string("fixture-created-session")])
+        case "session.create":
+            creates += 1
+            inheritedAtCreation = projectModel == "project-pro" && params["model"] == nil
+            publish()
+            return .object(["sessionId": .string("fixture-created-session")])
         case "session.list", "session.listUpdated": return .object(["sessions": .array([])])
         case "system.metadata": return .object([:])
         case "attention.list": return .object(["items": .array([])])

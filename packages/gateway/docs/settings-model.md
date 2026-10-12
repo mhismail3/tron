@@ -1330,7 +1330,7 @@ Re-verified against `main` at `b76f6ca80`.
 | Implemented: `UI/Settings/SettingsView.swift` | Mac-only schema sections with native account, package and Setup flows; device-only preferences under This iPhone. Global/Project scope pickers and superseded Mac editors are removed. Changes remains a separate implementation slice. |
 | `UI/Settings/AgentConfigurationControls.swift` | Thin layer adapters over the served control primitives. Context-window and generic numbers share `SettingsNumberSlider.swift` and `SettingsNumberSliderScale.swift`; thinking shares `SettingsChoiceSlider.swift`. All use `SettingsConfigurationValueRow.swift`. Model catalog adoption remains with the surface migration. |
 | `UI/Chat/NewSessionSheet.swift:94-96,339-343`, `NewSessionConfigurationOwner.swift` | Generic Model rows at the new chat's Chat layer, with badges. |
-| The dashboard project list (`UI/Chat/SessionShellView.swift`, inferred owner) | Gains "Project settings", which opens the Project card. |
+| Implemented: dashboard workspace headers and New Session's workspace row | Open the same `UI/Chat/ProjectSettingsSheet.swift` as Manage Session. No-chat Project default inheritance is tested at the native and real RuntimeRegistry boundaries. Separate root, outside changes and per-key git-state acceptance still depend on #764. |
 
 **Mac menu bar** (`packages/mac-app/Sources/MenuBar/MenuBarController.swift`):
 Gateway lifecycle and pairing only (Setup). It has no harness keys, and none are

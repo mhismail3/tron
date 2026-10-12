@@ -81,6 +81,11 @@ struct NewSessionSheet: View {
                         accent: .tronEmerald
                     ) { showBrowser = true }
 
+                    if !workspace.isEmpty, let profileID = activeProfileID {
+                        ProjectSettingsLink(cwd: workspace, profileID: profileID)
+                            .tronGlassSurface(accent: .tronEmerald)
+                    }
+
                     setupCard(
                         icon: "arrow.triangle.branch",
                         title: "Source Control",

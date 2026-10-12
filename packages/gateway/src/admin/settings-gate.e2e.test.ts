@@ -199,6 +199,27 @@ const retries = (value: number, expected: number) => ({
 });
 
 describe("settings risk gate", () => {
+  it("a project model saved before its first chat is inherited with Project provenance and never changes Mac defaults", async () => {
+    const f = await fixture();
+    const target = { kind: "project", cwd: f.project };
+    const saved = await f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target,
+      changes: [{ key: "model.ref[role=chat]", layer: "project", op: "set", value: MEMORY_MODEL }],
+    });
+    const project = await f.service.invoke(phone(), "settings.resolve", { target, keys: ["model.ref[role=chat]"] }) as unknown as { keys: Array<{ value: unknown; layer: string }> };
+    expect(project.keys[0]).toMatchObject({ value: MEMORY_MODEL, layer: "project" });
+    expect(await f.macDocument()).toMatchObject({ defaultProvider: MODEL.provider, defaultModel: MODEL.id });
+    const slot = await f.registry.create(f.project);
+    expect(slot.snapshot().model).toMatchObject(MEMORY_MODEL);
+    const source = slot.settingsChatLayer().fixed?.["model.ref[role=chat]"];
+    expect(source).toMatchObject({ from: "project", value: MEMORY_MODEL });
+    const history = await f.history();
+    expect(history.filter(entry => entry.key === "model.ref[role=chat]")).toEqual([
+      expect.objectContaining({ layer: "project", after: MEMORY_MODEL, status: "applied" }),
+    ]);
+    transcript.push({ case: "project default before first chat", steps: [{ saved, project, source }] });
+  });
+
   it("fixed model and thinking retain their start source and reset through the audited current-default path", async () => {
     const f = await fixture({ reasoning: true });
     const slot = await f.registry.create(f.project);

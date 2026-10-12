@@ -79,6 +79,7 @@ struct SessionShellView: View {
     @State private var knowledgeDraftIdentity: KnowledgePresentationIdentity?
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
+    @State private var projectSettings: ProjectSettingsRoute?
     @State private var search = ""
     @State private var contentSearchSessionIDs: Set<String> = []
     @State private var searchResults: [SessionSearchResult] = []
@@ -181,6 +182,9 @@ struct SessionShellView: View {
                     present(route)
                 })
                 .presentationDragIndicator(.hidden)
+            }
+            .tronManagedSheet(item: $projectSettings, identity: { "dashboard.project-settings.\($0.id)" }) { route in
+                ProjectSettingsSheet(route: route)
             }
             .tronManagedSheet(
                 isPresented: $showingSearchOptions,
@@ -1247,6 +1251,13 @@ struct SessionShellView: View {
         .buttonStyle(.plain)
         .textCase(nil)
         .listRowInsets(SessionDashboardLayout.headerInsets)
+        .contextMenu {
+            if !group.path.isEmpty, let profileID = group.profileID ?? model.selectedGatewayProfileID() {
+                Button("Project settings", systemImage: "folder.badge.gearshape") {
+                    projectSettings = ProjectSettingsRoute(cwd: group.path, profileID: profileID)
+                }
+            }
+        }
         .accessibilityLabel(group.name)
         .accessibilityValue(isExpanded ? "expanded" : "collapsed")
         .accessibilityHint(isExpanded ? "Double tap to hide sessions" : "Double tap to show sessions")

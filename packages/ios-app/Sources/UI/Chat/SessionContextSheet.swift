@@ -236,6 +236,11 @@ struct SessionContextSheet: View {
                                 Task { _ = await model.retryConversationSynchronization(target: target) }
                             }
                         }
+                        if let cwd = displayedPresentation?.cwd, !cwd.isEmpty,
+                           let profileID = model.selectedGatewayProfileID() {
+                            ProjectSettingsLink(cwd: cwd, profileID: profileID)
+                                .tronGlassSurface(accent: .tronEmerald)
+                        }
                         SessionContextUsageCard(snapshot: snapshot)
                             .settingsApprovals(.session(sessionID))
                         modelConfigurationCard(snapshot)

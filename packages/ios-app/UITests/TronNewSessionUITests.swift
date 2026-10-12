@@ -1,6 +1,36 @@
 import XCTest
 
 final class TronNewSessionUITests: XCTestCase {
+    @MainActor func testProjectDefaultBeforeFirstChatIsInheritedWithoutChatOverride() {
+        continueAfterFailure = false
+        let app = launch("project-settings"); defer { app.terminate() }
+        let project = app.buttons["project-settings-link"]
+        XCTAssertTrue(project.waitForExistence(timeout: 10))
+        project.tap()
+        let section = app.buttons["settings-section-model-expand"]
+        XCTAssertTrue(section.waitForExistence(timeout: 5))
+        for _ in 0..<5 where !section.isHittable { app.swipeUp() }
+        section.tap()
+        let row = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let control = row.buttons.firstMatch.buttons.firstMatch
+        for _ in 0..<5 where !control.isHittable { app.swipeUp() }
+        control.tap()
+        let choice = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Project Pro'")).firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 5))
+        choice.tap()
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:0 typed:0 projectWrites:1'"))
+        evidence(app, "758-project-schema-default-before-first-chat")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(wait(app.buttons["new-session-card.Model"], "label CONTAINS[c] 'project'"))
+        evidence(app, "758-project-default-new-session")
+        XCTAssertTrue(app.buttons["Create"].isEnabled)
+        app.buttons["Create"].tap()
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'"))
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:1 typed:0 projectWrites:1 inherited:true'"),
+                      "The selected project default must remain inheritance, not an explicit Chat override")
+    }
+
     @MainActor func testSourceControlDraftSurvivesChildDoneAndBackground() {
         continueAfterFailure = false
         let app = launch("draft"); defer { app.terminate() }
