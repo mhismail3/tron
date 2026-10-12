@@ -2,7 +2,7 @@ import { ManagedSubagents } from "./sessions/managed-subagents.js";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, renameSync, writeFileSync, rmSync } from "node:fs";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.js";
 import { GatewayError } from "./errors.js";
@@ -578,6 +578,7 @@ function recordShutdownStep(step: string, durationMs: number): void {
 async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false): Promise<void> {
   if (stopping) return;
   stopping = true;
+  const stopDrainId = drainAcceptedWork ? sessions.administrativeDrainSnapshot().drainId : undefined;
   service.dispose();
   const stoppingAt = performance.now();
   // The last record of this process: the next process's gateway.started
@@ -633,6 +634,22 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     await shutdownStep("command-receipts-dispose", () => receipts.dispose(), recordShutdownStep);
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     if (forced) clearTimeout(forced);
+    if (exitCode === 0 && stopDrainId) {
+      // One atomic receipt survives transport retirement and log rotation. The
+      // accepted drain UUID plus Mac's captured PID/start identity exclude stale
+      // processes/attempts; this is completion, never permission to SIGKILL exit 0.
+      const path = join(config.tronHome, "gateway", "stop-completed.json");
+      const temporary = `${path}.${process.pid}.tmp`;
+      try {
+        writeFileSync(temporary, JSON.stringify({ version: 1, pid: process.pid, drainId: stopDrainId }), { mode: 0o600 });
+        renameSync(temporary, path);
+      } catch (error) {
+        try { rmSync(temporary, { force: true }); } catch {}
+        logger.log("error", "Could not publish intentional-stop completion; wrapper must report observation uncertainty", {
+          event: "gateway.stop-completion.failed", source: "lifecycle", error,
+        });
+      }
+    }
     recordStopped(exitCode);
     exitAfterShutdown(exitCode, gatewayLogPath);
   } catch (error) {

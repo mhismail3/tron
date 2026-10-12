@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Owns one user Quit across Gateway drain, exact process disappearance and
@@ -37,12 +38,13 @@ final class MacQuitCoordinator {
     private let processStartIdentity: @Sendable (Int) async -> String?
     private let runtimeOwnershipHealthy: @Sendable () async -> Bool
     private let serviceEnabled: @Sendable () -> Bool
-    private let shutdownCompleted: @Sendable (Int, Date) async -> Bool
-    private let exitStallGrace: Duration
+    private let shutdownCompleted: @Sendable (Int, String) async -> Bool
+    private let readDrain: @Sendable () async throws -> GatewayStopClient.Drain
+    private let exitStallGrace: Duration = .seconds(5)
     private let stopGateway: @Sendable (String) async throws -> GatewayStopClient.Response
     private let retireNativeHost: @Sendable () async throws -> Void
     private let wait: @Sendable () async throws -> Void
-    private var attempt: (identity: RuntimeIdentity, commandID: String)?
+    private var attempt: (identity: RuntimeIdentity, commandID: String, response: GatewayStopClient.Response?)?
     private var pending: Task<Void, Error>?
 
     init(
@@ -50,8 +52,8 @@ final class MacQuitCoordinator {
         processStartIdentity: @escaping @Sendable (Int) async -> String?,
         runtimeOwnershipHealthy: @escaping @Sendable () async -> Bool,
         serviceEnabled: @escaping @Sendable () -> Bool,
-        shutdownCompleted: @escaping @Sendable (Int, Date) async -> Bool = { _, _ in false },
-        exitStallGrace: Duration = .seconds(5),
+        shutdownCompleted: @escaping @Sendable (Int, String) async -> Bool,
+        readDrain: @escaping @Sendable () async throws -> GatewayStopClient.Drain,
         stopGateway: @escaping @Sendable (String) async throws -> GatewayStopClient.Response,
         retireNativeHost: @escaping @Sendable () async throws -> Void,
         wait: @escaping @Sendable () async throws -> Void = { try await Task.sleep(for: .milliseconds(250)) }
@@ -61,7 +63,7 @@ final class MacQuitCoordinator {
         self.runtimeOwnershipHealthy = runtimeOwnershipHealthy
         self.serviceEnabled = serviceEnabled
         self.shutdownCompleted = shutdownCompleted
-        self.exitStallGrace = exitStallGrace
+        self.readDrain = readDrain
         self.stopGateway = stopGateway
         self.retireNativeHost = retireNativeHost
         self.wait = wait
@@ -101,24 +103,30 @@ final class MacQuitCoordinator {
             throw Failure.runtimeReplaced
         }
         if attempt?.identity != identity {
-            attempt = (identity, "mac-quit-\(UUID().uuidString.lowercased())")
+            attempt = (identity, "mac-quit-\(UUID().uuidString.lowercased())", nil)
         }
         // A retry after uncertainty reuses this exact runtime's receipt. There is
         // no automatic replay and a different runtime always gets a new attempt.
-        let stopRequestedAt = Date()
-        _ = try await stopGateway(attempt!.commandID)
+        if attempt!.response == nil {
+            attempt!.response = try await stopGateway(attempt!.commandID)
+        }
+        let drainID = attempt!.response!.drainId
         var shutdownObservedAt: ContinuousClock.Instant?
+        var observationLostAt: ContinuousClock.Instant?
         let clock = ContinuousClock()
         while true {
             let current = try await readRuntime()
             guard let current else { break }
             guard let currentPID = current.pid else { break }
-            guard currentPID == identity.pid,
-                  current.processCommand == identity.command,
+            guard currentPID == identity.pid else { throw Failure.runtimeReplaced }
+            guard current.processCommand == identity.command,
                   await processStartIdentity(currentPID) == identity.start else {
+                // Exit can race the separate supervisor/ps observations. Confirm
+                // absence before classifying a disappearing process as replaced.
+                if try await readRuntime()?.pid == nil { break }
                 throw Failure.runtimeReplaced
             }
-            if await shutdownCompleted(identity.pid, stopRequestedAt) {
+            if await shutdownCompleted(identity.pid, drainID) {
                 let observedAt = shutdownObservedAt ?? clock.now
                 shutdownObservedAt = observedAt
                 if observedAt.duration(to: clock.now) >= exitStallGrace {
@@ -129,29 +137,55 @@ final class MacQuitCoordinator {
                     )
                     throw Failure.exitStalled
                 }
+            } else {
+                // A missing receipt is not evidence that accepted work finished.
+                // Keep a reachable canonical drain unbounded; loss of observation
+                // fails the UI only, never cancels work or signals the process.
+                do {
+                    let drain = try await readDrain()
+                    guard drain.drainId == drainID else { throw Failure.runtimeReplaced }
+                    guard drain.phase != "failed" else {
+                        attempt = nil // an explicit retry may start a new failed-drain attempt
+                        throw Failure.observation
+                    }
+                    if drain.phase == "preparing" || drain.phase == "waiting" {
+                        observationLostAt = nil
+                    } else {
+                        observationLostAt = observationLostAt ?? clock.now
+                    }
+                } catch let failure as Failure {
+                    throw failure
+                } catch {
+                    observationLostAt = observationLostAt ?? clock.now
+                }
+                if let lostAt = observationLostAt, lostAt.duration(to: clock.now) >= exitStallGrace {
+                    TronLog.shared.record(
+                        .error, event: "app.quit.gateway-observation-lost", source: "lifecycle",
+                        message: "Could not observe the accepted stop drain or its completion receipt; process remains untouched",
+                        commandId: attempt?.commandID, why: "pid=\(identity.pid)", outcome: "blocked"
+                    )
+                    throw Failure.observation
+                }
             }
             try await wait()
         }
     }
 
-    static func hasCompletedShutdown(pid: Int, since: Date, logURL: URL) async -> Bool {
-        await Task.detached(priority: .utility) {
-            guard let handle = try? FileHandle(forReadingFrom: logURL) else { return false }
+    static func hasCompletedShutdown(pid: Int, drainID: String, receiptURL: URL) async -> Bool {
+        struct Receipt: Decodable { let version: Int; let pid: Int; let drainId: String }
+        return await Task.detached(priority: .utility) {
+            // Reject non-regular/symlink receipts without blocking on a FIFO or
+            // following a replacement path. The producer publishes regular files.
+            let descriptor = open(receiptURL.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+            guard descriptor >= 0 else { return false }
+            let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
             defer { try? handle.close() }
-            let size = (try? handle.seekToEnd()) ?? 0
-            try? handle.seek(toOffset: size > 128_000 ? size - 128_000 : 0)
-            guard let data = try? handle.readToEnd(),
-                  let text = String(data: data, encoding: .utf8) else { return false }
-            let formatter = ISO8601DateFormatter()
-            return text.split(separator: "\n").reversed().contains { line in
-                guard let bytes = line.data(using: .utf8),
-                      let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return false }
-                guard let timestamp = value["timestamp"] as? String,
-                      let recordedAt = formatter.date(from: timestamp), recordedAt >= since else { return false }
-                return value["event"] as? String == "gateway.stopped"
-                    && (value["pid"] as? NSNumber)?.intValue == pid
-                    && value["code"] as? String == "0"
-            }
+            var info = stat()
+            guard fstat(descriptor, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
+                  info.st_size <= 4096 else { return false }
+            guard let data = try? handle.read(upToCount: 4097), data.count <= 4096,
+                  let receipt = try? JSONDecoder().decode(Receipt.self, from: data) else { return false }
+            return receipt.version == 1 && receipt.pid == pid && receipt.drainId == drainID
         }.value
     }
 

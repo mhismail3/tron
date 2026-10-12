@@ -59,15 +59,26 @@ profile starts.
 User Quit is owned by `MacQuitCoordinator`, reached through AppKit's deferred
 termination callback. It reads the exact Stable Gateway PID, command and process
 start identity, sends one authenticated receipt-backed `gateway.stop` command,
-then waits until that process is gone with no replacement PID. The drain itself
-is unbounded: only after `gateway.stopped` records that exact PID does a five-
-second exit-stall deadline begin. If it expires, Quit fails closed and keeps
-Tron open; the wrapper never kills the intentional-stop process because launchd
-could relaunch it as a crash. Only confirmed process disappearance joins
-native-host retirement. An unavailable response, runtime change, failed Gateway
-exit or failed native drain keeps the wrapper open; there is no forced
-termination, automatic retry or permission bypass. A manual retry for the same
-captured runtime reuses its command ID. A retry after the Gateway has stopped
+then waits until that process is gone with no replacement PID. A reachable
+canonical `gateway.drain.status` in preparing/waiting remains unbounded. After
+all shutdown owners settle, the Gateway atomically publishes its one
+`gateway/stop-completed.json` receipt (version, PID, accepted drain UUID), before
+entering Node exit. Only that exact receipt starts the five-second exit-stall
+grace. Diagnostic logs and their timestamp formats/rotation are not lifecycle
+authority. The process PID, command and start identity remain fenced on every
+observation.
+
+A missing, unreadable, malformed or stale receipt cannot silently create an
+endless wait after transport retirement: five seconds without a reachable active
+drain reports observation uncertainty (plus at most the current bounded probe),
+not fabricated completion. This fails only Quit, never accepted work. Both
+uncertainty and a proven exit stall leave Tron open without signaling the
+Gateway, since launchd could treat a signal as a crash and relaunch it. Only
+confirmed process disappearance joins native-host retirement. Runtime changes
+and failed drain observations fail closed. A manual retry retains the accepted
+response/drain UUID for the same captured runtime, avoiding a stop replay against
+its already-closed transport. If acceptance was uncertain it reuses the command
+ID; a canonically failed drain permits a new explicit attempt. A retry after the Gateway has stopped
 resumes at native-host retirement only while the Login Item stays enabled and
 no Gateway process runs.
 

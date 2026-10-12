@@ -809,6 +809,29 @@ and the built Gateway launcher (`GatewayLauncherArgvTests`). Unit tests with fak
 or in-process module calls are not kept; cover a change with its real-boundary
 test or the fixture scripts above.
 
+`MacQuitGatewayTests` executes the built Quit coordinator against the signed bundled
+Gateway in a uniquely named disposable launchd job, using the production
+`KeepAlive.SuccessfulExit=false` policy. It proves normal exit 0, a real held model
+request longer than the exit grace, blocked Node exit, missing/stale completion
+receipts, receipt publication failure, explicit Retry, and a restart-75 supervisor
+control. Each fixture has isolated HOME/TMPDIR/agent/Gateway stores, bootouts only
+its own job, and removes its files. No installed service or app is addressed.
+Run after the signed build above (test execution HOME/TMPDIR must be scratch
+directories outside live stores):
+
+```bash
+xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
+  -configuration Debug -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build/DerivedData \
+  -only-testing:TronMacIntegrationTests/MacQuitGatewayTests \
+  -resultBundlePath build/MacQuitGateway.xcresult
+```
+
+The signed build uses the existing Xcode user/signing context; do not carry a
+test's isolated HOME into that build, disable signing, or substitute ad-hoc
+signing for hosted test acceptance. Keep test execution isolated. The result
+bundle is behavioral evidence, not deployment or physical-device validation.
+
 `SingleInstanceLockTests` launches the test-only `SingleInstanceLockProbe` in
 separate processes. The owner and contender communicate through bounded pipe
 markers, proving exclusion while the first process holds a disposable lock and
