@@ -716,7 +716,7 @@ settings_inventory_json() {
 patch_xctestrun() {
   local xctestrun="$1" target="$2"
   python3 "$repo_root/scripts/patch-ios-gateway-e2e-xctestrun.py" \
-    "$xctestrun" "$target" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "$TRON_E2E_PI_VERSION" "$TRON_E2E_PROXY_TOKEN" "$TRON_E2E_SETTINGS_INVENTORY"
+    "$xctestrun" "$target" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "$TRON_E2E_PI_VERSION" "$TRON_E2E_PROXY_TOKEN" "$TRON_E2E_SETTINGS_INVENTORY" "$TRON_E2E_AGENT_DIR"
 }
 
 build_tests() {

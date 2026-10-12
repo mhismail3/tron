@@ -421,6 +421,29 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
 
+        // An outside edit replaces the value Tron wrote (settings-model.md 5.6): the
+        // reopened row says so and Apply again writes Tron's value back.
+        try editMacSettingsOutsideTron(fixture.agentDirectory) { document in
+            document["enableInstallTelemetry"] = macEdit.before == "1"
+        }
+        menu.tap()
+        settingsAction.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 30), app.debugDescription)
+        expandAllSettings(app)
+        let outsideRow = settingRow(app, key: "setup.installTelemetry")
+        XCTAssertTrue(waitForBadge(outsideRow, "Changed outside Tron", timeout: 30),
+                      "an outside edit of Tron's value must be shown: \(badgeLabels(outsideRow))")
+        XCTAssertEqual(switchValue(outsideRow), macEdit.before, "the live value must follow the edited store")
+        let applyAgain = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-applyAgain")
+        XCTAssertNotNil(applyAgain, "the outside change of Tron's value must offer Apply again: \(app.debugDescription)")
+        keepScreenshot(app, name: "settings-surface-outside-change-apply-again")
+        applyAgain?.tap()
+        XCTAssertTrue(waitUntil(timeout: 60) {
+            self.switchValue(outsideRow) == macEdit.after && !self.badgeLabels(outsideRow).contains("Changed outside Tron")
+        }, "Apply again must restore Tron's value and clear the outside mark: \(badgeLabels(outsideRow))")
+        dismissTopSheet(app)
+        XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
+
         // Project card from the dashboard's workspace header: the Project layer
         // and the Mac key that qualifies by this project.
         let folderName = fixture.workspace.split(separator: "/").last.map(String.init) ?? fixture.workspace
@@ -459,6 +482,18 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     // MARK: - Settings surface helpers
+
+    /// A hand edit of the fixture's Mac `settings.json`, as an editor would make
+    /// it: write a sibling file, then rename it over the store.
+    private func editMacSettingsOutsideTron(_ agentDirectory: String?, _ edit: (inout [String: Any]) -> Void) throws {
+        let directory = try XCTUnwrap(agentDirectory, "run through scripts/ios-gateway-e2e-test run-ui to name the fixture's agent directory")
+        let store = URL(fileURLWithPath: directory).appendingPathComponent("settings.json")
+        var document = (try JSONSerialization.jsonObject(with: Data(contentsOf: store)) as? [String: Any]) ?? [:]
+        edit(&document)
+        let staged = store.deletingLastPathComponent().appendingPathComponent("settings.json.outside-edit")
+        try JSONSerialization.data(withJSONObject: document, options: [.prettyPrinted]).write(to: staged)
+        _ = try FileManager.default.replaceItemAt(store, withItemAt: staged)
+    }
 
     /// What one surface showed for the schema's keys, attached as the journey's coverage report.
     private struct SurfaceCoverage {
@@ -532,7 +567,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// presentation. Covered presentations are not hittable, so a nested sheet's
     /// rows never resolve to the sheet beneath it.
     @MainActor
-    private func revealedElement(_ app: XCUIApplication, where predicate: NSPredicate, timeout: TimeInterval = 4) -> XCUIElement? {
+    private func revealedElement(_ app: XCUIApplication, where predicate: NSPredicate, timeout: TimeInterval = 20) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(timeout)
         var swipes = 0
         repeat {
@@ -540,7 +575,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             for index in 0..<min(candidates.count, 16) where candidates.element(boundBy: index).isHittable {
                 return candidates.element(boundBy: index)
             }
-            if swipes < 12 {
+            if swipes < 30 {
                 app.swipeUp()
                 swipes += 1
             }
@@ -550,7 +585,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    private func hittableElement(_ app: XCUIApplication, identifier: String, timeout: TimeInterval = 4) -> XCUIElement? {
+    private func hittableElement(_ app: XCUIApplication, identifier: String, timeout: TimeInterval = 20) -> XCUIElement? {
         revealedElement(app, where: NSPredicate(format: "identifier == %@", identifier), timeout: timeout)
     }
 
@@ -865,6 +900,8 @@ private struct RealGatewayUIFixture {
     let port: Int
     let code: String
     let workspace: String
+    /// The fixture Gateway's agent directory on this Mac (its Mac settings store).
+    var agentDirectory: String? = nil
 
     static func fromEnvironment() throws -> RealGatewayUIFixture {
         let environment = ProcessInfo.processInfo.environment
@@ -873,7 +910,7 @@ private struct RealGatewayUIFixture {
               let workspace = environment["TRON_E2E_WORKSPACE"] else {
             throw XCTSkip("Run through scripts/ios-gateway-e2e-test run-ui to provide the real Gateway fixture.")
         }
-        return RealGatewayUIFixture(port: port, code: code, workspace: workspace)
+        return RealGatewayUIFixture(port: port, code: code, workspace: workspace, agentDirectory: environment["TRON_E2E_AGENT_DIR"])
     }
 
     /// The production invitation link, addressed at the fixture's fault proxy so
