@@ -435,7 +435,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout: 30) { self.badgeLabels(outsideRow).contains { $0.hasPrefix("Changed outside Tron") } },
                       "an outside edit of Tron's value must be shown: \(badgeLabels(outsideRow))")
         XCTAssertEqual(switchValue(outsideRow), macEdit.before, "the live value must follow the edited store")
-        let applyAgain = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-applyAgain")
+        // Setup is the last section of the expanded list: allow the swipes to reach it.
+        let applyAgain = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-applyAgain", timeout: 120)
         XCTAssertNotNil(applyAgain, "the outside change of Tron's value must offer Apply again: \(app.debugDescription)")
         keepScreenshot(app, name: "settings-surface-outside-change-apply-again")
         applyAgain?.tap()
