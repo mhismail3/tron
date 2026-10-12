@@ -2386,12 +2386,20 @@ export class GatewayService {
         `${actorLabel(context.actor)} changed ${what}${context.reason ? `: ${context.reason}` : ""}. Undo it in Tron.`);
     }
     const cwd = target.kind === "project" ? target.cwd : undefined;
-    const imageChanged = changes.some(change => change.key === "context.images.block");
-    if (imageChanged && (context.actor.kind === "ui" || context.approved === true)
-      && (target.kind === "mac" || target.kind === "project")) {
-      const resolved = await this.dependencies.settingsModel.resolve(target, undefined, ["context.images.block"]);
-      if (resolved.keys[0]?.value === false) {
-        await this.dependencies.sessions.releaseInheritedImageBlock(target.kind === "project" ? target.cwd : undefined);
+    if (context.actor.kind === "ui" || context.approved === true) {
+      // A chat/Home requester can edit a default layer. Scope follows the
+      // changed store, not the target through which the request arrived.
+      const imageLayers = new Set(changes.filter(change => change.key === "context.images.block").map(change => change.layer));
+      for (const layer of imageLayers) {
+        if (layer !== "mac" && layer !== "project") continue;
+        const projectCwd = layer === "project"
+          ? target.kind === "project" ? target.cwd
+            : target.kind === "session" ? (await this.slot({ sessionId: target.sessionId })).cwd : undefined
+          : undefined;
+        if (layer === "project" && projectCwd === undefined) continue;
+        const defaultTarget: SettingsTarget = projectCwd === undefined ? { kind: "mac" } : { kind: "project", cwd: projectCwd };
+        const resolved = await this.dependencies.settingsModel.resolve(defaultTarget, undefined, ["context.images.block"]);
+        if (resolved.keys[0]?.value === false) await this.dependencies.sessions.releaseInheritedImageBlock(projectCwd);
       }
     }
     for (const change of changes) {

@@ -384,7 +384,9 @@ Chat-layer value is never removed. A Mac change reaches only chats whose effecti
 image policy still inherits Mac or Built-in, never a Project-shadowed pin. Project
 changes reach only matching Project chats whose inherited policy is now unblocked.
 The higher-layer negative control is an outside Project widening immediately after
-a Mac tap, without an intervening request: that chat must keep blocking.
+a Mac tap, without an intervening request: that chat must keep blocking. The
+changed layer owns propagation, including when a Chat/Home requester edits a
+Mac or Project default through a session-targeted change or approval.
 Image auto-resize uses its fixed snapshot at the actual conversion boundary.
 Resources still apply through Reload. Compaction changes refresh open chats
 through `GatewayService.settingsChanged`.

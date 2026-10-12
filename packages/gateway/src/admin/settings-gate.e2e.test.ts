@@ -422,12 +422,13 @@ describe("settings risk gate", () => {
     expect((await observe()).images).toBeGreaterThan(0);
     transcript.push({ case: `${kind} directional image request policy`, steps: [...captures, { withinTurn, lowered }] });
   });
-  it.each(["mac", "project"] as const)("an approved %s image-block widening releases only inheriting open chats", async layer => {
+  it.each([["mac", false], ["project", false], ["mac", true], ["project", true]] as const)("an approved %s image-block widening (session target: %s) releases only inheriting open chats", async (layer, viaSession) => {
     const f = await fixture();
     const target = layer === "mac" ? { kind: "mac" } as const : { kind: "project", cwd: f.project } as const;
     const initialLayer = layer === "mac" ? "mac" : "project";
-    const setDefault = (value: boolean) => f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target, changes: [{ key: "context.images.block", layer: initialLayer, op: "set", value }],
+    const setDefault = (value: boolean, sessionId?: string) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: sessionId ? { kind: "session", sessionId } : target,
+      changes: [{ key: "context.images.block", layer: initialLayer, op: "set", value }],
     });
     await setDefault(true);
     const inheriting = await f.chat();
@@ -450,12 +451,12 @@ describe("settings risk gate", () => {
     expect(await images(inheriting)).toBe(0);
     expect(await images(explicit)).toBe(0);
     if (unrelated) expect(await images(unrelated)).toBeGreaterThan(0);
-    const widened = await setDefault(false);
+    const widened = await setDefault(false, viaSession ? inheriting.id : undefined);
     expect(widened).toMatchObject({ status: "applied", tier: "approve" });
     expect(await images(inheriting)).toBeGreaterThan(0);
     expect(await images(explicit)).toBe(0);
     if (unrelated) expect(await images(unrelated)).toBeGreaterThan(0);
-    transcript.push({ case: `${layer} image widening`, result: { widened, inherited: await images(inheriting), explicit: await images(explicit), unrelated: unrelated ? await images(unrelated) : null } });
+    transcript.push({ case: `${layer} image widening via ${viaSession ? "session" : "default"}`, result: { widened, inherited: await images(inheriting), explicit: await images(explicit), unrelated: unrelated ? await images(unrelated) : null } });
   });
 
   it("a Mac image widening cannot release a Project-owned pin before an outside Project widening", async () => {
