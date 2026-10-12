@@ -441,7 +441,7 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts["Manage Home"].exists)
             XCTAssertEqual(app.buttons["thinking-level-control"].value as? String, "Off")
             app.buttons["home-sheet-done-manage"].tap()
-            XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
             XCTAssertEqual(app.buttons["session-context-button"].label, "Manage Home")
             app.terminate()
         }
@@ -1215,7 +1215,7 @@ final class TronSmokeUITests: XCTestCase {
         for (index, session) in ["ordinary", "home", "ordinary", "home"].enumerated() {
             let row = session == "home" ? home : app.buttons["session-row-home-shell-fixture:ordinary-session"]
             row.tap()
-            XCTAssertTrue(app.staticTexts[session == "home" ? "Home fixture chat" : "Ordinary session chat"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.navigationBars.staticTexts[session == "home" ? "Home" : "Ordinary session chat"].waitForExistence(timeout: 10))
             app.buttons["Back"].tap()
             // Sample the native row repeatedly while the Gateway response is held.
             // Waiting for Ready here would hide precisely the reported flicker.
@@ -1376,6 +1376,15 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(search.waitForExistence(timeout: 5), app.debugDescription)
         search.tap()
         search.typeText(query)
+        // With the live Chat card above Profile settings, matching rows can be
+        // below the keyboard. Scroll inside the sheet's visible content region.
+        let controls = app.buttons.matching(NSPredicate(format: "label == %@", query))
+        for _ in 0..<3 {
+            if controls.allElementsBoundByIndex.contains(where: \.isHittable) { break }
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
+                thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)))
+        }
+        XCTAssertTrue(controls.allElementsBoundByIndex.contains(where: \.isHittable), app.debugDescription)
     }
 
     @MainActor
