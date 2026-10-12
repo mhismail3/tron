@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -43,6 +44,9 @@ it.each([
   const facts: Record<string, unknown> = { passed: false };
   try {
     await Promise.all([mkdir(agentDir), mkdir(cache), mkdir(cwd)]);
+    // The workspace is its own Project root even when TMPDIR lies inside a Git
+    // checkout, as it does under update-pi-subagents' staging gate.
+    expect(spawnSync("git", ["-C", cwd, "init", "-q"], { env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" } }).status).toBe(0);
     expect(await readdir(agentDir)).toEqual([]);
     expect(await readdir(cache)).toEqual([]);
     facts.emptyAgentHome = true;
