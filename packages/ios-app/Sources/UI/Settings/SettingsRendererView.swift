@@ -276,6 +276,7 @@ struct SettingsRendererView: View {
                 .first(where: { $0 != .project || projectCWD != nil }) {
                 Button { layerEditor = editor } label: { TronInlineActionLabel(editor.title) }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("\(settingsRowIdentifier(setting))-edit-layer")
                     .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
                     .padding(.bottom, 12)
             }

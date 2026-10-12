@@ -339,6 +339,317 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "424-real-ui-accepted-code-pairs")
     }
 
+    /// Settings surfaces serve the schema's keys (docs/settings-model.md 7.7). For
+    /// each surface, every key whose layers include one the surface's target has
+    /// is a reachable row with a layer badge and a value; a key with none of them
+    /// has no row. A layer the surface does not own offers its "Edit at …" path,
+    /// and an accepted edit reads back after reopening, from the Gateway's
+    /// resolution. Expectations come from the fixture Gateway's own schema
+    /// inventory (`TRON_E2E_SETTINGS_INVENTORY`), never from a Swift key list.
+    @MainActor
+    func testSettingsSurfacesServeEveryKeyAndEditAtItsLayer() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let schema = try SettingsSchemaInventory.fromEnvironment()
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90),
+                      "the invitation link and setup did not reach the dashboard: \(app.debugDescription)")
+        createSession(app, inWorkspace: fixture.workspace)
+        var coverage: [String: SurfaceCoverage] = [:]
+
+        // Manage Session: the Chat, Project and Mac layers of this chat.
+        let chatGear = app.navigationBars.buttons["Manage Session"]
+        XCTAssertTrue(chatGear.waitForExistence(timeout: 60), app.debugDescription)
+        chatGear.tap()
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
+        expandAllSettings(app)
+        coverage["manage-session"] = assertSettingsSurface(app, name: "manage-session",
+            layers: ["chat", "project", "mac"], schema: schema)
+        let chatLayerRetry = toggleSetting(app, key: "run.retry.enabled", expectingBadge: schema.label(for: "chat"))
+        XCTAssertNotEqual(chatLayerRetry.before, chatLayerRetry.after, "the Chat-layer edit was not accepted")
+        // A Mac-only key on this surface names its own editor, which opens Settings.
+        let macEditor = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-edit-layer")
+        XCTAssertNotNil(macEditor, "setup.installTelemetry is Mac-only and must offer Edit at Mac here")
+        macEditor?.tap()
+        XCTAssertTrue(hittableStaticText(app, "Settings") != nil, "Edit at Mac must present the Settings sheet")
+        expandAllSettings(app)
+        XCTAssertNotNil(hittableElement(app, identifier: settingRowToken("setup.installTelemetry")),
+                        "Edit at Mac did not open the Mac layer's Settings: \(app.debugDescription)")
+        dismissTopSheet(app)
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 10), "dismissing Settings must return to Manage Session")
+        // Reopen: the Chat-layer value and its badge are read from the Gateway again.
+        dismissTopSheet(app)
+        XCTAssertTrue(waitForNonExistence(app.staticTexts["Manage Session"], timeout: 15))
+        chatGear.tap()
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
+        expandAllSettings(app)
+        let reopenedRetry = settingRow(app, key: "run.retry.enabled")
+        XCTAssertTrue(waitForBadge(reopenedRetry, schema.label(for: "chat"), timeout: 30),
+                      "the reopened Manage Session must show the Chat badge: \(reopenedRetry.debugDescription)")
+        XCTAssertEqual(switchValue(reopenedRetry), chatLayerRetry.after, "the reopened Chat value is not the accepted value")
+        keepScreenshot(app, name: "settings-surface-manage-session-chat-edit")
+        dismissTopSheet(app)
+        XCTAssertTrue(waitForNonExistence(app.staticTexts["Manage Session"], timeout: 15))
+
+        // Settings (Mac layer) from the dashboard: one Mac key edits and reads back.
+        app.buttons["Back"].tap()
+        let menu = app.buttons["dashboard.menu"]
+        XCTAssertTrue(waitForHittable(menu, timeout: 60), app.debugDescription)
+        menu.tap()
+        let settingsAction = app.buttons["Settings"]
+        XCTAssertTrue(settingsAction.waitForExistence(timeout: 30), app.debugDescription)
+        settingsAction.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 30), app.debugDescription)
+        expandAllSettings(app)
+        coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["mac"], schema: schema)
+        let macEdit = toggleSetting(app, key: "setup.installTelemetry", expectingBadge: schema.label(for: "mac"))
+        XCTAssertNotEqual(macEdit.before, macEdit.after, "the Mac-layer edit was not accepted")
+        dismissTopSheet(app)
+        XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
+        menu.tap()
+        settingsAction.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 30), app.debugDescription)
+        expandAllSettings(app)
+        let reopenedTelemetry = settingRow(app, key: "setup.installTelemetry")
+        XCTAssertTrue(waitForBadge(reopenedTelemetry, schema.label(for: "mac"), timeout: 30),
+                      "the reopened Settings must show the Mac badge: \(reopenedTelemetry.debugDescription)")
+        XCTAssertEqual(switchValue(reopenedTelemetry), macEdit.after, "the reopened Mac value is not the accepted value")
+        keepScreenshot(app, name: "settings-surface-settings-mac-edit")
+        dismissTopSheet(app)
+        XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
+
+        // Project card from the dashboard's workspace header: the Project layer
+        // and the Mac key that qualifies by this project.
+        let folderName = fixture.workspace.split(separator: "/").last.map(String.init) ?? fixture.workspace
+        let header = app.buttons[folderName].firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 30), "the dashboard has no header for \(folderName): \(app.debugDescription)")
+        openProjectCard(app, header: header)
+        expandAllSettings(app)
+        coverage["project"] = assertSettingsSurface(app, name: "project", layers: ["project", "mac"], schema: schema)
+        let projectEdit = toggleSetting(app, key: "context.compaction.enabled", expectingBadge: schema.label(for: "project"))
+        XCTAssertNotEqual(projectEdit.before, projectEdit.after, "the Project-layer edit was not accepted")
+        // The project's trust decision is a Mac key qualified by this project: its
+        // row offers Edit at Mac, which opens the Mac layer's Settings.
+        let trustEditor = revealedElement(app, where: NSPredicate(
+            format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@",
+            settingRowToken("permissions.projectTrust"), "-edit-layer"))
+        XCTAssertNotNil(trustEditor, "the project trust row must offer Edit at Mac on the Project card")
+        trustEditor?.tap()
+        XCTAssertTrue(hittableStaticText(app, "Settings") != nil, "Edit at Mac on the Project card must open Settings")
+        dismissTopSheet(app)
+        XCTAssertTrue(app.staticTexts["Project settings"].waitForExistence(timeout: 10))
+        dismissTopSheet(app)
+        XCTAssertTrue(waitForNonExistence(app.staticTexts["Project settings"], timeout: 15))
+        openProjectCard(app, header: header)
+        expandAllSettings(app)
+        let reopenedCompaction = settingRow(app, key: "context.compaction.enabled")
+        XCTAssertTrue(waitForBadge(reopenedCompaction, schema.label(for: "project"), timeout: 30),
+                      "the reopened Project card must show the Project badge: \(reopenedCompaction.debugDescription)")
+        XCTAssertEqual(switchValue(reopenedCompaction), projectEdit.after, "the reopened Project value is not the accepted value")
+        keepScreenshot(app, name: "settings-surface-project-layer-edit")
+        dismissTopSheet(app)
+
+        let attachment = XCTAttachment(string: coverageReport(coverage, schema: schema))
+        attachment.name = "settings-surface-coverage.json"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    // MARK: - Settings surface helpers
+
+    /// What one surface showed for the schema's keys, attached as the journey's coverage report.
+    private struct SurfaceCoverage {
+        var served = 0
+        var rowsPresent = 0
+        var optionalAbsent = 0
+        var notServed = 0
+        var notServedAbsent = 0
+        var layerBadgeChecked = 0
+        var valueChecked = 0
+    }
+
+    /// Every served key of a surface has a row with a value and a source badge
+    /// its layers allow; a key the surface's target does not serve has no row.
+    /// A key qualified by a fixed key (a floor instance) is served by the Mac
+    /// target alone (`settings-resolver.ts` `instances`), and a key qualified by
+    /// project has an instance only when a trust decision exists on the Mac target.
+    @MainActor
+    private func assertSettingsSurface(_ app: XCUIApplication, name: String, layers: Set<String>,
+                                       schema: SettingsSchemaInventory) -> SurfaceCoverage {
+        var coverage = SurfaceCoverage()
+        let isMacTarget = layers == ["mac"]
+        let allLayerLabels = Set(schema.layerLabels.values)
+        for key in schema.keys {
+            let rows = settingRows(app, key: key.id)
+            let served = !key.layers.isDisjoint(with: layers) && (key.qualifier != "key" || isMacTarget)
+            guard served else {
+                coverage.notServed += 1
+                XCTAssertEqual(rows.count, 0, "\(name) must not show \(key.id): it is not served on this surface")
+                if rows.count == 0 { coverage.notServedAbsent += 1 }
+                continue
+            }
+            coverage.served += 1
+            guard rows.count > 0 else {
+                XCTAssertTrue(key.qualifier == "project" && isMacTarget, "\(name) serves \(key.id) but shows no row")
+                coverage.optionalAbsent += 1
+                continue
+            }
+            coverage.rowsPresent += 1
+            let labels = badgeLabels(rows.firstMatch)
+            let allowedBadges = Set(key.layers.union(["builtin"]).compactMap { schema.layerLabels[$0] })
+            XCTAssertFalse(labels.filter(allowedBadges.contains).isEmpty,
+                           "\(name) row \(key.id) shows no source badge among \(allowedBadges.sorted()): \(labels)")
+            coverage.layerBadgeChecked += 1
+            // A switch's value is part of its button's label, so the value is read from every descendant.
+            let row = rows.firstMatch
+            let described = row.descendants(matching: .any).allElementsBoundByIndex.map { $0.label }
+                + row.switches.allElementsBoundByIndex.compactMap { $0.value as? String }
+            XCTAssertTrue(described.contains { !$0.isEmpty && $0 != key.label && !allLayerLabels.contains($0) },
+                          "\(name) row \(key.id) shows no value: \(described)")
+            coverage.valueChecked += 1
+        }
+        return coverage
+    }
+
+    /// Exact row identifiers: the key's own row, and each qualified instance
+    /// (`<token>_<qualifiers>`). Child identifiers such as `-note` never match.
+    @MainActor
+    private func settingRows(_ app: XCUIApplication, key: String) -> XCUIElementQuery {
+        let token = settingRowToken(key)
+        return app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier == %@ OR identifier BEGINSWITH %@", token, token + "_"))
+    }
+
+    @MainActor
+    private func settingRow(_ app: XCUIApplication, key: String) -> XCUIElement {
+        app.descendants(matching: .any)[settingRowToken(key)]
+    }
+
+    /// Reveals the first on-screen element matching the predicate in the top-most
+    /// presentation. Covered presentations are not hittable, so a nested sheet's
+    /// rows never resolve to the sheet beneath it.
+    @MainActor
+    private func revealedElement(_ app: XCUIApplication, where predicate: NSPredicate, timeout: TimeInterval = 4) -> XCUIElement? {
+        let deadline = Date().addingTimeInterval(timeout)
+        var swipes = 0
+        repeat {
+            let candidates = app.descendants(matching: .any).matching(predicate)
+            for index in 0..<min(candidates.count, 16) where candidates.element(boundBy: index).isHittable {
+                return candidates.element(boundBy: index)
+            }
+            if swipes < 12 {
+                app.swipeUp()
+                swipes += 1
+            }
+            Thread.sleep(forTimeInterval: 0.25)
+        } while Date() < deadline
+        return nil
+    }
+
+    @MainActor
+    private func hittableElement(_ app: XCUIApplication, identifier: String, timeout: TimeInterval = 4) -> XCUIElement? {
+        revealedElement(app, where: NSPredicate(format: "identifier == %@", identifier), timeout: timeout)
+    }
+
+    @MainActor
+    private func hittableStaticText(_ app: XCUIApplication, _ text: String) -> XCUIElement? {
+        revealedElement(app, where: NSPredicate(format: "label == %@ AND elementType == %d", text, XCUIElement.ElementType.staticText.rawValue), timeout: 6)
+    }
+
+    @MainActor
+    private func expandAllSettings(_ app: XCUIApplication) {
+        guard let all = hittableElement(app, identifier: "settings-renderer-all", timeout: 30) else {
+            XCTFail("All settings is not reachable: \(app.debugDescription)")
+            return
+        }
+        // The control's row Button spans the whole container; its switch is not
+        // a separate descendant of the identified surface.
+        all.tap()
+    }
+
+    @MainActor
+    private func dismissTopSheet(_ app: XCUIApplication) {
+        guard let done = revealedElement(app, where: NSPredicate(format: "label == %@", "Done"), timeout: 10) else {
+            XCTFail("no hittable Done control to dismiss the presented sheet: \(app.debugDescription)")
+            return
+        }
+        done.tap()
+    }
+
+    /// The Project card, from the dashboard's workspace header context menu.
+    @MainActor
+    private func openProjectCard(_ app: XCUIApplication, header: XCUIElement) {
+        header.press(forDuration: 1.2)
+        let projectSettings = app.buttons["Project settings"]
+        XCTAssertTrue(projectSettings.waitForExistence(timeout: 15), app.debugDescription)
+        projectSettings.tap()
+        XCTAssertTrue(app.staticTexts["Project settings"].waitForExistence(timeout: 30), app.debugDescription)
+    }
+
+    /// A switch row's value, read from the row's own switch.
+    private func switchValue(_ row: XCUIElement) -> String? {
+        row.switches.firstMatch.value.map { String(describing: $0) }
+    }
+
+    private func badgeLabels(_ row: XCUIElement) -> [String] {
+        row.staticTexts.allElementsBoundByIndex.map { $0.label }
+    }
+
+    /// Toggles one row's switch through the shared control and waits for the
+    /// Gateway's accepted state: the value flips and the badge names the layer.
+    @MainActor
+    private func toggleSetting(_ app: XCUIApplication, key: String, expectingBadge badge: String) -> (before: String?, after: String?) {
+        let row = settingRow(app, key: key)
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "\(key) has no row: \(app.debugDescription)")
+        let toggle = row.switches.firstMatch
+        var swipes = 0
+        while !toggle.isHittable && swipes < 12 {
+            app.swipeUp()
+            swipes += 1
+        }
+        let before = switchValue(row)
+        toggle.tap()
+        XCTAssertTrue(waitUntil(timeout: 60) {
+            self.switchValue(row) != before && self.badgeLabels(row).contains(badge)
+        }, "the accepted \(key) change did not show the \(badge) badge: \(badgeLabels(row))")
+        return (before, switchValue(row))
+    }
+
+    @MainActor
+    private func waitForBadge(_ row: XCUIElement, _ badge: String, timeout: TimeInterval) -> Bool {
+        waitUntil(timeout: timeout) { self.badgeLabels(row).contains(badge) }
+    }
+
+    @MainActor
+    private func waitForNonExistence(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        waitUntil(timeout: timeout) { !element.exists }
+    }
+
+    @MainActor
+    private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if condition() { return true }
+            Thread.sleep(forTimeInterval: 0.25)
+        } while Date() < deadline
+        return condition()
+    }
+
+    private func coverageReport(_ coverage: [String: SurfaceCoverage], schema: SettingsSchemaInventory) -> String {
+        let surfaces = coverage.mapValues { surface -> [String: Int] in
+            ["served": surface.served, "rowsPresent": surface.rowsPresent, "optionalAbsent": surface.optionalAbsent,
+             "notServed": surface.notServed, "notServedAbsent": surface.notServedAbsent,
+             "layerBadgeChecked": surface.layerBadgeChecked, "valueChecked": surface.valueChecked]
+        }
+        let report: [String: Any] = ["schema": "tron.ios-settings-surface-coverage.v1", "schemaKeys": schema.keys.count,
+                                     "surfaces": surfaces]
+        let data = (try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted])) ?? Data()
+        return String(decoding: data, as: UTF8.self)
+    }
+
     // MARK: - The production path
 
     /// Launches the hosted app with no fixture argument and no setup: the state
@@ -570,4 +881,48 @@ private struct RealGatewayUIFixture {
     func invitationLink(code: String? = nil) -> String {
         "tron://pair?host=\(host)&port=\(port)&code=\(code ?? self.code)"
     }
+}
+
+/// The fixture Gateway's settings schema, dumped by the E2E harness from its own
+/// built `settings-schema.ts` (`TRON_E2E_SETTINGS_INVENTORY`): one row per schema
+/// key with the layers it allows, its label and its qualifier, plus the Gateway's
+/// layer labels. Expectations come from it, never from a Swift copy of the keys.
+private struct SettingsSchemaInventory {
+    struct Key {
+        let id: String
+        let label: String
+        let layers: Set<String>
+        let qualifier: String?
+    }
+
+    let layerLabels: [String: String]
+    let keys: [Key]
+
+    func label(for layer: String) -> String { layerLabels[layer] ?? layer }
+
+    static func fromEnvironment() throws -> SettingsSchemaInventory {
+        guard let text = ProcessInfo.processInfo.environment["TRON_E2E_SETTINGS_INVENTORY"] else {
+            throw XCTSkip("Run through scripts/ios-gateway-e2e-test run-ui to provide the fixture's settings schema inventory.")
+        }
+        guard let document = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
+              let labels = document["layerLabels"] as? [String: String],
+              let rows = document["keys"] as? [[String: Any]], !rows.isEmpty else {
+            throw SettingsInventoryError.malformed
+        }
+        let keys = try rows.map { row -> Key in
+            guard let id = row["id"] as? String, let label = row["label"] as? String,
+                  let layers = row["layers"] as? [String] else { throw SettingsInventoryError.malformed }
+            return Key(id: id, label: label, layers: Set(layers), qualifier: row["qualifier"] as? String)
+        }
+        return SettingsSchemaInventory(layerLabels: labels, keys: keys)
+    }
+}
+
+private enum SettingsInventoryError: Error { case malformed }
+
+/// The accessibility identifier of a settings row, as `SettingsRendererRow` names it.
+private func settingRowToken(_ key: String) -> String {
+    "settings-row-" + String(key.unicodeScalars.map { scalar in
+        CharacterSet.alphanumerics.contains(scalar) || scalar == "." || scalar == "-" ? Character(scalar) : "_"
+    })
 }
