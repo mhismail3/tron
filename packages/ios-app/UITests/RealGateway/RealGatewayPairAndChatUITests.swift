@@ -398,6 +398,30 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openProjectCard(app)
         expandAllSettings(app)
         coverage["project"] = assertSettingsSurface(app, name: "project", layers: ["project", "mac"], schema: schema)
+        // Setup opened the workspace without its resources: the untrusted Project
+        // layer refuses the write and the row says why (decision 2, doc 3.5).
+        let untrustedRow = settingRow(app, key: "context.compaction.enabled")
+        let untrustedSwitch = untrustedRow.switches.firstMatch
+        for _ in 0..<30 where !untrustedSwitch.isHittable { app.swipeUp() }
+        let untrustedValue = switchValue(untrustedRow)
+        untrustedSwitch.tap()
+        XCTAssertTrue(waitUntil(timeout: 30) {
+            self.badgeLabels(untrustedRow).contains { $0.contains("Trust this project") }
+        }, "an untrusted Project write must be refused on its row: \(badgeLabels(untrustedRow))")
+        XCTAssertEqual(switchValue(untrustedRow), untrustedValue, "a refused Project write must not change the value")
+        // Trust it through the card's own Review trust, then reopen the card.
+        let review = app.buttons["Review trust"]
+        for _ in 0..<40 where !review.isHittable { app.swipeDown() }
+        review.tap()
+        let trustProject = app.buttons["Trust Project"]
+        XCTAssertTrue(trustProject.waitForExistence(timeout: 30), "Review trust must offer Trust Project: \(app.debugDescription)")
+        for _ in 0..<10 where !trustProject.isHittable { app.swipeUp() }
+        trustProject.tap()
+        XCTAssertTrue(waitForNonExistence(trustProject, timeout: 60), "the trust decision was not accepted")
+        for _ in 0..<3 where !app.buttons["project-settings-link"].isHittable { dismissTopSheet(app) }
+        XCTAssertTrue(waitUntil(timeout: 15) { app.buttons["project-settings-link"].isHittable }, "dismissing must return to Manage Session")
+        openProjectCard(app)
+        expandAllSettings(app)
         let projectEdit = toggleSetting(app, key: "context.compaction.enabled", expectingBadge: schema.label(for: "project"))
         XCTAssertNotEqual(projectEdit.before, projectEdit.after, "the Project-layer edit was not accepted")
         // The project's trust decision is a Mac key qualified by this project: its
