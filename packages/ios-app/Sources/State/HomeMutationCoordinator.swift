@@ -25,7 +25,9 @@ final class HomeMutationCoordinator {
             switch self {
             case .designate: "home.designate"
             case .disable: "home.disable"
-            case .configureMemory: "home.configureMemory"
+            // Home's memory model is a profile key changed through the one
+            // settings path (gateway docs/settings-model.md 6.1).
+            case .configureMemory: "settings.change"
             case .pauseMemory: "home.pauseMemory"
             case .resumeMemory: "home.resumeMemory"
             case .stopTask: "home.stopTask"
@@ -121,7 +123,12 @@ final class HomeMutationCoordinator {
                                     commandID: uuidSource.next().uuidString, command: command)
         var params: [String: JSONValue] = ["commandId": .string(invocation.commandID)]
         switch command {
-        case .configureMemory(let model): params["model"] = try JSONValue.encode(model)
+        case .configureMemory(let model):
+            params["target"] = .object(["kind": .string("home")])
+            params["changes"] = .array([.object([
+                "key": .string("model.ref[role=memory]"), "layer": .string("profile"),
+                "op": .string("set"), "value": try JSONValue.encode(model),
+            ])])
         case .stopTask(let task, let operation):
             params["taskId"] = .string(task); params["operationId"] = .string(operation)
         case .steerTask(let task, let operation, let text):

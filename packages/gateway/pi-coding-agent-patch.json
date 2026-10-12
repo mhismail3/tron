@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "package": "@earendil-works/pi-coding-agent",
+  "version": "1.0.4",
+  "artifact": {
+    "path": "third_party/pi-coding-agent/pi-coding-agent-1.0.4-tron.1.tgz",
+    "integrity": "sha512-aMe99yFsaVWWgLbMCuEVOKqxCnxh5O2PK+x2j/1cvTwyb0ypbhsI3sEbGmIjtZubZOy3gWlxpJcFpGuVTVtqdw=="
+  },
+  "patch": {
+    "path": "third_party/pi-coding-agent/project-dir.patch",
+    "sha256": "2e8a5b21dacc3ceb6b85d3d84fb9c5ce2c822cc81c9d0b7c7d747c5eac98e32b"
+  },
+  "license": {
+    "path": "third_party/pi-coding-agent/LICENSE",
+    "spdx": "MIT"
+  },
+  "upstream": {
+    "repository": "https://github.com/earendil-works/pi.git",
+    "tag": "v1.0.4",
+    "tagCommit": "7c10bd4337495ee613f2224843ecdf349b80d1df",
+    "registryIntegrity": "sha512-+956nfMFHr5lDUVY/2Q4k+YzojzBuCaBXFgj0eSlXVGr7QVliVddKdc1Pz6yVg1dOlJQmb67doOVrlMsIcIdaw==",
+    "proposalCommit": "7a795da1c69cbc2df30485c173d14d2266ead2ba",
+    "proposalBase": "a447ba11f3e7760fcff91e924bda8c20033953ea"
+  },
+  "modelData": {
+    "package": "@earendil-works/pi-ai",
+    "version": "1.0.4",
+    "integrity": "sha512-/Eu5R0gfor6wcmRcVyOmulUiZmsHJ0bKu5wXXnpCoSHF3y4FnW4fgnjRlLjNza8NJWXdvW5Uew90Zukx7Sh2rw=="
+  },
+  "toolchain": {
+    "node": "22.22.0",
+    "npm": "10.9.4"
+  },
+  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
+}

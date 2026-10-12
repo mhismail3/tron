@@ -899,7 +899,7 @@ export interface CompactionConfiguration {
   keepRecentTokens: number;
   thinkingLevel: "inherit" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   instructions: string;
-  source: Record<"enabled" | "reserveTokens" | "keepRecentTokens" | "thinkingLevel" | "instructions", "global" | "project" | "default">;
+  source: Record<"enabled" | "reserveTokens" | "keepRecentTokens" | "thinkingLevel" | "instructions", "chat" | "global" | "project" | "default">;
 }
 export interface ResolvedCompactionConfiguration extends CompactionConfiguration {
   model?: ModelRef;
@@ -1189,7 +1189,7 @@ export interface HomeStatus {
   sessionPresent: boolean;
   /** Home's memory, once a record names one. There are no memory defaults
    * (decision D4), so a Home whose memory is unconfigured refuses its
-   * activations until `home.configureMemory`. */
+   * activations until the memory model is set (`model.ref[role=memory]`). */
   memory: HomeMemoryStatus;
 }
 

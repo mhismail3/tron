@@ -191,6 +191,7 @@ final class TronSmokeUITests: XCTestCase {
             let done = app.buttons["home-sheet-done-tasks"]
             let y = done.frame.midY
             keepScreenshot(named: "sheet-\(appearance)-tasks-error")
+            assertManagedSheetSurface(app, title: "Tasks", name: "\(appearance)-tasks-error")
             app.buttons["Reload"].tap()
             XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
             XCTAssertEqual(done.frame.midY, y, accuracy: 2)
@@ -206,14 +207,22 @@ final class TronSmokeUITests: XCTestCase {
         let loading = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Loading Home…")).firstMatch
         XCTAssertTrue(loading.waitForExistence(timeout: 3))
         keepScreenshot(named: "sheet-\(name)-loading")
+        assertManagedSheetSurface(app, title: app.staticTexts["Tasks"].exists ? "Tasks" : "Manage Home", name: name)
+        XCTAssertLessThan(loading.frame.height, 40, "The short loading label must not wrap at normal Dynamic Type")
+    }
+
+    @MainActor
+    private func assertManagedSheetSurface(_ app: XCUIApplication, title: String, name: String) {
+        let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done"))
+        XCTAssertEqual(done.allElementsBoundByIndex.filter(\.isHittable).count, 1,
+                       "The active managed sheet owns one actionable dismissal control")
         let scroll = app.scrollViews.firstMatch
         XCTAssertGreaterThan(scroll.frame.width, app.windows.firstMatch.frame.width * 0.9,
                              "The sheet viewport and its edge material must not inherit the loading row's intrinsic width")
-        XCTAssertLessThan(loading.frame.height, 40, "The short loading label must not wrap at normal Dynamic Type")
         // Accessibility reports the full ScrollView even when its overlay is
         // intrinsically narrow. Compare the actual material above the title,
         // away from text, controls and rounded corners; no device-specific golden.
-        let title = app.staticTexts["Tasks"].exists ? app.staticTexts["Tasks"].firstMatch : app.staticTexts["Manage Home"].firstMatch
+        let title = app.staticTexts[title].firstMatch
         let screenshot = XCUIScreen.main.screenshot().image
         let y = title.frame.minY - 12
         let width = app.windows.firstMatch.frame.width
@@ -394,7 +403,9 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(state.label, "Ready")
         XCTAssertTrue(app.descendants(matching: .any)["session-usage-summary"].exists, "The stats card comes from the Home chat's session")
         XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].exists)
-        XCTAssertTrue(app.buttons["Memory model"].exists, "The memory model is a row in the model card")
+        searchHomeSettings(app, "Memory model")
+        XCTAssertTrue(app.buttons["Memory model"].firstMatch.exists, "The schema supplies the memory model row")
+        app.buttons["Clear search"].tap()
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
         for row in ["home-manage-context", "home-manage-memory-browser", "home-manage-chapters", "home-manage-tasks", "home-manage-permissions"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
@@ -439,7 +450,7 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts["Manage Home"].exists)
             XCTAssertEqual(app.buttons["thinking-level-control"].value as? String, "Off")
             app.buttons["home-sheet-done-manage"].tap()
-            XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
             XCTAssertEqual(app.buttons["session-context-button"].label, "Manage Home")
             app.terminate()
         }
@@ -596,8 +607,8 @@ final class TronSmokeUITests: XCTestCase {
         app.terminate()
     }
 
-    /// The memory model is a row of the model card, chosen through the same model
-    /// picker as the chat model. Its choice is the `home.configureMemory` receipt.
+    /// Profile memory selection uses the shared catalog and settings receipt.
+    /// Reopening reads the canonical value; dismissal must not repeat a write.
     @MainActor
     func testHomeMemoryModelRowSelectsPhysicalModel() {
         continueAfterFailure = false
@@ -608,30 +619,28 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        XCTAssertTrue(app.buttons["Memory model"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Choose a memory model before sending"].waitForExistence(timeout: 5))
-        app.buttons["Memory model"].tap()
-        let provider = app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Fixture, 2 models")).firstMatch
-        XCTAssertTrue(provider.waitForExistence(timeout: 5))
-        if provider.value as? String == "collapsed" { provider.tap() }
-        let choice = app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Memory Model B")).firstMatch
+        searchHomeSettings(app, "Memory model")
+        app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+        let choice = app.buttons["settings-option-Memory Model B"]
         XCTAssertTrue(choice.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Virtual model")).firstMatch.exists)
+        XCTAssertFalse(app.buttons["settings-option-Virtual model"].exists)
         choice.tap()
-        XCTAssertTrue(choice.waitForExistence(timeout: 5))
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "fixture/memory-b", timeout: 5))
-        choice.tap() // The receipt is terminal while the covered sheet cannot re-read status: the choice stays applying.
-        let applying = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Applying configuration"), object: choice)
-        XCTAssertEqual(XCTWaiter.wait(for: [applying], timeout: 5), .completed)
-        choice.tap()
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
-        let done = try? XCTUnwrap(app.buttons.matching(identifier: "Done").allElementsBoundByIndex.first(where: \.isHittable))
-        XCTAssertNotNil(done)
-        done?.tap()
-        let modelRow = app.buttons["Memory model"]
+        let modelRow = app.buttons["Memory model"].firstMatch
+        XCTAssertTrue(modelRow.waitForExistence(timeout: 5))
         let converged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Memory Model B"), object: modelRow)
         XCTAssertEqual(XCTWaiter.wait(for: [converged], timeout: 8), .completed)
         keepScreenshot(named: "home-memory-model-configured")
+        app.buttons["home-sheet-done-manage"].tap()
+        openManageHome(app)
+        searchHomeSettings(app, "Memory model")
+        XCTAssertEqual(app.buttons["Memory model"].firstMatch.value as? String, "Memory Model B")
+        app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+        XCTAssertTrue(app.buttons["settings-option-Memory Model A"].waitForExistence(timeout: 5))
+        app.buttons["Done"].firstMatch.tap()
+        app.buttons["home-sheet-done-manage"].tap()
+        XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"),
+                      "Catalog dismissal must not repeat the accepted selection")
     }
 
     @MainActor
@@ -650,17 +659,17 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertTrue(app.descendants(matching: .any)["home-manage-context"].exists)
             }
             if state == "empty-models" {
-                XCTAssertTrue(app.buttons["Memory model"].waitForExistence(timeout: 5))
-                app.buttons["Memory model"].tap()
-                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "No available memory models")).firstMatch.waitForExistence(timeout: 5))
+                searchHomeSettings(app, "Memory model")
+                app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+                XCTAssertTrue(app.staticTexts["No options match this search"].waitForExistence(timeout: 5))
+                XCTAssertFalse(app.buttons["settings-option-Memory Model B"].exists)
             } else if state == "configure-refused" {
-                app.buttons["Memory model"].tap()
-                let provider = app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Fixture, 2 models")).firstMatch
-                XCTAssertTrue(provider.waitForExistence(timeout: 5))
-                if provider.value as? String == "collapsed" { provider.tap() }
-                app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Memory Model B")).firstMatch.tap()
-                XCTAssertTrue(app.alerts["Home change"].waitForExistence(timeout: 5))
-                XCTAssertTrue(app.alerts.staticTexts["Memory configuration refused"].exists)
+                searchHomeSettings(app, "Memory model")
+                app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+                let choice = app.buttons["settings-option-Memory Model B"]
+                XCTAssertTrue(choice.waitForExistence(timeout: 5))
+                choice.tap()
+                XCTAssertTrue(app.staticTexts["Memory configuration refused"].waitForExistence(timeout: 5))
                 XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "none", timeout: 3))
             }
             keepScreenshot(named: "home-settings-\(state)")
@@ -712,7 +721,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-check-completion"].waitForExistence(timeout: 8),
                       "An unresolved disable must offer only the completion check")
         app.buttons["home-sheet-done-manage"].tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].exists)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].exists)
         // Authoritative disable does not resolve an unknown command receipt: the
         // ring still manages Home, and the fresh read shows Disabled.
         openManageHome(app)
@@ -730,7 +739,7 @@ final class TronSmokeUITests: XCTestCase {
         let row = app.buttons["home-pinned-row"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10))
         openManageHome(app)
         let state = app.descendants(matching: .any)["home-manage-state"]
         tapManageRow(app, "home-manage-pause")
@@ -747,12 +756,59 @@ final class TronSmokeUITests: XCTestCase {
         confirmHomeAction(app)
         XCTAssertTrue(waitForLabel(state, containing: "Disabled", timeout: 5))
         app.buttons["home-sheet-done-manage"].tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].exists)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].exists)
         // Confirmed disable returns the ring to Manage Session.
         XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Session", timeout: 8))
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["Manage Home"].exists)
         app.terminate()
+    }
+
+    /// Home's role title ignores a generated canonical session name. The leading
+    /// toolbar action opens the existing terminal route, never a Home-specific shell.
+    @MainActor
+    func testHomeTitleAndManageTerminalUseCanonicalRoute() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["home-pinned-row"].label.contains("Home"))
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.navigationBars.staticTexts["Home fixture chat"].exists)
+        keepScreenshot(named: "home-canonical-title")
+        openManageHome(app)
+        let terminal = app.buttons["manage-home-terminal"]
+        let done = app.buttons["home-sheet-done-manage"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        XCTAssertTrue(terminal.isEnabled)
+        XCTAssertLessThan(terminal.frame.midX, app.frame.width / 2)
+        XCTAssertEqual(terminal.frame.midY, done.frame.midY, accuracy: 8)
+        XCTAssertGreaterThan(done.frame.minY, app.frame.height * 0.4, "Manage Home still opens at medium")
+        keepScreenshot(named: "manage-home-leading-terminal")
+        terminal.tap()
+        XCTAssertTrue(app.staticTexts["Terminal unavailable"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Fixture terminal unavailable for home-session"].exists,
+                      "The standard TerminalSheet must request terminal.list for the exact Home session")
+        keepScreenshot(named: "home-terminal-established-unavailable-state")
+    }
+
+    @MainActor
+    func testManageHomeTerminalRespectsUnavailableCapability() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-terminal-unsupported"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        let terminal = app.buttons["manage-home-terminal"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        XCTAssertFalse(terminal.isEnabled)
+        keepScreenshot(named: "manage-home-terminal-unsupported")
     }
 
     /// Manage Home opens at medium, drags to large, and lists every Home entry. Its
@@ -766,18 +822,21 @@ final class TronSmokeUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+        let homeControlCount = app.staticTexts["fixture.home-control-count"]
+        XCTAssertTrue(homeControlCount.waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["home-pinned-row"].tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10), app.debugDescription)
-        // The Home chat's gear opens Settings, as it does in every chat (#799).
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
+        // Home retains its direct Settings gear; ordinary chats use Manage Session.
         let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(app.navigationBars.buttons["Manage Home"].exists)
         gear.tap()
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
+        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Home Settings must not apply controls")
         keepScreenshot(named: "home-gear-settings-sheet")
         app.buttons["Done"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5), app.debugDescription)
         // Its context ring opens Manage Home at the medium detent, like Manage Session.
         openManageHome(app)
         let state = app.descendants(matching: .any)["home-manage-state"]
@@ -787,6 +846,7 @@ final class TronSmokeUITests: XCTestCase {
         let mediumTop = done.frame.minY
         XCTAssertGreaterThan(mediumTop, windowHeight * 0.40, "Manage Home must open at its medium detent")
         keepScreenshot(named: "manage-home-medium")
+        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Manage Home must not apply controls")
         // It drags to large from the sheet title.
         let title = app.staticTexts["Manage Home"].firstMatch
         title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
@@ -818,16 +878,23 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Manage Home"].exists)
         keepScreenshot(named: "home-chapter-read-only")
         // Opening a chapter replaced the single chat route, so Back returns to the
-        // dashboard; the ordinary chat keeps the ordinary settings sheet from its gear.
+        // dashboard; an ordinary chat's gear opens Manage Session, then Settings.
         app.buttons["Back"].tap()
         let ordinary = app.buttons["session-row-home-shell-fixture:ordinary-session"]
         XCTAssertTrue(ordinary.waitForExistence(timeout: 10), app.debugDescription)
         ordinary.tap()
         XCTAssertTrue(app.staticTexts["Ordinary session chat"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Manage Home"].exists)
-        app.buttons["Settings"].tap()
+        let ordinaryGear = app.navigationBars.buttons["Manage Session"]
+        XCTAssertTrue(ordinaryGear.waitForExistence(timeout: 5), app.debugDescription)
+        ordinaryGear.tap()
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 5))
+        let settings = app.buttons["manage-session-settings"]
+        reveal(settings, in: app)
+        settings.tap()
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
+        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening ordinary-chat Settings must not apply Home controls")
         keepScreenshot(named: "ordinary-chat-settings-sheet")
     }
 
@@ -965,7 +1032,53 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"))
         keepScreenshot(named: "manage-home-background-accepted-paused")
         app.buttons["home-sheet-done-manage"].tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
+    }
+
+    /// Manage Home's pending settings changes (settings-model.md 5.5): each row
+    /// is decided by its own digest-bound Approve or Decline, and a decided row leaves.
+    @MainActor
+    func testManageHomeSettingsApprovalsApproveAndDecline() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-settings-approvals"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        let header = app.descendants(matching: .any)["settings-approvals-header"]
+        XCTAssertTrue(header.waitForExistence(timeout: 5), app.debugDescription)
+        let approveRow = app.descendants(matching: .any)["settings-approval-settings-request-approve"]
+        let declineRow = app.descendants(matching: .any)["settings-approval-settings-request-decline"]
+        XCTAssertTrue(approveRow.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(declineRow.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["settings-approval-settings-request-chat"].exists,
+                       "A chat agent's request belongs to that chat's Manage Session, not Manage Home")
+        // The exact change, who asked and the confirm text, all Gateway text.
+        for text in ["Not set → Trusted", "Asked by Home", "Asked by Home task nightly-sync", "/work/other", "Trusting a project lets its files run"] {
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.waitForExistence(timeout: 5), text)
+        }
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Expires in")).firstMatch.exists, "The expiry reads as a relative time")
+        keepScreenshot(named: "home-settings-approvals-pending")
+
+        tapScrolling(app.buttons["settings-approval-approve-settings-request-approve"], in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-decisions"], containing: "approved:settings-request-approve", timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+        XCTAssertTrue(approveRow.waitForNonExistence(timeout: 5))
+
+        tapScrolling(app.buttons["settings-approval-decline-settings-request-decline"], in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-decisions"], containing: "declined:settings-request-decline", timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:2", timeout: 5))
+        XCTAssertTrue(header.waitForNonExistence(timeout: 5), "No pending Home change leaves the approvals section empty")
+        keepScreenshot(named: "home-settings-approvals-decided")
+    }
+
+    /// Scrolls the sheet until the control is hittable, then taps it.
+    @MainActor
+    private func tapScrolling(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<4 where !element.isHittable { app.swipeUp() }
+        element.tap()
     }
 
     /// A Home sheet belongs to the profile that opened it: once the selected profile
@@ -1057,7 +1170,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
         XCTAssertTrue(waitForLabel(row, containing: "Updating Home", timeout: 3), row.label)
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 15), app.debugDescription)
     }
 
     @MainActor
@@ -1082,7 +1195,7 @@ final class TronSmokeUITests: XCTestCase {
         let home = ready.buttons["home-pinned-row"]
         XCTAssertTrue(home.waitForExistence(timeout: 10))
         home.tap()
-        XCTAssertTrue(ready.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
+        XCTAssertTrue(ready.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10))
         XCTAssertTrue(ready.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
         ready.terminate()
 
@@ -1093,7 +1206,7 @@ final class TronSmokeUITests: XCTestCase {
             let designate = setup.buttons["home-pinned-row"]
             XCTAssertTrue(designate.waitForExistence(timeout: 10), state)
             designate.tap()
-            XCTAssertTrue(setup.staticTexts["Home fixture chat"].waitForExistence(timeout: 10), state)
+            XCTAssertTrue(setup.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), state)
             XCTAssertTrue(setup.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
             setup.terminate()
         }
@@ -1111,7 +1224,7 @@ final class TronSmokeUITests: XCTestCase {
         for (index, session) in ["ordinary", "home", "ordinary", "home"].enumerated() {
             let row = session == "home" ? home : app.buttons["session-row-home-shell-fixture:ordinary-session"]
             row.tap()
-            XCTAssertTrue(app.staticTexts[session == "home" ? "Home fixture chat" : "Ordinary session chat"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.navigationBars.staticTexts[session == "home" ? "Home" : "Ordinary session chat"].waitForExistence(timeout: 10))
             app.buttons["Back"].tap()
             // Sample the native row repeatedly while the Gateway response is held.
             // Waiting for Ready here would hide precisely the reported flicker.
@@ -1133,7 +1246,7 @@ final class TronSmokeUITests: XCTestCase {
         let home = app.buttons["home-pinned-row"]
         XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
         home.tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
         let count = app.staticTexts["fixture.home-status-count"]
         XCTAssertTrue(count.waitForExistence(timeout: 5))
@@ -1168,7 +1281,7 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["home-pinned-row"].tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
         // The ring's claim proves the Home status is routed before the ring is judged.
         XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Home", timeout: 10), app.debugDescription)
         XCTAssertTrue(app.navigationBars.buttons["Settings"].exists)
@@ -1181,7 +1294,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(state.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "home-ring-manage-home")
         app.buttons["home-sheet-done-manage"].tap()
-        XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
         // VoiceOver names the ring by what it opens.
         XCTAssertEqual(ring.label, "Manage Home")
 
@@ -1202,6 +1315,112 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertGreaterThan(manageSessionDone.frame.minY, app.windows.firstMatch.frame.height * 0.40, "Manage Session opens at medium (the detent Manage Home matches)")
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
         keepScreenshot(named: "ordinary-ring-manage-session")
+        manageSessionDone.tap()
+        let gear = app.navigationBars.buttons["Manage Session"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 5), "The ordinary gear must name and open Manage Session")
+        gear.tap()
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(app.buttons["Done"].firstMatch.frame.minY, app.windows.firstMatch.frame.height * 0.40)
+        keepScreenshot(named: "ordinary-gear-manage-session")
+        let settings = app.buttons["manage-session-settings"]
+        reveal(settings, in: app)
+        XCTAssertTrue(settings.isHittable, app.debugDescription)
+        settings.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "ordinary-manage-settings-child")
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 5), "Settings dismisses back to its Manage Session owner")
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Ordinary session chat"].waitForExistence(timeout: 5))
+        app.buttons["Back"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5),
+                      "Opening and dismissing management sheets must not apply Home controls")
+    }
+
+    /// Opening an inherited context window must not create a Chat override.
+    /// Exercise the actual Manage Home card and shared anchored editor, not a duplicate control fixture.
+    @MainActor
+    func testManageHomeContextWindowOpenDismissDoesNotWrite() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitForLabel(ring, containing: "Manage Home", timeout: 10))
+        ring.tap()
+        let control = app.buttons["context-window-control"]
+        reveal(control, in: app)
+        XCTAssertTrue(control.isHittable, app.debugDescription)
+        let inherited = control.value as? String
+        keepScreenshot(named: "manage-home-context-window-row")
+        control.tap()
+        let slider = app.descendants(matching: .any)["context-window-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "manage-home-context-window-editor")
+        // Tap the overlay's backdrop inside the sheet, not the status bar outside its host.
+        let state = app.descendants(matching: .any)["home-manage-state"]
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: state.frame.midX, dy: state.frame.midY)).tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 5), "Dismiss must retire the editor")
+        XCTAssertTrue(control.waitForExistence(timeout: 5))
+        XCTAssertEqual(control.value as? String, inherited)
+        app.buttons["home-sheet-done-manage"].tap()
+        app.buttons["Back"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5),
+                      "Opening and dismissing an inherited value must not call settings.change")
+    }
+
+    @MainActor
+    private func searchHomeSettings(_ app: XCUIApplication, _ query: String) {
+        let title = app.staticTexts["Manage Home"].firstMatch
+        if app.buttons["home-sheet-done-manage"].frame.minY > app.windows.firstMatch.frame.height * 0.4 {
+            title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
+                thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+        }
+        let search = app.textFields["settings-renderer-search"]
+        reveal(search, in: app)
+        XCTAssertTrue(search.waitForExistence(timeout: 5), app.debugDescription)
+        search.tap()
+        search.typeText(query)
+        // With the live Chat card above Profile settings, matching rows can be
+        // below the keyboard. Scroll inside the sheet's visible content region.
+        let controls = app.buttons.matching(NSPredicate(format: "label == %@", query))
+        for _ in 0..<3 {
+            if controls.allElementsBoundByIndex.contains(where: \.isHittable) { break }
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
+                thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)))
+        }
+        XCTAssertTrue(controls.allElementsBoundByIndex.contains(where: \.isHittable), app.debugDescription)
+    }
+
+    @MainActor
+    func testManageHomeProfileSettingChangeReopenAndCancel() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        searchHomeSettings(app, "Worker thinking")
+        app.buttons.matching(NSPredicate(format: "label == %@", "Worker thinking")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+        XCTAssertTrue(app.buttons["Low"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["Low"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+        app.buttons["home-sheet-done-manage"].tap()
+        openManageHome(app)
+        searchHomeSettings(app, "Worker thinking")
+        XCTAssertTrue(app.staticTexts["Low"].waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "manage-home-profile-worker-thinking")
+        app.buttons.matching(NSPredicate(format: "label == %@", "Worker thinking")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+        XCTAssertTrue(app.buttons["Medium"].waitForExistence(timeout: 5))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+        app.buttons["home-sheet-done-manage"].tap()
+        XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"), "Dismissing a choice must not change Profile")
     }
 
     private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
@@ -1260,57 +1479,70 @@ final class TronSmokeUITests: XCTestCase {
     // a lock; browsing/dismissal blocked; receipt settlement leaving controls stuck.
     @MainActor
     func testConfigurationFeedbackExplainsLockAndPendingWithoutBlockingBrowsing() {
+        configurationFeedbackJourney(appearance: "light")
+    }
+
+    @MainActor
+    func testConfigurationFeedbackExplainsLockAndPendingWithoutBlockingBrowsingInDark() {
+        configurationFeedbackJourney(appearance: "dark")
+    }
+
+    @MainActor
+    private func configurationFeedbackJourney(appearance: String) {
         continueAfterFailure = false
-        for appearance in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
-            app.launch()
-            defer { app.terminate() }
-            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
-            app.buttons["Stop session"].tap()
-            let thinking = app.buttons["thinking-level-control"]
-            XCTAssertTrue(thinking.waitForExistence(timeout: 5))
-            XCTAssertFalse(thinking.isEnabled)
-            keepScreenshot(named: "configuration-lock-\(appearance)")
-            let explanation = app.buttons["Why configuration is unavailable"]
-            XCTAssertTrue(explanation.waitForExistence(timeout: 3), "A disabled control needs a touch-accessible explanation")
-            explanation.tap()
-            XCTAssertTrue(app.staticTexts["Finishing the session. Configuration will be available shortly."].waitForExistence(timeout: 3))
-            keepScreenshot(named: "configuration-lock-explanation-\(appearance)")
-            app.buttons["Done"].tap()
-            app.buttons["Release terminal settlement"].tap()
-            wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
-            thinking.tap()
-            let slider = app.descendants(matching: .any)["thinking-level-slider"]
-            XCTAssertTrue(slider.waitForExistence(timeout: 3))
-            slider.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-            app.buttons["Done"].tap()
-            wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
-            let switchModel = app.buttons["Switch Model"]
-            XCTAssertTrue(switchModel.isEnabled, "Pending configuration must not block model browsing")
-            XCTAssertEqual(switchModel.value as? String, "Applying configuration")
-            keepScreenshot(named: "configuration-applying-\(appearance)")
-            switchModel.tap()
-            let selected = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
-            XCTAssertTrue(selected.waitForExistence(timeout: 3))
-            XCTAssertFalse(selected.isEnabled)
-            XCTAssertEqual(selected.value as? String, "Applying configuration")
-            keepScreenshot(named: "models-applying-\(appearance)")
-            app.buttons["Search models"].tap()
-            let search = app.textFields.firstMatch
-            XCTAssertTrue(search.waitForExistence(timeout: 3))
-            if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
-            search.typeText("Alternative")
-            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch.waitForExistence(timeout: 3))
-            app.buttons["Close search"].tap()
-            app.buttons["Done"].tap()
-            app.buttons["Complete superseded thinking"].tap()
-            XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
-            wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
-            XCTAssertEqual(thinking.value as? String, "Off")
-            XCTAssertFalse(app.buttons["Why configuration is unavailable"].exists)
-            app.terminate()
-        }
+        // Keyboard/search animation monitoring belongs to one XCTest automation
+        // session. Each appearance gets its own case, not a second launch under
+        // the first launch's animation observer (which can wait 60s per action).
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        let thinking = app.buttons["thinking-level-control"]
+        XCTAssertTrue(thinking.waitForExistence(timeout: 5))
+        XCTAssertFalse(thinking.isEnabled)
+        keepScreenshot(named: "configuration-lock-\(appearance)")
+        let explanation = app.buttons["Why configuration is unavailable"]
+        XCTAssertTrue(explanation.waitForExistence(timeout: 3), "A disabled control needs a touch-accessible explanation")
+        explanation.tap()
+        XCTAssertTrue(app.staticTexts["Finishing the session. Configuration will be available shortly."].waitForExistence(timeout: 3))
+        keepScreenshot(named: "configuration-lock-explanation-\(appearance)")
+        app.buttons["Done"].tap()
+        app.buttons["Release terminal settlement"].tap()
+        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+        thinking.tap()
+        let slider = app.descendants(matching: .any)["thinking-level-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 3))
+        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        app.buttons["Done"].tap()
+        wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
+        let switchModel = app.buttons["Switch Model"]
+        XCTAssertTrue(switchModel.isEnabled, "Pending configuration must not block model browsing")
+        XCTAssertEqual(switchModel.value as? String, "Applying configuration")
+        keepScreenshot(named: "configuration-applying-\(appearance)")
+        // Semantic lookup finds the enabled control, but XCTest reports this
+        // post-dismissal activation point as not hittable. Use its observed
+        // center; the assertions below still require real pending-state browsing.
+        switchModel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let selected = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout: 3))
+        XCTAssertFalse(selected.isEnabled)
+        XCTAssertEqual(selected.value as? String, "Applying configuration")
+        keepScreenshot(named: "models-applying-\(appearance)")
+        app.buttons["Search models"].tap()
+        let search = app.textFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 3))
+        if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
+        search.typeText("Alternative")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch.waitForExistence(timeout: 3))
+        app.buttons["Close search"].tap()
+        app.buttons["Done"].tap()
+        app.buttons["Complete superseded thinking"].tap()
+        XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
+        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+        XCTAssertEqual(thinking.value as? String, "Off")
+        XCTAssertFalse(app.buttons["Why configuration is unavailable"].exists)
     }
 
     /// Real native taps through the production nested sheet, with receipt and
@@ -1443,6 +1675,607 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "post-stop-configuration-ready")
     }
 
+    /// The real Manage Session route, not the renderer-only fixture: reset is
+    /// fenced to this chat, and reopening shows the authoritative new snapshot.
+    @MainActor
+    func testManageSessionUsesCurrentDefault() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        XCTAssertTrue(app.buttons["Release terminal settlement"].waitForExistence(timeout: 5))
+        app.buttons["Release terminal settlement"].tap()
+        let expand = app.buttons["settings-section-model-expand"]
+        XCTAssertTrue(expand.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(expand, in: app)
+        let reset = app.buttons["settings-row-model.thinking_role_chat_-useCurrentDefault"]
+        tapScrolling(reset, in: app)
+        XCTAssertTrue(app.staticTexts["From default at start: High (Mac)"].waitForExistence(timeout: 5), app.debugDescription)
+        // Bring the summary below the native sheet chrome before collapsing;
+        // a partially clipped button can still report isHittable.
+        for _ in 0..<4 where expand.frame.minY < 160 { app.swipeDown() }
+        tapScrolling(expand, in: app)
+        XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Do not repeat generic policy in the model card")
+        let context = app.buttons["settings-section-context-expand"]
+        tapScrolling(context, in: app)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings-row-context.compaction.enabled").count, 1)
+        XCTAssertTrue(app.buttons["manage-session-compact"].exists, "Manual compaction remains a Context action")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
+        tapScrolling(expand, in: app)
+        XCTAssertTrue(app.staticTexts["From default at start: High (Mac)"].waitForExistence(timeout: 5))
+    }
+
+    /// Manage Session's pending change for this chat: a decline is recorded by the
+    /// Gateway, and the chat's approvals section then renders nothing.
+    @MainActor
+    func testManageSessionSettingsApprovalDecline() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-session-settings-approvals"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        let row = app.descendants(matching: .any)["settings-approval-settings-session-request"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["settings-approval-settings-other-request"].exists,
+                       "Another chat's request does not show in this chat's Manage Session")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "read, bash → read, bash, fetch_page")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Asked by A chat's agent")).firstMatch.exists)
+        keepScreenshot(named: "session-settings-approval-pending")
+
+        tapScrolling(app.buttons["settings-approval-decline-settings-session-request"], in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "declined:settings-session-request", timeout: 5))
+        XCTAssertTrue(row.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["settings-approvals-header"].waitForNonExistence(timeout: 5))
+        keepScreenshot(named: "session-settings-approval-declined")
+    }
+
+    /// A settings-approval push action opens this chat's Manage Session with one
+    /// confirmation over its row. The push alone decides nothing; the dialog's button does.
+    @MainActor
+    func testSettingsApprovalPushApproveConfirmsTheRow() {
+        assertSettingsApprovalPushConfirms(
+            pushFlag: "-session-settings-approval-push-approve",
+            confirmButton: "Approve change",
+            outcome: "approved",
+            screenshot: "settings-approval-push-approve-confirm"
+        )
+    }
+
+    @MainActor
+    func testSettingsApprovalPushDeclineConfirmsTheRow() {
+        assertSettingsApprovalPushConfirms(
+            pushFlag: "-session-settings-approval-push-decline",
+            confirmButton: "Decline change",
+            outcome: "declined",
+            screenshot: "settings-approval-push-decline-confirm"
+        )
+    }
+
+    @MainActor
+    private func assertSettingsApprovalPushConfirms(
+        pushFlag: String,
+        confirmButton: String,
+        outcome: String,
+        screenshot: String
+    ) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-session-settings-approvals", pushFlag]
+        app.launch()
+        defer { app.terminate() }
+        let decisions = app.staticTexts["fixture.session-settings-decisions"]
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        XCTAssertTrue(app.buttons[confirmButton].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "read, bash → read, bash, fetch_page")).firstMatch.exists,
+                      app.debugDescription)
+        XCTAssertTrue(waitForLabel(decisions, containing: "decisions:none", timeout: 5), "The push must not decide anything")
+        keepScreenshot(named: screenshot)
+
+        app.buttons[confirmButton].tap()
+        XCTAssertTrue(waitForLabel(decisions, containing: "\(outcome):settings-session-request", timeout: 5))
+        XCTAssertFalse(decisions.label.contains("settings-other-request"),
+                       "Another chat's request is never decided from this chat's push")
+        XCTAssertTrue(app.descendants(matching: .any)["settings-approvals-header"].waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testSettingsChangesOpensRequestingChatOnItsOwningMac() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
+        app.launch(); defer { app.terminate() }
+        let more = app.buttons["settings-changes-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        more.tap()
+        let row = app.buttons["settings-change-fixture-change"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        tapScrolling(app.buttons["Open requesting chat"], in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-route"],
+                                  containing: "owned:true:fixture-chat", timeout: 5))
+    }
+
+    @MainActor
+    func testSettingsChangesOpensOwningHomeTask() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-settings-history"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-changes")
+        let row = app.buttons["settings-change-worker-setting"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        tapScrolling(app.buttons["Open task"], in: app)
+        XCTAssertTrue(app.buttons["home-sheet-done-task"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Settings model: continue epic #758"].waitForExistence(timeout: 5),
+                      "Open the audit actor's exact canonical task, not the task list")
+    }
+
+    @MainActor
+    func testSettingsChangesScopeFiltersAndApprovalReceipts() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-session", "-settings-changes-scope", "-settings-changes-approvals"]
+        app.launch(); defer { app.terminate() }
+        let approve = app.buttons["Approve"].firstMatch
+        XCTAssertTrue(approve.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(approve, in: app)
+        app.buttons["Approve change"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:1 approved:1", timeout: 5))
+        let decline = app.buttons["Decline"].firstMatch
+        tapScrolling(decline, in: app)
+        app.buttons["Decline change"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:2 approved:1", timeout: 5))
+        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        XCTAssertTrue(app.buttons["settings-change-project-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
+        for _ in 0..<8 where !app.buttons["Everything"].isHittable { app.swipeDown() }
+        app.buttons["Everything"].tap()
+        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
+        for _ in 0..<8 where !app.buttons["settings-changes-status"].isHittable { app.swipeDown() }
+        let statusControl = app.buttons.matching(NSPredicate(format: "label == %@", "Status")).allElementsBoundByIndex.last(where: \.isHittable)
+        XCTAssertNotNil(statusControl)
+        statusControl?.tap()
+        XCTAssertTrue(app.buttons["Failed"].waitForExistence(timeout: 3))
+        app.buttons["Failed"].tap()
+        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-fixture-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-project-change"].exists)
+        keepScreenshot(named: "758-changes-scoped-filter-intersection")
+    }
+
+    @MainActor
+    func testSettingsChangesLastLookUsesPreviousVisit() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
+        app.launch(); defer { app.terminate() }
+        let more = app.buttons["settings-changes-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        tapScrolling(more, in: app)
+        XCTAssertTrue(app.buttons["settings-change-fixture-change"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Since you last looked"].exists)
+        keepScreenshot(named: "758-changes-since-last-visit")
+    }
+
+    @MainActor
+    func testSettingsChangesUndoRefusalRetainsCurrentDiff() {
+        continueAfterFailure = false
+        for outcomeFailure in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-undo-refused"]
+            if outcomeFailure { app.launchArguments.append("-settings-undo-outcome-refused") }
+            app.launch(); defer { app.terminate() }
+            let more = app.buttons["settings-changes-load-more"]
+            XCTAssertTrue(more.waitForExistence(timeout: 5))
+            tapScrolling(more, in: app)
+            let entry = app.buttons["settings-change-fixture-change"]
+            XCTAssertTrue(entry.waitForExistence(timeout: 5))
+            tapScrolling(entry, in: app)
+            tapScrolling(app.buttons["Undo"], in: app)
+            app.buttons["Undo change"].tap()
+            XCTAssertTrue(app.staticTexts["Current value"].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(app.staticTexts["8 retries"].exists)
+            XCTAssertTrue(app.staticTexts["Value when applied"].exists)
+            XCTAssertTrue(app.staticTexts["6 retries"].exists)
+            XCTAssertEqual(app.staticTexts["fixture.settings-changes-undos"].label, "undos:1")
+            keepScreenshot(named: "758-changes-undo-current-diff-\(outcomeFailure ? "outcome" : "rpc")")
+        }
+    }
+
+    @MainActor
+    func testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
+        app.launch()
+        defer { app.terminate() }
+
+        let more = app.buttons["settings-changes-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10), app.debugDescription)
+        more.tap()
+        let row = app.buttons["settings-change-fixture-change"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "An empty history page with a cursor is not EOF: \(app.debugDescription)")
+        XCTAssertTrue(showsText("6 retries", in: app))
+        row.tap()
+        XCTAssertTrue(showsText("Key history", in: app))
+        XCTAssertTrue(showsText("Risk evaluation", in: app))
+        XCTAssertTrue(showsText("The deterministic floor is sufficient.", in: app))
+        let undo = app.buttons["Undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
+        undo.tap()
+        app.buttons["Undo change"].tap()
+        XCTAssertTrue(app.staticTexts["fixture.settings-changes-undos"].waitForExistence(timeout: 5))
+        XCTAssertTrue(showsText("undos:1", in: app), "Undo was issued exactly once through settings.undo")
+    }
+
+    /// The generic renderer over a fixture schema (settings-model.md F1, 7.5): a new
+    /// section, subgroup, key and badge kind render from served data alone; an
+    /// unknown control is read-only; the Gateway refuses an invalid value inline
+    /// and nothing applies; a model without thinking offers no thinking options.
+    @MainActor
+    func testSettingsRendererRetiresCoveredPreviewWithoutWritingOrLockingRows() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-held-preview"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        let section = app.buttons["settings-section-context-expand"]
+        XCTAssertTrue(section.waitForExistence(timeout: 10))
+        tapScrolling(section, in: app)
+        let toggle = any["settings-row-context.images.block"].switches.firstMatch
+        tapScrolling(toggle, in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-held"], containing: "held:1", timeout: 5))
+        app.buttons["Cover renderer"].tap()
+        app.buttons["Release preview"].tap()
+        app.buttons["Done"].tap()
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
+        XCTAssertTrue(toggle.isEnabled, "Retiring a disposable preview must release its busy state")
+        tapScrolling(toggle, in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        keepScreenshot(named: "758-retired-preview-rejoined")
+    }
+
+    @MainActor
+    func testSettingsRendererRendersAFixtureSchema() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        let applied = app.staticTexts["fixture.settings-renderer-applied"]
+        let thinking = app.staticTexts["fixture.settings-renderer-thinking-options"]
+        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(showsText("Fixture Pro · High", in: app), "The Model summary shows its essential values")
+        XCTAssertTrue(showsText("Lab", in: app), "A section the app never heard of renders from its served title")
+        keepScreenshot(named: "settings-renderer-collapsed")
+
+        // The Run section: the override, the pending approval and the recent agent change.
+        scrollTo(any["settings-section-run"], in: app)
+        XCTAssertTrue(any["settings-section-run-pending"].exists)
+        XCTAssertTrue(showsText("Home changed Retries", in: app))
+        tapScrolling(app.buttons["settings-section-run-expand"], in: app)
+        let retries = any["settings-row-run.retry.maxRetries"]
+        XCTAssertTrue(retries.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(showsText("Advanced", in: app), "Advanced keys follow the essential ones")
+        keepScreenshot(named: "settings-renderer-run-expanded")
+
+        // An invalid value: the Gateway's dry run refuses it under the row; nothing applies.
+        // Numeric controls now share the anchored slider; exercise the Gateway's
+        // negative validation through the fixture's text setting instead.
+        tapScrolling(app.buttons["settings-section-lab-expand"], in: app)
+        let invalid = any["settings-row-lab.invalidValue"]
+        scrollTo(invalid, in: app)
+        let field = invalid.textFields.firstMatch
+        tapScrolling(field, in: app)
+        field.tap()
+        field.typeText("rejected\n")
+        XCTAssertTrue(any["settings-row-lab.invalidValue-error"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fixture value rejected")).firstMatch.exists)
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2))
+        keepScreenshot(named: "settings-renderer-invalid")
+
+        // The new key in the new subgroup, the unknown control and the read-only secret.
+        scrollTo(any["settings-row-lab.focusMode"], in: app)
+        XCTAssertTrue(showsText("Experiments", in: app), "A subgroup the app never heard of")
+        XCTAssertTrue(showsText("New", in: app), "An unknown badge kind renders neutrally with its label")
+        scrollTo(any["settings-row-lab.palette"], in: app)
+        XCTAssertTrue(showsText("Teal", in: app), "An unknown control shows its display read-only")
+        scrollTo(any["settings-row-lab.secretToken"], in: app)
+        XCTAssertTrue(any["settings-row-lab.secretToken-note"].exists)
+        XCTAssertTrue(showsText("Update Tron to edit", in: app))
+
+        // Switching to a model without thinking: the options are asked for again, and there are none.
+        XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:-1", timeout: 2), "Collapsed rows ask for nothing")
+        for _ in 0..<10 where !app.buttons["settings-section-model-expand"].isHittable { app.swipeDown() }
+        app.buttons["settings-section-model-expand"].tap()
+        XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:4", timeout: 5))
+        // The row's trailing value opens the catalog picker.
+        let modelCatalogRow = any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch
+        tapScrolling(modelCatalogRow, in: app)
+        let lite = any["settings-option-Fixture Lite"]
+        XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "settings-renderer-catalog")
+        XCTAssertTrue(app.images["Selected"].exists, "The catalog marks the current value like the existing pickers")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2), "Opening and dismissing the catalog must not write settings")
+        tapScrolling(modelCatalogRow, in: app)
+        XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
+        lite.tap()
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
+        XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:0", timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "No options for the current choice")).firstMatch.waitForExistence(timeout: 5))
+
+        // All settings, then search.
+        reveal(any["settings-renderer-all"], in: app)
+        any["settings-renderer-all"].tap()
+        reveal(any["settings-all-lab"], in: app)
+        XCTAssertTrue(any["settings-all-lab"].exists, app.debugDescription)
+        keepScreenshot(named: "settings-renderer-all")
+        let search = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Search settings")).firstMatch
+        for _ in 0..<12 where !search.isHittable { app.swipeDown() }
+        search.tap()
+        // A focused search field drops its placeholder, so type into the focused app.
+        app.typeText("retr")
+        XCTAssertTrue(any["settings-renderer-results"].waitForExistence(timeout: 5))
+        XCTAssertTrue(any["settings-row-run.retry.maxRetries"].exists)
+        XCTAssertFalse(any["settings-row-run.transport"].exists, "Search shows only matching rows")
+        keepScreenshot(named: "settings-renderer-search")
+    }
+
+    /// Source actions are renderer primitives, not per-key code. The fixture
+    /// socket receives one unset via the existing dry-run/receipt path; unknown
+    /// actions stay display-only rather than dispatching arbitrary operations.
+    @MainActor
+    func testSettingsRendererUsesCurrentDefaultSourceAction() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-source-actions"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["settings-section-model-expand"].waitForExistence(timeout: 10))
+        app.buttons["settings-section-model-expand"].tap()
+        let reset = app.buttons["settings-row-model.ref-useCurrentDefault"]
+        XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.buttons["Unsupported action"].exists)
+        keepScreenshot(named: "settings-current-default-before")
+        tapScrolling(reset, in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        XCTAssertTrue(showsText("Fixture Lite", in: app))
+        XCTAssertTrue(showsText("Future source", in: app), "Unknown actions do not hide their value or badge")
+        keepScreenshot(named: "settings-current-default-after")
+    }
+
+    /// A served catalog remains complete beyond its first page and a new search
+    /// retires both the prior results and cursor without changing the setting.
+    @MainActor
+    func testSettingsRendererCatalogPagesAndSearchesWithoutWriting() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
+        app.buttons["settings-section-model-expand"].tap()
+        tapScrolling(any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(any["settings-option-Fixture Pro"].waitForExistence(timeout: 5))
+        XCTAssertFalse(any["settings-option-Fixture Page Two"].exists)
+        let more = app.buttons["settings-catalog-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5), "A served nextCursor must make the rest of the catalog reachable")
+        more.tap()
+        XCTAssertTrue(any["settings-option-Fixture Page Two"].waitForExistence(timeout: 5))
+        XCTAssertFalse(more.exists, "The final page retires its cursor")
+        keepScreenshot(named: "settings-catalog-second-page")
+        let search = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Search")).firstMatch
+        search.tap()
+        app.typeText("Page")
+        XCTAssertTrue(any["settings-option-Fixture Pro"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(any["settings-option-Fixture Page Two"].waitForExistence(timeout: 5))
+        XCTAssertFalse(more.exists)
+        keepScreenshot(named: "settings-catalog-search")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:0", timeout: 5))
+    }
+
+    /// The same native anchored choice editor works for schema-only choices,
+    /// without thinking-specific labels or a second slider presentation owner.
+    @MainActor
+    func testSettingsRendererOrderedChoiceUsesSharedSlider() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
+        tapScrolling(app.buttons["settings-section-model-expand"], in: app)
+        let row = any["settings-row-model.thinking"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-ordered-choice-row")
+        tapScrolling(row.buttons.firstMatch.buttons.firstMatch, in: app)
+        let slider = any["settings-choice-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "An ordered choice reuses the native anchored slider, not a menu")
+        keepScreenshot(named: "settings-renderer-ordered-choice-expanded")
+        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
+        // The editor's modal ScrollView becomes firstMatch while it is open.
+        // Dismiss on the host backdrop below the observed slider, not inside that panel.
+        let outside = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80)))
+        outside.tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        XCTAssertTrue(showsText("Off", in: app))
+    }
+
+    /// A schema number uses the same anchored slider interaction and saves its
+    /// bounded numeric value through the fixture Gateway.
+    @MainActor
+    func testSettingsRendererNumberUsesSharedSlider() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        XCTAssertTrue(any["settings-section-run"].waitForExistence(timeout: 10))
+        tapScrolling(app.buttons["settings-section-run-expand"], in: app)
+        let row = any["settings-row-run.retry.maxRetries"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-number-row")
+        tapScrolling(row.buttons.firstMatch.buttons.firstMatch, in: app)
+        let slider = any["settings-number-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "A schema number uses the shared bounded slider")
+        keepScreenshot(named: "settings-renderer-number-expanded")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:0", timeout: 2),
+                      "Opening the editor must not write an override")
+        slider.coordinate(withNormalizedOffset: CGVector(dx: 1.0, dy: 0.5)).tap()
+        let outside = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80)))
+        outside.tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        let numberButton = any["settings-row-run.retry.maxRetries"].buttons.matching(identifier: "settings-number-control").firstMatch
+        XCTAssertEqual(numberButton.value as? String, "10 retries",
+                       "The served dynamic range wins over the static 0–100 declaration")
+        keepScreenshot(named: "settings-renderer-number-persisted")
+        let future = any["settings-row-run.futureNumber"]
+        XCTAssertTrue(future.waitForExistence(timeout: 5))
+        XCTAssertTrue(future.staticTexts["Future numeric value"].exists)
+        XCTAssertFalse(future.buttons["settings-number-control"].exists,
+                       "An out-of-representation range must stay visible read-only, never trap")
+        keepScreenshot(named: "settings-renderer-number-unsupported")
+    }
+
+    /// Write-only replacement and ordered-list operations cross the real client
+    /// socket; reopening reads the stored result rather than the editor's draft.
+    @MainActor
+    func testSettingsRendererSecretAndListEditors() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
+        tapScrolling(app.buttons["settings-section-lab-expand"], in: app)
+        let password = any["settings-row-lab.password"]
+        reveal(password, in: app)
+        tapScrolling(password.buttons.firstMatch.buttons.firstMatch, in: app)
+        let field = app.secureTextFields["New value"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-secret-empty")
+        field.tap()
+        field.typeText("fixture-replacement")
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        XCTAssertFalse(showsText("fixture-replacement", in: app), "A submitted secret never appears in the row")
+        tapScrolling(password.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "New value", "Reopening never pre-fills a secret")
+        app.buttons["Done"].tap()
+
+        let paths = any["settings-row-lab.paths"]
+        tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(app.buttons["Edit beta"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-list-before-edit")
+        app.buttons["Edit beta"].tap()
+        app.buttons["Move up"].tap()
+        app.buttons["Edit alpha"].tap()
+        app.buttons["Remove"].tap()
+        app.textFields["Value"].tap()
+        app.textFields["Value"].typeText("gamma")
+        app.buttons["Add"].tap()
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:2", timeout: 5))
+        XCTAssertTrue(paths.buttons.matching(NSPredicate(format: "value == %@", "beta, gamma")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(app.buttons["Edit beta"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Edit gamma"].exists)
+        XCTAssertFalse(app.buttons["Edit alpha"].exists)
+        keepScreenshot(named: "settings-renderer-list-persisted")
+        app.buttons["Done"].tap()
+
+        // A numeric map uses only field names and bounds served by this unknown
+        // fixture schema. Saving preserves untouched fields; Done never writes.
+        let weights = any["settings-row-lab.weights"]
+        tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
+        // The canonical settings row combines its label for accessibility;
+        // target that semantic row's field rather than a nonexistent field label.
+        let blue = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Blue weight")).textFields.firstMatch
+        let red = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Red weight")).textFields.firstMatch
+        XCTAssertTrue(blue.waitForExistence(timeout: 5), app.debugDescription)
+        blue.tap(); blue.typeText("101\n")
+        XCTAssertFalse(app.buttons["Save"].isEnabled, "The served range must constrain representation")
+        blue.tap()
+        blue.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3) + "9\n")
+        XCTAssertTrue(app.buttons["Save"].isEnabled)
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:3", timeout: 5))
+        tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertEqual(red.value as? String, "2")
+        XCTAssertEqual(blue.value as? String, "9")
+        blue.tap(); blue.typeText(XCUIKeyboardKey.delete.rawValue + "7\n")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:3", timeout: 5))
+        tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertEqual(blue.value as? String, "9", "Dismissed draft must not replace the saved numeric map")
+        keepScreenshot(named: "settings-renderer-number-map")
+    }
+
+    /// The renderer in dark mode at the largest accessibility text size.
+    @MainActor
+    func testSettingsRendererDarkLargeType() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-dark",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10), app.debugDescription)
+        keepScreenshot(named: "settings-renderer-dark-xxxl-collapsed")
+        tapScrolling(app.buttons["settings-section-run-expand"], in: app)
+        XCTAssertTrue(any["settings-row-run.retry.maxRetries"].waitForExistence(timeout: 5))
+        scrollTo(any["settings-row-run.retry.maxRetries"], in: app)
+        keepScreenshot(named: "settings-renderer-dark-xxxl-expanded")
+    }
+
+    /// Any element whose label contains the text: a settings row combines its labels.
+    @MainActor
+    private func showsText(_ text: String, in app: XCUIApplication) -> Bool {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
+    }
+
+    /// Scrolls a lazy list down until the element is built and hittable.
+    @MainActor
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
+        for _ in 0..<16 where !(element.exists && element.isHittable) { app.swipeUp() }
+    }
+
+    /// Scrolls until the element is hittable.
+    @MainActor
+    private func scrollTo(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<10 where !element.isHittable { app.swipeUp() }
+    }
+
     @MainActor
     func testIntegrationDestinationsHaveOneDoneButtonThroughSettings() {
         continueAfterFailure = false
@@ -1452,7 +2285,7 @@ final class TronSmokeUITests: XCTestCase {
             app.launch()
             let destination = app.buttons[title]
             XCTAssertTrue(destination.waitForExistence(timeout: 5))
-            for _ in 0..<3 where !destination.isHittable { app.swipeUp() }
+            for _ in 0..<8 where !destination.isHittable { app.swipeUp() }
             XCTAssertTrue(destination.isHittable)
             destination.tap()
             let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done"))
@@ -1461,25 +2294,37 @@ final class TronSmokeUITests: XCTestCase {
                            "Only the progressive settings shell owns dismissal")
             keepScreenshot(named: "settings-\(title)-single-done-light")
             done.allElementsBoundByIndex.first(where: \.isHittable)?.tap()
-            XCTAssertTrue(app.buttons["Agent Defaults"].waitForExistence(timeout: 3))
+            XCTAssertTrue(app.buttons[title].waitForExistence(timeout: 3))
             app.terminate()
         }
     }
 
     @MainActor
-    func testAgentDefaultsThinkingSliderOpensAfterDefaultsConsolidation() {
+    func testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-agent-defaults-fixture"]
+        app.launchArguments = ["-tron-mac-settings-fixture"]
         app.launch()
         defer { app.terminate() }
-        let control = app.buttons.matching(identifier: "thinking-level-control")
-            .matching(NSPredicate(format: "label == %@", "Thinking")).firstMatch
-        XCTAssertTrue(control.waitForExistence(timeout: 5))
-        XCTAssertTrue(control.isEnabled)
-        control.tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "thinking-level-slider").firstMatch.waitForExistence(timeout: 3))
-        keepScreenshot(named: "agent-defaults-thinking-editor-fixture")
+        let modelSection = app.buttons["settings-section-model-expand"]
+        XCTAssertTrue(modelSection.waitForExistence(timeout: 5))
+        modelSection.tap()
+        let thinking = app.descendants(matching: .any)["settings-row-model.thinking"]
+        XCTAssertTrue(thinking.waitForExistence(timeout: 3))
+        tapScrolling(thinking.buttons.firstMatch.buttons.firstMatch, in: app)
+        let slider = app.descendants(matching: .any)["settings-choice-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 3))
+        keepScreenshot(named: "mac-settings-schema-thinking")
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80))).tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 3))
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
+        XCTAssertFalse(app.buttons["Settings Scope"].exists)
+        modelSection.tap()
+        for _ in 0..<12 where !app.staticTexts["This iPhone"].isHittable { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["This iPhone"].exists)
+        XCTAssertTrue(app.staticTexts["Stored on this iPhone. Never changes harness behaviour."].exists)
+        keepScreenshot(named: "mac-settings-this-iphone")
     }
 
     @MainActor

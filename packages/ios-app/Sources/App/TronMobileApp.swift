@@ -69,16 +69,14 @@ struct TronMobileApp: App {
                     .tronPresentation()
                     .tronSettingsLayout()
                     .preferredColorScheme(.light)
-            } else if ProcessInfo.processInfo.arguments.contains("-tron-agent-defaults-fixture") {
-                NavigationStack { AgentDefaultsSettingsView(projectCWD: nil) }
-                    .environment(hostedModel)
-                    .tronPresentation()
-                    .tronSettingsLayout()
-                    .tronSettingsVisualTheme(accent: .tronPurple)
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-mac-settings-fixture") {
+                HostedSettingsRendererFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-extension-widgets-fixture") {
                 HostedExtensionWidgetsFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-agent-instructions-fixture") {
                 HostedAgentInstructionsFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-settings-renderer-fixture") {
+                HostedSettingsRendererFixture()
             } else {
                 HostedProductionScene(model: hostedModel)
             }

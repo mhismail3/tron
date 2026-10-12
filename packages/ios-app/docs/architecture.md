@@ -199,7 +199,8 @@ A chat that claims the Home status manages Home from the composer's context ring
 Home** sheet, #725) replaces the ordinary Manage Session sheet, whose
 compaction/tool/fork/resource controls are refused for Home, and opens at the
 medium detent with drag to large, like Manage Session (#799); its child Home
-sheets open full height. The gear opens Settings in every chat, Home included
+sheets also open at the medium detent and drag to large (#807,
+`testManageHomeSubSheetsOpenAtMedium`). The gear opens Settings in every chat, Home included
 (#799). Every other chat keeps Manage Session on the ring, and the ring's
 accessibility label names the sheet it opens. The sheet presents one `home.status` read as sections — state, chat
 model and context window, Home context, memory (settings, browser, pause/resume),
@@ -686,12 +687,16 @@ Global settings, provider/model catalog, package, and custom-model event hints e
 advance a dedicated invalidation generation. Successful reads publish their projection
 without advancing that generation, so a visible `.task(id:)` performs one initial read
 and one read per actual invalidation rather than feeding its own reload loop.
-`SettingsTrustCoordinator` is the sole owner of target-keyed disposable settings values,
-per-target read admission, settings and trust event revisions, settings request/mutation
-construction, and trust inspection/mutation. Clearing a saved trust decision sends an explicit
-JSON `null`, while `true` and `false` remain distinct decisions. It uses the shared
-confirmed-mutation executor, and profile retirement synchronously revokes suspended work
-and clears settings projections. Project Trust treats an accepted decision receipt as command
+`SettingsTrustCoordinator` owns settings and trust event revisions, request/mutation
+construction, and trust inspection/mutation; it keeps no settings projection. Settings are read
+only through `settings.resolve` (the generic renderer's `resolveForRenderer`, or one resolve for a
+single served key, reading `value` or the target's own layer through `ResolvedSetting.value(at:)`)
+and written only through the Gateway's one change path, `settings.change` (gateway
+`docs/settings-model.md`). Hand-built screens send schema keys with `SettingsTarget.keyChange`, so
+iOS holds no pi-document path table. A trust decision is the `permissions.projectTrust` key for the
+project target, and its change outcome carries the resulting trust inspection; clearing a saved
+decision is an `unset`, while `true` and `false` remain distinct decisions. It uses the shared
+confirmed-mutation executor, and profile retirement synchronously revokes suspended work. Project Trust treats an accepted decision receipt as command
 outcome, not the latest visible inspection: under its original presentation namespace it rejoins a
 current canonical trust read. Event and post-command inspection reads share one leaf-owned latest
 request ticket, independent of global trust-default reads; values and errors require matching
@@ -701,6 +706,147 @@ decisions. `TronProjectTrustUITests` exercises the real controls against the `HO
 `HostedProjectTrustFixture`: an older accepted receipt and older inspection value/error cannot replace
 a later canonical Block, with ordered/single decisions, foreground receipt reconciliation and a
 replacement Mac with the same cwd as controls. The fixture changes no actual trust or resources.
+The settings risk gate's iPhone half (gateway `docs/settings-model.md` 5.4 and 5.5) has the same
+owner. `SettingsApprovalsSection` shows pending changes in Manage Home (Home's and its task
+workers') and Manage Session (this chat's): it re-reads `settings.approvals` on the
+`settings.approvalsChanged` revision and decides with `settings.decide` through the receipt
+executor, bound to the request's digest; a Chat-layer change carries the chat's last read
+runtime fence. Every word a row shows is Gateway text (`requester`, `label`, `display`,
+`confirm`), with the raw `before` and `after` one tap away, and it renders nothing when nothing
+is pending. Settings › Permissions renders every `permissions.floor` instance through the
+generic renderer: Gateway labels, qualifiers, choices, source badges and reset actions remain
+authoritative. A dry run precedes a write; lowering a floor displays the Gateway's `confirm`
+text and sends only after the maintainer confirms. The duplicate floor picker and its Mac-only
+read/write adapters are removed, not retained as a second editor. The real hosted floor journey
+now drives this same generic control and preserves lowering-confirmation and direct-raising proof.
+The "Approval needed" push carries the `settings-approval` category (decision 35), registered by
+`AppDelegate` with Approve and Decline as foreground actions. `PushNotificationTap` admits the
+action only with that category and an admitted route; `AppModel.stageSettingsDecision` holds it
+for two minutes while push navigation opens the requester's chat, `ChatView` opens the Manage
+sheet its context control would, and `SettingsApprovalsSection` consumes it after its read: one matching
+request gets a confirmation dialog over its row (nothing is decided without that tap, because the
+push names no request or digest), several leave the rows, none says it is no longer waiting.
+Hosted journeys: `TronSmokeUITests.testManageHomeSettingsApprovalsApproveAndDecline`,
+`testManageSessionSettingsApprovalDecline` and `testSettingsApprovalPushApproveConfirmsTheRow` /
+`testSettingsApprovalPushDeclineConfirmsTheRow` (the `-home-settings-approvals` and
+`-session-settings-approvals` fixture flags, each with a request from another scope that must not
+show; the push flags stage the relay's payload through `PushNotificationTap.admit`), and `TronProjectTrustUITests.testPermissionFloorsLowerNeedsConfirmAndRaiseApplies` (the
+`floors` scenario of `HostedProjectTrustFixture`).
+
+`SettingsChangesView` is the native audit-feed owner for Settings, Manage Session and Manage Home.
+It reads one Gateway `settings.history` page at a time (an empty page with a cursor still enables
+continuation), intersects server actor/layer/section/key/status filters with the surface's Home or
+chat lineage, and pins current approvals above newest-first history. Its managed sheet owns
+navigation/Done chrome. Last-look is per paired Mac and scope: badges compare against the previous
+visit while the current visit is saved only after a successful read. It never becomes audit truth.
+Feed and detail reads carry managed activity, profile/presentation identity, foreground generation
+and settings invalidation fences through every await. Details preserve key qualifiers when reading
+history and show the recorded tier basis, task/chat attribution and staging state; absent timestamps
+remain absent. Requesting-chat links capture the entry’s paired Mac and return a canonical navigation
+route to the owning Settings/Manage navigation callback. Task links reuse the managed Home task
+detail owner for the exact actor task ID. Neither route infers ownership from the currently selected
+Mac after a switch; hosted chat-route and task-detail journeys exercise both links. Undo and approval decisions use the existing receipt-backed
+`SettingsTrustCoordinator` paths. Undo validates per-change refusal and captures the Chat
+configuration admission when applicable, so an acknowledged envelope cannot hide a failed change.
+An outside entry that replaced Tron's value offers Apply again, an ordinary receipt-backed
+`settings.applyAgain` change; outside MCP server and custom-model entries show their name and
+whether it was added, changed or removed, never the definition.
+`TronSmokeUITests.testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt`
+exercises an empty page with a continuation cursor, then the feed/detail/undo journey against
+the hosted socket, including its exact `settings.undo` request. Additional hosted journeys cover
+previous-visit markers, refused undo retaining the current diff, intersected scope/filter pages and
+exact-digest approve/decline receipts. Their recorded red runs distinguish the last-look and undo
+regressions from subsequent successful validation.
+Changes separates disposable history errors from action failures. An undo conflict renders the Gateway’s formatted current/applied values without replacing the historical entry; both RPC and per-change failures retain that structured detail, even when an earlier outcome succeeded. The existing undo-conflict journey exercises both envelopes.
+
+`SettingsValueEditors` supplies the generic numeric-map list editor as well as secret and string-list editors. A numeric map takes every field name, label and numeric range from the served metadata; unknown fields or unsafe numeric representations stay read-only. Save sends a typed object through the ordinary preview/receipt path, and dismissal never submits a draft. The existing secret/list E2E journey also checks offered bounds, untouched-field preservation and numeric-map save/reopen/cancel; the Gateway journey proves an unoffered field cannot erase the stored map. Project Sources and Run reuse the scoped package and Hooks owners rather than returning to a Mac/Project picker. The dashboard also offers Project settings through the existing workspace browser, so a folder needs no chat to acquire defaults. Its sheet handoff samples current presentation authority at dismissal (not a cached active flag) and retains the exact Mac identity. New Session resolves its model default through the same schema and shows the shared served source badge; choosing an override removes that default-source claim. The dashboard/no-chat journey proves a Project default remains inherited at creation. Manage Session shows automatic-compaction policy once, in the generic Context group; manual Compact Now remains a separate receipt-owning Context action rather than a repeated policy footer in the model card.
+
+The generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is
+`SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
+in `TronPresentation.swift`. Its bounded, expandable section cards stay mounted in
+an ordinary vertical stack, like Settings: lazy eviction of expanding glass cards
+can continuously invalidate SwiftUI's layout graph during a scroll. The fixture-schema
+and secret/list journeys exercise scrolling through those cards and subsequent editing;
+a main-thread sample distinguishes this layout hang from a Gateway request timeout.
+It sends
+`SettingsRendererContract` (version 1; `toggle`, `choice`, `number`, `text`, `secret`,
+`list`, `catalog`, `readOnly`) with `settings.resolve` and renders whatever comes back: sections in Gateway order
+with their summary (essential values, overrides with a layer badge, waiting approvals, recent
+agent changes) as the section's expand row, every key on expand (essential, then Advanced, with
+subgroup headings), All settings, and search over label, id, help and display. A control it
+does not implement, or a missing presentation, renders the `display` read-only; an unknown
+badge kind is neutral; a group no section declares is shown under its id, so a value is never
+hidden. Choices with an `optionsSource` and catalogs come from `settings.options`, re-requested
+when a key in `dependsOn` changes. `orderedChoice` uses `SettingsChoiceSlider.swift`, and bounded integer `number`
+settings use `SettingsNumberSlider.swift`; both use the same anchored
+`ConfigurationSliderContainer` and track as existing thinking and context-window
+rows. The Gateway supplies number bounds, unit and step as well as choice values
+and labels. Dynamic number ranges replace static metadata and are re-requested
+with their dependencies. Unsupported numeric representations stay read-only.
+The number journey proves that a served 0–10 range wins over a static 0–100
+range, opening does not write, and an unrepresentable future range remains visible.
+Editors use the established motion, Dynamic Type, VoiceOver adjustment,
+cancellation and commit-on-dismiss lifecycle. `SettingsNumberSlider` owns both
+stepped numbers and continuous reference-valued numbers, including their row,
+draft, detents, reset action and editor. The context-window wrapper supplies only
+its inheritance conversion, labels and served limits; it has no second editor or
+presentation lifecycle. `SettingsNumberSliderScale` owns numeric landmarks, and
+`SettingsConfigurationValueRow` preserves the established full-size value row
+and compact settings-row layout. The real Manage Home context-window journey
+checks open/dismiss without a setting write and retains simulator row/editor captures.
+Catalog destinations share `TronCatalogOptionRow`, extracted without changing
+ModelPicker's row layout, fact typography, selection/applying treatment or tint.
+ModelPicker keeps its domain-owned Recent/Latest rails, provider expansion and
+local search; the generic catalog takes opaque values, labels, disabled reasons
+and cursor pages from `settings.options`. Both use the existing selected-value
+sheet entry and managed chrome, not a second row wrapper. The generic catalog's
+Load more carries the returned cursor; search, target, connection, foreground
+and presentation changes retire the old page chain. Every page completion is
+fenced before publishing options, errors or loading state. Overlapping pages
+preserve existing row identity, and repeated cursors stop rather than loop.
+Hosted coverage opens and dismisses a served catalog without writing, selects a
+model and verifies dependent thinking options refresh, and reaches a second page
+then searches without carrying the old cursor or applying any setting. `SettingsValueEditors.swift` hosts write-only
+secret replacement and ordered string-list add/remove/reorder in standard
+progressive sheets, fields, groups, rows and action capsules. Secret drafts
+start empty and are cleared on submission/disappearance; list drafts have local row
+identity and write only on Save. Unknown item kinds stay read-only. The
+`testSettingsRendererSecretAndListEditors` journey reopens both editors against the
+fixture socket to prove redaction and persisted ordering.
+`testSettingsRendererOrderedChoiceUsesSharedSlider` exercises a served choice and
+`testSettingsRendererNumberUsesSharedSlider` exercises a served number through selection
+and persistence; the legacy Agent Defaults journey protects the existing
+AgentConfigurationControls callers, which share the same choice and value-row primitives.
+Source badges may carry `useCurrentDefault` or `followDefault` actions. The row
+renders the Gateway's label with the shared inline action capsule and routes an
+unset through the same change owner; it contains no per-key reset logic. Unknown
+actions remain display-only badges, and a negotiated read-only row cannot reset.
+A `Changed outside Tron` state badge may carry `applyAgain` with the outside
+change's `changeId`; the row offers it wherever the Gateway serves it (it acts on
+the change record, like Undo in Changes) and sends `settings.applyAgain` through
+the renderer's command owner, then rereads. Changes detail offers the same action
+for an outside entry that refers to the Tron change it replaced.
+`testSettingsRendererUsesCurrentDefaultSourceAction` proves one applied unset
+against the hosted socket and preserves the unknown badge without dispatching it.
+This is primitive coverage; session-surface adoption still owns the runtime fence.
+Manage Session and Manage Home embed the same schema renderer with calm
+collapsed summaries and All settings/search. Home owns Chat then Profile;
+Manage Session owns Chat. The shared Chat card remains the only value editor
+for its live model, thinking and context window, while their generic rows retain
+schema provenance and reset actions. Other keys remain read-only with routes to
+the shared Project or Mac surface. Disposable previews own separate busy state
+from accepted mutations. Exact request, surface-token, target, foreground and
+profile fences reject stale responses; retirement releases preview state without
+cancelling a receipt. The controlled hosted preview journey holds a response
+across a covering sheet, proving no stale write and a usable row after rejoin.
+Active-child selections remain admitted when the child dismisses to its parent.
+Every edit is a `settings.change` dry run first: a refusal
+shows under its row and nothing is applied, and a change with `confirm` text asks first.
+`SettingsTrustCoordinator` owns the generic reads and the receipt-bound change, which the
+Permissions floors view also uses for its Mac target. Surfaces adopt the renderer in slices 8
+and 11 (#766, #769); until then its proof is `TronSmokeUITests.testSettingsRendererRendersAFixtureSchema`
+and `testSettingsRendererDarkLargeType` over `HostedSettingsRendererFixture`, which serves a
+fixture schema with a section, subgroup, key, control and badge kind the app has never seen.
 `ProviderAuthCoordinator` likewise solely owns typed-target
 provider/model catalogs, per-target paging admission, event-only provider invalidation,
 auth prompt/event parsing, browser-callback submission, and operation-to-target retention through
@@ -1147,7 +1293,7 @@ its Script and then its Result show their first eight lines (`ToolTextHeadPrevie
 Admitted display descriptors use the existing session-bound display presentation route; no nested call becomes a
 canonical transcript row or independent receipt. MCP tool names use the projected server/tool identity, resource
 and search tools remain generic result cards. Manage Session → Available Tools turns tools on or off for one chat
-(`session.setTools`); it groups `session.resources` tools as Built-in, Tron, each package, local extensions and each
+(a Chat-layer `tools.active` change through `settings.change`); it groups `session.resources` tools as Built-in, Tron, each package, local extensions and each
 MCP server (from the `namespace` object), omits hidden exposures, and is the only Manage Session list of tools. Its rows carry no icon and a two-line description; only the switch toggles a tool, and the rest of the row opens the shared resource detail sheet with the full description and the tool's declared inputs. Routed assistant rows use physical provider/model attribution;
 virtual model names are marked in the model and session selectors without replacing physical attribution. Bash keeps
 Pi's empty result empty rather than inventing `(no output)`. Bash commands wrap to the available width
@@ -1515,6 +1661,68 @@ immediate revocation; revoking this iPhone also removes its local profile.
 
 ## Presentation parity
 
+Settings/Manage/Project changes reuse `TronSettingsGroup`, `TronSettingsRow`,
+`TronSelectionRow`, `TronGlassCard`, shared typography/colors and the managed or
+progressive sheet owner; do not substitute local rounded-card backgrounds or
+duplicate navigation/Done chrome. `SessionModelSummaryCard` remains the shared
+Models/thinking/context presentation owner for both Manage surfaces.
+Prefer the existing real-app journeys over source-string checks or broad golden
+snapshots: `TronSmokeUITests` owns single-Done nesting, light/dark full-width
+loading/error material, medium Manage Home entry and pending/confirmed/refused
+Models behavior. `TronNewSessionUITests.testProjectDefaultBeforeFirstChatIsInheritedWithoutChatOverride`
+also checks Project/catalog sheet ownership while proving inheritance. Layout
+assertions use bounded tolerances only for the identified width/chrome risks;
+screenshots are diagnostic evidence, not substitutes for successful interaction.
+State-boundary integration tests supplement these journeys where the native
+fixture cannot establish store/runtime behavior.
+
+`ProjectSettingsContent` is the shared Project card behind Manage Session's
+Project settings row, the dashboard workspace header's context-menu action, and
+New Session's selected-workspace row. The last route edits a project before its
+first chat. Every route captures the Gateway and exact workspace; another Mac
+requires explicit Use This Server before any settings read/write. The card
+composes the generic Project-layer renderer with existing trust review and a
+bounded Git header. Workspace dirtiness is not a per-setting staging badge.
+The read carries managed activity, identity and a latest-request fence through
+trust and Git awaits. Native no-chat save/rejoin/create and real RuntimeRegistry
+inheritance journeys prove a project default remains Project provenance, not an
+explicit Chat override or Mac default. The Project store is the Gateway-served
+Project root (`TrustInspection.projectDir`), and its rows carry the resolver's
+git-state and Changed outside Tron badges with Apply again; this UI never infers
+a root or replays audit.
+
+Settings is the Mac-layer surface, regardless of whether it was opened from the
+dashboard, an ordinary chat or Home. Its schema renderer owns Model, Context,
+Tools, Permissions, Run and supply-section keys, summaries and search. Native
+account, MCP, package, hook and Setup flows supplement those sections without
+duplicating harness controls. Pairing and account repair remain reachable when
+resolution is offline. The default trust key is in Permissions; per-project
+trust belongs to the Project surface. This iPhone explicitly never changes
+harness behaviour. The former defaults, compaction and resource-path editors and
+all Global/Project scope pickers are removed; hook inventory inherits its caller's
+target. Hosted Mac-settings and offline navigation journeys protect the shared
+thinking editor, no-write dismissal and native flow reachability.
+
+Manage Session embeds the renderer for its exact Chat target; its Settings
+destination opens Mac settings. Its bounded cards use an ordinary stack so the
+shared Models presenter's lifetime cannot be ended by lazy eviction behind a
+nested sheet. The original popup acknowledgement/failure journeys reproduce the
+lazy-container failure and pass without relaxed assertions after that correction.
+Fixed-source actions and live overrides go through the existing
+settings mutation receipt owner, with runtime/model/revision captured from the
+admitted session and rechecked immediately before a send. Opening or dismissing
+never writes. The renderer uses the resolver's allowed layer list: other-layer
+rows remain read-only and link to the Project or Mac editor rather than attempting
+a Chat write. The hosted `testManageSessionUsesCurrentDefault` journey exercises
+reset through this actual route and reopens it to check the authoritative value;
+Gateway settings-gate coverage owns persistence and provider-effect proof.
+The shared Chat card keeps its domain receipt/revision adapter; the renderer
+owns the remaining keys and all source/reset rows. Context supplements group delivered Agent
+Instructions and loaded Project Resources; Available Tools supplements Tools, while the schema
+keeps source/reset ownership for the shared tools control. Run contains the existing Hooks flow.
+Manage Home's Context section opens the existing next-request/delivered Home Context view; memory,
+chapters, tasks and permission requests retain their established domain owners.
+
 An interrupted initial chat open has a distinct `waitingForConnection` phase.
 The opening owner starts no open lease or timeout without lifecycle admission;
 Retry while disconnected remains waiting rather than turning a cancellation into
@@ -1561,28 +1769,37 @@ background/reconnect in the live invocation. An unresolved Disable retains the
 completion control even after authoritative status says Disabled; confirmed
 Disable returns the ring to Manage Session without replacing chat.
 App restart reads current Gateway status, without claiming or replaying an old
-command. Memory model configuration uses the same receipt path, and its picker is a row of the
-model card (#811), not a separate sheet. Manage Home is the main sheet of the Home
-chat, built from Manage Session's own components: `SessionContextUsageCard` (the
-stats card, with the state pill on its header row), `SessionModelConfigurationCard`
-(model, thinking and context window through the ordinary session RPCs, with the
-Memory model row as its footer), a rows container for the Home sub-sheets, and a
-bottom container for pause/resume and disable. The settings-approvals section
-(#758) inserts between the stats card and the model card. Every Home sub-sheet
+command. Manage Home keeps the shared live Chat model/context card, including
+active-lineage receipt/snapshot reconciliation and its session-scoped notice above
+Models. The embedded generic renderer resolves Home's Chat and Profile layers,
+preferring Chat when both allow a key. Schema source/reset rows do not duplicate
+the shared Chat card's value editors. Profile controls, qualifiers, options,
+badges, source actions and reset stay schema-driven, with no per-key native
+Profile picker.
+A mounted renderer accepts selections from its active child catalog/editor even
+while that child suspends the parent's presentation reads. The physical
+memory-model selection/reopen/cancel journey protects this boundary. Any future
+consolidation of the live Chat card must preserve receipt plus applied-revision
+acknowledgement with Models open, not replace it with optimistic catalog dismissal.
+Manage Home uses `SessionContextUsageCard` for stats with the state pill on its
+header row, the shared Chat card, Profile settings, its Home sub-sheet rows, and
+the bottom pause/resume and disable container. The settings-approvals section
+(#758) inserts between the stats card and shared Chat card. Manage Session mounts the same
+section on its usage card with the exact session scope; Home-only mounting would
+hide ordinary chat approval requests and push decisions. The hosted decline and
+push-approve/decline journeys protect that shared mount.
+Every Home sub-sheet
 opens at medium and drags to large, through the shared managed-sheet chrome.
 Its Memory row, Chapters, Tasks and Permissions read the same single load. Task
 recovery appears in Tasks and Permissions only when it needs attention; an
 available recovery is the normal state and has no row. The browser
 additionally requires authenticated `home-memory-browser.v1` and the chapter
 list `home-chapter-list.v1`; the context sheet requires only `home.v1`. The memory
-picker is the existing progressive model-selection row and ModelPicker, filtered
-to registered, available physical models. Selection captures the mounted picker
-profile/lifecycle before sending `configureMemory` through the existing receipt
-owner. Choices stay Applying until the exact latest canonical status read
-converges, not merely until the configure receipt is terminal; an old installed
-model frame cannot admit a duplicate choice during that gap. Its row shows spend as information and the
-configuration/pause/block state, with explicit unresolved receipt checks, never
-budgets or cache/storage controls. The Home Context
+picker is the schema's catalog control, whose Gateway option source excludes
+virtual/unavailable models. It sends the Profile key through `settings.change`,
+then reloads canonical resolution; dismissal alone does not save a selection.
+Home pause/disable retain their existing mutation and unresolved-receipt owner.
+No budget or authorization semantics are inferred by the renderer. The Home Context
 sheet reads `home.context`: one bar of the context window split by its breakdown
 sections (instructions, about you, memory, this chapter, task results, input),
 with a legend row per section and the free remainder. It shows no entry IDs or
@@ -1697,8 +1914,14 @@ search, segmented choices, fields, editors, toolbar typography, row actions,
 icon buttons, loading labels, and prominent actions use shared semantic
 components. Toolbar and sheet action icons use Tron emerald while their
 container geometry and Liquid Glass remain default iOS styling rather than
-receiving a second app-drawn container. The chat toolbar's trailing gear opens
-app Settings; Manage Session is owned by the composer's context ring. Its principal title
+receiving a second app-drawn container. In ordinary chats, both the toolbar's
+trailing gear and the composer's context ring open Manage Session at its existing
+medium detent; its Settings row opens the Mac-layer Settings child sheet,
+whose dismissal returns to Manage Session. Settings retains its own category
+palette rather than inheriting the Session destinations' teal theme. Home's
+route keeps its direct Settings gear even while Home status loads; its context
+ring still opens Manage Home, with the existing leading terminal button.
+The chat toolbar's principal title
 is explicitly bounded from the mounted chat viewport and clipped after tail truncation,
 so a cancelled interactive-pop transition cannot temporarily restore intrinsic-width text
 across the back or Settings controls. App-owned workspace
@@ -2662,7 +2885,7 @@ The stack is never persisted and is not a second state authority.
 
 Connected Services presents definitions owned by `ConnectionOwner` and uses its instance-scoped setup, policy, and disconnect receipts. Setup is owner-typed (`oauth` or `token`) and uses the Gateway's confirmed mutation receipt executor. The iOS form accepts only opaque Mac Keychain credential references, never token values or generic agent-readable secret fields. X setup is a public-client OAuth 2.0 PKCE flow: the user enters their public client ID and registered HTTPS callback, opens X consent, and pastes the redirected URL or code; the Gateway owns state verification, code exchange, refresh-token rotation, and Keychain storage, while iOS never receives tokens. Policy controls (enabled, writes, paid, and recurring) are independent and instance-scoped; capability availability is effect-specific. Dismissing a sheet retires only presentation reads; an accepted setup, policy, or disconnect mutation continues with its owner, and reconnect never replays it.
 
-MCP Servers is a separate surface over Pi's `mcp.json`: it reads global or trust-approved project configuration, decodes Pi CLI `state`, `scope`, exposure, transport, tool and bounded error fields, and shows only project rows in project scope. Needs-auth uses the sign-in warning treatment; bearer values remain transient while the Mac Keychain owner stores them. The scope switch is the shared `TronSegmentedControl` (as in the Workspace sheet), Reload is the leading toolbar button, Add Server is a glass row button below the list, and each server row is a `TronSettingsRow` whose `Manage` menu holds sign-in, on/off, exposure, token, sign-out and remove. Extensions Settings shows Built-in Extensions and Default Tools as standard toggle and selection rows; they read the active scope's document, write only on an explicit change, and keep `defaultTools` entries they do not manage. MCP sign-in adopts the exact `{ kind: "mcp", sessionId, server }` operation into the provider-auth event coordinator, including events arriving while the start RPC is pending; cancellation uses only the MCP-specific cancel command. Its callback remains in the iOS listener and is relayed only to Pi's loopback listener. Accepted mutations and authentication operations retain their Gateway owners and reconnect never replays them.
+MCP Servers is a separate surface over Pi's `mcp.json`: it reads global or trust-approved project configuration, decodes Pi CLI `state`, `scope`, exposure, transport, tool and bounded error fields, and shows only project rows in project scope. Needs-auth uses the sign-in warning treatment; bearer values remain transient while the Mac Keychain owner stores them. The scope switch is the shared `TronSegmentedControl` (as in the Workspace sheet), Reload is the leading toolbar button, Add Server is a glass row button below the list, and each server row is a `TronSettingsRow` whose `Manage` menu holds sign-in, on/off, exposure, token, sign-out and remove. Extensions Settings shows the Built-in Extensions switches and Default Tools as standard toggle and selection rows over the served `sources.extensions`, `tools.active` and `tools.codemode.mode` keys; they read the scope's own layer, write only on an explicit change (a switch adds or removes its `-builtin:<name>` entry), and keep entries they do not manage. MCP sign-in adopts the exact `{ kind: "mcp", sessionId, server }` operation into the provider-auth event coordinator, including events arriving while the start RPC is pending; cancellation uses only the MCP-specific cancel command. Its callback remains in the iOS listener and is relayed only to Pi's loopback listener. Accepted mutations and authentication operations retain their Gateway owners and reconnect never replays them.
 
 Knowledge Jev is not a ConnectionOwner capability. It uses the TypeSafe classifier credential in Provider Settings; a configured key is the consent for paid Jev work, bounded by a fixed monthly cap (user decision, 2026-09-30). MCP configuration and Jev credentials are not mirrored into connection rows.
 
@@ -2808,6 +3031,20 @@ Both managed-sheet content boundaries explicitly reset `chatOwnsStatusBar` to
 false. A resource sheet presented by a composer chip/catalog must regain its own
 primary scroll eligibility rather than inherit the covered chat's exclusion.
 and their native document scrolls; without the reset both variants fail.
+
+### Home display identity and terminal
+
+The Home chat header presents **Home** rather than a generated conversation name;
+ordinary chat headers retain their canonical titles. The Gateway also projects the
+role title on snapshots and notification admission, preserving opaque route IDs.
+Manage Home's top-left terminal action shares `SessionTerminalToolbarButton` with
+Manage Session and presents the existing managed `TerminalSheet(sessionID:)`.
+It disables when the Gateway lacks `terminal.v1` or no Home session is bound.
+The terminal controller continues to own loading, shell reuse and unavailable
+states; Home does not add a second terminal lifecycle. The context circle still
+opens Manage Home at medium, and the gear still opens Settings. Hosted UI journeys
+cover the role title, leading placement, exact Home terminal request and unavailable
+capability alongside the existing routing/detent journey.
 
 ### Home task sheets
 

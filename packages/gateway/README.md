@@ -106,6 +106,15 @@ and mobile clients treat that as a retryable transport failure: every Mac must
 run a Gateway that sends the typed close before the phone can stop retrying it
 and name the build to update.
 
+Protocol v8 replaces the per-setting RPCs (`settings.update`,
+`session.setModel`/`setThinking`/`setContextWindow`/`setTools`, `trust.set`,
+`home.configureMemory`) with the one settings change path
+([settings model](docs/settings-model.md)). It has no v7 runtime path, so an
+older iPhone app is refused with the typed mismatch close rather than failing on
+a removed RPC. The v7 to v8 step is the same one-time transition as v6 to v7:
+the deployed v7 update helper cannot promote a strictly v8 candidate, so it uses
+the manual local Release reinstall runbook, Mac first, then the iPhone app.
+
 Tron Gateway is the minimal always-running Mac service behind the Tron iPhone
 app. It embeds the pinned Pi SDK through supported SDK exports. User-facing copy
 calls the product and agent **Tron**; source may use Pi-specific names only where
@@ -306,6 +315,53 @@ notes instead of a hand-read changelog; an update whose changelog carries no
 delta fails and restores. Do not submit independent
 Pi package updates, hand-edit lockfiles, run Gateway deployment/lifecycle
 commands, or promote/restart a Gateway as part of this process.
+
+### Tron-patched `pi-coding-agent`
+
+The Gateway needs the SDK's `projectDir` option (the Project layer is the
+worktree root's `.pi/`, see [Project root](#project-root)), which no published
+release has. Until one does, `pi-coding-agent` comes from a Tron-built tarball
+instead of the registry, at the same version as the rest of the family.
+`pi-coding-agent-patch.json` is its only owner. It records the upstream tag and
+commit, the published tarball's integrity, the upstream proposal commit the patch
+backports, the patch's SHA-256, the published `pi-ai` model data that release
+bundled, the Node/npm toolchain, and the built tarball's SHA-512, under
+`third_party/pi-coding-agent/` with the upstream MIT `LICENSE`. `package.json`
+names the tarball as `file:third_party/pi-coding-agent/<file>.tgz`, so
+`package-lock.json` binds its bytes with npm's own integrity and a clean `npm ci`
+needs no other input. `npm run check:pi-sdk` accepts exactly that declaration:
+the direct dependency, the lock root and lock entry must name the declared
+tarball and integrity, the tarball and patch must match their digests and the
+license must be present; without the declaration a `file:` dependency fails as
+before (`npm run test:pi-sdk-scripts` runs the checker against the real files and
+single-fault copies). Packaging stages the declaration and tarball before `npm ci` in the app
+payload, and a source update refreshes the declaration with the lock it explains.
+The tarball's package version stays the release version, so Pi's own version
+checks are unchanged; the lockfile `resolved` value and the declaration name the
+patch.
+
+`npm run reproduce:pi-coding-agent` rebuilds the tarball from a fresh fetch of
+the tag with the declared toolchain and model data: `npm ci` and
+`npm run build:offline`, then a pack of the unpatched package that must equal the
+published registry tarball byte for byte, then `git apply` of the patch, a
+pi-coding-agent rebuild and a pack that must equal the committed SHA-512
+(`--upstream <path>` uses a local clone). The tarball therefore differs from the
+registry release only in the patched modules, their declarations and maps, the
+bundled CLI chunks and two docs pages. After a deliberate patch change, `--write`
+replaces the tarball and records its SHA-512 and the patch SHA-256; then refresh
+the lock with `npm install`. Moving the patch to another release means updating
+the declaration's `version`, `upstream`, `modelData` and artifact path, rebasing
+the patch onto that tag, and running `--write`.
+
+`npm run update:pi-sdk` refuses while the declaration exists. When a release
+ships `projectDir` (the declaration's `removeWhen`), remove the patch in one
+change: set `pi-coding-agent` in `package.json` back to the exact release
+version, delete `pi-coding-agent-patch.json`, `third_party/pi-coding-agent/`,
+`scripts/build-pi-coding-agent-patch.mjs` and its `reproduce:pi-coding-agent`
+script, drop the declaration from `packages/mac-app/scripts/stage-gateway-app.sh`
+and the `BUILD_INPUT_FILES` of `scripts/gateway-install-inputs.mjs`, run
+`npm install` so the lock returns to the registry entry, then
+`npm run update:pi-sdk -- <release>`.
 
 ### Tron-owned `pi-subagents` build
 
@@ -626,6 +682,9 @@ MCP tools from hyphenated fixture servers, tool search over the tool the
 codemode exposure keeps undeclared, steer and follow-up, abort, and manual
 compaction. Its normalized trace is compared byte-for-byte with
 `packages/gateway/test-fixtures/pi-sdk/sdk-behavior-trace.golden.json`.
+Its explicit Chat model selection also persists `tron.settings.v1` with the fixed
+model source/reference and command receipt before the following invocation.
+That settings lineage is canonical behavior, not noise to prune from the trace.
 
 The trace records each distinct provider request's declared tool names,
 system-prompt section headings, a hash of the normalized prompt text and how
@@ -711,13 +770,185 @@ the Gateway is stopped and restarted; the runtime also snapshots the admitted
 session directory at startup so an out-of-band settings edit cannot redirect
 new work around the ownership lock.
 
-`settings.get`/`settings.update` expose only SDK settings the embedded runtime
+The settings schema exposes only SDK settings the embedded runtime
 or a Tron client consumes. Terminal-only presentation settings (thinking-block
 hiding, cache-miss notices, skill-command autocomplete, markdown rendering, the
 Anthropic extra-usage warning, analytics, and the branch-summary skip prompt) are
-not projected, and `settings.update` ignores them; values already in `settings.json` are left
+not projected or declared, so no change can write them; values already in `settings.json` are left
 untouched. `telemetry.install` remains because the SDK uses it to gate provider
 attribution headers.
+
+`settings.resolve { target, keys? }` is the settings model's resolver
+([docs/settings-model.md](docs/settings-model.md), advertised as
+`settings-model.v1`). `target` is `{ kind: "mac" }`, `{ kind: "project", cwd }`,
+`{ kind: "session", sessionId }` (the client must have opened the session) or
+`{ kind: "home" }` (Home's profile). Every key declared once in
+`src/admin/settings-schema.ts` is returned with `{ value, display, layer,
+applied, reason?, badges, layers[] }`, where `layers[]` lists each layer the
+target has and what it holds. The resolver (`src/admin/settings-resolver.ts`)
+takes the topmost layer that the target has, that holds the key, that the key
+allows, and that is applied: Chat, then Home profile, then Project (`.pi/` at the
+canonical cwd pi reads), then Mac (`<tronHome>/agent/settings.json` and
+`trust.json`), then Built-in. An untrusted project's values are returned with
+`applied: false, reason: "untrusted"` and never apply; reading them is JSON
+parsing only. A value stored at a layer the key does not allow is reported in
+`diagnostics` and ignored. A thinking level the resolved model does not support
+resolves to pi's closest level with a Clamped badge. Redacted keys (`httpProxy`)
+return only "Set" or "Not set". `settings-model.integration.test.ts` compares
+real Gateway resolutions with the SDK over filesystem-backed stores, including
+fallback to built-ins after stored values are removed. It does not claim that a
+documentation-string scan proves every SDK setting or runtime applier is covered;
+that inventory and the real-runtime journeys remain separate acceptance work.
+With `renderer: { version, controls[] }` (doc 7.5) each key also carries
+`presentation` (`label`, `help`, `order`, `importance`, the negotiated `control`
+and `note`, `valueKind`, static `options`, `range`, `optionsSource`, `confirm`,
+`redacted`), and the response carries `renderer: { version }` and `sections[]`,
+each with the summary doc 7.2 describes: `essential` values, `overrides` above
+Built-in with their layer, `pending` approvals for this target and `recent`
+agent changes (three, then `moreRecent`). The control is the declared one when
+the client names it, else its fallback, else `readOnly` with the note "Update
+Tron to edit"; a client that sends no `renderer` gets every editable key
+read-only, always with its `display`. Presentation and summaries are
+`src/admin/settings-presentation.ts`. `settings.options { target, key,
+qualifiers?, query?, cursor?, limit? }` serves a key's choices: its static
+options, or its `optionsSource` (`catalog.models`, searchable and paged;
+`catalog.thinkingLevels` for the `model` qualifier or the target's chat model,
+empty for a model without reasoning; `catalog.contextWindow` as a `range` with
+the bounds `settings.change` enforces).
+`settings.change { commandId, target, fence?, changes[], reason?, dryRun? }` is the one path every setting changes through
+([docs/settings-model.md](docs/settings-model.md) 5). Each change is `{ key,
+qualifiers?, layer, op: "set" | "unset", value?, expected? }`. The Gateway
+validates it against the key's schema entry (type, allowed layer, writer, and the
+target having that layer), checks `expected` against the store, applies it through
+the key's applier under that store's own lock, appends one entry per key to the
+change record, and broadcasts `settings.changed { changeIds, keys, layer, target }`
+(plus `trust.changed` for a trust change). A request with several changes applies
+them in a fixed store order and rolls back the stores it already changed when one
+fails. `dryRun` validates and returns each change's tier and error without applying.
+Appliers: the Mac `settings.json` (`updateJsonLocked`), the Project
+`.pi/settings.json` (written keeping the file's other keys and indentation, then
+staged with `git add` when git can take it, never committed; an unparseable file is
+a failed change left untouched; an ignored `.pi/`, no repository or a locked index
+leaves the write unstaged with the reason), trust (`TrustService.setAndApply` with
+the project runtime reload), Home's memory model (`HomeOwner`, physical models only),
+and a session's Chat layer through its slot lane (`setModel`, `setThinking`,
+`setContextWindow`, `setTools`, and `setChatRunSetting`). Live Run keys with a
+Chat binding are resolved at prompt/request admission; explicit
+Chat values live in branch-local `tron.settings.v1` entries, survive fork/resume,
+and unset back to current defaults. The runtime overlays operational fields
+without reloading fixed resources or saving defaults. Its own running settings
+tool appends in the lane it already owns. Optional provider timeout/count and
+WebSocket timeout are replaced after SDK default composition, at the final
+provider-stream boundary under the exact agent request's async context. Unset
+cannot resurrect initial SDK values, and unrelated memory/extension requests
+retain their explicit options. Ordinary/Home and fork/cold-resume provider
+journeys cover that distinction. Directional request settings also retain their
+effective value in canonical `requestPins`: image blocking narrows before SDK
+message conversion, including within a tool turn; default/outside widening stays
+fixed across fork/resume. A Chat-layer approval or maintainer tap can release it;
+lowering a risk floor alone cannot. New chats also record fixed model, thinking,
+context-window, tools and declared fixed Chat settings with their actual value,
+source, time and stable reference. Fork/resume preserve that provenance; a fixed
+Chat unset snapshots the current lower-layer default through the normal audited
+change path. Inherited snapshots are not explicit overrides in summaries. The
+generic native row handles the served reset action, but session-surface adoption
+and approved Mac/Project widening propagation remain outstanding. Home rollover
+inherits Chat policy and provenance only from the adjacent sealed chapter, using
+its live canonical branch or an identity-fenced cold read. Existing successor
+recovery never recopies it, and no predecessor messages or audit receipts move.
+The `home.chapter-recovery` settings-source reason diagnoses this boundary.
+A Chat-layer change needs `fence: {
+runtimeGeneration, model?, revision? }`, the runtime the client read; the lane's
+idle, chapter and fence guards are unchanged, and the receipt's work entry is the
+session's. Keys with no writer (`setup.sessionDir`) cannot change while the Gateway
+runs. Every non-iPhone actor must give a `reason`.
+
+The change record is `<tronHome>/gateway/settings/changes/`: append-only segments
+of at most 500 entries named in `index.json`, kept forever and never consulted to
+compute a value. Each entry holds the actor, target, layer, key, qualifiers,
+`before` and `after` (only `changed` for a redacted key), the reason, the tier and
+how it was reached, the status (`applied` or `failed` with its reason), the git
+result of a Project write, and `undoOf` or `applyAgainOf`. `settings.history {
+cursor?, limit?, key?, status?, actor?, layer?, section? }` pages it newest first,
+scanning at most one bounded segment per request. Filters intersect; `actor` is
+an actor kind or `agents` (all non-iPhone actors, including outside changes).
+Omitting it is Everything. `layer` is a writable layer and `section` is a declared
+section ID. An empty page with `nextCursor` is not the end: continue until the
+cursor is absent. Settings summaries traverse this same API up to their fixed
+200-entry recent horizon, so a segment rollover does not hide recent changes.
+Each returned entry adds schema-owned `presentation` (label, section when declared,
+actor, layer, and before/after display strings). This projection never rewrites the
+record. Retired keys retain their key ID and recorded JSON display; redacted entries
+expose only Hidden → Changed, never raw before/after or fixed values. Outside
+changes are labeled Outside Tron, not You. Native clients need no key-formatting map.
+`settings.undo { commandId, changeId, fence? }` writes `before` back as an
+ordinary change, refused with the current value when the store no longer holds
+`after`, and refused for a redacted change, which has no `before`.
+`settings.applyAgain { commandId, changeId }` names an `outside` entry that
+replaced or removed a value Tron wrote and writes that value back through the same
+path and gate (with `applyAgainOf`), refused when the store moved on since.
+
+Outside changes (docs/settings-model.md 5.6) are owned by
+`src/admin/settings-outside.ts`. Every settings read, and a debounced directory
+event on the Mac agent directory or a known project's `.pi/`, compares the Mac
+`settings.json`, `trust.json` and each known project's `.pi/settings.json` (at
+most 64, least recently read out) by content digest with the per-key values Tron
+last observed in `<tronHome>/gateway/settings/observed.json`. Each differing key
+instance becomes one `outside` entry (redacted keys by digest only) with the
+repository `HEAD` and branch for a project file; an entry that replaced a value
+Tron wrote refers to that change and offers Apply again. Tron's own writes, the
+change path and package installs, bracket the store so they never echo. The tier
+is the key's floor for its direction and decides only whether it pushes. A commit
+whose `.pi/settings.json` blob is Tron's staged blob appends `committed` to that
+change. Rows carry `Changed outside Tron` (with Apply again), and a Project value's
+git state as `Staged`, `Uncommitted` or `Local only`. The provider-request
+boundary reads values only. `models.json` and `mcp.json` hold no schema key, so
+they are not compared.
+
+Every change gets a tier, and the tier is enforced (docs/settings-model.md 5.4,
+5.5). It is `max(floor + web, riskModel)` capped at approve: the key's floor for
+the change's direction, or the maintainer's override of it in
+`<tronHome>/gateway/settings/floors.json` (the key `permissions.floor`, qualified
+by `key` and, for a key whose floor differs by direction, `direction`; only the
+iPhone writes it, and lowering one is its widen direction, floor approve); one
+step more when the requesting run read open-world content, then max-composes the optional bounded risk assessment. The typed classifier can only raise; UI taps and dry runs do not dispatch it, and failure/timeout preserves the computed tier. Its bounded disclosure, pricing ceiling and audit basis are owned by settings-model.md §5.4b.
+The iPhone's own change is applied at once whatever its tier. An agent's
+(`home`, `worker`, `agent`) quiet change applies; a notify change applies and
+queues an `explicit` push naming it; an approve request is held: one entry per
+change is recorded `pending`, a `waiting` push asks the maintainer, and the
+result is `{ status: "pending", approval: { requestId, digest, expiresAt } }`.
+Pending requests live in `<tronHome>/gateway/settings/approvals.json` (at most
+100 open). `settings.approvals {}` lists the open ones with their diff and
+`digest`, each change with its `label`, raw `before` and `after`, Gateway `display`
+strings and any `confirm` text, and the request with `requester`, who asked as the
+iPhone names it; `settings.decide { commandId, requestId, digest, approved, fence? }`
+approves or declines one, bound to that exact diff. Approval re-plans every change
+against the store with the recorded `before` as `expected`, so a store that moved
+since, or a newer request for the same key, supersedes it and the approval is
+refused. Decisions, supersession and expiry (24 hours, evaluated against the
+change path's clock whenever the path is used) are appended to the record as
+facts referring to the pending entry; an expired or declined change is never
+applied. `settings.approvalsChanged { kind, requestId, status }` is broadcast on
+every change to the open set. The requester is told on its next run: the
+`tron-settings` module adds one `tron.settings-outcome.v1` custom message naming
+each of its declined, expired or superseded changes, once.
+
+The `tron-settings` module registers the `settings` tool in every session,
+Home included: a thin client of the resolver and the change path that always
+targets its own chat, recorded as Home, the task worker (with its task id) or
+the chat's agent, with the tool call id. A chat's own Chat-layer values change
+only between runs, so the tool refuses them during its run. The module also sets
+the run's web mark from the `tool_call` hook, which runs before each call
+(nested codemode calls included): a call to any tool that does not declare
+`annotations.openWorldHint: false` marks the run until it ends. Tron's own tools
+declare it; `web_search`, `web_fetch`, `computer` and the `knowledge` tool (its
+X, capture and Raindrop actions) declare `true`; pi's built-in `read`, `edit`,
+`write`, `grep`, `find`, `ls`, `bash`, `codemode` and `tool_search` are declared in
+`tron-settings-extension.ts` against their built-in source (`bash` is Tron's
+direct bash tool, `<sdk:bash>`; decision 33); any undeclared third-party or MCP
+tool marks the run. A task worker writes exactly the keys an ordinary chat's
+agent may: a key's `writers` list is the grant, and there is no per-task grant
+(decision 34).
 
 `modules.list` reports Tron's built-in extensions for Settings without opening a
 session. It returns one row per entry of the single `TRON_MODULES` definition
@@ -771,7 +1002,13 @@ Add/remove report the affected server and require `/reload` or a new session for
 configuration changes; sign-out and new credentials are observed by running
 sessions at the next turn. `mcp.update` patches only `enabled` and `exposure` on
 an existing entry in the scope's `mcp.json`, under a file lock, retaining all
-other JSON keys and failing closed on malformed or oversized files.
+other JSON keys and failing closed on malformed or oversized files. Project scope
+is the Project root (`TrustInspection.projectDir`), not the subdirectory a chat
+runs in. Every change to an `mcp.json`, by these writers or outside Tron, broadcasts
+`mcp.changed` (`{ scope: "global" }` or `{ scope: "project", projectDir }`) so the
+MCP screen reloads; an outside change is also a settings record entry with a push
+(settings-model.md 5.6a). Tron's own writes are adopted as observed, never
+recorded as outside changes; `models.custom.put` is bracketed the same way.
 
 `mcp.token.set` stores bearer credentials through the host Keychain credential
 owner and writes only a `!command` reference in `mcp.json`; token values are
@@ -879,7 +1116,7 @@ first-party Responses route. If a mixed/custom model is registered, the whole
 provider is left unchanged rather than applying account authority to proxy
 models.
 
-`session.setModel`, default-model writes, `provider.list` choice counts, and
+Chat and default model changes (`model.ref[role=chat]`), `provider.list` choice counts, and
 `model.list.available` use the same policy. On a new session only, an ineligible
 saved OpenAI/Codex default is replaced by the first currently available model;
 the persisted setting is not rewritten, and creation fails without publishing a
@@ -1082,8 +1319,8 @@ Tron Home is one opt-in persistent conversation per Gateway installation. It is 
 `home.designate`; until then every session is ordinary. [`docs/home.md`](docs/home.md) owns its designation
 record, RPC shapes, chapters, runtime profile, memory, task delegation and terminal client.
 
-- **Memory.** There is no memory default: Home refuses activations until `home.configureMemory` records a
-  physical model. Memory spend is bounded by construction and reported; there is no budget to manage. Each
+- **Memory.** There is no memory default: Home refuses activations until its memory model
+  (`model.ref[role=memory]`, changed through `settings.change`) names a physical model. Memory spend is bounded by construction and reported; there is no budget to manage. Each
   activation sends the model only the system messages before it, ONE frozen memory view and its own messages.
   Prior activations are never re-sent, and the view is never persisted.
 - **Runtime.** Home runs in the neutral `<tronHome>/gateway/home/workspace` under an explicit untrusted decision,
@@ -1328,7 +1565,7 @@ from an automation-originated turn to prevent self-replication. Paired Gateway c
 
 Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list` (keyset `cursor`, `filter`, `limit`), `notification.inbox.read` (one inbox ID or APNs request ID), and `notification.inbox.readAll` (a required `through` cut). Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. A registration identical to the stored grant is answered with the same status and writes nothing at all: no command receipt, no credential document, and no delivery-receipt or revocation overlay. Every other upsert keeps its command receipt and is admitted durably as before. `hello` and `system.info` carry `pushRegistrationRevision`, a digest of the grants this Gateway stores and the relay origin they are valid for; it changes whenever a grant is added, rotated, disabled at runtime or retired, so a phone that acknowledged an earlier value re-sends its registration and learns the rotation requirement. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The per-kind policy is Gateway-owned, defaults all three kinds on, and round-trips through registration upsert/status; the ask-notification policy is rechecked inside the same serialized admission transaction that appends the intent, so a concurrent policy disable can no longer admit and deliver an ask notification after the outer read. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
 
-Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a twenty-second deadline that exceeds the relay's bounded APNs deadline, a 2 KiB request and 16 KiB response boundary, and a lowercase-hex HMAC over method, path, timestamp, stable request ID, and the exact body's lowercase-hex SHA-256. Restart recovery retries transient outcomes with the same request ID. When the relay specifically reports that this ID still owns an active provider attempt, the Gateway polls it through the same bounded retry schedule; the relay ledger returns the eventual terminal result without creating a second APNs request. Unclassified ambiguous outcomes remain terminal and are never blindly replayed. Exact relay `invalid_signature` and `installation_unavailable` errors invalidate that grant without persisting or logging response bodies; mobile registration then rotates the capability instead of retrying an identity that cannot reach APNs. The Gateway adds no per-installation or per-session delivery quota; the relay applies a device-wide runaway backstop of 120 requests/hour and 1,000 routine requests/day, with ask and explicit notifications exempt from the daily cap.
+Outbound relay requests use one fixed `/v3/notifications` route (plus the unauthenticated `GET /v3/capabilities` read before queuing the settings "Waiting for you" push, whose allowlisted `settings-approval` category is sent only to a relay that lists it; [settings-model.md decision 35](docs/settings-model.md#101-decisions)), no redirects, a twenty-second deadline that exceeds the relay's bounded APNs deadline, a 2 KiB request and 16 KiB response boundary, and a lowercase-hex HMAC over method, path, timestamp, stable request ID, and the exact body's lowercase-hex SHA-256. Restart recovery retries transient outcomes with the same request ID. When the relay specifically reports that this ID still owns an active provider attempt, the Gateway polls it through the same bounded retry schedule; the relay ledger returns the eventual terminal result without creating a second APNs request. Unclassified ambiguous outcomes remain terminal and are never blindly replayed. Exact relay `invalid_signature` and `installation_unavailable` errors invalidate that grant without persisting or logging response bodies; mobile registration then rotates the capability instead of retrying an identity that cannot reach APNs. The Gateway adds no per-installation or per-session delivery quota; the relay applies a device-wide runaway backstop of 120 requests/hour and 1,000 routine requests/day, with ask and explicit notifications exempt from the daily cap.
 
 ## Transport
 
@@ -1416,7 +1653,7 @@ Files are 0600. It never accepts a client filesystem path, reads session content
 - `POST /v1/sessions/:sessionId/live-views/:id` — open a disposable viewer with `{generation}`
 - `GET /v1/sessions/:sessionId/live-views/:id/frame` — latest JPEG or a body-free waiting/unchanged response
 - `DELETE /v1/sessions/:sessionId/live-views/:id` — close the exact viewer; last native viewer requests joined suspension, never browser automation shutdown
-- `GET /v1/socket` — authenticated protocol version 7 WebSocket
+- `GET /v1/socket` — authenticated protocol version 8 WebSocket
 
 Bearer admission is linearized with the paired-device document under the
 DeviceStore mutex: the credential check and synchronous HTTP/upgrade registration
@@ -1688,7 +1925,7 @@ Authorized device names are projected from one Gateway-owned record: a validated
 Every WebSocket starts with:
 
 ```json
-{"type":"hello","protocolVersion":7}
+{"type":"hello","protocolVersion":8}
 ```
 
 The hello, pairing response, and authenticated `system.info` identify the runtime
@@ -2267,8 +2504,7 @@ for later sessions and are never silently deleted with a session.
 and Manage Session. `model.list` retains the SDK's configured `contextWindow` and
 adds optional `contextWindowLimits` (`minimum`, `maximum`, `default`, and an optional
 `longContextThreshold`). The catalog minimum uses standard compaction headroom;
-`settings.get.effective.contextWindowMinimum` supplies the selected scope's actual
-reserve plus retained-tail headroom, clamped to each model's maximum by the editor.
+`settings.options` for `model.contextWindow` serves the target's actual bounds.
 Session policy bounds use that live session's compaction settings. Capacity is
 declared by the provider/catalog, not inferred
 from a display name or copied from a different endpoint. The pinned catalog lacks a
@@ -2281,20 +2517,19 @@ and long-context billing remain provider-controlled; the catalog is not a live
 million-token request probe.
 
 The first-party `modelContextWindows` preference lives in canonical global or
-trusted-project SDK `settings.json`, keyed by `provider/modelId`. `settings.update`
-accepts a sparse map of integer token counts or `null` to remove that scope's key;
-it preserves other models and unrelated settings. Each scope is bounded to 500
-preferences. Project updates may include `sessionId` to validate against that
-subscribed session's extension-provider catalog; its canonical cwd must match the
-requested project. New or cold-resumed sessions and explicit resource reloads read
+trusted-project SDK `settings.json`, keyed by `provider/modelId`. It is the
+`model.contextWindow` key qualified by model: `settings.change` sets one model's
+integer token count, bounded by that model's catalog limits, or unsets it; other
+models and unrelated settings are preserved. Each scope is bounded to 500
+preferences. New or cold-resumed sessions and explicit resource reloads read
 these defaults. Saving defaults never changes an in-flight request or silently
 reconfigures an already-live session. It does not restart the Gateway or rewrite
 `models.json`. This is a Tron-owned preference interpreted by its embedded runtime
 adapter, not a new native SDK setting consumed by independent runtime clients.
 
-`session.setContextWindow` requires `sessionId`, `provider`, `modelId`, an integer
-`contextWindow` (or `null` to inherit), `expectedRevision`, `expectedRuntimeGeneration`
-from the displayed snapshot, and `commandId`. It uses the exact open subscription,
+A chat's own window is the Chat layer of `model.contextWindow`: a `settings.change`
+for the session target with the model qualifier, an integer value (or `unset` to
+inherit), and `fence: { runtimeGeneration, revision }` from the displayed snapshot. It uses the exact open subscription,
 command receipts, and the session's idle-only serialized mutation lane. Revision
 and runtime generation are checked inside that lane, preventing same-model stale
 saves, A → B → A model switches, and delayed requests after cold reopen. A stale
@@ -2326,7 +2561,7 @@ append stages an entry but disk persistence fails, the RPC reports an uncertain
 outcome and publishes the actual live projection rather than fabricating rollback
 or blindly replaying the command. An explicitly issued new command always records
 its desired value, even when it matches a previously staged in-memory value. Parent
-`session.setModel`, `session.setThinking` and `session.setContextWindow` share
+Chat-layer model, thinking and context-window changes share
 one parent-configuration admission policy in RuntimeSlot. Streaming, pending
 parent operations/queues/interactions, terminal persistence and concurrent
 session mutations remain fenced. Only the initiating RPC token is excluded.
@@ -2393,7 +2628,11 @@ compaction admission, never inside an active run. No broad settings/resource rel
 Settings writes refresh live projections without mutating prepared work. `SessionSnapshot`
 contains `compactionPolicy.next`, `currentBudgets`, and optional `active` configuration;
 terminal events clear the captured policy before the owner publishes the end snapshot.
-Sources are global/project/default, and global Settings never invents a session model.
+Sources are chat/global/project/default: an ordinary chat's explicit `tron.settings.v1`
+compaction values (enabled, reserve, keep-recent, focus) overlay the global and project
+policy for that chat only, follow fork and resume, and are unset by Follow the default.
+Home has no Chat compaction layer (its SDK compaction stays off). Global Settings never
+invents a session model.
 Absent project fields inherit; null patches delete overrides; explicit inherit/empty restore
 standard generation without changing budgets. Project editors can instead delete
 thinking/focus overrides with null patches to resume global inheritance. Malformed initial
@@ -3177,7 +3416,7 @@ below that limit. `runtime.loaded` and `runtime.evicted` record each transition
 with the session, its reason (`heap` for the heap-pressure pass `G-12` added),
 its transcript bytes and the charge, as named `counts`.
 
-A chat's tool loadout (`session.setTools`) lives only in its canonical
+A chat's tool loadout (`tools.active` at the Chat layer) lives only in its canonical
 transcript, as the system messages' `toolsAdded`/`toolsRemoved`. Every runtime
 the Gateway creates for an existing transcript (cold open, reopen after idle or
 capacity eviction, restart, fork, previous-runtime restore) applies the loadout
@@ -3260,8 +3499,8 @@ Dashboard provider catalog and global authentication use this runtime before any
 session is opened; project-only extension providers remain in their trusted
 project RuntimeSlot and never enter the global catalog.
 
-Global package install/update/remove and global `settings.update` changes to
-`packages` or explicit `extensions` paths request a serialized global
+Global package install/update/remove and Mac-layer `settings.change` changes to
+`sources.packages` or `sources.extensions` request a serialized global
 extension-resource reload. An admitted global package mutation with an uncertain
 outcome also requests reconciliation; validation failures and uncertain
 project-scoped mutations do not. Pi remains the resource-loader/provider-
@@ -3284,6 +3523,37 @@ the current ordered set after unregistering old extension layers, so removing or
 reordering a contributor does not leave stale fields behind or disturb built-in
 providers. Project-scoped package and settings changes do not reload or mutate the
 global provider runtime.
+
+### Project root
+
+The Project layer is the `.pi/` of a chat's Project root, even for a chat started
+in a subdirectory (settings-model decision 31). `projectRoot()` in
+`src/machine/workspace-inspection-service.ts` is the only resolver: the realpath
+of `git rev-parse --show-toplevel` for the canonical chat cwd, so each linked
+worktree is its own Project. When Git reports no work tree (no repository, a cwd
+inside `.git`, a refused ownership check) or cannot run, the cwd itself is the
+Project; a Git timeout stays a retryable error so one decision never lands on two
+directories. `TrustService` resolves it with every inspection
+(`TrustInspection.projectDir`) and records, reads and re-reads the decision for
+the root, with `hasTrustRequiringProjectResources(cwd, projectDir)`; a decision
+saved earlier for a subdirectory no longer applies, so such a chat asks once for
+its root. Tron Home's workspace is a standalone directory
+(`TrustServiceOptions.standaloneDirectories`): its explicit untrusted decision
+never reaches a repository that encloses the Tron home, while a repository inside
+the workspace keeps its own root. Each runtime build passes
+the root as the SDK's `projectDir` to `SettingsManager.create()` and
+`createAgentSessionServices()`, so Pi reads Project settings, packages,
+`.pi/{extensions,skills,prompts,themes}`, `SYSTEM.md` and built-in MCP
+configuration from the root and starts stdio MCP servers there; extensions read
+`ctx.projectDir`. The chat's own cwd still owns tools, context files
+(`AGENTS.md` from the cwd and its parents), session grouping and `ctx.cwd`.
+Trust changes and Project settings reload every live chat of the root
+(`RuntimeSlot.projectDir`); session-free package, hook and settings reads,
+compaction policy and project MCP administration use the same root.
+`src/sessions/project-root.integration.test.ts` proves a nested chat against a
+real repository, linked worktree, stdio MCP server and faux model, writing
+`test-results/project-root-864.json`. The SDK option comes from the
+[Tron-patched `pi-coding-agent`](#tron-patched-pi-coding-agent).
 
 ### Tron context and delegated children
 
@@ -3500,7 +3770,7 @@ no parameters, send `hello` with the current protocol version and
 `SessionPresentationStore` does: `session.open`, `session.sync`, a visible
 `session.presentation.set` renewed every 15 s, then hidden and `session.close`
 when it leaves. Before each window the acting client also selects the profile
-model with `session.setModel`: Pi 0.87.1 can cold-open a session whose provider
+model with a Chat-layer `settings.change`: Pi 0.87.1 can cold-open a session whose provider
 an extension registers without any model (an availability-refresh race), and the
 report warns whenever an opened session needed that repair. The **dashboard**
 client has no subscription. A third, unrecorded device drives

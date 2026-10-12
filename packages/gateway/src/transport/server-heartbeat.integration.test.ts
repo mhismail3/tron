@@ -154,7 +154,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number, options: H
     sessions: { unsubscribeClient: vi.fn() } as never,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as never,
     service: {
-      info: () => ({ protocolVersion: 7 }),
+      info: () => ({ protocolVersion: 8 }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       invoke: vi.fn(),
@@ -187,7 +187,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number, options: H
   });
   await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
   // The hello is client-initiated inbound at virtual second 0.
-  socket.send(JSON.stringify({ type: "hello", protocolVersion: 7, diagnostics: PEER_DIAGNOSTICS }));
+  socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, diagnostics: PEER_DIAGNOSTICS }));
   await waitFor(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"), "hello");
   const connection = () => [...(gateway as unknown as { clients: Map<string, { unansweredHeartbeats: number; lastClientInitiatedInboundAt: number | null }> }).clients.values()][0];
 

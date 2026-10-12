@@ -80,6 +80,8 @@ export function homeMemoryTools(memoryTools: () => HomeMemoryToolAccess | undefi
   return [
     {
       name: "zoom",
+      // docs/settings-model.md 5.4: declares it reads no open-world content.
+      annotations: { openWorldHint: false },
       label: "Zoom",
       description: "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole.",
       parameters: ZOOM_PARAMETERS,
@@ -91,6 +93,8 @@ export function homeMemoryTools(memoryTools: () => HomeMemoryToolAccess | undefi
     },
     {
       name: "date",
+      // docs/settings-model.md 5.4: declares it reads no open-world content.
+      annotations: { openWorldHint: false },
       label: "Date",
       description: "The date and time of message id.",
       parameters: DATE_PARAMETERS,
@@ -102,6 +106,8 @@ export function homeMemoryTools(memoryTools: () => HomeMemoryToolAccess | undefi
     },
     {
       name: "memory_search",
+      // docs/settings-model.md 5.4: declares it reads no open-world content.
+      annotations: { openWorldHint: false },
       label: "Memory search",
       description: "Find messages of this chat by case-insensitive substring, oldest first, at most 20 lines; each line is `id+0|kind: snippet`, and the header counts the range's matches, its [omitted] messages and its capped ones. Tron's addition to the view's tools.",
       parameters: SEARCH_PARAMETERS,

@@ -113,6 +113,7 @@ struct HostedHomeDashboardFixture: View {
     @State private var staleActionFinished = false
     @State private var promptRoute = "none"
     @State private var openedSession = "none"
+    @State private var settingsDecisionState = "none"
     private let actionProbe = HostedHomeActionProbe()
     private let arguments = ProcessInfo.processInfo.arguments
     private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
@@ -129,7 +130,9 @@ struct HostedHomeDashboardFixture: View {
             delayed: arguments.contains("-home-control-delayed"),
             browserState: arguments.first(where: { $0.hasPrefix("-home-browser-") })?.replacingOccurrences(of: "-home-browser-", with: ""),
             emptyContext: arguments.contains("-home-context-empty"),
-            sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""))
+            sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""),
+            settingsApprovals: arguments.contains("-home-settings-approvals"),
+            terminalEnabled: !arguments.contains("-home-terminal-unsupported"))
         self.gateway = gateway
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
@@ -161,6 +164,7 @@ struct HostedHomeDashboardFixture: View {
                             Text(model.homeMutations.isRunning(profileID: profile.id) ? "running" : model.homeMutations.ownsUnresolvedCommand(profileID: profile.id) ? "unresolved" : "idle")
                                 .accessibilityIdentifier("fixture.home-command-state")
                             Text("control-count:\(controlCount)").accessibilityIdentifier("fixture.home-control-count")
+                            Text("settings-decisions:\(settingsDecisionState)").accessibilityIdentifier("fixture.settings-decisions")
                             Text("prompt-route:\(promptRoute)").accessibilityIdentifier("fixture.home-prompt-route")
                             Text("opened-session:\(openedSession)").accessibilityIdentifier("fixture.home-opened-session")
                             Text(configuredModel).accessibilityIdentifier("fixture.home-configured-model")
@@ -230,6 +234,7 @@ struct HostedHomeDashboardFixture: View {
                 configuredModel = await gateway.configuredModelIdentity()
                 promptRoute = await gateway.lastPromptRoute()
                 openedSession = await gateway.lastOpenedSession()
+                settingsDecisionState = await gateway.settingsDecisionSummary()
                 // Requested once. A hosted reconnect is a new connection identity, which the mounted
                 // sheet must observe by re-reading, so it fires after the second read (Manage Home's,
                 // then the Tasks sheet's). A profile switch fires after the third (its reload), so a
@@ -256,6 +261,7 @@ struct HostedHomeDashboardFixture: View {
 
 private actor HostedHomeShellGateway {
     private let capabilityEnabled: Bool
+    private let terminalEnabled: Bool
     private let initialState: String
     private var designated: Bool
     private var homeStatusCount = 0
@@ -274,6 +280,7 @@ private actor HostedHomeShellGateway {
     private var browserReads = 0
     private var taskListReads = 0
     private var configuredModel: ModelRef?
+    private var workerThinking = "sameAsHome"
     private var taskStopped = false
     private var taskRedelivered = false
     private var scopeRevoked = false
@@ -282,8 +289,27 @@ private actor HostedHomeShellGateway {
     private var materialized = false
     private var promptRoutes: [String] = []
     private var openedSessions: [String] = []
-    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil) {
+    private var approvals: [JSONValue] = []
+    private var settingsDecisions: [String] = []
+    init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, settingsApprovals: Bool = false, terminalEnabled: Bool = true) {
+        self.terminalEnabled = terminalEnabled
         self.sheetState = sheetState
+        // Home's and a task worker's requests show in Manage Home; a chat agent's does not.
+        approvals = settingsApprovals ? [
+            Self.settingsApprovalRequest(requestId: "settings-request-approve", digest: String(repeating: "a", count: 64),
+                actor: .object(["kind": .string("home"), "id": .string("home-session"), "sessionId": .string("home-session")]), requester: "Home",
+                key: "permissions.projectTrust", label: "Project trust", qualifiers: ["project": "/work/other"],
+                before: .null, after: .bool(true), display: ("Not set", "Trusted"),
+                confirm: "Trusting a project lets its files run with your Mac user's authority."),
+            Self.settingsApprovalRequest(requestId: "settings-request-decline", digest: String(repeating: "b", count: 64),
+                actor: .object(["kind": .string("worker"), "id": .string("worker-session"), "sessionId": .string("worker-session"), "taskId": .string("nightly-sync")]),
+                requester: "Home task nightly-sync", key: "run.retry.maxRetries", label: "Retries", qualifiers: nil,
+                before: .number(3), after: .number(6), display: ("3", "6"), confirm: nil),
+            Self.settingsApprovalRequest(requestId: "settings-request-chat", digest: String(repeating: "d", count: 64),
+                actor: .object(["kind": .string("agent"), "id": .string("ordinary-session"), "sessionId": .string("ordinary-session")]),
+                requester: "A chat's agent", key: "run.retry.maxRetries", label: "Retries", qualifiers: nil,
+                before: .number(3), after: .number(9), display: ("3", "9"), confirm: nil),
+        ] : []
         self.browserState = browserState
         self.emptyContext = emptyContext
         self.capabilityEnabled = capabilityEnabled
@@ -301,10 +327,15 @@ private actor HostedHomeShellGateway {
     func configuredModelIdentity() -> String { configuredModel.map { "\($0.provider)/\($0.id)" } ?? "none" }
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
-    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "context-window.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
+    func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
+    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "context-window.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
 
     func handle(_ method: String, _ params: [String: JSONValue]) async throws -> (JSONValue?, JSONValue?) {
         switch method {
+        case "terminal.list":
+            return (nil, .object(["code": .string("unavailable"),
+                "message": .string("Fixture terminal unavailable for \(params["sessionId"]?.stringValue ?? "missing")"),
+                "retryable": .bool(false)]))
         case "session.list":
             let row = SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace", parentSessionId: nil,
                 createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z", messageCount: 0,
@@ -320,6 +351,17 @@ private actor HostedHomeShellGateway {
                 anthropicModel("claude-haiku-5-5", name: "Claude Haiku 5.5", window: 200_000), model("memory-a", name: "Memory Model A"),
                 model("memory-b", name: "Memory Model B"), model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
         case "model.recent": return (.object(["models": .array([])]), nil)
+        case "settings.history":
+            let entries: [JSONValue] = ProcessInfo.processInfo.arguments.contains("-home-settings-history") ? [
+                .object(["changeId": .string("worker-setting"), "at": .string("2026-10-11T12:00:00Z"),
+                    "actor": .object(["kind": .string("worker"), "sessionId": .string("worker-session"), "taskId": .string("active")]),
+                    "target": .object(["kind": .string("home")]), "layer": .string("profile"), "key": .string("model.thinking[role=worker]"),
+                    "op": .string("set"), "before": .string("off"), "after": .string("high"), "tier": .string("notify"),
+                    "status": .string("applied"), "presentation": .object(["label": .string("Worker thinking"),
+                        "actor": .string("Worker"), "layer": .string("Home profile"), "section": .string("model"),
+                        "display": .object(["before": .string("Off"), "after": .string("High")])])])
+            ] : []
+            return (.object(["entries": .array(entries)]), nil)
         case "home.taskList":
             taskListReads += 1
             // Hold the real sheet's read at the socket boundary, not its view state.
@@ -435,19 +477,47 @@ private actor HostedHomeShellGateway {
             if delayed { try? await Task.sleep(for: .seconds(6)) }
             designated = true
             return (.object(["homeId": .string("home-fixture"), "sessionId": .string("home-session"), "generation": .number(1)]), nil)
-        case "home.pauseMemory", "home.resumeMemory", "home.configureMemory", "home.disable":
+        case "settings.resolve":
+            if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
+            return (homeSettingsResolution(), nil)
+        case "settings.options":
+            return (homeSettingsOptions(params), nil)
+        case "settings.approvals":
+            return (.object(["requests": .array(approvals)]), nil)
+        case "settings.decide":
+            guard params["commandId"]?.stringValue != nil, let id = params["requestId"]?.stringValue,
+                  let digest = params["digest"]?.stringValue, let approved = params["approved"]?.boolValue,
+                  let index = approvals.firstIndex(where: { $0.objectValue?["requestId"]?.stringValue == id && $0.objectValue?["digest"]?.stringValue == digest })
+            else { return taskRefusal() }
+            approvals.remove(at: index)
+            settingsDecisions.append("\(approved ? "approved" : "declined"):\(id)")
             controlCount += 1
-            if method == "home.configureMemory", sheetState == "configure-refused" {
+            return (.object(["requestId": .string(id), "approved": .bool(approved)]), nil)
+        case "home.pauseMemory", "home.resumeMemory", "settings.change", "home.disable":
+            if method == "settings.change", params["dryRun"]?.boolValue == true {
+                return (settingsChangePreview(params), nil)
+            }
+            controlCount += 1
+            let memoryChange = params["changes"]?.arrayValue?.first?.objectValue
+            if method == "settings.change", memoryChange?["key"]?.stringValue == "model.thinking[role=worker]" {
+                guard memoryChange?["layer"]?.stringValue == "profile" else { return taskRefusal() }
+                workerThinking = memoryChange?["value"]?.stringValue ?? "sameAsHome"
+                return (fixtureSettingsChangeResult(key: "model.thinking[role=worker]"), nil)
+            }
+            if method == "settings.change", memoryChange?["key"]?.stringValue != "model.ref[role=memory]" { return (nil, nil) }
+            if method == "settings.change", sheetState == "configure-refused" {
                 return (nil, .object(["code": .string("conflict"), "message": .string("Memory configuration refused"), "retryable": .bool(false)]))
             }
             if method == "home.pauseMemory" { paused = true; if phase != "active" { phase = "paused" } }
             if method == "home.resumeMemory" { paused = false; phase = "ready" }
-            if method == "home.configureMemory" {
+            if method == "settings.change" {
                 configured = true; phase = "ready"
-                configuredModel = try? params["model"]?.decode(ModelRef.self)
+                configuredModel = try? memoryChange?["value"]?.decode(ModelRef.self)
             }
             if method == "home.disable" { designated = false; phase = "disabled" }
-            let result = JSONValue.object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused)])
+            let result = method == "settings.change"
+                ? fixtureSettingsChangeResult(key: "model.ref[role=memory]")
+                : JSONValue.object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused)])
             if delayed {
                 acceptedControl = result
                 try? await Task.sleep(for: .seconds(6))
@@ -493,6 +563,96 @@ private actor HostedHomeShellGateway {
         case "session.attention.read": return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil)
         default: return (nil, .object(["code": .string("not_found"), "message": .string("Not part of this fixture"), "retryable": .bool(false)]))
         }
+    }
+
+    private func homeSettingsResolution() -> JSONValue {
+        let thinkingLabel = workerThinking == "sameAsHome" ? "Same as Home" : workerThinking.capitalized
+        let choices: [JSONValue] = [
+            ("sameAsHome", "Same as Home"), ("off", "Off"), ("low", "Low"),
+            ("medium", "Medium"), ("high", "High"),
+        ].map { .object(["value": $0.0 == "sameAsHome" ? .object(["sameAs": .string("home")]) : .string($0.0), "label": .string($0.1)]) }
+        let workerThinkingKey: JSONValue = .object([
+            "key": .string("model.thinking[role=worker]"), "qualifiers": .object(["role": .string("worker")]),
+            "group": .string("model"), "subgroup": .string("Workers"),
+            "value": workerThinking == "sameAsHome" ? .object(["sameAs": .string("home")]) : .string(workerThinking),
+            "display": .string(thinkingLabel), "layer": .string(workerThinking == "sameAsHome" ? "builtin" : "profile"),
+            "applied": .bool(true), "badges": .array([.object(["kind": .string("source"), "label": .string(workerThinking == "sameAsHome" ? "Built-in" : "Profile: Home")])]),
+            "layers": .array([.object(["layer": .string("profile")]), .object(["layer": .string("builtin")])]),
+            "presentation": .object(["label": .string("Worker thinking"), "help": .string("Thinking level for Home task workers."),
+                "order": .number(45), "importance": .string("essential"), "control": .string("choice"),
+                "options": .array(choices)]),
+        ])
+        let contextWindowKey: JSONValue = .object([
+            "key": .string("model.contextWindow"), "qualifiers": .object(["model": .string("anthropic/claude-opus-5-5")]),
+            "group": .string("model"), "value": .number(200_000), "display": .string("200,000 tokens"),
+            "layer": .string("builtin"), "applied": .bool(true), "badges": .array([]),
+            "layers": .array([.object(["layer": .string("chat")]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
+            "presentation": .object(["label": .string("Context window"), "help": .string("How many tokens the model receives."),
+                "order": .number(30), "importance": .string("essential"), "control": .string("number"),
+                "optionsSource": .object(["name": .string("catalog.contextWindow"), "dependsOn": .array([])])]),
+        ])
+        let memoryName = configuredModel?.id == "memory-b" ? "Memory Model B" : configuredModel == nil ? "Not set" : "Memory Model A"
+        let memoryKey: JSONValue = .object([
+            "key": .string("model.ref[role=memory]"), "qualifiers": .object(["role": .string("memory")]),
+            "group": .string("model"), "subgroup": .string("Memory"), "value": configuredModel.flatMap { try? JSONValue.encode($0) } ?? .null,
+            "display": .string(memoryName), "layer": .string("profile"), "applied": .bool(true),
+            "badges": .array([.object(["kind": .string("source"), "label": .string("Profile: Home")])]),
+            "layers": .array([.object(["layer": .string("profile")])]),
+            "presentation": .object(["label": .string("Memory model"), "help": .string("Choose a memory model before sending."),
+                "order": .number(50), "importance": .string("advanced"), "control": .string("catalog"),
+                "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])]),
+        ])
+        return .object(["keys": .array([workerThinkingKey, contextWindowKey, memoryKey]), "sections": .array([.object([
+            "id": .string("model"), "title": .string("Model"), "order": .number(10),
+            "summary": .object(["essential": .array([]), "overrides": .array([]), "pending": .array([]), "recent": .array([]), "moreRecent": .number(0)]),
+        ]), .object(["id": .string("context"), "title": .string("Context"), "order": .number(20), "summary": .object([:])])])])
+    }
+
+    private func homeSettingsOptions(_ params: [String: JSONValue]) -> JSONValue {
+        if params["key"]?.stringValue == "model.ref[role=memory]" {
+            let options: [JSONValue] = sheetState == "empty-models" ? [] : [("memory-a", "Memory Model A"), ("memory-b", "Memory Model B")].map { id, name in
+                .object(["value": .object(["provider": .string("fixture"), "id": .string(id)]), "label": .string(name)])
+            }
+            return .object(["key": params["key"]!, "source": .string("catalog.models"), "dependsOn": .array([]), "options": .array(options)])
+        }
+        return .object(["key": params["key"] ?? .string("model.contextWindow"),
+            "source": .string("catalog.contextWindow"), "dependsOn": .array([]), "options": .array([]),
+            "range": .object(["min": .number(1_024), "max": .number(200_000), "unit": .string("tokens")])])
+    }
+
+    private func settingsChangePreview(_ params: [String: JSONValue]) -> JSONValue {
+        let change = params["changes"]?.arrayValue?.first?.objectValue ?? [:]
+        let value = change["value"] ?? .null
+        if change["key"]?.stringValue == "model.ref[role=memory]", sheetState == "configure-refused" {
+            return .object(["changes": .array([.object(["error": .object([
+                "code": .string("conflict"), "message": .string("Memory configuration refused"),
+            ])])])])
+        }
+        return .object(["dryRun": .bool(true), "status": .string("applied"), "tier": .string("notify"),
+            "changes": .array([.object(["key": change["key"] ?? .string(""), "layer": change["layer"] ?? .string("profile"),
+                "status": .string("applied"), "tier": .string("notify"), "before": .string(workerThinking), "after": value])])])
+    }
+
+    /// One pending Mac-layer change as `settings.approvals` serves it (gateway approvalProjection).
+    private static func settingsApprovalRequest(
+        requestId: String, digest: String, actor: JSONValue, requester: String, key: String, label: String,
+        qualifiers: [String: String]?, before: JSONValue, after: JSONValue, display: (String, String), confirm: String?
+    ) -> JSONValue {
+        var change: [String: JSONValue] = [
+            "changeId": .string("change-\(requestId)"), "key": .string(key), "label": .string(label),
+            "layer": .string("mac"), "op": .string("set"), "tier": .string("approve"), "tierBasis": .object([:]),
+            "before": before, "after": after,
+            "display": .object(["before": .string(display.0), "after": .string(display.1)]),
+        ]
+        if let qualifiers { change["qualifiers"] = .object(qualifiers.mapValues(JSONValue.string)) }
+        if let confirm { change["confirm"] = .string(confirm) }
+        return .object([
+            "requestId": .string(requestId), "digest": .string(digest),
+            "createdAt": .string("2026-01-01T00:00:00.000Z"), "expiresAt": .string(Date.now.addingTimeInterval(23 * 60 * 60).formatted(.iso8601)),
+            "target": .object(["kind": .string("session"), "sessionId": actor.objectValue?["sessionId"] ?? .null]),
+            "actor": actor, "requester": .string(requester), "reason": .string("You asked me to"),
+            "changes": .array([.object(change)]),
+        ])
     }
 
     private func taskRefusal() -> (JSONValue?, JSONValue?) {
@@ -738,7 +898,7 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         Task {
             let caps = await gateway.capabilities()
             let data = try! JSONEncoder.gateway.encode(JSONValue.object(["type": .string("hello"), "gatewayVersion": .string("fixture"),
-                "piVersion": .string("fixture"), "protocolVersion": .number(7), "minProtocolVersion": .number(7),
+                "piVersion": .string("fixture"), "protocolVersion": .number(8), "minProtocolVersion": .number(8),
                 "machineId": .string("home-shell-fixture"), "machineName": .string("Home fixture"),
                 "gatewayChannel": .string("stable"), "capabilities": .array(caps.map(JSONValue.string))]))
             await deliver(data)
@@ -749,14 +909,19 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue ?? [:]
         guard frame["type"]?.stringValue == "request", let id = frame["id"]?.stringValue,
               let method = frame["method"]?.stringValue else { return }
-        if method == "session.setModel", ProcessInfo.processInfo.arguments.contains("-home-model-picker"), var snapshot = openedSnapshot {
+        let params = frame["params"]?.objectValue ?? [:]
+        let change = params["changes"]?.arrayValue?.first?.objectValue
+        if method == "settings.change", change?["key"]?.stringValue == "model.ref[role=chat]",
+           ProcessInfo.processInfo.arguments.contains("-home-model-picker"), var snapshot = openedSnapshot {
             modelRequests += 1
             let shouldFail = modelRequests == 1 && ProcessInfo.processInfo.arguments.contains("-home-model-failure")
-            let params = frame["params"]?.objectValue ?? [:]
-            guard let provider = params["provider"]?.stringValue, let modelID = params["modelId"]?.stringValue,
+            guard let provider = change?["value"]?.objectValue?["provider"]?.stringValue,
+                  let modelID = change?["value"]?.objectValue?["id"]?.stringValue,
+                  change?["layer"]?.stringValue == "chat", change?["op"]?.stringValue == "set",
+                  params["target"]?.objectValue?["sessionId"]?.stringValue == snapshot.sessionId,
                   params["commandId"]?.stringValue != nil,
-                  params["expectedRuntimeGeneration"]?.stringValue == snapshot.runtimeGeneration,
-                  params["expectedModel"] == (try JSONValue.encode(snapshot.model)) else {
+                  params["fence"]?.objectValue?["runtimeGeneration"]?.stringValue == snapshot.runtimeGeneration,
+                  params["fence"]?.objectValue?["model"] == (try JSONValue.encode(snapshot.model)) else {
                 throw GatewayFailure(code: "invalid_request", message: "Model change lacked its session fence", retryable: false, details: nil)
             }
             modelDelivery = Task {
@@ -780,7 +945,7 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
                 try await Task.sleep(for: .seconds(1))
                 await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
                     "type": .string("response"), "id": .string(id), "ok": .bool(true),
-                    "result": .object(["updated": .bool(true), "revision": .number(Double(snapshot.revision))])])))
+                    "result": fixtureSettingsChangeResult(key: "model.ref[role=chat]", revision: snapshot.revision)])))
             }
             return
         }
@@ -827,7 +992,7 @@ private actor HostedChatDisplaySocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         if hello {
             hello = false
-            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":7,"minProtocolVersion":7,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
         }
         return try await withCheckedThrowingContinuation { receiver = $0 }
     }

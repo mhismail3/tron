@@ -1,4 +1,5 @@
 import type { ManagedSubagents } from "./managed-subagents.js";
+import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { createHash, randomUUID } from "node:crypto";
 import { getHeapStatistics } from "node:v8";
 import { realpathSync } from "node:fs";
@@ -11,6 +12,7 @@ import {
   parseSessionEntries,
   SessionManager,
   type FileEntry,
+  type SessionEntry,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
@@ -94,7 +96,9 @@ import {
   type CatalogMetadataIndexFailure,
   type CatalogMetadataIndexSummary,
 } from "./catalog-metadata-index.js";
-import { branchFromParsedSession } from "./session-branch.js";
+import { branchFromParsedSession, branchFromSessionEntries } from "./session-branch.js";
+import { appendChatSettingsSnapshot } from "./chat-settings.js";
+import { appendContextWindowSnapshot } from "../providers/context-window-policy.js";
 import {
   SessionCatalog,
   SUBAGENT_RUN_DIRECTORY,
@@ -593,6 +597,7 @@ export class RuntimeRegistry {
   private readonly workspace: TronWorkspace;
   private knowledgeService: KnowledgeService | undefined;
   private sessionSearchService: import("./session-search-service.js").SessionSearchService | undefined;
+  private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
@@ -935,6 +940,13 @@ export class RuntimeRegistry {
     this.sessionSearchService = service;
   }
 
+  /** Installs the settings model and its change path for the `settings` tool.
+   * Both are built over this registry, so slots read them late-bound. */
+  setSettings(model: import("../admin/settings-model.js").SettingsModel, changes: import("../admin/settings-model.js").SettingsChangePath): void {
+    if (this.settingsOwners && this.settingsOwners.changes !== changes) throw new Error("Settings are already installed");
+    this.settingsOwners = { model, changes };
+  }
+
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
   /** The Home designation owner for this installation. */
@@ -1011,6 +1023,19 @@ export class RuntimeRegistry {
       throw new GatewayError("conflict", "Home recovery is blocked because its recorded chapter path is absent");
     }
 
+    // Resolve the sealed predecessor before reserving a new durable path. A
+    // failed read must not strand an otherwise absent materialization attempt.
+    const previousId = scan.action === "absent" ? this.home.settingsPredecessor(sessionId) : undefined;
+    // A never-prompted live predecessor can still have SDK-staged choices and
+    // no physical file. Its sealed slot is the canonical owner; cold reads must
+    // instead prove the exact durable file and may not treat absence as defaults.
+    const livePrevious = previousId ? this.slots.get(previousId) : undefined;
+    const previousFromLive = livePrevious !== undefined && !livePrevious.isDisposed;
+    const previousEntries = previousId ? previousFromLive
+      ? livePrevious.canonicalSessionEntries() : await this.canonicalSessionEvidenceCut(previousId) : undefined;
+    if (previousId && !previousEntries) throw new GatewayError("conflict", "Home settings predecessor is missing");
+    const previousBranch = previousEntries ? branchFromSessionEntries(previousEntries.filter((entry): entry is SessionEntry => entry.type !== "session")) : undefined;
+    if (previousId && !previousBranch) throw new GatewayError("conflict", "Home settings predecessor is invalid");
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
     let slot: RuntimeSlot | undefined;
@@ -1040,6 +1065,12 @@ export class RuntimeRegistry {
         manager = SessionManager.create(cwd.cwd, sessionDirectory);
         const createdPath = manager.newSession({ id: sessionId });
         if (!createdPath) throw new GatewayError("internal", "Home chapter creation did not reserve a session path");
+        // These metadata-only appends stage in Pi. Validate and stage the
+        // inherited policy before committing the new path to the Home ledger.
+        if (previousBranch) {
+          appendChatSettingsSnapshot(previousBranch, manager);
+          appendContextWindowSnapshot(previousBranch, manager);
+        }
         await this.home.recordReservedChapterPath(sessionId, attemptId, createdPath);
         expectedPath = createdPath;
       }
@@ -1058,6 +1089,7 @@ export class RuntimeRegistry {
       if (slot.id !== sessionId || slot.sessionFile !== manager.getSessionFile()) {
         throw new GatewayError("conflict", "Home chapter runtime identity differs from its reservation");
       }
+      if (previousBranch) this.options.homeDiagnostic?.({ outcome: "chapter-recovery", reason: previousFromLive ? "settings-from-live" : "settings-from-cold" });
       const transcriptBytes = await sessionFileBytes(slot.persistedSessionFile);
       await this.mutex.run(() => {
         if (this.slots.has(sessionId)) throw new GatewayError("conflict", "Reserved Home chapter runtime is already active");
@@ -1955,6 +1987,7 @@ export class RuntimeRegistry {
       ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
       sessionSearch: () => this.sessionSearchService,
+      settings: () => this.settingsOwners,
       ...(this.options.homeWebTransport ? { homeWebTransport: this.options.homeWebTransport } : {}),
       ...(this.options.jev ? { jev: this.options.jev } : {}),
       ...(this.options.connections ? { connections: this.options.connections } : {}),
@@ -1970,7 +2003,7 @@ export class RuntimeRegistry {
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
       homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => this.home.taskTool(sessionId, request),
-      homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => this.home.dispatchTask(sessionId, request),
+      homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => this.dispatchHomeTask(sessionId, request),
       validateTaskMarker: (sessionId: string, marker: unknown) => this.home.validateTaskMarker(sessionId, marker),
       ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),
       homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {
@@ -2037,7 +2070,7 @@ export class RuntimeRegistry {
       path: row.path,
       cwd: row.cwd,
       ...(row.parentSessionPath ? { parentSessionPath: row.parentSessionPath } : {}),
-      ...(row.name ? { name: row.name } : {}),
+      ...(this.home.chapterStateFor(row.id).homeId ? { name: "Home" } : row.name ? { name: row.name } : {}),
       created: new Date(row.createdAt),
       modified: new Date(row.updatedAt),
       messageCount: row.messageCount,
@@ -2905,8 +2938,8 @@ export class RuntimeRegistry {
   private async projectTrustReloading(cwdInput: string): Promise<boolean> {
     if (this.trustReloadProjects.size === 0) return false;
     try {
-      const cwd = await this.options.trust.canonicalDirectory(cwdInput);
-      return this.trustReloadProjects.has(cwd);
+      const { projectDir } = await this.options.trust.inspect(cwdInput);
+      return this.trustReloadProjects.has(projectDir);
     } catch (error) {
       if (this.trustReloadProjects.size > 0) return true;
       throw error;
@@ -2938,7 +2971,7 @@ export class RuntimeRegistry {
       // pass: there is no room to make for it.
       const existing = await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         const current = this.slots.get(sessionId);
@@ -2969,7 +3002,7 @@ export class RuntimeRegistry {
       const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       return await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Automation session was retired before publication", true);
         }
         if (this.slots.has(sessionId)) {
@@ -3006,6 +3039,77 @@ export class RuntimeRegistry {
     return inspection.cwd;
   }
 
+  /** The Home profile's task budget (settings-model.md 6.1), read through the one
+   * resolver: at task admission (fixed at start) and at each worker turn boundary
+   * (a lowered budget applies live). Undefined is no limit. */
+  async homeTaskBudget(): Promise<{ inputTokens?: number; outputTokens?: number } | undefined> {
+    const settings = this.settingsOwners?.model;
+    if (!settings) return undefined;
+    const resolution = await settings.resolve({ kind: "home" }, undefined, ["permissions.budget.task"], { storeState: false });
+    return resolution.keys.find(key => key.key === "permissions.budget.task")?.value as { inputTokens?: number; outputTokens?: number } | undefined;
+  }
+
+  /** Home resolves its typed worker profile at the delegate boundary. The selected
+   * values are copied into this task only; later Home/profile changes cannot retarget it. */
+  private async dispatchHomeTask(sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) {
+    if ((request.model !== undefined || request.thinking !== undefined) && !request.reason?.trim()) {
+      throw new GatewayError("invalid_request", "An explicit worker model or thinking choice needs a short reason");
+    }
+    const settings = this.settingsOwners?.model;
+    const homeSlot = await this.acquire(sessionId);
+    const home = homeSlot.snapshot();
+    const resolution = settings ? await settings.resolve({ kind: "home" }, undefined,
+      ["model.ref[role=worker]", "model.thinking[role=worker]"]) : undefined;
+    const profileModel = resolution?.keys.find(key => key.key === "model.ref[role=worker]")?.value as
+      { provider: string; id: string } | { sameAs: "home" } | undefined;
+    const profileThinking = resolution?.keys.find(key => key.key === "model.thinking[role=worker]")?.value as
+      string | { sameAs: "home" } | undefined;
+    const fromProfileModel = request.model === undefined;
+    const fromProfileThinking = request.thinking === undefined;
+    const candidateModel = request.model ?? (profileModel && "provider" in profileModel ? profileModel : home.model);
+    const candidateThinking = request.thinking ?? (typeof profileThinking === "string" ? profileThinking : home.thinkingLevel);
+    let choice: HomeTaskWorkerChoice = {
+      ...(candidateModel ? { model: candidateModel } : {}),
+      ...(candidateThinking && candidateModel ? { thinking: candidateThinking as NonNullable<HomeTaskWorkerChoice["thinking"]> } : {}),
+    };
+    let fallback: string | undefined;
+    let clampNote: string | undefined;
+    if (choice.model) {
+      const model = this.options.gatewayModelRuntime?.getModel(choice.model.provider, choice.model.id);
+      const supported = model ? getSupportedThinkingLevels(model) : [];
+      if (choice.thinking && model && supported.length) {
+        const requested = choice.thinking;
+        choice.thinking = clampThinkingLevel(model, requested);
+        if (choice.thinking !== requested) clampNote = `${requested} clamped to ${choice.thinking}`;
+      }
+    }
+    if (fromProfileModel && choice.model) {
+      try { await this.admitTaskWorkerChoice({ model: choice.model }); }
+      catch (error) {
+        const reason = error instanceof GatewayError && error.details && typeof error.details === "object"
+          ? (error.details as { reason?: unknown }).reason : undefined;
+        if (!(error instanceof GatewayError) || !["unavailable-model", "unregistered-model", "virtual-model"].includes(String(reason))) throw error;
+        fallback = `Profile worker model ${choice.model.provider}/${choice.model.id} unavailable; worker default used (${String(reason)})`;
+        choice = candidateThinking ? { thinking: candidateThinking as NonNullable<HomeTaskWorkerChoice["thinking"]> } : {};
+      }
+    }
+    const modelText = choice.model ? `${choice.model.provider}/${choice.model.id}` : "Gateway default";
+    const thinkingText = choice.thinking ?? "Gateway default";
+    const explicitReason = request.model || request.thinking ? request.reason!.trim() : undefined;
+    const modelSource = request.model ? `explicit: ${explicitReason}`
+      : fallback ?? (profileModel && "provider" in profileModel ? "Home profile" : "same as Home");
+    const thinkingSource = request.thinking ? `explicit: ${explicitReason}`
+      : typeof profileThinking === "string" ? "Home profile" : "same as Home";
+    const choiceNotes = [clampNote].filter(Boolean).join("; ");
+    const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.`;
+    const { model: _model, thinking: _thinking, ...input } = request;
+    return this.home.dispatchTask(sessionId, { ...input, ...choice, intent: brief,
+      provenance: {
+        model: { via: fallback ? "home-fallback" : !fromProfileModel ? "home-explicit" : profileModel && "provider" in profileModel ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
+        thinking: { via: !fromProfileThinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
+      } });
+  }
+
   /** Admits a delegation's model and thinking level against the Gateway's own model
    * runtime, the one designation validates against. Read-only. */
   async admitTaskWorkerChoice(choice: HomeTaskWorkerChoice): Promise<HomeTaskWorkerChoice> {
@@ -3027,7 +3131,7 @@ export class RuntimeRegistry {
       // pass: there is no room to make for it.
       await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         this.requireLiveSlotCapacity();
@@ -3041,7 +3145,7 @@ export class RuntimeRegistry {
       );
       const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       await this.mutex.run(() => {
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Session creation was retired before publication", true);
         }
         if (this.slots.has(manager.getSessionId())) {
@@ -3521,7 +3625,7 @@ export class RuntimeRegistry {
       ));
       await this.mutex.run(() => {
         if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration
-            || this.trustReloadProjects.has(entry.canonicalCwd)) {
+            || this.trustReloadProjects.has(slot!.projectDir)) {
           throw new GatewayError("busy", "Session runtime start was retired before publication", true);
         }
         const ambiguous = this.indexAmbiguousSessionIds();
@@ -3571,7 +3675,7 @@ export class RuntimeRegistry {
       // is a mutation whose owner settles it.
       return await this.coldLoadGate.run(undefined, () => this.mutex.run(async () => {
         this.assertSlotAdmissionOpen();
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         this.requireLiveSlotCapacity();
@@ -3613,17 +3717,19 @@ export class RuntimeRegistry {
     }
   }
 
-  async reloadProject(cwdInput: string, projectTrusted?: boolean, publish = true): Promise<void> {
-    const cwd = await this.options.trust.canonicalDirectory(cwdInput);
+  /** Reload every live runtime of one Project root (`TrustInspection.projectDir`),
+   * including chats in its subdirectories. */
+  async reloadProject(projectDirInput: string, projectTrusted?: boolean, publish = true): Promise<void> {
+    const projectDir = await this.options.trust.canonicalDirectory(projectDirInput);
     const transactional = !publish;
     const slots = await this.mutex.run(() => {
-      const current = [...this.slots.values()].filter((slot) => slot.cwd === cwd);
+      const current = [...this.slots.values()].filter((slot) => slot.projectDir === projectDir);
       if (current.some((slot) => slot.isBusy)) {
         throw new GatewayError("busy", "Stop active sessions before changing project trust", true);
       }
       if (transactional) {
         current.forEach((slot) => slot.beginTrustReload());
-        this.trustReloadProjects.add(cwd);
+        this.trustReloadProjects.add(projectDir);
       }
       return current;
     });
@@ -3662,18 +3768,27 @@ export class RuntimeRegistry {
     if (publish) slots.forEach((slot) => slot.commitReload());
   }
 
-  refreshCompactionPolicies(scope: "global" | "project", cwd: string): void {
+  refreshCompactionPolicies(scope: "global" | "project", projectDir: string): void {
     for (const slot of this.slots.values()) {
-      if (scope === "global" || slot.cwd === cwd) slot.refreshCompactionPolicy();
+      if (scope === "global" || slot.projectDir === projectDir) slot.refreshCompactionPolicy();
     }
   }
 
-  async commitProjectReload(cwdInput: string): Promise<void> {
-    const cwd = await this.options.trust.canonicalDirectory(cwdInput);
+  /** An approved/tapped image-policy widening releases only the fixed inherited
+   * pin in already-open chats at the affected default scope. A Project scope is
+   * its canonical Project root, which every chat of that root shares. */
+  async releaseInheritedImageBlock(projectDir?: string): Promise<void> {
+    const slots = [...this.slots.values()].filter(slot => !slot.isDisposed && (projectDir === undefined || slot.projectDir === projectDir));
+    await Promise.all(slots.map(slot => slot.releaseInheritedImageBlock(projectDir === undefined ? "mac" : "project")));
+  }
+
+  async commitProjectReload(projectDirInput: string): Promise<void> {
+    // The key reloadProject added must leave even if the root vanished since.
+    const projectDir = await this.options.trust.canonicalDirectory(projectDirInput).catch(() => projectDirInput);
     await this.mutex.run(() => {
-      const slots = [...this.slots.values()].filter((slot) => slot.cwd === cwd);
+      const slots = [...this.slots.values()].filter((slot) => slot.projectDir === projectDir);
       slots.forEach((slot) => slot.commitReload());
-      this.trustReloadProjects.delete(cwd);
+      this.trustReloadProjects.delete(projectDir);
     });
   }
 
@@ -4739,7 +4854,7 @@ export class RuntimeRegistry {
   private async taskWorkerEntries(sessionId: string): Promise<FileEntry[]> {
     const live = this.slots.get(sessionId);
     if (live) return live.canonicalSessionEntries();
-    if (await this.homeSessionFile(sessionId)) return await this.taskEvidenceFileCut(sessionId) ?? [];
+    if (await this.homeSessionFile(sessionId)) return await this.canonicalSessionEvidenceCut(sessionId) ?? [];
     return [];
   }
 
@@ -4747,7 +4862,7 @@ export class RuntimeRegistry {
    * resources or repairs the canonical file. Sync and identity checks precede
    * immutable terminal/outbox publication and operation acknowledgement. */
   async readTaskEvidence(sessionId: string): Promise<FileEntry[]> {
-    const entries = await this.taskEvidenceFileCut(sessionId);
+    const entries = await this.canonicalSessionEvidenceCut(sessionId);
     if (!entries) throw new GatewayError("conflict", "Task canonical session is missing");
     return entries;
   }
@@ -4762,19 +4877,19 @@ export class RuntimeRegistry {
       const slot = this.slots.get(sessionId);
       if (!slot) throw new GatewayError("conflict", "Task runtime is missing");
       return slot.inspectTaskSettlement(operationId, async operationSettled => {
-        const entries = await this.taskEvidenceFileCut(sessionId);
+        const entries = await this.canonicalSessionEvidenceCut(sessionId);
         return entries ? { state: "present" as const, entries, branch: slot.canonicalSessionEntries() }
           : { state: "absent" as const, operationSettled };
       });
     });
   }
 
-  private async taskEvidenceFileCut(sessionId: string): Promise<FileEntry[] | null> {
-    // Recovery publishes a permanent result. A loaded previous catalog cut or
-    // a not-yet-ready projection cannot decide whether its report exists.
+  private async canonicalSessionEvidenceCut(sessionId: string): Promise<SessionEntry[] | null> {
+    // Task settlement and Home carry-forward publish durable results. A stale
+    // catalog cut or a not-yet-ready projection cannot decide source presence.
     await this.sessionCatalog.whenReconciled();
     const path = await this.homeSessionFile(sessionId);
-    if (!path) throw new GatewayError("conflict", "Task canonical session is missing");
+    if (!path) throw new GatewayError("conflict", "Canonical session is missing");
     const before = await lstat(path).catch(error => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;
@@ -4789,10 +4904,10 @@ export class RuntimeRegistry {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
         throw error;
       });
-      if (after) throw new GatewayError("conflict", "Task canonical session changed during inspection");
+      if (after) throw new GatewayError("conflict", "Canonical session changed during inspection");
       return null;
     }
-    if (!before.isFile() || before.isSymbolicLink()) throw new GatewayError("conflict", "Task canonical session is unsafe");
+    if (!before.isFile() || before.isSymbolicLink()) throw new GatewayError("conflict", "Canonical session is unsafe");
     for (const durablePath of [path, dirname(path)]) {
       const handle = await open(durablePath, "r");
       try { await syncDurably(handle); } finally { await handle.close(); }
@@ -4800,8 +4915,8 @@ export class RuntimeRegistry {
     const entries = await readCanonicalSessionFile({ path, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes });
     const after = await lstat(path);
     if (after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
-      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new GatewayError("conflict", "Task canonical session changed during inspection");
-    return entries.map(entry => entry.raw as unknown as FileEntry);
+      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new GatewayError("conflict", "Canonical session changed during inspection");
+    return entries.map(entry => entry.raw as unknown as SessionEntry);
   }
 
   /** Whether Home's recorded session still exists: a live runtime, or a

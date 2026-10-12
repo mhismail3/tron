@@ -79,6 +79,15 @@ struct SessionShellView: View {
     @State private var knowledgeDraftIdentity: KnowledgePresentationIdentity?
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
+    @State private var projectSettings: ProjectSettingsRoute?
+    private struct ProjectBrowser: Identifiable {
+        let id = UUID()
+        let profileID: String
+        let identity: KnowledgePresentationIdentity
+        let initialPath: String?
+    }
+    @State private var projectBrowser: ProjectBrowser?
+    @State private var pickedProject: (route: ProjectSettingsRoute, identity: KnowledgePresentationIdentity)?
     @State private var search = ""
     @State private var contentSearchSessionIDs: Set<String> = []
     @State private var searchResults: [SessionSearchResult] = []
@@ -181,6 +190,21 @@ struct SessionShellView: View {
                     present(route)
                 })
                 .presentationDragIndicator(.hidden)
+            }
+            .tronManagedSheet(item: $projectBrowser, identity: { "dashboard.project-browser.\($0.id)" }, onDismiss: {
+                defer { pickedProject = nil }
+                guard let pickedProject, let homeStatusSurfaceToken,
+                      presentationActivityCoordinator?.activity(for: homeStatusSurfaceToken).allowsPresentationPublication == true,
+                      pickedProject.identity == model.knowledgePresentationIdentity else { return }
+                projectSettings = pickedProject.route
+            }) { owner in
+                WorkspaceBrowser(initialPath: owner.initialPath) { cwd in
+                    guard owner.identity == model.knowledgePresentationIdentity else { return }
+                    pickedProject = (ProjectSettingsRoute(cwd: cwd, profileID: owner.profileID), owner.identity)
+                }
+            }
+            .tronManagedSheet(item: $projectSettings, identity: { "dashboard.project-settings.\($0.id)" }) { route in
+                ProjectSettingsSheet(route: route)
             }
             .tronManagedSheet(
                 isPresented: $showingSearchOptions,
@@ -629,6 +653,9 @@ struct SessionShellView: View {
         routeReplacementOwner.invalidate()
         showNewSession = false
         showSettings = false
+        projectBrowser = nil
+        pickedProject = nil
+        projectSettings = nil
         showingServerFilter = false
         if showingSearch { dismissDashboardSearch() }
 
@@ -679,6 +706,8 @@ struct SessionShellView: View {
                 requestID: request.id,
                 pendingRequestID: model.pushNavigationRequest?.id
             ) else { return }
+            // A failed navigation never reaches the chat, so its staged action must not outlive it.
+            if let staged = model.stagedSettingsDecision { model.consumeStagedSettingsDecision(staged.id) }
             model.consumePushNavigation(request.id)
             model.presentError(error)
         }
@@ -761,6 +790,11 @@ struct SessionShellView: View {
             search: showDashboardSearch,
             filter: { showingServerFilter = true },
             settings: { showSettings = true },
+            additionalControls: [.init(title: "Project settings", symbol: "folder.badge.gearshape", perform: {
+                guard let profileID = model.selectedGatewayProfileID() else { return }
+                projectBrowser = ProjectBrowser(profileID: profileID, identity: model.knowledgePresentationIdentity,
+                                                initialPath: model.defaultWorkspace)
+            })],
             creation: [.init(title: "New Session", symbol: "plus", perform: { showNewSession = true })]
         )
     }
@@ -1245,6 +1279,13 @@ struct SessionShellView: View {
         .buttonStyle(.plain)
         .textCase(nil)
         .listRowInsets(SessionDashboardLayout.headerInsets)
+        .contextMenu {
+            if !group.path.isEmpty, let profileID = group.profileID ?? model.selectedGatewayProfileID() {
+                Button("Project settings", systemImage: "folder.badge.gearshape") {
+                    projectSettings = ProjectSettingsRoute(cwd: group.path, profileID: profileID)
+                }
+            }
+        }
         .accessibilityLabel(group.name)
         .accessibilityValue(isExpanded ? "expanded" : "collapsed")
         .accessibilityHint(isExpanded ? "Double tap to hide sessions" : "Double tap to show sessions")

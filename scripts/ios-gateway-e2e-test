@@ -111,6 +111,7 @@ die() { echo "error: $*" >&2; exit 1; }
 ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSurfacesServeEveryKeyAndEditAtItsLayer"
 )
 
 ui_journey_is_owned() {
@@ -309,8 +310,11 @@ when it inherits an iOS test lease that does not cover its lane.
 USAGE
 }
 
+# The Pi release the fixture Gateway reports, from its own built version owner
+# (dist/version.js), which also resolves Tron's declared patched tarball.
 manifest_pi_version() {
-  "$NODE_BIN" -e 'const value=require(process.argv[1]).dependencies["@earendil-works/pi-coding-agent"]; if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value)) process.exit(1); process.stdout.write(value)' "$gateway_dir/package.json"
+  "$NODE_BIN" --input-type=module -e 'import { pathToFileURL } from "node:url"; const { PI_VERSION } = await import(pathToFileURL(process.argv[1]).href); process.stdout.write(PI_VERSION)' "$gateway_dir/dist/version.js" \
+    || die "the fixture Gateway's Pi version could not be read from its build"
 }
 
 # node-pty's own search order (its lib/utils.js loadNativeModule): the package
@@ -679,6 +683,7 @@ PY
     printf 'TRON_E2E_GATEWAY_HOME=%q\n' "$gateway_home"
     printf 'TRON_E2E_TRON_HOME=%q\n' "$tron_home"
     printf 'TRON_E2E_AGENT_DIR=%q\n' "$agent_dir"
+    printf 'TRON_E2E_SETTINGS_INVENTORY=%q\n' "$(settings_inventory_json)"
   } >"$state_file"
   chmod 600 "$state_file"
   echo "Gateway fixture upstream 127.0.0.1:$upstream_port (pid $(<"$pid_file")); fault proxy 127.0.0.1:$port (pid $proxy_pid)"
@@ -697,10 +702,24 @@ if runs:
 PY
 }
 
+# The fixture Gateway's own settings schema (its built settings-schema.ts), one row
+# per key with its layers, label and qualifier, plus the Gateway's layer labels.
+settings_inventory_json() {
+  "$NODE_BIN" --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const dir = process.argv[1];
+    const schema = await import(pathToFileURL(`${dir}/settings-schema.js`).href);
+    const types = await import(pathToFileURL(`${dir}/settings-types.js`).href);
+    const keys = schema.KEYS.map(key => ({ id: key.id, label: key.label, layers: Object.keys(key.layers),
+      qualifier: key.qualifier ?? null }));
+    process.stdout.write(JSON.stringify({ layerLabels: types.LAYER_LABELS, keys }));
+  ' "$gateway_dir/dist/admin"
+}
+
 patch_xctestrun() {
   local xctestrun="$1" target="$2"
   python3 "$repo_root/scripts/patch-ios-gateway-e2e-xctestrun.py" \
-    "$xctestrun" "$target" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "$TRON_E2E_PI_VERSION" "$TRON_E2E_PROXY_TOKEN"
+    "$xctestrun" "$target" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "$TRON_E2E_PI_VERSION" "$TRON_E2E_PROXY_TOKEN" "$TRON_E2E_SETTINGS_INVENTORY" "$TRON_E2E_AGENT_DIR"
 }
 
 build_tests() {

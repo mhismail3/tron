@@ -1,11 +1,6 @@
 import SwiftUI
 
 struct SettingsView: View {
-    enum Scope { case dashboard, project }
-
-    let scope: Scope
-    let projectSessionID: String?
-    let projectCWD: String?
     let onImported: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -17,15 +12,7 @@ struct SettingsView: View {
     @State private var showsNotifications = false
     @State private var hasRefreshedNotificationBadge = false
 
-    init(
-        scope: Scope = .dashboard,
-        projectSessionID: String? = nil,
-        projectCWD: String? = nil,
-        onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }
-    ) {
-        self.scope = scope
-        self.projectSessionID = scope == .project ? projectSessionID : nil
-        self.projectCWD = scope == .project ? projectCWD : nil
+    init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
         self.onImported = onImported
     }
 
@@ -33,93 +20,33 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
-                    // Groups follow what the user is configuring: this phone, the
-                    // agent and its models, what the agent can load or reach, then
-                    // maintenance. App-local preferences never sit beside Mac policy.
-                    TronSettingsGroup("This iPhone", accent: .tronEmerald) {
-                        settingsLink(
-                            "Connections",
-                            summary: "Pair and manage Mac gateways",
-                            icon: "desktopcomputer",
-                            accent: .tronEmerald
-                        ) { ConnectionsSettingsView() }
+                    SettingsChangesLink(scope: .all, subtitle: "Review agent changes and pending approvals",
+                                        onOpenSession: onImported)
+                        .tronGlassSurface(accent: .tronEmerald)
+                    // Settings owns only Mac defaults. Project and Chat editors
+                    // retain their own targets; opening Settings never changes scope.
+                    SettingsRendererView(
+                        target: .object(["kind": .string("mac")]),
+                        writeLayer: "mac",
+                        embedded: true,
+                        externalControlKeys: ["sources.packages"],
+                        sectionSupplement: { AnyView(sectionSupplement($0)) },
+                        unresolvedSupplement: AnyView(offlineDestinations)
+                    )
+
+                    TronSettingsGroup(
+                        "This iPhone",
+                        detail: "Stored on this iPhone. Never changes harness behaviour.",
+                        accent: .tronEmerald
+                    ) {
+                        settingsLink("Appearance", summary: "Theme, type scale, and visual preferences",
+                                     icon: "circle.lefthalf.filled", accent: .tronEmerald) {
+                            AppearanceSettingsView()
+                        }
                         settingsDivider(accent: .tronEmerald)
-                        settingsLink(
-                            "Appearance",
-                            summary: "Theme, type scale, and visual preferences",
-                            icon: "circle.lefthalf.filled",
-                            accent: .tronEmerald
-                        ) { AppearanceSettingsView() }
-                        settingsDivider(accent: .tronEmerald)
-                        settingsLink(
-                            "Sessions",
-                            summary: "Dashboard list and subagent activity",
-                            icon: "slider.horizontal.2.square",
-                            accent: .tronEmerald
-                        ) { AppLocalBehaviorSettingsView() }
-                    }
-
-                    TronSettingsGroup("Agent", accent: .tronPurple) {
-                        settingsLink("Model Providers", summary: "Provider accounts and authentication", icon: "key", accent: .tronPurple) {
-                            ProvidersSettingsView(sessionID: projectSessionID)
-                        }
-                        settingsDivider(accent: .tronPurple)
-                        settingsLink("Custom Models", summary: "Saved model definitions and aliases", icon: "slider.horizontal.3", accent: .tronPurple) {
-                            CustomModelsSettingsView()
-                        }
-                        settingsDivider(accent: .tronPurple)
-                        settingsLink("Agent Defaults", summary: "Model, message delivery, images, and retries", icon: "gearshape.2", accent: .tronPurple) {
-                            AgentDefaultsSettingsView(projectCWD: projectCWD, projectSessionID: projectSessionID)
-                        }
-                        settingsDivider(accent: .tronPurple)
-                        settingsLink("Compaction", summary: "Summaries, focus, and token budgets", icon: "arrow.triangle.2.circlepath", accent: .tronPurple) {
-                            CompactionSettingsView(projectCWD: projectCWD, projectSessionID: projectSessionID)
-                        }
-                        settingsDivider(accent: .tronPurple)
-                        // The row takes its group's accent; the sheet keeps the hook
-                        // inventory's teal, as Extensions keeps its resource colors.
-                        settingsLink("Hooks", summary: "Lifecycle hooks registered by extensions", icon: "bolt.horizontal.circle", accent: .tronPurple) {
-                            HooksSettingsView(projectCWD: projectCWD)
-                        }
-                    }
-
-                    TronSettingsGroup("Tools & Extensions", accent: .tronCyan) {
-                        settingsLink("Extensions", summary: "Installed packages, Tron modules, and themes", icon: "shippingbox", accent: .tronCyan) {
-                            ExtensionsSettingsView(projectCWD: projectCWD)
-                        }
-                        settingsDivider(accent: .tronCyan)
-                        settingsLink("MCP Servers", summary: "Global and trusted-project MCP servers", icon: "server.rack", accent: .tronCyan) {
-                            MCPServersSettingsView(projectCWD: projectCWD, sessionID: projectSessionID)
-                        }
-                        settingsDivider(accent: .tronCyan)
-                        settingsLink("Connected Services", summary: "Accounts and service capabilities", icon: "link", accent: .tronCyan) {
-                            IntegrationsSettingsView()
-                        }
-                        settingsDivider(accent: .tronCyan)
-                        if scope == .project {
-                            settingsLink("Project Trust", summary: "Review executable workspace resource trust", icon: "checkmark.shield", accent: .tronCyan) {
-                                TrustSettingsView(target: projectCWD.flatMap(TrustTarget.init(cwd:)))
-                            }
-                        } else {
-                            settingsLink("Project Trust", summary: "Set the default policy for project-local resources", icon: "checkmark.shield", accent: .tronCyan) {
-                                TrustSettingsView(target: nil, allowsGlobalDefault: true)
-                            }
-                        }
-                        settingsDivider(accent: .tronCyan)
-                        settingsLink("Locations and Overrides", summary: "Extra paths, shell, npm, and proxy", icon: "folder.badge.gearshape", accent: .tronCyan) {
-                            ResourceSettingsView(projectCWD: projectCWD)
-                        }
-                    }
-
-                    TronSettingsGroup("Data & Diagnostics", accent: .tronBlue) {
-                        if scope == .dashboard {
-                            settingsLink("Import", summary: "Restore a session export", icon: "tray.and.arrow.down", accent: .tronBlue) {
-                                ImportSettingsView(onImported: onImported)
-                            }
-                            settingsDivider(accent: .tronBlue)
-                        }
-                        settingsLink("Logs", summary: "Recent diagnostics from paired Mac gateways", icon: "text.alignleft", accent: .tronBlue) {
-                            GatewayLogsSettingsView()
+                        settingsLink("Sessions", summary: "Dashboard list and subagent activity",
+                                     icon: "slider.horizontal.2.square", accent: .tronEmerald) {
+                            AppLocalBehaviorSettingsView()
                         }
                     }
                 }
@@ -145,6 +72,7 @@ struct SettingsView: View {
                             .foregroundStyle(Color.tronEmerald)
                             .accessibilityLabel("Done")
                     }
+                    .accessibilityIdentifier("settings-done")
                 }
             }
         }
@@ -174,6 +102,62 @@ struct SettingsView: View {
         #endif
     }
 
+    private var offlineDestinations: some View {
+        VStack(spacing: 18) {
+            TronSettingsGroup("Tools") { sectionSupplement("tools") }
+            TronSettingsGroup("Permissions") { sectionSupplement("permissions") }
+            TronSettingsGroup("Run") { sectionSupplement("run") }
+            TronSettingsGroup("Accounts") { sectionSupplement("accounts") }
+            TronSettingsGroup("Sources") { sectionSupplement("sources") }
+            TronSettingsGroup("Setup") { sectionSupplement("setup") }
+        }
+    }
+
+    /// Native flows keep their established controls inside the schema's section.
+    /// Harness values (including default trust) have just one generic editor.
+    @ViewBuilder
+    private func sectionSupplement(_ section: String) -> some View {
+        switch section {
+        case "tools":
+            settingsDivider(accent: .tronCyan)
+            settingsLink("MCP Servers", summary: "Tool providers and authentication",
+                         icon: "server.rack", accent: .tronCyan) {
+                MCPServersSettingsView(projectCWD: nil, sessionID: nil)
+            }
+        case "run":
+            settingsDivider(accent: .tronPurple)
+            settingsLink("Hooks", summary: "Loaded event handlers from extensions",
+                         icon: "bolt.horizontal.circle", accent: .tronPurple) {
+                HooksSettingsView(projectCWD: nil)
+            }
+        case "accounts":
+            settingsLink("Model Providers", summary: "Provider accounts and authentication",
+                         icon: "key", accent: .tronPurple) { ProvidersSettingsView(sessionID: nil) }
+            settingsDivider(accent: .tronPurple)
+            settingsLink("Custom Models", summary: "Saved model definitions and aliases",
+                         icon: "slider.horizontal.3", accent: .tronPurple) { CustomModelsSettingsView() }
+            settingsDivider(accent: .tronPurple)
+            settingsLink("Connected Services", summary: "Accounts and service capabilities",
+                         icon: "link", accent: .tronPurple) { IntegrationsSettingsView() }
+        case "sources":
+            settingsDivider(accent: .tronCyan)
+            settingsLink("Extensions", summary: "Installed packages and what they contribute",
+                         icon: "shippingbox", accent: .tronCyan) { ExtensionsSettingsView(projectCWD: nil) }
+        case "setup":
+            settingsDivider(accent: .tronBlue)
+            settingsLink("Connections", summary: "Pair Macs, devices, and push readiness",
+                         icon: "desktopcomputer", accent: .tronBlue) { ConnectionsSettingsView() }
+            settingsDivider(accent: .tronBlue)
+            settingsLink("Import", summary: "Restore a session export",
+                         icon: "tray.and.arrow.down", accent: .tronBlue) { ImportSettingsView(onImported: onImported) }
+            settingsDivider(accent: .tronBlue)
+            settingsLink("Logs", summary: "Recent diagnostics from paired Mac gateways",
+                         icon: "text.alignleft", accent: .tronBlue) { GatewayLogsSettingsView() }
+        default:
+            EmptyView()
+        }
+    }
+
     private func settingsLink<Destination: View>(
         _ title: String,
         summary: String,
@@ -196,6 +180,7 @@ struct SettingsView: View {
             )
             .contentShape(Rectangle())
         }
+        .accessibilityIdentifier("settings-link-\(title)")
     }
 
     private func settingsDivider(accent: Color) -> some View {

@@ -4,8 +4,9 @@
 
 Pi's built-in MCP extension is the sole MCP client and `mcp.json` is the sole
 configuration authority. Global servers are configured in the Gateway's Pi
-agent directory; project-level `.pi/mcp.json` is read only when Tron's project
-trust decision admits it. Session runtimes and session-free extension discovery compose Pi's built-in
+agent directory; project-level `.pi/mcp.json` is the one at the chat's
+[Project root](../README.md#project-root) and is read only when Tron's project
+trust decision for that root admits it. Its stdio servers start in the root. Session runtimes and session-free extension discovery compose Pi's built-in
 `mcp`, `codemode`, and `tool-search` factories from the same Gateway-owned list.
 MCP logs remain under the Pi agent directory; OAuth credentials are managed by
 Pi's built-in credential store. Static bearer tokens entered through Tron are

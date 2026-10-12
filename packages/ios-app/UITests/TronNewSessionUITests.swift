@@ -1,6 +1,75 @@
 import XCTest
 
 final class TronNewSessionUITests: XCTestCase {
+    @MainActor func testDashboardProjectWithoutChatsSetsInheritedDefault() {
+        continueAfterFailure = false
+        let app = launch("project-dashboard"); defer { app.terminate() }
+        let menu = app.buttons["dashboard.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), app.debugDescription)
+        menu.tap()
+        let projectAction = app.buttons["Project settings"]
+        XCTAssertTrue(projectAction.waitForExistence(timeout: 5), app.debugDescription)
+        projectAction.tap()
+        let select = app.buttons["Use current folder"]
+        XCTAssertTrue(select.waitForExistence(timeout: 5), app.debugDescription)
+        select.tap()
+        let section = app.buttons["settings-section-model-expand"]
+        XCTAssertTrue(section.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<5 where !section.isHittable { app.swipeUp() }
+        section.tap()
+        let row = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
+        row.buttons.firstMatch.buttons.firstMatch.tap()
+        let choice = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Project Pro'")).firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 5))
+        choice.tap()
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:0 typed:0 projectWrites:1'"))
+        evidence(app, "758-dashboard-project-before-first-chat")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        menu.tap()
+        app.buttons["New Session"].tap()
+        let modelCard = app.buttons["new-session-card.Model"]
+        XCTAssertTrue(modelCard.waitForExistence(timeout: 5))
+        XCTAssertTrue(modelCard.staticTexts["Project"].exists, "New Session must show the served source badge, not merely a model id containing project")
+        evidence(app, "758-dashboard-project-default-source")
+        app.buttons["Create"].tap()
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:1 typed:0 projectWrites:1 inherited:true'"))
+    }
+
+    @MainActor func testProjectDefaultBeforeFirstChatIsInheritedWithoutChatOverride() {
+        continueAfterFailure = false
+        let app = launch("project-settings"); defer { app.terminate() }
+        let project = app.buttons["project-settings-link"]
+        XCTAssertTrue(project.waitForExistence(timeout: 10))
+        project.tap()
+        let section = app.buttons["settings-section-model-expand"]
+        XCTAssertTrue(section.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Project settings"].exists)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.filter(\.isHittable).count, 1)
+        for _ in 0..<5 where !section.isHittable { app.swipeUp() }
+        section.tap()
+        let row = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let control = row.buttons.firstMatch.buttons.firstMatch
+        for _ in 0..<5 where !control.isHittable { app.swipeUp() }
+        control.tap()
+        let choice = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Project Pro'")).firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.filter(\.isHittable).count, 1,
+                       "The nested catalog uses the canonical progressive sheet, not a second toolbar")
+        choice.tap()
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:0 typed:0 projectWrites:1'"))
+        evidence(app, "758-project-schema-default-before-first-chat")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(wait(app.buttons["new-session-card.Model"], "label CONTAINS[c] 'project'"))
+        evidence(app, "758-project-default-new-session")
+        XCTAssertTrue(app.buttons["Create"].isEnabled)
+        app.buttons["Create"].tap()
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'"))
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:1 typed:0 projectWrites:1 inherited:true'"),
+                      "The selected project default must remain inheritance, not an explicit Chat override")
+    }
+
     @MainActor func testSourceControlDraftSurvivesChildDoneAndBackground() {
         continueAfterFailure = false
         let app = launch("draft"); defer { app.terminate() }

@@ -264,6 +264,15 @@ struct ChatView: View {
             admitPendingFloatingDisplay()
         }
         .task(id: "search-anchor:\(sessionID):\(initialHistoryEntryID ?? "")") { await navigateToInitialSearchResult() }
+        .onChange(of: model.stagedSettingsDecision?.id, initial: true) { _, _ in openManageForStagedSettingsDecision() }
+    }
+
+    /// A settings-approval push action opens this chat's Manage sheet; the approvals
+    /// section consumes the staging, so this only opens the sheet and never decides.
+    private func openManageForStagedSettingsDecision() {
+        guard model.freshStagedSettingsDecision()?.sessionID == sessionID,
+              homeSheet == nil, !sessionPresentation.showContext else { return }
+        if !presentManageHome() { sessionPresentation.showContext = true }
     }
 
     private var completedDisplayPresentations: [DisplayProjection] {
@@ -2778,7 +2787,8 @@ struct ChatView: View {
     }
 
     private var chatTitle: String {
-        selectedAuthoritativeSnapshot?.name
+        if isHomeRoute { return "Home" }
+        return selectedAuthoritativeSnapshot?.name
             ?? model.sessions.first { $0.id == sessionID }?.title
             ?? "Session"
     }
@@ -2821,16 +2831,17 @@ struct ChatView: View {
             }
         }
         ToolbarItem(placement: .primaryAction) {
-            // The gear opens Settings in every chat, Home included; Manage Home
-            // replaces only the context ring's Manage Session sheet (#799).
+            // The route owns this choice even while Home status is loading.
+            // Home keeps direct Settings; ordinary chats enter through Manage Session.
             Button {
-                sessionPresentation.showSettings = true
+                if isHomeRoute { sessionPresentation.showSettings = true }
+                else { sessionPresentation.showContext = true }
             } label: {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                     .foregroundStyle(Color.tronEmerald)
             }
-            .accessibilityLabel("Settings")
+            .accessibilityLabel(isHomeRoute ? "Settings" : "Manage Session")
         }
     }
 

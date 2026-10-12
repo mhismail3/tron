@@ -12,6 +12,8 @@ import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
 import { GatewayServer } from "./server.js";
+import { settingsDependencies } from "../../test-support/settings-dependencies.js";
+import { chatSettingChange, changedRevision, type ChatSetting } from "../../test-support/chat-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
@@ -97,12 +99,13 @@ async function fixture(options: {
     debugTail: () => [],
   };
   let server: GatewayServer | undefined;
+  const trust = new TrustService(agentDir);
   const registry = new RuntimeRegistry({
     agentDir,
     tronHome: root,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: runtimeFactory as never,
-    trust: new TrustService(agentDir),
+    trust,
     stopSteeringDiagnostic: (diagnostic) => logRecords.push({
       level: diagnostic.outcome === "failed" ? "warning" : "info",
       message: `Stop continuation ${diagnostic.outcome}`,
@@ -133,6 +136,8 @@ async function fixture(options: {
     config: { tronHome: root },
     devices,
     sessions: registry,
+    ...settingsDependencies({ agentDir, tronHome: root, trust, modelRuntime: await runtimeFactory(), sessions: registry }),
+    broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
     receipts: new CommandReceiptStore(root),
     uploads,
     terminals: { belongsToSession: () => false, beginRestartDrain: () => true, activeTerminalIds: () => [] },
@@ -181,7 +186,7 @@ async function fixture(options: {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await waitFor(() => socket.readyState === WebSocket.OPEN, "socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 8 }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "hello");
     return {
       frames,
@@ -269,10 +274,10 @@ describe("receipt-backed mutations against their own session work entry", () => 
     await f.openSession(client, session.id);
     const beforeModel = await f.snapshot(client, session.id);
     const model = f.faux.models[0]!;
-    const configured = await client.request("steer-model", "session.setModel", {
+    const configured = await client.request("steer-model", "settings.change", chatSettingChange("model", {
       sessionId: session.id, commandId: "steer-model", provider: model.provider, modelId: model.id,
       expectedRuntimeGeneration: beforeModel.runtimeGeneration, expectedModel: beforeModel.model ?? null,
-    });
+    }));
     expect(configured.ok, JSON.stringify(configured)).toBe(true);
     let providerStarted!: () => void;
     const started = new Promise<void>((resolve) => { providerStarted = resolve; });
@@ -396,10 +401,10 @@ describe("receipt-backed mutations against their own session work entry", () => 
     await f.openSession(client, session.id);
     const beforeModel = await f.snapshot(client, session.id);
     const model = f.faux.models[0]!;
-    const configured = await client.request("race-model", "session.setModel", {
+    const configured = await client.request("race-model", "settings.change", chatSettingChange("model", {
       sessionId: session.id, commandId: "race-model", provider: model.provider, modelId: model.id,
       expectedRuntimeGeneration: beforeModel.runtimeGeneration, expectedModel: beforeModel.model ?? null,
-    });
+    }));
     expect(configured.ok, JSON.stringify(configured)).toBe(true);
     let providerStarted!: () => void;
     const started = new Promise<void>((resolve) => { providerStarted = resolve; });
@@ -475,10 +480,10 @@ describe("receipt-backed mutations against their own session work entry", () => 
     await f.openSession(client, session.id);
     const beforeModel = await f.snapshot(client, session.id);
     const model = f.faux.models[0]!;
-    const configured = await client.request("second-model", "session.setModel", {
+    const configured = await client.request("second-model", "settings.change", chatSettingChange("model", {
       sessionId: session.id, commandId: "second-model", provider: model.provider, modelId: model.id,
       expectedRuntimeGeneration: beforeModel.runtimeGeneration, expectedModel: beforeModel.model ?? null,
-    });
+    }));
     expect(configured.ok, JSON.stringify(configured)).toBe(true);
     let providerStarted!: () => void;
     const started = new Promise<void>((resolve) => { providerStarted = resolve; });
@@ -565,27 +570,27 @@ describe("receipt-backed mutations against their own session work entry", () => 
     const accepted: string[] = [];
     try {
       expect(slot.isDrainBusy).toBe(true);
-      for (const method of ["session.setModel", "session.setThinking", "session.setContextWindow"]) {
+      for (const method of ["model", "thinking", "contextWindow"] as const) {
         const before = await f.snapshot(client, session.id);
-        const nextModel = method === "session.setModel" ? f.faux.models.find(model => model.id !== before.model.id)! : before.model;
+        const nextModel = method === "model" ? f.faux.models.find(model => model.id !== before.model.id)! : before.model;
         const nextThinking = before.availableThinkingLevels.find((level: string) => level !== before.thinkingLevel)!;
-        const response = await client.request(method, method, {
-          sessionId: session.id, commandId: method,
+        const response = await client.request(method, "settings.change", chatSettingChange(method, {
+          sessionId: session.id, commandId: `configure-${method}`,
           expectedRuntimeGeneration: before.runtimeGeneration, expectedModel: before.model ?? null,
           provider: nextModel.provider, modelId: nextModel.id,
           level: nextThinking, contextWindow: 64_000, expectedRevision: before.revision,
-        });
+        }));
         expect(response.ok, `${method}: ${JSON.stringify(response)}`).toBe(true);
         accepted.push(method);
         const after = await f.snapshot(client, session.id);
-        expect(response.result.revision).toBe(after.revision);
+        expect(changedRevision(response.result)).toBe(after.revision);
         expect(after.model).toEqual({ provider: nextModel.provider, id: nextModel.id });
-        if (method === "session.setModel") expect(after.model).not.toEqual(before.model);
-        if (method === "session.setThinking") {
+        if (method === "model") expect(after.model).not.toEqual(before.model);
+        if (method === "thinking") {
           expect(after.thinkingLevel).toBe(nextThinking);
           expect(after.thinkingLevel).not.toBe(before.thinkingLevel);
         }
-        if (method === "session.setContextWindow") expect(after.contextWindowPolicy).toMatchObject({ effective: 64_000, override: 64_000, source: "session" });
+        if (method === "contextWindow") expect(after.contextWindowPolicy).toMatchObject({ effective: 64_000, override: 64_000, source: "session" });
       }
       expect((await f.snapshot(client, session.id)).configurationBlocker).toBeNull();
       expect(slot.isDrainBusy).toBe(true);
@@ -606,10 +611,10 @@ describe("receipt-backed mutations against their own session work entry", () => 
       await waitFor(() => client.frames.some(frame => frame.topic === "session.configuration" && frame.payload?.data?.configurationBlocker === "settling"), "settling publication");
       const busy = await f.snapshot(client, session.id);
       expect(busy.configurationBlocker).toBe("settling");
-      const rejected = await client.request("settling-thinking", "session.setThinking", {
+      const rejected = await client.request("settling-thinking", "settings.change", chatSettingChange("thinking", {
         sessionId: session.id, commandId: "settling-thinking", level: "off",
         expectedRuntimeGeneration: before.runtimeGeneration, expectedModel: before.model ?? null,
-      });
+      }));
       expect(rejected).toMatchObject({ok: false, error: {code: "busy", details: {configurationBlocker: "settling"}}});
       expect(f.logRecords.some(record => record.metadata.event === "rpc.error" && record.metadata.reason === "session_configuration_settling")).toBe(true);
       settlementFrameCut = client.frames.length;
@@ -618,31 +623,31 @@ describe("receipt-backed mutations against their own session work entry", () => 
     await waitFor(() => client.frames.slice(settlementFrameCut).some(frame => frame.topic === "session.configuration" && frame.payload?.data?.configurationBlocker === null), "ready publication after terminal retirement");
     const ready = await f.snapshot(client, session.id);
     expect(ready.revision).toBe(before.revision);
-    const stale = await client.request("stale-thinking", "session.setThinking", {
+    const stale = await client.request("stale-thinking", "settings.change", chatSettingChange("thinking", {
       sessionId: session.id, commandId: "stale-thinking", level: "off",
       expectedRuntimeGeneration: "retired-runtime", expectedModel: before.model ?? null,
-    });
+    }));
     expect(stale).toMatchObject({ok: false, error: {code: "conflict"}});
-    const wrongModel = await client.request("wrong-model-thinking", "session.setThinking", {
+    const wrongModel = await client.request("wrong-model-thinking", "settings.change", chatSettingChange("thinking", {
       sessionId: session.id, commandId: "wrong-model-thinking", level: "off",
       expectedRuntimeGeneration: before.runtimeGeneration, expectedModel: {provider: "retired-provider", id: "retired-model"},
-    });
+    }));
     expect(wrongModel).toMatchObject({ok: false, error: {code: "conflict"}});
     const competing = f.registry.administrativeWorkRegistry.begin({kind: "rpc-mutation", sessionId: session.id, hostEpoch: "fixture"});
     try {
-      for (const method of ["session.setModel", "session.setThinking", "session.setContextWindow"]) {
-        const response = await client.request(`competing-${method}`, method, {
+      for (const method of ["model", "thinking", "contextWindow"] as const) {
+        const response = await client.request(`competing-${method}`, "settings.change", chatSettingChange(method, {
           sessionId: session.id, commandId: `competing-${method}`, level: "off",
           provider: before.model.provider, modelId: before.model.id, contextWindow: null, expectedRevision: before.revision,
           expectedRuntimeGeneration: before.runtimeGeneration, expectedModel: before.model ?? null,
-        });
+        }));
         expect(response).toMatchObject({ok: false, error: {code: "busy", details: {configurationBlocker: "mutation"}}});
       }
     } finally { competing.settle(); }
-    const context = await client.request("ready-context", "session.setContextWindow", {
+    const context = await client.request("ready-context", "settings.change", chatSettingChange("contextWindow", {
       sessionId: session.id, commandId: "ready-context", provider: before.model.provider, modelId: before.model.id,
       expectedRuntimeGeneration: before.runtimeGeneration, expectedRevision: before.revision, contextWindow: null,
-    });
+    }));
     expect(context.ok, JSON.stringify(context)).toBe(true);
     record("configuration settlement and original intent", { revisionPreserved: true, staleIntentRejected: true, contextAccepted: true });
   });
@@ -656,14 +661,17 @@ describe("receipt-backed mutations against their own session work entry", () => 
     const accepted: string[] = [];
     const step = async (method: string, params: Record<string, unknown>) => {
       const commandId = `${method.replace(/\./g, "-")}-command`;
-      const response = await client.request(`rpc-${method}`, method, { commandId, sessionId: session.id, ...params });
+      const setting = method.startsWith("chat.") ? method.slice("chat.".length) as ChatSetting : undefined;
+      const response = setting
+        ? await client.request(`rpc-${method}`, "settings.change", chatSettingChange(setting, { commandId, sessionId: session.id, ...params }))
+        : await client.request(`rpc-${method}`, method, { commandId, sessionId: session.id, ...params });
       expect(response.ok, `${method}: ${JSON.stringify(response)}`).toBe(true);
       accepted.push(method);
       return response.result;
     };
 
-    await step("session.setThinking", { level: (opened.availableThinkingLevels as string[])[0], expectedRuntimeGeneration: opened.runtimeGeneration, expectedModel: opened.model ?? null });
-    await step("session.setTools", { tools: [] });
+    await step("chat.thinking", { level: (opened.availableThinkingLevels as string[])[0], expectedRuntimeGeneration: opened.runtimeGeneration, expectedModel: opened.model ?? null });
+    await step("chat.tools", { tools: [] });
     await step("session.label", { entryId: session.entryId, label: "idle admission" });
     const bash = await step("session.bash", { command: "echo rpc-idle-admission" });
     expect(JSON.stringify(bash)).toContain("rpc-idle-admission");
@@ -671,7 +679,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
     await step("session.reloadResources", {});
     const current = await f.snapshot(client, session.id);
     expect(current.model, JSON.stringify(current)).toBeDefined();
-    await step("session.setContextWindow", {
+    await step("chat.contextWindow", {
       provider: current.model.provider,
       modelId: current.model.id,
       contextWindow: null,
@@ -687,13 +695,13 @@ describe("receipt-backed mutations against their own session work entry", () => 
     accepted.push("session.fork");
 
     expect(accepted).toEqual([
-      "session.setThinking",
-      "session.setTools",
+      "chat.thinking",
+      "chat.tools",
       "session.label",
       "session.bash",
       "session.navigate",
       "session.reloadResources",
-      "session.setContextWindow",
+      "chat.contextWindow",
       "session.fork",
     ]);
     record("admits every idle-checked mutation on an idle session", {
@@ -718,14 +726,15 @@ describe("receipt-backed mutations against their own session work entry", () => 
 
     const rejectedByRun: string[] = [];
     for (const [method, params] of [
-      ["session.setTools", { tools: [] }],
-      ["session.setThinking", { level: "off", expectedRuntimeGeneration: opened.runtimeGeneration, expectedModel: opened.model ?? null }],
+      ["chat.tools", { tools: [] }],
+      ["chat.thinking", { level: "off", expectedRuntimeGeneration: opened.runtimeGeneration, expectedModel: opened.model ?? null }],
       ["session.label", { entryId: session.entryId, label: "blocked" }],
       ["session.reloadResources", {}],
     ] as Array<[string, Record<string, unknown>]>) {
-      const response = await client.request(`blocked-${method}`, method, {
-        commandId: `${method.replace(/\./g, "-")}-blocked-command`, sessionId: session.id, ...params,
-      });
+      const request = { commandId: `${method.replace(/\./g, "-")}-blocked-command`, sessionId: session.id, ...params };
+      const response = method.startsWith("chat.")
+        ? await client.request(`blocked-${method}`, "settings.change", chatSettingChange(method.slice("chat.".length) as ChatSetting, request))
+        : await client.request(`blocked-${method}`, method, request);
       expect(response, `${method}: ${JSON.stringify(response)}`).toMatchObject({ ok: false, error: { code: "busy" } });
       rejectedByRun.push(method);
     }
@@ -739,16 +748,16 @@ describe("receipt-backed mutations against their own session work entry", () => 
       commandId: "held-bash-command", sessionId: session.id, command: "sleep 5", excludeFromContext: true,
     });
     await waitFor(async () => (await list(client)).sessions.some((row) => row.id === session.id && row.phase === "running"), "bash running");
-    const blocked = await client.request("held-set-tools", "session.setTools", {
+    const blocked = await client.request("held-set-tools", "settings.change", chatSettingChange("tools", {
       commandId: "held-set-tools-command", sessionId: session.id, tools: [],
-    });
+    }));
     expect(blocked, JSON.stringify(blocked)).toMatchObject({ ok: false, error: { code: "busy" } });
     await client.request("held-abort", "session.abort", { commandId: "held-abort-command", sessionId: session.id, kind: "bash" });
     await bash;
 
     record("still rejects a mutation while the session is running or another mutation holds it", {
       rejectedByRun,
-      rejectedByConcurrentBash: "session.setTools",
+      rejectedByConcurrentBash: "chat.tools",
     });
   });
 });

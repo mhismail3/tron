@@ -169,7 +169,7 @@ private final class ConfigurationSliderBackdropView: UIVisualEffectView {
 
 /// Labels use the same center coordinates as the thumb/dots. Only a colliding
 /// default label moves to a second line; its horizontal detent anchor never moves.
-struct ContextWindowSliderLabelsLayout: Layout {
+struct SettingsNumberSliderLabelsLayout: Layout {
     let defaultProgress: Double
     static let trackInset = ConfigurationSliderTrack.inset
 

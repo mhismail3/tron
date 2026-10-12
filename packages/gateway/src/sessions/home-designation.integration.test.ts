@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs";
+import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, type FauxProviderHandle } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { HomeDesignation, HomeStatus } from "../protocol/types.js";
 import type { GatewayConfig } from "../config.js";
@@ -126,7 +126,8 @@ function openRegistry(f: {
     sessions: registry,
     home: registry.homeOwner(),
     receipts: new CommandReceiptStore(join(f.tronHome, "receipts")),
-    settings: new SettingsService(f.agentDir, f.runtime),
+    broadcast: () => {},
+    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner() }),
     trust: new TrustService(f.agentDir),
   } as unknown as GatewayServiceDependencies);
   return { registry, service };
@@ -245,13 +246,13 @@ async function homeStatus(f: Fixture): Promise<HomeStatus> {
 }
 
 const HOME_EXTENSIONS = [
-  "tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-notify",
+  "tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-notify", "tron-settings",
 ];
 /** The curated Home profile's executable tool set: the allowlist, sorted the way
  * the assertions read it. */
 const HOME_TOOLS = [
   "ask_user", "date", "delegate", "display", "knowledge", "memory_search", "notify",
-  "profile", "read_file", "session_search", "task", "web_fetch", "web_search", "zoom",
+  "profile", "read_file", "session_search", "settings", "task", "web_fetch", "web_search", "zoom",
 ];
 
 describe("Tron Home designation", () => {
@@ -267,7 +268,7 @@ describe("Tron Home designation", () => {
       model: { provider: PROVIDER, id: OTHER_MODEL_ID },
     })).rejects.toMatchObject({
       code: "conflict",
-      message: expect.stringContaining("session.setModel"),
+      message: expect.stringContaining("settings.change"),
     });
     expect(await homeStatus(f)).toEqual(before);
     expect(home.snapshot().model).toEqual(runtimeModel);

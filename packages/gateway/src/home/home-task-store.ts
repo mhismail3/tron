@@ -41,6 +41,8 @@ export interface HomeTaskRecord {
   operationId: string | null;
   stopIntent: { operationId: string; requestedAt: string } | null;
   spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
+  /** The Home profile's task budget fixed at dispatch (settings-model.md 6.1); absent is no limit. */
+  budget?: { inputTokens?: number; outputTokens?: number };
   /** The one canonical report this task sealed, pinned by entry ID and payload digest. */
   reportRef: { resultId: string; sessionId: string; entryId: string; digest: string } | null;
   terminalEvidence: {
@@ -478,7 +480,8 @@ function timestamp(value: unknown): boolean { return typeof value === "number" &
 function unique(records: Record<string, unknown>[]): boolean { return new Set(records.map(record => record.id)).size === records.length; }
 function invalid(): never { throw new HomeTaskStoreError("invalid-record"); }
 function immutableTask(task: HomeTaskRecord): string {
-  return JSON.stringify([task.createdAt, task.taskId, task.homeId, task.generation, task.routeGeneration, task.intent.text, task.intentDigest, task.target]);
+  // The budget is fixed at the task's start: no later publication may raise or drop it.
+  return JSON.stringify([task.createdAt, task.taskId, task.homeId, task.generation, task.routeGeneration, task.intent.text, task.intentDigest, task.target, task.budget ?? null]);
 }
 
 function authorityReferencesResolve(task: HomeTaskRecord, authorization: HomeTaskAuthorizationState): boolean {
@@ -492,7 +495,7 @@ function validateAuthorityReferences(task: HomeTaskRecord, authorization: HomeTa
 
 function validateTask(value: unknown): HomeTaskRecord {
   if (!keys(value, ["version", "taskId", "revision", "createdAt", "updatedAt", "homeId", "generation", "intent", "intentDigest", "target",
-    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"])
+    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"], ["budget"])
     || value.version !== 1 || !identifier(value.taskId) || value.taskId === "authorization" || !positive(value.revision)
     || !timestamp(value.createdAt) || (value.createdAt as number) > 9_999_999_999_999
     || !timestamp(value.updatedAt) || (value.updatedAt as number) < (value.createdAt as number)
@@ -510,6 +513,8 @@ function validateTask(value: unknown): HomeTaskRecord {
   if (value.spend !== null && (!keys(value.spend, ["sourceDigest", "inputTokens", "outputTokens"])
     || typeof value.spend.sourceDigest !== "string" || !/^[a-f0-9]{64}$/u.test(value.spend.sourceDigest)
     || !count(value.spend.inputTokens) || !count(value.spend.outputTokens))) invalid();
+  if (value.budget !== undefined && (!keys(value.budget, [], ["inputTokens", "outputTokens"]) || Object.keys(value.budget).length === 0
+    || Object.values(value.budget).some(tokens => !positive(tokens)))) invalid();
   const reportRef = value.reportRef;
   if (reportRef !== null && (!keys(reportRef, ["resultId", "sessionId", "entryId", "digest"]) || !identifier(reportRef.resultId)
     || !identifier(reportRef.sessionId) || !identifier(reportRef.entryId) || typeof reportRef.digest !== "string" || !/^[a-f0-9]{64}$/u.test(reportRef.digest))) invalid();

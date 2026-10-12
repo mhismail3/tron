@@ -68,7 +68,7 @@ async function startGateway() {
     sessions: { subscribe: vi.fn(), unsubscribe: vi.fn(), unsubscribeClient: vi.fn() } as any,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
     service: {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 7, minProtocolVersion: 7, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke,
     } as any,
   });
@@ -94,7 +94,7 @@ async function startGateway() {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); });
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 7, clientRole: "mobile" }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, clientRole: "mobile" }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "hello");
     const openedRecords = logger.log.mock.calls.filter((call) => call[2]?.event === "connection.opened");
     return { socket, frames, transport: () => transport!, negotiated, opened: openedRecords.at(-1)?.[1] as string };

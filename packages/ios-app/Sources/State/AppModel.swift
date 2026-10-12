@@ -174,6 +174,15 @@ final class AppModel {
         let tap: PushNotificationTap
     }
 
+    /// One settings-approval push action carried across navigation to the chat's
+    /// Manage sheet, where the approvals section stages it as a confirmation.
+    struct StagedSettingsDecision: Equatable, Sendable {
+        let id: Int
+        let sessionID: String
+        let decision: SettingsApprovalPushDecision
+        let stagedAt: Date
+    }
+
     typealias SessionPresentationTarget = SessionPresentationIdentity
 
     typealias SessionOpenResponse = GatewaySessionOpenResponse
@@ -301,13 +310,21 @@ final class AppModel {
     var packageInvalidationGeneration: Int { packageConfiguration.invalidationGeneration }
     var customModelInvalidationGeneration: Int { customModelConfiguration.invalidationGeneration }
     var trustRevision: Int { settingsTrust.trustRevision }
+    var settingsApprovalsRevision: Int { settingsTrust.approvalsRevision }
     var pairedDevices: [PairedDevice] = []
     // Invalidates surface-owned device reads without blocking control-event intake.
     var deviceCatalogRevision = 0
+    /// Invalidates the MCP server surface when an `mcp.json` changes, from Tron or outside it.
+    var mcpConfigurationRevision = 0
     let notificationInbox: NotificationInboxCoordinator
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
     private(set) var pushNavigationRequest: PushNavigationRequest?
+    /// Exists only to carry one push action across navigation. A stale one must
+    /// never surprise a later manual visit, so it is honored only while fresh.
+    private(set) var stagedSettingsDecision: StagedSettingsDecision?
+    static let stagedSettingsDecisionLifetime: TimeInterval = 120
+    private var stagedSettingsDecisionSequence = 0
     /// Lease-scoped invalidation for a mounted read-only subagent transcript.
     /// This does not participate in the parent session event cursor.
     private var processTranscriptInvalidationSinks: [UUID: (ProcessTranscriptChanged) -> Void] = [:]
@@ -803,7 +820,6 @@ final class AppModel {
         #endif
         lifecycle.delegate = self
         sessionPresentation.delegate = self
-        settingsTrust.delegate = self
         providerAuth.delegate = self
         packageConfiguration.delegate = self
         customModelConfiguration.delegate = self
@@ -959,11 +975,6 @@ final class AppModel {
 
 
 
-    func installHostedSettings(_ value: JSONValue?, for target: SettingsTarget) {
-        settingsTrust.installHostedSettings(value, for: target)
-    }
-
-
     func installHostedProviderCatalog(_ catalog: ProviderCatalog?, for target: ProviderCatalogTarget) {
         providerAuth.installHostedCatalog(catalog, for: target)
     }
@@ -1115,14 +1126,6 @@ final class AppModel {
 
     func sessionPresentationIdentity(for sessionID: String) -> SessionPresentationIdentity? {
         sessionPresentation.presentationTarget(for: sessionID)
-    }
-
-    func settings(for target: SettingsTarget) -> JSONValue? {
-        settingsTrust.settings(for: target)
-    }
-
-    func configuredDefaultModel(for target: SettingsTarget) -> ModelRef? {
-        settingsTrust.configuredDefaultModel(for: target)
     }
 
     func providerCatalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
@@ -2054,18 +2057,6 @@ final class AppModel {
 
     func restoreMountedPresentationAfterReconnect() async -> Bool {
         await sessionPresentation.reconnectMountedPresentation()
-    }
-
-    func refreshAll(
-        settingsTarget: SettingsTarget = .global,
-        providerTarget: ProviderCatalogTarget = .global
-    ) async {
-        _ = await refreshSessions()
-        guard !Task.isCancelled else { return }
-        async let providerLoad: Bool = refreshProviders(target: providerTarget)
-        async let settingLoad: Bool = refreshSettings(target: settingsTarget)
-        async let deviceLoad: Void = refreshDevices()
-        _ = await (providerLoad, settingLoad, deviceLoad)
     }
 
     @discardableResult
@@ -3189,8 +3180,36 @@ final class AppModel {
 
     func requestPushNavigation(_ tap: PushNotificationTap) {
         guard tap.sessionID != nil, tap.machineID != nil else { return }
+        stageSettingsDecision(from: tap)
         pushNavigationSequence &+= 1
         pushNavigationRequest = PushNavigationRequest(id: pushNavigationSequence, tap: tap)
+    }
+
+    /// A newer plain tap replaces an older action, so any tap without a settings
+    /// decision clears the staging.
+    func stageSettingsDecision(from tap: PushNotificationTap) {
+        guard let decision = tap.settingsDecision, let sessionID = tap.sessionID else {
+            stagedSettingsDecision = nil
+            return
+        }
+        stagedSettingsDecisionSequence &+= 1
+        stagedSettingsDecision = StagedSettingsDecision(
+            id: stagedSettingsDecisionSequence,
+            sessionID: sessionID,
+            decision: decision,
+            stagedAt: .now
+        )
+    }
+
+    func freshStagedSettingsDecision(now: Date = .now) -> StagedSettingsDecision? {
+        guard let staged = stagedSettingsDecision,
+              now.timeIntervalSince(staged.stagedAt) < Self.stagedSettingsDecisionLifetime else { return nil }
+        return staged
+    }
+
+    func consumeStagedSettingsDecision(_ id: Int) {
+        guard stagedSettingsDecision?.id == id else { return }
+        stagedSettingsDecision = nil
     }
 
     func refreshNotificationInbox() async {
@@ -4301,15 +4320,6 @@ final class AppModel {
         try await providerAuth.logout(providerID: providerID, target: target)
     }
 
-    @discardableResult
-    func refreshSettings(target: SettingsTarget) async -> Bool {
-        await settingsTrust.refreshSettings(target: target)
-    }
-
-    func updateSettings(_ patch: JSONValue, target: SettingsTarget, sessionID: String? = nil) async throws {
-        try await settingsTrust.updateSettings(patch, target: target, sessionID: sessionID)
-    }
-
     func mutateMCPAdmin(_ method: String, parameters: [String: JSONValue]) async throws -> JSONValue {
         let allowed = ["mcp.add", "mcp.remove", "mcp.update", "mcp.logout", "mcp.token.set", "mcp.auth.start", "mcp.auth.cancel"]
         guard allowed.contains(method) else {
@@ -4329,6 +4339,82 @@ final class AppModel {
 
     func setTrust(target: TrustTarget, decision: Bool?) async throws -> JSONValue {
         try await settingsTrust.setTrust(target: target, decision: decision)
+    }
+
+    func settingsApprovals(scope: SettingsApprovalScope) async throws -> [SettingsApprovalRequest] {
+        try await settingsTrust.pendingApprovals().filter(scope.includes)
+    }
+
+    func allSettingsApprovals() async throws -> [SettingsApprovalRequest] {
+        try await settingsTrust.pendingApprovals()
+    }
+
+    func settingsHistory(cursor: String?, actor: String?, layer: String?, section: String?, key: String?, status: String?) async throws -> SettingsChangeHistoryPage {
+        try await settingsTrust.settingsHistory(cursor: cursor, actor: actor, layer: layer, section: section, key: key, status: status)
+    }
+
+    func applySettingsChangeAgain(_ changeID: String) async throws {
+        try await settingsTrust.applySettingsChangeAgain(changeID)
+    }
+
+    func undoSettingsChange(_ entry: SettingsChangeHistoryEntry) async throws {
+        let target: JSONValue = .object(["kind": .string(entry.target.kind),
+            "sessionId": entry.target.sessionId.map(JSONValue.string) ?? .null])
+        let snapshot = entry.layer == "chat" ? try rendererConfigurationSnapshot(target) : nil
+        try await settingsTrust.undoSettingsChange(entry.changeId, fence: rendererConfigurationFence(snapshot)) { [weak self] in
+            guard let snapshot else { return true }
+            return self?.admitsConfigurationSend(snapshot) == true
+        }
+    }
+
+    /// Approves or declines one pending change. A change to a chat's own Chat
+    /// layer applies under the runtime this app last read for that chat, as the
+    /// chat's own controls do; without a read the Gateway refuses it.
+    func decideSettingsApproval(_ request: SettingsApprovalRequest, approved: Bool) async throws {
+        var fence: JSONValue?
+        if approved, request.target.kind == "session", request.changes.contains(where: { $0.layer == "chat" }),
+           let sessionID = request.target.sessionId, let snapshot = authoritativeSnapshot(for: sessionID) {
+            fence = .object([
+                "runtimeGeneration": .string(snapshot.runtimeGeneration),
+                "model": try snapshot.model.map { try JSONValue.encode($0) } ?? .null,
+            ])
+        }
+        try await settingsTrust.decideApproval(request, approved: approved, fence: fence)
+    }
+
+    /// The generic settings renderer's reads and writes, for any target (settings-model.md 7.5).
+    func resolveSettingsForRenderer(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
+        try await settingsTrust.resolveForRenderer(target: target, keys: keys)
+    }
+
+    func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, query: String?, cursor: String? = nil) async throws -> SettingsOptionsResponse {
+        try await settingsTrust.settingsOptions(target: target, key: key, qualifiers: qualifiers, query: query, cursor: cursor)
+    }
+
+    func previewSettingsChange(target: JSONValue, change: JSONValue) async throws -> SettingsChangeResult {
+        let snapshot = try rendererConfigurationSnapshot(target)
+        return try await settingsTrust.previewChange(target: target, change: change, fence: rendererConfigurationFence(snapshot))
+    }
+
+    func changeSetting(target: JSONValue, change: JSONValue) async throws {
+        let snapshot = try rendererConfigurationSnapshot(target)
+        try await settingsTrust.change(target: target, change: change, fence: rendererConfigurationFence(snapshot)) { [weak self] in
+            guard let snapshot else { return true }
+            return self?.admitsConfigurationSend(snapshot) == true
+        }
+    }
+
+    private func rendererConfigurationSnapshot(_ target: JSONValue) throws -> SessionSnapshot? {
+        guard target.objectValue?["kind"]?.stringValue == "session",
+              let sessionID = target.objectValue?["sessionId"]?.stringValue else { return nil }
+        return try configurationSnapshot(sessionID)
+    }
+
+    private func rendererConfigurationFence(_ snapshot: SessionSnapshot?) throws -> JSONValue? {
+        guard let snapshot else { return nil }
+        return .object(["runtimeGeneration": .string(snapshot.runtimeGeneration),
+                        "model": try snapshot.model.map(JSONValue.encode) ?? .null,
+                        "revision": .number(Double(snapshot.revision))])
     }
 
     func packageInventory(for target: PackageConfigurationTarget) -> PackageInventory? {
@@ -5076,6 +5162,8 @@ final class AppModel {
             settingsTrust.noteSettingsChanged()
         case "trust.changed":
             settingsTrust.noteTrustChanged()
+        case "settings.approvalsChanged":
+            settingsTrust.noteApprovalsChanged()
         case "providers.changed":
             providerAuth.noteProvidersChanged()
         case "packages.changed":
@@ -5098,6 +5186,8 @@ final class AppModel {
             }
         case "devices.changed":
             deviceCatalogRevision &+= 1
+        case "mcp.changed":
+            mcpConfigurationRevision &+= 1
         case "automation.changed":
             guard case .automationChanged = event.preparation else { return }
             automationCatalog.invalidate()
@@ -5625,12 +5715,6 @@ extension AppModel: SessionPresentationStoreDelegate {
     }
 }
 
-extension AppModel: SettingsTrustCoordinatorDelegate {
-    func settingsTrustCoordinatorSurface(_ error: Error) {
-        surface(error)
-    }
-}
-
 extension AppModel: ProviderAuthCoordinatorDelegate {
     func providerAuthCoordinatorSurface(_ error: Error) {
         surface(error)
@@ -5787,9 +5871,8 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
             guard !Task.isCancelled, self.admitsLifecycle(admission),
                   activeConnectionID == admission.connectionID else { return }
             async let providerLoad = self.refreshProviders(target: .global)
-            async let settingLoad = self.refreshSettings(target: .global)
             async let deviceLoad = self.refreshDevices()
-            _ = await (providerLoad, settingLoad, deviceLoad)
+            _ = await (providerLoad, deviceLoad)
         }
     }
 

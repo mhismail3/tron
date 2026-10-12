@@ -995,6 +995,17 @@ command. Each selector is `TronMobileUITests/<Class>/<method>`. After a source
 edit, rerun `build` (incremental) and then `run`; the runner refuses products
 built from another source state.
 
+Pending-configuration browsing has separate light and dark XCTest cases:
+`testConfigurationFeedbackExplainsLockAndPendingWithoutBlockingBrowsing` and
+`testConfigurationFeedbackExplainsLockAndPendingWithoutBlockingBrowsingInDark`.
+Both call the same complete journey, with one app launch and one teardown per
+case. Keep both in settings acceptance: selected-model disabling, live search,
+dismissal, and superseded-receipt recovery remain identical. This isolates
+XCTest's keyboard/animation observer lifecycle rather than disabling animation
+or extending waits. A log saying `App animations complete notification not
+received` is an automation-readiness failure, not evidence that a Gateway
+request took 60 seconds; retain the result and diagnose it if it recurs.
+
 The other real-boundary owners are:
 
 - `scripts/ios-gateway-e2e-test all` runs `TronMobileE2ETests`
@@ -2081,7 +2092,18 @@ The wrong-code control uses the same link with a code the Gateway refuses: it as
 the app's own `Pairing code is invalid` refusal, and then that the fixture's own link
 pairs through the same address — the setup sheet reaching its workspace step is what
 only a connected Gateway shows — so the control cannot pass by being a broken address.
-Both journeys retain screenshots.
+`testSettingsSurfacesServeEveryKeyAndEditAtItsLayer` takes its key inventory from
+the fixture Gateway's own built schema (`TRON_E2E_SETTINGS_INVENTORY`, written by the
+harness), never a Swift key list. On Manage Session, the shared Project card and
+Settings it requires every key served on that target to have a row with a value and
+a layer source badge, and every unserved key to have none, and attaches the per-surface
+counts (`settings-surface-coverage.json`). It edits one key per layer through the
+shared toggle (Chat, then Project after the untrusted write is refused on its row and
+the project is trusted through Review trust, then Mac) and reads each accepted value
+and badge back after reopening; Mac-only rows open Settings through Edit at Mac. It
+then edits the fixture's Mac `settings.json` by rename-replace (`TRON_E2E_AGENT_DIR`)
+and requires `Changed outside Tron` with Apply again, which restores Tron's value.
+All journeys retain screenshots.
 
 This lane pairs the hosted app for real, and the lane's app container is shared with the
 hosted E2E lane of the same worktree; a pairing left behind made that lane's

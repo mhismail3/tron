@@ -6395,7 +6395,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registries.push(registry);
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
-    await waitFor(() => slot.snapshot().extensionPresentation.semanticState.statuses["oversized-widget-callback"] === "completed", "the oversized widget callback to complete");
+    try {
+      await waitFor(() => slot.snapshot().extensionPresentation.semanticState.statuses["oversized-widget-callback"] === "completed", "the oversized widget callback to complete");
+    } catch (cause) {
+      // A timeout alone cannot distinguish an unloaded producer from a rejected
+      // callback. Retain the owning projection, including callback diagnostics.
+      throw new Error(`Oversized-widget callback did not complete: ${JSON.stringify(slot.snapshot().extensionPresentation)}`, { cause });
+    }
     expect(slot.snapshot().extensionPresentation.semanticState.widgets).toEqual([]);
   });
 

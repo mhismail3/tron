@@ -12,6 +12,8 @@
  * Retained artifacts are `test-results/home-activation/report.json` and
  * `test-results/terminal-chat-home/transcript.json`.
  */
+import { settingsDependencies } from "../../test-support/settings-dependencies.js";
+import { homeMemoryChange } from "../../test-support/chat-settings-change.js";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
@@ -61,7 +63,6 @@ vi.mock("../home/home-session-recovery.js", async importOriginal => {
   };
 });
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
-import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { EpisodicMemory } from "../episodic/episodic-memory.js";
@@ -283,7 +284,8 @@ function openRegistry(f: Fixture): void {
     sessions: registry,
     home: registry.homeOwner(),
     receipts,
-    settings: new SettingsService(f.agentDir, f.runtime),
+    broadcast: () => {},
+    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner() }),
     trust: new TrustService(f.agentDir),
     sessionDeleted: () => {},
     uploads: f.uploads ?? {
@@ -376,10 +378,10 @@ async function designateHome(
 ): Promise<Awaited<ReturnType<RuntimeRegistry["acquire"]>>> {
   await f.service.invoke(client, "home.designate", { commandId, model: MODEL });
   if (options.configure !== false) {
-    await f.service.invoke(client, "home.configureMemory", {
+    await f.service.invoke(client, "settings.change", homeMemoryChange({
       commandId: `${commandId}-memory`,
       model: MEMORY_MODEL,
-    });
+    }));
   }
   const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
   return await f.registry.acquire(status.sessionId!);
@@ -1819,7 +1821,7 @@ describe("Tron Home activations end to end", () => {
         phase: "paused", readiness: { ready: false, gaps: ["memory-paused"] },
         recovery: { action: "resume-memory" }, memory: { paused: true },
       });
-      await f.service.invoke(client, "home.configureMemory", { commandId: "pause-configure", model: OTHER_MEMORY_MODEL });
+      await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "pause-configure", model: OTHER_MEMORY_MODEL }));
       await f.registry.homeOwner().disable();
       await f.registry.homeOwner().designate({}, () => MODEL);
       await restart(f);
@@ -2238,10 +2240,10 @@ describe("Tron Home activations end to end", () => {
     const refusals = refusedReasons(f);
     const context = await f.service.invoke(client, "home.context", {}) as unknown as HomeContextProjection;
 
-    await f.service.invoke(client, "home.configureMemory", {
+    await f.service.invoke(client, "settings.change", homeMemoryChange({
       commandId: "e2e-configure-memory",
       model: MEMORY_MODEL,
-    });
+    }));
     f.faux.setResponses([responsesOf(f, requests)("configured activation response")]);
     await slot.prompt(longInput("configured activation input"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
@@ -2675,7 +2677,7 @@ describe("Tron Home activations end to end", () => {
       terminal.stdin.write("/home status\n");
       await waitUntil(() => stdout.includes("configure-memory"), 10_000).catch(() => { throw new Error(`missing status; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
       await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 6, 10_000);
-      await f.service.invoke(client, "home.configureMemory", { commandId: "terminal-configure-memory", model: MEMORY_MODEL });
+      await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "terminal-configure-memory", model: MEMORY_MODEL }));
       const requests: CapturedRequest[] = [];
       f.faux.setResponses([responsesOf(f, requests)("TERMINAL-STREAMED-REPLY")]);
       terminal.stdin.write("ordinary reply\n");
@@ -2977,9 +2979,9 @@ describe("Tron Home activations end to end", () => {
     const second = slot.prompt(longInput("race activation two"));
     await waitUntil(() => activationOpen(f));
     // The operator's change lands while the activation is inside its first step.
-    const configured = await f.service.invoke(client, "home.configureMemory", {
+    const configured = await f.service.invoke(client, "settings.change", homeMemoryChange({
       commandId: "e2e-configure-race", model: OTHER_MEMORY_MODEL,
-    }).then(() => "accepted", (error: unknown) => (error as { message?: string }).message ?? "failed");
+    })).then(() => "accepted", (error: unknown) => (error as { message?: string }).message ?? "failed");
     f.compactor.release?.();
     await second.catch(() => undefined);
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
@@ -3071,7 +3073,7 @@ describe("Tron Home activations end to end", () => {
     const f = await fixture("configure-validation", { virtualModel: true });
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     await f.service.invoke(client, "home.designate", { commandId: "e2e-designate-validation", model: MODEL });
-    const attempt = (params: Record<string, unknown>): Promise<string> => f.service.invoke(client, "home.configureMemory", params)
+    const attempt = (params: Record<string, unknown>): Promise<string> => f.service.invoke(client, "settings.change", homeMemoryChange(params))
       .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
     const outcomes = {
       unregisteredModel: await attempt({ commandId: "configure-validation-1", model: { provider: MEMORY_PROVIDER, id: "missing" } }),
@@ -3081,7 +3083,7 @@ describe("Tron Home activations end to end", () => {
       missingModel: await attempt({ commandId: "configure-validation-5" }),
     };
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
-    const accepted = await f.service.invoke(client, "home.configureMemory", { commandId: "configure-validation-6", model: MEMORY_MODEL })
+    const accepted = await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "configure-validation-6", model: MEMORY_MODEL }))
       .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
     const after = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     report.cases.push({ case: "configure-validation", outcomes, memoryAfterRefusals: status.memory, accepted, memoryAfterAccept: after.memory });
