@@ -310,8 +310,11 @@ when it inherits an iOS test lease that does not cover its lane.
 USAGE
 }
 
+# The Pi release the fixture Gateway reports, from its own built version owner
+# (dist/version.js), which also resolves Tron's declared patched tarball.
 manifest_pi_version() {
-  "$NODE_BIN" -e 'const value=require(process.argv[1]).dependencies["@earendil-works/pi-coding-agent"]; if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value)) process.exit(1); process.stdout.write(value)' "$gateway_dir/package.json"
+  "$NODE_BIN" --input-type=module -e 'import { pathToFileURL } from "node:url"; const { PI_VERSION } = await import(pathToFileURL(process.argv[1]).href); process.stdout.write(PI_VERSION)' "$gateway_dir/dist/version.js" \
+    || die "the fixture Gateway's Pi version could not be read from its build"
 }
 
 # node-pty's own search order (its lib/utils.js loadNativeModule): the package
