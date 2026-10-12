@@ -98,8 +98,8 @@ async function fixture() {
   });
   const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), new SettingsApprovals(tronHome), {
     setTrust: async (project, decision) => trust.setAndApply(project, decision,
-      async inspection => { await registry.reloadProject(inspection.cwd, inspection.effectiveDecision === true, false); },
-      async inspection => { await registry.commitProjectReload(inspection.cwd); }),
+      async inspection => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
+      async inspection => { await registry.commitProjectReload(inspection.projectDir); }),
   }, agentDir);
   const service = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },

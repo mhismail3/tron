@@ -2426,7 +2426,12 @@ export class GatewayService {
       void this.settingsPush(context.actor, `settings-applied:${changes[0]!.changeId}`, "explicit", "Setting changed",
         `${actorLabel(context.actor)} changed ${what}${context.reason ? `: ${context.reason}` : ""}. Undo it in Tron.`);
     }
-    const cwd = target.kind === "project" ? target.cwd : undefined;
+    // Project-layer effects address every live chat of the changed store's
+    // Project root (TrustInspection.projectDir), not only chats at one cwd; a chat
+    // target's project layer is its own root.
+    const projectDir = target.kind === "project" ? (await this.dependencies.trust.inspect(target.cwd)).projectDir
+      : target.kind === "session" && changes.some(change => change.layer === "project")
+        ? (await this.slot({ sessionId: target.sessionId })).projectDir : undefined;
     if (context.actor.kind === "ui" || context.actor.kind === "outside" || context.approved === true) {
       // A chat/Home requester can edit a default layer. Scope follows the
       // changed store, not the target through which the request arrived.
@@ -2440,14 +2445,16 @@ export class GatewayService {
         if (layer === "project" && projectCwd === undefined) continue;
         const defaultTarget: SettingsTarget = projectCwd === undefined ? { kind: "mac" } : { kind: "project", cwd: projectCwd };
         const resolved = await this.dependencies.settingsModel.resolve(defaultTarget, undefined, ["context.images.block"]);
-        if (resolved.keys[0]?.value === false) await this.dependencies.sessions.releaseInheritedImageBlock(projectCwd);
+        if (resolved.keys[0]?.value === false) {
+          await this.dependencies.sessions.releaseInheritedImageBlock(projectCwd === undefined ? undefined : (await this.dependencies.trust.inspect(projectCwd)).projectDir);
+        }
       }
     }
     for (const change of changes) {
       const key = schemaKey(change.key);
       if (key.effect === "reload" && change.layer === "mac" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();
-      if (key.effect === "next-compaction" && (change.layer === "mac" || cwd)) {
-        this.dependencies.sessions.refreshCompactionPolicies(change.layer === "mac" ? "global" : "project", cwd ?? this.dependencies.config.tronHome);
+      if (key.effect === "next-compaction" && (change.layer === "mac" || projectDir)) {
+        this.dependencies.sessions.refreshCompactionPolicies(change.layer === "mac" ? "global" : "project", projectDir ?? this.dependencies.config.tronHome);
       }
     }
     this.dependencies.broadcast("settings.changed", safeJson({
@@ -2815,7 +2822,7 @@ export class GatewayService {
     if (!cwd) throw new GatewayError("invalid_request", "Project MCP scope requires cwd");
     const resolved = await this.dependencies.trust.requireResolved(cwd);
     if (!resolved.trusted) throw new GatewayError("unauthenticated", "Project MCP servers require a trusted project");
-    return { scope, cwd: resolved.cwd, trusted: true };
+    return { scope, cwd: resolved.projectDir, trusted: true };
   }
 
   private async modelRuntime(params: Record<string, unknown>): Promise<ModelRuntime> {

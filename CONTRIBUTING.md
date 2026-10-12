@@ -46,7 +46,10 @@ agent execution, session state, inbox, badge, or reminder policy.
    is the version authority; do not merge independent Pi package updates. Use
    `cd packages/gateway && npm run update:pi-sdk -- <exact-version>` from a
    clean manifest/lockfile, then run `npm run check:pi-sdk` and
-   `npm run test:pi-sdk-rollback`. The
+   `npm run test:pi-sdk-rollback`. While `pi-coding-agent-patch.json` declares
+   the Tron-patched `pi-coding-agent`, the updater refuses: rebuild the patch for
+   the target release or delete it once upstream ships the API (Gateway README,
+   "Tron-patched `pi-coding-agent`"). The
    `pi-sdk-baseline.json` file records the prior runtime used by the sequential
    rollback probe, and any one-way rollback delta the maintainer has accepted for
    that version range under `knownOneWayDeltas`; `package.json` remains the

@@ -316,6 +316,53 @@ delta fails and restores. Do not submit independent
 Pi package updates, hand-edit lockfiles, run Gateway deployment/lifecycle
 commands, or promote/restart a Gateway as part of this process.
 
+### Tron-patched `pi-coding-agent`
+
+The Gateway needs the SDK's `projectDir` option (the Project layer is the
+worktree root's `.pi/`, see [Project root](#project-root)), which no published
+release has. Until one does, `pi-coding-agent` comes from a Tron-built tarball
+instead of the registry, at the same version as the rest of the family.
+`pi-coding-agent-patch.json` is its only owner. It records the upstream tag and
+commit, the published tarball's integrity, the upstream proposal commit the patch
+backports, the patch's SHA-256, the published `pi-ai` model data that release
+bundled, the Node/npm toolchain, and the built tarball's SHA-512, under
+`third_party/pi-coding-agent/` with the upstream MIT `LICENSE`. `package.json`
+names the tarball as `file:third_party/pi-coding-agent/<file>.tgz`, so
+`package-lock.json` binds its bytes with npm's own integrity and a clean `npm ci`
+needs no other input. `npm run check:pi-sdk` accepts exactly that declaration:
+the direct dependency, the lock root and lock entry must name the declared
+tarball and integrity, the tarball and patch must match their digests and the
+license must be present; without the declaration a `file:` dependency fails as
+before (`npm run test:pi-sdk-scripts` runs the checker against the real files and
+single-fault copies). Packaging stages the declaration and tarball before `npm ci` in the app
+payload, and a source update refreshes the declaration with the lock it explains.
+The tarball's package version stays the release version, so Pi's own version
+checks are unchanged; the lockfile `resolved` value and the declaration name the
+patch.
+
+`npm run reproduce:pi-coding-agent` rebuilds the tarball from a fresh fetch of
+the tag with the declared toolchain and model data: `npm ci` and
+`npm run build:offline`, then a pack of the unpatched package that must equal the
+published registry tarball byte for byte, then `git apply` of the patch, a
+pi-coding-agent rebuild and a pack that must equal the committed SHA-512
+(`--upstream <path>` uses a local clone). The tarball therefore differs from the
+registry release only in the patched modules, their declarations and maps, the
+bundled CLI chunks and two docs pages. After a deliberate patch change, `--write`
+replaces the tarball and records its SHA-512 and the patch SHA-256; then refresh
+the lock with `npm install`. Moving the patch to another release means updating
+the declaration's `version`, `upstream`, `modelData` and artifact path, rebasing
+the patch onto that tag, and running `--write`.
+
+`npm run update:pi-sdk` refuses while the declaration exists. When a release
+ships `projectDir` (the declaration's `removeWhen`), remove the patch in one
+change: set `pi-coding-agent` in `package.json` back to the exact release
+version, delete `pi-coding-agent-patch.json`, `third_party/pi-coding-agent/`,
+`scripts/build-pi-coding-agent-patch.mjs` and its `reproduce:pi-coding-agent`
+script, drop the declaration from `packages/mac-app/scripts/stage-gateway-app.sh`
+and the `BUILD_INPUT_FILES` of `scripts/gateway-install-inputs.mjs`, run
+`npm install` so the lock returns to the registry entry, then
+`npm run update:pi-sdk -- <release>`.
+
 ### Tron-owned `pi-subagents` build
 
 The delegated provider is distributed separately from the Gateway's Pi SDK. Its
@@ -3466,6 +3513,37 @@ the current ordered set after unregistering old extension layers, so removing or
 reordering a contributor does not leave stale fields behind or disturb built-in
 providers. Project-scoped package and settings changes do not reload or mutate the
 global provider runtime.
+
+### Project root
+
+The Project layer is the `.pi/` of a chat's Project root, even for a chat started
+in a subdirectory (settings-model decision 31). `projectRoot()` in
+`src/machine/workspace-inspection-service.ts` is the only resolver: the realpath
+of `git rev-parse --show-toplevel` for the canonical chat cwd, so each linked
+worktree is its own Project. When Git reports no work tree (no repository, a cwd
+inside `.git`, a refused ownership check) or cannot run, the cwd itself is the
+Project; a Git timeout stays a retryable error so one decision never lands on two
+directories. `TrustService` resolves it with every inspection
+(`TrustInspection.projectDir`) and records, reads and re-reads the decision for
+the root, with `hasTrustRequiringProjectResources(cwd, projectDir)`; a decision
+saved earlier for a subdirectory no longer applies, so such a chat asks once for
+its root. Tron Home's workspace is a standalone directory
+(`TrustServiceOptions.standaloneDirectories`): its explicit untrusted decision
+never reaches a repository that encloses the Tron home, while a repository inside
+the workspace keeps its own root. Each runtime build passes
+the root as the SDK's `projectDir` to `SettingsManager.create()` and
+`createAgentSessionServices()`, so Pi reads Project settings, packages,
+`.pi/{extensions,skills,prompts,themes}`, `SYSTEM.md` and built-in MCP
+configuration from the root and starts stdio MCP servers there; extensions read
+`ctx.projectDir`. The chat's own cwd still owns tools, context files
+(`AGENTS.md` from the cwd and its parents), session grouping and `ctx.cwd`.
+Trust changes and Project settings reload every live chat of the root
+(`RuntimeSlot.projectDir`); session-free package, hook and settings reads,
+compaction policy and project MCP administration use the same root.
+`src/sessions/project-root.integration.test.ts` proves a nested chat against a
+real repository, linked worktree, stdio MCP server and faux model, writing
+`test-results/project-root-864.json`. The SDK option comes from the
+[Tron-patched `pi-coding-agent`](#tron-patched-pi-coding-agent).
 
 ### Tron context and delegated children
 

@@ -8,7 +8,8 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BASELINE_FILE, DIRECT_PI_PACKAGES, PI_PACKAGES, formatPiSdkReport, readPiSdkBaseline, validatePiSdk, validSha512Integrity } from "./check-pi-sdk.mjs";
+import { existsSync } from "node:fs";
+import { BASELINE_FILE, DIRECT_PI_PACKAGES, PATCH_PIN_FILE, PI_PACKAGES, formatPiSdkReport, readPiSdkBaseline, validatePiSdk, validSha512Integrity } from "./check-pi-sdk.mjs";
 
 const REGISTRY_ARGS = Object.freeze(["--registry=https://registry.npmjs.org/"]);
 const CODING_AGENT = "@earendil-works/pi-coding-agent";
@@ -191,6 +192,12 @@ function restoreOwnedState(root, original, npmBin, spawn) {
 export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.meta.url)), ".."), version, npmBin = "npm", spawn = spawnSync } = {}) {
   if (!exactVersion(version)) throw new Error(`Pi SDK version must be one exact semver (received ${version ?? "missing"})`);
   const root = resolve(gatewayDir);
+  // The patched pi-coding-agent has one owner. A registry install would
+  // silently drop it, so the maintainer first rebases it onto the target
+  // release or deletes it once upstream ships the API (see its removeWhen).
+  if (existsSync(resolve(root, PATCH_PIN_FILE))) {
+    throw new Error(`refusing update: ${PATCH_PIN_FILE} declares a Tron-patched pi-coding-agent; rebuild it for ${version} or delete it and third_party/pi-coding-agent/ first`);
+  }
   if (manifestsDirty(root, spawn)) throw new Error("refusing update: packages/gateway/package.json or package-lock.json has uncommitted changes");
   const packagePath = resolve(root, "package.json");
   const lockPath = resolve(root, "package-lock.json");

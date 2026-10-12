@@ -305,12 +305,12 @@ F2: each store is its layer's truth.
 The Mac layer is `<tronHome>/agent/settings.json`: the agent directory is
 `<tronHome>/agent` (`packages/gateway/src/config.ts:434`), not `~/.pi/agent`.
 
-**The Project store's location.** pi reads `<cwd>/.pi/settings.json` with no
-upward search (`pi-coding-agent` `dist/core/settings-manager.js:100`). The
-Project store for a chat is `.pi/` at that chat's worktree root: a linked
-worktree uses its own `.pi/`, never the main checkout's, and a chat started in
-a subdirectory uses its worktree's root. Slice 4 verifies that the cwd Tron
-gives pi is that root.
+**The Project store's location.** The Project store for a chat is `.pi/` at
+that chat's worktree root: a linked worktree uses its own `.pi/`, never the main
+checkout's, and a chat started in a subdirectory uses its worktree's root. The
+Gateway's `projectRoot()` resolves it and every owner reads it from
+`TrustInspection.projectDir`; the runtime passes it to pi as `projectDir`
+([Project root](../README.md#project-root)).
 
 ### 3.3 Which layers a target has
 
@@ -587,25 +587,14 @@ open:
 - **Which keys a target shows.** A key appears for a target that has at least one
   of its allowed layers, so Home-only profile keys never appear on an ordinary
   chat.
-- **The Project store's location.** Tron gives pi the chat's canonical cwd, and
-  pi reads `.pi/` there with no upward search, so that is the Project store the
-  resolver reads. A linked worktree resolves its own `.pi/`. A chat started in a
-  subdirectory of a worktree today reads the subdirectory's `.pi/`, not the
-  worktree root's. Mohsin decided (2026-10-11, [10.1](#101-decisions)) that the
-  Project layer is the worktree root's `.pi/`; moving it changes what pi loads
-  (extensions, skills, prompts and settings, under trust), so it is a deliberate
-  change of its own with a test, recorded on slice 6 (#764) and PR 798, not part
-  of slice 5. The pinned SDK 1.0.4 and published 1.1.0 support explicit
-  settings/resource services with a separate `createAgentSession` cwd, but the
-  built-in `createMcpExtension` still loads configuration and resolves default
-  transport cwd from the extension's actual cwd. Its canonical `loadMcpConfig`
-  reader is not publicly exported. A real SDK session with a stdio MCP fixture
-  confirms that moving the services alone leaves MCP in the nested directory.
-  #764 therefore needs a supported Project-root/config-base option covering
-  MCP load, writeback and relative/default transport paths under root trust,
-  while keeping actual chat/tool/extension cwd and its instruction hierarchy.
-  Neither a dependency upgrade to 1.1.0 nor changing chat cwd meets that contract;
-  no partial split, private import, replacement parser or context wrapper ships.
+- **The Project store's location.** The resolver reads the Project store at the
+  target's Project root (`TrustInspection.projectDir`): a linked worktree
+  resolves its own `.pi/`, and a chat started in a subdirectory reads its
+  worktree root's `.pi/` (decision 31). The runtime gives pi that root as the
+  Tron-patched SDK's `projectDir`, so pi loads the same settings, resources and
+  MCP configuration under the root's trust while the chat keeps its own cwd, tools
+  and instruction hierarchy (#864, Gateway README "Project root" and
+  "Tron-patched `pi-coding-agent`").
 - **Home memory model.** The Profile layer of `model.ref[role=memory]` reads
   `profile.json` through `HomeOwner`. The one-time startup transfer and its
   recovery contract are described in [6.1](#61-what-it-is).

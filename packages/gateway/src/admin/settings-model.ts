@@ -46,6 +46,11 @@ export class SettingsModel {
 
   constructor(private readonly dependencies: SettingsModelDependencies) {}
 
+  /** The Project root that keys a path's Project store and trust decision. */
+  async projectRoot(path: string): Promise<string> {
+    return (await this.dependencies.trust.inspect(path)).projectDir;
+  }
+
   /** The outside-change owner every settings read reconciles through (doc 5.6). */
   observeOutside(outside: OutsideChanges): void {
     if (this.outside && this.outside !== outside) throw new Error("Settings already have an outside-change owner");
@@ -175,10 +180,10 @@ export class SettingsModel {
     const storeState = options.storeState !== false;
     if (target.kind === "session" && !session) throw new GatewayError("invalid_request", "A session target needs its session");
     const cwd = target.kind === "project" ? target.cwd : target.kind === "session" && !session!.home ? session!.cwd : undefined;
-    // The Project store is `.pi/` at the cwd Tron gives pi, which is where pi
-    // reads it (pi settings-manager has no upward search).
+    // The Project store is `.pi/` at the chat's Project root (decision 31), the
+    // `projectDir` Tron gives pi; trust names that root for every chat in it.
     const inspection = cwd === undefined ? undefined : await this.dependencies.trust.inspect(cwd);
-    const observed: ObservedStore[] = [{ kind: "mac" }, { kind: "trust" }, ...(inspection ? [{ kind: "project" as const, root: inspection.cwd }] : [])];
+    const observed: ObservedStore[] = [{ kind: "mac" }, { kind: "trust" }, ...(inspection ? [{ kind: "project" as const, root: inspection.projectDir }] : [])];
     // Every read compares the stores with what Tron last observed first (F2):
     // file events are only prompts, so a dropped event cannot hide a change.
     if (storeState) await this.outside?.reconcile(observed);
@@ -186,19 +191,19 @@ export class SettingsModel {
     const trust = await this.trustDecisions();
     let project: SettingsStores["project"];
     if (inspection) {
-      const documents = this.piDocuments(inspection.cwd);
+      const documents = this.piDocuments(inspection.projectDir);
       project = {
-        root: inspection.cwd,
+        root: inspection.projectDir,
         document: documents.project,
         ...(documents.projectUnreadable ? { unreadable: true as const } : {}),
         applied: inspection.effectiveDecision === true,
         ...(inspection.effectiveDecision === true ? {} : { reason: "untrusted" as const }),
-        ...(storeState ? { git: await projectGitState(inspection.cwd) } : {}),
+        ...(storeState ? { git: await projectGitState(inspection.projectDir) } : {}),
       };
     }
     const outside = this.outside && storeState ? {
       mac: { ...await this.outside.marks({ kind: "mac" }), ...await this.outside.marks({ kind: "trust" }) },
-      ...(inspection ? { project: await this.outside.marks({ kind: "project", root: inspection.cwd }) } : {}),
+      ...(inspection ? { project: await this.outside.marks({ kind: "project", root: inspection.projectDir }) } : {}),
     } : undefined;
     const home = target.kind === "home" || (target.kind === "session" && session!.home);
     const layers = targetLayers(target, { home, project: project !== undefined });
@@ -845,6 +850,12 @@ export class SettingsChangePath {
       qualifiers.project = stores.project.root;
     }
     if (key.qualifier === "project" && !qualifiers.project) throw new GatewayError("invalid_request", `${key.label} needs a project`);
+    // Trust is keyed by the Project root (TrustInspection.projectDir), so a path a
+    // Mac or Home request names reads, plans and writes its root's decision. A
+    // path that does not exist yet keeps its name; applying it fails as before.
+    if (key.qualifier === "project" && qualifiers.project !== stores.project?.root) {
+      qualifiers.project = await this.model.projectRoot(qualifiers.project!).catch(() => qualifiers.project!);
+    }
     if (key.qualifier === "key" && !floorInstances().some(instance => instance.key === qualifiers.key && instance.direction === qualifiers.direction)) {
       throw new GatewayError("invalid_request", `${key.label} names a setting and, when its floor differs by direction, that direction`);
     }
