@@ -316,7 +316,7 @@ describe("Home task subagents", () => {
     expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
   }, 60_000);
 
-  it("stops a workflow's async child that outlives its completed workflow when the task is stopped while it waits", async () => {
+  it.each(["ordinary", "refresh during selection"])("stops a workflow's async child that outlives its completed workflow when the task is stopped while it waits (%s)", async (interleaving) => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
     await writeFile(join(f.cwd, "detached-workflow.js"), DETACHED_WORKFLOW_SCRIPT);
@@ -337,8 +337,28 @@ describe("Home task subagents", () => {
     const slot = await f.registry.acquire(run.sessionId);
     await waitFor(() => child.heldRequests() === 1, "detached child live", bound);
     await waitBetweenTurns(slot);
+    // Force the real artifact publisher into the suspended stop-target read.
+    // It reorders the activity map; neither the provider result nor its run
+    // state is mocked. A live Map iterator must not revisit that same child.
+    const boundary = slot as unknown as {
+      liveWorkflowChildRunIds(directory: string, children: readonly unknown[]): Promise<string[]>;
+      refreshExtensionActivityFromArtifact(toolCallId: string, directory: string): Promise<void>;
+    };
+    const readChildren = boundary.liveWorkflowChildRunIds.bind(boundary);
+    let refreshed = false;
+    if (interleaving === "refresh during selection") {
+      vi.spyOn(boundary, "liveWorkflowChildRunIds").mockImplementation(async (directory, children) => {
+        const ids = await readChildren(directory, children);
+        if (!refreshed) {
+          refreshed = true;
+          await boundary.refreshExtensionActivityFromArtifact("workflow-launch", directory);
+        }
+        return ids;
+      });
+    }
     await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId });
     const result = await run.completion;
+    expect(refreshed).toBe(interleaving === "refresh during selection");
     expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "workflow-launch");
     const workflowDir = launch!.details!.asyncDir as string;
