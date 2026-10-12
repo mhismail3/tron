@@ -431,7 +431,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 30), app.debugDescription)
         expandAllSettings(app)
         let outsideRow = settingRow(app, key: "setup.installTelemetry")
-        XCTAssertTrue(waitForBadge(outsideRow, "Changed outside Tron", timeout: 30),
+        // The badge's accessible label carries its detail ("Changed outside Tron, Mac: On → Off").
+        XCTAssertTrue(waitUntil(timeout: 30) { self.badgeLabels(outsideRow).contains { $0.hasPrefix("Changed outside Tron") } },
                       "an outside edit of Tron's value must be shown: \(badgeLabels(outsideRow))")
         XCTAssertEqual(switchValue(outsideRow), macEdit.before, "the live value must follow the edited store")
         let applyAgain = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-applyAgain")
@@ -439,7 +440,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "settings-surface-outside-change-apply-again")
         applyAgain?.tap()
         XCTAssertTrue(waitUntil(timeout: 60) {
-            self.switchValue(outsideRow) == macEdit.after && !self.badgeLabels(outsideRow).contains("Changed outside Tron")
+            self.switchValue(outsideRow) == macEdit.after && !self.badgeLabels(outsideRow).contains { $0.hasPrefix("Changed outside Tron") }
         }, "Apply again must restore Tron's value and clear the outside mark: \(badgeLabels(outsideRow))")
         dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
