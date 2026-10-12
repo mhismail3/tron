@@ -63,7 +63,6 @@ vi.mock("../home/home-session-recovery.js", async importOriginal => {
   };
 });
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
-import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { EpisodicMemory } from "../episodic/episodic-memory.js";
@@ -285,7 +284,6 @@ function openRegistry(f: Fixture): void {
     sessions: registry,
     home: registry.homeOwner(),
     receipts,
-    settings: new SettingsService(f.agentDir),
     broadcast: () => {},
     ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner() }),
     trust: new TrustService(f.agentDir),

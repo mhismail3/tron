@@ -723,7 +723,7 @@ the Gateway is stopped and restarted; the runtime also snapshots the admitted
 session directory at startup so an out-of-band settings edit cannot redirect
 new work around the ownership lock.
 
-`settings.get` and the settings schema expose only SDK settings the embedded runtime
+The settings schema exposes only SDK settings the embedded runtime
 or a Tron client consumes. Terminal-only presentation settings (thinking-block
 hiding, cache-miss notices, skill-command autocomplete, markdown rendering, the
 Anthropic extra-usage warning, analytics, and the branch-summary skip prompt) are
@@ -2451,8 +2451,7 @@ for later sessions and are never silently deleted with a session.
 and Manage Session. `model.list` retains the SDK's configured `contextWindow` and
 adds optional `contextWindowLimits` (`minimum`, `maximum`, `default`, and an optional
 `longContextThreshold`). The catalog minimum uses standard compaction headroom;
-`settings.get.effective.contextWindowMinimum` supplies the selected scope's actual
-reserve plus retained-tail headroom, clamped to each model's maximum by the editor.
+`settings.options` for `model.contextWindow` serves the target's actual bounds.
 Session policy bounds use that live session's compaction settings. Capacity is
 declared by the provider/catalog, not inferred
 from a display name or copied from a different endpoint. The pinned catalog lacks a

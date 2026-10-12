@@ -7,7 +7,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { GatewayConfig } from "../config.js";
 import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, cachePieces } from "../episodic/cache-layout.js";
@@ -143,7 +142,7 @@ async function fixture(responses = false) {
   disposals.push(async () => { await registry.dispose(); });
   const service = new GatewayService({
     config: { tronHome } as unknown as GatewayConfig, modelRuntime: runtime, sessions: registry, home: registry.homeOwner(),
-    receipts: new CommandReceiptStore(join(tronHome, "receipts")), settings: new SettingsService(agentDir),
+    receipts: new CommandReceiptStore(join(tronHome, "receipts")),
     broadcast: () => {},
     ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => registry.homeOwner() }),
     trust: new TrustService(agentDir), sessionDeleted: () => {}, uploads: { removeSession: async () => {} },

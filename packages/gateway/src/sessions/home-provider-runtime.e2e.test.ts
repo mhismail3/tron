@@ -7,7 +7,6 @@ import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent
 import { fauxAssistantMessage, fauxProvider, type AssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { fileURLToPath } from "node:url";
-import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { GatewayConfig } from "../config.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
@@ -86,7 +85,7 @@ async function fixture(options: { shareGatewayRuntime: boolean }) {
   cleanups.push(async () => { await registry.dispose(); });
   const service = new GatewayService({
     config: { tronHome } as unknown as GatewayConfig, modelRuntime: gateway, sessions: registry, home: registry.homeOwner(),
-    receipts: new CommandReceiptStore(join(tronHome, "receipts")), settings: new SettingsService(agentDir),
+    receipts: new CommandReceiptStore(join(tronHome, "receipts")),
     broadcast: () => {},
     ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: gateway, sessions: registry, home: () => registry.homeOwner() }),
     trust: new TrustService(agentDir), sessionDeleted: () => {}, uploads: { removeSession: async () => {} },

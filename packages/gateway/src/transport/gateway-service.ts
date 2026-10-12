@@ -45,7 +45,6 @@ import { MAXIMUM_PROMPT_ATTACHMENTS, type UploadStore } from "../machine/upload-
 import { DISPLAY_CAPABILITY, DISPLAY_LIVE_VIEW_CAPABILITY, NATIVE_LIVE_VIEW_CAPABILITY } from "../display/display-contract.js";
 import type { TerminalService } from "../machine/terminal-service.js";
 import type { TrustService } from "../admin/trust-service.js";
-import type { SettingsService } from "../admin/settings-service.js";
 import type { ModelConfigService } from "../admin/model-config-service.js";
 import type { PackageService } from "../admin/package-service.js";
 import type { GlobalProviderResources } from "../admin/global-provider-resources.js";
@@ -351,7 +350,6 @@ export interface GatewayServiceDependencies {
   uploads: UploadStore;
   terminals: TerminalService;
   trust: TrustService;
-  settings: SettingsService;
   /** The settings model's resolver (docs/settings-model.md). */
   settingsModel: SettingsModel;
   /** The settings model's one change path, with its record. */
@@ -646,9 +644,11 @@ export class GatewayService {
           const model = this.admitNamedHomeModel(params.model);
           // The owner falls back to the recorded model when re-enabling an
           // existing Home, and only a fresh session uses the default.
+          // The default is read before the owner's lock; only a fresh session uses it.
+          const fallback = model ? undefined : await this.defaultHomeModel().then(value => ({ value }), (error: unknown) => ({ error }));
           return safeJson(await this.requireHome().designate(
             model ? { model } : {},
-            () => this.defaultHomeModel(),
+            () => { if (!fallback || "error" in fallback) throw fallback?.error; return fallback.value; },
           ));
         });
       case "home.disable":
@@ -2124,13 +2124,6 @@ export class GatewayService {
         });
         return safeJson({ ...page, entries: page.entries.map(presentHistoryEntry) });
       }
-      case "settings.get": {
-        const cwd = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();
-        const scope = params.scope === undefined ? "project" : oneOf(params.scope, "scope", ["global", "project"] as const);
-        if (scope === "global") return safeJson(this.dependencies.settings.get(cwd, false));
-        const inspection = await this.dependencies.trust.inspect(cwd);
-        return safeJson(this.dependencies.settings.get(inspection.cwd, inspection.effectiveDecision === true));
-      }
       case "trust.inspect":
         return safeJson(await this.dependencies.trust.inspect(string(params.cwd, "cwd", { max: 4_096 })));
       case "packages.list":
@@ -2633,11 +2626,10 @@ export class GatewayService {
   }
 
   /** This Gateway's default model for a new session, admitted the same way. */
-  private defaultHomeModel(): ModelRef {
-    const defaults = this.dependencies.settings.get(this.dependencies.config.tronHome, false) as {
-      effective?: { defaultModel?: ModelRef | null };
-    };
-    const fallback = defaults.effective?.defaultModel;
+  private async defaultHomeModel(): Promise<ModelRef> {
+    // The Mac layer's default model through the one resolver.
+    const resolution = await this.dependencies.settingsModel.resolve({ kind: "mac" }, undefined, ["model.ref[role=chat]"], { storeState: false });
+    const fallback = resolution.keys.find(key => key.key === "model.ref[role=chat]")?.value as ModelRef | undefined;
     if (!fallback) throw new GatewayError("invalid_request", "Tron Home needs a model: set a default model or name one");
     return this.admitHomeModel(fallback.provider, fallback.id);
   }

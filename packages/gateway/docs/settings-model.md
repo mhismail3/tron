@@ -476,9 +476,8 @@ An untrusted project's `.pi/` layer is **present but not applied** (F4):
   the Project value with `applied: false, reason: "untrusted"`, and the
   effective value comes from the next layer down.
 - Rows show the repo's value struck through, with a **"Project · not applied
-  (untrusted)"** badge and **Review trust**. Today `settings.get` returns
-  `project: null` when untrusted (`settings-service.ts:138`), which hides what
-  trusting would change.
+  (untrusted)"** badge and **Review trust**. (The former `settings.get` projection hid
+  the untrusted Project document; it is removed.)
 - Tron never writes the Project layer of an untrusted project, as today's
   `trust_required` refusal does (`settings-service.ts:202-204`).
 
@@ -1410,8 +1409,8 @@ Re-verified against `main` at `b76f6ca80`.
 
 | Today | Becomes |
 |---|---|
-| `admin/settings-service.ts:121-195` `get`: two documents plus an effective object | `settings.resolve` from the schema: every key with value, `display`, layer, applied flag, badges and section summaries, for a target (Mac, project, session or profile). `settings.get` is removed when its last client moves (no alias). |
-| `transport/gateway-service.ts` `settings.get` | Removed when its last client moves to `settings.resolve` (slices 8 and 11); `settings.options` and the served schema arrive with slice 14. |
+| `admin/settings-service.ts` `get`: two documents plus an effective object | Removed with its last client: `settings.resolve` from the schema serves every key with value, `display`, layer, applied flag, badges and section summaries, for a target (Mac, project, session or profile). |
+| `transport/gateway-service.ts` `settings.get` | Removed (no alias); Home's default-model fallback reads the Mac layer through the resolver. |
 | Implemented: memory model in `profile.json`, applied by `HomeOwner` behind `settings.change` | One-time startup transfer consumes the legacy `home.json` model before admission; runtime has no fallback. |
 | `home/home-task-dispatcher.ts:190-193`, `home-task-worker-choice.ts`, `tron-home-extension.ts:29,77` ("omit both for the Gateway default") | Home's `delegate` handler fills omitted `model` and `thinking` from the profile (`sameAs: home`) before admission, clamping thinking to the model; an explicit choice wins with its reason ([6.3](#63-worker-model-same-as-home)). |
 | No per-chat Run values; `images.blockImages` read per request by pi but only from settings files | Chat-layer values in `tron.settings.v1` for every key that allows Chat, applied to the chat's own settings ([3.4](#34-timing)). |

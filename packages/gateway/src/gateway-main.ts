@@ -11,7 +11,6 @@ import { TrustService } from "./admin/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
-import { SettingsService } from "./admin/settings-service.js";
 import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
 import { SettingsRiskEvaluator } from "./admin/settings-risk.js";
 import { SettingsChangeRecord } from "./admin/settings-record.js";
@@ -184,7 +183,6 @@ const trust = new TrustService(config.agentDir);
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
-const settings = new SettingsService(config.agentDir);
 const settingsModel = new SettingsModel({
   agentDir: config.agentDir,
   tronHome: config.tronHome,
@@ -838,7 +836,6 @@ const service = new GatewayService({
   uploads,
   terminals: terminal,
   trust,
-  settings,
   settingsModel,
   settingsChanges,
   modelConfig,
