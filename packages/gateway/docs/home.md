@@ -913,12 +913,17 @@ delegation. Ordinary sessions never read this profile and keep their repo/Mac de
 
 The resolved model must be registered, usable (its provider has credentials) and not virtual.
 An unavailable profile-derived model falls through to the worker's normal Gateway/project
-default, with the fallback recorded in the task brief; an explicit invalid model remains a
-refusal. Thinking is clamped to the closest level the actual selected model supports. The
+default, including when the unavailable choice came from same-as-Home. The fallback and
+reason are recorded in the task brief; an explicit invalid model remains a refusal.
+A fallback does not discard the independently selected thinking field: the worker's
+actual default model clamps it at start, and the canonical worker brief records that
+result without rewriting the authorized task intent/digest. Thinking is clamped to the closest level the actual selected model supports. The
 Gateway applies the resulting fixed choices through the worker slot's `setModel` and
 `setThinking` before its first prompt, recording Home-at-start provenance for the generic
-settings badge. A `thinking` without an explicit model is permitted when it resolves with a
-profile/Home model; a direct dispatcher request without a model still refuses thinking. Invalid
+settings badge (same as Home, Home profile, chosen for this task, or worker-default
+fallback, with its reason). The fixed metadata survives cold reads rather than consulting
+Home again. A `thinking` without an explicit model is permitted when it resolves with a
+profile/Home model or its recorded fallback; a direct dispatcher request without a model still refuses thinking. Invalid
 explicit choices return `invalid_request`; model admission refusals name at most twenty fixed,
 usable models.
 

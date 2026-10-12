@@ -999,9 +999,13 @@ preservation, conflicting stores and the unindexed-audit crash cut.
 
 The design also names task budgets and scopes as Profile keys, but neither is
 currently declared in `settings-schema.ts`; this slice does not invent new
-schema entries or task policy. Likewise, storing worker model/thinking values
-does not by itself implement delegation-time resolution, admission, or start
-provenance; those remain a separate owner API boundary.
+schema entries or task policy. Delegation-time worker resolution, fieldwise
+explicit choices, capability clamping, fallback and fixed Chat provenance are
+implemented at the Home delegate/dispatcher boundary, independently of the
+Profile store. The real `home-task-worker-model.e2e.test.ts` covers these paths,
+including unavailable same-as-Home admission, a retained explicit thinking field,
+ordinary Project-default control and a later Home change leaving the first worker
+unchanged.
 
 ### 6.2 Who it applies to
 
@@ -1051,10 +1055,12 @@ removed), the handler leaves the field unset, the worker resolves its own
 Chat > Project > Mac > Built-in default, and the task record and the row say
 why.
 
-Today the `delegate` tool tells Home to "omit both for the Gateway default"
-(`tron-home-extension.ts:29,77`), and an omitted model keeps the worker
-session's default (`home-task-dispatcher.ts:190-191`). Slice 9 replaces both
-atomically.
+The `delegate` tool now describes typed Profile defaults and requires a short
+reason for either explicit field. Home resolves before task admission. Fixed
+metadata distinguishes same-as-Home, explicit Profile, task-specific and fallback
+choices; generic source badges carry the reason. A fallback leaves model selection
+to the worker's own runtime, and its actual thinking clamp is recorded in the
+canonical worker brief without changing the authorized task intent/digest.
 
 Changing Home's model later does not change running workers: the worker's
 values are fixed at start. Changing the profile key from `sameAs: home` to an

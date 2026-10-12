@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { clampThinkingLevel } from "@earendil-works/pi-ai";
 import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import type { GatewayWorkHandle } from "../sessions/gateway-work-registry.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -13,6 +14,7 @@ import { homeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
 import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
+import type { FixedSetting } from "../admin/settings-resolver.js";
 import { HOME_TASK_SUBAGENTS, HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, parseHomeTaskSubagentsEntry, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "./home-task-subagents.js";
 import type { HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
 import { basename } from "node:path";
@@ -30,7 +32,11 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
 export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
 /** `title` names the worker session; it is never persisted with the task record. */
-export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice { taskId: string; intent: string; target: string; title?: string; reason?: string }
+export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice {
+  taskId: string; intent: string; target: string; title?: string; reason?: string;
+  /** Internal Home boundary metadata, never accepted by the delegate tool schema. */
+  provenance?: { model: Pick<FixedSetting, "via" | "reason">; thinking: Pick<FixedSetting, "via" | "reason"> };
+}
 /** The durable record plus the worker's model from its own transcript. The model is
  * projected per read, never persisted with the task. */
 export interface HomeTaskOwnerSettlement {
@@ -164,13 +170,14 @@ export class HomeTaskDispatcher {
   private async startOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle): Promise<HomeTaskHandle> {
     const input = structuredClone(request);
     const keys = Object.keys(input);
-    if (!["taskId", "intent", "target"].every(key => keys.includes(key)) || keys.some(key => !["taskId", "intent", "target", "model", "thinking", "title", "reason"].includes(key))
+    if (!["taskId", "intent", "target"].every(key => keys.includes(key)) || keys.some(key => !["taskId", "intent", "target", "model", "thinking", "title", "reason", "provenance"].includes(key))
       || typeof input.taskId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/u.test(input.taskId)
       || typeof input.intent !== "string" || !input.intent.trim() || Buffer.byteLength(input.intent) > 65536) throw new GatewayError("invalid_request", "Invalid task intent");
     const title = typeof input.title === "string" ? input.title.trim() : undefined;
     if (input.title !== undefined && (!title || [...title].length > HOME_TASK_TITLE_CHARACTERS)) throw new GatewayError("invalid_request", "Invalid task title");
     // Refused before any task record, namespace initialization or worker exists.
-    const choice = await this.sessions.admitTaskWorkerChoice(input);
+    const deferredThinking = input.provenance && !input.model ? input.thinking : undefined;
+    const choice = await this.sessions.admitTaskWorkerChoice(deferredThinking === undefined ? input : {});
     const epoch = await this.setup.run(async () => {
       const created = await this.store.initialize();
       const current = await this.store.restoreEpoch();
@@ -209,9 +216,24 @@ export class HomeTaskDispatcher {
       if (title) await slot.rename(title);
       // The slot's own configuration owners record the choice in the worker's transcript
       // before its first prompt. An omitted model keeps the session's default.
-      const fixedAt = (value: unknown) => ({ value, from: "delegate" as const, at: new Date().toISOString(), ref: randomUUID() });
-      if (choice.model) await slot.setModel(choice.model.provider, choice.model.id, undefined, undefined, fixedAt(choice.model));
-      if (choice.thinking !== undefined) await slot.setThinking(choice.thinking, undefined, undefined, fixedAt(choice.thinking));
+      const fixedAt = (value: unknown, field: "model" | "thinking"): FixedSetting => ({ value,
+        from: "delegate", at: new Date().toISOString(), ref: randomUUID(), ...input.provenance?.[field] });
+      const model = choice.model ?? (input.provenance ? slot.snapshot().model ?? undefined : undefined);
+      if (model) await slot.setModel(model.provider, model.id, undefined, undefined, fixedAt(model, "model"));
+      const requestedThinking = choice.thinking ?? deferredThinking;
+      const definition = model ? slot.modelRuntime.getModel(model.provider, model.id) : undefined;
+      const thinking = requestedThinking !== undefined && definition ? clampThinkingLevel(definition, requestedThinking) : requestedThinking;
+      const clamped = thinking !== requestedThinking ? `${requestedThinking} clamped to ${thinking}` : undefined;
+      if (thinking !== undefined) {
+        const source = fixedAt(thinking, "thinking");
+        if (clamped) source.reason = [source.reason, clamped].filter(Boolean).join("; ");
+        await slot.setThinking(thinking, undefined, undefined, source);
+      }
+      // The canonical worker brief records the actual fallback capability choice;
+      // the authorized task intent/digest is never rewritten after admission.
+      const appliedChoice = input.provenance
+        ? `\n\nWorker at start: ${model ? `${model.provider}/${model.id}` : "worker default"}; thinking ${slot.snapshot().thinkingLevel}${clamped ? `; ${clamped}` : ""}.`
+        : "";
       task = { ...task, revision: task.revision + 1, lifecycle: "active", sessionId: slot.id, operationId,
         grantRef: authority.kind === "one-use-grant" ? authority.grantId : null,
         scopeRef: authority.kind === "standing-scope" ? authority.scopeId : null };
@@ -229,7 +251,7 @@ export class HomeTaskDispatcher {
       deadline = dispatch.armDeadline();
       const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation }, deadline);
       work.transition("foreground-agent-operation");
-      const admitted = dispatch.admit(slot, `${task.intent.text}\n\nThis is a finite Home task. Use report with explicit evidence to finish. A normal reply is not a task result.`, [], undefined, undefined, undefined,
+      const admitted = dispatch.admit(slot, `${task.intent.text}${appliedChoice}\n\nThis is a finite Home task. Use report with explicit evidence to finish. A normal reply is not a task result.`, [], undefined, undefined, undefined,
         { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
       void admitted.catch(async () => {
         await cancellation("admission-refused").catch(() => {});

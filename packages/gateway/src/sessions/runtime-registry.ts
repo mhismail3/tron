@@ -3042,7 +3042,7 @@ export class RuntimeRegistry {
   /** Home resolves its typed worker profile at the delegate boundary. The selected
    * values are copied into this task only; later Home/profile changes cannot retarget it. */
   private async dispatchHomeTask(sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) {
-    if ((request.model !== undefined || request.thinking !== undefined) && !(request as typeof request & { reason?: string }).reason?.trim()) {
+    if ((request.model !== undefined || request.thinking !== undefined) && !request.reason?.trim()) {
       throw new GatewayError("invalid_request", "An explicit worker model or thinking choice needs a short reason");
     }
     const settings = this.settingsOwners?.model;
@@ -3060,40 +3060,44 @@ export class RuntimeRegistry {
     const candidateThinking = request.thinking ?? (typeof profileThinking === "string" ? profileThinking : home.thinkingLevel);
     let choice: HomeTaskWorkerChoice = {
       ...(candidateModel ? { model: candidateModel } : {}),
-      ...(candidateThinking && candidateModel ? { thinking: candidateThinking as HomeTaskWorkerChoice["thinking"] } : {}),
+      ...(candidateThinking && candidateModel ? { thinking: candidateThinking as NonNullable<HomeTaskWorkerChoice["thinking"]> } : {}),
     };
     let fallback: string | undefined;
     let clampNote: string | undefined;
     if (choice.model) {
       const model = this.options.gatewayModelRuntime?.getModel(choice.model.provider, choice.model.id);
       const supported = model ? getSupportedThinkingLevels(model) : [];
-      if (fromProfileThinking && choice.thinking && model && supported.length) {
+      if (choice.thinking && model && supported.length) {
         const requested = choice.thinking;
         choice.thinking = clampThinkingLevel(model, requested);
         if (choice.thinking !== requested) clampNote = `${requested} clamped to ${choice.thinking}`;
       }
     }
-    if (fromProfileModel && profileModel && "provider" in profileModel && choice.model) {
-      try { choice = await this.admitTaskWorkerChoice(choice); }
+    if (fromProfileModel && choice.model) {
+      try { await this.admitTaskWorkerChoice({ model: choice.model }); }
       catch (error) {
         const reason = error instanceof GatewayError && error.details && typeof error.details === "object"
           ? (error.details as { reason?: unknown }).reason : undefined;
         if (!(error instanceof GatewayError) || !["unavailable-model", "unregistered-model", "virtual-model"].includes(String(reason))) throw error;
-        choice = {};
-        fallback = `Profile worker model ${profileModel.provider}/${profileModel.id} unavailable; Gateway default used`;
+        fallback = `Profile worker model ${choice.model.provider}/${choice.model.id} unavailable; worker default used (${String(reason)})`;
+        choice = candidateThinking ? { thinking: candidateThinking as NonNullable<HomeTaskWorkerChoice["thinking"]> } : {};
       }
     }
     const modelText = choice.model ? `${choice.model.provider}/${choice.model.id}` : "Gateway default";
     const thinkingText = choice.thinking ?? "Gateway default";
-    const explicitReason = request.model || request.thinking ? (request as typeof request & { reason?: string }).reason!.trim() : undefined;
+    const explicitReason = request.model || request.thinking ? request.reason!.trim() : undefined;
     const modelSource = request.model ? `explicit: ${explicitReason}`
       : fallback ?? (profileModel && "provider" in profileModel ? "Home profile" : "same as Home");
     const thinkingSource = request.thinking ? `explicit: ${explicitReason}`
-      : fallback ? "Gateway default after profile model fallback"
-        : typeof profileThinking === "string" ? "Home profile" : "same as Home";
+      : typeof profileThinking === "string" ? "Home profile" : "same as Home";
     const choiceNotes = [clampNote].filter(Boolean).join("; ");
     const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.`;
-    return this.home.dispatchTask(sessionId, { ...request, ...choice, intent: brief });
+    const { model: _model, thinking: _thinking, ...input } = request;
+    return this.home.dispatchTask(sessionId, { ...input, ...choice, intent: brief,
+      provenance: {
+        model: { via: fallback ? "home-fallback" : !fromProfileModel ? "home-explicit" : profileModel && "provider" in profileModel ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
+        thinking: { via: !fromProfileThinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
+      } });
   }
 
   /** Admits a delegation's model and thinking level against the Gateway's own model

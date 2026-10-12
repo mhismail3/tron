@@ -72,7 +72,10 @@ export class HomeMemoryProfile {
       const expected = transferAudit(intent.home, model, intent.audit.at);
       if (!model || digest(intent.audit) !== digest(expected)) throw new GatewayError("conflict", "Home memory transfer audit is invalid");
     } else {
-      const source = await readSecureJson<unknown>(homePath, HOME_BYTES);
+      // Without a transfer intent, the ordinary ledger loader owns malformed or
+      // unreadable Home diagnostics. Do not mislabel every bad ledger a migration.
+      let source;
+      try { source = await readSecureJson<unknown>(homePath, HOME_BYTES); } catch { return; }
       if (!source.present || !object(source.value) || !object(source.value.memory) || source.value.memory.model === undefined) return;
       const old = source.value;
       const memory = old.memory as Record<string, unknown>;

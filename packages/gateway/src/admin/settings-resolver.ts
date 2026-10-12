@@ -22,6 +22,9 @@ export interface FixedSetting {
   at: string;
   ref: string;
   qualifiers?: Qualifiers;
+  /** Delegation-time source, kept with the fixed value rather than inferred from current Home. */
+  via?: "home-profile:sameAs:home" | "home-profile" | "home-explicit" | "home-fallback";
+  reason?: string;
 }
 
 /** The Chat layer as the session record holds it (doc 3.2). */
@@ -325,7 +328,10 @@ function resolveInstance(
     if (requested !== undefined && JSON.stringify(requested) !== JSON.stringify(value)) {
       badges.push({ kind: "state", label: "Applies to a new chat", detail: `Requested: ${format(requested)}` });
     }
-    badges.push({ kind: "source", label: fixedAt.from === "chat" ? "Explicit choice" : `From default at start: ${format(fixedAt.value)} (${fixedAt.from === "delegate" ? "Home" : LAYER_LABELS[fixedAt.from]})`,
+    badges.push({ kind: "source", label: fixedAt.from === "chat" ? "Explicit choice" : fixedAt.from === "delegate"
+      ? `From Home at start: ${fixedAt.via === "home-profile:sameAs:home" ? "same as Home" : fixedAt.via === "home-profile" ? "Home profile" : fixedAt.via === "home-fallback" ? "worker default" : "chosen for this task"} (${format(fixedAt.value)})`
+      : `From default at start: ${format(fixedAt.value)} (${LAYER_LABELS[fixedAt.from]})`,
+      ...(fixedAt.reason ? { detail: fixedAt.reason } : {}),
       action: { kind: "useCurrentDefault", label: "Use the current default" } });
   }
 

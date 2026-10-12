@@ -67,7 +67,9 @@ function readChatSnapshots(entries: readonly SessionEntry[], field: "fixed" | "r
   for (const value of Object.values(snapshots)) {
     if (!value || typeof value !== "object" || typeof value.at !== "string" || !Number.isFinite(Date.parse(value.at))
       || typeof value.ref !== "string" || !value.ref
-      || !["builtin", "mac", "project", "profile", "chat", "delegate"].includes(value.from)) {
+      || !["builtin", "mac", "project", "profile", "chat", "delegate"].includes(value.from)
+      || (value.via !== undefined && !["home-profile:sameAs:home", "home-profile", "home-explicit", "home-fallback"].includes(value.via))
+      || (value.reason !== undefined && (typeof value.reason !== "string" || value.reason.length > 1024))) {
       throw new GatewayError("conflict", "Canonical Chat provenance is invalid");
     }
   }
