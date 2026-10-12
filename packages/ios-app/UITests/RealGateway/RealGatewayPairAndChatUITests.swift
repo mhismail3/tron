@@ -400,9 +400,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         coverage["project"] = assertSettingsSurface(app, name: "project", layers: ["project", "mac"], schema: schema)
         // Setup opened the workspace without its resources: the untrusted Project
         // layer refuses the write and the row says why (decision 2, doc 3.5).
-        let untrustedRow = settingRow(app, key: "context.compaction.enabled")
+        let untrustedRow = topSwitchRow(app, key: "context.compaction.enabled")
         let untrustedSwitch = untrustedRow.switches.firstMatch
-        for _ in 0..<30 where !untrustedSwitch.isHittable { app.swipeUp() }
         let untrustedValue = switchValue(untrustedRow)
         untrustedSwitch.tap()
         XCTAssertTrue(waitUntil(timeout: 30) {
@@ -439,7 +438,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout: 15) { app.buttons["project-settings-link"].isHittable }, "dismissing the Project card must return to Manage Session")
         openProjectCard(app)
         expandAllSettings(app)
-        let reopenedCompaction = settingRow(app, key: "context.compaction.enabled")
+        let reopenedCompaction = topSwitchRow(app, key: "context.compaction.enabled")
         XCTAssertTrue(waitForBadge(reopenedCompaction, schema.label(for: "project"), timeout: 30),
                       "the reopened Project card must show the Project badge: \(reopenedCompaction.debugDescription)")
         XCTAssertEqual(switchValue(reopenedCompaction), projectEdit.after, "the reopened Project value is not the accepted value")
@@ -659,6 +658,22 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         app.descendants(matching: .any)[settingRowToken(key)]
     }
 
+    /// The switch row of `key` in the top-most presentation, revealed. A covered
+    /// sheet beneath can hold a row with the same identifier (Manage Session under
+    /// the Project card, where a Chat-layer key is editable too); covered rows are
+    /// never hittable, so the first row whose switch is hittable is the top one.
+    @MainActor
+    private func topSwitchRow(_ app: XCUIApplication, key: String) -> XCUIElement {
+        let rows = app.descendants(matching: .any).matching(identifier: settingRowToken(key))
+        for _ in 0..<30 {
+            for index in 0..<min(rows.count, 4) where rows.element(boundBy: index).switches.firstMatch.isHittable {
+                return rows.element(boundBy: index)
+            }
+            app.swipeUp()
+        }
+        return rows.element(boundBy: max(rows.count - 1, 0))
+    }
+
     /// Reveals the first on-screen element matching the predicate in the top-most
     /// presentation. Covered presentations are not hittable, so a nested sheet's
     /// rows never resolve to the sheet beneath it.
@@ -736,14 +751,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// Gateway's accepted state: the value flips and the badge names the layer.
     @MainActor
     private func toggleSetting(_ app: XCUIApplication, key: String, expectingBadge badge: String) -> (before: String?, after: String?) {
-        let row = settingRow(app, key: key)
-        XCTAssertTrue(row.waitForExistence(timeout: 15), "\(key) has no row: \(app.debugDescription)")
+        XCTAssertTrue(settingRow(app, key: key).waitForExistence(timeout: 15), "\(key) has no row: \(app.debugDescription)")
+        let row = topSwitchRow(app, key: key)
         let toggle = row.switches.firstMatch
-        var swipes = 0
-        while !toggle.isHittable && swipes < 12 {
-            app.swipeUp()
-            swipes += 1
-        }
         let before = switchValue(row)
         toggle.tap()
         XCTAssertTrue(waitUntil(timeout: 60) {
