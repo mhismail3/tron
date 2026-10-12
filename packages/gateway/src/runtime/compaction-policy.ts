@@ -39,8 +39,28 @@ export function resolveCompactionPolicy(global: Record<string, unknown>, project
   return { ...result, source } as unknown as CompactionConfiguration;
 }
 
-function settingsCompactionPolicy(settings: SettingsManager): CompactionConfiguration {
-  return resolveCompactionPolicy(settings.getGlobalSettings() as Record<string, unknown>, settings.getProjectSettings() as Record<string, unknown>, settings.isProjectTrusted());
+/** The Chat-layer compaction values this policy honours (decision 9). The
+ * summarizer's thinking level stays Project/Mac (`model.thinking[role=summarizer]`). */
+const CHAT_FIELDS = ["enabled", "reserveTokens", "keepRecentTokens", "instructions"] as const;
+
+function settingsCompactionPolicy(settings: SettingsManager, chat: Record<string, unknown> = {}): CompactionConfiguration {
+  const resolved = resolveCompactionPolicy(settings.getGlobalSettings() as Record<string, unknown>, settings.getProjectSettings() as Record<string, unknown>, settings.isProjectTrusted());
+  const values = document(chat.compaction);
+  const result: CompactionConfiguration = { ...resolved, source: { ...resolved.source } };
+  // Chat values were validated by the schema when written; the shared
+  // validation below refuses a canonical entry edited out of range.
+  for (const field of CHAT_FIELDS) {
+    if (values[field] === undefined) continue;
+    (result as unknown as Record<string, unknown>)[field] = values[field];
+    result.source[field] = "chat";
+  }
+  if (typeof result.enabled !== "boolean"
+    || !Number.isSafeInteger(result.reserveTokens) || result.reserveTokens < 1_024 || result.reserveTokens > 1_000_000
+    || !Number.isSafeInteger(result.keepRecentTokens) || result.keepRecentTokens < 0 || result.keepRecentTokens > 1_000_000
+    || typeof result.instructions !== "string" || result.instructions.length > COMPACTION_POLICY_INSTRUCTION_LIMIT) {
+    throw new GatewayError("conflict", "Canonical Chat compaction settings contain an invalid value");
+  }
+  return result;
 }
 
 /** One disposable operation projection per SDK session, not a second settings
@@ -53,6 +73,7 @@ export class CompactionOperationPolicy {
   private warning: string | undefined;
   /** True only for a Home session. Never read from global settings. */
   private readonly disabled: boolean;
+  private readonly chat: (() => Record<string, unknown>) | undefined;
 
   constructor(
     private readonly session: AgentSession,
@@ -60,10 +81,11 @@ export class CompactionOperationPolicy {
     /** Tron Home keeps its own history: SDK compaction is disabled for this
      * session only, through the same per-session overlay `applyBudgets`
      * reapplies from canonical settings at every idle admission. */
-    options: { disabled?: boolean } = {},
+    options: { disabled?: boolean; chat?: () => Record<string, unknown> } = {},
   ) {
     this.disabled = options.disabled === true;
-    this.next = settingsCompactionPolicy(session.settingsManager);
+    this.chat = options.chat;
+    this.next = settingsCompactionPolicy(session.settingsManager, this.chatSettings());
     this.budgetSources = { enabled: this.next.source.enabled, reserveTokens: this.next.source.reserveTokens, keepRecentTokens: this.next.source.keepRecentTokens };
     this.refresh();
     // The override must exist from the session's first admission, not only after
@@ -77,12 +99,19 @@ export class CompactionOperationPolicy {
 
   restore(): void {
     try {
-      const source = settingsCompactionPolicy(this.session.settingsManager).source;
+      const source = settingsCompactionPolicy(this.session.settingsManager, this.chatSettings()).source;
       this.budgetSources = { enabled: source.enabled, reserveTokens: source.reserveTokens, keepRecentTokens: source.keepRecentTokens };
       this.refresh();
     } catch {
       this.warning ??= "Canonical compaction settings are invalid. The last valid configuration remains in use.";
     }
+  }
+
+  /** This chat's explicit Chat layer (`tron.settings.v1`), supplied by its
+   * RuntimeSlot: branch-local like every Chat value, so fork and resume follow
+   * Pi's canonical branch. */
+  private chatSettings(): Record<string, unknown> {
+    return this.chat?.() ?? {};
   }
 
   refresh(): void {
@@ -92,7 +121,7 @@ export class CompactionOperationPolicy {
       throw new GatewayError("conflict", this.warning);
     }
     try {
-      this.next = settingsCompactionPolicy(settings);
+      this.next = settingsCompactionPolicy(settings, this.chatSettings());
       this.warning = undefined;
     } catch (error) {
       this.warning = "Canonical compaction settings are invalid. The last valid configuration remains in use.";

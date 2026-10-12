@@ -2622,7 +2622,11 @@ compaction admission, never inside an active run. No broad settings/resource rel
 Settings writes refresh live projections without mutating prepared work. `SessionSnapshot`
 contains `compactionPolicy.next`, `currentBudgets`, and optional `active` configuration;
 terminal events clear the captured policy before the owner publishes the end snapshot.
-Sources are global/project/default, and global Settings never invents a session model.
+Sources are chat/global/project/default: an ordinary chat's explicit `tron.settings.v1`
+compaction values (enabled, reserve, keep-recent, focus) overlay the global and project
+policy for that chat only, follow fork and resume, and are unset by Follow the default.
+Home has no Chat compaction layer (its SDK compaction stays off). Global Settings never
+invents a session model.
 Absent project fields inherit; null patches delete overrides; explicit inherit/empty restore
 standard generation without changing budgets. Project editors can instead delete
 thinking/focus overrides with null patches to resume global inheritance. Malformed initial

@@ -545,6 +545,94 @@ describe("settings risk gate", () => {
     expect(changes.map(entry => entry.op)).toEqual(expect.arrayContaining(["set", "unset"]));
     transcript.push({ case: "live retry settings", steps: [{ chat: first.id, changes, mac: await f.macDocument() }] });
   });
+  it("a Chat compaction override reaches only its own chat's SDK compaction, survives fork and cold resume, and Follow the default restores the Mac value", async () => {
+    const f = await fixture();
+    const first = await f.chat();
+    const second = await f.chat();
+    const sdk = (slot: typeof first) => slot.runtime.session.settingsManager.getCompactionSettings();
+    const idle = async (slot: typeof first, text: string) => {
+      f.faux.setResponses([fauxAssistantMessage("ok")]);
+      await slot.prompt(text);
+      await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, `${text} settled`);
+    };
+    const changeChat = (slot: typeof first, changes: Array<Record<string, unknown>>) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: MODEL }, changes,
+    });
+    await changeChat(first, [
+      { key: "context.compaction.enabled", layer: "chat", op: "set", value: false },
+      { key: "context.compaction.reserveTokens", layer: "chat", op: "set", value: 4_096 },
+      { key: "context.compaction.instructions", layer: "chat", op: "set", value: "Keep the plan." },
+    ]);
+    expect(first.settingsChatLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
+    // The projection follows the Chat value at once; the SDK budgets at the next idle admission.
+    expect(first.snapshot().compactionPolicy?.next).toMatchObject({ enabled: false, reserveTokens: 4_096, instructions: "Keep the plan.",
+      source: { enabled: "chat", reserveTokens: "chat", instructions: "chat", keepRecentTokens: "default" } });
+    await idle(first, "apply the chat compaction policy");
+    await idle(second, "apply the default compaction policy");
+    expect(sdk(first)).toMatchObject({ enabled: false, reserveTokens: 4_096 });
+    expect(sdk(second)).toMatchObject({ enabled: true, reserveTokens: 16_384 });
+    // A Mac default reaches the other open chat; the overridden fields stay local.
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" }, changes: [
+      { key: "context.compaction.reserveTokens", layer: "mac", op: "set", value: 32_768 },
+      { key: "context.compaction.keepRecentTokens", layer: "mac", op: "set", value: 12_000 },
+    ] });
+    await idle(first, "keep the chat override");
+    await idle(second, "follow the new default");
+    expect(sdk(first)).toMatchObject({ enabled: false, reserveTokens: 4_096, keepRecentTokens: 12_000 });
+    expect(sdk(second)).toMatchObject({ enabled: true, reserveTokens: 32_768, keepRecentTokens: 12_000 });
+    const resolved = await f.service.invoke(phone(), "settings.resolve", { target: { kind: "session", sessionId: first.id },
+      keys: ["context.compaction.enabled"] }) as { keys: Array<{ key: string; value: unknown; layer: string }> };
+    expect(resolved.keys[0]).toMatchObject({ value: false, layer: "chat" });
+    // Fork rebinds this slot to the new branch with the same Chat values; each
+    // branch then owns its own.
+    const parentId = first.id;
+    const point = first.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
+    const fork = await first.fork(point.id, "at");
+    expect(first.id).toBe(fork.sessionId);
+    expect(first.settingsChatLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
+    // Follow the default: unsetting the Chat values restores the Mac and Built-in values.
+    await changeChat(first, [
+      { key: "context.compaction.enabled", layer: "chat", op: "unset" },
+      { key: "context.compaction.reserveTokens", layer: "chat", op: "unset" },
+      { key: "context.compaction.instructions", layer: "chat", op: "unset" },
+    ]);
+    expect(first.settingsChatLayer().settings).toEqual({});
+    await idle(first, "follow the default again");
+    expect(sdk(first)).toMatchObject({ enabled: true, reserveTokens: 32_768, keepRecentTokens: 12_000 });
+    expect(first.snapshot().compactionPolicy?.next.source).toMatchObject({ enabled: "default", reserveTokens: "global", instructions: "default" });
+    const changes = (await f.history()).filter(entry => entry.layer === "chat" && entry.key.startsWith("context.compaction."));
+    expect(changes.map(entry => entry.op)).toEqual(expect.arrayContaining(["set", "unset"]));
+    // Cold resume of the parent keeps its own Chat values (the fork's unset is branch-local).
+    await f.registry.dispose();
+    const reopened = new RuntimeRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
+    registries.push(reopened);
+    await reopened.initialize();
+    await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut() || undefined, "compaction catalog cut");
+    settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.modelRuntime, sessions: reopened,
+      home: () => reopened.homeOwner(), registry: reopened });
+    const resumed = await reopened.acquire(parentId);
+    expect(resumed.settingsChatLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
+    expect(resumed.snapshot().compactionPolicy?.next).toMatchObject({ enabled: false, reserveTokens: 4_096, keepRecentTokens: 12_000,
+      source: { enabled: "chat", reserveTokens: "chat", keepRecentTokens: "global" } });
+    await idle(resumed, "resumed chat compaction policy");
+    expect(sdk(resumed)).toMatchObject({ enabled: false, reserveTokens: 4_096 });
+    transcript.push({ case: "chat compaction override", steps: [{ parent: parentId, fork: fork.sessionId, sdk: sdk(resumed), mac: await f.macDocument() }] });
+  });
+  it("Home refuses a Chat compaction value: Home keeps its own history and SDK compaction stays off", async () => {
+    const f = await fixture();
+    const home = await f.designateHome();
+    const snapshot = home.snapshot();
+    await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: home.id },
+      fence: { runtimeGeneration: snapshot.runtimeGeneration, revision: snapshot.revision, model: snapshot.model },
+      changes: [{ key: "context.compaction.enabled", layer: "chat", op: "set", value: true }] }))
+      .rejects.toMatchObject({ code: "unsupported", message: expect.stringContaining("Home") });
+    const served = await f.service.invoke(phone(), "settings.resolve", { target: { kind: "session", sessionId: home.id }, keys: ["context.compaction.enabled"] }) as { keys: Array<{ layers: Array<{ layer: string }> }> };
+    expect(served.keys[0]?.layers.map(layer => layer.layer)).not.toContain("chat");
+    expect(home.settingsChatLayer().settings).toEqual({});
+    expect(home.runtime.session.settingsManager.getCompactionSettings().enabled).toBe(false);
+  });
   it("Home's actual provider requests follow transport and retry-delay defaults, then a Chat override and its unset", async () => {
     const f = await fixture();
     const home = await f.designateHome();

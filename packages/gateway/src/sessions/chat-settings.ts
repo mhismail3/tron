@@ -3,7 +3,7 @@ import { getCurrentTools } from "@earendil-works/pi-ai";
 import type { SessionEntry, SessionManager } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type { FixedSetting } from "../admin/settings-resolver.js";
-import { hasRuntimeRequestApplier, schemaKey } from "../admin/settings-schema.js";
+import { hasChatSettingsApplier, schemaKey } from "../admin/settings-schema.js";
 
 export const CHAT_SETTINGS_ENTRY = "tron.settings.v1";
 
@@ -81,7 +81,7 @@ function readChatSnapshots(entries: readonly SessionEntry[], field: "fixed" | "r
 export function changeChatSetting(settings: Record<string, unknown>, id: string, value: unknown): Record<string, unknown> {
   const key = schemaKey(id);
   const binding = key.layers.chat;
-  if (!hasRuntimeRequestApplier(key) || binding?.store !== "chat-settings") {
+  if (!hasChatSettingsApplier(key) || binding?.store !== "chat-settings") {
     throw new GatewayError("unsupported", "This setting has no live Chat applier");
   }
   const next = structuredClone(settings);

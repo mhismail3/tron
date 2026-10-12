@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { KEYS, SECTIONS, builtinValue, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, SECTIONS, builtinValue, chatLayerApplies, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_LABELS, type FormatContext, type LayerId, type Qualifiers } from "./settings-types.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
 import { instanceId } from "./settings-outside.js";
@@ -274,7 +274,7 @@ function resolveInstance(
     for (const layer of BOTTOM_UP) {
       if (layer === "builtin" || !stores.layers.includes(layer)) continue;
       const binding = key.layers[layer as Exclude<LayerId, "builtin">];
-      if (!binding) continue;
+      if (!binding || (layer === "chat" && !chatLayerApplies(key, stores.layers.includes("profile")))) continue;
       const value = readBinding(stores, layer, binding, qualifiers, qualifiedOnly, key.id);
       if (value === undefined) continue;
       found.push({ layer, value, ...layerApplied(stores, layer) });
@@ -309,6 +309,8 @@ function resolveInstance(
       continue;
     }
     if (!key.layers[layerId as Exclude<LayerId, "builtin">]) continue;
+    // Only the Home chat has the Profile layer (doc 3.3); it has no Chat compaction layer.
+    if (layerId === "chat" && !chatLayerApplies(key, stores.layers.includes("profile"))) continue;
     const entry = shown.find(candidate => candidate.layer === layerId);
     layerValues.push(entry
       ? { layer: layerId, value: entry.value, display: format(entry.value), applied: entry.applied, ...(entry.reason ? { reason: entry.reason } : {}) }

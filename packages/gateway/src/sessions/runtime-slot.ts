@@ -173,7 +173,7 @@ import { resourceDistribution } from "./resource-distribution.js";
 import { boundedUtf8Prefix } from "../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
 import type { ChatStore, FixedSetting } from "../admin/settings-resolver.js";
-import { KEYS, schemaKey } from "../admin/settings-schema.js";
+import { KEYS, hasCompactionApplier, schemaKey } from "../admin/settings-schema.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
 // admitted the first property from the exact-owned status file. A payload key
@@ -1426,6 +1426,11 @@ export class RuntimeSlot {
     }
     const receiptId = randomUUID();
     await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings, requestPins, fixed }), receiptId);
+    // The compaction projection follows the Chat value at once; its budgets
+    // reach the SDK at the next idle admission (refreshCompactionPolicy).
+    if (hasCompactionApplier(schemaKey(key))) {
+      try { this.compactionPolicies.get(this.runtime.session)?.refresh(); } catch { /* Published warning is authoritative. */ }
+    }
     this.revision += 1;
     this.publishSnapshot();
     return this.revision;
@@ -2298,7 +2303,9 @@ export class RuntimeSlot {
         ? this.dependencies.homeRequestPolicy(sessionManager.getSessionId())
         : undefined;
       const homeRequestPolicy = this.homeRequestPolicy;
-      compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir, home ? { disabled: true } : {});
+      const compactionSession = created.session;
+      compactionPolicy = new CompactionOperationPolicy(compactionSession, this.dependencies.agentDir,
+        home ? { disabled: true } : { chat: () => readChatSettings(compactionSession.sessionManager.getBranch()) });
       const providerStream = created.session.agent.streamFunction;
       let admittedSettings: ReturnType<SettingsManager["getSettings"]> | undefined;
       const baseStream: StreamFn = (model, context, options) => {

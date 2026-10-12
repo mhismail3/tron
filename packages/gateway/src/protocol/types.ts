@@ -899,7 +899,7 @@ export interface CompactionConfiguration {
   keepRecentTokens: number;
   thinkingLevel: "inherit" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   instructions: string;
-  source: Record<"enabled" | "reserveTokens" | "keepRecentTokens" | "thinkingLevel" | "instructions", "global" | "project" | "default">;
+  source: Record<"enabled" | "reserveTokens" | "keepRecentTokens" | "thinkingLevel" | "instructions", "chat" | "global" | "project" | "default">;
 }
 export interface ResolvedCompactionConfiguration extends CompactionConfiguration {
   model?: ModelRef;

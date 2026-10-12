@@ -259,27 +259,27 @@ export const KEYS: readonly KeyDeclaration[] = [
   // Context -------------------------------------------------------------
   {
     id: "context.compaction.enabled", group: "context", subgroup: "Compaction", type: types.boolean(),
-    // No Chat layer: compaction policy reads the Project and Mac stores at each
-    // compaction boundary, and no Chat applier exists to honour a per-chat value.
-    layers: both(pi("compaction", "enabled")), builtin: true, timing: "live", effect: "next-compaction", floor: "quiet",
+    // The Chat layer is applied by the session's CompactionOperationPolicy, which
+    // overlays this chat's `tron.settings.v1` values on Project and Mac (decision 9).
+    layers: chatPi("compaction", "enabled"), builtin: true, timing: "live", effect: "next-compaction", floor: "quiet",
     writers: ANY_ACTOR, label: "Automatic compaction", help: "Summarize older conversation when the context fills.",
     order: 10, importance: "essential", control: "toggle",
   },
   {
     id: "context.compaction.reserveTokens", group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(1_024, 1_000_000, "tokens"),
-    layers: both({ store: "pi", path: ["compaction", "reserveTokens"], qualified: ["compaction", "modelOverrides", "{model}", "reserveTokens"] }),
+    layers: { chat: { store: "chat-settings", path: ["compaction", "reserveTokens"] }, ...both({ store: "pi", path: ["compaction", "reserveTokens"], qualified: ["compaction", "modelOverrides", "{model}", "reserveTokens"] }) },
     builtin: 16_384, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
     label: "Reserve", help: "Tokens kept free for the response before compaction starts.", order: 20, importance: "advanced", control: "number",
   },
   {
     id: "context.compaction.keepRecentTokens", group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(0, 1_000_000, "tokens"),
-    layers: both({ store: "pi", path: ["compaction", "keepRecentTokens"], qualified: ["compaction", "modelOverrides", "{model}", "keepRecentTokens"] }),
+    layers: { chat: { store: "chat-settings", path: ["compaction", "keepRecentTokens"] }, ...both({ store: "pi", path: ["compaction", "keepRecentTokens"], qualified: ["compaction", "modelOverrides", "{model}", "keepRecentTokens"] }) },
     builtin: 20_000, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
     label: "Keep recent", help: "Tokens of recent conversation kept verbatim after compaction.", order: 30, importance: "advanced", control: "number",
   },
   {
     id: "context.compaction.instructions", group: "context", subgroup: "Compaction", type: types.text(COMPACTION_POLICY_INSTRUCTION_LIMIT, { raw: true }),
-    layers: both(pi("compaction", "instructions")), timing: "live", effect: "next-compaction", floor: "notify", writers: ["ui", "home"],
+    layers: chatPi("compaction", "instructions"), timing: "live", effect: "next-compaction", floor: "notify", writers: ["ui", "home"],
     label: "Summary instructions", help: "Extra instructions for compaction summaries.", order: 40, importance: "advanced", control: "text",
   },
   {
@@ -505,6 +505,23 @@ export function builtinValue(key: KeyDeclaration, qualifiers: Partial<Record<Qua
 export function hasRuntimeRequestApplier(key: KeyDeclaration): boolean {
   return key.layers.chat?.store === "chat-settings" && (key.timing === "fixed" || (key.group === "run" && key.timing === "live")
     || (key.effect === "next-request" && typeof key.timing !== "string"));
+}
+
+/** Compaction keys reach a chat through its CompactionOperationPolicy at the
+ * next compaction boundary, not through the request settings. */
+export function hasCompactionApplier(key: KeyDeclaration): boolean {
+  return key.layers.chat?.store === "chat-settings" && key.effect === "next-compaction";
+}
+
+/** Home keeps its own history with SDK compaction off, so the Home chat has no
+ * Chat layer for compaction keys: it is neither served nor writable there. */
+export function chatLayerApplies(key: KeyDeclaration, home: boolean): boolean {
+  return !(home && hasCompactionApplier(key));
+}
+
+/** Whether a Chat-layer value of this key has a runtime owner that honours it. */
+export function hasChatSettingsApplier(key: KeyDeclaration): boolean {
+  return hasRuntimeRequestApplier(key) || hasCompactionApplier(key);
 }
 
 export function timingFor(key: KeyDeclaration, direction: Direction): Timing {

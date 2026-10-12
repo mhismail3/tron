@@ -198,7 +198,7 @@ schema data (F1); no row here is an exception to a rule.
 | `modelContextWindows` → `model.contextWindow[model]` | Model | Chat (session entry), Profile, Project, Mac | Fixed |
 | `enabledModels` → `model.offered` | Model | Project, Mac | Live (picker filter only) |
 | `compaction.thinkingLevel` → `model.thinking[role=summarizer]` | Model | Project, Mac | Live |
-| `compaction.enabled`, `reserveTokens`, `keepRecentTokens`, `instructions` | Context | Project, Mac | Live |
+| `compaction.enabled`, `reserveTokens`, `keepRecentTokens`, `instructions` | Context | Chat (not Home), Project, Mac | Live |
 | `branchSummary.reserveTokens` | Context | Project, Mac | Live |
 | `images.autoResize` | Context | Chat, Project, Mac | Fixed |
 | `images.blockImages` → `context.images.block` | Context | Chat, Project, Mac | Narrow live, widen fixed ([decision 15](#101-decisions)) |
@@ -545,8 +545,8 @@ Provenance is not a field. It is part of every resolved value
 | `model.thinking` | model | `role`, `model` | chat → `thinking_level_change`; profile (Home chat, and `role=worker` built-in `{ sameAs: "home" }`); project/mac → `defaultThinkingLevel`, `modelThinkingLevels`; summarizer → `compaction.thinkingLevel` | fixed (summarizer: live) / next-turn | quiet | ui, home, agent |
 | `model.contextWindow` | model | `model` | chat → `tron.context-window.v1`; project/mac → `modelContextWindows` | fixed / next-turn | quiet | ui, home, agent |
 | `model.ref[role=memory]` | model | `role` | profile → `profile.json` (`memory.model`) | live / next memory pass | notify | ui, home |
-| `context.compaction.reserveTokens` | context | `model` | project/mac → `compaction.reserveTokens`, `compaction.modelOverrides` | live / next compaction | quiet | ui, home, agent |
-| `context.compaction.instructions` | context | | project/mac → `compaction.instructions` | live / next compaction | notify | ui, home |
+| `context.compaction.reserveTokens` | context | `model` | chat → `tron.settings.v1`; project/mac → `compaction.reserveTokens`, `compaction.modelOverrides` | live / next compaction | quiet | ui, home, agent |
+| `context.compaction.instructions` | context | | chat → `tron.settings.v1`; project/mac → `compaction.instructions` | live / next compaction | notify | ui, home |
 | `context.images.block` | context | | chat; project/mac → `images.blockImages` | narrow live, widen fixed / next-request | approve / quiet | ui, home, agent |
 | `tools.active` | tools | | chat → active tool set; profile; project/mac → `defaultTools` | fixed / next-turn | notify / quiet | ui, home, agent |
 | `tools.codemode.mode` | tools | | project/mac → `codemode.mode` | fixed / new-chat | notify / quiet | ui, home |
@@ -722,9 +722,16 @@ above leave open:
   runtimeGeneration, model?, revision? }`, the runtime the client read, and the
   slot lane's existing guards check it; `expected` is the value check for every
   other store.
-- **Stores without an applier yet.** `tron.settings.v1` (Chat-layer Run and
-  compaction values) arrives with slice 7, and `profile.json` with slice 9; a
-  change to those layers is refused as unsupported until then.
+- **Chat-layer appliers.** `tron.settings.v1` holds a chat's explicit Run and
+  compaction values. Run keys reach the SDK at each idle request admission
+  (`RuntimeSlot.applyLiveRunSettings`); compaction keys reach it through the
+  session's `CompactionOperationPolicy`, which overlays the chat's values on the
+  Project and Mac stores at every refresh and applies the budgets at the next
+  idle admission, so a summary already prepared is never changed. The summary
+  thinking level stays Project/Mac. Home keeps its own history with SDK
+  compaction off, so a Home Chat compaction value is refused as unsupported
+  rather than shown as effective. A key whose Chat binding has no such owner is
+  refused the same way.
 - **Keys with no writer.** `setup.sessionDir` declares no writer: the runtime
   fixes its session folder under the ownership lock at start, so it changes only
   while the Gateway is stopped.
@@ -733,9 +740,6 @@ above leave open:
 - **Unparseable Project files.** A `.pi/settings.json` that cannot be parsed is an
   unreadable, empty layer in `settings.resolve` (`projectUnreadable`), and a write
   to it is a `failed` entry with the file untouched.
-- **The iPhone's hand-built screens.** Until the generic renderer replaces them,
-  their pi-document patches are turned into key changes on the device
-  (`SettingsPatchChanges`); an unknown path is refused, never dropped.
 
 Slice 5 enforces the tier ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)).
 
