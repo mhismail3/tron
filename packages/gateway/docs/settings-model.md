@@ -374,6 +374,14 @@ count as explicit overrides in section summaries. A fixed-key Chat unset means
 and applies that exact value through the normal audit/approval path. Subsequent
 default changes still cannot move it. The generic iOS renderer understands this
 served action, but adoption in Manage Session/Home remains a separate slice.
+
+For `context.images.block`, a live narrowing default is read at request admission
+while an unapproved widening remains pinned. After a maintainer tap or recorded
+approval changes a Mac or Project default to unblocked, the applied change releases
+the inherited image-block pins in already-open chats at that scope. The release
+is a branch-local canonical settings entry, so cold resume retains it; an explicit
+Chat-layer value is never removed. A Mac change reaches all open chats, while a
+Project change reaches only chats with that exact Project root.
 Image auto-resize uses its fixed snapshot at the actual conversion boundary.
 Resources still apply through Reload. Compaction changes refresh open chats
 through `GatewayService.settingsChanged`.

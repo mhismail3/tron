@@ -383,7 +383,7 @@ export interface SettingsWriters {
 /** Who hears about changes once they happen. The Gateway service registers one:
  * after-apply effects and broadcasts, and the maintainer's pushes (doc 5.4, 5.5). */
 export interface SettingsObserver {
-  applied(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; tier: Tier; reason?: string; approved?: true }): void;
+  applied(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; tier: Tier; reason?: string; approved?: true }): void | Promise<void>;
   approvals(event: { kind: "pending" | "resolved"; request: ApprovalRequest }): void;
 }
 
@@ -473,7 +473,7 @@ export class SettingsChangePath {
       if (held) return this.hold(target, planned, context, tier);
       const applied = await this.applyAll(target, stores, planned, context, entry => entry);
       const changes = this.outcomes(applied, "applied");
-      this.observer?.applied(target, changes, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
+      await this.observer?.applied(target, changes, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
       return { status: "applied" as const, tier, changes };
     });
   }
@@ -575,7 +575,7 @@ export class SettingsChangePath {
       }
       const settled = await this.approvals.settle(requestId, "approved", this.now());
       const changes = this.outcomes(applied, "approved");
-      this.observer?.applied(request.target, changes, { actor: request.actor, tier: "approve", ...(request.reason ? { reason: request.reason } : {}), approved: true });
+      await this.observer?.applied(request.target, changes, { actor: request.actor, tier: "approve", ...(request.reason ? { reason: request.reason } : {}), approved: true });
       this.observer?.approvals({ kind: "resolved", request: settled });
       return { status: "approved" as const, tier: "approve" as const, changes };
     });

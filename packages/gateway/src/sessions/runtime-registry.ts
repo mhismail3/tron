@@ -3700,6 +3700,13 @@ export class RuntimeRegistry {
     }
   }
 
+  /** An approved/tapped image-policy widening releases only the fixed inherited
+   * pin in already-open chats at the affected default scope. */
+  async releaseInheritedImageBlock(projectCwd?: string): Promise<void> {
+    const slots = [...this.slots.values()].filter(slot => !slot.isDisposed && (projectCwd === undefined || slot.cwd === projectCwd));
+    await Promise.all(slots.map(slot => slot.releaseInheritedImageBlock()));
+  }
+
   async commitProjectReload(cwdInput: string): Promise<void> {
     const cwd = await this.options.trust.canonicalDirectory(cwdInput);
     await this.mutex.run(() => {

@@ -2378,7 +2378,7 @@ export class GatewayService {
 
   /** After-apply effects by each key's effect point, then the broadcast (doc 5.2
    * step 6), and for a notify-tier change an agent made, the push with Undo (5.4). */
-  private settingsChanged(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; tier: string; reason?: string; approved?: true }): void {
+  private async settingsChanged(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; tier: string; reason?: string; approved?: true }): Promise<void> {
     if (changes.length === 0) return;
     if (context.tier === "notify" && context.actor.kind !== "ui" && !context.approved) {
       const what = changes.map(change => schemaKey(change.key).label).join(", ");
@@ -2386,6 +2386,14 @@ export class GatewayService {
         `${actorLabel(context.actor)} changed ${what}${context.reason ? `: ${context.reason}` : ""}. Undo it in Tron.`);
     }
     const cwd = target.kind === "project" ? target.cwd : undefined;
+    const imageChanged = changes.some(change => change.key === "context.images.block");
+    if (imageChanged && (context.actor.kind === "ui" || context.approved === true)
+      && (target.kind === "mac" || target.kind === "project")) {
+      const resolved = await this.dependencies.settingsModel.resolve(target, undefined, ["context.images.block"]);
+      if (resolved.keys[0]?.value === false) {
+        await this.dependencies.sessions.releaseInheritedImageBlock(target.kind === "project" ? target.cwd : undefined);
+      }
+    }
     for (const change of changes) {
       const key = schemaKey(change.key);
       if (key.effect === "reload" && change.layer === "mac" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();

@@ -422,6 +422,42 @@ describe("settings risk gate", () => {
     expect((await observe()).images).toBeGreaterThan(0);
     transcript.push({ case: `${kind} directional image request policy`, steps: [...captures, { withinTurn, lowered }] });
   });
+  it.each(["mac", "project"] as const)("an approved %s image-block widening releases only inheriting open chats", async layer => {
+    const f = await fixture();
+    const target = layer === "mac" ? { kind: "mac" } as const : { kind: "project", cwd: f.project } as const;
+    const initialLayer = layer === "mac" ? "mac" : "project";
+    const setDefault = (value: boolean) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target, changes: [{ key: "context.images.block", layer: initialLayer, op: "set", value }],
+    });
+    await setDefault(true);
+    const inheriting = await f.chat();
+    const explicit = await f.chat();
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: explicit.id },
+      fence: { runtimeGeneration: explicit.snapshot().runtimeGeneration, model: MODEL },
+      changes: [{ key: "context.images.block", layer: "chat", op: "set", value: true }] });
+    const unrelated = layer === "project" ? await f.registry.create(f.other).then(async slot => { await slot.setModel(MODEL.provider, MODEL.id); return slot; }) : undefined;
+    const image = { type: "image" as const, mimeType: "image/png", data: syntheticPng(1, 1).toString("base64") };
+    const images = async (slot: typeof inheriting) => {
+      let count = -1;
+      f.faux.setResponses([async context => {
+        count = context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === "image").length;
+        return fauxAssistantMessage("observed image policy");
+      }]);
+      await slot.prompt("observe image policy", [image]);
+      await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "image request settled");
+      return count;
+    };
+    expect(await images(inheriting)).toBe(0);
+    expect(await images(explicit)).toBe(0);
+    if (unrelated) expect(await images(unrelated)).toBeGreaterThan(0);
+    const widened = await setDefault(false);
+    expect(widened).toMatchObject({ status: "applied", tier: "approve" });
+    expect(await images(inheriting)).toBeGreaterThan(0);
+    expect(await images(explicit)).toBe(0);
+    if (unrelated) expect(await images(unrelated)).toBeGreaterThan(0);
+    transcript.push({ case: `${layer} image widening`, result: { widened, inherited: await images(inheriting), explicit: await images(explicit), unrelated: unrelated ? await images(unrelated) : null } });
+  });
+
   it("open chats follow live retry defaults while a canonical Chat override stays local and can be unset", async () => {
     const f = await fixture();
     const mac = (maxRetries: number) => f.service.invoke(phone(), "settings.change", {

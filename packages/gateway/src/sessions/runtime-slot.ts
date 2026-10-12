@@ -1425,6 +1425,26 @@ export class RuntimeSlot {
     return this.revision;
   }
 
+  /** Drop a fixed widening pin only after an approved/tapped default change.
+   * The canonical chat entry makes the release survive a cold resume; explicit
+   * Chat values remain the source of truth and are never touched. */
+  async releaseInheritedImageBlock(): Promise<void> {
+    await this.lane.run(async () => {
+      if (this.isDisposed) return;
+      const branch = this.sessionManager.getBranch();
+      const pins = readChatRequestPins(branch);
+      const pin = pins["context.images.block"];
+      if (!pin || pin.value !== true) return;
+      const explicit = readChatSettings(branch);
+      const images = explicit.images;
+      if (images && typeof images === "object" && Object.prototype.hasOwnProperty.call(images, "blockImages")) return;
+      delete pins["context.images.block"];
+      const receiptId = randomUUID();
+      await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId,
+        settings: explicit, requestPins: pins, fixed: readChatFixedSettings(branch) }), receiptId);
+    });
+  }
+
   async setChatRunSetting(key: string, value: unknown, initiatingWorkToken?: string,
     expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, allowFixedDirection = false, fixedAt?: FixedSetting): Promise<number> {
     return this.lane.run(async () => {
