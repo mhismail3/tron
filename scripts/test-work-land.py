@@ -18,11 +18,25 @@ def fixture_gh() -> None:
     state = json.loads(path.read_text())
     args = sys.argv[1:]
     response = None
+    refusal = None
     if args[:2] == ["repo", "view"]:
         print("fixture/project")
         return
     elif args[:2] == ["pr", "list"]:
         response = []
+    elif args[:2] == ["api", "graphql"]:
+        query = json.load(sys.stdin)["query"]
+        assert "markPullRequestReadyForReview" in query, query
+        state["events"].append("ready-mutation")
+        if state["ready_refused"]:
+            refusal = "GraphQL: Pull request is not in a state that can be marked ready"
+        else:
+            if not state["ready_ignored"]:
+                state["draft"] = False
+            response = {"data": {"markPullRequestReadyForReview": {"pullRequest": {"isDraft": state["draft"]}}}}
+    elif args[:3] == ["api", "--paginate", "--slurp"]:
+        assert args[3].endswith("/sub_issues?per_page=100"), args
+        response = state["sub_issue_pages"]
     elif args[:3] == ["api", "-X", "GET"]:
         endpoint = args[3]
         if "pulls?state=open" in endpoint:
@@ -31,13 +45,21 @@ def fixture_gh() -> None:
         elif endpoint.endswith("/pulls/7"):
             observed = state["first_head"] if state["stale_forever"] else state["actual_head"]
             response = {"number": 7, "title": "fixture", "head": {"sha": observed}}
+        elif "/issues/" in endpoint:
+            response = {"number": int(endpoint.rsplit("/", 1)[1]), "title": "Fixture claimed issue",
+                        "state": "open", "labels": []}
         else:
             raise AssertionError(args)
+    elif args[:3] == ["api", "-X", "PATCH"] and "/issues/" in args[3]:
+        request = json.load(sys.stdin)
+        state["events"].append("issue-patch")
+        response = {"number": int(args[3].rsplit("/", 1)[1]), "state": request.get("state", "open")}
     elif args[:3] == ["api", "-X", "PATCH"]:
         request = json.load(sys.stdin)
         actual = git(state, "rev-parse", f"refs/heads/{state['branch']}")
         state["actual_head"] = actual
         state["patch_count"] += 1
+        state["events"].append("pull-patch")
         if state["patch_count"] == 1:
             # Advance main after the first publication. land must remerge and republish.
             advance_main(state)
@@ -56,11 +78,23 @@ def fixture_gh() -> None:
         state["last_title"] = request["title"]
     elif args[:3] == ["api", "-X", "PUT"]:
         request = json.load(sys.stdin)
-        state["merge_sha"] = request["sha"]
-        response = {"sha": "a" * 40}
+        state["events"].append("merge")
+        if state["draft"]:
+            # GitHub refuses a squash merge of a draft pull request.
+            refusal = "HTTP 405: Pull request is still a draft"
+        else:
+            state["merge_sha"] = request["sha"]
+            response = {"sha": "a" * 40}
     else:
         raise AssertionError(f"Unexpected fixture gh invocation: {args}")
+    if isinstance(response, dict) and "head" in response:
+        response = {**response, "draft": state["draft"], "node_id": "PR_fixture_7"}
+    elif isinstance(response, list) and response and isinstance(response[0], dict) and "head" in response[0]:
+        response = [{**item, "draft": state["draft"], "node_id": "PR_fixture_7"} for item in response]
     path.write_text(json.dumps(state))
+    if refusal:
+        print(f"gh: {refusal}", file=sys.stderr)
+        sys.exit(1)
     print(json.dumps(response))
 
 
@@ -133,7 +167,8 @@ def run() -> None:
             run_git("push", "origin", "HEAD:refs/heads/feature")
             state = {"root": str(root), "repo": str(repo), "remote": str(remote), "branch": "feature", "patch_count": 0,
                      "first_head": run_git("rev-parse", "HEAD"), "actual_head": "", "merge_sha": None,
-                     "foreign_on_second_patch": False, "stale_forever": False}
+                     "foreign_on_second_patch": False, "stale_forever": False, "events": [], "draft": False,
+                     "ready_refused": False, "ready_ignored": False, "sub_issue_pages": [[]]}
             (root / "github.json").write_text(json.dumps(state))
             summary = root / "summary.md"
             summary.write_text("Safely publish the verified head.\n")
@@ -192,7 +227,63 @@ def run() -> None:
             assert result.returncode != 0 and "could not confirm remote branch" in result.stderr, evidence[-1]
             assert "publication state is uncertain" in result.stderr
             assert json.loads((root / "github.json").read_text())["merge_sha"] is None
-        print(f"Passed {len(evidence)} real-CLI land publication assertions; evidence: {artifact}")
+
+            # Draft and epic journeys. Each branch is published once without a base advance (patch_count starts at 1),
+            # so the recorded events are exactly the land writes under test.
+            # The unavailable-remote journey repointed origin at a missing path; restore it for these cases.
+            run_git("remote", "set-url", "origin", str(remote))
+
+            def land_case(branch: str, extra: list, **overrides) -> tuple:
+                run_git("checkout", "-b", branch, "origin/main")
+                run_git("commit", "--allow-empty", "-m", f"{branch} change")
+                run_git("push", "origin", f"HEAD:refs/heads/{branch}")
+                case = {"root": str(root), "repo": str(repo), "remote": str(remote), "branch": branch,
+                        "patch_count": 1, "first_head": run_git("rev-parse", "HEAD"), "actual_head": "",
+                        "merge_sha": None, "foreign_on_second_patch": False, "stale_forever": False,
+                        "events": [], "draft": False, "ready_refused": False, "ready_ignored": False,
+                        "sub_issue_pages": [[]], **overrides}
+                (root / "github.json").write_text(json.dumps(case))
+                completed = subprocess.run([*command, *extra], cwd=repo, env=env, capture_output=True, text=True, timeout=90)
+                return completed, json.loads((root / "github.json").read_text()), case["first_head"]
+
+            completed, after, _ = land_case("feat/866-draft-refused", [], draft=True)
+            evidence.append({"case": "draft without --ready refuses before merge", "exit": completed.returncode,
+                             "stdout": completed.stdout, "stderr": completed.stderr, "events": after["events"]})
+            assert completed.returncode != 0 and "--ready" in completed.stderr, evidence[-1]
+            assert "merge" not in after["events"] and "ready-mutation" not in after["events"], evidence[-1]
+            assert "issue-patch" not in after["events"] and after["draft"] is True, evidence[-1]
+
+            completed, after, head = land_case("feature-ready", ["--ready"], draft=True)
+            evidence.append({"case": "--ready marks the draft ready, then merges the verified head", "exit": completed.returncode,
+                             "stdout": completed.stdout, "stderr": completed.stderr, "events": after["events"]})
+            assert completed.returncode == 0 and "merged: " in completed.stdout, evidence[-1]
+            assert after["events"].index("ready-mutation") < after["events"].index("merge"), evidence[-1]
+            assert after["merge_sha"] == head and after["draft"] is False, evidence[-1]
+            audit = (repo / ".git" / "work" / "github-writes.jsonl").read_text()
+            assert '"operation":"graphql.mutation"' in audit, audit
+
+            completed, after, _ = land_case("feature-ready-refused", ["--ready"], draft=True, ready_refused=True)
+            evidence.append({"case": "refused ready mutation merges nothing", "exit": completed.returncode,
+                             "stdout": completed.stdout, "stderr": completed.stderr, "events": after["events"]})
+            assert completed.returncode != 0 and "refused to mark pull request #7 ready" in completed.stderr, evidence[-1]
+            assert "merge" not in after["events"] and after["draft"] is True, evidence[-1]
+
+            completed, after, _ = land_case("feature-ready-ignored", ["--ready"], draft=True, ready_ignored=True)
+            evidence.append({"case": "ready mutation that leaves the PR draft merges nothing", "exit": completed.returncode,
+                             "stdout": completed.stdout, "stderr": completed.stderr, "events": after["events"]})
+            assert completed.returncode != 0 and "still a draft after marking it ready" in completed.stderr, evidence[-1]
+            assert "merge" not in after["events"], evidence[-1]
+
+            completed, after, head = land_case(
+                "feat/867-epic-open-child", [], sub_issue_pages=[[{"number": 868, "state": "closed"}],
+                                                                 [{"number": 869, "state": "open"}]])
+            evidence.append({"case": "merge with an open sub-issue leaves the claimed issue open", "exit": completed.returncode,
+                             "stdout": completed.stdout, "stderr": completed.stderr, "events": after["events"]})
+            assert completed.returncode == 0 and "merged: " in completed.stdout, evidence[-1]
+            assert "merge" in after["events"] and "issue-patch" not in after["events"], evidence[-1]
+            assert ("issue:   left #867 open: sub-issues #869 remain open; "
+                    "close each fulfilled one with work issue close, then the epic") in completed.stdout, evidence[-1]
+        print(f"Passed {len(evidence)} real-CLI land publication and ready/epic assertions; evidence: {artifact}")
     finally:
         artifact.write_text(json.dumps(evidence, indent=2) + "\n")
 
