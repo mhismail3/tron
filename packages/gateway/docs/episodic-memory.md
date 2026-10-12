@@ -456,6 +456,16 @@ report is `test-results/home-activation/report.json`.
 
 ## Retries, spend and blocked states
 
+- **Invalid summary content** (model-written role labels or echoed compactor
+  instructions) receives corrective feedback in the same conversation, sharing
+  the five-attempt size-correction bound. Only valid candidates may be persisted
+  or selected as the shortest answer; a later invalid reply cannot replace an
+  earlier valid oversized candidate. Five invalid replies block with
+  `permanent-failure`; provider/auth failures still follow the rules below.
+  `episodic.summary-rejected` identifies this cause without logging private text.
+  `home-source.e2e.test.ts` proves correction, bounded refusal, persistence across
+  restart and explicit resume, with artifacts under `test-results/home-memory/`.
+
 - **Transient** provider failures (a thrown call, or an error the pinned
   classifier `isRetryableAssistantError` calls retryable) retry after
   `retryMs` (production 10 s, the recipe's `RETRY`) up to `maxRetries`, then the

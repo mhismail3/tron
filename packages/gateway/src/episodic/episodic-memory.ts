@@ -1081,11 +1081,24 @@ export class EpisodicMemory {
     const tries: string[] = [];
     for (let attempt = 0; attempt < EPISODIC_TRIES; attempt += 1) {
       const reply = await this.compactCall(request, stamp);
+      // Formatting failures belong to the same bounded correction conversation
+      // as size failures, not the provider/auth failure path. Never let a rejected
+      // reply enter the shortest-valid candidate set or the durable node store.
+      if (invalidSummaryText(reply)) {
+        this.diagnostic({ event: "episodic.summary-rejected", level: "warning",
+          message: "Episodic summary failed content validation", reason: "invalid-summary",
+          counts: { attempt: attempt + 1, limit: EPISODIC_TRIES } });
+        request = withFeedback(request, reply,
+          "Output only the line of memory content for the original input. Do not add source-role labels or copy summarizer instructions or correction feedback. Tron attaches attribution from the canonical source.");
+        continue;
+      }
       tries.push(reply);
       if (utf8Bytes(reply) <= this.limits.nodeBytes || attempt + 1 >= EPISODIC_TRIES) break;
       request = withFeedback(request, reply, sizeFeedback(reply, this.limits.nodeBytes));
     }
-    // Keep the shortest try (gist §4.3): a stubborn node keeps a line a few
+    if (tries.length === 0) throw new EpisodicBlockedSignal({ reason: "permanent-failure",
+      detail: `the compactor echoed role labels or summarizer repair instructions after ${EPISODIC_TRIES} correction attempts` });
+    // Keep the shortest valid try (gist §4.3): a stubborn node keeps a line a few
     // bytes over, which is fine because the view measures real sizes.
     return tries.reduce((shortest, line) => utf8Bytes(line) < utf8Bytes(shortest) ? line : shortest, tries[0]!);
   }
@@ -1115,9 +1128,6 @@ export class EpisodicMemory {
       // Durable before the next call: a crash must not lose recorded spend.
       await this.saveState();
       const text = summarizerText(message);
-      if (invalidSummaryText(text)) {
-        throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail: "the compactor echoed role labels or summarizer repair instructions" });
-      }
       const verdict = classifyReply(message);
       if (verdict === "ok") return text;
       if (verdict === "permanent") {
