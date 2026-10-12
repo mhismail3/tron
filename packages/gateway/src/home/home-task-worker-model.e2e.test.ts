@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { SettingsModel } from "../admin/settings-model.js";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type Model, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
 import { OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
+import { CHAT_SETTINGS_ENTRY } from "../sessions/chat-settings.js";
 import { disposeFixtures, fixture, reportCall, TASK_REASONING_MODEL_ID, TASK_VIRTUAL_MODEL_ID } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
@@ -69,11 +73,69 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
   it("runs the worker's provider request on the delegated model and thinking level", async () => {
     const f = await fixture();
     const { observed } = await delegateThroughHome(f, { taskId: "model-thinking", intent: "Finite work", target: f.cwd,
-      model: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID }, thinking: "high" });
+      model: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID }, thinking: "high", reason: "Reasoning is needed for this task" });
     await taskIsTerminal(f, "model-thinking");
     expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "high" }]);
     expect((await f.registry.homeOwner().taskStatus("model-thinking")).workerModel)
       .toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
+  });
+
+  it("resolves typed worker profile fields at delegation and freezes their source on the worker", async () => {
+    const f = await fixture();
+    const settings = new SettingsModel({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway });
+    f.registry.setSettings(settings, {} as never);
+    await writeFile(settings.profilePath, JSON.stringify({ model: { worker: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID } }, thinking: { worker: "max" } }));
+    const { observed } = await delegateThroughHome(f, { taskId: "profile-model", intent: "Finite work", target: f.cwd });
+    await taskIsTerminal(f, "profile-model");
+    expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "high" }]);
+    const task = await f.registry.homeOwner().taskStatus("profile-model");
+    expect(task.intent.text).toContain("Worker choice: model");
+    expect(task.intent.text).toContain("Home profile");
+    expect(task.intent.text).toContain("max clamped to high");
+    const entries = await f.registry.readTaskEvidence(task.sessionId!);
+    const settingsEntry = entries.find(entry => entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY);
+    expect(settingsEntry?.type === "custom" ? settingsEntry.data : undefined).toMatchObject({ fixed: {
+      "model.ref[role=chat]": { from: "delegate", value: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID } },
+      "model.thinking[role=chat]": { from: "delegate", value: "high" },
+    } });
+  });
+
+  it("lets an explicit model override only its field while profile thinking remains", async () => {
+    const f = await fixture();
+    f.registry.setSettings(new SettingsModel({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway }), {} as never);
+    await writeFile(join(f.tronHome, "gateway", "home", "profile.json"), JSON.stringify({ thinking: { worker: "low" } }));
+    const { observed } = await delegateThroughHome(f, { taskId: "fieldwise", intent: "Finite work", target: f.cwd,
+      model: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID }, reason: "This task needs reasoning" });
+    await taskIsTerminal(f, "fieldwise");
+    expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "low" }]);
+  });
+
+  it("clamps profile thinking to the selected model and records an unavailable profile model fallback", async () => {
+    const f = await fixture();
+    const settings = new SettingsModel({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway });
+    f.registry.setSettings(settings, {} as never);
+    await writeFile(settings.profilePath, JSON.stringify({
+      model: { worker: { provider: f.model.provider, id: "removed-profile-model" } }, thinking: { worker: "max" },
+    }));
+    const { observed } = await delegateThroughHome(f, { taskId: "profile-fallback", intent: "Finite work", target: f.cwd });
+    await taskIsTerminal(f, "profile-fallback");
+    expect(observed).toEqual([{ model: f.model.id, reasoning: undefined }]);
+    const task = await f.registry.homeOwner().taskStatus("profile-fallback");
+    expect(task.intent.text).toContain("unavailable; Gateway default used");
+  });
+
+  it("uses the live Home model for a later worker while direct dispatch stays on the worker default", async () => {
+    const f = await fixture();
+    f.registry.setSettings(new SettingsModel({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway }), {} as never);
+    const home = await f.registry.acquire(f.home.sessionId);
+    await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
+    const { observed } = await delegateThroughHome(f, { taskId: "live-home-model", intent: "Finite work", target: f.cwd });
+    await taskIsTerminal(f, "live-home-model");
+    expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: undefined }]);
+    const direct = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "ordinary-default-control", intent: "Finite work", target: f.cwd });
+    await direct.completion;
+    const worker = await f.registry.acquire(direct.sessionId);
+    expect(worker.snapshot().model).toEqual({ provider: f.model.provider, id: f.model.id });
   });
 
   it("keeps the Gateway default model when the delegation names none", async () => {
@@ -147,7 +209,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
   it("returns the refusal to Home as a delegate error and creates no task", async () => {
     const f = await fixture();
     const { refusals } = await delegateThroughHome(f, { taskId: "refused-by-home", intent: "Finite work", target: f.cwd,
-      model: { provider: f.model.provider, id: TASK_VIRTUAL_MODEL_ID } });
+      model: { provider: f.model.provider, id: TASK_VIRTUAL_MODEL_ID }, reason: "Testing invalid routing refusal" });
     expect(refusals).toEqual([expect.stringContaining("is virtual")]);
     expect((await f.registry.homeOwner().taskList({})).items).toEqual([]);
   });

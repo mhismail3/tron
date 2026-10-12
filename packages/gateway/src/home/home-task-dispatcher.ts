@@ -30,7 +30,7 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
 export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
 /** `title` names the worker session; it is never persisted with the task record. */
-export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice { taskId: string; intent: string; target: string; title?: string }
+export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice { taskId: string; intent: string; target: string; title?: string; reason?: string }
 /** The durable record plus the worker's model from its own transcript. The model is
  * projected per read, never persisted with the task. */
 export interface HomeTaskOwnerSettlement {
@@ -164,7 +164,7 @@ export class HomeTaskDispatcher {
   private async startOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle): Promise<HomeTaskHandle> {
     const input = structuredClone(request);
     const keys = Object.keys(input);
-    if (!["taskId", "intent", "target"].every(key => keys.includes(key)) || keys.some(key => !["taskId", "intent", "target", "model", "thinking", "title"].includes(key))
+    if (!["taskId", "intent", "target"].every(key => keys.includes(key)) || keys.some(key => !["taskId", "intent", "target", "model", "thinking", "title", "reason"].includes(key))
       || typeof input.taskId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/u.test(input.taskId)
       || typeof input.intent !== "string" || !input.intent.trim() || Buffer.byteLength(input.intent) > 65536) throw new GatewayError("invalid_request", "Invalid task intent");
     const title = typeof input.title === "string" ? input.title.trim() : undefined;
@@ -209,8 +209,9 @@ export class HomeTaskDispatcher {
       if (title) await slot.rename(title);
       // The slot's own configuration owners record the choice in the worker's transcript
       // before its first prompt. An omitted model keeps the session's default.
-      if (choice.model) await slot.setModel(choice.model.provider, choice.model.id);
-      if (choice.thinking !== undefined) await slot.setThinking(choice.thinking);
+      const fixedAt = (value: unknown) => ({ value, from: "delegate" as const, at: new Date().toISOString(), ref: randomUUID() });
+      if (choice.model) await slot.setModel(choice.model.provider, choice.model.id, undefined, undefined, fixedAt(choice.model));
+      if (choice.thinking !== undefined) await slot.setThinking(choice.thinking, undefined, undefined, fixedAt(choice.thinking));
       task = { ...task, revision: task.revision + 1, lifecycle: "active", sessionId: slot.id, operationId,
         grantRef: authority.kind === "one-use-grant" ? authority.grantId : null,
         scopeRef: authority.kind === "standing-scope" ? authority.scopeId : null };

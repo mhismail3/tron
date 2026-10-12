@@ -1,4 +1,5 @@
 import type { ManagedSubagents } from "./managed-subagents.js";
+import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { createHash, randomUUID } from "node:crypto";
 import { getHeapStatistics } from "node:v8";
 import { realpathSync } from "node:fs";
@@ -2002,7 +2003,7 @@ export class RuntimeRegistry {
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
       homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => this.home.taskTool(sessionId, request),
-      homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => this.home.dispatchTask(sessionId, request),
+      homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => this.dispatchHomeTask(sessionId, request),
       validateTaskMarker: (sessionId: string, marker: unknown) => this.home.validateTaskMarker(sessionId, marker),
       ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),
       homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {
@@ -3036,6 +3037,63 @@ export class RuntimeRegistry {
     const inspection = await this.options.trust.inspect(target);
     if (inspection.effectiveDecision !== true) throw new GatewayError("trust_required", "Home tasks require a trusted project");
     return inspection.cwd;
+  }
+
+  /** Home resolves its typed worker profile at the delegate boundary. The selected
+   * values are copied into this task only; later Home/profile changes cannot retarget it. */
+  private async dispatchHomeTask(sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) {
+    if ((request.model !== undefined || request.thinking !== undefined) && !(request as typeof request & { reason?: string }).reason?.trim()) {
+      throw new GatewayError("invalid_request", "An explicit worker model or thinking choice needs a short reason");
+    }
+    const settings = this.settingsOwners?.model;
+    const homeSlot = await this.acquire(sessionId);
+    const home = homeSlot.snapshot();
+    const resolution = settings ? await settings.resolve({ kind: "home" }, undefined,
+      ["model.ref[role=worker]", "model.thinking[role=worker]"]) : undefined;
+    const profileModel = resolution?.keys.find(key => key.key === "model.ref[role=worker]")?.value as
+      { provider: string; id: string } | { sameAs: "home" } | undefined;
+    const profileThinking = resolution?.keys.find(key => key.key === "model.thinking[role=worker]")?.value as
+      string | { sameAs: "home" } | undefined;
+    const fromProfileModel = request.model === undefined;
+    const fromProfileThinking = request.thinking === undefined;
+    const candidateModel = request.model ?? (profileModel && "provider" in profileModel ? profileModel : home.model);
+    const candidateThinking = request.thinking ?? (typeof profileThinking === "string" ? profileThinking : home.thinkingLevel);
+    let choice: HomeTaskWorkerChoice = {
+      ...(candidateModel ? { model: candidateModel } : {}),
+      ...(candidateThinking && candidateModel ? { thinking: candidateThinking as HomeTaskWorkerChoice["thinking"] } : {}),
+    };
+    let fallback: string | undefined;
+    let clampNote: string | undefined;
+    if (choice.model) {
+      const model = this.options.gatewayModelRuntime?.getModel(choice.model.provider, choice.model.id);
+      const supported = model ? getSupportedThinkingLevels(model) : [];
+      if (fromProfileThinking && choice.thinking && model && supported.length) {
+        const requested = choice.thinking;
+        choice.thinking = clampThinkingLevel(model, requested);
+        if (choice.thinking !== requested) clampNote = `${requested} clamped to ${choice.thinking}`;
+      }
+    }
+    if (fromProfileModel && profileModel && "provider" in profileModel && choice.model) {
+      try { choice = await this.admitTaskWorkerChoice(choice); }
+      catch (error) {
+        const reason = error instanceof GatewayError && error.details && typeof error.details === "object"
+          ? (error.details as { reason?: unknown }).reason : undefined;
+        if (!(error instanceof GatewayError) || !["unavailable-model", "unregistered-model", "virtual-model"].includes(String(reason))) throw error;
+        choice = {};
+        fallback = `Profile worker model ${profileModel.provider}/${profileModel.id} unavailable; Gateway default used`;
+      }
+    }
+    const modelText = choice.model ? `${choice.model.provider}/${choice.model.id}` : "Gateway default";
+    const thinkingText = choice.thinking ?? "Gateway default";
+    const explicitReason = request.model || request.thinking ? (request as typeof request & { reason?: string }).reason!.trim() : undefined;
+    const modelSource = request.model ? `explicit: ${explicitReason}`
+      : fallback ?? (profileModel && "provider" in profileModel ? "Home profile" : "same as Home");
+    const thinkingSource = request.thinking ? `explicit: ${explicitReason}`
+      : fallback ? "Gateway default after profile model fallback"
+        : typeof profileThinking === "string" ? "Home profile" : "same as Home";
+    const choiceNotes = [clampNote].filter(Boolean).join("; ");
+    const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.`;
+    return this.home.dispatchTask(sessionId, { ...request, ...choice, intent: brief });
   }
 
   /** Admits a delegation's model and thinking level against the Gateway's own model
