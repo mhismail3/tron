@@ -963,6 +963,17 @@ TronMobileUITests/TronSubagentParityUITests/<method>` after `build`. The retaine
 VoiceOver certification. The shared Home loading-surface journey remains the
 regression gate for sheet chrome; these card changes do not replace that owner.
 
+||||||| b5232cc63
+
+`TronSmokeUITests/testHomeRowRetainsStatusAcrossRepeatedBackNavigation` drives
+four native returns alternating ordinary and Home chats. The hosted socket holds
+subsequent status responses for four seconds; three screenshot/row samples on
+each return must retain Ready and the enabled target rather than waiting for
+loading to disappear. Attachments `853-simulator-return-<return>-frame-<sample>`
+are a repeatable interaction/frame sequence, not frame-by-frame animation or
+physical-device certification. Existing Home capability, profile-switch and
+mutation journeys qualify authority changes separately.
+
 iOS validation is integration and end-to-end at real boundaries; there is no
 hosted unit-test target. Build the UI-validation products once, then run only
 the journeys that own the change, without rebuilding:
