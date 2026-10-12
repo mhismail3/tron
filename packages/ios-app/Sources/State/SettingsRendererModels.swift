@@ -35,7 +35,7 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
     let control: String
     let note: String?
     let valueKind: String?
-    /// The static choices of a `choice` control.
+    /// Static choices, or field names/labels for a `numberMap` list.
     let options: [SettingsChoice]?
     let range: SettingsRange?
     let optionsSource: SettingsOptionsSource?

@@ -840,7 +840,7 @@ the change's direction, or the maintainer's override of it in
 `<tronHome>/gateway/settings/floors.json` (the key `permissions.floor`, qualified
 by `key` and, for a key whose floor differs by direction, `direction`; only the
 iPhone writes it, and lowering one is its widen direction, floor approve); one
-step more when the requesting run read open-world content; no risk model yet.
+step more when the requesting run read open-world content, then max-composes the optional bounded risk assessment. The typed classifier can only raise; UI taps and dry runs do not dispatch it, and failure/timeout preserves the computed tier. Its bounded disclosure, pricing ceiling and audit basis are owned by settings-model.md §5.4b.
 The iPhone's own change is applied at once whatever its tier. An agent's
 (`home`, `worker`, `agent`) quiet change applies; a notify change applies and
 queues an `explicit` push naming it; an approve request is held: one entry per

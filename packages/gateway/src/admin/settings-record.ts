@@ -35,6 +35,7 @@ export interface TierBasis {
   floorSource: "code" | "override";
   web: boolean;
   risk: Tier | null;
+  riskEvaluation?: { status: "assessed" | "failed" | "timeout"; rationale: string };
 }
 
 export interface GitResult {

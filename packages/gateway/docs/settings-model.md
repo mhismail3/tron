@@ -863,6 +863,36 @@ fixes that 5.4 and 5.5 leave open:
   `before` and `after` and `confirm`; a dry run of the maintainer's own change
   returns an approve-tier change's `confirm` text for his row to show first.
 
+### 5.4b Implemented: bounded risk assessment
+
+Before applying a non-UI request, the gate may ask the configured Jev classifier
+through `SettingsRiskEvaluator` and the existing typed decision adapter. UI taps
+and dry-run validation do not dispatch it. An absent/unconfigured classifier,
+failure or timeout leaves the deterministic tier intact. The gate always uses
+`max(floor + web, assessment)`, including a floor the maintainer lowered; a
+classifier can never grant approval.
+
+A whole request shares a 1.5-second classification deadline. Each dispatch uses
+the adapter's conservative 0.2688-cent ceiling; the existing 50-change bound
+therefore caps the request at 13.44 cents. There is no retry, alternate provider,
+or background classification after the gate. This is separate from task-budget
+semantics. Deployment with a configured classifier enables this gate; these
+changes do not configure credentials or alter any live installation.
+
+Only schema key/layer, actor kind, effective floor/direction/web mark, a bounded
+redacted reason and a lossy diff are disclosed. Secret-typed values are absent;
+all other string/object values are withheld and arrays expose only cardinality.
+No target object, credential store, transcript, actor IDs or full stores are read or attached.
+Both tier and rationale are typed choices; audit records the returned tier,
+fixed-vocabulary rationale and assessed/failed/timeout state in
+`tierBasis.riskEvaluation`, never provider exception text.
+
+The real Gateway/RuntimeRegistry settings-change journey proves a raise holds
+the write pending approval, a lower answer preserves the maintainer's lowered
+floor and web escalation, failure/timeout retain the base tier, UI and
+a mixed bundle containing an unauthorized write does not dispatch at all, and value/reason secrets are withheld.
+Its bounded transcript remains `test-results/settings-change.json`.
+
 ### 5.5 Approvals
 
 Pending changes use the pattern of Home task grants (`home.decideTaskGrant`):
@@ -1293,6 +1323,19 @@ It is the same component with no new Gateway surface.
 
 ### 7.9 Each duplicate resolved to one editor
 
+The executable inventory remains `settings-schema.ts:KEYS`, not a second native
+key list. Model, Context, Tools, Permissions and Run values use the generic
+primitive appropriate to their served type; thinking-token budgets now serve a
+`numberMap` list with field labels and a shared numeric range. Unknown fields
+are refused rather than silently erasing the current map. This is the existing
+thinking-token budget contract, not the undefined task-budget proposal.
+Mac and Project package values retain source/reset rows while their existing
+scoped package owner supplies the sole editor; Project also retains its Hooks
+inventory. `setup.sessionDir` remains intentionally read-only (no admitted
+writer). Role-aware Chat model/thinking/context controls retain the shared
+receipt/revision adapter, while the generic rows own provenance and resets.
+No independent native key vocabulary or raw-JSON editing escape hatch is added.
+
 | Audit | Today | One key, one editor per layer |
 |---|---|---|
 | D1. Model and thinking in six places, with three meanings | Manage Session, Agent Defaults (global or project), New Session, Manage Home chat model, Home memory model, `delegate` arguments | `model.ref` and `model.thinking`, by role. Chat in Manage Session and Manage Home (and New Session at creation), Project in the Project card, Mac in Settings › Model. The worker and memory roles in Manage Home (Profile). `delegate` arguments are turn-level inputs. |
@@ -1332,7 +1375,7 @@ Re-verified against `main` at `b76f6ca80`.
 | `UI/Chat/ChatComposerView.swift:259` context ring | Unchanged: it opens Manage Session in ordinary chats and Manage Home (medium detent) in the Home chat (#748, #799). |
 | `UI/Chat/SessionContextSheet.swift:530-590` model card, thinking and context window; `:649-690` session section | The generic sections plus the Project card, this chat's Changes and the Settings row. |
 | `UI/Chat/HomeSheets.swift:233-291,351` chat model and context window values, memory model | The generic sections, with Profile rows, plus Home's Changes. |
-| Implemented: `UI/Settings/SettingsView.swift` | Mac-only schema sections with native account, package and Setup flows; device-only preferences under This iPhone. Global/Project scope pickers and superseded Mac editors are removed. Changes remains a separate implementation slice. |
+| Implemented: `UI/Settings/SettingsView.swift` | Mac-only schema sections with native account, package and Setup flows; device-only preferences under This iPhone. Global/Project scope pickers and superseded Mac/floor editors are removed. Changes opens the shared managed feed with filtering, scoped approvals, details, safe undo and actor/task navigation. |
 | `UI/Settings/AgentConfigurationControls.swift` | Thin layer adapters over the served control primitives. Context-window and generic numbers share `SettingsNumberSlider.swift` and `SettingsNumberSliderScale.swift`; thinking shares `SettingsChoiceSlider.swift`. All use `SettingsConfigurationValueRow.swift`. Model catalog adoption remains with the surface migration. |
 | `UI/Chat/NewSessionSheet.swift:94-96,339-343`, `NewSessionConfigurationOwner.swift` | Generic Model rows at the new chat's Chat layer, with badges. |
 | Implemented: dashboard workspace headers and New Session's workspace row | Open the same `UI/Chat/ProjectSettingsSheet.swift` as Manage Session. No-chat Project default inheritance is tested at the native and real RuntimeRegistry boundaries. Separate root, outside changes and per-key git-state acceptance still depend on #764. |
@@ -1344,8 +1387,9 @@ planned for it.
 ## 9. Slices
 
 Each slice is a Proposed issue under epic #758; the maintainer moves a slice to Ready.
-Slices land on `main` one at a time, in their blocked-by order, with no
-integration branch ([decision 16](#101-decisions)). Size is S, M or L. Slice 14
+The maintainer-approved #758 integration branch collects these dependent slices;
+individual acceptance remains explicit and every required dependency must be
+satisfied before its draft integration PR can land. Size is S, M or L. Slice 14
 was added after the first numbering; it lands after slice 4 and before slice 8.
 
 | # | Slice | Size | Area | Depends on | Issue |
@@ -1408,7 +1452,7 @@ refines. The sections above already reflect them.
 | 13 | Outside project changes | Notify only on permission-related `.pi/` changes after a pull (Permissions, Tools, hooks, Sources). Now a consequence of F3: an outside change's tier is its key's floor, and only `notify` or `approve` push ([5.6](#56-outside-changes)). |
 | 14 | Project writes | Tron edits a repo's `.pi/` and stages it with `git add`; it never commits, pushes or opens a pull request. Refined by F2 and Q24 to Q27: the file on disk is the layer, and git state is a badge ([5.7](#57-project-writes)). |
 | 15 | Image blocking timing | Turning blocking on applies at once; turning it off waits for the next chat start or an approval. Expressed as per-direction timing in the schema ([3.4](#34-timing)). |
-| 16 | Landing | Slices land on `main` one at a time, in their blocked-by order ([9](#9-slices)). |
+| 16 | Landing | The maintainer-approved #758 integration branch preserves slice dependencies and lands only when all required acceptance is satisfied ([9](#9-slices)). |
 
 **Answers to Q17 to Q27, as consequences**
 

@@ -47,6 +47,11 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
         let floorSource: String
         let web: Bool
         let risk: String?
+        struct Evaluation: Decodable, Equatable, Sendable {
+            let status: String
+            let rationale: String
+        }
+        let riskEvaluation: Evaluation?
     }
     struct GitState: Decodable, Equatable, Sendable {
         let staged: Bool

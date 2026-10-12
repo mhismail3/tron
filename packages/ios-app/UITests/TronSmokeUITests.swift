@@ -1902,6 +1902,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(showsText("6 retries", in: app))
         row.tap()
         XCTAssertTrue(showsText("Key history", in: app))
+        XCTAssertTrue(showsText("Risk evaluation", in: app))
+        XCTAssertTrue(showsText("The deterministic floor is sufficient.", in: app))
         let undo = app.buttons["Undo"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
         undo.tap()
@@ -2197,6 +2199,33 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Edit gamma"].exists)
         XCTAssertFalse(app.buttons["Edit alpha"].exists)
         keepScreenshot(named: "settings-renderer-list-persisted")
+        app.buttons["Done"].tap()
+
+        // A numeric map uses only field names and bounds served by this unknown
+        // fixture schema. Saving preserves untouched fields; Done never writes.
+        let weights = any["settings-row-lab.weights"]
+        tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
+        // The canonical settings row combines its label for accessibility;
+        // target that semantic row's field rather than a nonexistent field label.
+        let blue = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Blue weight")).textFields.firstMatch
+        let red = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Red weight")).textFields.firstMatch
+        XCTAssertTrue(blue.waitForExistence(timeout: 5), app.debugDescription)
+        blue.tap(); blue.typeText("101\n")
+        XCTAssertFalse(app.buttons["Save"].isEnabled, "The served range must constrain representation")
+        blue.tap()
+        blue.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3) + "9\n")
+        XCTAssertTrue(app.buttons["Save"].isEnabled)
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:3", timeout: 5))
+        tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertEqual(red.value as? String, "2")
+        XCTAssertEqual(blue.value as? String, "9")
+        blue.tap(); blue.typeText(XCUIKeyboardKey.delete.rawValue + "7\n")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:3", timeout: 5))
+        tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertEqual(blue.value as? String, "9", "Dismissed draft must not replace the saved numeric map")
+        keepScreenshot(named: "settings-renderer-number-map")
     }
 
     /// The renderer in dark mode at the largest accessibility text size.

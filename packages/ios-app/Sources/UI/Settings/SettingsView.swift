@@ -29,6 +29,7 @@ struct SettingsView: View {
                         target: .object(["kind": .string("mac")]),
                         writeLayer: "mac",
                         embedded: true,
+                        externalControlKeys: ["sources.packages"],
                         sectionSupplement: { AnyView(sectionSupplement($0)) },
                         unresolvedSupplement: AnyView(offlineDestinations)
                     )

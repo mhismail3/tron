@@ -221,6 +221,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         return .object(["entries": .array(entries)])
     }
 
+    private var weights: [String: JSONValue] = ["red": .number(2)]
+
     private func historyEntry() -> JSONValue {
         .object([
             "changeId": .string("fixture-change"), "at": .string("2026-10-11T12:00:00.000Z"),
@@ -228,6 +230,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             "target": .object(["kind": .string("mac")]), "layer": .string("mac"),
             "key": .string("run.retry.maxRetries"), "op": .string("set"),
             "before": .number(4), "after": .number(6), "tier": .string("quiet"), "status": .string("applied"),
+            "tierBasis": .object(["direction": .string("widen"), "floor": .string("quiet"), "floorSource": .string("code"),
+                "web": .bool(false), "risk": .string("quiet"),
+                "riskEvaluation": .object(["status": .string("assessed"), "rationale": .string("The deterministic floor is sufficient.")])]),
             "presentation": .object(["label": .string("Agent retry count"), "section": .string("run"),
                 "actor": .string("Agent"), "layer": .string("Mac"),
                 "display": .object(["before": .string("4 retries"), "after": .string("6 retries")])]),
@@ -272,6 +277,12 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             key("lab.paths", group: "lab", value: .array(paths.map { .string($0) }), display: paths.joined(separator: ", "),
                 presentation: presentation("Paths", "Ordered search locations.", 25, "advanced", "list",
                     extra: ["valueKind": .string("stringList")])),
+            key("lab.weights", group: "lab", value: .object(weights), display: weights.keys.sorted().map { "\($0):\(weights[$0]!)" }.joined(separator: ", "),
+                presentation: presentation("Weights", "Gateway-defined numeric fields.", 26, "advanced", "list",
+                    extra: ["valueKind": .string("numberMap"),
+                        "options": .array([.object(["value": .string("red"), "label": .string("Red weight")]),
+                                           .object(["value": .string("blue"), "label": .string("Blue weight")])]),
+                        "range": .object(["min": .number(0), "max": .number(100), "step": .number(1)])])),
             key("lab.password", group: "lab", value: nil, display: hasSecret ? "Set" : "Not set",
                 presentation: presentation("Password", "Write-only replacement.", 26, "advanced", "secret",
                     extra: ["redacted": .bool(true)])),
@@ -347,6 +358,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             case "context.images.block": blockImages = value?.boolValue ?? blockImages
             case "lab.focusMode": focusMode = value?.stringValue ?? focusMode
             case "lab.paths": paths = value?.arrayValue?.compactMap(\.stringValue) ?? []
+            case "lab.weights": weights = value?.objectValue ?? [:]
             case "lab.password": hasSecret = value?.stringValue?.isEmpty == false
             default: break
             }

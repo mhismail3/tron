@@ -106,14 +106,23 @@ const toolsDirection = (before: unknown, after: unknown): Direction => {
 };
 
 function thinkingBudgetsType(): ValueType {
-  return objectType("thinkingBudgets", (value, label) => {
-    const budgets = object(value, label);
-    const result: Record<string, number> = {};
-    for (const key of ["minimal", "low", "medium", "high"] as const) {
-      if (budgets[key] !== undefined) result[key] = integer(budgets[key], `${label}.${key}`, 0, 10_000_000);
-    }
-    return result;
-  }, (value) => Object.entries(value as Record<string, number>).map(([k, v]) => `${k} ${v}`).join(", ") || "Default");
+  const levels = ["minimal", "low", "medium", "high"] as const;
+  const max = 10_000_000;
+  return {
+    ...objectType("numberMap", (value, label) => {
+      const budgets = object(value, label);
+      if (Object.keys(budgets).some(key => !levels.some(level => level === key))) {
+        throw new GatewayError("invalid_request", `${label} contains an unsupported thinking level`);
+      }
+      const result: Record<string, number> = {};
+      for (const key of levels) {
+        if (budgets[key] !== undefined) result[key] = integer(budgets[key], `${label}.${key}`, 0, max);
+      }
+      return result;
+    }, value => Object.entries(value as Record<string, number>).map(([k, v]) => `${k} ${v}`).join(", ") || "Default"),
+    options: levels.map(value => ({ value, label: value[0]!.toUpperCase() + value.slice(1) })),
+    range: { min: 0, max, step: 1, unit: "tokens" },
+  };
 }
 
 function packagesType(): ValueType {
@@ -181,8 +190,8 @@ export const KEYS: readonly KeyDeclaration[] = [
   {
     id: "model.thinkingBudgets", group: "model", subgroup: "Thinking budgets", type: thinkingBudgetsType(),
     layers: both(pi("thinkingBudgets")), timing: "fixed", effect: "new-chat", floor: "quiet", writers: ANY_ACTOR,
-    label: "Thinking budgets", help: "Token budgets per thinking level for models that take a budget.", order: 60, importance: "advanced",
-    control: "readOnly",
+    label: "Thinking budgets", help: "Token budgets per thinking level for models that take a budget. Empty fields leave that level unset.", order: 60, importance: "advanced",
+    control: "list",
   },
   {
     id: "model.offered", group: "model", type: types.stringList(500),

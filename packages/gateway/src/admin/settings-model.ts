@@ -15,6 +15,7 @@ import type { Actor, ActorKind, ChangeEntry, ChangeStatus, GitResult, SettingsCh
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
 import { readBinding, resolveSettings, targetLayers, type ChatStore, type FixedSetting, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
 import { KEYS, builtinValue, floorFor, floorInstances, hasRuntimeRequestApplier, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
 import { LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
 
 /** What a session target contributes: its Chat layer and whether it is Home's chat. */
@@ -420,6 +421,8 @@ export interface ChangeResult {
 }
 
 export interface SettingsWriters {
+  /** Optional typed classifier; the gate owns disclosure, max composition and deadline. */
+  assessRisk?(input: SettingsRiskInput, signal: AbortSignal): Promise<SettingsRiskAssessment>;
   /** Trust's applier: TrustService.setAndApply with the runtime reload. Returns
    * the resulting trust inspection, which the change outcome carries. */
   setTrust(project: string, decision: boolean | null): Promise<unknown>;
@@ -499,6 +502,8 @@ export class SettingsChangePath {
           errors.set(index, error instanceof GatewayError ? error : new GatewayError("invalid_request", String(error)));
         }
       }
+      // Validate the entire bundle before disclosing anything or spending on it.
+      await this.assessRisk(planned, context);
       const tier = planned.length ? maxTier(...planned.map(plan => plan.tier)) : "quiet";
       // Only the maintainer's own tap applies an approve-tier request at once;
       // that tap is the approval (F3). Everyone else waits for it.
@@ -810,15 +815,39 @@ export class SettingsChangePath {
     }
     const builtin = builtinValue(key, qualifiers);
     const direction = key.direction ? key.direction(before ?? builtin, after ?? builtin) : "widen";
-    // F3: tier = max(floor + web, riskModel), capped at approve. No risk model
-    // exists yet (slice 13), so it never raises.
     const { floor, source } = floorFor(key, direction, stores.floors);
     const web = context.web === true;
+    const basis: TierBasis = { direction, floor, floorSource: source, web, risk: null };
     return {
       request, key, binding, qualifiers, before, after,
-      tier: raiseTier(floor, web ? 1 : 0), basis: { direction, floor, floorSource: source, web, risk: null },
+      tier: raiseTier(floor, web ? 1 : 0), basis,
       changeId: randomUUID(), ...(fixedAt ? { fixedAt } : {}),
     };
+  }
+
+  private async assessRisk(plans: Planned[], context: ChangeContext): Promise<void> {
+    if (!this.writers.assessRisk || context.actor.kind === "ui" || context.dryRun) return;
+    // One deadline for the whole bounded request, not 1.5 seconds per key.
+    const signal = AbortSignal.timeout(1_500);
+    for (const plan of plans) {
+      const { key, basis } = plan;
+      try {
+        signal.throwIfAborted();
+        const assessment = await this.writers.assessRisk({
+          key: key.id, layer: plan.request.layer, actor: context.actor.kind, reason: riskReason(context.reason),
+          before: key.redacted ? null : riskValue(plan.before), after: key.redacted ? null : riskValue(plan.after),
+          redacted: key.redacted === true, direction: basis.direction, floor: basis.floor, web: basis.web,
+        }, signal);
+        signal.throwIfAborted();
+        basis.risk = assessment.tier;
+        basis.riskEvaluation = { status: "assessed", rationale: assessment.rationale };
+        plan.tier = maxTier(plan.tier, assessment.tier);
+      } catch {
+        // No provider failure text enters permanent audit: it may echo input.
+        basis.riskEvaluation = { status: signal.aborted ? "timeout" : "failed",
+          rationale: "Risk evaluation did not complete; the deterministic tier stands." };
+      }
+    }
   }
 
   private async admitModel(runtime: ModelRuntime, ref: ModelRefValue): Promise<void> {

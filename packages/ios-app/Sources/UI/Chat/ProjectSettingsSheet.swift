@@ -113,7 +113,24 @@ struct ProjectSettingsContent: View {
                         TronSettingsNotice(message: error, retry: { reload &+= 1 })
                     }
                     SettingsRendererView(target: .object(["kind": .string("project"), "cwd": .string(cwd)]),
-                                         writeLayer: "project", embedded: true, projectCWD: cwd)
+                                         writeLayer: "project", embedded: true, externalControlKeys: ["sources.packages"], projectCWD: cwd,
+                                         sectionSupplement: { section in
+                        AnyView(Group {
+                            if section == "sources" {
+                                TronProgressiveSheetLink(accessibilityLabel: "Packages", accent: .tronEmerald,
+                                    destination: { ExtensionsSettingsView(projectCWD: cwd) }) {
+                                    TronSettingsRow(icon: "shippingbox", title: "Packages",
+                                                    subtitle: "Installed for this project", accent: .tronEmerald)
+                                }
+                            } else if section == "run" {
+                                TronProgressiveSheetLink(accessibilityLabel: "Hooks", accent: .tronEmerald,
+                                    destination: { HooksSettingsView(projectCWD: cwd) }) {
+                                    TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks",
+                                                    subtitle: "Loaded project event handlers", accent: .tronEmerald)
+                                }
+                            }
+                        })
+                    })
                     TronSettingsCaption("Project values live in this workspace's .pi files. Changes are staged when possible; Tron never commits them.")
                 }
             }

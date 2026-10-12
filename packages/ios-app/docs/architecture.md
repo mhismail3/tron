@@ -757,8 +757,7 @@ the hosted socket, including its exact `settings.undo` request. Additional hoste
 previous-visit markers, refused undo retaining the current diff, intersected scope/filter pages and
 exact-digest approve/decline receipts. Their recorded red runs distinguish the last-look and undo
 regressions from subsequent successful validation.
-The generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is
-`SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
+`SettingsValueEditors` supplies the generic numeric-map list editor as well as secret and string-list editors. A numeric map takes every field name, label and numeric range from the served metadata; unknown fields or unsafe numeric representations stay read-only. Save sends a typed object through the ordinary preview/receipt path, and dismissal never submits a draft. The existing secret/list E2E journey also checks offered bounds, untouched-field preservation and numeric-map save/reopen/cancel; the Gateway journey proves an unoffered field cannot erase the stored map. Project Sources and Run reuse the scoped package and Hooks owners rather than returning to a Mac/Project picker.\n\nThe generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is\n`SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
 in `TronPresentation.swift`. Its bounded, expandable section cards stay mounted in
 an ordinary vertical stack, like Settings: lazy eviction of expanding glass cards
 can continuously invalidate SwiftUI's layout graph during a scroll. The fixture-schema

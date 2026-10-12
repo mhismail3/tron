@@ -13,6 +13,7 @@ import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
 import { SettingsService } from "./admin/settings-service.js";
 import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
+import { SettingsRiskEvaluator } from "./admin/settings-risk.js";
 import { SettingsChangeRecord } from "./admin/settings-record.js";
 import { SettingsApprovals } from "./admin/settings-approvals.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
@@ -795,7 +796,17 @@ async function runStopDrain(): Promise<void> {
 
 // The one settings change path (docs/settings-model.md 5). Agents reach it
 // through the `settings` tool; the slots read it late-bound from the registry.
+const settingsRisk = new SettingsRiskEvaluator(jevClient);
 const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(config.tronHome), new SettingsApprovals(config.tronHome), {
+  assessRisk: async (input, signal) => {
+    try { return await settingsRisk.assess(input, signal); }
+    catch (error) {
+      logger.log("warning", "Settings risk evaluation did not complete; deterministic tier retained", {
+        event: "settings.risk.failed", source: "settings", kind: input.key, reason: signal.aborted ? "timeout" : "unavailable",
+      });
+      throw error;
+    }
+  },
   setTrust: async (project, decision) => trust.setAndApply(
     project,
     decision,

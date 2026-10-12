@@ -9,6 +9,8 @@ import { TrustService } from "./trust-service.js";
 import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "./settings-record.js";
 import { SettingsApprovals } from "./settings-approvals.js";
+import { SettingsRiskEvaluator, type SettingsRiskInput } from "./settings-risk.js";
+import { JEV_MAX_ESTIMATED_CHARGE_CENTS } from "../knowledge/jev-client.js";
 import type { Resolution } from "./settings-resolver.js";
 import type { PresentedResolution } from "./settings-presentation.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -43,7 +45,7 @@ function client(sessionIds: string[] = []): ClientContext {
 let command = 0;
 const commandId = () => `settings-change-${String(++command).padStart(4, "0")}`;
 
-async function fixture(options: { segmentEntries?: number } = {}) {
+async function fixture(options: { segmentEntries?: number; assessRisk?: (input: SettingsRiskInput, signal: AbortSignal) => Promise<{ tier: "quiet" | "notify" | "approve"; rationale: string }> } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-settings-change-"));
   roots.push(root);
   const tronHome = join(root, "tron");
@@ -68,6 +70,7 @@ async function fixture(options: { segmentEntries?: number } = {}) {
   const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime });
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
   const settingsChanges = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
+    ...(options.assessRisk ? { assessRisk: options.assessRisk } : {}),
     setTrust: async (project, decision) => {
       return trust.setAndApply(project, decision,
         async inspection => { await registry.reloadProject(inspection.cwd, inspection.effectiveDecision === true, false); },
@@ -109,6 +112,92 @@ async function gitProject(root: string, name: string) {
 }
 
 describe("settings.change", () => {
+  it("persists a schema numeric map and rejects unoffered fields without erasing the current store", async () => {
+    const f = await fixture();
+    await f.change({ kind: "mac" }, [{ key: "model.thinkingBudgets", layer: "mac", op: "set", value: { low: 1_234 } }]);
+    expect((await f.macDocument()).thinkingBudgets).toEqual({ low: 1_234 });
+    await expect(f.change({ kind: "mac" }, [{ key: "model.thinkingBudgets", layer: "mac", op: "set", value: { unoffered: 3 } }]))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    expect((await f.macDocument()).thinkingBudgets).toEqual({ low: 1_234 });
+    const resolution = await f.service.invoke(client(), "settings.resolve", {
+      target: { kind: "mac" }, keys: ["model.thinkingBudgets"], renderer: { version: 1, controls: ["list", "readOnly"] },
+    }) as unknown as PresentedResolution;
+    expect(resolution.keys[0]).toMatchObject({ value: { low: 1_234 }, presentation: {
+      control: "list", valueKind: "numberMap", options: expect.arrayContaining([{ value: "low", label: "Low" }]),
+      range: { min: 0, max: 10_000_000, step: 1, unit: "tokens" },
+    } });
+    transcript.push({ case: "numeric-map-persistence", detail: resolution });
+  });
+
+  it("holds a non-UI change when the bounded risk model raises its tier", async () => {
+    const f = await fixture({ assessRisk: async () => ({ tier: "approve", rationale: "unexpected scope" }) });
+    const result = await f.settingsChanges.change({ kind: "mac" }, [
+      { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6 },
+    ], { actor: { kind: "home", id: "home-fixture" }, reason: "Retry a bounded failure" });
+    expect(result.status).toBe("pending");
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
+    expect((await f.history())[0]).toMatchObject({ tier: "approve", tierBasis: { floor: "quiet", risk: "approve" } });
+    transcript.push({ case: "risk-raise-held", detail: { result, history: await f.history() } });
+  });
+
+  it("keeps lowered maintainer floors and web escalation, audits risk failure and timeout, and withholds value secrets", async () => {
+    let mode: "quiet" | "fail" | "timeout" = "quiet";
+    const calls: unknown[] = [];
+    const evaluator = new SettingsRiskEvaluator({ evaluate: async (request, signal, context) => {
+      calls.push(request);
+      expect(context?.maxChargeCents).toBe(JEV_MAX_ESTIMATED_CHARGE_CENTS);
+      if (mode === "fail") throw new Error("provider failure must not be copied into audit");
+      if (mode === "timeout") await new Promise((_, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+      return { requestedModel: "jev-latest", actualModel: "jev-latest", usage: { input_tokens: 50, output_tokens: 0 },
+        estimatedCostCents: 0.001, maxEstimatedChargeCents: JEV_MAX_ESTIMATED_CHARGE_CENTS,
+        answers: { tier: { type: "choice", choice: "quiet", confidence: 1, probabilities: { quiet: 1, notify: 0, approve: 0 } },
+          rationale: { type: "choice", choice: "baseline", confidence: 1, probabilities: { baseline: 1, scope: 0, consequence: 0, uncertain: 0 } } } };
+    } });
+    const f = await fixture({ assessRisk: evaluator.assess.bind(evaluator) });
+    const agent = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
+    await f.change({ kind: "mac" }, [{ key: "context.images.block", layer: "mac", op: "set", value: true }]);
+    await f.change({ kind: "mac" }, [{ key: "permissions.floor", layer: "mac", op: "set", value: "notify",
+      qualifiers: { key: "context.images.block", direction: "widen" } }]);
+    expect(calls).toHaveLength(0); // UI taps never spend on risk classification.
+    const lowered = await f.settingsChanges.change({ kind: "mac" }, [
+      { key: "context.images.block", layer: "mac", op: "set", value: false },
+    ], agent);
+    expect(lowered).toMatchObject({ status: "applied", tier: "notify" });
+    expect((await f.history({ key: "context.images.block" })).find(e => e.changeId === lowered.changes[0]!.changeId))
+      .toMatchObject({ tierBasis: { floor: "notify", floorSource: "override", risk: "quiet", riskEvaluation: { status: "assessed" } } });
+    const web = await f.settingsChanges.change({ kind: "mac" }, [
+      { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 5 },
+    ], { ...agent, web: true });
+    expect(web).toMatchObject({ status: "applied", tier: "notify" });
+    mode = "fail";
+    const failed = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6 }], agent);
+    expect(failed).toMatchObject({ status: "applied", tier: "quiet" });
+    expect((await f.history()).find(e => e.changeId === failed.changes[0]!.changeId))
+      .toMatchObject({ tierBasis: { risk: null, riskEvaluation: { status: "failed" } } });
+    mode = "timeout";
+    const timedOut = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 7 }], agent);
+    expect(timedOut).toMatchObject({ status: "applied", tier: "quiet" });
+    expect((await f.history()).find(e => e.changeId === timedOut.changes[0]!.changeId))
+      .toMatchObject({ tierBasis: { risk: null, riskEvaluation: { status: "timeout" } } });
+    mode = "quiet";
+    const beforeRefusal = calls.length;
+    await expect(f.settingsChanges.change({ kind: "mac" }, [
+      { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 8 },
+      { key: "run.httpProxy", layer: "mac", op: "set", value: "http://private-fixture.invalid:3128" },
+    ], agent))
+      .rejects.toMatchObject({ code: "invalid_request", message: "HTTP proxy cannot be changed by home" });
+    expect(calls).toHaveLength(beforeRefusal); // Authorization precedes disclosure.
+    await f.settingsChanges.change({ kind: "mac" }, [{ key: "tools.shell.commandPrefix", layer: "mac", op: "set", value: "API_TOKEN=private-fixture.invalid" }],
+      { ...agent, reason: "Use Bearer fixture-secret-token-123456789" });
+    expect(JSON.stringify(calls)).not.toContain("private-fixture.invalid");
+    expect(JSON.stringify(calls)).not.toContain("fixture-secret-token");
+    expect(JSON.stringify(await f.history())).not.toContain("provider failure must not be copied");
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 7 });
+    transcript.push({ case: "risk-floor-failure-timeout-redaction", detail: { calls, outcomes: (await f.history()).map(e => ({ key: e.key, tier: e.tier, basis: e.tierBasis })) } });
+  });
+
   it("records every change once with actor and diff, undoes it, refuses a stale undo, and never undoes a redacted key", async () => {
     const f = await fixture();
     const applied = await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6, expected: 4 }]);

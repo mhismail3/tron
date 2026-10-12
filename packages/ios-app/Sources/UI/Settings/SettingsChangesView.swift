@@ -409,6 +409,9 @@ private struct SettingsChangeDetailView: View {
                     if let basis = entry.tierBasis {
                         detailValue("How the tier was reached",
                             "Floor: \(basis.floor) (\(basis.floorSource)); direction: \(basis.direction). Web/browser raise: \(basis.web ? "one step" : "none"). Risk model: \(basis.risk ?? "not used").")
+                        if let evaluation = basis.riskEvaluation {
+                            detailValue("Risk evaluation", "\(evaluation.status.capitalized): \(evaluation.rationale)")
+                        }
                     }
                     detailValue("Target", entry.target.sessionId ?? entry.target.cwd ?? entry.target.kind.capitalized)
                     if let taskID = entry.actor.taskId { detailValue("Task", taskID) }

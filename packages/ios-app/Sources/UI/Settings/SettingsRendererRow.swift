@@ -109,7 +109,21 @@ struct SettingsRendererRow: View {
                 SettingsSecretEditor(title: title, help: presentation?.help ?? "", onChange: onChange)
             }
         case .list:
-            if ["stringList", "toolSelection"].contains(presentation?.valueKind ?? ""),
+            if presentation?.valueKind == "numberMap", let fields = presentation?.options,
+               !fields.isEmpty, fields.count <= 64,
+               fields.allSatisfy({ $0.value.stringValue != nil }),
+               Set(fields.compactMap { $0.value.stringValue }).count == fields.count,
+               Set((setting.value?.objectValue ?? [:]).keys).isSubset(of: Set(fields.compactMap { $0.value.stringValue })),
+               let range = presentation?.range, range.supportsIntegerSlider,
+               setting.value == nil || setting.value?.objectValue?.values.allSatisfy({ value in
+                   if case .number(let number) = value { return Int(exactly: number) != nil }
+                   return false
+               }) == true {
+                TronSelectionSheetRow(icon: "list.number", title: title, value: setting.display) {
+                    SettingsNumberMapEditor(title: title, help: presentation?.help ?? "", fields: fields,
+                                            range: range, values: setting.value?.objectValue ?? [:], onChange: onChange)
+                }
+            } else if ["stringList", "toolSelection"].contains(presentation?.valueKind ?? ""),
                setting.value == nil || setting.value?.arrayValue?.allSatisfy({ $0.stringValue != nil }) == true {
                 let values = setting.value?.arrayValue ?? []
                 TronSelectionSheetRow(icon: "list.bullet", title: title, value: setting.display) {
