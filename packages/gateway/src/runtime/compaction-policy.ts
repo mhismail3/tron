@@ -85,7 +85,7 @@ export class CompactionOperationPolicy {
   ) {
     this.disabled = options.disabled === true;
     this.chat = options.chat;
-    this.next = settingsCompactionPolicy(session.settingsManager, this.chatSettings());
+    this.next = settingsCompactionPolicy(session.settingsManager, this.guardedChatSettings());
     this.budgetSources = { enabled: this.next.source.enabled, reserveTokens: this.next.source.reserveTokens, keepRecentTokens: this.next.source.keepRecentTokens };
     this.refresh();
     // The override must exist from the session's first admission, not only after
@@ -99,7 +99,7 @@ export class CompactionOperationPolicy {
 
   restore(): void {
     try {
-      const source = settingsCompactionPolicy(this.session.settingsManager, this.chatSettings()).source;
+      const source = settingsCompactionPolicy(this.session.settingsManager, this.guardedChatSettings()).source;
       this.budgetSources = { enabled: source.enabled, reserveTokens: source.reserveTokens, keepRecentTokens: source.keepRecentTokens };
       this.refresh();
     } catch {
@@ -114,6 +114,15 @@ export class CompactionOperationPolicy {
     return this.chat?.() ?? {};
   }
 
+  /** A damaged Chat entry never fails construction or a refresh: the Project and
+   * Mac policy applies and the published warning says so until a valid read. */
+  private guardedChatSettings(): Record<string, unknown> {
+    try { return this.chatSettings(); } catch {
+      this.warning = "Canonical Chat compaction settings are invalid. Project and Mac compaction settings apply.";
+      return {};
+    }
+  }
+
   refresh(): void {
     const settings = SettingsManager.create(this.session.projectDir, this.agentDir, { projectTrusted: this.session.settingsManager.isProjectTrusted() });
     if (settings.drainErrors().length) {
@@ -121,8 +130,8 @@ export class CompactionOperationPolicy {
       throw new GatewayError("conflict", this.warning);
     }
     try {
-      this.next = settingsCompactionPolicy(settings, this.chatSettings());
       this.warning = undefined;
+      this.next = settingsCompactionPolicy(settings, this.guardedChatSettings());
     } catch (error) {
       this.warning = "Canonical compaction settings are invalid. The last valid configuration remains in use.";
       throw error;

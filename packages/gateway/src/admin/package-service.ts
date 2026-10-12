@@ -220,7 +220,7 @@ export class PackageService {
         const { settings } = managed;
         const writes: PlannedWrite[] = [{ store: local ? { kind: "project", root: managed.project.projectDir } : { kind: "mac" },
           instance: instanceId("sources.packages", {}), changeId: operationId, value: undefined }];
-        this.outside?.begin(writes);
+        await this.outside?.begin(writes);
         try {
         if (action === "install") {
           if (source === undefined) throw new GatewayError("invalid_request", "Package source is required");

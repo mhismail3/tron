@@ -720,6 +720,29 @@ describe("outside changes to MCP servers and custom models", () => {
     expect((await outsideEntries(f))[0]).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "tron-added" }, op: "unset",
       presentation: { display: { before: "Configured", after: "Removed" } } });
 
+    // A hand edit just before Tron's own write is recorded, never absorbed into it.
+    const beforeTron = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
+    await writeJson(globalMcp, { ...beforeTron, mcpServers: { ...beforeTron.mcpServers, "edited-before-tron": { url: "http://127.0.0.1:1/before" } } });
+    await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "tron-second", transport: "http", url: "http://127.0.0.1:1/second" });
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] });
+    const aroundTron = await outsideEntries(f);
+    expect(aroundTron.filter(entry => entry.qualifiers?.server === "edited-before-tron").map(entry => entry.op)).toEqual(["set"]);
+    expect(aroundTron.some(entry => entry.qualifiers?.server === "tron-second")).toBe(false);
+
+    // A project whose `.pi/` appears later: its creation is seen through the
+    // root, and later edits inside it push from the file event alone.
+    const late = join(f.root, "late-pi");
+    await mkdir(late);
+    await f.trust.set(late, true);
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd: late }, keys: ["run.transport"] });
+    await mkdir(join(late, ".pi"));
+    await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" } } });
+    await until(() => f.pushes.some(push => push.message.includes("MCP server first")));
+    await new Promise(resolve => setTimeout(resolve, 400)); // the rescan that replaces the root watch settles
+    await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" }, second: { url: "http://127.0.0.1:1/second" } } });
+    await until(() => f.pushes.some(push => push.message.includes("MCP server second")));
+    expect(f.pushes.some(push => push.message.includes("MCP server second"))).toBe(true);
+
     // Project scope follows the Project root, not the subdirectory a chat runs in.
     const chat = await f.registry.create(subdirectory);
     expect(chat.cwd).toBe(await realpath(subdirectory));

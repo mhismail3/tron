@@ -260,10 +260,15 @@ export class OutsideChanges {
 
   private watchProject(root: string): void {
     if (!this.watching || this.watchers.has(`project:${root}`)) return;
-    if (this.watchers.size > OBSERVED_PROJECT_LIMIT) return;
-    // `.pi/` may not exist yet; its parent's events include its creation.
-    this.watchDirectory(`project:${root}`, join(root, ".pi"), name => PROJECT_FILES.has(name), projectStores(root))
-      || this.watchDirectory(`project:${root}`, root, name => name === ".pi", projectStores(root));
+    // `.pi/` may not exist yet: its parent's events include its creation, and the
+    // rescan that event prompts replaces the parent watch with the `.pi/` one.
+    if (this.watchDirectory(`project:${root}`, join(root, ".pi"), name => PROJECT_FILES.has(name), projectStores(root))) {
+      this.watchers.get(`project-parent:${root}`)?.close();
+      this.watchers.delete(`project-parent:${root}`);
+      return;
+    }
+    if (this.watchers.has(`project-parent:${root}`) || this.watchers.size > OBSERVED_PROJECT_LIMIT) return;
+    this.watchDirectory(`project-parent:${root}`, root, name => name === ".pi", projectStores(root));
   }
 
   private watchDirectory(id: string, directory: string, relevant: (name: string) => boolean, stores: ObservedStore[]): boolean {
@@ -291,8 +296,12 @@ export class OutsideChanges {
   }
 
   /** Tron starts writing these stores: no scan may read them until `end`. */
-  begin(writes: readonly PlannedWrite[]): void {
-    for (const id of new Set(writes.map(write => storeId(write.store)))) this.writing.set(id, (this.writing.get(id) ?? 0) + 1);
+  async begin(writes: readonly PlannedWrite[]): Promise<void> {
+    // Under the mutex: a comparison already reading these stores finishes first,
+    // so it can never see a half-written Tron change as an outside one.
+    await this.mutex.run(async () => {
+      for (const id of new Set(writes.map(write => storeId(write.store)))) this.writing.set(id, (this.writing.get(id) ?? 0) + 1);
+    });
   }
 
   /**
@@ -304,13 +313,13 @@ export class OutsideChanges {
   async end(writes: readonly PlannedWrite[], applied: ReadonlyMap<string, { git?: GitResult; changeId: string }>): Promise<void> {
     const entries: ChangeEntry[] = [];
     await this.mutex.run(async () => {
-      const document = await this.load();
       const byStore = new Map<string, { store: ObservedStore; writes: PlannedWrite[] }>();
       for (const write of writes) {
         const id = storeId(write.store);
         byStore.set(id, { store: write.store, writes: [...(byStore.get(id)?.writes ?? []), write] });
       }
       try {
+        const document = await this.load();
         for (const { store, writes: storeWrites } of byStore.values()) {
           const planned = new Map(storeWrites.map(write => [write.instance, write]));
           entries.push(...await this.compare(document, store, planned, applied));
@@ -333,13 +342,26 @@ export class OutsideChanges {
    * is adopted as observed, so Tron's write is never an outside change.
    */
   async adopt<T>(stores: readonly ObservedStore[], write: () => Promise<T>): Promise<T> {
-    for (const id of new Set(stores.map(storeId))) this.writing.set(id, (this.writing.get(id) ?? 0) + 1);
+    // First record what already changed outside, so Tron's write cannot absorb it;
+    // then hold the stores as Tron's. An outside edit made while the owner's own
+    // write runs is indistinguishable from it and is adopted with it.
+    const entries: ChangeEntry[] = [];
+    await this.mutex.run(async () => {
+      const document = await this.load();
+      for (const store of stores) {
+        if ((this.writing.get(storeId(store)) ?? 0) === 0) entries.push(...await this.compare(document, store));
+      }
+      if (entries.length) await this.record.append(entries);
+      await this.save(document);
+      for (const id of new Set(stores.map(storeId))) this.writing.set(id, (this.writing.get(id) ?? 0) + 1);
+    });
+    if (entries.length) await this.observer?.outside(entries);
     try {
       return await write();
     } finally {
       await this.mutex.run(async () => {
-        const document = await this.load();
         try {
+          const document = await this.load();
           for (const store of stores) await this.rebaseline(document, store);
           await this.save(document);
         } finally {

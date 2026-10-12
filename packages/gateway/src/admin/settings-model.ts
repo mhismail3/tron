@@ -787,7 +787,7 @@ export class SettingsChangePath {
       return observed ? [{ ...observed, changeId: plan.changeId, value: plan.after }] : [];
     });
     const landed = new Map<string, { git?: GitResult; changeId: string }>();
-    outside?.begin(writes);
+    await outside?.begin(writes);
     try {
       const result = await this.applyBracketed(target, stores, ordered, context, shape);
       // The original entry holds the value (an approval's fact refers to it).

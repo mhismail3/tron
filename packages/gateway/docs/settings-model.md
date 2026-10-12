@@ -722,6 +722,10 @@ above leave open:
   runtimeGeneration, model?, revision? }`, the runtime the client read, and the
   slot lane's existing guards check it; `expected` is the value check for every
   other store.
+- **Per-model compaction overrides.** A Project or Mac
+  `compaction.modelOverrides[model]` value outranks a Chat reserve or keep-recent
+  value for that model, in the resolver and in pi (`getCompactionSettings(model)`
+  reads `modelOverrides` first), as for every qualified instance ([2.1](#21-harness-primitives)).
 - **Chat-layer appliers.** `tron.settings.v1` holds a chat's explicit Run and
   compaction values. Run keys reach the SDK at each idle request admission
   (`RuntimeSlot.applyLiveRunSettings`); compaction keys reach it through the
@@ -971,7 +975,13 @@ with the scope (`global`, or `project` and its root) for the MCP screen, and
 follows the Project root like `.pi/settings.json`, whatever subdirectory a chat
 runs in; MCP definitions load at the next reload or chat and custom models at the
 next Gateway start, as for Tron's own edits. Tron's own MCP and custom-model
-writes go through `OutsideChanges.adopt`, so they are never outside changes.
+writes go through `OutsideChanges.adopt`, so they are never outside changes:
+it first records any outside difference already present, then holds the store
+while the owner writes (an outside edit made during that write itself is adopted
+with it). Tron's change-path writers enter the same hold under the comparison's
+lock, so a comparison already reading a store finishes before Tron writes it. A
+project whose `.pi/` appears later is watched through its root until it exists,
+then directly.
 Subject floors are not overridable: they are not keys.
 
 - A store's first sight is its baseline. Afterwards each differing key instance is

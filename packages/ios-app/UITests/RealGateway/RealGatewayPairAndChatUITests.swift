@@ -537,7 +537,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "an outside mcp.json addition must reach the open MCP screen without a reload: \(app.debugDescription)")
         keepScreenshot(app, name: "settings-mcp-outside-addition")
         dismissTopSheet(app)
-        XCTAssertTrue(waitUntil(timeout: 15) { !app.staticTexts["MCP Servers"].exists }, "dismissing MCP Servers must return to Settings")
+        // Settings' own row is also titled "MCP Servers": the screen is gone once its server row is.
+        XCTAssertTrue(waitUntil(timeout: 15) { !outsideServer.exists && mcpLink.exists }, "dismissing MCP Servers must return to Settings")
         for _ in 0..<40 where !app.buttons["Changes"].isHittable { app.swipeDown() }
         app.buttons["Changes"].tap()
         let outsideEntry = app.staticTexts["MCP server outside-mcp"]

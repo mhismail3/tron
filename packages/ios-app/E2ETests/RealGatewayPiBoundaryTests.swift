@@ -213,9 +213,24 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
                                         "value": .object(["provider": .string("tron-e2e"), "id": .string("e2e-model")])])]),
         ]))
         XCTAssertEqual(selected.status, "applied")
+        // A Chat-layer compaction value (decision 9) is projected with source
+        // "chat"; the app must still admit that authoritative snapshot.
+        let compaction: SettingsChangeResponse = try await firstClient.request("settings.change", JSONValue.object([
+            "commandId": .string(UUID().uuidString),
+            "target": .object(["kind": .string("session"), "sessionId": .string(created.sessionId)]),
+            "fence": .object(["runtimeGeneration": .string(opened.session.runtimeGeneration),
+                              "model": .object(["provider": .string("tron-e2e"), "id": .string("e2e-model")])]),
+            "changes": .array([.object(["key": .string("context.compaction.keepRecentTokens"), "layer": .string("chat"), "op": .string("set"),
+                                        "value": .number(24_000)])]),
+        ]))
+        XCTAssertEqual(compaction.status, "applied")
         let configured = try await synchronizedOpen(client: firstClient, sessionID: created.sessionId)
         XCTAssertEqual(configured.session.model?.provider, "tron-e2e")
         XCTAssertEqual(configured.session.model?.id, "e2e-model")
+        XCTAssertEqual(configured.session.compactionPolicy?.next.source["keepRecentTokens"], "chat")
+        XCTAssertEqual(configured.session.compactionPolicy?.next.keepRecentTokens, 24_000)
+        XCTAssertTrue(SessionSnapshotTranscriptAdmissionPolicy.admit(configured.session),
+                      "a snapshot with a Chat compaction value must be admitted")
         try await assertAgentInstructions(client: firstClient, sessionID: created.sessionId, workspace: workspace)
 
         let reconnectPrompt = "continue while disconnected"
