@@ -19,6 +19,7 @@ from gh import Gh, GhError
 
 # A moved base sends land back to merging it, at most this many times.
 MAX_LOOPBACKS = 3
+MAX_PR_HEAD_OBSERVATIONS = 3
 _IN_PROGRESS = (("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"),
                 ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect"))
 
@@ -160,6 +161,30 @@ def _base_moved(root: Path, remote: str, base: str, head: str) -> bool:
     return not _is_ancestor(root, _fetch_base(root, remote, base), head)
 
 
+def _published_pull_request(gh: Gh, root: Path, repository: str, remote: str, branch: str,
+                            head: str, pull: dict) -> dict:
+    """Require current branch and PR heads to agree before merging a published head."""
+    observed = pull
+    for attempt in range(MAX_PR_HEAD_OBSERVATIONS):
+        remote_result = _git(root, "ls-remote", "--heads", remote, f"refs/heads/{branch}", check=False)
+        if remote_result.returncode != 0:
+            raise LandError(f"could not confirm remote branch {branch} after publishing {head[:12]}; "
+                            "publication state is uncertain; rerun land to observe it again")
+        remote_fields = remote_result.stdout.split()
+        remote_head = remote_fields[0] if remote_fields else None
+        if remote_head != head:
+            actual = remote_head[:12] if remote_head else "missing"
+            raise LandError(f"remote branch {branch} is at {actual}, not the verified {head[:12]}; "
+                            "the branch moved after land pushed it")
+        if observed["head"]["sha"] == head:
+            return observed
+        if attempt + 1 < MAX_PR_HEAD_OBSERVATIONS:
+            observed = gh.rest("GET", f"repos/{repository}/pulls/{observed['number']}")
+    raise LandError(f"pull request #{pull['number']} still reports {observed['head']['sha'][:12]} after "
+                    f"{MAX_PR_HEAD_OBSERVATIONS} observations while remote branch {branch} is at {head[:12]}; "
+                    "publication state is uncertain; rerun land to observe it again")
+
+
 def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: Path,
          tests: List[str], dry_run: bool) -> int:
     rules = config["claim"]
@@ -201,9 +226,7 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
             pull = _pull_request(gh, repository, branch, base, title, body)
         except GhError as error:
             raise LandError(f"could not open or update the pull request: {error}") from error
-        if pull["head"]["sha"] != head:
-            raise LandError(f"pull request #{pull['number']} is at {pull['head']['sha'][:12]}, not {head[:12]}; "
-                            "someone else pushed to this branch")
+        pull = _published_pull_request(gh, root, repository, remote, branch, head, pull)
         if _base_moved(root, remote, base, head):
             continue
         final_title = pull["title"]

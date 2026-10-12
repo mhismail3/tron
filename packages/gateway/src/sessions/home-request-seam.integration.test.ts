@@ -651,7 +651,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await item.slot.prompt(longInput("C22 prior input"));
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const policy = item.policy()!;
-    policy.admit("c22", null);
+    policy.admit("c22", null, item.session.systemPrompt, "user");
     const prepared = policy.wrapPrepareRequest(item.session, undefined);
     const projection = item.session.sessionManager.buildSessionProjection();
     const update = await prepared({ context: { messages: projection.messages }, model: item.faux.getModel(), thinkingLevel: "off" });
@@ -1117,7 +1117,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     let innerStreamCalls = 0;
     const inner = ((() => { innerStreamCalls += 1; return { [Symbol.asyncIterator]: async function* () {} }; }) as unknown as StreamFn);
     const guard = policy.wrapStreamFunction(inner);
-    policy.admit("c8a", guarded.session.sessionManager.getLeafId() ?? null);
+    policy.admit("c8a", guarded.session.sessionManager.getLeafId() ?? null, guarded.session.systemPrompt, "user");
     const model = guarded.faux.getModel();
     let guardOutcome = "returned";
     try {
@@ -1417,7 +1417,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const enteredBefore = item.compactor.entered;
 
     const policy = item.policy()!;
-    policy.admit("c19", item.session.sessionManager.getLeafId() ?? null);
+    policy.admit("c19", item.session.sessionManager.getLeafId() ?? null, item.session.systemPrompt, "user");
     const prepared = policy.wrapPrepareRequest(item.session, undefined);
     const projection = item.session.sessionManager.buildSessionProjection();
     const extra = { role: "user", content: "NOT-THE-PROJECTION", timestamp: 0 } as unknown as AgentMessage;

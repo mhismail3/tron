@@ -147,6 +147,10 @@ struct HostedHomeDashboardFixture: View {
                     .environment(model)
                     .environment(\.hostedHomeActionProbe, actionProbe)
                     .environment(\.tronPresentationActivityCoordinator, homeActivity)
+                    .background {
+                        InAppNoticeWindowInstaller(model: model, colorScheme: .light, presentationActivity: homeActivity)
+                            .frame(width: 0, height: 0).allowsHitTesting(false)
+                    }
                     .tronPresentation()
                     .tronSettingsLayout()
                     .overlay(alignment: .top) {
@@ -227,17 +231,18 @@ struct HostedHomeDashboardFixture: View {
                 promptRoute = await gateway.lastPromptRoute()
                 openedSession = await gateway.lastOpenedSession()
                 // Requested once. A hosted reconnect is a new connection identity, which the mounted
-                // sheet must observe by re-reading, so it fires after the first read. A profile switch
-                // fires after the second, so a test can observe the presented sheet first (its reload).
+                // sheet must observe by re-reading, so it fires after the second read (Manage Home's,
+                // then the Tasks sheet's). A profile switch fires after the third (its reload), so a
+                // test can observe the presented sheet first.
                 if !reconnectRequested {
-                    if arguments.contains("-home-switch-profile-after-task-list"), taskListReads >= 2 {
+                    if arguments.contains("-home-switch-profile-after-task-list"), taskListReads >= 3 {
                         reconnectRequested = true
                         let other = GatewayProfile(id: "competing-profile", label: "Other Mac", host: "other.example.test", port: 9847, machineId: profile.machineId)
                         do {
                             try model.profiles.save(other, token: "other-fixture-token", selecting: false)
                             await model.switchGateway(other)
                         } catch { self.error = error.localizedDescription }
-                    } else if arguments.contains("-home-reconnect-after-task-list"), taskListReads >= 1 {
+                    } else if arguments.contains("-home-reconnect-after-task-list"), taskListReads >= 2 {
                         reconnectRequested = true
                         do { try await model.connectHostedGateway(profile: profile, token: "fixture-token") }
                         catch { self.error = error.localizedDescription }
@@ -296,7 +301,7 @@ private actor HostedHomeShellGateway {
     func configuredModelIdentity() -> String { configuredModel.map { "\($0.provider)/\($0.id)" } ?? "none" }
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
-    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
+    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "context-window.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
 
     func handle(_ method: String, _ params: [String: JSONValue]) async throws -> (JSONValue?, JSONValue?) {
         switch method {
@@ -311,11 +316,18 @@ private actor HostedHomeShellGateway {
             return (.object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),
                 "configured": .bool(true), "authMethods": .array([]), "modelCount": .number(3)])])]), nil)
         case "model.list":
-            return (.object(["models": .array(sheetState == "empty-models" ? [] : [model("memory-a", name: "Memory Model A"), model("memory-b", name: "Memory Model B"),
-                model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
+            return (.object(["models": .array(sheetState == "empty-models" ? [] : [anthropicModel("claude-opus-5-5", name: "Claude Opus 5.5", window: 1_000_000),
+                anthropicModel("claude-haiku-5-5", name: "Claude Haiku 5.5", window: 200_000), model("memory-a", name: "Memory Model A"),
+                model("memory-b", name: "Memory Model B"), model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
         case "model.recent": return (.object(["models": .array([])]), nil)
         case "home.taskList":
             taskListReads += 1
+            // Hold the real sheet's read at the socket boundary, not its view state.
+            // Both Manage Home and its nested Tasks sheet must lay out before data.
+            if sheetState == "presentation-loading" { try await Task.sleep(for: .seconds(8)) }
+            if sheetState == "tasks-error", taskListReads == 2 {
+                return (nil, .object(["code": .string("busy"), "message": .string("Task list unavailable"), "retryable": .bool(true)]))
+            }
             return (.object(["items": .array(sheetState == "tasks-empty" ? [] : [taskSummary("active"), taskSummary("terminal")])]), nil)
         case "home.taskStatus":
             guard let id = params["taskId"]?.stringValue, ["active", "terminal"].contains(id) else { return taskRefusal() }
@@ -365,12 +377,18 @@ private actor HostedHomeShellGateway {
                                     "hardBytes": .number(209_715_200), "hardEntries": .number(100_000)]),
                 "chapters": .array([
                     .object(["sessionId": .string("home-chapter-sealed"), "ordinal": .number(1), "state": .string("sealed"),
-                             "createdAt": .string("2025-12-01T00:00:00Z"), "sealedAt": .string("2025-12-31T00:00:00Z"),
+                             "createdAt": .string(isoAgo(40 * 86_400)), "sealedAt": .string(isoAgo(10 * 86_400)),
                              "activationStarted": .bool(true), "sessionPresent": .bool(true),
-                             "bytes": .number(25_165_824), "entries": .number(50_001)]),
+                             "bytes": .number(25_165_824), "entries": .number(50_001),
+                             "contents": .object(["firstAt": .string(isoAgo(40 * 86_400)), "lastAt": .string(isoAgo(10 * 86_400)),
+                                 "userMessages": .number(412), "homeReplies": .number(409), "tasksDelegated": .number(7),
+                                 "topics": .array([.string("Quarterly planning"), .string("Travel bookings"), .string("Kitchen renovation")])])]),
                     .object(["sessionId": .string("home-session"), "ordinal": .number(2), "state": .string("active"),
-                             "createdAt": .string("2026-01-01T00:00:00Z"), "activationStarted": .bool(true),
-                             "sessionPresent": .bool(true), "bytes": .number(480), "entries": .number(12)]),
+                             "createdAt": .string(isoAgo(3 * 86_400)), "activationStarted": .bool(true),
+                             "sessionPresent": .bool(true), "bytes": .number(480), "entries": .number(12),
+                             "contents": .object(["firstAt": .string(isoAgo(3 * 86_400)), "lastAt": .string(isoAgo(3 * 60)),
+                                 "userMessages": .number(6), "homeReplies": .number(6), "tasksDelegated": .number(1),
+                                 "topics": .array([.string("Garden redesign")])])]),
                 ]),
             ]), nil)
         case "home.memory.page":
@@ -379,13 +397,13 @@ private actor HostedHomeShellGateway {
             if browserState == "error", browserReads == 1 {
                 return (nil, .object(["code": .string("busy"), "message": .string("Canonical source unavailable"), "retryable": .bool(true)]))
             }
-            return (memoryPage(next: params["cursor"] != nil, empty: browserState == "empty"), nil)
+            return (memoryPage(next: params["cursor"] != nil, empty: browserState == "empty", sessionID: params["sessionId"]?.stringValue), nil)
         case "home.memory.evidence":
             let offset = params["offset"]?.intValue ?? 0
             let first = "Canonical original, not the memory projection"
             let second = "Canonical continuation"
             let text = offset == 0 ? first : second
-            var result: [String: JSONValue] = ["format": .string("canonical-history"), "evidence": evidence(),
+            var result: [String: JSONValue] = ["format": .string("canonical-history"), "evidence": params["evidence"] ?? evidence(),
                 "text": .string(text), "offset": .number(Double(offset)),
                 "totalCharacters": .number(Double(first.utf16.count + second.utf16.count)), "metadata": .object(["role": .string("user")])]
             if offset == 0 { result["nextOffset"] = .number(Double(first.utf16.count)) }
@@ -402,8 +420,15 @@ private actor HostedHomeShellGateway {
         case "session.prompt":
             promptRoutes.append("session.prompt:\(params["sessionId"]?.stringValue ?? "none")")
             return (nil, .object(["code": .string("conflict"), "message": .string("Sealed chapter refused"), "retryable": .bool(false)]))
+        case "home.context":
+            return (contextProjection(), nil)
         case "home.status":
             homeStatusCount += 1
+            // Hold the actual response across native back navigation so a transient
+            // loading replacement cannot disappear before XCTest observes it.
+            if sheetState == "navigation-refresh", homeStatusCount > 1 {
+                try await Task.sleep(for: .seconds(4))
+            }
             if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
             return (homeStatus(), nil)
         case "home.designate":
@@ -446,7 +471,7 @@ private actor HostedHomeShellGateway {
         case "session.open":
             let sessionID = params["sessionId"]?.stringValue ?? "home-session"
             openedSessions.append(sessionID)
-            let snapshot = SessionSnapshot(sessionId: sessionID, runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
+            var snapshot = SessionSnapshot(sessionId: sessionID, runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
                 phase: phase == "active" ? .running : .idle, name: sessionID.hasPrefix("home-") ? "Home fixture chat" : "Ordinary session chat", cwd: "/workspace",
                 parentSessionId: nil, model: nil, thinkingLevel: "medium", availableThinkingLevels: [], contextUsage: nil,
                 stats: SessionStats(userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
@@ -459,6 +484,7 @@ private actor HostedHomeShellGateway {
                 extensionPresentation: ExtensionPresentationState(version: 3, hostEpoch: "fixture", revision: 1, capabilities: [], diagnostics: [],
                     semanticState: .init(statuses: [:], working: .init(message: nil, visible: false), hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
                     surfaces: [], pendingInteractions: []), diagnostics: [])
+            if sessionID.hasPrefix("home-") { applyHomeChatConfiguration(to: &snapshot) }
             return (.object(["session": try! JSONValue.encode(snapshot), "syncToken": .string("fixture-sync"),
                 "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(0)]), nil)
         case "session.sync": return (.object(["synchronized": .bool(true)]), nil)
@@ -477,8 +503,13 @@ private actor HostedHomeShellGateway {
     }
     private func taskSummary(_ id: String) -> JSONValue {
         let terminal = id == "terminal" || taskStopped
-        return .object(["taskId": .string(id), "createdAt": .number(id == "active" ? 2000 : 1000), "updatedAt": .number(3000),
-            "title": .string(id == "active" ? "Active finite work" : "Finished finite work"), "target": .string("/trusted/project"),
+        // The Gateway sends whole epoch milliseconds; the task DTOs decode them as Int.
+        let now = nowMilliseconds()
+        let created = id == "active" ? now - 2 * 3_600_000 : now - 86_400_000
+        let updated = id == "active" ? now - 6 * 60_000 : now - 3 * 3_600_000
+        return .object(["taskId": .string(id), "createdAt": .number(created), "updatedAt": .number(updated),
+            "title": .string(id == "active" ? "Settings model: continue epic #758" : "Garden review email draft"), "project": .string("tron"),
+            "workerSessionId": .string("worker-session"), "target": .string("/trusted/project"),
             "lifecycle": .string(terminal ? "terminal" : "active"), "outcome": terminal ? .string(id == "active" ? "interrupted" : "final") : .null,
             "spend": taskSpend(), "attention": .bool(false), "pendingGrant": .bool(false)])
     }
@@ -488,9 +519,14 @@ private actor HostedHomeShellGateway {
         record["homeId"] = .string("home-fixture"); record["generation"] = .number(1); record["routeGeneration"] = .number(1)
         record["intentDigest"] = .string(String(repeating: "a", count: 64)); record["grantRef"] = .null; record["scopeRef"] = .string("scope-one")
         record["sessionId"] = .string("worker-session"); record["stopIntent"] = .null
+        record["workerModel"] = .object(["provider": .string("anthropic"), "id": .string("claude-opus-5-5")])
+        record["subagents"] = .object(["started": .number(2), "stoppedAtEnd": .number(1)])
+        record["subagentRuns"] = .object(["total": .number(id == "active" ? 1 : 0), "runs": .array(id == "active" ? [.object(["runId": .string("run-live"), "agent": .string("researcher"), "state": .string("running"), "startedAt": .string(isoAgo(900)), "lastActivityAt": .string(isoAgo(120))])] : [])])
         record["reportRef"] = id == "terminal" ? .object(["resultId": .string("report-one"), "sessionId": .string("worker-session"),
             "entryId": .string("report-entry"), "digest": .string(String(repeating: "b", count: 64))]) : .null
-        record["intent"] = .object(["text": .string(id == "active" ? "Active finite work" : "Finished finite work")])
+        record["intent"] = .object(["text": .string(id == "active"
+            ? "Continue epic #758 (settings model) on its integration branch. Implement the next slice, keep draft PR 798 updated, and do not merge."
+            : "Draft the email that summarises Thursday's garden review and send it for approval.")])
         record["operationId"] = .string("task-operation")
         let terminal = id == "terminal" || taskStopped
         record["terminalEvidence"] = terminal ? .object(["outcome": .string(id == "active" ? "interrupted" : "final"), "reason": .string("explicit-report"), "sessionId": .string("worker-session"), "entryIds": .array([.string("terminal-entry")])]) : .null
@@ -498,7 +534,7 @@ private actor HostedHomeShellGateway {
             "routeGeneration": .number(taskRedelivered ? 2 : 1), "delivery": .null,
             "eventId": .string("task-result-" + String(repeating: "b", count: 64)), "createdAt": .string("2026-01-01T00:00:00Z"),
             "push": .string("decided"), "acknowledgedAt": .null, "redeliveries": .array([])]) : .null
-        for key in ["title", "outcome", "attention", "pendingGrant"] { record.removeValue(forKey: key) }
+        for key in ["outcome", "attention", "pendingGrant"] { record.removeValue(forKey: key) }
         return .object(record)
     }
     private func taskBinding() -> JSONValue {
@@ -508,12 +544,14 @@ private actor HostedHomeShellGateway {
     private func taskPermissions() -> JSONValue {
         let ids = ["request-existing", "request-approve", "request-deny"]
         let binding = taskBinding()
+        // A grant's expiry must equal its decision's exactly; read the clock once.
+        let expiresAt = nowMilliseconds() + 604_800_000
         var decisions: [JSONValue] = [.object(["id": .string("existing-decision"), "requestId": .string("request-existing"),
-            "decidedAt": .number(1000), "approved": .bool(true), "expiresAt": .number(4102444800000)])]
+            "decidedAt": .number(1000), "approved": .bool(true), "expiresAt": .number(expiresAt)])]
         decisions += taskDecisions.keys.sorted().map { taskDecisions[$0]!.objectValue!["decision"]! }
         var grant = binding.objectValue!
         grant["id"] = .string("grant-one"); grant["decisionId"] = .string("existing-decision")
-        grant["expiresAt"] = .number(4102444800000); grant["state"] = .string(grantRevoked ? "revoked" : "available")
+        grant["expiresAt"] = .number(expiresAt); grant["state"] = .string(grantRevoked ? "revoked" : "available")
         var scope: [String: JSONValue] = ["id": .string("scope-one"), "kind": .string("all-trusted-projects"),
             "active": .bool(!scopeRevoked), "restoreEpoch": .string("fixture-epoch"), "createdAt": .number(1000)]
         if scopeRevoked { scope["revokedAt"] = .number(2000) }
@@ -526,22 +564,121 @@ private actor HostedHomeShellGateway {
                  "input": .array([.string("text")]), "contextWindow": .number(8192), "maxTokens": .number(1024),
                  "available": .bool(true), "virtual": .bool(virtual)])
     }
-    private func evidence(index: Int = 0) -> JSONValue {
-        .object(["index": .number(Double(index)), "sessionId": .string("source-session"), "entryId": .string("source-entry"),
+    private func anthropicModel(_ id: String, name: String, window: Int) -> JSONValue {
+        .object(["provider": .string("anthropic"), "id": .string(id), "name": .string(name), "reasoning": .bool(true),
+                 "input": .array([.string("text")]), "contextWindow": .number(Double(window)), "maxTokens": .number(64_000),
+                 "available": .bool(true), "virtual": .bool(false)])
+    }
+    /// The Home chat's own configuration, as a real session reports it: its model,
+    /// thinking, context window usage, token totals and cost, and its window policy.
+    private func applyHomeChatConfiguration(to snapshot: inout SessionSnapshot) {
+        let model = ModelRef(provider: "anthropic", id: "claude-opus-5-5")
+        snapshot.model = model
+        snapshot.thinkingLevel = "high"
+        snapshot.availableThinkingLevels = ["off", "low", "medium", "high"]
+        snapshot.contextUsage = try! JSONValue.object(["tokens": .number(30_800), "contextWindow": .number(1_000_000),
+            "percent": .number(3.08)]).decode(ContextUsage.self)
+        snapshot.stats = SessionStats(userMessages: 6, assistantMessages: 6, toolCalls: 4, toolResults: 4, totalMessages: 12,
+            tokens: .init(input: 412_000, output: 38_000, cacheRead: 1_230_000, cacheWrite: 96_000, total: 1_776_000),
+            latestCacheHitRate: 91.4, cost: 9.37)
+        snapshot.contextWindowPolicy = try! JSONValue.object(["model": try! JSONValue.encode(model), "minimum": .number(8_192),
+            "maximum": .number(1_000_000), "default": .number(200_000), "effective": .number(1_000_000), "override": .null,
+            "source": .string("model"), "warning": .null]).decode(ContextWindowPolicy.self)
+    }
+    private func anthropicRef(_ id: String) -> JSONValue {
+        .object(["provider": .string("anthropic"), "id": .string(id)])
+    }
+    /// An ISO timestamp the given seconds before now, so fixture rows read as recent.
+    private func nowMilliseconds() -> Double {
+        (Date.now.timeIntervalSince1970 * 1000).rounded(.down)
+    }
+    private func isoAgo(_ seconds: TimeInterval) -> String {
+        ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-seconds))
+    }
+    /// Memory entries belong to chapters: the sealed chapter (1) holds the first
+    /// entry and the active chapter (2) the second, so a chapter-filtered page is one item.
+    private func evidence(index: Int = 0, sessionID: String = "home-chapter-sealed") -> JSONValue {
+        .object(["index": .number(Double(index)), "sessionId": .string(sessionID), "entryId": .string("source-entry"),
                  "sourceDigest": .string(String(repeating: "a", count: 64))])
     }
-    private func memoryPage(next: Bool, empty: Bool) -> JSONValue {
-        let index = next ? 1 : 0
-        let item: JSONValue = .object(["index": .number(Double(index)), "kind": .string(next ? "talk" : "user"),
-            "attribution": .string(next ? "assistant" : "user"), "timestamp": .string("2026-01-01T00:00:00Z"),
-            "evidence": evidence(index: index), "projection": .object(["format": .string("memory-projection"),
-                "text": .string(next ? "Projected assistant memory" : "Projected user memory"), "omitted": .bool(false),
-                "omissions": .array([.string("browser-cap")])]), "summary": next ? .null : .object([
-                    "format": .string("memory-summary"), "text": .string("Condensed memory summary"), "truncated": .bool(true)])])
-        var page: [String: JSONValue] = ["homeId": .string("home-fixture"), "revision": .string(String(repeating: "a", count: 64)),
-            "totalItems": .number(empty ? 0 : 2), "items": .array(empty ? [] : [item])]
-        if !next && !empty { page["nextCursor"] = .string("fixture-next") }
-        return .object(page)
+    /// Six memory items of mixed kinds. The sealed chapter (1) holds item 0; the
+    /// active chapter (2) holds the rest. The unfiltered view pages three at a time.
+    private struct FixtureMemoryItem {
+        let index: Int
+        let sessionID: String
+        let json: JSONValue
+    }
+
+    private func memoryItems() -> [FixtureMemoryItem] {
+        let sealed = "home-chapter-sealed", active = "home-session"
+        return [
+            memoryItem(index: 0, session: sealed, kind: "user", attribution: "user", minutesAgo: 4_320,
+                       summary: "Asked to move garden planning to Thursday reviews",
+                       projection: "Move the garden planning to Thursday reviews.", omitted: false, omissions: []),
+            memoryItem(index: 1, session: active, kind: "talk", attribution: "assistant", minutesAgo: 40, summary: nil,
+                       projection: "Scheduled the garden review for Thursday at 10:00.", omitted: true, omissions: ["browser-cap"]),
+            memoryItem(index: 2, session: active, kind: "echo", attribution: "tool", minutesAgo: 35,
+                       summary: "Calendar tool created the Thursday review",
+                       projection: "Created calendar event: Garden review, Thursday 10:00.", omitted: false, omissions: []),
+            memoryItem(index: 3, session: active, kind: "event", attribution: "event", minutesAgo: 25,
+                       summary: "Settings model epic #758 reported done",
+                       projection: "Task result: settings model epic #758 finished.", omitted: false, omissions: []),
+            memoryItem(index: 4, session: active, kind: "user", attribution: "user", minutesAgo: 12,
+                       summary: "Wants the Thursday summary emailed",
+                       projection: "Email me the Thursday summary.", omitted: false, omissions: []),
+            memoryItem(index: 5, session: active, kind: "talk", attribution: "assistant", minutesAgo: 3,
+                       summary: "Confirmed the email goes out Thursday",
+                       projection: "Will email the summary Thursday morning.", omitted: false, omissions: []),
+        ]
+    }
+
+    private func memoryItem(index: Int, session: String, kind: String, attribution: String, minutesAgo: Double,
+                            summary: String?, projection: String, omitted: Bool, omissions: [String]) -> FixtureMemoryItem {
+        var json: [String: JSONValue] = [
+            "index": .number(Double(index)), "kind": .string(kind), "attribution": .string(attribution),
+            "timestamp": .string(isoAgo(minutesAgo * 60)), "evidence": evidence(index: index, sessionID: session),
+            "projection": .object(["format": .string("memory-projection"), "text": .string(projection),
+                "omitted": .bool(omitted), "omissions": .array(omissions.map { .string($0) })]),
+        ]
+        json["summary"] = summary.map { text in
+            .object(["format": .string("memory-summary"), "text": .string(text), "truncated": .bool(index == 0)])
+        } ?? .null
+        return FixtureMemoryItem(index: index, sessionID: session, json: .object(json))
+    }
+
+    /// A page of memory: one chapter's items when filtered; otherwise pages of three.
+    private func memoryPage(next: Bool, empty: Bool, sessionID: String? = nil) -> JSONValue {
+        let items = memoryItems()
+        let revision = JSONValue.string(String(repeating: "a", count: 64))
+        if let sessionID {
+            return .object(["homeId": .string("home-fixture"), "revision": revision,
+                "totalItems": .number(Double(items.count)), "items": .array(items.filter { $0.sessionID == sessionID }.map(\.json))])
+        }
+        let page = empty ? [] : (next ? Array(items[3...]) : Array(items[..<3]))
+        var result: [String: JSONValue] = ["homeId": .string("home-fixture"), "revision": revision,
+            "totalItems": .number(empty ? 0 : Double(items.count)), "items": .array(page.map(\.json))]
+        if !next && !empty { result["nextCursor"] = .string("fixture-next") }
+        return .object(result)
+    }
+
+    /// `home.context`: the activation's request sizes with the body-free breakdown
+    /// (sections sum to the effective tokens; the chapter section takes the remainder).
+    private func contextProjection() -> JSONValue {
+        if emptyContext { return .object(["available": .bool(false)]) }
+        return .object(["available": .bool(true), "activationStartEntryId": .string("activation-entry"), "activationOpen": .bool(true),
+            "viewLines": .number(412), "viewBytes": .number(18_400), "effectiveTokens": .number(30_800), "contextWindow": .number(1_000_000),
+            "breakdown": .object([
+                "activation": .object(["state": .string("running"), "kind": .string("user"), "startedAt": .string(isoAgo(240))]),
+                "contextWindow": .number(1_000_000), "effectiveTokens": .number(30_800),
+                "sections": .array([
+                    .object(["id": .string("instructions"), "tokens": .number(8_000)]),
+                    .object(["id": .string("profile"), "tokens": .number(1_200), "count": .number(3)]),
+                    .object(["id": .string("memory"), "tokens": .number(20_000), "count": .number(260)]),
+                    .object(["id": .string("chapter"), "tokens": .number(1_500), "count": .number(12)]),
+                    .object(["id": .string("results"), "tokens": .number(0), "count": .number(0)]),
+                    .object(["id": .string("input"), "tokens": .number(100)]),
+                ]),
+            ])])
     }
 
     /// The Gateway's rollover shape: the reserved successor is named but absent.
@@ -550,8 +687,8 @@ private actor HostedHomeShellGateway {
     private func rolloverStatus() -> JSONValue {
         .object(["taskRecovery": .object(["available": .bool(true)]), "routeGeneration": .number(2),
             "phase": .string(materialized ? "ready" : "rollover-pending"),
-            "activation": .object(["available": .bool(true), "activationOpen": .bool(false), "effectiveTokens": .number(320),
-                "contextWindow": .number(8192), "viewLines": .number(12), "viewBytes": .number(480)]),
+            "activation": .object(["available": .bool(true), "activationOpen": .bool(false), "effectiveTokens": .number(30_800),
+                "contextWindow": .number(1_000_000), "viewLines": .number(412), "viewBytes": .number(18_400)]),
             "readiness": .object(["ready": .bool(materialized), "gaps": .array(materialized ? [] : [.string("session-missing")])]),
             "recovery": .object(["action": .string(materialized ? "none" : "designate")]),
             "available": .bool(true), "enabled": .bool(true), "homeId": .string("home-fixture"),
@@ -570,7 +707,7 @@ private actor HostedHomeShellGateway {
         return .object(["taskRecovery": .object(["available": .bool(sheetState != "task-fenced"), "reason": .string("unsafe-state")]),
             "routeGeneration": .number(2), "phase": .string(phase),
             "activation": emptyContext ? .object(["available": .bool(false)]) : .object(["available": .bool(true), "activationOpen": .bool(phase == "active"),
-                "effectiveTokens": .number(320), "contextWindow": .number(8192), "viewLines": .number(12), "viewBytes": .number(480)]),
+                "effectiveTokens": .number(30_800), "contextWindow": .number(1_000_000), "viewLines": .number(12), "viewBytes": .number(480)]),
             "readiness": .object(["ready": .bool(designated && phase == "ready"), "gaps": .array([])]),
             "recovery": .object(["action": .string(designated ? "none" : "designate")]),
             "available": .bool(true), "enabled": .bool(enabled),
@@ -578,17 +715,20 @@ private actor HostedHomeShellGateway {
             "sessionId": sessionPresent ? .string("home-session") : .null,
             "openSessionId": sessionPresent ? .string("home-session") : .null,
             "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(sessionPresent),
-            "model": designated ? .object(["provider": .string("fixture"), "id": .string("chat-model")]) : .null,
-            "chapter": designated ? .object(["count": .number(3), "currentBytes": .number(480),
+            "model": designated ? .object(["provider": .string("anthropic"), "id": .string("claude-opus-5-5")]) : .null,
+            "chapter": designated ? .object(["count": .number(2), "currentBytes": .number(480),
                 "currentEntries": .number(12), "recoveryDecision": .string("none")]) : .null,
             "memory": .object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused),
                 "blocked": phase == "blocked" && configured ? .string("source-unavailable") : .null,
-                "spentTokens": .number(42), "model": configuredModel.map { try! JSONValue.encode($0) } ?? .null])])
+                "spentTokens": .number(10_000_000), "model": (configuredModel.map { try! JSONValue.encode($0) } ?? (configured ? anthropicRef("claude-haiku-5-5") : .null))])])
     }
 }
 
 private actor HostedHomeShellSocket: GatewaySocketConnection {
     private let gateway: HostedHomeShellGateway
+    private var openedSnapshot: SessionSnapshot?
+    private var modelDelivery: Task<Void, Error>?
+    private var modelRequests = 0
     private var inbound: [Data]
     private var receivers: [CheckedContinuation<Data, Error>] = []
     private var closed = false
@@ -609,9 +749,47 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue ?? [:]
         guard frame["type"]?.stringValue == "request", let id = frame["id"]?.stringValue,
               let method = frame["method"]?.stringValue else { return }
+        if method == "session.setModel", ProcessInfo.processInfo.arguments.contains("-home-model-picker"), var snapshot = openedSnapshot {
+            modelRequests += 1
+            let shouldFail = modelRequests == 1 && ProcessInfo.processInfo.arguments.contains("-home-model-failure")
+            let params = frame["params"]?.objectValue ?? [:]
+            guard let provider = params["provider"]?.stringValue, let modelID = params["modelId"]?.stringValue,
+                  params["commandId"]?.stringValue != nil,
+                  params["expectedRuntimeGeneration"]?.stringValue == snapshot.runtimeGeneration,
+                  params["expectedModel"] == (try JSONValue.encode(snapshot.model)) else {
+                throw GatewayFailure(code: "invalid_request", message: "Model change lacked its session fence", retryable: false, details: nil)
+            }
+            modelDelivery = Task {
+                try await Task.sleep(for: .seconds(3))
+                if shouldFail {
+                    await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
+                        "type": .string("response"), "id": .string(id), "ok": .bool(false),
+                        "error": .object(["code": .string("conflict"), "message": .string("Model choice refused; try again."), "retryable": .bool(false)])])))
+                    return
+                }
+                snapshot.model = ModelRef(provider: provider, id: modelID)
+                snapshot.revision += 1
+                snapshot.eventSequence += 1
+                snapshot.thinkingLevel = "off"
+                snapshot.availableThinkingLevels = ["off"]
+                snapshot.contextWindowPolicy = nil
+                openedSnapshot = snapshot
+                await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("event"), "topic": .string("session.snapshot"), "sessionId": .string(snapshot.sessionId),
+                    "payload": try JSONValue.encode(snapshot)])))
+                try await Task.sleep(for: .seconds(1))
+                await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"), "id": .string(id), "ok": .bool(true),
+                    "result": .object(["updated": .bool(true), "revision": .number(Double(snapshot.revision))])])))
+            }
+            return
+        }
         let result: (JSONValue?, JSONValue?)
         do {
             result = try await gateway.handle(method, frame["params"]?.objectValue ?? [:])
+            if method == "session.open", let value = result.0?.objectValue?["session"] {
+                openedSnapshot = try value.decode(SessionSnapshot.self)
+            }
         } catch is CancellationError {
             return
         }
@@ -626,7 +804,15 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         if !inbound.isEmpty { return inbound.removeFirst() }
         return try await withCheckedThrowingContinuation { receivers.append($0) }
     }
-    func close() async { closed = true; let pending = receivers; receivers.removeAll(); pending.forEach { $0.resume(throwing: CancellationError()) } }
+    func close() async {
+        closed = true
+        modelDelivery?.cancel()
+        _ = await modelDelivery?.result
+        modelDelivery = nil
+        let pending = receivers
+        receivers.removeAll()
+        pending.forEach { $0.resume(throwing: CancellationError()) }
+    }
     private func deliver(_ data: Data) { if receivers.isEmpty { inbound.append(data) } else { receivers.removeFirst().resume(returning: data) } }
 }
 

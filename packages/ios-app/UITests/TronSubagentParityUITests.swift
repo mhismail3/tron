@@ -4,6 +4,116 @@ import XCTest
 /// read-only child transport. Fixtures are bounded projections, not live workers.
 final class TronSubagentParityUITests: XCTestCase {
     @MainActor
+    func testHomeResultReadableMessageAndNestedInfo() throws {
+        continueAfterFailure = false
+        for mode in ["legacy", "typed-report", "plain-report", "malformed-report"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-subagent-parity-fixture", "-presentation-polish", "-\(mode)", mode == "typed-report" ? "-dark" : "-light"]
+            app.launch()
+            defer { app.terminate() }
+            let pill = app.buttons["Tron · Context, Received"]
+            XCTAssertTrue(pill.waitForExistence(timeout: 10), app.debugDescription)
+            pill.tap()
+            try capture("852-\(mode)-message")
+            if mode == "plain-report" {
+                XCTAssertTrue(app.staticTexts["Plain report remains complete."].exists)
+            } else if mode == "malformed-report" {
+                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "preserve this text")).firstMatch.exists)
+            } else {
+                XCTAssertTrue(app.staticTexts["Actual report"].waitForExistence(timeout: 3), app.debugDescription)
+                XCTAssertTrue(app.staticTexts["All requested changes are preserved."].exists)
+                XCTAssertTrue(app.staticTexts[mode == "typed-report" ? "Needs input" : "Final report"].exists)
+                XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "receiptId")).firstMatch.exists)
+            }
+            app.buttons["Technical details"].tap()
+            XCTAssertTrue(app.staticTexts["ORIGIN"].waitForExistence(timeout: 5), app.debugDescription)
+            try capture("852-\(mode)-info")
+            if mode == "legacy" {
+                let envelope = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Inspect report envelope")).firstMatch
+                for _ in 0..<6 {
+                    if envelope.exists && envelope.isHittable { break }
+                    app.swipeUp()
+                }
+                XCTAssertTrue(envelope.isHittable, app.debugDescription)
+                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "evidence/native-result.xcresult")).firstMatch.exists, app.debugDescription)
+                try capture("852-evidence-table")
+                envelope.tap()
+                XCTAssertTrue(app.staticTexts["Report envelope"].waitForExistence(timeout: 5), app.debugDescription)
+                try capture("852-envelope-inspector")
+                try XCTUnwrap(app.buttons.matching(identifier: "Done").allElementsBoundByIndex.last(where: \.isHittable)).tap()
+            }
+            try XCTUnwrap(app.buttons.matching(identifier: "Done").allElementsBoundByIndex.last(where: \.isHittable)).tap()
+            XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 5))
+            try XCTUnwrap(app.buttons.matching(identifier: "Done").allElementsBoundByIndex.last(where: \.isHittable)).tap()
+            XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        }
+    }
+
+    @MainActor
+    func testNotificationBodyFillsSheetWidth() throws {
+        continueAfterFailure = false
+        for scheme in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-subagent-parity-fixture", "-presentation-polish", "-\(scheme)"]
+            if scheme == "dark" { app.launchArguments.append("-accessibility-type") }
+            app.launch()
+            defer { app.terminate() }
+            let errors = app.buttons.matching(NSPredicate(format: "label == %@", "Tron · Notification, Error"))
+            XCTAssertTrue(errors.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+            for index in 0..<2 {
+                errors.element(boundBy: 1 - index).tap()
+                let text = index == 0 ? "HTTP 429" : "Long error context"
+                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+                try capture("852-error-\(scheme)-\(index)")
+                let card = app.descendants(matching: .any).matching(identifier: "chat-notification-body").firstMatch
+                XCTAssertTrue(card.exists)
+                let viewport = app.scrollViews.element(boundBy: app.scrollViews.count - 1)
+                XCTAssertGreaterThanOrEqual(card.frame.width, viewport.frame.width - 40, "Short and long cards use the same standard content width")
+                app.buttons["Done"].tap()
+            }
+        }
+    }
+
+    @MainActor
+    func testAdjacentNotificationsKeepCompactIndependentTargets() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-subagent-parity-fixture", "-presentation-polish", "-light"]
+        app.launch()
+        defer { app.terminate() }
+        let errors = app.buttons.matching(NSPredicate(format: "label == %@", "Tron · Notification, Error"))
+        XCTAssertTrue(errors.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(errors.count, 2)
+        let frames = [errors.element(boundBy: 0).frame, errors.element(boundBy: 1).frame].sorted { $0.minY < $1.minY }
+        try capture("852-notification-run")
+        XCTAssertGreaterThanOrEqual(frames[1].midY - frames[0].midY, 44, "Independent targets must not overlap")
+        XCTAssertLessThanOrEqual(frames[1].midY - frames[0].midY, 46, "A contiguous run must not repeat turn spacing")
+        // The AX label can hug the glass; prove the actual 44-point target with
+        // a native tap outside its visible face but within its own clearance.
+        let first = errors.element(boundBy: 1)
+        first.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .withOffset(CGVector(dx: 0, dy: 20)).tap()
+        XCTAssertTrue(app.staticTexts["HTTP 429"].waitForExistence(timeout: 5), "Expanded target must open its own event, not its neighbour")
+    }
+
+    @MainActor
+    func testInterleavedNotificationsPreserveConversationAndToolBoundaries() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-subagent-parity-fixture", "-presentation-polish", "-interleaved-events", "-dark"]
+        app.launch()
+        defer { app.terminate() }
+        let errors = app.buttons.matching(NSPredicate(format: "label == %@", "Tron · Notification, Error"))
+        XCTAssertTrue(errors.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(errors.count, 2)
+        XCTAssertTrue(app.staticTexts["Conversation between independent events."].exists, app.debugDescription)
+        XCTAssertTrue(app.buttons["Read file, Interrupted"].exists, app.debugDescription)
+        let frames = [errors.element(boundBy: 0).frame, errors.element(boundBy: 1).frame].sorted { $0.minY < $1.minY }
+        XCTAssertGreaterThan(frames[1].midY - frames[0].midY, 80, "Prose and tools must remain chronological boundaries, not join an event run")
+        try capture("852-interleaved-events")
+    }
+
+    @MainActor
     func testNativeOrganizationAndPills() throws {
         continueAfterFailure = false
         for scheme in ["light", "dark"] {

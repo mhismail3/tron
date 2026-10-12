@@ -143,6 +143,10 @@ private struct TronTopBlurSurfaceModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // The native scroll viewport can fill a sheet while SwiftUI offers
+            // its overlay only the loading row's ideal width. Establish surface
+            // width before attaching chrome; never paint a content-sized column.
+            .frame(maxWidth: .infinity)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
             .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
             .overlay(alignment: .top) {
@@ -155,16 +159,10 @@ private struct TronTopBlurSurfaceModifier: ViewModifier {
 /// extend beneath the custom navigation blur. Keep that underlap explicit so
 /// form/detail surfaces retain SwiftUI's normal safe-area placement.
 private struct TronDocumentTopBlurSurfaceModifier: ViewModifier {
-    @Environment(\.tronTopBlurStyle) private var style
-
     func body(content: Content) -> some View {
         content
             .ignoresSafeArea(.container, edges: .top)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
-            .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
-            .overlay(alignment: .top) {
-                if let style { TronTopBlurOverlay(style: style) }
-            }
+            .tronTopBlurSurface()
     }
 }
 

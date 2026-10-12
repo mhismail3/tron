@@ -533,6 +533,16 @@ final class SessionPresentationStore {
         clearSecondaryProjection()
     }
 
+    /// Project the synchronization owner's finite failure latch; the view must
+    /// not infer failure from an absent subscription or a transient notice.
+    func hasFailedSynchronization(for sessionID: String) -> Bool {
+        guard let target = mountedTarget,
+              target.sessionID == sessionID,
+              let recovery = automaticSynchronization else { return false }
+        return recovery.failed && recovery.target == target
+            && recovery.connectionGeneration == connectionGeneration
+    }
+
     func hasInstalledSubscription(for sessionID: String) -> Bool {
         guard let target = mountedTarget else { return false }
         if let recovery = automaticSynchronization,
