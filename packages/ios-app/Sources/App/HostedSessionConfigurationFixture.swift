@@ -67,6 +67,9 @@ struct HostedSessionConfigurationFixture: View {
                         Text("decisions:\(decisionState)").accessibilityIdentifier("fixture.session-settings-decisions")
                         Text("Model requests: \(modelRequests)").accessibilityIdentifier("fixture.model-requests")
                     }
+                    // Fixture controls stay at the default size so an accessibility
+                    // type size measures the sheet's own content, not these probes.
+                    .dynamicTypeSize(.large)
                     .task {
                         for await count in socket.modelRequestCounts {
                             modelRequests = count

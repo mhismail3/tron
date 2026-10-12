@@ -181,7 +181,7 @@ struct SettingsRendererView: View {
             } label: {
                 TronSettingsRow(
                     icon: nil,
-                    title: summary.essential.map(\.display).joined(separator: " · ").nonEmpty ?? "\(keys.count) settings",
+                    title: summary.essential.map(\.display).joined(separator: " · ").nonEmpty ?? (keys.count == 1 ? "1 setting" : "\(keys.count) settings"),
                     subtitle: summary.essential.isEmpty ? nil : summary.essential.map(\.label).joined(separator: " · ")
                 ) {
                     TronInlineActionLabel(isExpanded ? "Show less" : "Show all")

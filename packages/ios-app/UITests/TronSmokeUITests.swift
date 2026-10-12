@@ -1709,6 +1709,39 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["From default at start: High (Mac)"].waitForExistence(timeout: 5))
     }
 
+    /// Manage Session's sections collapsed and expanded in light and dark at the
+    /// largest accessibility type size: every row stays reachable (#766).
+    @MainActor
+    func testManageSessionSectionsAtAccessibilityTypeInLightAndDark() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance,
+                                   "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+            app.launch()
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+            app.buttons["Stop session"].tap()
+            let model = app.buttons["settings-section-model-expand"]
+            let context = app.buttons["settings-section-context-expand"]
+            XCTAssertTrue(model.waitForExistence(timeout: 5), app.debugDescription)
+            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-collapsed")
+            tapScrolling(model, in: app)
+            let reset = app.buttons["settings-row-model.thinking_role_chat_-useCurrentDefault"]
+            XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
+            scrollTo(reset, in: app)
+            XCTAssertTrue(reset.isHittable, "The expanded Model row must stay reachable at XXXL")
+            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-model-expanded")
+            tapScrolling(context, in: app)
+            XCTAssertTrue(app.staticTexts["1 setting"].exists, "A one-key section summary is singular")
+            let compaction = app.descendants(matching: .any)["settings-row-context.compaction.enabled"]
+            XCTAssertTrue(compaction.waitForExistence(timeout: 5), app.debugDescription)
+            scrollTo(compaction, in: app)
+            XCTAssertTrue(compaction.isHittable, "The expanded Context row must stay reachable at XXXL")
+            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-context-expanded")
+            app.terminate()
+        }
+    }
+
     /// Manage Session's pending change for this chat: a decline is recorded by the
     /// Gateway, and the chat's approvals section then renders nothing.
     @MainActor
@@ -1895,6 +1928,27 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertEqual(app.staticTexts["fixture.settings-changes-undos"].label, "undos:1")
             keepScreenshot(named: "758-changes-undo-current-diff-\(outcomeFailure ? "outcome" : "rpc")")
         }
+    }
+
+    /// A redacted entry never recorded its values, so its detail offers no Undo (#769).
+    @MainActor
+    func testSettingsChangesRedactedEntryIsNotUndoable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-redacted"]
+        app.launch()
+        defer { app.terminate() }
+        let more = app.buttons["settings-changes-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10), app.debugDescription)
+        tapScrolling(more, in: app)
+        let entry = app.buttons["settings-change-fixture-change"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(entry, in: app)
+        XCTAssertTrue(app.staticTexts["Not undoable"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(showsText("Hidden", in: app))
+        XCTAssertFalse(app.buttons["Undo"].exists, "A redacted change must not offer Undo")
+        XCTAssertEqual(app.staticTexts["fixture.settings-changes-undos"].label, "undos:0")
+        keepScreenshot(named: "769-changes-redacted-not-undoable")
     }
 
     @MainActor
