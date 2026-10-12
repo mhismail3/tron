@@ -1,6 +1,11 @@
 import Foundation
 import TronMobileCore
 
+enum ConfirmedMutationPhase: Equatable {
+    case sending
+    case confirming
+}
+
 enum ConfirmedMutationConnectionPolicy {
     /// Pre-transmission waiting preserves single-send ownership during a short
     /// transport handoff.
@@ -40,12 +45,14 @@ final class ConfirmedMutationExecutor {
         method: String,
         commandID: String,
         replayAdmission: @escaping @MainActor () -> Bool = { true },
+        phaseChanged: @escaping @MainActor (ConfirmedMutationPhase?) -> Void = { _ in },
         send: () async throws -> Response
     ) async throws -> Response {
         let value = try await performValue(
             method: method,
             commandID: commandID,
-            replayAdmission: replayAdmission
+            replayAdmission: replayAdmission,
+            phaseChanged: phaseChanged
         ) {
             try JSONValue.encode(try await send())
         }
@@ -57,6 +64,7 @@ final class ConfirmedMutationExecutor {
         commandID: String,
         replayAdmission: @escaping @MainActor () -> Bool = { true },
         replayMissingReceipt: Bool = true,
+        phaseChanged: @escaping @MainActor (ConfirmedMutationPhase?) -> Void = { _ in },
         send: () async throws -> JSONValue
     ) async throws -> JSONValue {
         guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
@@ -74,6 +82,8 @@ final class ConfirmedMutationExecutor {
             ))
         }
 
+        phaseChanged(.sending)
+        defer { phaseChanged(nil) }
         var retriedBeforeTransmission = false
         while true {
             do {
@@ -96,6 +106,7 @@ final class ConfirmedMutationExecutor {
                 throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: failure)
             } catch let uncertain as GatewayPossiblySentError {
             let original = uncertain.failure
+            phaseChanged(.confirming)
             if Task.isCancelled || lifecycle.currentLifecycleGeneration != admission.generation || lifecycle.selectedProfileID != profileID {
                 throw Self.uncertainMutationOutcome(
                     method: method,

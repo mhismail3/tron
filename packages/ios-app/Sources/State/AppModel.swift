@@ -3824,21 +3824,23 @@ final class AppModel {
     }
 
     @discardableResult
-    func setModel(_ model: ModelRef, sessionID: String) async throws -> Int {
+    func setModel(_ model: ModelRef, sessionID: String,
+                  phaseChanged: @escaping @MainActor (ConfirmedMutationPhase?) -> Void = { _ in }) async throws -> Int {
         let snapshot = try configurationSnapshot(sessionID)
         return try await sessionMutations.setModel(model, sessionID: sessionID,
-            expectedRuntimeGeneration: snapshot.runtimeGeneration, expectedModel: snapshot.model) { [weak self] in
-                self?.admitsConfigurationSend(snapshot) == true
-            }
+            expectedRuntimeGeneration: snapshot.runtimeGeneration, expectedModel: snapshot.model,
+            sendAdmission: { [weak self] in self?.admitsConfigurationSend(snapshot) == true },
+            phaseChanged: phaseChanged)
     }
 
     @discardableResult
-    func setThinking(_ level: String, sessionID: String) async throws -> Int {
+    func setThinking(_ level: String, sessionID: String,
+                     phaseChanged: @escaping @MainActor (ConfirmedMutationPhase?) -> Void = { _ in }) async throws -> Int {
         let snapshot = try configurationSnapshot(sessionID)
         return try await sessionMutations.setThinking(level, sessionID: sessionID,
-            expectedRuntimeGeneration: snapshot.runtimeGeneration, expectedModel: snapshot.model) { [weak self] in
-                self?.admitsConfigurationSend(snapshot) == true
-            }
+            expectedRuntimeGeneration: snapshot.runtimeGeneration, expectedModel: snapshot.model,
+            sendAdmission: { [weak self] in self?.admitsConfigurationSend(snapshot) == true },
+            phaseChanged: phaseChanged)
     }
 
     @discardableResult
@@ -3856,14 +3858,16 @@ final class AppModel {
     }
 
     private func configurationSnapshot(_ sessionID: String) throws -> SessionSnapshot {
-        guard let snapshot = authoritativeSnapshot(for: sessionID), admitsConfigurationSend(snapshot) else {
+        guard let snapshot = authoritativeSnapshot(for: sessionID), admitsConfigurationSend(snapshot),
+              let target = presentationTarget(for: sessionID), admitsLiveSessionCommands(target) else {
             throw GatewayFailure(code: "busy", message: "Wait for the session to finish synchronizing or settling before changing configuration.", retryable: true, details: nil)
         }
         return snapshot
     }
 
     private func admitsConfigurationSend(_ original: SessionSnapshot) -> Bool {
-        guard sessionPresentation.hasInstalledSubscription(for: original.sessionId),
+        guard connectionState == .connected, !isReconcilingForeground,
+              sessionPresentation.hasInstalledSubscription(for: original.sessionId),
               let current = authoritativeSnapshot(for: original.sessionId) else { return false }
         return current.runtimeGeneration == original.runtimeGeneration && current.model == original.model
             && current.configurationBlocker == .ready && !current.phase.isActive
@@ -3929,8 +3933,12 @@ final class AppModel {
         scheduleSessionListRefresh()
     }
 
-    func compact(sessionID: String, instructions: String? = nil) async throws {
-        try await sessionMutations.compact(sessionID: sessionID, instructions: instructions)
+    func compact(sessionID: String, instructions: String? = nil,
+                 phaseChanged: @escaping @MainActor (ConfirmedMutationPhase?) -> Void = { _ in }) async throws {
+        guard let target = presentationTarget(for: sessionID), admitsLiveSessionCommands(target) else {
+            throw GatewayFailure(code: "disconnected", message: "Reconnect to the Mac before starting this command.", retryable: true, details: nil)
+        }
+        try await sessionMutations.compact(sessionID: sessionID, instructions: instructions, phaseChanged: phaseChanged)
     }
 
     func setTools(_ tools: [String], sessionID: String) async throws {

@@ -293,14 +293,15 @@ final class SessionMutationService {
 
     @discardableResult
     func setModel(_ model: ModelRef, sessionID: String, expectedRuntimeGeneration: String,
-                  expectedModel: ModelRef?, sendAdmission: @escaping @MainActor () -> Bool) async throws -> Int {
+                  expectedModel: ModelRef?, sendAdmission: @escaping @MainActor () -> Bool,
+                  phaseChanged: @escaping @MainActor (ConfirmedMutationPhase?) -> Void = { _ in }) async throws -> Int {
         let commandID = uuidSource.next().uuidString
         let params: JSONValue = .object([
             "sessionId": .string(sessionID), "provider": .string(model.provider), "modelId": .string(model.id),
             "commandId": .string(commandID), "expectedRuntimeGeneration": .string(expectedRuntimeGeneration),
             "expectedModel": try expectedModel.map { try JSONValue.encode($0) } ?? .null,
         ])
-        let response: ConfigurationResponse = try await executor.perform(method: "session.setModel", commandID: commandID, replayAdmission: sendAdmission) {
+        let response: ConfigurationResponse = try await executor.perform(method: "session.setModel", commandID: commandID, replayAdmission: sendAdmission, phaseChanged: phaseChanged) {
             try Self.requireConfigurationSend(sendAdmission)
             return try await client.request("session.setModel", params)
         }
@@ -309,14 +310,15 @@ final class SessionMutationService {
 
     @discardableResult
     func setThinking(_ level: String, sessionID: String, expectedRuntimeGeneration: String,
-                     expectedModel: ModelRef?, sendAdmission: @escaping @MainActor () -> Bool) async throws -> Int {
+                     expectedModel: ModelRef?, sendAdmission: @escaping @MainActor () -> Bool,
+                     phaseChanged: @escaping @MainActor (ConfirmedMutationPhase?) -> Void = { _ in }) async throws -> Int {
         let commandID = uuidSource.next().uuidString
         let params: JSONValue = .object([
             "sessionId": .string(sessionID), "level": .string(level), "commandId": .string(commandID),
             "expectedRuntimeGeneration": .string(expectedRuntimeGeneration),
             "expectedModel": try expectedModel.map { try JSONValue.encode($0) } ?? .null,
         ])
-        let response: ConfigurationResponse = try await executor.perform(method: "session.setThinking", commandID: commandID, replayAdmission: sendAdmission) {
+        let response: ConfigurationResponse = try await executor.perform(method: "session.setThinking", commandID: commandID, replayAdmission: sendAdmission, phaseChanged: phaseChanged) {
             try Self.requireConfigurationSend(sendAdmission)
             return try await client.request("session.setThinking", params)
         }
@@ -389,7 +391,8 @@ final class SessionMutationService {
         }
     }
 
-    func compact(sessionID: String, instructions: String?) async throws {
+    func compact(sessionID: String, instructions: String?,
+                 phaseChanged: @escaping @MainActor (ConfirmedMutationPhase?) -> Void = { _ in }) async throws {
         struct Params: Codable {
             let sessionId: String
             let instructions: String?
@@ -398,7 +401,7 @@ final class SessionMutationService {
         struct Response: Codable { let compacted: Bool }
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, instructions: instructions, commandId: commandID)
-        let _: Response = try await executor.perform(method: "session.compact", commandID: commandID) {
+        let _: Response = try await executor.perform(method: "session.compact", commandID: commandID, phaseChanged: phaseChanged) {
             try await client.request("session.compact", params, timeout: GatewayRequestTimeout.sessionCompact)
         }
     }

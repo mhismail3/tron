@@ -7,15 +7,18 @@ private enum ManageSessionDestination: String, Identifiable {
 }
 
 enum SessionCompactionControlPolicy {
-    enum VisualState: Equatable { case queued, inProgress, idle }
+    enum VisualState: Equatable { case queued, inProgress, sending, confirming, idle }
 
     static func visualState(
         compactionQueued: Bool,
         submitting: Bool,
-        phase: SessionPhase
+        phase: SessionPhase,
+        mutationPhase: ConfirmedMutationPhase? = nil
     ) -> VisualState {
         if compactionQueued { return .queued }
-        if submitting || phase == .compacting { return .inProgress }
+        if mutationPhase == .confirming { return .confirming }
+        if mutationPhase == .sending { return .sending }
+        if phase == .compacting { return .inProgress }
         return .idle
     }
 
@@ -24,9 +27,10 @@ enum SessionCompactionControlPolicy {
         operationKind: SessionOperationState.Kind? = nil,
         compactionQueued: Bool,
         submitting: Bool,
-        exporting: Bool = false
+        exporting: Bool = false,
+        isConnected: Bool = true
     ) -> Bool {
-        guard !submitting, !compactionQueued, !exporting else { return false }
+        guard isConnected, !submitting, !compactionQueued, !exporting else { return false }
         if phase == .running { return operationKind == .prompt }
         return phase == .idle || phase == .interrupted
     }
@@ -177,6 +181,8 @@ struct SessionContextSheet: View {
     @State private var unarchiving = false
     @State private var name = ""
     @State private var compacting = false
+    @State private var compactionMutationPhase: ConfirmedMutationPhase?
+    @State private var configurationMutationPhase: ConfirmedMutationPhase?
     @State private var exportedURL: URL?
     @State private var exportingFormat: String?
     @State private var exportTask: Task<Void, Never>?
@@ -209,8 +215,11 @@ struct SessionContextSheet: View {
     }
 
     private var configurationConnectionReason: String? {
-        guard let target = model.presentationTarget(for: sessionID), model.admitsLiveSessionCommands(target) else {
-            return "Waiting for the conversation to synchronize."
+        guard model.connectionState == .connected,
+              let target = model.presentationTarget(for: sessionID), model.admitsLiveSessionCommands(target) else {
+            return model.connectionState == .connected
+                ? "Waiting for the conversation to synchronize."
+                : "Reconnect to the Mac before changing session commands."
         }
         return nil
     }
@@ -422,7 +431,8 @@ struct SessionContextSheet: View {
         let state = SessionCompactionControlPolicy.visualState(
             compactionQueued: snapshot.compactionQueued,
             submitting: compacting,
-            phase: snapshot.phase
+            phase: snapshot.phase,
+            mutationPhase: compactionMutationPhase
         )
         return Button {
             guard SessionCompactionControlPolicy.canRequest(
@@ -435,14 +445,14 @@ struct SessionContextSheet: View {
             compacting = true
             Task {
                 defer { compacting = false }
-                do { try await model.compact(sessionID: sessionID) }
+                do { try await model.compact(sessionID: sessionID) { compactionMutationPhase = $0 } }
                 catch { surfaceActionError(error) }
             }
         } label: {
             TronInlineActionLabel(
-                state == .queued ? "Queued" : state == .inProgress ? "Compacting" : "Compact Now",
+                state == .queued ? "Queued" : state == .confirming ? "Confirming with Mac…" : state == .sending ? "Sending…" : state == .inProgress ? "Compacting" : "Compact Now",
                 icon: state == .queued ? "clock" : "rectangle.compress.vertical",
-                isWorking: state == .inProgress
+                isWorking: state == .sending || state == .confirming
             )
         }
         .buttonStyle(.plain)
@@ -453,11 +463,14 @@ struct SessionContextSheet: View {
             operationKind: snapshot.operationKind,
             compactionQueued: snapshot.compactionQueued,
             submitting: compacting,
-            exporting: exportingFormat != nil
+            exporting: exportingFormat != nil,
+            isConnected: model.connectionState == .connected
         ))
         .accessibilityValue(snapshot.compactionQueued == true
             ? "Queued after current work"
-            : (compacting || snapshot.phase == .compacting) ? "In progress" : "")
+            : compactionMutationPhase == .confirming ? "Confirming with Mac"
+            : compactionMutationPhase == .sending ? "Sending"
+            : snapshot.phase == .compacting ? "In progress" : "")
     }
 
     private var configurationRowAccent: Color { .tronPurple }
@@ -511,7 +524,7 @@ struct SessionContextSheet: View {
                             pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
                             return
                         }
-                        let revision = try await model.setModel(selection, sessionID: sessionID)
+                        let revision = try await model.setModel(selection, sessionID: sessionID) { configurationMutationPhase = $0 }
                         pendingModelSelection = pendingModelSelection?.confirming(pending.id, revision: revision)
                         if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
                     } catch is CancellationError {
@@ -559,7 +572,7 @@ struct SessionContextSheet: View {
                                     pendingThinking = pendingThinking?.rejecting(pending.id)
                                     return
                                 }
-                                let revision = try await model.setThinking(level, sessionID: sessionID)
+                                let revision = try await model.setThinking(level, sessionID: sessionID) { configurationMutationPhase = $0 }
                                 pendingThinking = pendingThinking?.confirming(pending.id, revision: revision)
                                 if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
                             } catch {
