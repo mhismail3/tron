@@ -516,7 +516,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             return entries.contains("-builtin:tool-search") == (toolSearchBefore == "1")
         }, "turning Tool search off must write -builtin:tool-search to the Mac settings.json")
         keepScreenshot(app, name: "settings-surface-builtin-extension-switch")
-        dismissTopSheet(app)
+        // Extensions is a progressive child of Settings: close it, then Settings.
+        for _ in 0..<3 where app.staticTexts["Settings"].exists || app.switches["Tool search"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
 
         let attachment = XCTAttachment(string: coverageReport(coverage, schema: schema))
