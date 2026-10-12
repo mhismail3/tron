@@ -98,6 +98,8 @@ def main(argv: list) -> int:
     landing.add_argument("--title", help="pull request title (default: '<type>: <branch slug>'; kept when a PR exists)")
     landing.add_argument("--tests", action="append", default=[], metavar="COMMAND",
                          help="integration or E2E command to run on the merged tree; repeat for each")
+    landing.add_argument("--ready", action="store_true",
+                         help="mark a draft pull request ready for review, after verify and publication, before the merge")
     landing.add_argument("--dry-run", action="store_true",
                          help="verify the merged tree, then stop before any push or GitHub write")
     tidy = commands.add_parser("cleanup", help="remove this task worktree and its branches once its PR merged")
@@ -152,7 +154,7 @@ def main(argv: list) -> int:
                 tracking.set_project_fields(gh, root, config, args.issue, args.status, args.priority)
                 return 0
         if args.command == "land":
-            return land.land(Gh(root), root, config, args.title, args.summary_file, args.tests, args.dry_run)
+            return land.land(Gh(root), root, config, args.title, args.summary_file, args.tests, args.dry_run, args.ready)
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
     except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, verify.VerifyError, dashboard.DashboardError,

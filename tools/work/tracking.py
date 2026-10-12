@@ -311,6 +311,12 @@ def add_blocker(gh: Gh, repo: Path, config: dict, issue_number: int, blocker_num
     print(f"linked blocker #{blocker_number} to issue #{issue_number}")
 
 
+def open_sub_issues(gh: Gh, repository: str, number: int) -> List[int]:
+    """Open sub-issue numbers of an issue, read from every page: a finished first page is not a finished epic."""
+    children = gh.rest_pages(f"repos/{repository}/issues/{number}/sub_issues?per_page=100")
+    return [child["number"] for child in children if child.get("state") != "closed"]
+
+
 _CLOSE_REASONS = {"completed": "completed", "not_planned": "not planned"}
 
 
@@ -366,8 +372,7 @@ def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comm
     labels = {label["name"] for label in issue.get("labels", [])}
     if config["dashboard"]["epicLabel"] in labels:
         # Read every page before any write; a finished first page is not a finished epic.
-        children = gh.rest_pages(f"repos/{repository}/issues/{number}/sub_issues?per_page=100")
-        unfinished = [child["number"] for child in children if child.get("state") != "closed"]
+        unfinished = open_sub_issues(gh, repository, number)
         if unfinished:
             raise TrackingError(f"#{number} has unfinished sub-issues: "
                                 + ", ".join(f"#{child}" for child in unfinished))

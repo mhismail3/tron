@@ -248,6 +248,14 @@ class Gh:
             raise GhError("GraphQL: " + "; ".join(e.get("message", "?") for e in errors))
         return response["data"]
 
+    def mark_pull_request_ready(self, node_id: str) -> None:
+        """Clear a pull request's draft state. The mutation is audited as a write by graphql()."""
+        self.graphql(
+            "mutation($pullRequestId: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $pullRequestId}) "
+            "{ pullRequest { isDraft } } }",
+            pullRequestId=node_id,
+        )
+
     def rest(self, method: str, path: str, body: Optional[dict] = None) -> Any:
         args = ["api", "-X", method, path]
         if body is not None:
