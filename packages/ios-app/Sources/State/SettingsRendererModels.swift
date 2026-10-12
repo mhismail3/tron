@@ -189,6 +189,7 @@ struct SettingsChangeResult: Decodable, Equatable, Sendable {
         struct Failure: Decodable, Equatable, Sendable {
             let code: String
             let message: String
+            let details: JSONValue?
         }
 
         let tier: String?
@@ -211,7 +212,7 @@ struct SettingsChangeResult: Decodable, Equatable, Sendable {
 
     /// The refusal the first change carries, if any, as the Gateway's own failure.
     func throwIfRefused() throws {
-        guard let failure = changes.first?.error else { return }
-        throw GatewayFailure(code: failure.code, message: failure.message, retryable: false, details: nil)
+        guard let failure = changes.compactMap(\.error).first else { return }
+        throw GatewayFailure(code: failure.code, message: failure.message, retryable: false, details: failure.details)
     }
 }

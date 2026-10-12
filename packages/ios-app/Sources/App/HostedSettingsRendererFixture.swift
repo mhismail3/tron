@@ -161,10 +161,21 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         case "settings.undo":
             undos += 1
             if ProcessInfo.processInfo.arguments.contains("-settings-undo-refused") {
-                result = .object(["status": .string("applied"), "changes": .array([.object([
-                    "key": .string("run.retry.maxRetries"), "status": .string("failed"),
-                    "error": .object(["code": .string("conflict"), "message": .string("Value moved on: current 8 retries, expected 6 retries")])
-                ])])])
+                let failure: JSONValue = .object(["code": .string("conflict"),
+                    "message": .string("The setting changed since; undo would overwrite a newer value"),
+                    "retryable": .bool(false), "details": .object([
+                        "current": .number(8), "after": .number(6),
+                        "display": .object(["current": .string("8 retries"), "after": .string("6 retries")])
+                    ])])
+                if ProcessInfo.processInfo.arguments.contains("-settings-undo-outcome-refused") {
+                    result = .object(["status": .string("applied"), "changes": .array([
+                        .object(["key": .string("run.transport"), "status": .string("applied")]), .object([
+                        "key": .string("run.retry.maxRetries"), "status": .string("failed"), "error": failure
+                    ])])])
+                } else {
+                    try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(false), "error": failure]))
+                    return
+                }
             } else {
                 result = .object(["status": .string("applied"), "changes": .array([])])
             }

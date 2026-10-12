@@ -1875,20 +1875,26 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     func testSettingsChangesUndoRefusalRetainsCurrentDiff() {
         continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-undo-refused"]
-        app.launch(); defer { app.terminate() }
-        let more = app.buttons["settings-changes-load-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 5))
-        tapScrolling(more, in: app)
-        let entry = app.buttons["settings-change-fixture-change"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 5))
-        tapScrolling(entry, in: app)
-        tapScrolling(app.buttons["Undo"], in: app)
-        app.buttons["Undo change"].tap()
-        XCTAssertTrue(app.staticTexts["Value moved on: current 8 retries, expected 6 retries"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["fixture.settings-changes-undos"].label, "undos:1")
-        keepScreenshot(named: "758-changes-undo-current-diff")
+        for outcomeFailure in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-undo-refused"]
+            if outcomeFailure { app.launchArguments.append("-settings-undo-outcome-refused") }
+            app.launch(); defer { app.terminate() }
+            let more = app.buttons["settings-changes-load-more"]
+            XCTAssertTrue(more.waitForExistence(timeout: 5))
+            tapScrolling(more, in: app)
+            let entry = app.buttons["settings-change-fixture-change"]
+            XCTAssertTrue(entry.waitForExistence(timeout: 5))
+            tapScrolling(entry, in: app)
+            tapScrolling(app.buttons["Undo"], in: app)
+            app.buttons["Undo change"].tap()
+            XCTAssertTrue(app.staticTexts["Current value"].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(app.staticTexts["8 retries"].exists)
+            XCTAssertTrue(app.staticTexts["Value when applied"].exists)
+            XCTAssertTrue(app.staticTexts["6 retries"].exists)
+            XCTAssertEqual(app.staticTexts["fixture.settings-changes-undos"].label, "undos:1")
+            keepScreenshot(named: "758-changes-undo-current-diff-\(outcomeFailure ? "outcome" : "rpc")")
+        }
     }
 
     @MainActor

@@ -751,6 +751,8 @@ above leave open:
 
 Slice 5 enforces the tier ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)).
 
+Undo conflicts return both the current and originally applied values, with display strings from the same schema formatter used for history. The native detail retains the historical diff and shows the current conflict separately; it must not fabricate a diff by expanding an error message or dismiss on a per-change refusal.
+
 ### 5.4 Tiers
 
 F3 in full.

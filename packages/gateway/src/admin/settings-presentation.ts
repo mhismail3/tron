@@ -2,7 +2,7 @@ import { KEYS, SECTIONS, schemaKey, type KeyDeclaration, type SectionDeclaration
 import type { ResolvedKey, Resolution, SettingsTarget } from "./settings-resolver.js";
 import type { Actor, ChangeEntry } from "./settings-record.js";
 import type { ApprovalRequest } from "./settings-approvals.js";
-import { LAYER_LABELS, RENDERER_CONTRACT_VERSION, type Control, type LayerId, type Qualifiers, type ValueType } from "./settings-types.js";
+import { formatStoredSetting, LAYER_LABELS, RENDERER_CONTRACT_VERSION, type Control, type LayerId, type Qualifiers, type ValueType } from "./settings-types.js";
 
 /**
  * What a client is shown for each resolved key and section (docs/settings-model.md
@@ -129,10 +129,7 @@ export function presentHistoryEntry(entry: ChangeEntry) {
   const key = declaredKey(entry.key);
   const redacted = entry.redacted || key?.redacted;
   const { before, after, fixedAt: _fixedAt, ...redactedEntry } = entry;
-  const format = (value: unknown): string => {
-    if (value === undefined) return "Not set";
-    return key ? key.type.format(value, { modelName: () => undefined }) : JSON.stringify(value);
-  };
+  const format = (value: unknown): string => formatStoredSetting(key?.type, value);
   return {
     ...(redacted ? { ...redactedEntry, changed: true as const, redacted: true as const } : entry),
     presentation: {

@@ -55,6 +55,12 @@ export interface ValueType {
   range?: { min: number; max: number; step?: number; unit?: string };
 }
 
+/** Audit/conflict display uses the declared formatter, never a client key table. */
+export function formatStoredSetting(type: ValueType | undefined, value: unknown): string {
+  if (value === undefined) return "Not set";
+  return type ? type.format(value, { modelName: () => undefined }) : JSON.stringify(value);
+}
+
 const tokenUnit = (value: number) => value >= 1_000_000 && value % 100_000 === 0 ? `${value / 1_000_000}M`
   : value >= 1_000 && value % 1_000 === 0 ? `${value / 1_000}K` : String(value);
 

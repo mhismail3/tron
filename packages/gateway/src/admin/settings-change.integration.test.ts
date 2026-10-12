@@ -223,7 +223,8 @@ describe("settings.change", () => {
     const second = await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 8 }]);
     await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 10 }]);
     await expect(f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: second.changes[0]!.changeId }))
-      .rejects.toMatchObject({ code: "conflict", details: { current: 10, after: 8 } });
+      .rejects.toMatchObject({ code: "conflict", details: { current: 10, after: 8,
+        display: { current: "10 retries", after: "8 retries" } } });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 10 });
 
     // A redacted key records only "changed", and its change is not undoable.

@@ -16,7 +16,7 @@ import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settin
 import { readBinding, resolveSettings, targetLayers, type ChatStore, type FixedSetting, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
 import { KEYS, builtinValue, floorFor, floorInstances, hasRuntimeRequestApplier, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
-import { LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
+import { formatStoredSetting, LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
 
 /** What a session target contributes: its Chat layer and whether it is Home's chat. */
 export interface SessionSettingsSource {
@@ -545,7 +545,8 @@ export class SettingsChangePath {
     const current = readBinding(stores, entry.layer, binding, entry.qualifiers ?? {}, qualifiedWrite(binding, entry.qualifiers ?? {}), entry.key);
     if (!deepEqual(current, entry.after)) {
       throw new GatewayError("conflict", "The setting changed since; undo would overwrite a newer value", false,
-        { current: (current ?? null) as never, after: (entry.after ?? null) as never });
+        { current: (current ?? null) as never, after: (entry.after ?? null) as never,
+          display: { current: formatStoredSetting(key.type, current), after: formatStoredSetting(key.type, entry.after) } });
     }
     return this.change(entry.target, [{
       key: entry.key, ...(entry.qualifiers ? { qualifiers: entry.qualifiers } : {}), layer: entry.layer,

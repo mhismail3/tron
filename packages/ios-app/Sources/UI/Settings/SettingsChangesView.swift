@@ -384,6 +384,8 @@ private struct SettingsChangeDetailView: View {
     @State private var loading = false
     @State private var generation = 0
     @State private var showingUndo = false
+    @State private var actionError: String?
+    @State private var undoConflict: (current: String, after: String)?
     @State private var undoing = false
     @State private var openingSession = false
     @State private var showingTask = false
@@ -402,6 +404,10 @@ private struct SettingsChangeDetailView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     detailValue("Before", entry.presentation?.display.before ?? (entry.redacted == true ? "Hidden" : entry.before.map(String.init(describing:)) ?? "—"))
                     detailValue("After", entry.presentation?.display.after ?? (entry.redacted == true ? "Changed" : entry.after.map(String.init(describing:)) ?? "—"))
+                    if let undoConflict {
+                        detailValue("Current value", undoConflict.current)
+                        detailValue("Value when applied", undoConflict.after)
+                    }
                     detailValue("Actor", entry.presentation?.actor ?? entry.actor.kind)
                     detailValue("Layer", entry.presentation?.layer ?? entry.layer)
                     if let reason = entry.reason, !reason.isEmpty { detailValue("Reason", reason) }
@@ -443,6 +449,7 @@ private struct SettingsChangeDetailView: View {
                             .buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronEmerald))
                             .disabled(undoing)
                     } else { Text("Not undoable").font(TronTypography.sans(size: TronTypography.sizeBodySM)).foregroundStyle(Color.tronTextSecondary) }
+                    if let actionError { TronSettingsNotice(message: actionError, title: "Action unavailable") }
                     Text("Key history").font(TronTypography.headline).accessibilityAddTraits(.isHeader)
                     ForEach(history) { item in
                         TronGlassCard(accent: .tronEmerald) {
@@ -487,6 +494,7 @@ private struct SettingsChangeDetailView: View {
             guard presentationActivity.allowsPresentationPublication else { return }
             if installedIdentity != readID {
                 generation &+= 1; loading = false; history = []; cursor = nil; errorMessage = nil
+                actionError = nil; undoConflict = nil
                 await loadHistory()
             }
         }
@@ -508,6 +516,7 @@ private struct SettingsChangeDetailView: View {
               model.selectedGatewayProfileID() == profileID, presentationActivity.allowsDataPublication else { return }
         let identity = model.knowledgePresentationIdentity
         openingSession = true
+        actionError = nil
         defer { openingSession = false }
         do {
             let route = try await model.navigationRoute(profileID: profileID, sessionID: sessionID)
@@ -520,13 +529,14 @@ private struct SettingsChangeDetailView: View {
         } catch {
             guard identity == model.knowledgePresentationIdentity,
                   presentationActivity.allowsDataPublication else { return }
-            errorMessage = error.localizedDescription
+            actionError = error.localizedDescription
         }
     }
 
     private func performUndo() async {
         guard !undoing, model.selectedGatewayProfileID() == profileID else { return }
         undoing = true
+        actionError = nil; undoConflict = nil
         defer { undoing = false }
         let identity = model.knowledgePresentationIdentity
         do {
@@ -535,7 +545,12 @@ private struct SettingsChangeDetailView: View {
             dismiss()
         } catch {
             guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
-            errorMessage = error.localizedDescription
+            actionError = error.localizedDescription
+            if let failure = error as? GatewayFailure, failure.code == "conflict",
+               let display = failure.details?.objectValue?["display"]?.objectValue,
+               let current = display["current"]?.stringValue, let after = display["after"]?.stringValue {
+                undoConflict = (current, after)
+            }
         }
     }
 
