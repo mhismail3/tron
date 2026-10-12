@@ -1100,6 +1100,31 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
+    func testHomeRowRetainsStatusAcrossRepeatedBackNavigation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-navigation-refresh"]
+        app.launch()
+        defer { app.terminate() }
+        let home = app.buttons["home-pinned-row"]
+        XCTAssertTrue(waitForLabel(home, containing: "Ready", timeout: 10), app.debugDescription)
+        for (index, session) in ["ordinary", "home", "ordinary", "home"].enumerated() {
+            let row = session == "home" ? home : app.buttons["session-row-home-shell-fixture:ordinary-session"]
+            row.tap()
+            XCTAssertTrue(app.staticTexts[session == "home" ? "Home fixture chat" : "Ordinary session chat"].waitForExistence(timeout: 10))
+            app.buttons["Back"].tap()
+            // Sample the native row repeatedly while the Gateway response is held.
+            // Waiting for Ready here would hide precisely the reported flicker.
+            for frame in 0..<3 {
+                keepScreenshot(named: "853-simulator-return-\(index)-frame-\(frame)")
+                XCTAssertTrue(home.exists, "Home disappeared on return \(index), frame \(frame)")
+                XCTAssertTrue(home.label.contains("Ready"), "Retained status replaced: \(home.label)")
+                XCTAssertTrue(home.isEnabled)
+            }
+        }
+    }
+
+    @MainActor
     func testHomeChatStatusPollingResumesAfterCoveredManageHomeSheet() {
         continueAfterFailure = false
         let app = XCUIApplication()

@@ -424,6 +424,11 @@ private actor HostedHomeShellGateway {
             return (contextProjection(), nil)
         case "home.status":
             homeStatusCount += 1
+            // Hold the actual response across native back navigation so a transient
+            // loading replacement cannot disappear before XCTest observes it.
+            if sheetState == "navigation-refresh", homeStatusCount > 1 {
+                try await Task.sleep(for: .seconds(4))
+            }
             if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
             return (homeStatus(), nil)
         case "home.designate":
