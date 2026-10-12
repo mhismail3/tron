@@ -4412,8 +4412,8 @@ final class AppModel {
     }
 
     /// The generic settings renderer's reads and writes, for any target (settings-model.md 7.5).
-    func resolveSettingsForRenderer(target: JSONValue) async throws -> SettingsResolution {
-        try await settingsTrust.resolveForRenderer(target: target)
+    func resolveSettingsForRenderer(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
+        try await settingsTrust.resolveForRenderer(target: target, keys: keys)
     }
 
     func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, query: String?, cursor: String? = nil) async throws -> SettingsOptionsResponse {

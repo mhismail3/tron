@@ -166,7 +166,7 @@ private actor ProjectTrustFixtureGateway {
                               .object(["kind": .string("scope"), "label": .string("Project trust (widen)")])]),
             "presentation": .object(["label": .string("Project trust (widen)"),
                 "help": .string("Lowering this floor requires your confirmation."), "order": .number(10), "importance": .string("advanced"),
-                "control": .string("choice"), "options": .array(["quiet", "notify", "approve"].map { tier in
+                "control": .string("choice"), "valueKind": .string("orderedChoice"), "options": .array(["quiet", "notify", "approve"].map { tier in
                     .object(["value": .string(tier), "label": .string(labels[tier]!)])
                 })])])
     }

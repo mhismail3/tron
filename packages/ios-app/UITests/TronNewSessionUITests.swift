@@ -1,6 +1,41 @@
 import XCTest
 
 final class TronNewSessionUITests: XCTestCase {
+    @MainActor func testDashboardProjectWithoutChatsSetsInheritedDefault() {
+        continueAfterFailure = false
+        let app = launch("project-dashboard"); defer { app.terminate() }
+        let menu = app.buttons["dashboard.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), app.debugDescription)
+        menu.tap()
+        let projectAction = app.buttons["Project settings"]
+        XCTAssertTrue(projectAction.waitForExistence(timeout: 5), app.debugDescription)
+        projectAction.tap()
+        let select = app.buttons["Use current folder"]
+        XCTAssertTrue(select.waitForExistence(timeout: 5), app.debugDescription)
+        select.tap()
+        let section = app.buttons["settings-section-model-expand"]
+        XCTAssertTrue(section.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<5 where !section.isHittable { app.swipeUp() }
+        section.tap()
+        let row = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
+        row.buttons.firstMatch.buttons.firstMatch.tap()
+        let choice = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Project Pro'")).firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 5))
+        choice.tap()
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:0 typed:0 projectWrites:1'"))
+        evidence(app, "758-dashboard-project-before-first-chat")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        menu.tap()
+        app.buttons["New Session"].tap()
+        let modelCard = app.buttons["new-session-card.Model"]
+        XCTAssertTrue(modelCard.waitForExistence(timeout: 5))
+        XCTAssertTrue(modelCard.staticTexts["Project"].exists, "New Session must show the served source badge, not merely a model id containing project")
+        evidence(app, "758-dashboard-project-default-source")
+        app.buttons["Create"].tap()
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:1 typed:0 projectWrites:1 inherited:true'"))
+    }
+
     @MainActor func testProjectDefaultBeforeFirstChatIsInheritedWithoutChatOverride() {
         continueAfterFailure = false
         let app = launch("project-settings"); defer { app.terminate() }

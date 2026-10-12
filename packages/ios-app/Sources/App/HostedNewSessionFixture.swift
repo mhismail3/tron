@@ -27,7 +27,7 @@ struct HostedNewSessionFixture: View {
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(original, token: "fixture-only-token")
-        try! profiles.save(replacement, token: "fixture-only-replacement-token", selecting: false)
+        if scenario != "project-dashboard" { try! profiles.save(replacement, token: "fixture-only-replacement-token", selecting: false) }
         let model = AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { request in
             NewSessionFixtureSocket(gateway: gateway, replacement: request.url?.host == "replacement.example.test")
         }), profiles: profiles, cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "new-session-fixture")))
@@ -44,17 +44,14 @@ struct HostedNewSessionFixture: View {
         _model = State(initialValue: model)
     }
     var body: some View {
-        NavigationStack {
-            VStack {
-                Text(counts).accessibilityIdentifier("fixture.create-counts")
-                Text(trustCounts).accessibilityIdentifier("fixture.trust-counts")
-                Text("callbacks:\(callbacks) owned:\(owned)").accessibilityIdentifier("fixture.create-result")
-                Text("\(model.connectionState) socket:\(model.knowledgePresentationIdentity.connectionID.map(String.init) ?? "none") profile:\(model.profiles.selected?.id ?? "none")").accessibilityIdentifier("fixture.create-connection")
-            }
+        Group {
+            if scenario == "project-dashboard" {
+                SessionShellView().safeAreaInset(edge: .bottom) { fixtureStatus }
+            } else { NavigationStack { fixtureStatus } }
         }
         .environment(model)
         .tronPresentation()
-        .tronManagedSheet(isPresented: Binding(get: { ready && showing }, set: { showing = $0 }), identity: "fixture.new-session") {
+        .tronManagedSheet(isPresented: Binding(get: { ready && showing && scenario != "project-dashboard" }, set: { showing = $0 }), identity: "fixture.new-session") {
             NewSessionSheet(initialDraftText: "Fixture original prompt") { route in
                 callbacks += 1; owned = model.ownsNavigationRoute(route)
                 showing = false
@@ -77,6 +74,20 @@ struct HostedNewSessionFixture: View {
             }
         }
         .onChange(of: phase) { _, value in
+            updatePhase(value)
+        }
+    }
+
+    private var fixtureStatus: some View {
+            VStack {
+                Text(counts).accessibilityIdentifier("fixture.create-counts")
+                Text(trustCounts).accessibilityIdentifier("fixture.trust-counts")
+                Text("callbacks:\(callbacks) owned:\(owned)").accessibilityIdentifier("fixture.create-result")
+                Text("\(model.connectionState) socket:\(model.knowledgePresentationIdentity.connectionID.map(String.init) ?? "none") profile:\(model.profiles.selected?.id ?? "none")").accessibilityIdentifier("fixture.create-connection")
+            }
+    }
+
+    private func updatePhase(_ value: ScenePhase) {
             switch value {
             case .background:
                 model.enteredBackground()
@@ -90,7 +101,6 @@ struct HostedNewSessionFixture: View {
             case .active: model.becameActive()
             @unknown default: break
             }
-        }
     }
 }
 
@@ -112,7 +122,7 @@ private actor NewSessionFixtureGateway {
     nonisolated func updates() -> AsyncStream<Counts> { AsyncStream { c in Task { await self.add(c) } } }
     private func add(_ c: AsyncStream<Counts>.Continuation) { streams.append(c); publish() }
     private func publish() {
-        let counts = Counts(creates: "creates:\(creates) typed:\(typed)" + (scenario == "project-settings" ? " projectWrites:\(projectWrites) inherited:\(inheritedAtCreation)" : ""), trust: "trusts:\(trusts) successor:\(successorTrusts) fallback:\(fallbackMatches) held:\(submissionHeld) released:\(submissionReleased) acceptedHeld:\(acceptedHeld)")
+        let counts = Counts(creates: "creates:\(creates) typed:\(typed)" + (scenario.hasPrefix("project-") ? " projectWrites:\(projectWrites) inherited:\(inheritedAtCreation)" : ""), trust: "trusts:\(trusts) successor:\(successorTrusts) fallback:\(fallbackMatches) held:\(submissionHeld) released:\(submissionReleased) acceptedHeld:\(acceptedHeld)")
         streams.forEach { $0.yield(counts) }
     }
     func holdSubmission() async {
@@ -140,7 +150,7 @@ private actor NewSessionFixtureGateway {
             "layers": .array([.string("project"), .string("mac"), .string("builtin")]),
             "keys": .array([.object([
                 "key": .string("model.ref[role=chat]"), "group": .string("model"),
-                "value": .object(["provider": .string("fixture"), "id": .string(projectModel ?? "builtin")]),
+                "value": projectModel.map { .object(["provider": .string("fixture"), "id": .string($0)]) } ?? .null,
                 "display": .string(projectModel == nil ? "Built-in model" : "Project Pro"),
                 "layer": .string(projectModel == nil ? "builtin" : "project"), "applied": .bool(true),
                 "layers": .array([.object(["layer": .string("project"), "applied": .bool(true)])]),
@@ -160,14 +170,13 @@ private actor NewSessionFixtureGateway {
         case "settings.get":
             return .object(["effective": projectModel.map { .object(["defaultModel": .object(["provider": .string("fixture"), "id": .string($0)])]) } ?? .object([:])])
         case "settings.resolve":
-            guard scenario == "project-settings" else { return nil }
             return projectResolution()
         case "settings.options":
             return .object(["key": .string("model.ref[role=chat]"), "source": .string("catalog.models"), "dependsOn": .array([]),
                             "options": .array([.object(["value": .object(["provider": .string("fixture"), "id": .string("project-pro")]), "label": .string("Project Pro")])])])
         case "trust.inspect": return .object(["requiresDecision": .bool(scenario.hasPrefix("trust-") && !trustResolved), "effectiveDecision": scenario.hasPrefix("trust-") && !trustResolved ? .null : .bool(false)])
         case "settings.change":
-            if scenario == "project-settings" {
+            if scenario.hasPrefix("project-") {
                 guard params["target"]?.objectValue?["kind"]?.stringValue == "project",
                       params["target"]?.objectValue?["cwd"]?.stringValue == "/fixture/original",
                       let change = params["changes"]?.arrayValue?.first?.objectValue,

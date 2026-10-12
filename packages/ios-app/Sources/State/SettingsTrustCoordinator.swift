@@ -223,15 +223,17 @@ final class SettingsTrustCoordinator {
 
     /// `settings.resolve` for the generic renderer: the controls it implements are
     /// named so the Gateway negotiates each key's control (docs/settings-model.md 7.5).
-    func resolveForRenderer(target: JSONValue) async throws -> SettingsResolution {
+    func resolveForRenderer(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
         let admittedProfileGeneration = profileGeneration
-        let value = try await client.requestValue("settings.resolve", JSONValue.object([
+        var params: [String: JSONValue] = [
             "target": target,
             "renderer": .object([
                 "version": .number(Double(SettingsRendererContract.version)),
                 "controls": .array(SettingsRendererContract.controls.map { JSONValue.string($0) }),
             ]),
-        ]))
+        ]
+        if let keys { params["keys"] = .array(keys.map(JSONValue.string)) }
+        let value = try await client.requestValue("settings.resolve", JSONValue.object(params))
         try requireProfile(admittedProfileGeneration)
         return try value.decode(SettingsResolution.self)
     }
