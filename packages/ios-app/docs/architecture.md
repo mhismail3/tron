@@ -754,7 +754,8 @@ whether it was added, changed or removed, never the definition.
 `TronSmokeUITests.testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt`
 exercises an empty page with a continuation cursor, then the feed/detail/undo journey against
 the hosted socket, including its exact `settings.undo` request. Additional hosted journeys cover
-previous-visit markers, refused undo retaining the current diff, intersected scope/filter pages and
+previous-visit markers, refused undo retaining the current diff, a redacted entry shown as Not
+undoable with no Undo action, intersected scope/filter pages and
 exact-digest approve/decline receipts. Their recorded red runs distinguish the last-look and undo
 regressions from subsequent successful validation.
 Changes separates disposable history errors from action failures. An undo conflict renders the Gateway’s formatted current/applied values without replacing the historical entry; both RPC and per-change failures retain that structured detail, even when an earlier outcome succeeded. The existing undo-conflict journey exercises both envelopes.
@@ -1715,6 +1716,8 @@ never writes. The renderer uses the resolver's allowed layer list: other-layer
 rows remain read-only and link to the Project or Mac editor rather than attempting
 a Chat write. The hosted `testManageSessionUsesCurrentDefault` journey exercises
 reset through this actual route and reopens it to check the authoritative value;
+`testManageSessionSectionsAtAccessibilityTypeInLightAndDark` keeps every expanded row reachable
+at the largest accessibility type size in light and dark;
 Gateway settings-gate coverage owns persistence and provider-effect proof.
 The shared Chat card keeps its domain receipt/revision adapter; the renderer
 owns the remaining keys and all source/reset rows. Context supplements group delivered Agent

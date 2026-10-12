@@ -235,7 +235,20 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var weights: [String: JSONValue] = ["red": .number(2)]
 
     private func historyEntry() -> JSONValue {
-        .object([
+        // A redacted entry carries no before/after values, so it cannot be undone.
+        if ProcessInfo.processInfo.arguments.contains("-settings-changes-redacted") {
+            return .object([
+                "changeId": .string("fixture-change"), "at": .string("2026-10-11T12:00:00.000Z"),
+                "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
+                "target": .object(["kind": .string("mac")]), "layer": .string("mac"),
+                "key": .string("run.retry.maxRetries"), "op": .string("set"), "changed": .bool(true), "redacted": .bool(true),
+                "tier": .string("quiet"), "status": .string("applied"),
+                "presentation": .object(["label": .string("Agent retry count"), "section": .string("run"),
+                    "actor": .string("Agent"), "layer": .string("Mac"),
+                    "display": .object(["before": .string("Hidden"), "after": .string("Changed")])]),
+            ])
+        }
+        return .object([
             "changeId": .string("fixture-change"), "at": .string("2026-10-11T12:00:00.000Z"),
             "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
             "target": .object(["kind": .string("mac")]), "layer": .string("mac"),
