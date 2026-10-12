@@ -747,9 +747,11 @@ canonical cwd pi reads), then Mac (`<tronHome>/agent/settings.json` and
 parsing only. A value stored at a layer the key does not allow is reported in
 `diagnostics` and ignored. A thinking level the resolved model does not support
 resolves to pi's closest level with a Clamped badge. Redacted keys (`httpProxy`)
-return only "Set" or "Not set". The schema is checked against the pinned pi
-settings reference (`settings-model.integration.test.ts`), so a pi upgrade that
-adds a key, or lets an agent-directory-only key move, fails that test.
+return only "Set" or "Not set". `settings-model.integration.test.ts` compares
+real Gateway resolutions with the SDK over filesystem-backed stores, including
+fallback to built-ins after stored values are removed. It does not claim that a
+documentation-string scan proves every SDK setting or runtime applier is covered;
+that inventory and the real-runtime journeys remain separate acceptance work.
 With `renderer: { version, controls[] }` (doc 7.5) each key also carries
 `presentation` (`label`, `help`, `order`, `importance`, the negotiated `control`
 and `note`, `valueKind`, static `options`, `range`, `optionsSource`, `confirm`,

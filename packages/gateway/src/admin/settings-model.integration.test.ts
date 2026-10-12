@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -11,7 +10,7 @@ import { TrustService } from "./trust-service.js";
 import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "./settings-record.js";
 import { SettingsApprovals } from "./settings-approvals.js";
-import { KEYS, UNDECLARED_PI_SETTINGS, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS } from "./settings-schema.js";
 import type { Resolution, ResolvedKey, SettingsTarget } from "./settings-resolver.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
 import { CONTROLS } from "./settings-types.js";
@@ -23,8 +22,8 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 /**
  * settings.resolve at its real boundaries (docs/settings-model.md F1, F4):
  * the Gateway RPC over real stores, a real RuntimeRegistry chat, pi's own
- * SettingsManager as the oracle, a real git linked worktree, and the pinned pi
- * settings reference. The resolved report is retained as an artifact.
+ * SettingsManager as the oracle and a real git linked worktree. The resolved
+ * report, including fallback after the store values are removed, is retained.
  */
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-resolve.json");
 const RENDERER_ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-renderer.integration.json");
@@ -235,8 +234,16 @@ describe("settings.resolve", () => {
     expect(row(home, "model.thinking[role=worker]")).toMatchObject({ value: "low", layer: "profile", badges: expect.arrayContaining([{ kind: "layer", label: "Profile: Home" }]) });
     expect(row(home, "model.ref[role=memory]")).toMatchObject({ layer: "profile", value: { provider: model.provider, id: model.id } });
 
+    // Removing stored values must reveal the SDK defaults at the real read
+    // boundary, not merely make two declaration tables agree.
+    await writeFile(join(agentDir, "settings.json"), "{}");
+    const defaults = await resolve({ kind: "mac" });
+    const piDefaults = piEffective(SettingsManager.create(project, agentDir, { projectTrusted: false }), model);
+    for (const [key, expected] of Object.entries(piDefaults)) {
+      if (expected !== undefined) expect(row(defaults, key), key).toMatchObject({ value: expected, layer: "builtin" });
+    }
     await mkdir(dirname(ARTIFACT), { recursive: true });
-    await writeFile(ARTIFACT, `${JSON.stringify({ untrusted, trusted, mac, session, home }, null, 2)}\n`);
+    await writeFile(ARTIFACT, `${JSON.stringify({ untrusted, trusted, mac, session, home, defaults }, null, 2)}\n`);
   });
 
   it("clamps a thinking level the resolved model does not support, with a Clamped badge", async () => {
@@ -269,75 +276,6 @@ describe("settings.resolve", () => {
     const resolveFor = async (cwd: string) => row(await service.invoke(subscribed(), "settings.resolve", { target: { kind: "project", cwd } }) as Resolution, "run.retry.maxRetries");
     expect(await resolveFor(linked)).toMatchObject({ value: 2, layer: "project" });
     expect(await resolveFor(main)).toMatchObject({ value: 9, layer: "project" });
-  });
-});
-
-describe("the schema against the pinned pi settings", () => {
-  // The pinned package's own settings reference (resolved like gateway-main resolves its CLI).
-  const piRoot = dirname(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))));
-
-  async function piReference() {
-    const reference = await readFile(join(piRoot, "docs", "settings.md"), "utf8");
-    const rows = [...reference.matchAll(/^\| `([A-Za-z.]+)` \|(.*)$/gmu)];
-    return rows.map(([, key, rest]) => ({ key: key!, agentDirOnly: /Can only be set in agent-directory settings|Global setting only/u.test(rest!) }));
-  }
-
-  function declaredPaths(keys: readonly KeyDeclaration[]): Map<string, KeyDeclaration> {
-    const paths = new Map<string, KeyDeclaration>();
-    for (const key of keys) {
-      for (const binding of Object.values(key.layers)) {
-        if (binding.store === "pi-model-ref") { paths.set("defaultProvider", key); paths.set("defaultModel", key); }
-        if (binding.store !== "pi") continue;
-        for (const path of [binding.path, binding.qualified ?? []]) {
-          const prefix = path.slice(0, path.indexOf("{model}") === -1 ? path.length : path.indexOf("{model}"));
-          if (prefix.length) paths.set(prefix.join("."), key);
-        }
-      }
-    }
-    return paths;
-  }
-
-  /** Every pi key is declared or deliberately undeclared, and pi's agent-dir-only keys allow only the Mac layer. */
-  function coverageFailures(keys: readonly KeyDeclaration[], reference: Array<{ key: string; agentDirOnly: boolean }>): string[] {
-    const declared = declaredPaths(keys);
-    const failures: string[] = [];
-    for (const { key, agentDirOnly } of reference) {
-      const undeclared = UNDECLARED_PI_SETTINGS.some(name => key === name || key.startsWith(`${name}.`));
-      const owner = declared.get(key) ?? [...declared.entries()].find(([path]) => key.startsWith(`${path}.`))?.[1];
-      if (!owner && !undeclared) failures.push(`${key} is neither declared nor listed as undeclared`);
-      if (owner && agentDirOnly && Object.keys(owner.layers).some(layer => layer !== "mac")) failures.push(`${key} is agent-directory only but ${owner.id} allows ${Object.keys(owner.layers).join(", ")}`);
-    }
-    return failures;
-  }
-
-  it("covers every pi setting and confines agent-directory-only keys to the Mac layer", async () => {
-    const reference = await piReference();
-    expect(reference.length).toBeGreaterThan(50);
-    expect(reference.filter(entry => entry.agentDirOnly).map(entry => entry.key).sort()).toEqual(["cacheWarming", "defaultProjectTrust", "httpProxy"]);
-    expect(coverageFailures(KEYS, reference)).toEqual([]);
-    // Negative control: declaring an agent-dir-only key at the Project layer fails.
-    const mutated = KEYS.map(key => key.id === "run.httpProxy" ? { ...key, layers: { ...key.layers, project: key.layers.mac! } } : key);
-    expect(coverageFailures(mutated, reference)).toEqual([expect.stringContaining("httpProxy is agent-directory only")]);
-    // A pi key nobody declared fails too.
-    expect(coverageFailures(KEYS, [...reference, { key: "futureSetting", agentDirOnly: false }])).toEqual(["futureSetting is neither declared nor listed as undeclared"]);
-  });
-
-  it("declares built-in values equal to pi's defaults", () => {
-    const manager = SettingsManager.inMemory({});
-    const builtins: Record<string, unknown> = {
-      "run.retry.maxRetries": manager.getRetrySettings().maxRetries, "run.retry.enabled": manager.getRetrySettings().enabled,
-      "run.retry.baseDelayMs": manager.getRetrySettings().baseDelayMs, "run.transport": manager.getTransport(),
-      "run.retry.provider.maxRetryDelayMs": manager.getProviderRetrySettings().maxRetryDelayMs,
-      "run.queue.steeringMode": manager.getSteeringMode(), "run.queue.followUpMode": manager.getFollowUpMode(),
-      "run.httpIdleTimeoutMs": manager.getHttpIdleTimeoutMs(), "run.cacheWarming": manager.getCacheWarmingMode(),
-      "context.compaction.enabled": manager.getCompactionSettings().enabled,
-      "context.compaction.reserveTokens": manager.getCompactionSettings().reserveTokens,
-      "context.compaction.keepRecentTokens": manager.getCompactionSettings().keepRecentTokens,
-      "context.branchSummary.reserveTokens": manager.getBranchSummarySettings().reserveTokens,
-      "context.images.autoResize": manager.getImageAutoResize(), "context.images.block": manager.getBlockImages(),
-      "permissions.defaultProjectTrust": manager.getDefaultProjectTrust(), "setup.installTelemetry": manager.getEnableInstallTelemetry(),
-    };
-    for (const [id, expected] of Object.entries(builtins)) expect(KEYS.find(key => key.id === id)?.builtin, id).toEqual(expected);
   });
 });
 

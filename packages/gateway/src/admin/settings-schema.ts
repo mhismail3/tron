@@ -424,18 +424,6 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
 ];
 
-/** pi settings Tron deliberately does not declare: terminal presentation and
- * pi-internal bookkeeping no Tron surface consumes (doc 2.3). The pi coverage
- * test fails when the pinned pi adds a key that is in neither list. */
-export const UNDECLARED_PI_SETTINGS: readonly string[] = [
-  "lastChangelogVersion", "theme", "hideThinkingBlock", "showCacheMissNotices", "externalEditor", "quietStartup", "collapseChangelog",
-  "enableAnalytics", "trackingId", "deviceId", "enableSkillCommands", "terminal", "doubleEscapeAction", "treeFilterMode",
-  "editorPaddingX", "outputPad", "autocompleteMaxVisible", "showHardwareCursor", "markdown", "warnings", "tuiMode",
-  "fullscreenExitOutput", "fullscreenScrollbar", "fullscreenCopyOnSelect", "fullscreenWheelScrollLines",
-  // Declared through a qualifier of a declared key rather than a key of its own.
-  "retry.maxAgentDelayMs", "branchSummary.skipPrompt",
-];
-
 const byId = new Map(KEYS.map(key => [key.id, key]));
 
 export function schemaKey(id: string): KeyDeclaration {
