@@ -325,6 +325,10 @@ struct OnboardingView: View {
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     Text("Trust allows them to run with your Mac user authority. It is not a sandbox.")
                         .font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary)
+                    if let root = NewSessionTrustPolicy.sharedProjectRoot(trustInspection) {
+                        Text("The decision applies to the whole project at \(root).")
+                            .font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary)
+                    }
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: TronSpacing.sm) { trustActions }
                         VStack(spacing: TronSpacing.sm) { trustActions }

@@ -3,6 +3,9 @@ import TronMobileCore
 
 struct ProjectTrustSummary: Equatable, Sendable {
     let cwd: String
+    /// The Project root the decision is recorded for (the Git worktree root, else
+    /// the workspace itself). A chat in a subdirectory shares its root's decision.
+    let projectDir: String
     let requiresDecision: Bool
     let savedDecision: Bool?
     let defaultDecision: String
@@ -11,6 +14,7 @@ struct ProjectTrustSummary: Equatable, Sendable {
     init(_ value: JSONValue?) {
         let object = value?.objectValue ?? [:]
         cwd = object["cwd"]?.stringValue ?? "Unknown workspace"
+        projectDir = object["projectDir"]?.stringValue ?? cwd
         requiresDecision = object["requiresDecision"]?.boolValue ?? false
         savedDecision = object["savedDecision"]?.boolValue
         defaultDecision = object["defaultDecision"]?.stringValue ?? "ask"
@@ -222,6 +226,9 @@ struct TrustSettingsView: View {
 
             Divider().overlay(accent.opacity(0.18))
             trustMetadataRow("Workspace", summary.cwd)
+            if summary.projectDir != summary.cwd {
+                trustMetadataRow("Applies to project root", summary.projectDir)
+            }
             trustMetadataRow("Default policy", summary.defaultDecisionLabel)
             trustMetadataRow("Saved decision", summary.savedDecisionLabel)
         }

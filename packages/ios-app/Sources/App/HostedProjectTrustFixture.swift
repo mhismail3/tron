@@ -139,7 +139,8 @@ private actor ProjectTrustFixtureGateway {
         streams.forEach { $0.yield(counts + " | " + trace.joined(separator: " > ")) }
     }
     private func inspection() -> JSONValue {
-        .object(["cwd": .string("/fixture/project"), "requiresDecision": .bool(true),
+        // A chat in a subdirectory: the Gateway records the decision for its Project root.
+        .object(["cwd": .string("/fixture/project"), "projectDir": .string("/fixture"), "requiresDecision": .bool(true),
                  "savedDecision": decision.map(JSONValue.bool) ?? .null,
                  "defaultDecision": .string("ask"), "effectiveDecision": decision.map(JSONValue.bool) ?? .null])
     }

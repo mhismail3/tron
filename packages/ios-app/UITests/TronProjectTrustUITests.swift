@@ -56,6 +56,9 @@ final class TronProjectTrustUITests: XCTestCase {
     func testMatchingSingleBlockSettlesWithoutAnotherCommand() {
         let app = launch(scenario: "ordered")
         defer { app.terminate() }
+        // The decision names the Project root it is recorded for, not only the chat's folder.
+        XCTAssertTrue(app.staticTexts["Applies to project root"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["/fixture"].exists, app.debugDescription)
         app.buttons["Do Not Load Project Resources"].tap()
         XCTAssertTrue(app.staticTexts["Resources blocked"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(counts(app, contain: "canonical:false"))

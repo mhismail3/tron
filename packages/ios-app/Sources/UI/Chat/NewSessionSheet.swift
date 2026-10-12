@@ -110,7 +110,9 @@ struct NewSessionSheet: View {
                             icon: "checkmark.shield",
                             title: "Project Trust",
                             value: "Untrusted",
-                            caption: "This session will open without project resources unless you trust this project.",
+                            caption: NewSessionTrustPolicy.sharedProjectRoot(trustInspection).map {
+                                "This session will open without project resources unless you trust its project root, \(URL(fileURLWithPath: $0).lastPathComponent)."
+                            } ?? "This session will open without project resources unless you trust this project.",
                             accent: .tronAmber
                         ) { confirmingTrust = true }
                         .accessibilityHint("Opens a confirmation to trust project resources")
@@ -144,7 +146,8 @@ struct NewSessionSheet: View {
             .tronManagedSheet(isPresented: $confirmingTrust, identity: "new-session.project-trust") {
                 TronConfirmationSheet(
                     title: "Trust this project?",
-                    message: "Trusting allows project-local settings, extensions, skills, prompts, packages, and system prompt files to load and execute with your Mac user authority. Trust is not a sandbox. If you cancel, this session will open without project resources.",
+                    message: "Trusting allows project-local settings, extensions, skills, prompts, packages, and system prompt files to load and execute with your Mac user authority. Trust is not a sandbox. If you cancel, this session will open without project resources."
+                        + (NewSessionTrustPolicy.sharedProjectRoot(trustInspection).map { " The decision applies to the whole project at \($0)." } ?? ""),
                     confirmTitle: "Trust",
                     centersTitle: true,
                     alwaysUsesToolbarActions: true,
