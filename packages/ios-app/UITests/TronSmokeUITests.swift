@@ -2079,7 +2079,7 @@ final class TronSmokeUITests: XCTestCase {
             app.launch()
             let destination = app.buttons[title]
             XCTAssertTrue(destination.waitForExistence(timeout: 5))
-            for _ in 0..<3 where !destination.isHittable { app.swipeUp() }
+            for _ in 0..<8 where !destination.isHittable { app.swipeUp() }
             XCTAssertTrue(destination.isHittable)
             destination.tap()
             let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done"))
@@ -2088,25 +2088,37 @@ final class TronSmokeUITests: XCTestCase {
                            "Only the progressive settings shell owns dismissal")
             keepScreenshot(named: "settings-\(title)-single-done-light")
             done.allElementsBoundByIndex.first(where: \.isHittable)?.tap()
-            XCTAssertTrue(app.buttons["Agent Defaults"].waitForExistence(timeout: 3))
+            XCTAssertTrue(app.buttons[title].waitForExistence(timeout: 3))
             app.terminate()
         }
     }
 
     @MainActor
-    func testAgentDefaultsThinkingSliderOpensAfterDefaultsConsolidation() {
+    func testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-agent-defaults-fixture"]
+        app.launchArguments = ["-tron-mac-settings-fixture"]
         app.launch()
         defer { app.terminate() }
-        let control = app.buttons.matching(identifier: "thinking-level-control")
-            .matching(NSPredicate(format: "label == %@", "Thinking")).firstMatch
-        XCTAssertTrue(control.waitForExistence(timeout: 5))
-        XCTAssertTrue(control.isEnabled)
-        control.tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "thinking-level-slider").firstMatch.waitForExistence(timeout: 3))
-        keepScreenshot(named: "agent-defaults-thinking-editor-fixture")
+        let modelSection = app.buttons["settings-section-model-expand"]
+        XCTAssertTrue(modelSection.waitForExistence(timeout: 5))
+        modelSection.tap()
+        let thinking = app.descendants(matching: .any)["settings-row-model.thinking"]
+        XCTAssertTrue(thinking.waitForExistence(timeout: 3))
+        tapScrolling(thinking.buttons.firstMatch.buttons.firstMatch, in: app)
+        let slider = app.descendants(matching: .any)["settings-choice-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 3))
+        keepScreenshot(named: "mac-settings-schema-thinking")
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80))).tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 3))
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
+        XCTAssertFalse(app.buttons["Settings Scope"].exists)
+        modelSection.tap()
+        for _ in 0..<12 where !app.staticTexts["This iPhone"].isHittable { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["This iPhone"].exists)
+        XCTAssertTrue(app.staticTexts["Stored on this iPhone. Never changes harness behaviour."].exists)
+        keepScreenshot(named: "mac-settings-this-iphone")
     }
 
     @MainActor

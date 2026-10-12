@@ -31,8 +31,14 @@ struct HostedSettingsRendererFixture: View {
     var body: some View {
         NavigationStack {
             if ready {
-                SettingsRendererView(target: .object(["kind": .string("mac")]), writeLayer: "mac")
-                    .tronNavigationTitle("Settings")
+                Group {
+                    if ProcessInfo.processInfo.arguments.contains("-tron-mac-settings-fixture") {
+                        SettingsView()
+                    } else {
+                        SettingsRendererView(target: .object(["kind": .string("mac")]), writeLayer: "mac")
+                            .tronNavigationTitle("Settings")
+                    }
+                }
                     .safeAreaInset(edge: .bottom) {
                         HStack {
                             Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
@@ -150,6 +156,11 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             section("model", "Model", 10, essential: [("Model", modelName), ("Thinking", model == "pro" ? thinking.capitalized : "Off")],
                     overrides: [("Model", modelName)]),
             section("context", "Context", 20, essential: [("Block images", blockImages ? "On" : "Off")]),
+            section("tools", "Tools", 30, essential: []),
+            section("permissions", "Permissions", 40, essential: []),
+            section("accounts", "Accounts", 60, essential: []),
+            section("sources", "Sources", 70, essential: []),
+            section("setup", "Setup", 80, essential: []),
             section("run", "Run", 50, essential: [("Retries", "\(retries) retries")], overrides: [("Retries", "\(retries) retries")],
                     pending: true, recent: true),
             section("lab", "Lab", 95, essential: [("Focus mode", focusMode.capitalized)]),

@@ -14,6 +14,10 @@ struct SettingsRendererView: View {
     /// renderer owns only its declared layer. Key membership stays schema-owned.
     var ownedKeysOnly = false
     var projectCWD: String? = nil
+    /// Hand-built account, package and setup flows supplement schema rows, never replace them.
+    var sectionSupplement: ((String) -> AnyView)? = nil
+    /// Pairing/account repair must remain reachable while the schema cannot load.
+    var unresolvedSupplement: AnyView? = nil
 
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -114,6 +118,9 @@ struct SettingsRendererView: View {
                 TronLoadingState(label: "Loading settings…")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            if resolution == nil, let unresolvedSupplement {
+                unresolvedSupplement
+            }
         }
         .padding(embedded ? 0 : 20)
     }
@@ -202,6 +209,9 @@ struct SettingsRendererView: View {
             if isExpanded {
                 TronSettingsDivider()
                 expandedRows(keys)
+            }
+            if let sectionSupplement {
+                sectionSupplement(section.id)
             }
         }
         .accessibilityElement(children: .contain)

@@ -1245,9 +1245,9 @@ never re-implements a key's control.
 | The Changes feed and approval cards | A fixed structure over any key; generic in what they show. |
 | The Project card header (project, trust, git state) and the New Session sheet | Composites. Their sections are the generic renderer. |
 
-Today's `AgentConfigurationControls` and `CompactionSettingsView` are not
-hand-built exceptions: their rows become the `catalog`, `choice` and `number`
-primitives. Thinking and context-window adapters already use the shared
+`AgentConfigurationControls` is not a hand-built exception: its rows use the
+`catalog`, `choice` and `number` primitives. Mac defaults and compaction now use
+the generic renderer in Settings. Thinking and context-window adapters already use the shared
 `SettingsChoiceSlider.swift` and `SettingsNumberSlider.swift` row/editor owners;
 the former dedicated context-window editor is removed.
 
@@ -1271,10 +1271,8 @@ with **"Edit at Project"** or **"Edit at Mac"**, which opens that surface.
 | **Settings** | Mac | The floor overrides in Permissions; the full Changes feed; Accounts, Sources, Setup and This iPhone. The Global/Project scope pickers are removed. |
 | **New Session** | Chat of the new chat, at creation | The resolved values for the picked project with badges, mainly Model, and the trust decision when needed. Overriding never changes a default. `NewSessionSheet.swift:94-96` already says "Use the current agent default"; it gains the badge. |
 
-Why the Project card also opens from the dashboard: today the only way to edit
-project settings without a chat is the Global/Project scope picker
-(`SettingsScopeRow.swift`, `AgentDefaultsSettingsView.swift`). The dashboard
-route keeps three things possible: setting a project's model and tools before
+The Project card also opens from the dashboard without a chat. With the scope
+pickers removed, that route keeps three things possible: setting a project's model and tools before
 its first chat, reviewing or revoking trust, and seeing what a pull changed.
 It is the same component with no new Gateway surface.
 
@@ -1293,11 +1291,11 @@ It is the same component with no new Gateway surface.
 | Audit | Today | One key, one editor per layer |
 |---|---|---|
 | D1. Model and thinking in six places, with three meanings | Manage Session, Agent Defaults (global or project), New Session, Manage Home chat model, Home memory model, `delegate` arguments | `model.ref` and `model.thinking`, by role. Chat in Manage Session and Manage Home (and New Session at creation), Project in the Project card, Mac in Settings › Model. The worker and memory roles in Manage Home (Profile). `delegate` arguments are turn-level inputs. |
-| D2. Three controls called "Thinking" | Chat thinking, default thinking, compaction "Summary Thinking" (`CompactionSettingsView.swift:102`) | One key, `model.thinking`, with roles: "Thinking", "Worker thinking" and "Summary thinking", all in Model, each badged with its layer. |
+| D2. Three controls called "Thinking" | Chat thinking, default thinking, compaction "Summary Thinking" | One key, `model.thinking`, with roles: "Thinking", "Worker thinking" and "Summary thinking", all in Model, each badged with its layer. |
 | D3. "Project Trust" with three meanings | Settings › Project Trust as the default policy (dashboard) or as this project's decision (chat) (`SettingsView.swift:99-107`), and the New Session trust prompt | `permissions.projectTrust[project]` in the Project card, prompted by New Session. `permissions.defaultProjectTrust` in Settings › Permissions. |
 | D4. Resources with four truths (installed, search paths, loaded, delivered) | Extensions, Locations and Overrides, Project Resources, Agent Instructions | Sources: installed and search paths, with where each came from. Context, Tools and Run show each contribution's chain. |
 | D5. Context window | Manage Session slider (session entry) and Agent Defaults (`modelContextWindows`) | `model.contextWindow[model]`, one `number` control with a catalog range, edited at the surface's layer. |
-| D6. Compaction shown read-only in a second place | Settings › Compaction edits, and its live policy is repeated read-only (`CompactionSettingsView.swift:244-257`) | Context › Compaction, generic rows at each surface's layer. |
+| D6. Compaction shown read-only in a second place | Settings › Compaction edits, and its live policy is repeated read-only | Context › Compaction, generic rows at each surface's layer. |
 | D7. Queue delivery | Long-press per message versus the `steeringMode` and `followUpMode` defaults | The long-press is a turn-level input and shows "Default: X (Mac)". The defaults are `run.queue.*`. |
 | Untracked agent edits | Agents edit `settings.json` directly, and nothing records it | The `settings` tool through the change path. Direct edits are outside changes (F2). |
 
@@ -1325,15 +1323,12 @@ Re-verified against `main` at `b76f6ca80`.
 | Today | Becomes |
 |---|---|
 | Per-screen settings views with per-key controls | One generic renderer over the served schema: the control primitives, badges, section summaries and negotiation ([7.5](#75-the-rendering-contract)). |
-| Ordinary-chat gear (`UI/Chat/ChatView.swift`) and Settings row (`UI/Chat/SessionContextSheet.swift`) | The gear opens Manage Session at medium; its Settings row opens the project-scoped child, then dismisses back to Manage Session. Home's route keeps direct Settings even while status loads; its circle still opens Manage Home (#799). The hosted context-ring/gear journey proves both entry paths and return navigation. |
-| `UI/Chat/ChatRoutes.swift:89-101` `SettingsView(scope: .project)` sheet | Reached as a row inside Manage Session. |
+| Ordinary-chat gear (`UI/Chat/ChatView.swift`) and Settings row (`UI/Chat/SessionContextSheet.swift`) | The gear opens Manage Session at medium; its Settings row opens the Mac-layer child, then dismisses back to Manage Session. Home's route keeps direct Settings even while status loads; its circle still opens Manage Home (#799). The hosted context-ring/gear journey proves both entry paths and return navigation. |
 | `UI/Chat/ChatComposerView.swift:259` context ring | Unchanged: it opens Manage Session in ordinary chats and Manage Home (medium detent) in the Home chat (#748, #799). |
 | `UI/Chat/SessionContextSheet.swift:530-590` model card, thinking and context window; `:649-690` session section | The generic sections plus the Project card, this chat's Changes and the Settings row. |
 | `UI/Chat/HomeSheets.swift:233-291,351` chat model and context window values, memory model | The generic sections, with Profile rows, plus Home's Changes. |
-| `UI/Settings/SettingsView.swift:39-122` groups This iPhone, Agent, Tools & Extensions, Data & Diagnostics, with scope-dependent trust | The sections in order, Mac layer only, and the Changes feed. |
-| `UI/Settings/SettingsScopeRow.swift`, `AgentDefaultsSettingsView.swift`, `ResourceSettingsView.swift:188`, `HooksSettingsView.swift:262` scope pickers | Removed. Project editing moves to the Project card. |
+| Implemented: `UI/Settings/SettingsView.swift` | Mac-only schema sections with native account, package and Setup flows; device-only preferences under This iPhone. Global/Project scope pickers and superseded Mac editors are removed. Changes remains a separate implementation slice. |
 | `UI/Settings/AgentConfigurationControls.swift` | Thin layer adapters over the served control primitives. Context-window and generic numbers share `SettingsNumberSlider.swift` and `SettingsNumberSliderScale.swift`; thinking shares `SettingsChoiceSlider.swift`. All use `SettingsConfigurationValueRow.swift`. Model catalog adoption remains with the surface migration. |
-| `UI/Settings/CompactionSettingsView.swift:102,244-257` | Generic rows in Context › Compaction, plus Model › Summary thinking. |
 | `UI/Chat/NewSessionSheet.swift:94-96,339-343`, `NewSessionConfigurationOwner.swift` | Generic Model rows at the new chat's Chat layer, with badges. |
 | The dashboard project list (`UI/Chat/SessionShellView.swift`, inferred owner) | Gains "Project settings", which opens the Project card. |
 

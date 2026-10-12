@@ -88,9 +88,6 @@ struct ChatRoutes: ViewModifier {
                 identity: "chat.\(sessionID).settings"
             ) {
                 SettingsView(
-                    scope: .project,
-                    projectSessionID: sessionID,
-                    projectCWD: projectCWD,
                     onImported: { route in
                         showSettings = false
                         onForkCreated(route)

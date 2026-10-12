@@ -1615,6 +1615,18 @@ immediate revocation; revoking this iPhone also removes its local profile.
 
 ## Presentation parity
 
+Settings is the Mac-layer surface, regardless of whether it was opened from the
+dashboard, an ordinary chat or Home. Its schema renderer owns Model, Context,
+Tools, Permissions, Run and supply-section keys, summaries and search. Native
+account, MCP, package, hook and Setup flows supplement those sections without
+duplicating harness controls. Pairing and account repair remain reachable when
+resolution is offline. The default trust key is in Permissions; per-project
+trust belongs to the Project surface. This iPhone explicitly never changes
+harness behaviour. The former defaults, compaction and resource-path editors and
+all Global/Project scope pickers are removed; hook inventory inherits its caller's
+target. Hosted Mac-settings and offline navigation journeys protect the shared
+thinking editor, no-write dismissal and native flow reachability.
+
 Manage Session's Settings destination uses `SettingsRendererSheet` for its exact
 Chat target. Fixed-source actions and live overrides go through the existing
 settings mutation receipt owner, with runtime/model/revision captured from the
@@ -1818,7 +1830,7 @@ components. Toolbar and sheet action icons use Tron emerald while their
 container geometry and Liquid Glass remain default iOS styling rather than
 receiving a second app-drawn container. In ordinary chats, both the toolbar's
 trailing gear and the composer's context ring open Manage Session at its existing
-medium detent; its Settings row opens the project-scoped Settings child sheet,
+medium detent; its Settings row opens the Mac-layer Settings child sheet,
 whose dismissal returns to Manage Session. Settings retains its own category
 palette rather than inheriting the Session destinations' teal theme. Home's
 route keeps its direct Settings gear even while Home status loads; its context

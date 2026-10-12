@@ -138,7 +138,7 @@ struct HooksSettingsView: View {
     let projectCWD: String?
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var scope: SettingsScope = .global
+    private var scope: SettingsScope { projectCWD == nil ? .global : .project }
     @State private var mode: HookViewMode = .byEvent
     @State private var showUnregisteredEvents = false
     @State private var selected: HookExtensionRecord?
@@ -159,7 +159,6 @@ struct HooksSettingsView: View {
         let foregroundGeneration: Int
     }
 
-    private var allowsProjectScope: Bool { projectCWD != nil }
     private var trustTarget: TrustTarget? { projectCWD.flatMap(TrustTarget.init(cwd:)) }
 
     private var loadID: HooksLoadID {
@@ -188,7 +187,7 @@ struct HooksSettingsView: View {
         )
         return ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
-                scopeGroup
+                TronSettingsCaption(scopeExplanation)
                 if HooksProjectTrustNote.isRequired(projectCWD: projectCWD, trust: trust) {
                     untrustedProjectRow
                 }
@@ -254,18 +253,6 @@ struct HooksSettingsView: View {
         }
         .tronManagedSheet(item: $selectedEvent, identity: { "settings.hook-event.\($0.id)" }) { event in
             HookEventDetailView(event: event, accent: .tronSessionTeal)
-        }
-    }
-
-    private var scopeGroup: some View {
-        TronSettingsGroup("Scope", detail: scopeExplanation, accent: .tronSessionTeal) {
-            SettingsScopeRow(
-                icon: "scope",
-                title: "Hooks Scope",
-                scope: scope,
-                allowsProjectScope: allowsProjectScope,
-                accent: .tronSessionTeal
-            ) { selectScope($0) }
         }
     }
 
@@ -440,11 +427,6 @@ struct HooksSettingsView: View {
 
     private func displayName(for record: HookExtensionRecord, in content: HooksSettingsContent) -> String {
         content.extensionRows.first { $0.record.id == record.id }?.label ?? record.friendlyName
-    }
-
-    private func selectScope(_ newScope: SettingsScope) {
-        guard newScope != scope, newScope == .global || allowsProjectScope else { return }
-        scope = newScope
     }
 
     private func refreshHooks(_ request: HooksLoadID) async {
