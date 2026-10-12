@@ -12,6 +12,8 @@ struct HostedSessionConfigurationFixture: View {
     @State private var deliveredSupersededReceipt = false
     @State private var decisionState = "none"
     @State private var error: String?
+    @State private var modelRequests = 0
+    @State private var presentationActivity = PresentationActivityCoordinator()
     private let socket: HostedSessionConfigurationSocket
     private let profile: GatewayProfile
     private let snapshot: SessionSnapshot
@@ -63,10 +65,21 @@ struct HostedSessionConfigurationFixture: View {
                         }
                         if deliveredSupersededReceipt { Text("Superseded receipt delivered") }
                         Text("decisions:\(decisionState)").accessibilityIdentifier("fixture.session-settings-decisions")
+                        Text("Model requests: \(modelRequests)").accessibilityIdentifier("fixture.model-requests")
+                    }
+                    .task {
+                        for await count in socket.modelRequestCounts {
+                            modelRequests = count
+                        }
                     }.padding()
                 }
         }
         .environment(model)
+        .environment(\.tronPresentationActivityCoordinator, presentationActivity)
+        .background {
+            InAppNoticeWindowInstaller(model: model, colorScheme: .light, presentationActivity: presentationActivity)
+                .frame(width: 0, height: 0).allowsHitTesting(false)
+        }
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("dark") ? .dark : .light)
         .tronPresentation()
         .task {
@@ -120,10 +133,15 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     private var pending: [Data] = []
     private var closed = false
     private var pendingThinking: (id: String, revision: Int)?
+    private var modelRequests = 0
+    private var modelDelivery: Task<Void, Error>?
+    nonisolated let modelRequestCounts: AsyncStream<Int>
+    private let modelRequestContinuation: AsyncStream<Int>.Continuation
     private var approvals: [JSONValue] = []
     private var decisions: [String] = []
     init(snapshot: SessionSnapshot, settingsApprovals: Bool) {
         self.snapshot = snapshot
+        (modelRequestCounts, modelRequestContinuation) = AsyncStream.makeStream(of: Int.self)
         // This chat's agent's request shows in its Manage Session; another chat's does not.
         approvals = settingsApprovals ? ["configuration-fixture", "other-session"].map { sessionID in
             .object([
@@ -176,6 +194,49 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         case "settings.change":
             let params = frame.objectValue?["params"]?.objectValue ?? [:]
             let change = params["changes"]?.arrayValue?.first?.objectValue
+            if change?["key"]?.stringValue == "model.ref[role=chat]" {
+                modelRequests += 1
+                modelRequestContinuation.yield(modelRequests)
+                guard let provider = change?["value"]?.objectValue?["provider"]?.stringValue, let modelID = change?["value"]?.objectValue?["id"]?.stringValue,
+                      change?["layer"]?.stringValue == "chat", change?["op"]?.stringValue == "set",
+                      params["target"]?.objectValue?["sessionId"]?.stringValue == snapshot.sessionId,
+                      params["commandId"]?.stringValue != nil,
+                      params["fence"]?.objectValue?["runtimeGeneration"]?.stringValue == snapshot.runtimeGeneration,
+                      params["fence"]?.objectValue?["model"] == (try JSONValue.encode(snapshot.model)) else {
+                    throw GatewayFailure(code: "invalid_request", message: "Model change lacked its session fence", retryable: false, details: nil)
+                }
+                let scenario = ProcessInfo.processInfo.arguments.first { $0.hasPrefix("-model-ack-") } ?? "-model-ack-snapshot-first"
+                // The remote delivery outlives request-send cancellation on receipt.
+                // close() still owns and cancels it with this isolated socket.
+                modelDelivery = Task {
+                    // Delay only at the scripted socket boundary: the native picker must
+                    // remain pending until both its receipt and projection have arrived.
+                    try await Task.sleep(for: .seconds(3))
+                    if scenario == "-model-ack-failure", modelRequests == 1 {
+                        try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(false),
+                            "error": .object(["code": .string("conflict"), "message": .string("Model choice refused; try again."), "retryable": .bool(false)])]))
+                        return
+                    }
+                    snapshot.model = ModelRef(provider: provider, id: modelID)
+                    snapshot.revision += 1
+                    let receiptRevision = snapshot.revision
+                    snapshot.eventSequence += 1
+                    snapshot.thinkingLevel = "off"
+                    snapshot.availableThinkingLevels = snapshot.model?.id == "alternative" ? ["off"] : ["off", "high"]
+                    if scenario == "-model-ack-superseded" {
+                        snapshot.model = ModelRef(provider: "fixture", id: "model")
+                        snapshot.revision += 1
+                    }
+                    let response: JSONValue = .object(["type": .string("response"), "id": .string(id), "ok": .bool(true),
+                        "result": fixtureSettingsChangeResult(key: "model.ref[role=chat]", revision: receiptRevision)])
+                    let projection: JSONValue = .object(["type": .string("event"), "topic": .string("session.snapshot"),
+                        "sessionId": .string(snapshot.sessionId), "payload": try JSONValue.encode(snapshot)])
+                    try enqueue(scenario == "-model-ack-receipt-first" ? response : projection)
+                    try await Task.sleep(for: .seconds(1))
+                    try enqueue(scenario == "-model-ack-receipt-first" ? projection : response)
+                }
+                return
+            }
             if change?["op"]?.stringValue == "unset" {
                 guard params["target"]?.objectValue?["sessionId"]?.stringValue == snapshot.sessionId,
                       change?["key"]?.stringValue == "model.thinking[role=chat]", change?["layer"]?.stringValue == "chat",
@@ -256,6 +317,10 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     }
     func close() async {
         closed = true
+        modelDelivery?.cancel()
+        _ = await modelDelivery?.result
+        modelDelivery = nil
+        modelRequestContinuation.finish()
         receiver?.resume(throwing: CancellationError())
         receiver = nil
     }

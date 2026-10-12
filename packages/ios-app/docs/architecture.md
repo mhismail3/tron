@@ -187,6 +187,13 @@ changed revisions still force fresh canonical occurrence reads. The dashboard ha
 `automation.changed`. No second mutation-reconciliation algorithm or Automation event journal exists.
 `HomeStatusPresentationOwner` is an observable owner of only the focused Gateway's in-memory Home status projection. The surface's mount owns the status read, so a dashboard mounted before pairing reads Home once pairing configures a profile; a profile transition forgets the advertised capability, while a dropped connection keeps it so the row does not flicker. A read that the Gateway answers with a status this client cannot admit publishes a typed `isStatusUnavailable` state, which the row shows instead of loading. `SessionShellView` registers its exact `PresentationSurfaceToken` with the shared `PresentationActivityCoordinator`; every status read and post-await publication checks that token's current managed activity, profile, authenticated connection and latest read generation. Retirement must name the exact token, so a delayed callback from an older dashboard cannot clear a replacement. The owner does not persist status, session identity, or memory data. Its typed DTO decodes exactly the fields the app reads: it requires the phase, activation, readiness gaps, recovery reason and memory sections, rejects an unknown phase rather than guessing, and ignores every other Gateway field. `AppModel` retires status with lifecycle connection ownership, clears it on loss, then admits a fresh status read from the authenticated reconnect callback only if the current profile advertises `home.v1`. Backgrounding suspends the read and clears status; foreground reconciliation re-admits it. Matching Home-session summaries and session-list invalidations trigger an immediate refresh, while the active Home dashboard or its mounted chat route runs one sequential fallback no more frequently than every five seconds. A chat opened before status is known takes a `connectionOnly(HomeChatRouteKey)` probe: it reads on each connection admission and retries once after a covering discards its read, but it never polls and is not refreshed by invalidations or mutations. The key is one predicate (`HomeChatRouteKey.matches`): a Home route always claims the Home status, even with no openable chapter, so its recovery state stays reachable from the context ring; an ordinary chat matches only the chapter it is (`sessionId`), so an ordinary chat on the sealed predecessor during a rollover (or an open read-only chapter) never claims the status or manages Home. The first published status decides the claim. A matching route promotes the surface to the mounted cadence; any other route releases it, which keeps the published status for the dashboard and makes no further reads. A known status decides the chat by the same key alone. Cover/uncover activity is observed on the exact mounted surface so covering sheets retire disposable reads and dismissal resumes convergence.
 
+Moving the Home status read between dashboard and chat retires the old surface's
+requests and publication fence, not the last admitted status or capability. The
+same authenticated connection therefore keeps its pinned row while the new
+surface refreshes. Profile/connection retirement and capability loss still clear
+the projection; authoritative status changes publish normally. This is one
+in-memory projection, not a second row cache or a delayed refresh.
+
 A chat that claims the Home status manages Home from the composer's context ring
 (#748), through `ChatView.presentManageHome`: the `manage` destination (the **Manage
 Home** sheet, #725) replaces the ordinary Manage Session sheet, whose
@@ -1665,20 +1672,21 @@ background/reconnect in the live invocation. An unresolved Disable retains the
 completion control even after authoritative status says Disabled; confirmed
 Disable returns the ring to Manage Session without replacing chat.
 App restart reads current Gateway status, without claiming or replaying an old
-command. Manage Home resolves the Home chat target once through the Gateway
-settings schema and gives its generic renderer the Chat and Profile write layers;
-row controls, qualifiers, options, badges, source actions, and reset behavior stay
-schema-driven, so new Profile budgets and scopes need no per-key iOS controls.
-The renderer chooses the first declared owned layer the key supports (Chat before
-Profile), never the effective value's inherited source; the Gateway validates the
-exact submitted layer. A mounted renderer accepts selections from its active child
-catalog/editor even while that child suspends the parent's presentation reads.
-The physical memory-model selection/reopen/cancel journey protects this boundary. The Home target retains the context-window row and its
-existing anchored editor/reset semantics. Manage Home uses `SessionContextUsageCard`
-for stats with the state pill on its header row, the generic settings sections for
-model and context keys, its Home sub-sheet rows, and the bottom pause/resume and
-disable container. The settings-approvals section (#758) inserts between the
-stats card and the generic settings renderer. Manage Session mounts the same
+command. Manage Home keeps the shared live Chat model/context card, including
+active-lineage receipt/snapshot reconciliation and its session-scoped notice above
+Models. An embedded generic renderer resolves the Home chat target and displays
+only keys whose schema declares the Profile write layer; it does not duplicate
+live Chat controls. Profile row controls, qualifiers, options, badges, source
+actions and reset stay schema-driven, with no per-key native Profile picker.
+A mounted renderer accepts selections from its active child catalog/editor even
+while that child suspends the parent's presentation reads. The physical
+memory-model selection/reopen/cancel journey protects this boundary. Any future
+consolidation of the live Chat card must preserve receipt plus applied-revision
+acknowledgement with Models open, not replace it with optimistic catalog dismissal.
+Manage Home uses `SessionContextUsageCard` for stats with the state pill on its
+header row, the shared Chat card, Profile settings, its Home sub-sheet rows, and
+the bottom pause/resume and disable container. The settings-approvals section
+(#758) inserts between the stats card and shared Chat card. Manage Session mounts the same
 section on its usage card with the exact session scope; Home-only mounting would
 hide ordinary chat approval requests and push decisions. The hosted decline and
 push-approve/decline journeys protect that shared mount.
@@ -1689,14 +1697,11 @@ recovery appears in Tasks and Permissions only when it needs attention; an
 available recovery is the normal state and has no row. The browser
 additionally requires authenticated `home-memory-browser.v1` and the chapter
 list `home-chapter-list.v1`; the context sheet requires only `home.v1`. The memory
-picker is the existing progressive model-selection row and ModelPicker, filtered
-to registered, available physical models. Selection captures the mounted picker
-profile/lifecycle before sending the Home-profile memory model through
-`settings.change` via the existing receipt owner. Choices stay Applying until the exact latest canonical status read
-converges, not merely until the configure receipt is terminal; an old installed
-model frame cannot admit a duplicate choice during that gap. Its row shows spend as information and the
-configuration/pause/block state, with explicit unresolved receipt checks, never
-budgets or cache/storage controls. The Home Context
+picker is the schema's catalog control, whose Gateway option source excludes
+virtual/unavailable models. It sends the Profile key through `settings.change`,
+then reloads canonical resolution; dismissal alone does not save a selection.
+Home pause/disable retain their existing mutation and unresolved-receipt owner.
+No budget or authorization semantics are inferred by the renderer. The Home Context
 sheet reads `home.context`: one bar of the context window split by its breakdown
 sections (instructions, about you, memory, this chapter, task results, input),
 with a legend row per section and the free remainder. It shows no entry IDs or
@@ -1718,6 +1723,22 @@ screen's placeholder. The native sheet retains safe areas, rounded clipping,
 detents and toolbar ownership; loading changes only content, not chrome geometry.
 
 
+
+Inbound Context details present the full message in the existing Markdown reading
+card. Known `tron.home-task-result.v1` report envelopes use their typed `details.report`
+when present, otherwise the released one-header/one-JSON-envelope text format;
+only version 1 with complete report identity, text, evidence and an admitted report
+outcome is unpacked. Final report is not a success claim. Plain, malformed and
+unknown shapes remain verbatim. The standard toolbar Info button opens technical
+metadata tables, evidence and complete report/context/content JSON inspectors;
+no canonical text, model input, or stored context is changed. This remains compatible
+with readable Gateway delivery text without introducing a second delivery format.
+
+Notification reading cards establish full content width before applying their
+existing surface. Contiguous notification runs omit only repeated eight-point
+turn clearance, using one policy in live and read-only transcripts. Each event
+retains its ID, order, individual accessibility action and 44-point target;
+conversation and tool rows end the run. This is not event deduplication.
 
 Subagent context uses the shared seafoam compact inbound pill: supervisor progress
 keeps **Subagent · Progress Update**, per-child workflow notes use **Subagent ·
@@ -2699,7 +2720,16 @@ owners and are not cancelled merely because a surface is covered.
 Manage Session's semantic projection contains no causal revision. Context-window
 commands read the current authoritative revision/runtime at admission, while
 pending settings retain exact request/runtime identity and wait for both RPC
-confirmation and authoritative agreement. Native controls retain runtime/model
+confirmation and authoritative agreement (or a newer revision that supersedes the
+confirmed choice). The shared model card publishes bounded configuration data and
+retires pending receipts while its Models descendant is open, using
+`allowsDataPublication`, not the topmost-only load/presentation permission. Its
+binding reads the current authoritative configuration rather than the covered
+Manage Session frame. This applies equally to Manage Home without resuming parent
+polls, transcript work, or changing dismissal behavior. Rejected model choices
+clear only their exact request and surface the standard session-scoped notice
+above the popup; a retired runtime's failure cannot replace the current choice.
+Native controls retain runtime/model
 identity rather than being recreated on every progress revision. History, process,
 queue, and tool-detail selectors belong to the session presentation store and
 publish only changed bounded facts, never another canonical journal. A visible

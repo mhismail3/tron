@@ -9,10 +9,10 @@ import TronMobileCore
 struct SettingsRendererView: View {
     let target: JSONValue
     let writeLayer: String?
-    /// Multi-layer owners resolve each key once. The first owned allowed layer
-    /// is the edit target; an inherited value must not redirect a Chat edit to Profile.
-    var writeLayers: [String] = []
     var embedded = false
+    /// A composed surface can retain its existing live Chat controls while this
+    /// renderer owns only its declared layer. Key membership stays schema-owned.
+    var ownedKeysOnly = false
     var projectCWD: String? = nil
 
     @Environment(AppModel.self) private var model
@@ -123,6 +123,15 @@ struct SettingsRendererView: View {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         if !query.isEmpty {
             searchResults(resolution, query: query)
+        } else if ownedKeysOnly {
+            ForEach(Self.sections(resolution)) { section in
+                let keys = Self.keys(resolution, in: section.id).filter { writableLayer(for: $0) != nil }
+                if !keys.isEmpty {
+                    TronSettingsGroup(section.title, detail: section.note) {
+                        rows(keys, resolution: resolution)
+                    }
+                }
+            }
         } else {
             ForEach(Self.sections(resolution)) { section in
                 sectionView(section, keys: Self.keys(resolution, in: section.id))
@@ -255,6 +264,7 @@ struct SettingsRendererView: View {
 
     private func searchResults(_ resolution: SettingsResolution, query: String) -> some View {
         let matches = resolution.keys.filter { setting in
+            (!ownedKeysOnly || writableLayer(for: setting) != nil) &&
             [setting.presentation?.label, setting.key, setting.presentation?.help, setting.display]
                 .compactMap { $0 }
                 .contains { $0.localizedCaseInsensitiveContains(query) }
@@ -333,9 +343,8 @@ struct SettingsRendererView: View {
     }
 
     private func writableLayer(for setting: ResolvedSetting) -> String? {
-        let allowed = Set(setting.layers.map(\.layer))
-        let owned = writeLayers.isEmpty ? writeLayer.map { [$0] } ?? [] : writeLayers
-        return owned.first(where: allowed.contains)
+        guard let writeLayer, setting.layers.contains(where: { $0.layer == writeLayer }) else { return nil }
+        return writeLayer
     }
 
     /// A dry run first: the Gateway validates (no client copy of a key's rules),

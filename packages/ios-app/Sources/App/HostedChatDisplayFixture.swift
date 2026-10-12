@@ -150,6 +150,10 @@ struct HostedHomeDashboardFixture: View {
                     .environment(model)
                     .environment(\.hostedHomeActionProbe, actionProbe)
                     .environment(\.tronPresentationActivityCoordinator, homeActivity)
+                    .background {
+                        InAppNoticeWindowInstaller(model: model, colorScheme: .light, presentationActivity: homeActivity)
+                            .frame(width: 0, height: 0).allowsHitTesting(false)
+                    }
                     .tronPresentation()
                     .tronSettingsLayout()
                     .overlay(alignment: .top) {
@@ -451,6 +455,11 @@ private actor HostedHomeShellGateway {
             return (contextProjection(), nil)
         case "home.status":
             homeStatusCount += 1
+            // Hold the actual response across native back navigation so a transient
+            // loading replacement cannot disappear before XCTest observes it.
+            if sheetState == "navigation-refresh", homeStatusCount > 1 {
+                try await Task.sleep(for: .seconds(4))
+            }
             if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
             return (homeStatus(), nil)
         case "home.designate":
@@ -866,6 +875,9 @@ private actor HostedHomeShellGateway {
 
 private actor HostedHomeShellSocket: GatewaySocketConnection {
     private let gateway: HostedHomeShellGateway
+    private var openedSnapshot: SessionSnapshot?
+    private var modelDelivery: Task<Void, Error>?
+    private var modelRequests = 0
     private var inbound: [Data]
     private var receivers: [CheckedContinuation<Data, Error>] = []
     private var closed = false
@@ -886,9 +898,52 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue ?? [:]
         guard frame["type"]?.stringValue == "request", let id = frame["id"]?.stringValue,
               let method = frame["method"]?.stringValue else { return }
+        let params = frame["params"]?.objectValue ?? [:]
+        let change = params["changes"]?.arrayValue?.first?.objectValue
+        if method == "settings.change", change?["key"]?.stringValue == "model.ref[role=chat]",
+           ProcessInfo.processInfo.arguments.contains("-home-model-picker"), var snapshot = openedSnapshot {
+            modelRequests += 1
+            let shouldFail = modelRequests == 1 && ProcessInfo.processInfo.arguments.contains("-home-model-failure")
+            guard let provider = change?["value"]?.objectValue?["provider"]?.stringValue,
+                  let modelID = change?["value"]?.objectValue?["id"]?.stringValue,
+                  change?["layer"]?.stringValue == "chat", change?["op"]?.stringValue == "set",
+                  params["target"]?.objectValue?["sessionId"]?.stringValue == snapshot.sessionId,
+                  params["commandId"]?.stringValue != nil,
+                  params["fence"]?.objectValue?["runtimeGeneration"]?.stringValue == snapshot.runtimeGeneration,
+                  params["fence"]?.objectValue?["model"] == (try JSONValue.encode(snapshot.model)) else {
+                throw GatewayFailure(code: "invalid_request", message: "Model change lacked its session fence", retryable: false, details: nil)
+            }
+            modelDelivery = Task {
+                try await Task.sleep(for: .seconds(3))
+                if shouldFail {
+                    await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
+                        "type": .string("response"), "id": .string(id), "ok": .bool(false),
+                        "error": .object(["code": .string("conflict"), "message": .string("Model choice refused; try again."), "retryable": .bool(false)])])))
+                    return
+                }
+                snapshot.model = ModelRef(provider: provider, id: modelID)
+                snapshot.revision += 1
+                snapshot.eventSequence += 1
+                snapshot.thinkingLevel = "off"
+                snapshot.availableThinkingLevels = ["off"]
+                snapshot.contextWindowPolicy = nil
+                openedSnapshot = snapshot
+                await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("event"), "topic": .string("session.snapshot"), "sessionId": .string(snapshot.sessionId),
+                    "payload": try JSONValue.encode(snapshot)])))
+                try await Task.sleep(for: .seconds(1))
+                await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"), "id": .string(id), "ok": .bool(true),
+                    "result": fixtureSettingsChangeResult(key: "model.ref[role=chat]", revision: snapshot.revision)])))
+            }
+            return
+        }
         let result: (JSONValue?, JSONValue?)
         do {
             result = try await gateway.handle(method, frame["params"]?.objectValue ?? [:])
+            if method == "session.open", let value = result.0?.objectValue?["session"] {
+                openedSnapshot = try value.decode(SessionSnapshot.self)
+            }
         } catch is CancellationError {
             return
         }
@@ -903,7 +958,15 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         if !inbound.isEmpty { return inbound.removeFirst() }
         return try await withCheckedThrowingContinuation { receivers.append($0) }
     }
-    func close() async { closed = true; let pending = receivers; receivers.removeAll(); pending.forEach { $0.resume(throwing: CancellationError()) } }
+    func close() async {
+        closed = true
+        modelDelivery?.cancel()
+        _ = await modelDelivery?.result
+        modelDelivery = nil
+        let pending = receivers
+        receivers.removeAll()
+        pending.forEach { $0.resume(throwing: CancellationError()) }
+    }
     private func deliver(_ data: Data) { if receivers.isEmpty { inbound.append(data) } else { receivers.removeFirst().resume(returning: data) } }
 }
 

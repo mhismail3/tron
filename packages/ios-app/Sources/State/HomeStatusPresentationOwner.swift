@@ -290,16 +290,16 @@ final class HomeStatusPresentationOwner {
         fetch: @escaping @MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO
     ) {
         guard token != surfaceToken || activityCoordinator !== coordinator else { return }
-        stopWork(clearStatus: true)
+        // Surface ownership can move between dashboard and chat without changing
+        // the Gateway. Retire reads, not the last admitted connection's value;
+        // configure/profileRetired remain the authority for identity changes.
+        stopWork(clearStatus: false)
         surfaceGeneration &+= 1
         surfaceToken = token
         activityCoordinator = coordinator
         self.fetch = fetch
         self.cadence = cadence
         claimCoverRetryUsed = false
-        profileID = nil
-        connectionID = nil
-        capabilityEnabled = false
         suspended = false
     }
 
@@ -427,13 +427,10 @@ final class HomeStatusPresentationOwner {
 
     func retireSurface(_ token: PresentationSurfaceToken) {
         guard token == surfaceToken else { return }
-        stopWork(clearStatus: true)
+        stopWork(clearStatus: false)
         surfaceGeneration &+= 1
         surfaceToken = nil
         activityCoordinator = nil
-        profileID = nil
-        connectionID = nil
-        capabilityEnabled = false
         fetch = nil
         suspended = false
     }

@@ -35,11 +35,20 @@ extension HomeSheet {
             )
             // Home-originated and Home-task settings requests belong to Manage Home.
             .settingsApprovals(.home)
+            SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot,
+                                          onError: { error in
+                // A model choice belongs to the Home chat. Keep its notice above Models.
+                if let target = model.presentationTarget(for: sessionID) {
+                    model.presentError(error, scope: .session(id: target.sessionID, generation: target.generation))
+                }
+            }) { EmptyView() }
+            // The shared Chat card owns receipt + applied-revision reconciliation.
+            // Profile keys use the schema without duplicating those live Chat controls.
             SettingsRendererView(
                 target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
-                writeLayer: nil,
-                writeLayers: ["chat", "profile"],
-                embedded: true
+                writeLayer: "profile",
+                embedded: true,
+                ownedKeysOnly: true
             )
         } else {
             TronLoadingState(label: "Loading Home chat…")

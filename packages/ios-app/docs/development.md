@@ -941,6 +941,37 @@ the selected transport-open diagnostic distinguishes never-opened from opened fa
 
 ## Efficient focused tests
 
+The `TronSubagentParityUITests` presentation journeys exercise the actual chat and
+managed sheets with bounded transcript DTOs:
+
+- `testHomeResultReadableMessageAndNestedInfo`: legacy envelope, structured report
+  precedence (including Needs input), plain and malformed messages, Markdown and
+  toolbar Info/Done nested navigation in light/dark.
+- `testNotificationBodyFillsSheetWidth`: short HTTP 429 and multiline errors in
+  light/default and dark/accessibility text, measuring the actual reading card
+  against its sheet viewport.
+- `testAdjacentNotificationsKeepCompactIndependentTargets`: distinct chronological
+  events, 44-point row pitch, and a native tap beyond the visible glass inside the
+  event's own target. Restoring the old clearance fails at a 52-point pitch.
+- `testInterleavedNotificationsPreserveConversationAndToolBoundaries`: the same
+  errors separated by real rendered conversation and a tool call keep both events
+  and the intervening content.
+
+Run these with `scripts/tron-ios-test run --only-testing
+TronMobileUITests/TronSubagentParityUITests/<method>` after `build`. The retained
+`611-852-*` xcresult attachments are simulator captures, not physical-device or
+VoiceOver certification. The shared Home loading-surface journey remains the
+regression gate for sheet chrome; these card changes do not replace that owner.
+
+`TronSmokeUITests/testHomeRowRetainsStatusAcrossRepeatedBackNavigation` drives
+four native returns alternating ordinary and Home chats. The hosted socket holds
+subsequent status responses for four seconds; three screenshot/row samples on
+each return must retain Ready and the enabled target rather than waiting for
+loading to disappear. Attachments `853-simulator-return-<return>-frame-<sample>`
+are a repeatable interaction/frame sequence, not frame-by-frame animation or
+physical-device certification. Existing Home capability, profile-switch and
+mutation journeys qualify authority changes separately.
+
 iOS validation is integration and end-to-end at real boundaries; there is no
 hosted unit-test target. Build the UI-validation products once, then run only
 the journeys that own the change, without rebuilding:
@@ -2218,9 +2249,25 @@ admission behavior. Slim action/value capsules retain full touch height. Every s
 metadata face is half a point larger only within this sheet. The model picker must
 inherit purple across title, search, icons, and cards while keeping its ordinary type scale.
 Its title reads Models both from Manage Session and from Settings → Agent Defaults → Model Defaults.
-pending model selection and narrow authoritative projection.
-covers immediate pending choices, reset semantics, exact-request rollback, scope replacement,
-and shared Extra High labels without rewriting authored content. Project Resources must omit Context Files
+`TronSmokeUITests.testModelAcknowledgementResolvesWithoutDismissingPicker` taps the
+production Models sheet through a scripted Gateway socket. It holds acknowledgement,
+checks Applying and blocked replacement choices, then checks Selected and enabled
+without dismissal for snapshot-first, receipt-first, and newer-authority supersession.
+It also checks no-op reselect, another distinct choice, dismissal/reopen, and the
+Gateway's updated Thinking value. `testModelFailureRecoversAndDismissedPendingSelectionReconciles`
+checks a visible standard notice above Models, explicit retry, and an accepted change
+that completes across dismissal/reopen. `testHomeModelPickerAcknowledgementAndFailureStayInPopup`
+drives the production Home chat/ring/Manage Home route through success and failure,
+retaining its title and navigation. These are native interaction tests, not screenshot
+oracles; XCTest keeps the pending, confirmed, and failure screenshots in each result
+bundle. The hosted profiles/tokens are memory-only and caches use the owned simulator
+app's isolated temporary directory; no installed Mac Gateway or provider is contacted.
+The socket owns delayed delivery independently of the client's request-send task,
+which is correctly cancelled when a receipt arrives, and cancels/joins on close.
+Run the three named methods with `scripts/tron-ios-test run --only-testing
+TronMobileUITests/TronSmokeUITests/<method>` after `scripts/tron-ios-test build`.
+Shared Extra High labels remain unchanged without rewriting authored content.
+Project Resources must omit Context Files
 and `AGENTS.md` rows. Agent Instructions lists the Gateway's attributed sections as glass rows in
 reading order (`TronSmokeUITests.testAgentInstructionsSectionsOpenSheetsWithTheirSources` opens and
 dismisses medium-detent section sheets on the `-tron-agent-instructions-fixture` host and retains

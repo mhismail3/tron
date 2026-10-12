@@ -78,7 +78,52 @@ struct HostedSubagentParityFixture: View {
             snapshot.queuedItems.append(.init(id: "maintainer", behavior: .steer,
                 text: "Maintainer queued message", attachmentCount: 0))
         }
+        if arguments.contains("-presentation-polish") {
+            snapshot.transcript = Self.polishTranscript(arguments: arguments)
+            snapshot.transcriptTotal = snapshot.transcript.count
+            snapshot.processActivities = []
+        }
         self.snapshot = snapshot
+    }
+
+    private static func polishTranscript(arguments: [String]) -> [TranscriptItem] {
+        let report: JSONValue = .object([
+            "version": .number(1), "taskId": .string("fixture-task"), "homeId": .string("fixture-home"),
+            "generation": .number(1), "operationId": .string("fixture-operation"), "resultId": .string("fixture-result"),
+            "outcome": .string(arguments.contains("-typed-report") ? "needs-input" : "final"), "text": .string("## Actual report\n\nAll requested changes are preserved.\n\n- First result\n- Second result"),
+            "evidence": .array([.string("evidence/native-result.xcresult")]),
+            "receiptId": .string("report:fixture-operation"), "sessionId": .string("fixture-worker"), "acceptedAt": .string("2026-01-01T00:00:00Z")
+        ])
+        let raw = String(data: try! JSONEncoder.gateway.encode(report), encoding: .utf8)!
+        let text = arguments.contains("-typed-report") ? "Structured report is available in details."
+            : arguments.contains("-plain-report") ? "Plain report remains complete."
+            : arguments.contains("-malformed-report") ? "Home task fixture-task\n{malformed report: preserve this text}"
+            : "Home task fixture-task (completed; subagents started 1, stopped at end 0)\n\(raw)"
+        let semantic: JSONValue = .object(["version": .number(1), "sequence": .number(1), "direction": .string("inboundContext"),
+            "contextEffect": .string("modelInput"), "delivery": .string("stored"), "visibility": .string("visible"),
+            "kind": .string("message"), "origin": .object(["kind": .string("gateway"), "title": .string("Tron"), "confidence": .string("receipt")])])
+        var rows: [JSONValue] = []
+        for index in 0..<2 {
+            var status = semantic.objectValue!
+            status["kind"] = .string("status")
+            rows.append(.object(["id": .string("error-\(index)"), "timestamp": .string("2026-01-01T00:00:00Z"),
+                "kind": .string("customEntry"), "customType": .string("fixture.error"),
+                "data": .object(["tone": .string("error"), "message": .string(index == 0 ? "HTTP 429" : String(repeating: "Long error context with recovery instructions. ", count: 12))]), "semantic": .object(status)]))
+        }
+        if arguments.contains("-interleaved-events") {
+            rows.insert(.object(["id": .string("prose"), "presentationId": .string("prose"), "timestamp": .string("2026-01-01T00:00:00Z"),
+                "kind": .string("message"), "role": .string("assistant"), "content": .array([
+                    .object(["id": .string("prose-body"), "ordinal": .number(0), "type": .string("text"), "text": .string("Conversation between independent events.")]),
+                    .object(["id": .string("fixture-tool"), "toolCallId": .string("fixture-tool"), "ordinal": .number(1), "type": .string("toolCall"), "name": .string("read"), "arguments": .object(["path": .string("example.txt")])])])]), at: 1)
+        }
+        rows += [
+            .object(["id": .string("model"), "timestamp": .string("2026-01-01T00:00:01Z"), "kind": .string("modelChange"), "modelRef": .object(["provider": .string("fixture"), "id": .string("model")])]),
+            .object(["id": .string("thinking"), "timestamp": .string("2026-01-01T00:00:02Z"), "kind": .string("thinkingChange"), "level": .string("high")]),
+            .object(["id": .string("report"), "timestamp": .string("2026-01-01T00:00:03Z"), "kind": .string("customMessage"),
+                "customType": .string("tron.home-task-result.v1"), "display": .bool(true), "content": .array([.object(["id": .string("body"), "ordinal": .number(0), "type": .string("text"), "text": .string(text)])]),
+                "details": arguments.contains("-typed-report") ? .object(["report": report]) : .object(["terminalEvidence": .object(["outcome": .string("completed")])]), "semantic": semantic])
+        ]
+        return try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONEncoder.gateway.encode(rows))
     }
 
     static let transcript = Data(#"""
@@ -100,6 +145,7 @@ struct HostedSubagentParityFixture: View {
         }
         .environment(model)
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-light") ? .light : .dark)
+        .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("-accessibility-type") ? .accessibility1 : .large)
         .tronPresentation()
         .task {
             do {
