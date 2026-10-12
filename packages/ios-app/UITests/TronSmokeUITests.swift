@@ -407,6 +407,44 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "manage-home-sheet")
     }
 
+    @MainActor
+    func testHomeModelPickerAcknowledgementAndFailureStayInPopup() {
+        continueAfterFailure = false
+        for failure in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-model-picker"]
+            if failure { app.launchArguments.append("-home-model-failure") }
+            app.launch(); defer { app.terminate() }
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            app.buttons["Switch Model"].tap()
+            let haiku = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Claude Haiku 5.5")).firstMatch
+            XCTAssertTrue(haiku.waitForExistence(timeout: 5))
+            haiku.tap()
+            wait(for: [expectation(for: NSPredicate(format: "value == %@", "Applying configuration"), evaluatedWith: haiku)], timeout: 2)
+            if failure {
+                let failureNotice = app.descendants(matching: .any)["in-app-notice-card"]
+                XCTAssertTrue(failureNotice.waitForExistence(timeout: 10))
+                XCTAssertTrue(failureNotice.label.contains("Model choice refused; try again."))
+                XCTAssertTrue(failureNotice.isHittable, "The failure must be visible above the popup")
+                keepScreenshot(named: "home-model-failure-in-popup")
+                XCTAssertTrue(haiku.isEnabled)
+                haiku.tap()
+            }
+            wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: haiku)], timeout: 10)
+            XCTAssertTrue(app.staticTexts["Models"].exists)
+            keepScreenshot(named: "home-model-confirmed-open-\(failure ? "retry" : "success")")
+            app.buttons["Done"].tap()
+            XCTAssertTrue(app.staticTexts["Manage Home"].exists)
+            XCTAssertEqual(app.buttons["thinking-level-control"].value as? String, "Off")
+            app.buttons["home-sheet-done-manage"].tap()
+            XCTAssertTrue(app.staticTexts["Home fixture chat"].waitForExistence(timeout: 5))
+            XCTAssertEqual(app.buttons["session-context-button"].label, "Manage Home")
+            app.terminate()
+        }
+    }
+
     /// Every Manage Home sub-sheet opens at the medium detent, as the Manage Session
     /// sub-sheets do: its frame stays well short of the full window.
     @MainActor
@@ -1273,6 +1311,83 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertFalse(app.buttons["Why configuration is unavailable"].exists)
             app.terminate()
         }
+    }
+
+    /// Real native taps through the production nested sheet, with receipt and
+    /// snapshot order controlled independently at the Gateway socket boundary.
+    @MainActor
+    func testModelAcknowledgementResolvesWithoutDismissingPicker() {
+        continueAfterFailure = false
+        for order in ["snapshot-first", "receipt-first", "superseded"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-session-configuration-fixture", "-model-ack-\(order)"]
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+            app.buttons["Stop session"].tap()
+            app.buttons["Release terminal settlement"].tap()
+            app.buttons["Switch Model"].tap()
+            let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch
+            let original = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
+            XCTAssertTrue(alternative.waitForExistence(timeout: 5))
+            alternative.tap()
+            wait(for: [expectation(for: NSPredicate(format: "value == %@", "Applying configuration"), evaluatedWith: alternative)], timeout: 2)
+            XCTAssertFalse(original.isEnabled, "Rapid replacement choices are refused while one intent owns the receipt")
+            XCTAssertFalse(alternative.isEnabled)
+            keepScreenshot(named: "model-\(order)-pending-open")
+            let confirmed = order == "superseded" ? original : alternative
+            wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: confirmed)], timeout: 10)
+            XCTAssertTrue(app.staticTexts["Models"].exists, "Acknowledgement must not dismiss the picker")
+            keepScreenshot(named: "model-\(order)-confirmed-open")
+            confirmed.tap() // Reselect is a no-op, not another mutation.
+            XCTAssertEqual(confirmed.value as? String, "Selected")
+            app.buttons["Done"].tap()
+            XCTAssertTrue(app.staticTexts["Model requests: 1"].waitForExistence(timeout: 3))
+            app.buttons["Switch Model"].tap()
+            XCTAssertEqual(confirmed.value as? String, "Selected", "Reopening derives the acknowledged authoritative model")
+            if order != "superseded" {
+                original.tap()
+                wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: original)], timeout: 10)
+                XCTAssertTrue(app.staticTexts["Models"].exists, "A second distinct choice remains usable in this presentation")
+            }
+            app.buttons["Done"].tap()
+            XCTAssertTrue(app.staticTexts[order == "superseded" ? "Model requests: 1" : "Model requests: 2"].waitForExistence(timeout: 3))
+            XCTAssertEqual(app.buttons["thinking-level-control"].value as? String, "Off")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testModelFailureRecoversAndDismissedPendingSelectionReconciles() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-model-ack-failure"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        app.buttons["Release terminal settlement"].tap()
+        app.buttons["Switch Model"].tap()
+        let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch
+        let original = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
+        XCTAssertTrue(alternative.waitForExistence(timeout: 5))
+        alternative.tap()
+        let failureNotice = app.descendants(matching: .any)["in-app-notice-card"]
+        XCTAssertTrue(failureNotice.waitForExistence(timeout: 10))
+        XCTAssertTrue(failureNotice.label.contains("Model choice refused; try again."))
+        XCTAssertTrue(failureNotice.isHittable)
+        keepScreenshot(named: "model-failure-visible-in-picker")
+        XCTAssertTrue(app.staticTexts["Models"].exists)
+        XCTAssertEqual(original.value as? String, "Selected")
+        XCTAssertTrue(alternative.isEnabled)
+        alternative.tap()
+        wait(for: [expectation(for: NSPredicate(format: "value == %@", "Applying configuration"), evaluatedWith: alternative)], timeout: 2)
+        app.buttons["Done"].tap() // Accepted mutation survives picker dismissal.
+        app.buttons["Switch Model"].tap()
+        wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: alternative)], timeout: 10)
+        keepScreenshot(named: "model-retry-confirmed-after-reopen")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Model requests: 2"].waitForExistence(timeout: 3))
     }
 
     @MainActor

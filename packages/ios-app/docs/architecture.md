@@ -2595,7 +2595,16 @@ owners and are not cancelled merely because a surface is covered.
 Manage Session's semantic projection contains no causal revision. Context-window
 commands read the current authoritative revision/runtime at admission, while
 pending settings retain exact request/runtime identity and wait for both RPC
-confirmation and authoritative agreement. Native controls retain runtime/model
+confirmation and authoritative agreement (or a newer revision that supersedes the
+confirmed choice). The shared model card publishes bounded configuration data and
+retires pending receipts while its Models descendant is open, using
+`allowsDataPublication`, not the topmost-only load/presentation permission. Its
+binding reads the current authoritative configuration rather than the covered
+Manage Session frame. This applies equally to Manage Home without resuming parent
+polls, transcript work, or changing dismissal behavior. Rejected model choices
+clear only their exact request and surface the standard session-scoped notice
+above the popup; a retired runtime's failure cannot replace the current choice.
+Native controls retain runtime/model
 identity rather than being recreated on every progress revision. History, process,
 queue, and tool-detail selectors belong to the session presentation store and
 publish only changed bounded facts, never another canonical journal. A visible

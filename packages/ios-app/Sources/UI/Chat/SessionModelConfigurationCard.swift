@@ -39,10 +39,17 @@ struct SessionModelConfigurationCard<Footer: View>: View {
 
     private var configurationRowAccent: Color { .tronPurple }
 
+    private var displayedSnapshot: SessionContextPresentation {
+        // Manage Session freezes its own frame under a sheet. The model card
+        // still supplies bounded live data to its visible Models descendant;
+        // neither this read nor receipt retirement is a covered-surface load.
+        presentationActivity.allowsDataPublication ? (presentationSource ?? snapshot) : snapshot
+    }
+
     var body: some View {
-        modelSummaryCard(snapshot)
+        modelSummaryCard(displayedSnapshot)
             .background {
-                if presentationActivity.allowsPresentationPublication {
+                if presentationActivity.allowsDataPublication {
                     Color.clear
                         .onChange(of: presentationSource, initial: true) { _, value in
                             reconcile(value)
@@ -53,8 +60,8 @@ struct SessionModelConfigurationCard<Footer: View>: View {
                 }
             }
             .onChange(of: presentationActivity) { previous, current in
-                guard !previous.allowsPresentationPublication,
-                      current.allowsPresentationPublication else { return }
+                guard !previous.allowsDataPublication,
+                      current.allowsDataPublication else { return }
                 reconcile(presentationSource)
             }
     }
@@ -62,10 +69,11 @@ struct SessionModelConfigurationCard<Footer: View>: View {
     private func modelSelection(_ snapshot: SessionContextPresentation) -> Binding<ModelRef?> {
         Binding(
             get: {
-                SessionModelSelectionPresentation.displayed(pending: pendingModelSelection, authoritative: snapshot.model)
+                SessionModelSelectionPresentation.displayed(pending: pendingModelSelection, authoritative: displayedSnapshot.model)
             },
             set: { selection in
-                guard let selection, pendingModelSelection == nil, pendingThinking == nil, !settingContextWindow,
+                guard presentationActivity.allowsDataPublication,
+                      let selection, pendingModelSelection == nil, pendingThinking == nil, !settingContextWindow,
                       selection != SessionModelSelectionPresentation.displayed(
                         pending: pendingModelSelection, authoritative: snapshot.model
                       ),
@@ -87,13 +95,19 @@ struct SessionModelConfigurationCard<Footer: View>: View {
                         }
                         let revision = try await model.setModel(selection, sessionID: sessionID)
                         pendingModelSelection = pendingModelSelection?.confirming(pending.id, revision: revision)
-                        if presentationActivity.allowsPresentationPublication { reconcile(presentationSource) }
+                        if presentationActivity.allowsDataPublication { reconcile(presentationSource) }
                     } catch is CancellationError {
                         // Refused receipt replay is terminal for this intent;
                         // uncertain accepted outcomes use outcome_unknown instead.
                         pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
                     } catch {
-                        pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
+                        // A retired request may not replace a newer intent's
+                        // failure. The session-scoped notice is visible above
+                        // the picker as well as its covered Manage surface.
+                        guard pendingModelSelection?.id == pending.id else { return }
+                        pendingModelSelection = nil
+                        guard let current = model.sessionContextPresentation(for: sessionID),
+                              pending.admitted(in: current) != nil else { return }
                         onError(error)
                     }
                 }
@@ -134,7 +148,7 @@ struct SessionModelConfigurationCard<Footer: View>: View {
                                 }
                                 let revision = try await model.setThinking(level, sessionID: sessionID)
                                 pendingThinking = pendingThinking?.confirming(pending.id, revision: revision)
-                                if presentationActivity.allowsPresentationPublication { reconcile(presentationSource) }
+                                if presentationActivity.allowsDataPublication { reconcile(presentationSource) }
                             } catch {
                                 pendingThinking = pendingThinking?.rejecting(pending.id)
                                 onError(error)
@@ -174,7 +188,7 @@ struct SessionModelConfigurationCard<Footer: View>: View {
                                           admission.contextWindowPolicy?.model == policy.model else { return }
                                     let revision = try await model.setContextWindow(value, for: policy.model, sessionID: sessionID, expectedRevision: admission.revision, expectedRuntimeGeneration: admission.runtimeGeneration)
                                     pendingContextWindow = pendingContextWindow?.confirming(pending.id, revision: revision)
-                                    if presentationActivity.allowsPresentationPublication { reconcile(presentationSource) }
+                                    if presentationActivity.allowsDataPublication { reconcile(presentationSource) }
                                 } catch {
                                     pendingContextWindow = pendingContextWindow?.rejecting(pending.id)
                                     onError(error)

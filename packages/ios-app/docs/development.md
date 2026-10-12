@@ -2238,9 +2238,25 @@ admission behavior. Slim action/value capsules retain full touch height. Every s
 metadata face is half a point larger only within this sheet. The model picker must
 inherit purple across title, search, icons, and cards while keeping its ordinary type scale.
 Its title reads Models both from Manage Session and from Settings → Agent Defaults → Model Defaults.
-pending model selection and narrow authoritative projection.
-covers immediate pending choices, reset semantics, exact-request rollback, scope replacement,
-and shared Extra High labels without rewriting authored content. Project Resources must omit Context Files
+`TronSmokeUITests.testModelAcknowledgementResolvesWithoutDismissingPicker` taps the
+production Models sheet through a scripted Gateway socket. It holds acknowledgement,
+checks Applying and blocked replacement choices, then checks Selected and enabled
+without dismissal for snapshot-first, receipt-first, and newer-authority supersession.
+It also checks no-op reselect, another distinct choice, dismissal/reopen, and the
+Gateway's updated Thinking value. `testModelFailureRecoversAndDismissedPendingSelectionReconciles`
+checks a visible standard notice above Models, explicit retry, and an accepted change
+that completes across dismissal/reopen. `testHomeModelPickerAcknowledgementAndFailureStayInPopup`
+drives the production Home chat/ring/Manage Home route through success and failure,
+retaining its title and navigation. These are native interaction tests, not screenshot
+oracles; XCTest keeps the pending, confirmed, and failure screenshots in each result
+bundle. The hosted profiles/tokens are memory-only and caches use the owned simulator
+app's isolated temporary directory; no installed Mac Gateway or provider is contacted.
+The socket owns delayed delivery independently of the client's request-send task,
+which is correctly cancelled when a receipt arrives, and cancels/joins on close.
+Run the three named methods with `scripts/tron-ios-test run --only-testing
+TronMobileUITests/TronSmokeUITests/<method>` after `scripts/tron-ios-test build`.
+Shared Extra High labels remain unchanged without rewriting authored content.
+Project Resources must omit Context Files
 and `AGENTS.md` rows. Agent Instructions lists the Gateway's attributed sections as glass rows in
 reading order (`TronSmokeUITests.testAgentInstructionsSectionsOpenSheetsWithTheirSources` opens and
 dismisses medium-detent section sheets on the `-tron-agent-instructions-fixture` host and retains

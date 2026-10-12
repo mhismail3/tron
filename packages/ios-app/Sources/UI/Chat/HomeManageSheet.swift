@@ -36,7 +36,13 @@ extension HomeSheet {
             // #758: the settings approvals section (`.settingsApprovals(.home)`) inserts
             // here, before the model card, once that epic lands.
             SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot,
-                                          onError: { mutationFailure = $0.localizedDescription }) {
+                                          onError: { error in
+                // A model choice belongs to the Home chat, not Home control
+                // settings. Its notice must remain visible above Models.
+                if let target = model.presentationTarget(for: sessionID) {
+                    model.presentError(error, scope: .session(id: target.sessionID, generation: target.generation))
+                }
+            }) {
                 memoryModelRow(status)
             }
         } else {
