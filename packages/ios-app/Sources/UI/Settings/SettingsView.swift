@@ -180,6 +180,7 @@ struct SettingsView: View {
             )
             .contentShape(Rectangle())
         }
+        .accessibilityIdentifier("settings-link-\(title)")
     }
 
     private func settingsDivider(accent: Color) -> some View {

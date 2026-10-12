@@ -502,8 +502,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
 
         // A hand-built screen on the same change path: Extensions' Built-in switch
         // writes `sources.extensions` at the Mac layer (no legacy document read).
-        for _ in 0..<40 where !app.buttons["Extensions"].isHittable { app.swipeDown() }
-        app.buttons["Extensions"].tap()
+        let extensionsLink = app.buttons["settings-link-Extensions"]
+        for _ in 0..<40 where !extensionsLink.isHittable { app.swipeDown() }
+        extensionsLink.tap()
         let toolSearch = app.switches["Tool search"]
         XCTAssertTrue(toolSearch.waitForExistence(timeout: 30), "Extensions must show the Built-in switches: \(app.debugDescription)")
         for _ in 0..<10 where !toolSearch.isHittable { app.swipeUp() }
