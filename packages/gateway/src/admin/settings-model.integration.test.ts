@@ -136,6 +136,30 @@ function piEffective(manager: SettingsManager, model: { provider: string; id: st
 }
 
 describe("settings.resolve", () => {
+  it("changes bounded Home profile fields through the canonical change path and reads them from profile.json", async () => {
+    const f = await fixture();
+    const target = { kind: "home" };
+    const response = await f.service.invoke(subscribed(), "settings.change", {
+      commandId: "home-profile-worker-thinking", target,
+      changes: [{ key: "model.thinking[role=worker]", layer: "profile", op: "set", value: "high" }],
+    }) as { status: string };
+    expect(response.status).toBe("applied");
+    const profile = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "profile.json"), "utf8"));
+    expect(profile).toEqual({ thinking: { worker: "high" } });
+    const resolution = await f.service.invoke(subscribed(), "settings.resolve", { target }) as Resolution;
+    expect(row(resolution, "model.thinking[role=worker]")).toMatchObject({ value: "high", layer: "profile" });
+
+    await expect(f.service.invoke(subscribed(), "settings.change", {
+      commandId: "home-profile-invalid-thinking", target,
+      changes: [{ key: "model.thinking[role=worker]", layer: "profile", op: "set", value: "unbounded" }],
+    })).rejects.toThrow();
+    expect(JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "profile.json"), "utf8"))).toEqual(profile);
+
+    await writeFile(join(f.tronHome, "gateway", "home", "profile.json"), JSON.stringify({ thinking: { worker: "unbounded" } }));
+    await expect(f.service.invoke(subscribed(), "settings.resolve", { target })).rejects.toThrow("Home profile value for model.thinking[role=worker] is invalid");
+    await writeFile(join(f.tronHome, "gateway", "home", "profile.json"), JSON.stringify({ oversized: "x".repeat(256 * 1024) }));
+    await expect(f.service.invoke(subscribed(), "settings.resolve", { target })).rejects.toThrow("Home profile exceeds its 262144-byte limit");
+  });
   it("resolves five uniform layers for every target, shows an untrusted project as not applied, and matches pi and a live chat", async () => {
     const { service, project, registry, model, modelKey, tronHome, agentDir, trust } = await fixture();
     const client = subscribed();

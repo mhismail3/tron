@@ -175,9 +175,25 @@ export class SettingsModel {
       floors: await this.floorOverrides(),
       ...(project ? { project } : {}),
       ...(session ? { chat: session.chat } : {}),
-      ...(home ? { profile: await readJsonObject(this.profilePath) } : {}),
+      ...(home ? { profile: await this.homeProfile() } : {}),
       ...(home && this.dependencies.homeMemoryModel ? await this.homeMemory() : {}),
     };
+  }
+
+  private async homeProfile(): Promise<Record<string, unknown>> {
+    const document = await readBoundedJsonObject(this.profilePath, 256 * 1024, "Home profile");
+    for (const key of KEYS) {
+      const binding = key.layers.profile;
+      if (binding?.store !== "profile") continue;
+      const value = readPath(document, binding.path);
+      if (value === undefined) continue;
+      try {
+        setPath(document, binding.path, await key.type.validate(value, key.id));
+      } catch {
+        throw new GatewayError("conflict", `The Home profile value for ${key.id} is invalid`);
+      }
+    }
+    return document;
   }
 
   private async homeMemory(): Promise<{ homeMemory?: { provider: string; id: string } }> {
@@ -222,6 +238,37 @@ export class SettingsModel {
       if (typeof decision === "boolean") result[path] = decision;
     }
     return result;
+  }
+}
+
+function readPath(document: Record<string, unknown>, path: readonly string[]): unknown {
+  let value: unknown = document;
+  for (const [index, segment] of path.entries()) {
+    if (value === undefined) return undefined;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new GatewayError("conflict", "The Home profile has an invalid field structure");
+    }
+    value = (value as Record<string, unknown>)[segment];
+    if (value === undefined && index < path.length - 1) return undefined;
+  }
+  return value;
+}
+
+async function readBoundedJsonObject(path: string, maxBytes: number, label: string): Promise<Record<string, unknown>> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
+  }
+  if (Buffer.byteLength(raw, "utf8") > maxBytes) throw new GatewayError("conflict", `${label} exceeds its ${maxBytes}-byte limit`);
+  try {
+    const value = JSON.parse(raw.replace(/^\uFEFF/u, "")) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("not object");
+    return value as Record<string, unknown>;
+  } catch {
+    throw new GatewayError("conflict", `${label} could not be parsed`);
   }
 }
 
@@ -721,7 +768,7 @@ export class SettingsChangePath {
       if (request.layer === "chat" && chatModel) qualifiers.model = `${chatModel.provider}/${chatModel.id}`;
       else throw new GatewayError("invalid_request", `${key.label} needs a model qualifier`);
     }
-    if (binding.store === "profile" || (binding.store === "chat-settings" && !hasRuntimeRequestApplier(key))) {
+    if (binding.store === "chat-settings" && !hasRuntimeRequestApplier(key)) {
       throw new GatewayError("unsupported", `${key.label} has no writable ${LAYER_LABELS[request.layer]} store yet`);
     }
     let after: unknown;
@@ -807,6 +854,12 @@ export class SettingsChangePath {
             if (unset) delete entry[direction]; else entry[direction] = value as Tier;
           }
           if (Object.keys(entry).length === 0) delete document[qualifiers.key!]; else document[qualifiers.key!] = entry;
+          return document;
+        });
+        return {};
+      case "profile":
+        await updateJsonLocked<Record<string, unknown>>(this.model.profilePath, {}, document => {
+          if (unset) unsetPath(document, binding.path); else setPath(document, binding.path, value);
           return document;
         });
         return {};

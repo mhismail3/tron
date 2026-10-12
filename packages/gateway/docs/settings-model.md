@@ -959,13 +959,26 @@ no change to the resolver (F4). The Home profile has two parts.
   a value is set. They never carry the value. A `delegation-default` note that
   names a model is advice to Home; it is not resolved, and the typed key wins.
 
-The typed values live in `<tronHome>/gateway/home/profile.json`, owned by
-`HomeOwner` and written only by the change path. The memory model moves there
-from `home.json` `memory.model` (`packages/gateway/src/home/home-owner.ts:77`),
-and `HomeOwner.configureMemory` (`:987`), already the applier behind
-`settings.change`, writes it there. The Home chat's
-own model in `home.json` (`home-owner.ts:72`) stays: it is Home's Chat layer,
-carried across chapters.
+The typed profile store is `<tronHome>/gateway/home/profile.json`. The settings
+change path updates it with a locked JSON write; resolution validates each
+schema-declared Profile binding before exposing it. The document is capped at
+256 KiB. Undeclared fields do not resolve as settings and are preserved when a
+declared field is changed.
+
+This slice supports writing the schema keys already bound to the `profile`
+store. The memory model still uses the separate `home-memory` binding and
+`HomeOwner.configureMemory`; it remains in `home.json` `memory.model`
+(`packages/gateway/src/home/home-owner.ts:77`). Moving it to `profile.json`
+requires an owner-coordinated atomic transition across the settings applier and
+Home's persisted record. No migration or dual-store fallback is part of this
+slice. The Home chat's own model in `home.json` (`home-owner.ts:72`) stays: it
+is Home's Chat layer, carried across chapters.
+
+The design also names task budgets and scopes as Profile keys, but neither is
+currently declared in `settings-schema.ts`; this slice does not invent new
+schema entries or task policy. Likewise, storing worker model/thinking values
+does not by itself implement delegation-time resolution, admission, or start
+provenance; those remain a separate owner API boundary.
 
 ### 6.2 Who it applies to
 
