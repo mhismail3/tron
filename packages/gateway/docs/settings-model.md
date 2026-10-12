@@ -1130,7 +1130,11 @@ default, Follow the default, Review trust), sent back through
 ### 7.4 The Changes feed
 
 Changes is the main place to check up on agents. It reads the record
-([5.2](#52-the-request-and-the-record)) through `settings.history`.
+([5.2](#52-the-request-and-the-record)) through `settings.history`. The Gateway
+adds `presentation: { label, section?, actor, layer, display: { before, after } }`
+to each page entry using the schema's existing formatter, without writing the
+projection to audit. Retired keys show their ID and recorded JSON; redacted values
+show Hidden → Changed and are removed from the response's raw value fields.
 
 - **Each entry**: who (actor and its chat or task, linked), what (key label and
   the before and after `display` strings), why (the reason), when, where (layer

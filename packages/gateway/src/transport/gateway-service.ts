@@ -17,7 +17,7 @@ import type { ApprovalRequest } from "../admin/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../admin/settings-record.js";
 import { SECTIONS, schemaKey } from "../admin/settings-schema.js";
 import type { SettingsTarget } from "../admin/settings-resolver.js";
-import { RECENT_SCAN_LIMIT, actorLabel, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
+import { RECENT_SCAN_LIMIT, actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
 import { QUALIFIER_NAMES, type Qualifiers } from "../admin/settings-types.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
@@ -2087,7 +2087,7 @@ export class GatewayService {
         });
       case "settings.history": {
         rejectUnknownFields(params, ["cursor", "limit", "key", "status", "actor", "layer", "section"], method);
-        return safeJson(await this.dependencies.settingsChanges.history({
+        const page = await this.dependencies.settingsChanges.history({
           ...(params.actor === undefined ? {} : { actor: oneOf(params.actor, "actor", ["agents", "ui", "home", "worker", "agent", "outside"] as const) }),
           ...(params.layer === undefined ? {} : { layer: oneOf(params.layer, "layer", ["chat", "profile", "project", "mac"] as const) }),
           ...(params.section === undefined ? {} : { section: oneOf(params.section, "section", SECTIONS.map(section => section.id)) }),
@@ -2095,7 +2095,8 @@ export class GatewayService {
           ...(params.limit === undefined ? {} : { limit: integer(params.limit, "limit", 1, 200) }),
           ...(params.key === undefined ? {} : { key: string(params.key, "key", { max: 200 }) }),
           ...(params.status === undefined ? {} : { status: string(params.status, "status", { max: 40 }) }),
-        }));
+        });
+        return safeJson({ ...page, entries: page.entries.map(presentHistoryEntry) });
       }
       case "settings.get": {
         const cwd = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();

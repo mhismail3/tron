@@ -825,6 +825,11 @@ Omitting it is Everything. `layer` is a writable layer and `section` is a declar
 section ID. An empty page with `nextCursor` is not the end: continue until the
 cursor is absent. Settings summaries traverse this same API up to their fixed
 200-entry recent horizon, so a segment rollover does not hide recent changes.
+Each returned entry adds schema-owned `presentation` (label, section when declared,
+actor, layer, and before/after display strings). This projection never rewrites the
+record. Retired keys retain their key ID and recorded JSON display; redacted entries
+expose only Hidden → Changed, never raw before/after or fixed values. Outside
+changes are labeled Outside Tron, not You. Native clients need no key-formatting map.
 `settings.undo { commandId, changeId, fence? }` writes `before` back as an
 ordinary change, refused with the current value when the store no longer holds
 `after`, and refused for a redacted change, which has no `before`.

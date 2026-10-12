@@ -117,7 +117,8 @@ describe("settings.change", () => {
     expect(f.broadcasts).toContainEqual({ topic: "settings.changed", payload: expect.objectContaining({ keys: ["run.retry.maxRetries"], layer: "mac" }) });
     const [entry] = await f.history({ key: "run.retry.maxRetries" });
     expect(entry).toMatchObject({ actor: { kind: "ui", id: "device:phone" }, layer: "mac", before: 4, after: 6, status: "applied", tier: "quiet",
-      tierBasis: { floor: "quiet", floorSource: "code", web: false, risk: null } });
+      tierBasis: { floor: "quiet", floorSource: "code", web: false, risk: null },
+      presentation: { label: "Retries", section: "run", actor: "You", layer: "Mac", display: { before: "4 retries", after: "6 retries" } } });
 
     // A stale `expected` is refused and changes nothing.
     await expect(f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 9, expected: 4 }])).rejects.toMatchObject({ code: "conflict" });
@@ -139,13 +140,21 @@ describe("settings.change", () => {
     // A redacted key records only "changed", and its change is not undoable.
     const proxy = await f.change({ kind: "mac" }, [{ key: "run.httpProxy", layer: "mac", op: "set", value: "http://proxy.invalid:3128" }]);
     const proxyEntry = (await f.history({ key: "run.httpProxy" }))[0]!;
-    expect(proxyEntry).toMatchObject({ changed: true, redacted: true, tier: "notify" });
+    expect(proxyEntry).toMatchObject({ changed: true, redacted: true, tier: "notify",
+      presentation: { label: "HTTP proxy", display: { before: "Hidden", after: "Changed" } } });
     expect(JSON.stringify(await f.history())).not.toContain("proxy.invalid");
     await expect(f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: proxy.changes[0]!.changeId }))
       .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("not undoable") });
 
     // A layer the key does not allow, and a key with no writer, are refused.
     await expect(f.change({ kind: "mac" }, [{ key: "setup.sessionDir", layer: "mac", op: "set", value: "/elsewhere" }])).rejects.toMatchObject({ code: "invalid_request" });
+    // Permanent history remains readable after a schema key retires. The outside
+    // actor must not be mislabeled as a UI change, and projection never rewrites audit.
+    await f.record.append([{ ...entry!, changeId: "retired-key-entry", key: "retired.setting", actor: { kind: "outside", id: "fixture" }, before: "old", after: "new" }]);
+    expect((await f.history({ key: "retired.setting" }))[0]).toMatchObject({
+      presentation: { label: "retired.setting", actor: "Outside Tron", display: { before: '"old"', after: '"new"' } },
+    });
+    expect((await f.record.entry(entry!.changeId))?.entry).not.toHaveProperty("presentation");
     transcript.push({ case: "record, undo and redaction", detail: await f.history() });
   });
 

@@ -106,7 +106,7 @@ export function requesterLabel(actor: Actor): string {
 }
 
 export function actorLabel(actor: Actor): string {
-  return actor.kind === "home" ? "Home" : actor.kind === "worker" ? "A Home task worker" : actor.kind === "agent" ? "A chat's agent" : "You";
+  return actor.kind === "home" ? "Home" : actor.kind === "worker" ? "A Home task worker" : actor.kind === "agent" ? "A chat's agent" : actor.kind === "outside" ? "Outside Tron" : "You";
 }
 
 export function sameSettingsTarget(left: SettingsTarget, right: SettingsTarget): boolean {
@@ -120,6 +120,28 @@ export function sameSettingsTarget(left: SettingsTarget, right: SettingsTarget):
  * (an old record entry or approval may name one). */
 function declaredKey(id: string): KeyDeclaration | undefined {
   return KEYS.find(key => key.id === id);
+}
+
+/** History is a disposable projection of permanent audit, not another schema or
+ * value store. Retired keys keep their recorded values; known keys reuse their
+ * declared formatter. Neither labels nor formatted values are written to audit. */
+export function presentHistoryEntry(entry: ChangeEntry) {
+  const key = declaredKey(entry.key);
+  const redacted = entry.redacted || key?.redacted;
+  const { before, after, fixedAt: _fixedAt, ...redactedEntry } = entry;
+  const format = (value: unknown): string => {
+    if (value === undefined) return "Not set";
+    return key ? key.type.format(value, { modelName: () => undefined }) : JSON.stringify(value);
+  };
+  return {
+    ...(redacted ? { ...redactedEntry, changed: true as const, redacted: true as const } : entry),
+    presentation: {
+      label: key?.label ?? entry.key,
+      ...(key ? { section: key.group } : {}),
+      actor: requesterLabel(entry.actor), layer: LAYER_LABELS[entry.layer],
+      display: redacted ? { before: "Hidden", after: "Changed" } : { before: format(before), after: format(after) },
+    },
+  };
 }
 
 export function presentResolution(resolution: Resolution, input: PresentationInput): PresentedResolution {
