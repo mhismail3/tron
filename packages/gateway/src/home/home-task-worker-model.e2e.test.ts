@@ -43,12 +43,19 @@ function scriptedHome(delegate: Record<string, unknown>, observed: ObservedReque
 async function delegateThroughHome(f: Awaited<ReturnType<typeof fixture>>, delegate: Record<string, unknown>) {
   const observed: ObservedRequest[] = [];
   const refusals: string[] = [];
-  f.faux.setResponses(Array.from({ length: 4 }, () => scriptedHome(delegate, observed, refusals)));
+  const homeContexts: string[] = [];
+  f.faux.setResponses(Array.from({ length: 4 }, () => {
+    const respond = scriptedHome(delegate, observed, refusals);
+    return (context, options, state, model) => {
+      if (!isWorkerTurn(context)) homeContexts.push(JSON.stringify(context));
+      return respond(context, options, state, model);
+    };
+  }));
   await f.registry.homeOwner().configureMemory({ model: { provider: f.model.provider, id: f.model.id } });
   const home = await f.registry.acquire(f.home.sessionId);
   await home.prompt("Delegate the finite work");
   await waitFor(() => home.snapshot().configurationBlocker === null, "Home delegation turn");
-  return { observed, refusals };
+  return { observed, refusals, homeContexts };
 }
 
 const taskIsTerminal = (f: Awaited<ReturnType<typeof fixture>>, taskId: string) =>
@@ -76,13 +83,35 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
       .toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
   });
 
-  it("keeps the Gateway default model when the delegation names none", async () => {
+  it("defaults a worker to Home's live model and thinking, and tells Home that identity", async () => {
     const f = await fixture();
-    const { observed } = await delegateThroughHome(f, { taskId: "default-model", intent: "Finite work", target: f.cwd });
+    const home = await f.registry.acquire(f.home.sessionId);
+    await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
+    await home.setThinking("high");
+    const { observed, homeContexts } = await delegateThroughHome(f, { taskId: "default-model", intent: "Finite work", target: f.cwd });
     await taskIsTerminal(f, "default-model");
-    expect(observed).toEqual([{ model: f.model.id, reasoning: undefined }]);
+    expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "high" }]);
     expect((await f.registry.homeOwner().taskStatus("default-model")).workerModel)
-      .toEqual({ provider: f.model.provider, id: f.model.id });
+      .toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
+    expect(homeContexts[0]).toContain(`Current Home chat model: ${f.model.provider}/${TASK_REASONING_MODEL_ID}`);
+    expect(homeContexts[0]).toContain("Current Home thinking level: high");
+  });
+
+  it("accepts thinking alone for Home's current model", async () => {
+    const f = await fixture();
+    const home = await f.registry.acquire(f.home.sessionId);
+    await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
+    await home.setThinking("high");
+    const { observed, refusals } = await delegateThroughHome(f, { taskId: "thinking-only", intent: "Finite work", target: f.cwd, thinking: "low" });
+    expect(refusals).toEqual([]);
+    await taskIsTerminal(f, "thinking-only");
+    expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "low" }]);
+  });
+
+  it("distinguishes an unknown task from a changed identity", async () => {
+    const f = await fixture();
+    await expect(f.registry.homeOwner().taskTool(f.home.sessionId, { action: "status", taskId: "unknown-task" }))
+      .rejects.toMatchObject({ code: "not_found", message: "No task with this id" });
   });
 
   it("refuses each invalid choice before any task record or worker session exists", async () => {
@@ -98,8 +127,8 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
         reason: "unsupported-thinking", message: "does not support thinking level \"high\"" },
       { name: "xhigh on a reasoning model without a mapping", choice: { model: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID }, thinking: "xhigh" },
         reason: "unsupported-thinking", message: "does not support thinking level \"xhigh\"" },
-      { name: "thinking without a model", choice: { thinking: "high" },
-        reason: "thinking-requires-model", message: "thinking needs a model" },
+      { name: "thinking unsupported by Home's default model", choice: { thinking: "high" },
+        reason: "unsupported-thinking", message: "does not support thinking level" },
     ];
     for (const [index, { name, choice, reason, message }] of cases.entries()) {
       const taskId = `refused-${index}`;
