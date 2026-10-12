@@ -72,6 +72,7 @@ struct SettingsView: View {
                             .foregroundStyle(Color.tronEmerald)
                             .accessibilityLabel("Done")
                     }
+                    .accessibilityIdentifier("settings-done")
                 }
             }
         }

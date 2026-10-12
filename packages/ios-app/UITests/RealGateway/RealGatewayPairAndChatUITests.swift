@@ -374,8 +374,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let macEditor = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-edit-layer")
         XCTAssertNotNil(macEditor, "setup.installTelemetry is Mac-only and must offer Edit at Mac here")
         macEditor?.tap()
-        // The layer editor is the shared Settings renderer sheet for that layer.
-        let layerSheetDone = app.buttons["settings-renderer-done"]
+        // The Mac layer's editor is Settings itself.
+        let layerSheetDone = app.buttons["settings-done"]
         XCTAssertTrue(layerSheetDone.waitForExistence(timeout: 15), "Edit at Mac must present the Mac layer's Settings sheet: \(app.debugDescription)")
         layerSheetDone.tap()
         XCTAssertTrue(waitForNonExistence(layerSheetDone, timeout: 15), "the layer editor must dismiss")
@@ -461,7 +461,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             settingRowToken("permissions.projectTrust"), "-edit-layer"))
         XCTAssertNotNil(trustEditor, "the project trust row must offer Edit at Mac on the Project card")
         trustEditor?.tap()
-        let trustSheetDone = app.buttons["settings-renderer-done"]
+        let trustSheetDone = app.buttons["settings-done"]
         XCTAssertTrue(trustSheetDone.waitForExistence(timeout: 15), "Edit at Mac on the Project card must open Settings: \(app.debugDescription)")
         trustSheetDone.tap()
         XCTAssertTrue(waitForNonExistence(trustSheetDone, timeout: 15), "the layer editor must dismiss")
