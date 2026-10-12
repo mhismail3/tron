@@ -31,5 +31,5 @@
     "node": "22.22.0",
     "npm": "10.9.4"
   },
-  "removeWhen": "Delete this file and third_party/pi-coding-agent/ when a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), then update the family with npm run update:pi-sdk."
+  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
 }

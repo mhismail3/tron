@@ -94,7 +94,9 @@ export class PackageService {
     private readonly managedSubagents?: ManagedSubagents,
   ) {}
 
-  private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<{ manager: DefaultPackageManager; settings: SettingsManager }> {
+  private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<{
+    manager: DefaultPackageManager; settings: SettingsManager; project: { cwd: string; projectDir: string };
+  }> {
     const trust = requireProjectTrust
       ? await this.trust.requireResolved(cwdInput)
       : await this.trust.inspect(cwdInput).then((inspection) => ({ cwd: inspection.cwd, projectDir: inspection.projectDir, trusted: inspection.effectiveDecision === true }));
@@ -105,7 +107,11 @@ export class PackageService {
     if (settings.drainErrors().length > 0) {
       throw new GatewayError("conflict", "Canonical package settings could not be loaded");
     }
-    return { manager: new DefaultPackageManager({ cwd: trust.cwd, projectDir: trust.projectDir, agentDir: this.agentDir, settingsManager: settings }), settings };
+    return {
+      manager: new DefaultPackageManager({ cwd: trust.cwd, projectDir: trust.projectDir, agentDir: this.agentDir, settingsManager: settings }),
+      settings,
+      project: { cwd: trust.cwd, projectDir: trust.projectDir },
+    };
   }
 
   private async flushSettings(settings: SettingsManager): Promise<void> {
@@ -156,10 +162,10 @@ export class PackageService {
 
   async list(cwd: string): Promise<unknown> {
     return this.trackAdministrative(() => this.mutex.run(async () => {
-      const { manager, settings } = await this.manager(cwd, false);
+      const { manager, settings, project } = await this.manager(cwd, false);
       const packages = manager.listConfiguredPackages();
       const resolver = this.managedSubagents
-        ? new DefaultPackageManager({ cwd, agentDir: this.agentDir, settingsManager: managedProviderSettingsView(settings) })
+        ? new DefaultPackageManager({ cwd: project.cwd, projectDir: project.projectDir, agentDir: this.agentDir, settingsManager: managedProviderSettingsView(settings) })
         : manager;
       const resources = await resolver.resolve(async () => "skip");
       validatePackageInventory(packages, resources);

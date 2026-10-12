@@ -3671,7 +3671,8 @@ export class RuntimeRegistry {
   }
 
   async commitProjectReload(projectDirInput: string): Promise<void> {
-    const projectDir = await this.options.trust.canonicalDirectory(projectDirInput);
+    // The key reloadProject added must leave even if the root vanished since.
+    const projectDir = await this.options.trust.canonicalDirectory(projectDirInput).catch(() => projectDirInput);
     await this.mutex.run(() => {
       const slots = [...this.slots.values()].filter((slot) => slot.projectDir === projectDir);
       slots.forEach((slot) => slot.commitReload());

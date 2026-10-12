@@ -168,6 +168,12 @@ export interface HomeOwnerOptions {
   knowledge: () => KnowledgeService | undefined;
 }
 
+/** Tron Home's neutral workspace. It is never part of a Project, so project
+ * trust treats it as its own root (`TrustServiceOptions.standaloneDirectories`). */
+export function homeWorkspaceDirectory(tronHome: string): string {
+  return join(tronHome, "gateway", "home", "workspace");
+}
+
 /**
  * The one owner of Tron Home's designation for this Gateway installation: the
  * durable record under `<tronHome>/gateway/home/home.json`, the neutral working
@@ -216,7 +222,7 @@ export class HomeOwner {
   constructor(private readonly options: HomeOwnerOptions) {
     this.directory = join(options.tronHome, "gateway", "home");
     this.recordPath = join(this.directory, "home.json");
-    this.workspacePath = join(this.directory, "workspace");
+    this.workspacePath = homeWorkspaceDirectory(options.tronHome);
     const store = new HomeTaskStore(options.tronHome, options.workspace, options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {});
     const authorization = new HomeTaskAuthorization({ store: store.authorization,
       ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),

@@ -110,9 +110,12 @@ export default function (pi) {
     await writeJson(join(linked, ".pi", "settings.json"), { retry: { maxRetries: 5 } });
     await writeJson(join(linked, ".pi", "mcp.json"), { mcpServers: {} });
     const linkedNested = join(linked, "packages", "app");
+    // A Tron Home workspace that a repository happens to enclose stays its own root.
+    const homeWorkspace = join(repo, "tron-home", "workspace");
+    await mkdir(homeWorkspace, { recursive: true });
 
     process.env.PI_CODING_AGENT_DIR = agentDir;
-    const trust = new TrustService(agentDir);
+    const trust = new TrustService(agentDir, { standaloneDirectories: [homeWorkspace] });
     const faux = fauxProvider({ provider: "tron-project-root", tokensPerSecond: 10_000 });
     const modelRuntimeFactory = async () => {
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
@@ -135,6 +138,12 @@ export default function (pi) {
     const decided = await trust.set(nested, true);
     expect(decided).toMatchObject({ cwd: nested, projectDir: repo, savedDecision: true });
     expect((await trust.inspect(repo)).savedDecision).toBe(true);
+
+    // Inside `.git` there is no work tree, so the cwd is its own Project; the
+    // standalone Home workspace's explicit decision never reaches the root.
+    expect((await trust.inspect(join(repo, ".git"))).projectDir).toBe(join(repo, ".git"));
+    expect(await trust.set(homeWorkspace, false)).toMatchObject({ cwd: homeWorkspace, projectDir: homeWorkspace, savedDecision: false });
+    expect((await trust.inspect(nested)).savedDecision).toBe(true);
 
     const slot = await registry.create(nested);
     expect(slot.cwd).toBe(nested);
@@ -159,6 +168,7 @@ export default function (pi) {
     expect(toolText(slot, "root-where")).toBe(repo);
     expect(toolText(slot, "tool-cwd")).toBe(nested);
     expect(existsSync(join(root, "nested.pid"))).toBe(false);
+    const firstRootServer = Number(await readFile(join(root, "root.pid"), "utf8"));
     evidence.nested = { cwd: slot.cwd, projectDir: slot.projectDir, maxRetries: 7, mcpTools: mcpTools(slot), mcpServerCwd: repo, toolCwd: nested, nestedAgentsMd: true };
 
     // An outside edit of the root follows on reload; an edit of the nested .pi does not.
@@ -168,7 +178,10 @@ export default function (pi) {
     await slot.reload();
     expect(maxRetries(slot)).toBe(8);
     await waitFor(() => mcpTools(slot).join() === "mcp__root2__where", "the edited root MCP server");
-    evidence.outsideEdit = { maxRetries: 8, mcpTools: mcpTools(slot), nestedEditIgnored: true };
+    await waitFor(() => !alive(firstRootServer), "the replaced root MCP server to stop");
+    expect(existsSync(join(root, "nested.pid"))).toBe(false);
+    evidence.outsideEdit = { maxRetries: 8, mcpTools: mcpTools(slot), nestedEditIgnored: true, replacedServerStopped: true };
+    evidence.boundaries = { gitDirectoryIsOwnProject: true, homeWorkspaceStandalone: true, rootDecisionKept: true };
 
     // A linked worktree is its own Project: its own decision and its own values.
     const linkedUndecided = await registry.create(linkedNested).then(() => undefined, (error: unknown) => error);

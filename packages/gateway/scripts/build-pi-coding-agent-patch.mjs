@@ -3,9 +3,13 @@
  * Rebuild Tron's patched pi-coding-agent tarball from its declared inputs and
  * compare it with the committed artifact. pi-coding-agent-patch.json owns the
  * inputs: the upstream release tag, the checked-in patch, the published pi-ai
- * model data the release bundled, and the pinned Node/npm toolchain. The
- * default run only verifies; `--write` replaces the artifact and its integrity
- * after a deliberate patch change. It never installs into the Gateway tree.
+ * model data the release bundled, and the pinned Node/npm toolchain.
+ *
+ * The unpatched tag is built and packed first and must reproduce the published
+ * registry tarball byte for byte, which proves the toolchain and inputs; only
+ * then is the patch applied and pi-coding-agent rebuilt. The default run only
+ * verifies; `--write` replaces the artifact and records the artifact and patch
+ * digests after a deliberate patch change. It never installs into the Gateway.
  *
  * usage: node scripts/build-pi-coding-agent-patch.mjs [--upstream GIT-URL-OR-PATH] [--write] [--keep]
  */
@@ -31,7 +35,9 @@ function argument(name) {
   return index < 0 ? undefined : process.argv[index + 1];
 }
 
-const { value: pin, issues } = readPiCodingAgentPatch(gatewayDir, { requireSources: true });
+const write = process.argv.includes("--write");
+// A deliberate patch change is recorded by --write, so its old digest is not checked then.
+const { value: pin, issues } = readPiCodingAgentPatch(gatewayDir, { requireSources: !write });
 if (!pin) throw new Error(`${PATCH_PIN_FILE} is not valid:\n- ${issues.join("\n- ")}`);
 const node = process.versions.node;
 const npm = run("npm", ["--version"], { capture: true });
@@ -50,7 +56,6 @@ try {
   const commit = run("git", ["-C", source, "rev-parse", "FETCH_HEAD^{commit}"], { capture: true });
   if (commit !== pin.upstream.tagCommit) throw new Error(`${pin.upstream.tag} is ${commit}, expected ${pin.upstream.tagCommit}`);
   run("git", ["-C", source, "checkout", "-q", "--detach", commit]);
-  run("git", ["-C", source, "apply", "--whitespace=nowarn", join(gatewayDir, pin.patch.path)]);
 
   // pi-ai generates its model catalog from the network at release time. The
   // published pi-ai tarball is the exact catalog that the release bundled.
@@ -64,17 +69,35 @@ try {
 
   run("npm", ["ci", REGISTRY], { cwd: source, env });
   run("npm", ["run", "build:offline"], { cwd: source, env });
-  const output = join(work, "out");
-  mkdirSync(output);
-  run("npm", ["pack", "--pack-destination", output], { cwd: join(source, "packages/coding-agent"), env, capture: true });
-  const built = join(output, readdirSync(output).find((name) => name.endsWith(".tgz")));
+  const codingAgent = join(source, "packages/coding-agent");
+  const pack = (name) => {
+    const output = join(work, name);
+    mkdirSync(output);
+    run("npm", ["pack", "--pack-destination", output], { cwd: codingAgent, env, capture: true });
+    return join(output, readdirSync(output).find((file) => file.endsWith(".tgz")));
+  };
+  const base = sha512Integrity(pack("base"));
+  if (base !== pin.upstream.registryIntegrity) {
+    throw new Error(`unpatched ${pin.upstream.tag} packs ${base}, not the published ${pin.upstream.registryIntegrity}; the toolchain or inputs differ from the release`);
+  }
+
+  const patchPath = join(gatewayDir, pin.patch.path);
+  const touched = run("git", ["-C", source, "apply", "--numstat", patchPath], { capture: true })
+    .split("\n").filter(Boolean).map((line) => line.split("\t")[2]);
+  const outside = touched.filter((path) => !path.startsWith("packages/coding-agent/") && !path.startsWith("packages/evals/"));
+  if (outside.length > 0) throw new Error(`the patch changes packages this script does not rebuild: ${outside.join(", ")}`);
+  run("git", ["-C", source, "apply", "--whitespace=nowarn", patchPath]);
+  run("npm", ["run", "clean"], { cwd: codingAgent, env });
+  run("npm", ["run", "build"], { cwd: codingAgent, env });
+  const built = pack("patched");
   const integrity = sha512Integrity(built);
   const committed = join(gatewayDir, pin.artifact.path);
-  const report = { upstream, tagCommit: commit, patchSha256: sha256File(join(gatewayDir, pin.patch.path)), integrity, expected: pin.artifact.integrity };
-  if (process.argv.includes("--write")) {
+  const report = { upstream, tagCommit: commit, baseIntegrity: base, patchSha256: sha256File(patchPath), integrity, expected: pin.artifact.integrity };
+  if (write) {
     copyFileSync(built, committed);
     const document = JSON.parse(readFileSync(join(gatewayDir, PATCH_PIN_FILE), "utf8"));
     document.artifact.integrity = integrity;
+    document.patch.sha256 = report.patchSha256;
     writeFileSync(join(gatewayDir, PATCH_PIN_FILE), `${JSON.stringify(document, null, 2)}\n`);
     console.log(JSON.stringify({ ...report, wrote: pin.artifact.path }, null, 2));
     console.log("Update package-lock.json with npm install, then run npm run check:pi-sdk.");

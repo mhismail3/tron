@@ -25,7 +25,7 @@ import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { logHomeDiagnostic } from "./home/home-diagnostic.js";
-import { homeChapterObservationExcluded } from "./home/home-owner.js";
+import { homeChapterObservationExcluded, homeWorkspaceDirectory } from "./home/home-owner.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
@@ -174,7 +174,7 @@ const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime
 openAIModelEligibility.attachRuntime(modelRuntime);
 startupCheckpoint("model-runtime");
 const globalSettingsManager = SettingsManager.create(homedir(), config.agentDir, { projectTrusted: false });
-const trust = new TrustService(config.agentDir);
+const trust = new TrustService(config.agentDir, { standaloneDirectories: [homeWorkspaceDirectory(config.tronHome)] });
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
