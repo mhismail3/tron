@@ -13,6 +13,9 @@ import type { ChangeEntry } from "./settings-record.js";
 import { SETTINGS_OUTCOME_MESSAGE } from "./tron-settings-extension.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
+import { UploadStore } from "../machine/upload-store.js";
+import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
+import type { HomeDiagnosticRecord } from "../home/home-diagnostic.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { disposeFixtures, fixture as homeTaskFixture, reportCall } from "../../test-support/home-task-fixture.js";
 import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai";
@@ -68,7 +71,7 @@ function phone(): ClientContext {
 let command = 0;
 const commandId = () => `settings-gate-${String(++command).padStart(4, "0")}`;
 
-async function fixture(options: { reasoning?: boolean } = {}) {
+async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: number } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-settings-gate-")));
   roots.push(root);
   const tronHome = join(root, "tron");
@@ -92,9 +95,12 @@ async function fixture(options: { reasoning?: boolean } = {}) {
   const trust = new TrustService(agentDir);
   await trust.set(project, true);
   const runtimeEvents: Array<{ sessionId: string; topic: string; payload: unknown }> = [];
+  const homeDiagnostics: HomeDiagnosticRecord[] = [];
   const registry = new RuntimeRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
+    ...(options.maximumLiveRuntimes === undefined ? {} : { maximumLiveRuntimes: options.maximumLiveRuntimes }),
     broadcast: (sessionId, topic, payload) => { runtimeEvents.push({ sessionId, topic, payload }); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    homeDiagnostic: event => homeDiagnostics.push(event),
     homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("SETTINGS-GATE-LINE") }),
     homeWebTransport: {
       fetcher: async () => new Response("<html><head><title>Page</title></head><body><article><p>A page body long enough to extract as readable text, repeated. A page body long enough to extract as readable text, repeated.</p></article></body></html>", { status: 200, headers: { "content-type": "text/html" } }),
@@ -114,7 +120,8 @@ async function fixture(options: { reasoning?: boolean } = {}) {
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   const service = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
-    modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome),
+    modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, home: registry.homeOwner(), receipts: new CommandReceiptStore(tronHome),
+    uploads: new UploadStore(tronHome, DEFAULT_MAX_UPLOAD_BYTES),
     // The push owner's admission boundary, recorded: delivery is not under test.
     notifications: { enqueue: async (input: { kind: string; title?: string; message: string; sessionId: string; category?: string }) => { pushes.push(input); return "queued"; } },
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
@@ -183,7 +190,7 @@ async function fixture(options: { reasoning?: boolean } = {}) {
   };
   return {
     canonicalOutcomes, root, agentDir, tronHome, project, other, trust, registry, service, pushes, broadcasts, run, settle, history, approvals, decide,
-    macDocument, designateHome, chat, faux, modelRuntimeFactory, modelRuntime, runtimeEvents, advance: (ms: number) => { clock += ms; },
+    macDocument, designateHome, chat, faux, modelRuntimeFactory, modelRuntime, runtimeEvents, homeDiagnostics, advance: (ms: number) => { clock += ms; },
   };
 }
 
@@ -258,6 +265,53 @@ describe("settings risk gate", () => {
     expect(resumed.settingsChatLayer().tools).toEqual(["read"]);
     transcript.push({ case: "fixed start source and current-default reset", steps: [{ initial, reset, resumed: resumed.settingsChatLayer() }] });
   });
+  it.each(["warm", "cold"] as const)("carries Chat choices from a %s predecessor into Home's next chapter without copying messages", async temperature => {
+    const f = await fixture({ reasoning: true, ...(temperature === "cold" ? { maximumLiveRuntimes: 1 } : {}) });
+    const first = await f.designateHome();
+    for (const [key, value] of [["model.thinking[role=chat]", "high"], ["model.contextWindow", 64_000], ["run.retry.maxRetries", 7], ["context.images.block", true]] as const) {
+      const snapshot = first.snapshot();
+      await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: first.id },
+        fence: { runtimeGeneration: snapshot.runtimeGeneration, revision: snapshot.revision, model: snapshot.model },
+        changes: [{ key, layer: "chat", op: "set", value }] });
+    }
+    const choices = first.settingsChatLayer();
+    const owner = f.registry.homeOwner() as unknown as { options: { sessions: { chapterMetrics: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } } };
+    const metrics = owner.options.sessions.chapterMetrics;
+    owner.options.sessions.chapterMetrics = async () => ({ bytes: 0, entries: 50_001, quiescent: true });
+    f.faux.setResponses([fauxAssistantMessage("chapter one complete")]);
+    await first.prompt("Only the first chapter contains this message.");
+    const successor = await waitFor(async () => {
+      const status = await f.registry.homeOwner().status();
+      return status.sessionId && status.sessionId !== first.id ? status.sessionId : undefined;
+    }, "Home chapter reservation");
+    owner.options.sessions.chapterMetrics = metrics;
+    const oldIds = new Set(first.canonicalSessionEntries().map(entry => entry.id));
+    if (temperature === "cold") {
+      const holder = await f.registry.create(f.other);
+      expect(first.isDisposed).toBe(true);
+      f.faux.setResponses([fauxAssistantMessage("capacity holder finished")]);
+      await holder.prompt("Exercise cold chapter restoration through real capacity eviction.");
+      await waitFor(() => !holder.isEvictionProtected, "capacity holder quiescence");
+    }
+    const requests: TranscriptContext[] = [];
+    f.faux.setResponses([async context => { requests.push(structuredClone(context)); return fauxAssistantMessage("chapter two complete"); }]);
+    await f.service.invoke(phone(), "home.prompt", { commandId: commandId(), text: "The second chapter starts here." });
+    const next = await f.registry.acquire(successor);
+    await waitFor(() => requests.length > 0 && !next.isBusy, "successor response");
+    expect(next.settingsChatLayer()).toEqual(choices);
+    // Home intentionally summarizes earlier chapters in its request view. It
+    // must not copy their canonical messages or entry identities into this file.
+    const nextEntries = next.canonicalSessionEntries();
+    expect(JSON.stringify(nextEntries.filter(entry => entry.type === "message"))).not.toContain("Only the first chapter contains this message.");
+    expect(nextEntries.some(entry => oldIds.has(entry.id))).toBe(false);
+    expect(JSON.stringify(requests[0]?.messages)).toContain("Tron Home memory:");
+    expect(f.homeDiagnostics).toContainEqual({ outcome: "chapter-recovery", reason: temperature === "cold" ? "settings-from-cold" : "settings-from-live" });
+    expect(next.snapshot().thinkingLevel).toBe("high");
+    expect(next.snapshot().contextWindowPolicy?.effective).toBe(64_000);
+    expect(next.settingsChatLayer()).toEqual(choices);
+    transcript.push({ case: `Home chapter settings carry-forward (${temperature})`, steps: [{ before: choices, after: next.settingsChatLayer(), messagesCarried: false }] });
+  });
+
   it("image resizing is fixed at start until the audited current-default reset", async () => {
     const f = await fixture();
     const slot = await f.registry.create(f.project);

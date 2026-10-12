@@ -694,6 +694,18 @@ export class HomeOwner {
 
   /** Only the current active chapter is writable; sealed and in-progress
    * successor entries fail closed until their owning lifecycle transition lands. */
+  /** Rollover inherits only from the adjacent sealed chapter in this ledger;
+   * a caller cannot choose an unrelated session as a settings source. */
+  settingsPredecessor(sessionId: string): string | undefined {
+    this.assertAvailable();
+    const chapter = this.record?.chapters.find(candidate => candidate.sessionId === sessionId);
+    if (!chapter || chapter.state !== "materializing") throw new GatewayError("conflict", "Home chapter is not materializing");
+    if (chapter.ordinal === 1) return undefined;
+    const previous = this.record?.chapters.find(candidate => candidate.ordinal === chapter.ordinal - 1);
+    if (!previous || previous.state !== "sealed") throw new GatewayError("conflict", "Home settings predecessor is unavailable");
+    return previous.sessionId;
+  }
+
   chapterStateFor(sessionId: string): HomeChapterState {
     const chapter = this.record?.chapters.find(candidate => candidate.sessionId === sessionId);
     if (chapter?.state === "materializing") return {

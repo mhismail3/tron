@@ -1,9 +1,40 @@
-import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
+import { getCurrentTools } from "@earendil-works/pi-ai";
+import type { SessionEntry, SessionManager } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type { FixedSetting } from "../admin/settings-resolver.js";
 import { hasRuntimeRequestApplier, schemaKey } from "../admin/settings-schema.js";
 
 export const CHAT_SETTINGS_ENTRY = "tron.settings.v1";
+
+/** Rollover keeps policy, not conversation. Read only recognized canonical
+ * state; audit receipts and old message/entry identities belong to the predecessor. */
+export function appendChatSettingsSnapshot(entries: readonly SessionEntry[], manager: SessionManager): void {
+  const model = entries.findLast(entry => entry.type === "model_change");
+  if (model?.type === "model_change") manager.appendModelChange(model.provider, model.modelId);
+  const thinking = entries.findLast(entry => entry.type === "thinking_level_change");
+  if (thinking?.type === "thinking_level_change") manager.appendThinkingLevelChange(thinking.thinkingLevel);
+  const fixed = readChatFixedSettings(entries);
+  const choice = readChatToolChoice(entries);
+  if (choice) fixed["tools.active"] = choice.fixed ?? { value: choice.tools, from: "delegate", at: new Date().toISOString(), ref: randomUUID() };
+  manager.appendCustomEntry(CHAT_SETTINGS_ENTRY, {
+    settings: readChatSettings(entries), fixed, requestPins: readChatRequestPins(entries),
+  });
+}
+
+/** A choice after the last system frame wins; otherwise that frame is the
+ * actual declared loadout, including changes made through the SDK itself. */
+export function readChatToolChoice(entries: readonly SessionEntry[]): { tools: string[]; fixed?: FixedSetting } | undefined {
+  const fixed = readChatFixedSettings(entries)["tools.active"];
+  const fixedIndex = fixed ? entries.findIndex(entry => entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY
+    && (entry.data as { fixed?: Record<string, FixedSetting> }).fixed?.["tools.active"]?.ref === fixed.ref) : -1;
+  const declaredIndex = entries.findLastIndex(entry => entry.type === "message" && entry.message.role === "system");
+  if (fixed && fixedIndex > declaredIndex && Array.isArray(fixed.value)) return { tools: fixed.value as string[], fixed };
+  const declared = entries[declaredIndex];
+  if (declared?.type !== "message" || declared.message.role !== "system") return undefined;
+  const tools = getCurrentTools(entries.flatMap(entry => entry.type === "message" && entry.message.role === "system" ? [entry.message] : [])).map(tool => tool.name);
+  return { tools, ...(fixed && JSON.stringify(fixed.value) === JSON.stringify(tools) ? { fixed } : {}) };
+}
 
 /** Branch-local truth. Fork/resume follows Pi's canonical branch; the audit
  * ledger is never used to restore a runtime override. */

@@ -19,14 +19,14 @@ import {
   isInstalledDelegatedTool,
   trustedDelegatedController,
 } from "./delegated-provider.js";
-import type { AgentMessage, AgentTurnDecision, StreamFn } from "@earendil-works/pi-agent-core";
-import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings, readChatRequestPins, readChatFixedSettings } from "./chat-settings.js";
+import type { AgentMessage, AgentTurnDecision, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings, readChatRequestPins, readChatFixedSettings, readChatToolChoice } from "./chat-settings.js";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { getCurrentSystemMessage, type ImageContent, type Model } from "@earendil-works/pi-ai";
+import { type ImageContent, type Model } from "@earendil-works/pi-ai";
 import {
   AgentSessionRuntime,
   createAgentSessionFromServices,
@@ -2212,12 +2212,16 @@ export class RuntimeSlot {
         }
       }
       const startsNewChat = sessionManager.getEntryCount() === 0;
+      // Pi treats a metadata-only chapter as new because it has no messages.
+      // Canonical thinking is nevertheless an existing Chat choice, not a default.
+      const recordedThinking = sessionManager.getBranch().some(entry => entry.type === "thinking_level_change");
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
         ...(initialModel ? { model: initialModel } : {}),
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
         ...(homeModel ? { model: homeModel } : {}),
+        ...(recordedThinking ? { thinkingLevel: sessionManager.buildSessionContext().thinkingLevel as ThinkingLevel } : {}),
         // The allowlist is Home's executable ceiling. MCP tools cannot appear
         // under it because no MCP extension is loaded, and Tron's direct bash
         // tool is not registered at all for Home.
@@ -2247,16 +2251,8 @@ export class RuntimeSlot {
       // restore, so a resumed, forked or reloaded chat would silently fall back
       // to the defaults and the next prompt would persist that (#327). Apply the
       // declared loadout here; a session without one keeps the defaults.
-      const declared = getCurrentSystemMessage(sessionManager.buildSessionContext().messages);
-      const branch = sessionManager.getBranch();
-      const fixedTools = readChatFixedSettings(branch)["tools.active"];
-      const fixedToolsIndex = fixedTools ? branch.findIndex(entry => entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY
-        && (entry.data as { fixed?: Record<string, FixedSetting> }).fixed?.["tools.active"]?.ref === fixedTools.ref) : -1;
-      const declaredIndex = branch.findLastIndex(entry => entry.type === "message" && entry.message.role === "system");
-      // A choice made after the last rendered system frame is already canonical,
-      // even if no prompt has yet caused the SDK to emit the next frame.
-      if (fixedTools && fixedToolsIndex > declaredIndex && Array.isArray(fixedTools.value)) created.session.setActiveToolsByName(fixedTools.value as string[]);
-      else if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
+      const toolChoice = readChatToolChoice(sessionManager.getBranch());
+      if (toolChoice) created.session.setActiveToolsByName(toolChoice.tools);
       this.runtimeProfiles.set(created.session, home ? "home" : "ordinary");
       this.homeRequestPolicy = home
         ? this.dependencies.homeRequestPolicy(sessionManager.getSessionId())

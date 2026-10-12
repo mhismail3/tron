@@ -800,9 +800,12 @@ context-window, tools and declared fixed Chat settings with their actual value,
 source, time and stable reference. Fork/resume preserve that provenance; a fixed
 Chat unset snapshots the current lower-layer default through the normal audited
 change path. Inherited snapshots are not explicit overrides in summaries. The
-generic native row handles the served reset action, but session-surface adoption,
-Home chapter carry-forward and approved Mac/Project widening propagation remain
-outstanding.
+generic native row handles the served reset action, but session-surface adoption
+and approved Mac/Project widening propagation remain outstanding. Home rollover
+inherits Chat policy and provenance only from the adjacent sealed chapter, using
+its live canonical branch or an identity-fenced cold read. Existing successor
+recovery never recopies it, and no predecessor messages or audit receipts move.
+The `home.chapter-recovery` settings-source reason diagnoses this boundary.
 A Chat-layer change needs `fence: {
 runtimeGeneration, model?, revision? }`, the runtime the client read; the lane's
 idle, chapter and fence guards are unchanged, and the receipt's work entry is the

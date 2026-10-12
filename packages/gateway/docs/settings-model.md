@@ -418,10 +418,20 @@ to the current default. Lowering the key's risk floor alone does not change its
 timing. Ordinary and Home provider-content journeys prove these boundaries.
 The resolver shows the effective pinned value separately from the stored override.
 
-This is not complete timing support: Home chapter carry-forward and propagation
-of an approved Mac/Project widening into existing chats still need their runtime
-owners. End-to-end Chat reset adoption in the native session surfaces is also
-outstanding. The SDK's merge-only
+Home rollover carries the adjacent sealed chapter's Chat policy into the reserved
+successor: model/thinking entries, bounded effective context preferences, tool
+loadout, explicit settings and snapshot provenance. The ledger selects the source;
+a live sealed slot supplies its canonical branch, otherwise an identity-fenced
+cold read does. Invalid/missing cold evidence fails closed. Adoption of an already
+materialized successor never recopies from the predecessor. Neither old messages,
+entry identities nor audit receipts are copied. Home's normal summarized memory
+view remains independent. Warm and capacity-evicted predecessor journeys exercise
+the actual `home.prompt` path and the `settings-from-live`/`settings-from-cold`
+recovery diagnostic.
+
+This is not complete timing support: propagation of an approved Mac/Project
+widening into existing chats still needs its runtime owner. End-to-end Chat reset
+adoption in the native session surfaces is also outstanding. The SDK's merge-only
 `applyOverrides` is not the owner of optional-field removal; the final provider
 boundary above is, after SDK default composition.
 

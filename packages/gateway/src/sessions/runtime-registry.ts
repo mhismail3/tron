@@ -11,6 +11,7 @@ import {
   parseSessionEntries,
   SessionManager,
   type FileEntry,
+  type SessionEntry,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
@@ -94,7 +95,9 @@ import {
   type CatalogMetadataIndexFailure,
   type CatalogMetadataIndexSummary,
 } from "./catalog-metadata-index.js";
-import { branchFromParsedSession } from "./session-branch.js";
+import { branchFromParsedSession, branchFromSessionEntries } from "./session-branch.js";
+import { appendChatSettingsSnapshot } from "./chat-settings.js";
+import { appendContextWindowSnapshot } from "../providers/context-window-policy.js";
 import {
   SessionCatalog,
   SUBAGENT_RUN_DIRECTORY,
@@ -1019,6 +1022,19 @@ export class RuntimeRegistry {
       throw new GatewayError("conflict", "Home recovery is blocked because its recorded chapter path is absent");
     }
 
+    // Resolve the sealed predecessor before reserving a new durable path. A
+    // failed read must not strand an otherwise absent materialization attempt.
+    const previousId = scan.action === "absent" ? this.home.settingsPredecessor(sessionId) : undefined;
+    // A never-prompted live predecessor can still have SDK-staged choices and
+    // no physical file. Its sealed slot is the canonical owner; cold reads must
+    // instead prove the exact durable file and may not treat absence as defaults.
+    const livePrevious = previousId ? this.slots.get(previousId) : undefined;
+    const previousFromLive = livePrevious !== undefined && !livePrevious.isDisposed;
+    const previousEntries = previousId ? previousFromLive
+      ? livePrevious.canonicalSessionEntries() : await this.canonicalSessionEvidenceCut(previousId) : undefined;
+    if (previousId && !previousEntries) throw new GatewayError("conflict", "Home settings predecessor is missing");
+    const previousBranch = previousEntries ? branchFromSessionEntries(previousEntries.filter((entry): entry is SessionEntry => entry.type !== "session")) : undefined;
+    if (previousId && !previousBranch) throw new GatewayError("conflict", "Home settings predecessor is invalid");
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
     let slot: RuntimeSlot | undefined;
@@ -1048,6 +1064,12 @@ export class RuntimeRegistry {
         manager = SessionManager.create(cwd.cwd, sessionDirectory);
         const createdPath = manager.newSession({ id: sessionId });
         if (!createdPath) throw new GatewayError("internal", "Home chapter creation did not reserve a session path");
+        // These metadata-only appends stage in Pi. Validate and stage the
+        // inherited policy before committing the new path to the Home ledger.
+        if (previousBranch) {
+          appendChatSettingsSnapshot(previousBranch, manager);
+          appendContextWindowSnapshot(previousBranch, manager);
+        }
         await this.home.recordReservedChapterPath(sessionId, attemptId, createdPath);
         expectedPath = createdPath;
       }
@@ -1066,6 +1088,7 @@ export class RuntimeRegistry {
       if (slot.id !== sessionId || slot.sessionFile !== manager.getSessionFile()) {
         throw new GatewayError("conflict", "Home chapter runtime identity differs from its reservation");
       }
+      if (previousBranch) this.options.homeDiagnostic?.({ outcome: "chapter-recovery", reason: previousFromLive ? "settings-from-live" : "settings-from-cold" });
       const transcriptBytes = await sessionFileBytes(slot.persistedSessionFile);
       await this.mutex.run(() => {
         if (this.slots.has(sessionId)) throw new GatewayError("conflict", "Reserved Home chapter runtime is already active");
@@ -4748,7 +4771,7 @@ export class RuntimeRegistry {
   private async taskWorkerEntries(sessionId: string): Promise<FileEntry[]> {
     const live = this.slots.get(sessionId);
     if (live) return live.canonicalSessionEntries();
-    if (await this.homeSessionFile(sessionId)) return await this.taskEvidenceFileCut(sessionId) ?? [];
+    if (await this.homeSessionFile(sessionId)) return await this.canonicalSessionEvidenceCut(sessionId) ?? [];
     return [];
   }
 
@@ -4756,7 +4779,7 @@ export class RuntimeRegistry {
    * resources or repairs the canonical file. Sync and identity checks precede
    * immutable terminal/outbox publication and operation acknowledgement. */
   async readTaskEvidence(sessionId: string): Promise<FileEntry[]> {
-    const entries = await this.taskEvidenceFileCut(sessionId);
+    const entries = await this.canonicalSessionEvidenceCut(sessionId);
     if (!entries) throw new GatewayError("conflict", "Task canonical session is missing");
     return entries;
   }
@@ -4771,19 +4794,19 @@ export class RuntimeRegistry {
       const slot = this.slots.get(sessionId);
       if (!slot) throw new GatewayError("conflict", "Task runtime is missing");
       return slot.inspectTaskSettlement(operationId, async operationSettled => {
-        const entries = await this.taskEvidenceFileCut(sessionId);
+        const entries = await this.canonicalSessionEvidenceCut(sessionId);
         return entries ? { state: "present" as const, entries, branch: slot.canonicalSessionEntries() }
           : { state: "absent" as const, operationSettled };
       });
     });
   }
 
-  private async taskEvidenceFileCut(sessionId: string): Promise<FileEntry[] | null> {
-    // Recovery publishes a permanent result. A loaded previous catalog cut or
-    // a not-yet-ready projection cannot decide whether its report exists.
+  private async canonicalSessionEvidenceCut(sessionId: string): Promise<SessionEntry[] | null> {
+    // Task settlement and Home carry-forward publish durable results. A stale
+    // catalog cut or a not-yet-ready projection cannot decide source presence.
     await this.sessionCatalog.whenReconciled();
     const path = await this.homeSessionFile(sessionId);
-    if (!path) throw new GatewayError("conflict", "Task canonical session is missing");
+    if (!path) throw new GatewayError("conflict", "Canonical session is missing");
     const before = await lstat(path).catch(error => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;
@@ -4798,10 +4821,10 @@ export class RuntimeRegistry {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
         throw error;
       });
-      if (after) throw new GatewayError("conflict", "Task canonical session changed during inspection");
+      if (after) throw new GatewayError("conflict", "Canonical session changed during inspection");
       return null;
     }
-    if (!before.isFile() || before.isSymbolicLink()) throw new GatewayError("conflict", "Task canonical session is unsafe");
+    if (!before.isFile() || before.isSymbolicLink()) throw new GatewayError("conflict", "Canonical session is unsafe");
     for (const durablePath of [path, dirname(path)]) {
       const handle = await open(durablePath, "r");
       try { await syncDurably(handle); } finally { await handle.close(); }
@@ -4809,8 +4832,8 @@ export class RuntimeRegistry {
     const entries = await readCanonicalSessionFile({ path, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes });
     const after = await lstat(path);
     if (after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
-      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new GatewayError("conflict", "Task canonical session changed during inspection");
-    return entries.map(entry => entry.raw as unknown as FileEntry);
+      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new GatewayError("conflict", "Canonical session changed during inspection");
+    return entries.map(entry => entry.raw as unknown as SessionEntry);
   }
 
   /** Whether Home's recorded session still exists: a live runtime, or a
