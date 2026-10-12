@@ -458,6 +458,28 @@ describe("settings risk gate", () => {
     transcript.push({ case: `${layer} image widening`, result: { widened, inherited: await images(inheriting), explicit: await images(explicit), unrelated: unrelated ? await images(unrelated) : null } });
   });
 
+  it("a Mac image widening cannot release a Project-owned pin before an outside Project widening", async () => {
+    const f = await fixture();
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "project", cwd: f.project },
+      changes: [{ key: "context.images.block", layer: "project", op: "set", value: true }] });
+    const slot = await f.chat();
+    expect(slot.settingsChatLayer().requestPins?.["context.images.block"]).toMatchObject({ value: true, from: "project" });
+    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" },
+      changes: [{ key: "context.images.block", layer: "mac", op: "set", value: false }] });
+    // No request intervenes: a wrongly released pin must not be silently
+    // recreated by a request while Project still blocks images.
+    await writeFile(join(f.project, ".pi/settings.json"), JSON.stringify({ images: { blockImages: false } }));
+    let count = -1;
+    f.faux.setResponses([async context => {
+      count = context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === "image").length;
+      return fauxAssistantMessage("observed Project image policy");
+    }]);
+    await slot.prompt("observe image policy", [{ type: "image", mimeType: "image/png", data: syntheticPng(1, 1).toString("base64") }]);
+    await waitFor(() => count >= 0 || undefined, "Project image request observed");
+    expect(count).toBe(0);
+    transcript.push({ case: "Mac widening preserves Project pin", steps: [{ images: count }] });
+  });
+
   it("open chats follow live retry defaults while a canonical Chat override stays local and can be unset", async () => {
     const f = await fixture();
     const mac = (maxRetries: number) => f.service.invoke(phone(), "settings.change", {

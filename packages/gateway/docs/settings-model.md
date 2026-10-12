@@ -380,8 +380,11 @@ while an unapproved widening remains pinned. After a maintainer tap or recorded
 approval changes a Mac or Project default to unblocked, the applied change releases
 the inherited image-block pins in already-open chats at that scope. The release
 is a branch-local canonical settings entry, so cold resume retains it; an explicit
-Chat-layer value is never removed. A Mac change reaches all open chats, while a
-Project change reaches only chats with that exact Project root.
+Chat-layer value is never removed. A Mac change reaches only chats whose effective
+image policy still inherits Mac or Built-in, never a Project-shadowed pin. Project
+changes reach only matching Project chats whose inherited policy is now unblocked.
+The higher-layer negative control is an outside Project widening immediately after
+a Mac tap, without an intervening request: that chat must keep blocking.
 Image auto-resize uses its fixed snapshot at the actual conversion boundary.
 Resources still apply through Reload. Compaction changes refresh open chats
 through `GatewayService.settingsChanged`.
@@ -438,7 +441,7 @@ the actual `home.prompt` path and the `settings-from-live`/`settings-from-cold`
 recovery diagnostic.
 
 This is not complete timing support: propagation of an approved Mac/Project
-widening into existing chats still needs its runtime owner. End-to-end Chat reset
+widening into existing chats uses the scoped canonical pin release above. End-to-end Chat reset
 adoption in the native session surfaces is also outstanding. The SDK's merge-only
 `applyOverrides` is not the owner of optional-field removal; the final provider
 boundary above is, after SDK default composition.

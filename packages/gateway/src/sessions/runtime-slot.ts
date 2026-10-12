@@ -1428,7 +1428,7 @@ export class RuntimeSlot {
   /** Drop a fixed widening pin only after an approved/tapped default change.
    * The canonical chat entry makes the release survive a cold resume; explicit
    * Chat values remain the source of truth and are never touched. */
-  async releaseInheritedImageBlock(): Promise<void> {
+  async releaseInheritedImageBlock(layer: "mac" | "project"): Promise<void> {
     await this.lane.run(async () => {
       if (this.isDisposed) return;
       const branch = this.sessionManager.getBranch();
@@ -1438,6 +1438,17 @@ export class RuntimeSlot {
       const explicit = readChatSettings(branch);
       const images = explicit.images;
       if (images && typeof images === "object" && Object.prototype.hasOwnProperty.call(images, "blockImages")) return;
+      const owners = this.dependencies.settings();
+      if (!owners) return;
+      const { requestPins: _pins, ...chat } = this.settingsChatLayer();
+      const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, {
+        cwd: this.cwd, home: this.isHomeChapter, chat, modelRuntime: this.runtime.session.modelRuntime,
+      }, ["context.images.block"]);
+      const row = resolved.keys[0];
+      // Approval of a lower layer is not approval to release a higher layer's
+      // fixed policy, even if that higher store is subsequently edited outside Tron.
+      if (row?.value !== false || row.layer === "chat" || row.layer === "profile"
+        || (layer === "mac" && row.layer === "project")) return;
       delete pins["context.images.block"];
       const receiptId = randomUUID();
       await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId,
