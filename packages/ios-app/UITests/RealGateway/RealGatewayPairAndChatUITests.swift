@@ -410,7 +410,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertEqual(switchValue(untrustedRow), untrustedValue, "a refused Project write must not change the value")
         // Trust it through the card's own Review trust, then reopen the card.
         let review = app.buttons["Review trust"]
-        for _ in 0..<40 where !review.isHittable { app.swipeDown() }
+        revealBelowNavigationBar(app, review)
         review.tap()
         let trustProject = app.buttons["Trust Project"]
         XCTAssertTrue(trustProject.waitForExistence(timeout: 30), "Review trust must offer Trust Project: \(app.debugDescription)")
@@ -657,6 +657,19 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     @MainActor
     private func settingRow(_ app: XCUIApplication, key: String) -> XCUIElement {
         app.descendants(matching: .any)[settingRowToken(key)]
+    }
+
+    /// Scrolls `element` down into view below the top-most sheet's navigation bar.
+    /// A header row scrolled under that bar still reports itself hittable, but a
+    /// tap there lands on the bar (seen in a gate run: "Review trust" at y 83-131
+    /// under a bar spanning 88-142), so hittability alone is not enough.
+    @MainActor
+    private func revealBelowNavigationBar(_ app: XCUIApplication, _ element: XCUIElement) {
+        for _ in 0..<40 {
+            let bar = app.navigationBars.allElementsBoundByIndex.last
+            if element.isHittable, element.frame.minY >= (bar?.frame.maxY ?? 0) { return }
+            app.swipeDown()
+        }
     }
 
     /// The switch row of `key` in the top-most presentation, revealed. A covered
