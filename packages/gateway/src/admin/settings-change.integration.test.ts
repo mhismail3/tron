@@ -643,7 +643,10 @@ describe("outside changes", () => {
  * covered automatically. The per-instance report is a retained artifact.
  */
 describe("every key at every allowed layer", () => {
-  it("changes, resolves, stores and undoes each declared key instance", async () => {
+  // One case per layer: each owns its budget and failure, and the per-instance
+  // report accumulates across them into one artifact.
+  const report: Array<Record<string, unknown>> = [];
+  it.each(["chat", "profile", "project", "mac"])("changes, resolves, stores and undoes each declared key instance at the %s layer", async (only) => {
     const f = await fixture();
     const first = f.faux.getModel("first")!, second = f.faux.getModel("second")!;
     // A Mac default model gives model-qualified keys an instance on every target.
@@ -701,9 +704,8 @@ describe("every key at every allowed layer", () => {
       const qualified = binding.store === "pi" && binding.qualified !== undefined && qualifiers.model !== undefined;
       return readBinding(stores, layer as "mac", binding, qualifiers, qualified, key.id);
     };
-    const report: Array<Record<string, unknown>> = [];
     for (const key of KEYS) {
-      for (const layer of Object.keys(key.layers)) {
+      for (const layer of Object.keys(key.layers).filter(layer => layer === only)) {
         const row = await resolve(layer, key.id);
         const instance = { key: key.id, layer, qualifiers: row?.qualifiers };
         if (!row) { report.push({ ...instance, result: "no instance on its target" }); continue; }
@@ -748,10 +750,10 @@ describe("every key at every allowed layer", () => {
         report.push({ ...instance, result: "round-trip", value: key.redacted ? "redacted" : value });
       }
     }
-    transcript.push({ case: "every key", detail: report });
+    transcript.push({ case: `every key: ${only}`, detail: report.filter(entry => entry.layer === only) });
     await mkdir(dirname(EVERY_KEY_ARTIFACT), { recursive: true });
     await writeFile(EVERY_KEY_ARTIFACT, `${JSON.stringify(report, null, 2)}\n`);
-    const gaps = report.filter(entry => entry.result !== "round-trip" && entry.result !== "refused: no writer" && !String(entry.result).startsWith("Home applier"));
+    const gaps = report.filter(entry => entry.layer === only && entry.result !== "round-trip" && entry.result !== "refused: no writer" && !String(entry.result).startsWith("Home applier"));
     expect(gaps).toEqual([]);
   }, 60_000);
 });

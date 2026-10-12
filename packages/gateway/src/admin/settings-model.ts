@@ -9,7 +9,7 @@ import { assertNewModelChoice, openAIModelEligibility } from "../providers/opena
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { updateJsonLocked } from "../util/json.js";
-import { projectGitState, readProjectDocument, writeProjectSettings } from "./project-settings-writer.js";
+import { gitHeadState, projectGitState, readProjectDocument, writeProjectSettings } from "./project-settings-writer.js";
 import { observedInstance, type ObservedReaders, type ObservedStore, type OutsideChanges, type PlannedWrite } from "./settings-outside.js";
 import type { TrustService } from "./trust-service.js";
 import type { Actor, ActorKind, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
@@ -186,7 +186,9 @@ export class SettingsModel {
     const observed: ObservedStore[] = [{ kind: "mac" }, { kind: "trust" }, ...(inspection ? [{ kind: "project" as const, root: inspection.projectDir }] : [])];
     // Every read compares the stores with what Tron last observed first (F2):
     // file events are only prompts, so a dropped event cannot hide a change.
-    if (storeState) await this.outside?.reconcile(observed);
+    // One repository read serves both the comparison and the git-state badges.
+    const head = storeState && inspection ? await gitHeadState(inspection.projectDir) : undefined;
+    if (storeState) await this.outside?.reconcile(observed, inspection ? new Map([[inspection.projectDir, head]]) : undefined);
     const mac = this.piDocuments(this.dependencies.agentDir).global;
     const trust = await this.trustDecisions();
     let project: SettingsStores["project"];
@@ -198,7 +200,7 @@ export class SettingsModel {
         ...(documents.projectUnreadable ? { unreadable: true as const } : {}),
         applied: inspection.effectiveDecision === true,
         ...(inspection.effectiveDecision === true ? {} : { reason: "untrusted" as const }),
-        ...(storeState ? { git: await projectGitState(inspection.projectDir) } : {}),
+        ...(storeState ? { git: await projectGitState(inspection.projectDir, head ?? null) } : {}),
       };
     }
     const outside = this.outside && storeState ? {

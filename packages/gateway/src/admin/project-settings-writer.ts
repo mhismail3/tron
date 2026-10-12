@@ -110,16 +110,18 @@ async function stage(repository: string | null, path: string, relativePath: stri
 /** The repository holding a project's `.pi/settings.json`, its `HEAD` commit and
  * branch, for outside-change entries and commit facts (doc 5.6, 5.7). Undefined
  * outside a repository. */
-export async function gitHeadState(root: string): Promise<{ root: string; path: string; head: string | null; branch: string | null } | undefined> {
-  const top = await git(root, ["rev-parse", "--show-toplevel"]);
-  if (!top.ok) return undefined;
-  const repository = top.stdout.trim();
-  const head = await git(repository, ["rev-parse", "--verify", "-q", "HEAD"]);
-  const branch = await git(repository, ["branch", "--show-current"]);
-  return {
-    root: repository, path: relative(repository, projectSettingsPath(root)),
-    head: head.ok ? head.stdout.trim() : null, branch: branch.ok && branch.stdout.trim() ? branch.stdout.trim() : null,
-  };
+export type GitHeadState = { root: string; path: string; head: string | null; branch: string | null };
+export async function gitHeadState(root: string): Promise<GitHeadState | undefined> {
+  // One process for the common case (every settings read asks): top level, HEAD
+  // and its branch ("HEAD" when detached). An unborn HEAD fails after printing
+  // the top level; only then is the branch asked separately.
+  const read = await git(root, ["rev-parse", "--show-toplevel", "HEAD", "--abbrev-ref", "HEAD"]);
+  const [top, head, branch] = read.stdout.split("\n").map(line => line.trim());
+  if (!top || !top.startsWith("/")) return undefined;
+  const state = { root: top, path: relative(top, projectSettingsPath(root)) };
+  if (read.ok && head && branch) return { ...state, head, branch: branch === "HEAD" ? null : branch };
+  const unborn = await git(top, ["branch", "--show-current"]);
+  return { ...state, head: null, branch: unborn.ok && unborn.stdout.trim() ? unborn.stdout.trim() : null };
 }
 
 /** The blob id git holds for a revision spec (`HEAD:<path>`, `:<path>`), if any. */
@@ -135,8 +137,8 @@ export type ProjectGitState =
 /** The Project store's git state, from which the resolver badges each value
  * Project, Staged, Uncommitted or Local only (doc 5.7). A side that is absent or
  * cannot be parsed is an empty document. */
-export async function projectGitState(root: string): Promise<ProjectGitState> {
-  const state = await gitHeadState(root);
+export async function projectGitState(root: string, known?: GitHeadState | null): Promise<ProjectGitState> {
+  const state = known === undefined ? await gitHeadState(root) : known ?? undefined;
   if (!state) return { kind: "local", reason: "not in a git repository" };
   if ((await git(state.root, ["check-ignore", "-q", "--", state.path])).ok) return { kind: "local", reason: ".pi is ignored by git" };
   const show = async (spec: string) => {

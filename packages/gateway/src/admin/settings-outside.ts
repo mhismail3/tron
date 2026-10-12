@@ -6,7 +6,7 @@ import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { readJsonDocument } from "../util/json.js";
-import { gitHeadState, projectSettingsPath, stagedBlob } from "./project-settings-writer.js";
+import { gitHeadState, projectSettingsPath, stagedBlob, type GitHeadState } from "./project-settings-writer.js";
 import type { ChangeEntry, GitResult, SettingsChangeRecord } from "./settings-record.js";
 import type { OutsideMark } from "./settings-resolver.js";
 import { KEYS, builtinValue, floorFor, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
@@ -182,14 +182,15 @@ export class OutsideChanges {
   }
 
   /** Compare each store with what Tron last observed; record what changed outside. */
-  async reconcile(stores: readonly ObservedStore[]): Promise<void> {
+  /** `heads` carries a repository state the caller already read for a project root. */
+  async reconcile(stores: readonly ObservedStore[], heads?: ReadonlyMap<string, GitHeadState | undefined>): Promise<void> {
     const entries: ChangeEntry[] = [];
     await this.mutex.run(async () => {
       const document = await this.load();
       for (const store of stores) {
         if (store.kind === "project") this.watchProject(store.root);
         if ((this.writing.get(storeId(store)) ?? 0) > 0) continue;
-        entries.push(...await this.compare(document, store));
+        entries.push(...await this.compare(document, store, undefined, undefined, store.kind === "project" ? heads?.get(store.root) : undefined, store.kind === "project" && heads?.has(store.root)));
       }
       if (entries.length) await this.record.append(entries);
       await this.save(document);
@@ -331,13 +332,14 @@ export class OutsideChanges {
   }
 
   /** One store's comparison. With `planned`, the bracketed writes are Tron's. */
-  private async compare(document: ObservedDocument, store: ObservedStore, planned?: ReadonlyMap<string, PlannedWrite>, applied?: ReadonlyMap<string, { git?: GitResult; changeId: string }>): Promise<ChangeEntry[]> {
+  private async compare(document: ObservedDocument, store: ObservedStore, planned?: ReadonlyMap<string, PlannedWrite>, applied?: ReadonlyMap<string, { git?: GitResult; changeId: string }>,
+    knownHead?: GitHeadState, headKnown = false): Promise<ChangeEntry[]> {
     const id = storeId(store);
     const text = await this.raw(store);
     const digest = digestOf(text);
     const at = this.now().toISOString();
     let state = document.stores[id];
-    const git = store.kind === "project" ? await gitHeadState(store.root) : undefined;
+    const git = store.kind !== "project" ? undefined : headKnown ? knownHead : await gitHeadState(store.root);
     if (state && !planned && state.digest === digest && (!git || git.head === (state.head ?? null))) {
       state.seen = at;
       return [];
