@@ -242,7 +242,10 @@ describe("Home task bounded backlogs", () => {
     // The user's oversized input starves the inbox. When that activation settles, Home is idle and
     // the backlog is delivered by wakes: each bounded activation takes what fits, in order.
     const collect = (context: unknown) => {
-      batches.push([...JSON.stringify(context).matchAll(/Home task (backlog-\d)/g)].map(match => match[1]!));
+      // Task identity is metadata, not raw record JSON in the model text. Match
+      // the verbatim report bodies that actually reached this provider request.
+      const request = JSON.stringify(context);
+      batches.push(tasks.filter((_task, index) => request.includes(String(index).repeat(1000))).map(task => task.taskId));
       expect(JSON.stringify(context)).not.toContain("u".repeat(1000));
       return fauxAssistantMessage("Reviewed results");
     };
@@ -278,6 +281,7 @@ describe("Home task bounded backlogs", () => {
     const messages = home.canonicalSessionEntries().filter(e => e.type === "custom_message" && e.customType === "tron.home-task-result.v1") as any[];
     expect(messages.map(m => m.details.taskId)).toEqual([large.taskId, small.taskId]);
     expect(messages[0].content).toMatch(/immutable report.*task.*report/s);
+    expect(messages[0].content).toContain(`taskId=${large.taskId}`);
     expect(messages[0].content).not.toContain("x".repeat(100));
     expect(request).toContain("Small complete report");
     const pages: any[] = []; let offset = 0;
