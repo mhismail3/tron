@@ -963,8 +963,6 @@ TronMobileUITests/TronSubagentParityUITests/<method>` after `build`. The retaine
 VoiceOver certification. The shared Home loading-surface journey remains the
 regression gate for sheet chrome; these card changes do not replace that owner.
 
-||||||| b5232cc63
-
 `TronSmokeUITests/testHomeRowRetainsStatusAcrossRepeatedBackNavigation` drives
 four native returns alternating ordinary and Home chats. The hosted socket holds
 subsequent status responses for four seconds; three screenshot/row samples on
