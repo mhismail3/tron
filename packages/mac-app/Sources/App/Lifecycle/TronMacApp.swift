@@ -269,6 +269,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             processStartIdentity: { pid in await ServerProcessProbe.processStartIdentity(pid: pid) },
             runtimeOwnershipHealthy: setup.runtimeOwnershipHealthy,
             serviceEnabled: { setup.launchAgentServiceStatus() == .enabled },
+            shutdownCompleted: { pid, drainID in
+                await MacQuitCoordinator.hasCompletedShutdown(
+                    pid: pid, drainID: drainID,
+                    receiptURL: setup.tronHome.appendingPathComponent("gateway/stop-completed.json")
+                )
+            },
+            readDrain: setup.readDrainForQuit,
             stopGateway: setup.stopGateway,
             retireNativeHost: setup.retireNativeHostForQuit
         )

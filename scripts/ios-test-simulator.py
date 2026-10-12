@@ -380,7 +380,13 @@ def lease_description(text: str) -> str:
 
 
 def parse_lease(text: str) -> dict[str, Any] | None:
-    """The object a lease file records, or None when it records nothing usable."""
+    """The object a lease file records, or None when it records nothing usable.
+
+    The lock owner truncates metadata when an otherwise idle lane is released;
+    an empty file is therefore a valid idle lease, unlike nonempty malformed data.
+    """
+    if text == "":
+        return {}
     try:
         value = json.loads(text)
     except json.JSONDecodeError:
@@ -1126,6 +1132,79 @@ def sweep_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
     return "released"
 
 
+
+def assert_target_unowned(arguments: argparse.Namespace) -> None:
+    """Fail closed if any discovered lane claims the target or is ambiguous."""
+    frontier = [arguments.discovery_root]
+    for _ in range(SWEEP_DEPTH + 1):
+        below: list[Path] = []
+        for directory in frontier:
+            marker_path = directory / MARKER_NAME
+            if marker_path.is_symlink():
+                raise DestinationError(f"refusing symlinked simulator ownership marker: {marker_path}")
+            if marker_path.exists():
+                marker = load_marker(marker_path)
+                if marker is not None and marker["udid"].casefold() == arguments.udid.casefold():
+                    raise DestinationError(f"refusing simulator claimed by lane marker: {marker_path}")
+            lease_path = directory / LEASE_NAME
+            if lease_path.is_symlink():
+                raise DestinationError(f"refusing symlinked lane lease: {lease_path}")
+            if lease_path.exists():
+                try:
+                    lease_text = lease_path.read_text(encoding="utf-8")
+                except OSError as error:
+                    raise DestinationError(f"cannot inspect lane lease {lease_path}: {error}") from error
+                if parse_lease(lease_text) is None:
+                    raise DestinationError(f"refusing ambiguous lane lease: {lease_path}")
+                if lease_holder(lease_path, table=process_table()) != "idle":
+                    raise DestinationError(f"refusing cleanup while a test lane is leased: {lease_path.parent}")
+            try:
+                below.extend(child for child in directory.iterdir() if child.is_dir() and not child.is_symlink())
+            except OSError as error:
+                raise DestinationError(f"cannot inspect simulator ownership directory {directory}: {error}") from error
+        frontier = below
+
+
+def delete_unowned(arguments: argparse.Namespace) -> int:
+    """Delete exactly one explicitly named simulator only when no lane owns it."""
+    if not re.fullmatch(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}", arguments.udid):
+        raise DestinationError("refusing malformed simulator UUID")
+    dev_udid = development_udid(arguments)
+    document = inventory()
+    current = find_device(document, arguments.udid)
+    if current is None:
+        raise DestinationError(f"simulator UUID not found: {arguments.udid}")
+    if current[1].get("name") != arguments.name:
+        raise DestinationError(f"simulator name does not match the requested exact name {arguments.name!r}")
+    initial_runtime = current[0]
+    initial_device_type = current[1].get("deviceTypeIdentifier")
+    if arguments.udid == dev_udid:
+        raise DestinationError("refusing the remembered Development simulator")
+
+
+    # Re-read ownership-sensitive evidence immediately before the destructive
+    # boundary; never infer that a device is unowned from its name or state.
+    if arguments.udid == development_udid(arguments):
+        raise DestinationError("refusing the remembered Development simulator")
+    assert_target_unowned(arguments)
+    current = find_device(inventory(), arguments.udid)
+    if current is None or current[1].get("name") != arguments.name:
+        raise DestinationError("requested simulator identity changed during cleanup")
+    if current[1].get("state") == "Booted":
+        simctl("shutdown", arguments.udid, timeout=arguments.shutdown_timeout_seconds)
+    assert_target_unowned(arguments)
+    if arguments.udid == development_udid(arguments):
+        raise DestinationError("refusing the remembered Development simulator")
+    current = find_device(inventory(), arguments.udid)
+    if current is None or current[1].get("name") != arguments.name or current[1].get("state") != "Shutdown":
+        raise DestinationError("requested simulator is no longer safely deletable")
+    if current[0] != initial_runtime or current[1].get("deviceTypeIdentifier") != initial_device_type:
+        raise DestinationError("requested simulator identity changed during cleanup")
+    simctl("delete", arguments.udid)
+    print(f"deleted explicitly requested unowned simulator {arguments.name} ({arguments.udid})")
+    return 0
+
+
 def sweep(arguments: argparse.Namespace) -> int:
     """Reclaim every orphaned, expired and abandoned lane and stale artifact. Idempotent."""
     markers = marker_paths(arguments.discovery_root)
@@ -1605,7 +1684,7 @@ def parse_args() -> argparse.Namespace:
         "command",
         choices=(
             "provision", "validate", "status", "delete", "state", "shutdown", "sweep", "lane", "lanes",
-            "lane-remove", "simulators", "prune", "clean-runs", "latest-run", "development-uptime",
+            "lane-remove", "simulators", "prune", "clean-runs", "latest-run", "development-uptime", "delete-unowned",
         ),
     )
     parser.add_argument("--marker", type=Path)
@@ -1621,6 +1700,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--discovery-root", type=Path)
     parser.add_argument("--default-state-dir", type=Path)
     parser.add_argument("--lane-dir", type=Path)
+    parser.add_argument("--udid")
     parser.add_argument("--memory-reserve-bytes", type=int)
     parser.add_argument(
         "--admission-wait-seconds",
@@ -1638,6 +1718,13 @@ def parse_args() -> argparse.Namespace:
         default=float(os.environ.get("TRON_IOS_TEST_SWEEP_DEADLINE_SECONDS", "300")),
     )
     arguments = parser.parse_args()
+    if arguments.command == "delete-unowned":
+        for required in ("udid", "name", "discovery_root", "default_state_dir"):
+            if getattr(arguments, required) is None:
+                parser.error(f"delete-unowned requires --{required.replace('_', '-')}")
+        if arguments.marker is not None:
+            parser.error("delete-unowned does not take --marker")
+        return arguments
     if arguments.command == "lane":
         # Selection only: it reads no simulator, so it needs no Development state.
         if arguments.worktree is None:
@@ -1713,6 +1800,8 @@ SHUTDOWN_OUTCOME = {
 def main() -> int:
     arguments = parse_args()
     try:
+        if arguments.command == "delete-unowned":
+            return delete_unowned(arguments)
         if arguments.command == "lane":
             return print_lane(arguments)
         if arguments.command == "sweep":

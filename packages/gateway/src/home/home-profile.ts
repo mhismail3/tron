@@ -143,13 +143,16 @@ function itemLabel(item: HomeProfileItem): string {
 
 /** The section for one activation's system prompt. Unavailability is said, never shown as
  * an empty profile: Home must not assume it has no preferences when it could not read them. */
-export async function homeProfileSection(knowledge: () => KnowledgeService | undefined): Promise<string> {
+/** The learned-profile section and how many active notes it lists (`notes` is 0 when the
+ * section could not be read: no item is applied then). */
+export async function homeProfileSection(knowledge: () => KnowledgeService | undefined): Promise<{ text: string; notes: number }> {
   const owner = knowledge();
-  if (!owner) return unavailableSection("Knowledge is not available on this Gateway");
+  if (!owner) return { text: unavailableSection("Knowledge is not available on this Gateway"), notes: 0 };
   try {
-    return renderHomeProfileSection(await readHomeProfile(owner));
+    const read = await readHomeProfile(owner);
+    return { text: renderHomeProfileSection(read), notes: read.items.filter((item) => item.status === "active").length };
   } catch (error) {
-    return unavailableSection(`reading Knowledge failed (${error instanceof Error ? error.message.slice(0, 200) : "unknown error"})`);
+    return { text: unavailableSection(`reading Knowledge failed (${error instanceof Error ? error.message.slice(0, 200) : "unknown error"})`), notes: 0 };
   }
 }
 

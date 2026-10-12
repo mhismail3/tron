@@ -1,7 +1,7 @@
 import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
 import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
@@ -9044,7 +9044,7 @@ export default function (pi) {
     expect(existsSync(markerPath) ? readFileSync(markerPath, "utf8") : undefined, "a marker write landed after dispose").toEqual(markerAtDispose);
   });
 
-  it("keeps main's interrupted receipt when a Stop fails and the run then completes on its own", async () => {
+  it("records completed when SDK Stop fails before cancellation and the real run finishes naturally", async () => {
     const root = await temporaryRoot("tron-abort-failed-stop-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -9073,22 +9073,26 @@ export default function (pi) {
     await agentAdmitted;
     const session = (slot as unknown as { runtime: { session: { abort(): Promise<void> } } }).runtime.session;
     const sdkAbort = session.abort.bind(session);
+    // Inject refusal only at the SDK cancellation boundary. The Registry, Pi
+    // session/model run, event settlement, and canonical receipt I/O remain real.
     session.abort = async () => { throw new Error("abort refused"); };
     try {
       await expect(slot.abort("agent")).rejects.toThrow(/did not stop/);
     } finally {
       session.abort = sdkAbort;
+      release();
+      await prompt;
     }
-    release();
-    await prompt;
     await waitFor(() => !slot.isBusy, "the slot to go idle");
     const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
     const terminals = entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.receiptKind === "terminal");
-    // The user Stop intent outlives the failed attempt. This matches main, which
-    // records the same receipt; whether a failed Stop should instead record
-    // completed is a separate main-branch decision.
     expect(terminals).toHaveLength(1);
-    expect(terminals[0]?.data).toMatchObject({ lifecycle: "interrupted", errorCode: "user-abort" });
+    await mkdir("test-results", { recursive: true });
+    await writeFile("test-results/failed-stop-natural-completion.json", JSON.stringify({
+      lifecycle: terminals[0]?.data.lifecycle, errorCode: terminals[0]?.data.errorCode ?? null,
+    }, null, 2));
+    expect(terminals[0]?.data).toMatchObject({ lifecycle: "completed" });
+    expect(terminals[0]?.data.errorCode).toBeUndefined();
   });
 
   it("records a completed receipt for a Stop that arrives after a natural completion", async () => {
@@ -10948,6 +10952,16 @@ export default function (pi) {
     registries.push(registry);
     let serverPid: number | undefined;
     let childPid: number | undefined;
+    const processState = (pid: number | undefined): string => {
+      if (pid === undefined) return "absent";
+      if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error("Invalid owned MCP fixture PID");
+      const result = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8" });
+      if (result.error) throw result.error;
+      if (result.status !== 0 && result.status !== 1) throw new Error(`Cannot inspect owned MCP process ${pid}: ${result.stderr}`);
+      return result.stdout.trim() || "absent";
+    };
+    const terminal = (state: string) => state === "absent" || state.startsWith("Z");
+    const states = () => ({ server: processState(serverPid), child: processState(childPid) });
     try {
       await initializeRegistry(registry);
       const slot = await registry.create(cwd);
@@ -10962,20 +10976,34 @@ export default function (pi) {
       process.kill(childPid, 0);
       await registry.dispose();
       registries.splice(registries.indexOf(registry), 1);
-      await waitFor(() => [serverPid, childPid].every(pid => {
-        try { process.kill(pid!, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
-      }), "the starting MCP process group to exit after runtime disposal");
-      expect(existsSync(readyPath)).toBe(false);
-      await mkdir(join(process.cwd(), "test-results"), { recursive: true });
-      await writeFile(join(process.cwd(), "test-results", "pi-sdk-mcp-startup-dispose.json"), `${JSON.stringify({ disposedDuringStartup: true, serverPid, childPid, processGroupReaped: true }, null, 2)}\n`);
+      // A killed grandchild can remain a zombie until the OS reaps it. It is
+      // terminal and cannot write; kill(pid, 0) alone mistakes it for live work.
+      try {
+        await waitFor(() => Object.values(states()).every(terminal), "the starting MCP process group to exit after runtime disposal");
+        expect(existsSync(readyPath)).toBe(false);
+      } finally {
+        await mkdir(join(process.cwd(), "test-results"), { recursive: true });
+        await writeFile(join(process.cwd(), "test-results", "pi-sdk-mcp-startup-dispose.json"), `${JSON.stringify({ disposedDuringStartup: true, states: states() }, null, 2)}\n`);
+      }
     } finally {
       if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
-      if (registry && registries.includes(registry)) {
+      // Clean both exact fixture PIDs before any retry of the runtime shutdown:
+      // a failing shutdown/negative control must not strand its child at timeout.
+      if (serverPid === undefined && existsSync(pidFile)) serverPid = Number(await readFile(pidFile, "utf8"));
+      if (childPid === undefined && existsSync(childPidFile)) childPid = Number(await readFile(childPidFile, "utf8"));
+      for (const pid of [serverPid, childPid]) {
+        if (pid !== undefined && !terminal(processState(pid))) {
+          try { process.kill(pid, "SIGKILL"); } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+          }
+        }
+      }
+      await waitFor(() => Object.values(states()).every(terminal), "owned MCP fixture cleanup");
+      if (registries.includes(registry)) {
         await registry.dispose();
         registries.splice(registries.indexOf(registry), 1);
       }
-      if (serverPid) { try { process.kill(-serverPid, "SIGKILL"); } catch {} }
       await rm(root, { recursive: true, force: true });
     }
   });

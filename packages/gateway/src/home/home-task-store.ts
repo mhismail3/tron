@@ -6,7 +6,9 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, isDurablePublicationUncertain, syncDurably, type DurableJsonFileSystem } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { authorizationRequestId, type HomeTaskAuthorizationState, type HomeTaskAuthorizationStore } from "./home-task-authorization.js";
-import type { HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
+import type { HomeTaskCounts, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
+/** A list row before the dispatcher adds the project and the session of its display. */
+type HomeTaskRow = Omit<HomeTaskSummary, "project" | "sessionId">;
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
 
 const TASK_BYTES = 256 * 1_024;
@@ -384,9 +386,20 @@ export class HomeTaskStore {
     return createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
   }
 
+  /** Exact lifecycle counts over every task record. Each record is read once, so the cost grows with
+   * the namespace; a never-initialized namespace has none. */
+  async counts(): Promise<HomeTaskCounts> {
+    const counts: HomeTaskCounts = { active: 0, finished: 0 };
+    for await (const task of this.records()) {
+      if (task.lifecycle === "terminal") counts.finished += 1;
+      else counts.active += 1;
+    }
+    return counts;
+  }
+
   /** Maintainer list reads only the selected records, never report bodies.
    * A continuation is bound to the physical namespace, not installation text. */
-  async page(input: { limit?: number; cursor?: string }): Promise<HomeTaskPage> {
+  async page(input: { limit?: number; cursor?: string }): Promise<{ items: HomeTaskRow[]; nextCursor?: string }> {
     return this.run(async () => {
       const limit = input.limit ?? 20;
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) invalid();
@@ -412,7 +425,7 @@ export class HomeTaskStore {
         selected.sort(compareTaskNames);
         if (selected.length > limit + 1) selected.pop();
       }
-      const items: HomeTaskSummary[] = [];
+      const items: HomeTaskRow[] = [];
       for (const name of selected.slice(0, limit)) {
         const task = await this.readNamedTask(name);
         validateAuthorityReferences(task, authority);

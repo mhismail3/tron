@@ -12,7 +12,9 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 
 | Command | Does |
 | --- | --- |
-| `start <issue>` | Claims an open, unclaimed, non-epic issue: pushes a claim commit to `claim.remote`, sets Status In progress, comments the claim, and creates the worktree `../tron-worktrees/<issue>-<slug>` on `<type>/<issue>-<slug>`. A session resumes its own claim. |
+| `start <issue> [--integration] [--base REMOTE-BRANCH]` | Claims an open, unclaimed issue: pushes a canonical claim commit to `claim.remote`, sets Status In progress, comments the claim, and creates its worktree under `../tron-worktrees/`. Ordinary start excludes epics; maintainer-approved epic integration uses `--integration`. `--base` selects a branch on the configured remote; its name is recorded as `Work-Claim-Base` and the claim commit's parent pins the exact starting commit. Without it the configured base is used. A session resumes its own claim from that immutable creation receipt, including after handoff or a base advance. Closed issues and open blockers remain refused. Never create manual ownerless epic/custom-base branches. This is not adoption: unknown/live claims must go through supported handoff. |
+| `handoff <issue> --reason TEXT [--session ID] [--force-maintainer]` | Transfers an existing claim in place; preserves the registered worktree and dirty files. Automatic transfer requires authoritative terminal settlement evidence from `packages/gateway/dist/client/work-owner-status.js`; unknown `no-report` work is eligible only when the Gateway's `ownerSettlement` proof validates its canonical task marker, invocation start/terminal receipts, and successful subagent settlement for the same task, session, and operation (including a successful join with zero stops). The helper rechecks task identity, lifecycle, operation and proof before accepting. A terminal task with zero projected live runs is not independent settlement proof. This requires both a rebuilt helper and a Gateway running the updated Home status projection; an older Gateway omits the proof and therefore fails closed. Prepare the helper with `PATH="$HOME/.nvm/versions/node/v$(cat .node-version)/bin:$PATH" npm --prefix packages/gateway run build`. The helper defaults `TRON_GATEWAY_HOST` to the local Tailscale address, matching terminal chat. Set `TRON_GATEWAY_HOST=127.0.0.1` when querying a loopback-bound development Gateway, or set it to a literal IP assigned to this Mac; it refuses other hosts before reading the local credential or opening a socket. Maintainer override requires a real TTY and exact typed confirmation. A legacy claim with no owner is `unknown`, never automatically transferable; this includes both a claim commit with no owner trailer and an established claim-style remote branch with no claim commit or claim trailers at all. The branch name plus the matching registered worktree and exact local/remote head identify the existing claim; they do not invent an old session identity. A maintainer can recover it only with `--force-maintainer` and the exact prompt `HANDOFF #<issue> FROM unknown`. This records `unknown` as the prior owner; it does not invent an identity or liveness result. The public audit includes old/new owner, reason, and exact transition commit SHA. Local and remote claim heads must match exactly (except a verified partial handoff retry); an unpushed or divergent local head is refused even with force. Only a clean descendant candidate with a settled owner can use `recover` below before ordinary handoff. |
+| `recover <issue> --expected-local SHA --expected-remote SHA --reason TEXT` | Publishes an exact clean descendant candidate as **unverified work**, without transferring ownership or changing local history. Requires the same known claim at both full commit IDs and canonical owner/children settlement; there is no force override. See [candidate recovery](#candidate-recovery). |
 | `verify [--tests CMD]...` | Runs the checks the branch's paths require, then each `--tests` command, on the current commit. Exit 0 when all pass. |
 | `land --summary-file <md> [--title T] [--tests CMD]... [--dry-run]` | Merges `origin/main` in, verifies the merged tree, pushes the branch, opens or updates its pull request (title = `--title` or the issue title; body = the summary file, verbatim), squash-merges at the verified commit, deletes the remote branch, and closes the issue as completed with Status Done. Prints `merged: <commit>`. |
 | `cleanup [--all] [--dry-run]` | Removes a task worktree and its branches once its pull request merged at its head (or its issue is closed and it holds only its claim commit). Names what it keeps and why. |
@@ -25,6 +27,18 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 Every GitHub write goes through `scripts/tron work`, which appends it to a private,
 bounded audit log at `<git common dir>/work/github-writes.jsonl` without its body.
 Reads are plain `gh` reads.
+
+Do not create manual ownerless epic/custom-base branches. Explicit `start --integration`
+creates the canonical owner claim; `--base` records the exact configured-remote
+branch, not a guessed `main`. This selects the starting tree, not a different merge
+target: `verify` and `land` still use the configured base (normally `main`).
+Creation is not adoption: existing local-only branches refuse without publication,
+and unknown/live remote claims still require supported `handoff`. Unknown-owner maintainer recovery requires a real
+terminal and exact `HANDOFF #<issue> FROM unknown` confirmation. Before continuation
+writes, verify old/new owner, pre/transition heads, unchanged tree, local/remote match,
+public audit and normal `work start` admission. Durable receipts include issue, branch,
+worktree, owner, head/tree, PR, exact test commands with actual pass/fail results and
+the next slice; historical failed gates remain failed.
 
 ## `verify` and `land`
 
@@ -43,10 +57,21 @@ start a build:
   for `.sh` and for shebang-shell files under `scripts/`;
 - each `--tests` command, run from the repository root.
 
-Checks run two at a time. Each log is kept under `<git dir>/work/logs/`, and a
-failing check prints the end of its log. A tree that passed with the same check set is
+Read-only preflight checks run two at a time. Canonical builds then run one at a
+time, in Mac → Gateway → push relay → iOS order when selected; only after they
+succeed do explicit `--tests` commands run, at most two together. Mac staging can
+replace the Gateway's source `node_modules`, and package checks can install their
+dependencies, so those publishers must settle before consumers run. The first
+failed phase prevents later phases from starting; no assertion or timeout is
+relaxed. Explicit journeys must themselves avoid conflicting writes.
+
+Each log is kept under `<git dir>/work/logs/`, and a failing check prints the end
+of its log. A tree that passed with the same check set and build-order contract is
 recorded under `<git dir>/work/verified/` and is not run again. `verify` refuses
-a dirty worktree, because it checks a commit.
+a dirty worktree, because it checks a commit. `python3 -B scripts/test-work-verify.py`
+exercises the real CLI with child-process dependency replacement, an explicit
+reader journey, failed-publisher admission, and exact-tree cache reuse; its
+repeatable evidence is `test-results/work-verify.json`.
 
 `land` refuses a detached HEAD, a base branch, a dirty worktree, a merge or rebase in
 progress, and a branch with no commits beyond the base. The privacy guard runs on the
@@ -55,7 +80,42 @@ is aborted, and the conflicting files are listed for the agent to resolve and co
 then `land` runs again. A moved base sends `land` back to merging it, at most three
 times. A refused merge after the base moved is retried the same way. A head that a
 pull request already merged is refused, so a repeat run cannot open a second one.
-Other refusals stop `land` with nothing merged.
+Other refusals stop `land` with nothing merged. Claim handoff serializes through a read-only descriptor on the pre-existing common Git directory (it creates no lock file), checks operation markers in the selected worktree's private Git directory (including linked-worktree merge/rebase/cherry-pick/revert state), and rechecks local and remote heads before changing a ref. An exact accepted transition commit can repair local ref state after a partial push; unrelated or malformed remote objects are never treated as proof. A local head that differs from the remote claim head is not accepted merely because it is unpushed or has the same tree: use the explicit candidate recovery path for a clean settled-owner descendant, or stop and preserve the conflicting state. Force confirmation does not bypass this expected-head fence.
+
+## Candidate recovery
+
+Use only when the former owner and its children are authoritatively settled and
+a clean registered task worktree contains unpublished commits strictly descending
+from its remote claim head:
+
+```bash
+scripts/tron work recover <issue> --expected-local <full-candidate-SHA> \
+  --expected-remote <full-remote-ancestor-SHA> --reason "<reason>"
+scripts/tron work handoff <issue> --reason "<reason>"
+```
+
+Recovery is not approval: it publishes the preserved candidate to its existing
+task branch, leaves ownership unchanged, and audits the exact ancestor/candidate
+pair. It does not reset, replace files, create a new claim, open a PR, mark tests
+passed, merge, or close an issue. Review and full exact-head `land` gates remain
+required after ordinary handoff.
+
+Both heads must name the same original claim commit/owner. Divergence, changed
+claims, missing worktrees, unknown/live owners or children, dirty tracked/untracked
+files, pending Git operations and competing Git writers refuse. Recovery holds
+the common repository lock plus temporary Git HEAD/branch/index locks, repeats
+settlement and head checks immediately before publication, and uses an exact
+remote expected-head lease **only after proving strict fast-forward ancestry**.
+The lease is compare-and-swap protection, never authorization for a history rewrite.
+A remote move at publication is rejected; local candidate history is not rewritten.
+Arbitrary filesystem editors do not honor Git locks: a late dirty edit is detected
+after publication and reported as partial, never discarded or called success.
+
+If the push succeeds but audit publication fails, rerun the **same exact command**.
+Only the unchanged local candidate and that exact remote candidate admit this
+audit-repair path; current settlement is still required. The audit marker makes
+repeats idempotent. Inspect other partial/racing states instead of changing refs
+manually. Run commands from the checkout containing the landed tooling.
 
 ## `cleanup`
 
@@ -69,7 +129,9 @@ deletes the local branch and the remote branch with a lease on the proven head.
 ## Failure modes this protects
 
 - **A claim is taken twice.** The claim is a remote branch created without force; the
-  smallest branch name wins the race and the loser deletes only its own ref.
+  smallest branch name wins the race and the loser deletes only its own ref. `handoff`
+  appends the new owner trailer using an exact remote expected-head lease and updates
+  the local branch only at its expected old head. The audit marker is keyed by the exact handoff commit.
 - **A foreign session's claim is changed.** `issue close` refuses when another session
   holds a claim on the issue.
 - **Public text leaks personal data.** Issues, comments, and pull request text pass the
@@ -77,8 +139,12 @@ deletes the local branch and the remote branch with a lease on the proven head.
 - **A conflict is merged by hand.** `land` aborts a conflicting merge and names the files.
 - **Unverified code is merged.** The squash merge names the verified commit, so GitHub
   refuses it if the branch changed. A base that moved is re-merged and re-verified first.
-  A base that moves in the instant between that check and GitHub's merge call is not
-  caught; the merge still composes the base with the verified branch.
+  After publishing, land checks the remote branch and, when the PR response is stale,
+  re-reads the PR at most twice (three observations including publication). A different remote SHA is a foreign branch move;
+  an unchanged expected remote SHA paired with a persistently stale PR is reported as
+  uncertain and must be observed again by rerunning land. Neither path weakens the
+  exact-SHA merge request. A base that moves in the instant between the final check and
+  GitHub's merge call is not caught; the merge still composes the base with the verified branch.
 - **Unmerged work is removed.** `cleanup` needs a merged pull request at the local head,
   or a closed issue whose branch holds only its empty claim commit.
 - **A closed or blocked issue is claimed.** `start` refuses a closed issue, an excluded
@@ -90,8 +156,47 @@ The tooling has no unit tests. Changes are validated by running the real command
 `verify` or `land --dry-run` on the branch, and an integration run against a temporary
 repository when a change touches Git, GitHub or cleanup behavior.
 
+`python3 scripts/test-work-start.py` exercises real CLI/Git creation, custom-base
+contents and canonical ownership, idempotent resume, and fixture-only interactive
+handoff followed by ordinary successor admission. It verifies that the creation
+base survives handoff and a later base advance, and that closed/blocked/excluded
+issues, foreign/unknown claims, invalid/missing bases and local-only branch collisions
+refuse without publishing changes. Ordinary task creation remains covered. The
+process-level GitHub fixture uses isolated `HOME` and `TMPDIR`; evidence is written
+to `test-results/work-start.json`, and temporary repositories are removed on exit.
+The diagnostic signal for an ownerless integration branch is the absence of a
+`Work-Claim-Session` claim receipt: a branch name or clean worktree is not owner proof.
+
+`python3 scripts/test-work-land.py` exercises land through the real CLI, temporary Git
+remote, and process-level GitHub fixture. It covers a base advance followed by a stale
+PR PATCH response and fresh PR observation, refusal of a genuine remote branch move,
+and truthful uncertainty when the PR projection remains stale or the remote ref cannot
+be read. Evidence is written to
+`test-results/work-land.json`; the fixture repository, home, and temporary files are
+removed on exit.
+
 `python3 scripts/test-work-close.py` exercises epic/task close through the real CLI
 and Git with a process-level GitHub fixture in an isolated temporary home. It covers
 completed epics, unfinished children on later pages, failed reads, foreign claims,
 and idempotent recovery after a partial close. Regenerable evidence is written to
 `test-results/work-close.json`; the fixture repository and home are removed on exit.
+
+`python3 scripts/test-work-handoff.py` exercises handoff through the real CLI and Git
+in an isolated fixture, with owner-status evidence served by real Gateway WebSockets
+using the built client helper. It checks refusal of an unassigned IP before socket
+access, acceptance of a locally assigned interface IP when one is available, active-only
+refusal without status reads, pagination to a finished matching owner, malformed
+evidence, settled no-report proof with stopped or naturally completed children, task/session/operation mismatches, missing or failed settlement, excluded unknown reasons, status races, natural completion with zero stopped subagents, refusal preservation of
+refs/index/dirty bytes, ordinary and TTY-confirmed takeover, idempotent audit, and
+missing-worktree refusal without recreation. Evidence is written to
+`test-results/work-handoff.json`; build the Gateway first with the pinned Node runtime
+using `npm --prefix packages/gateway run build`. The fixture sets
+`TRON_GATEWAY_HOST=127.0.0.1` by default so it remains independent of host Tailscale.
+
+`python3 scripts/test-work-handoff.py --recovery-only` runs the focused recovery
+journeys through the same CLI/Git/WebSocket boundaries; the default command also
+includes these journeys. It proves unchanged ordinary handoff refusal, dirty and
+operation refusal, canonical owner/child and settlement-race refusal, same-claim
+ancestry, local Git writer exclusion, exact remote CAS race refusal, partial audit
+repair, idempotence, and subsequent ordinary handoff preserving candidate bytes.
+It does not run the separate host-interface and maintainer-TTY handoff journeys.
