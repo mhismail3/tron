@@ -175,10 +175,10 @@ export class SettingsModel {
     const storeState = options.storeState !== false;
     if (target.kind === "session" && !session) throw new GatewayError("invalid_request", "A session target needs its session");
     const cwd = target.kind === "project" ? target.cwd : target.kind === "session" && !session!.home ? session!.cwd : undefined;
-    // The Project store is `.pi/` at the cwd Tron gives pi, which is where pi
-    // reads it (pi settings-manager has no upward search).
+    // The Project store is `.pi/` at the chat's Project root (decision 31), the
+    // `projectDir` Tron gives pi; trust names that root for every chat in it.
     const inspection = cwd === undefined ? undefined : await this.dependencies.trust.inspect(cwd);
-    const observed: ObservedStore[] = [{ kind: "mac" }, { kind: "trust" }, ...(inspection ? [{ kind: "project" as const, root: inspection.cwd }] : [])];
+    const observed: ObservedStore[] = [{ kind: "mac" }, { kind: "trust" }, ...(inspection ? [{ kind: "project" as const, root: inspection.projectDir }] : [])];
     // Every read compares the stores with what Tron last observed first (F2):
     // file events are only prompts, so a dropped event cannot hide a change.
     if (storeState) await this.outside?.reconcile(observed);
@@ -186,19 +186,19 @@ export class SettingsModel {
     const trust = await this.trustDecisions();
     let project: SettingsStores["project"];
     if (inspection) {
-      const documents = this.piDocuments(inspection.cwd);
+      const documents = this.piDocuments(inspection.projectDir);
       project = {
-        root: inspection.cwd,
+        root: inspection.projectDir,
         document: documents.project,
         ...(documents.projectUnreadable ? { unreadable: true as const } : {}),
         applied: inspection.effectiveDecision === true,
         ...(inspection.effectiveDecision === true ? {} : { reason: "untrusted" as const }),
-        ...(storeState ? { git: await projectGitState(inspection.cwd) } : {}),
+        ...(storeState ? { git: await projectGitState(inspection.projectDir) } : {}),
       };
     }
     const outside = this.outside && storeState ? {
       mac: { ...await this.outside.marks({ kind: "mac" }), ...await this.outside.marks({ kind: "trust" }) },
-      ...(inspection ? { project: await this.outside.marks({ kind: "project", root: inspection.cwd }) } : {}),
+      ...(inspection ? { project: await this.outside.marks({ kind: "project", root: inspection.projectDir }) } : {}),
     } : undefined;
     const home = target.kind === "home" || (target.kind === "session" && session!.home);
     const layers = targetLayers(target, { home, project: project !== undefined });

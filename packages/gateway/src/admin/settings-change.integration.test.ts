@@ -82,8 +82,8 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
     ...(options.assessRisk ? { assessRisk: options.assessRisk } : {}),
     setTrust: async (project, decision) => {
       return trust.setAndApply(project, decision,
-        async inspection => { await registry.reloadProject(inspection.cwd, inspection.effectiveDecision === true, false); },
-        async inspection => { await registry.commitProjectReload(inspection.cwd); });
+        async inspection => { await registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false); },
+        async inspection => { await registry.commitProjectReload(inspection.projectDir); });
     },
   }, agentDir);
   registry.setSettings(settingsModel, settingsChanges);

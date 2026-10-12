@@ -2652,6 +2652,13 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
         await cp(compilerOutput, join(temporary, "app", "dist"), { recursive: true, errorOnExist: true, force: false });
         await writeFile(join(temporary, "app", "package.json"), source.packageBytes);
         await writeFile(join(temporary, "app", "package-lock.json"), source.lockBytes);
+        // The patched pi-coding-agent declaration explains this exact lock, which a
+        // source update cannot change; refresh it so its metadata is the revision's.
+        const patchDeclaration = await readFile(join(gatewayRoot, "pi-coding-agent-patch.json")).catch((error) => {
+          if (error?.code === "ENOENT") return undefined;
+          throw error;
+        });
+        if (patchDeclaration) await writeFile(join(temporary, "app", "pi-coding-agent-patch.json"), patchDeclaration);
         if (await validatePayloadPushConfiguration(temporary, paths.channel) !== activePushConfiguration) {
           throw new Error("source update changed the active product PushService.xcconfig");
         }

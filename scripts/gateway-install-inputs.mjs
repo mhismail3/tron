@@ -24,6 +24,7 @@ const BUILD_INPUT_FILES = [
   "packages/gateway/scripts/ensure-node-pty-helper.mjs",
   "packages/gateway/scripts/install-pi-subagents.mjs",
   "packages/gateway/pi-subagents-pin.json",
+  "packages/gateway/pi-coding-agent-patch.json",
   "packages/mac-app/scripts/bundle-gateway.sh",
   "scripts/gateway-payload-deploy.mjs",
   "scripts/gateway-install-inputs.mjs",
