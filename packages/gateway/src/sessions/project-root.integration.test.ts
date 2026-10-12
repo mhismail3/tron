@@ -143,6 +143,10 @@ export default function (pi) {
     // standalone Home workspace's explicit decision never reaches the root.
     expect((await trust.inspect(join(repo, ".git"))).projectDir).toBe(join(repo, ".git"));
     expect(await trust.set(homeWorkspace, false)).toMatchObject({ cwd: homeWorkspace, projectDir: homeWorkspace, savedDecision: false });
+    const homeRepository = join(homeWorkspace, "task-repo");
+    await mkdir(join(homeRepository, "src"), { recursive: true });
+    git(homeRepository, "init", "-q");
+    expect((await trust.inspect(join(homeRepository, "src"))).projectDir).toBe(homeRepository);
     expect((await trust.inspect(nested)).savedDecision).toBe(true);
 
     const slot = await registry.create(nested);
@@ -181,7 +185,7 @@ export default function (pi) {
     await waitFor(() => !alive(firstRootServer), "the replaced root MCP server to stop");
     expect(existsSync(join(root, "nested.pid"))).toBe(false);
     evidence.outsideEdit = { maxRetries: 8, mcpTools: mcpTools(slot), nestedEditIgnored: true, replacedServerStopped: true };
-    evidence.boundaries = { gitDirectoryIsOwnProject: true, homeWorkspaceStandalone: true, rootDecisionKept: true };
+    evidence.boundaries = { gitDirectoryIsOwnProject: true, homeWorkspaceStandalone: true, repositoryInsideHomeKeepsItsRoot: true, rootDecisionKept: true };
 
     // A linked worktree is its own Project: its own decision and its own values.
     const linkedUndecided = await registry.create(linkedNested).then(() => undefined, (error: unknown) => error);
