@@ -2092,7 +2092,18 @@ The wrong-code control uses the same link with a code the Gateway refuses: it as
 the app's own `Pairing code is invalid` refusal, and then that the fixture's own link
 pairs through the same address — the setup sheet reaching its workspace step is what
 only a connected Gateway shows — so the control cannot pass by being a broken address.
-Both journeys retain screenshots.
+`testSettingsSurfacesServeEveryKeyAndEditAtItsLayer` takes its key inventory from
+the fixture Gateway's own built schema (`TRON_E2E_SETTINGS_INVENTORY`, written by the
+harness), never a Swift key list. On Manage Session, the shared Project card and
+Settings it requires every key served on that target to have a row with a value and
+a layer source badge, and every unserved key to have none, and attaches the per-surface
+counts (`settings-surface-coverage.json`). It edits one key per layer through the
+shared toggle (Chat, then Project after the untrusted write is refused on its row and
+the project is trusted through Review trust, then Mac) and reads each accepted value
+and badge back after reopening; Mac-only rows open Settings through Edit at Mac. It
+then edits the fixture's Mac `settings.json` by rename-replace (`TRON_E2E_AGENT_DIR`)
+and requires `Changed outside Tron` with Apply again, which restores Tron's value.
+All journeys retain screenshots.
 
 This lane pairs the hosted app for real, and the lane's app container is shared with the
 hosted E2E lane of the same worktree; a pairing left behind made that lane's

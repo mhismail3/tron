@@ -821,6 +821,11 @@ Source badges may carry `useCurrentDefault` or `followDefault` actions. The row
 renders the Gateway's label with the shared inline action capsule and routes an
 unset through the same change owner; it contains no per-key reset logic. Unknown
 actions remain display-only badges, and a negotiated read-only row cannot reset.
+A `Changed outside Tron` state badge may carry `applyAgain` with the outside
+change's `changeId`; the row offers it wherever the Gateway serves it (it acts on
+the change record, like Undo in Changes) and sends `settings.applyAgain` through
+the renderer's command owner, then rereads. Changes detail offers the same action
+for an outside entry that refers to the Tron change it replaced.
 `testSettingsRendererUsesCurrentDefaultSourceAction` proves one applied unset
 against the hosted socket and preserves the unknown badge without dispatching it.
 This is primitive coverage; session-surface adoption still owns the runtime fence.
