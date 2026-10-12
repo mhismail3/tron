@@ -31,13 +31,6 @@ enum SessionCompactionControlPolicy {
         return phase == .idle || phase == .interrupted
     }
 
-    static func automaticStatus(_ enabled: Bool?) -> String {
-        switch enabled {
-        case true: "Enabled"
-        case false: "Disabled"
-        case nil: "Unavailable"
-        }
-    }
 }
 
 enum SessionContextUsageRefreshPresentation: Equatable {
@@ -492,7 +485,7 @@ struct SessionContextSheet: View {
 
     private func modelConfigurationCard(_ snapshot: SessionContextPresentation) -> some View {
         SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot, onError: { surfaceActionError($0) }) {
-            automaticCompactionRow(snapshot)
+            EmptyView()
         }
     }
 
@@ -500,11 +493,11 @@ struct SessionContextSheet: View {
         if presentation != value { presentation = value }
     }
 
-    private func automaticCompactionRow(_ snapshot: SessionContextPresentation) -> some View {
+    private func manualCompactionRow(_ snapshot: SessionContextPresentation) -> some View {
         TronSettingsRow(
             icon: "rectangle.compress.vertical",
-            title: "Automatic Compaction",
-            subtitle: SessionCompactionControlPolicy.automaticStatus(snapshot.automaticCompactionEnabled),
+            title: "Compact conversation",
+            subtitle: "Summarize older context now",
             accent: .tronPurple
         ) {
             compactButton(snapshot)
@@ -514,6 +507,10 @@ struct SessionContextSheet: View {
     @ViewBuilder
     private func settingsSectionSupplement(_ section: String) -> some View {
         if section == "context" {
+            if let snapshot = displayedPresentation {
+                manualCompactionRow(snapshot)
+                divider()
+            }
             manageRow(icon: "doc.text.magnifyingglass", title: "Agent Instructions",
                       subtitle: "Delivered: complete assembled instructions", accent: sessionRowAccent) { destination = .agentInstructions }
             divider()

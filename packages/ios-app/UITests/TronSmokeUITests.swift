@@ -1699,6 +1699,11 @@ final class TronSmokeUITests: XCTestCase {
         for _ in 0..<4 where expand.frame.minY < 160 { app.swipeDown() }
         tapScrolling(expand, in: app)
         XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Do not repeat generic policy in the model card")
+        let context = app.buttons["settings-section-context-expand"]
+        tapScrolling(context, in: app)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings-row-context.compaction.enabled").count, 1)
+        XCTAssertTrue(app.buttons["manage-session-compact"].exists, "Manual compaction remains a Context action")
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
         tapScrolling(expand, in: app)
         XCTAssertTrue(app.staticTexts["From default at start: High (Mac)"].waitForExistence(timeout: 5))

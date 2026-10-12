@@ -190,7 +190,16 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                     "order": .number(10), "importance": .string("essential"), "control": .string("choice"),
                     "options": .array([.object(["value": .string("off"), "label": .string("Off")]),
                                        .object(["value": .string("high"), "label": .string("High")])])]),
-            ])]), "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10)])])])
+            ]), .object([
+                "key": .string("context.compaction.enabled"), "group": .string("context"),
+                "value": .bool(true), "display": .string("On"), "layer": .string("mac"),
+                "applied": .bool(false), "layers": .array([]), "badges": .array([]),
+                "presentation": .object(["label": .string("Automatic compaction"), "help": .string("Automatic compaction policy."),
+                    "order": .number(10), "importance": .string("essential"), "control": .string("toggle")]),
+            ])]), "sections": .array([
+                .object(["id": .string("model"), "title": .string("Model"), "order": .number(10)]),
+                .object(["id": .string("context"), "title": .string("Context"), "order": .number(20)]),
+            ])])
         case "settings.change":
             let params = frame.objectValue?["params"]?.objectValue ?? [:]
             let change = params["changes"]?.arrayValue?.first?.objectValue
