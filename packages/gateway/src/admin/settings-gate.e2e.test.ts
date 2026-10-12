@@ -933,6 +933,25 @@ describe("settings risk gate", () => {
     transcript.push({ case: "superseded and expired", steps: [{ statuses, outcomes: told.outcomes }] });
   }, 60_000);
 
+  it("Home's pending change expires after 24 hours, is never applied, and Home is told on its next turn", async () => {
+    const f = await fixture();
+    const home = await f.designateHome();
+    const asked = await f.run(home, "trust the other project", [{ name: "settings", args: { action: "change", reason: "The maintainer asked me to work there",
+      changes: [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: true, qualifiers: { project: f.other } }] } }]);
+    const pending = f.settle(asked.results) as { status: string; approval: { requestId: string; digest: string } };
+    expect(pending).toMatchObject({ status: "pending", tier: "approve" });
+    f.advance(APPROVAL_TTL_MS + 1);
+    expect(await f.approvals()).toEqual([]);
+    await expect(f.decide(pending.approval.requestId, pending.approval.digest, true)).rejects.toMatchObject({ code: "conflict" });
+    expect((await f.trust.inspect(f.other)).savedDecision ?? null).toBeNull();
+    expect((await f.history()).filter(entry => entry.key === "permissions.projectTrust").map(entry => entry.status)).toEqual(expect.arrayContaining(["pending", "expired"]));
+    const told = await f.run(home, "next", []);
+    expect(told.outcomes).toHaveLength(1);
+    expect(told.outcomes[0]).toMatch(/expired after 24 hours/);
+    expect((await f.run(home, "after", [])).outcomes).toEqual([]);
+    transcript.push({ case: "Home expiry", steps: [{ outcomes: told.outcomes }] });
+  }, 60_000);
+
   it("a Home task worker: quiet from a clean turn, notify after an undeclared third-party tool in its turn", async () => {
     const f = await homeTaskFixture();
     // The worker's project carries a third-party tool that declares nothing, so it marks the run.
