@@ -3039,6 +3039,16 @@ export class RuntimeRegistry {
     return inspection.cwd;
   }
 
+  /** The Home profile's task budget (settings-model.md 6.1), read through the one
+   * resolver: at task admission (fixed at start) and at each worker turn boundary
+   * (a lowered budget applies live). Undefined is no limit. */
+  async homeTaskBudget(): Promise<{ inputTokens?: number; outputTokens?: number } | undefined> {
+    const settings = this.settingsOwners?.model;
+    if (!settings) return undefined;
+    const resolution = await settings.resolve({ kind: "home" }, undefined, ["permissions.budget.task"], { storeState: false });
+    return resolution.keys.find(key => key.key === "permissions.budget.task")?.value as { inputTokens?: number; outputTokens?: number } | undefined;
+  }
+
   /** Home resolves its typed worker profile at the delegate boundary. The selected
    * values are copied into this task only; later Home/profile changes cannot retarget it. */
   private async dispatchHomeTask(sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) {

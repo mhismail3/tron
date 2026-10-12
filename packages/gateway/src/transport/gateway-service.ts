@@ -440,7 +440,7 @@ export class GatewayService {
       approvals: (event) => this.settingsApprovalsChanged(event),
     });
     // Outside changes reach the same after-apply effects and broadcast, one store at a time.
-    dependencies.settingsModel.outsideChanges?.observe({
+    dependencies.settingsModel?.outsideChanges?.observe({
       outside: async (entries) => {
         const outside = entries.filter(entry => entry.status === "outside");
         for (const file of new Set(outside.map(entry => entry.actor.id))) {

@@ -816,6 +816,9 @@ real directories.
     replaced.
   - `spend`: null or exact `{ sourceDigest, inputTokens, outputTokens }`. Counts are
     safe nonnegative integers. No cost is recorded.
+  - `budget`: absent (no limit) or `{ inputTokens?, outputTokens? }`, the Home
+    profile's `permissions.budget.task` fixed when the task was admitted; no later
+    publication may change it.
   - `reportRef`: null or exact `{ resultId, sessionId, entryId, digest }`, the one
     canonical report the task sealed; the digest pins its payload.
   - `wake`: null before terminal, then the event (stable identity, route epoch,
@@ -1137,12 +1140,23 @@ operation suppresses the ordinary completion push. Identical duplicates reuse on
 entry; conflicts refuse. References carry the exact entry ID and digest, never a
 latest-assistant pointer.
 
-**Outcomes.** A final reply without a report is `unknown`. A provider length stop or
-a joined deadline without a report is `limited`. The last assistant entry is
+**Outcomes.** A final reply without a report is `unknown`. A provider length stop,
+a joined deadline or a reached task budget without a report is `limited` (reason
+`length`, `deadline` or `budget`). The last assistant entry is
 evidence only. A failed exact stop is `unknown` (`deadline-stop-failed`,
 `task-stop-failed`, `report-stop-failed`). A subagent run still live after the join is
 `unknown` (`detached-work-outlived-task`), whatever the report says. Admission alone
 never establishes success.
+
+**Budget.** The Home profile key `permissions.budget.task` (settings-model.md 6.1)
+caps a task's own spend counters. Admission resolves it once through the settings
+resolver and fixes it on the record. At each worker turn boundary the runtime
+computes spend from the operation's canonical entries with the same projection as
+the record, against the lower of the start budget and the current profile value per
+field: a lowered budget applies to running tasks, a raised one only to later tasks.
+Reaching it ends the run at that boundary, like a sealed report (queued steering
+takes the exact stop), so no further model request starts; settlement records
+`limited` with reason `budget`. Unset is no limit.
 
 **Spend.** Canonical usage is deduplicated by entry identity over the operation's
 history and persisted before live status and settlement. Contradictory duplicates,

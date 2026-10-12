@@ -1076,9 +1076,19 @@ Home's Chat layer, carried across chapters. The real-registry regression in
 `home-context-data.e2e.test.ts` covers settings-ledger writes, restart, pause
 preservation, conflicting stores and the unindexed-audit crash cut.
 
-The design also names task budgets and scopes as Profile keys, but neither is
-currently declared in `settings-schema.ts`; this slice does not invent new
-schema entries or task policy. Delegation-time worker resolution, fieldwise
+Task budgets are the key `permissions.budget.task` (Profile only, built in as no
+limit). Its value is `{ inputTokens?, outputTokens? }`: the task record's own
+spend counters, the only spend Tron measures (home.md Spend; provider cost is not
+authoritative). It renders with the generic numeric-map editor. A field rising or
+being removed widens (floor approve: Home's raise waits for the maintainer's tap);
+setting or lowering one narrows (quiet). Timing is narrow live, widen fixed: a task
+fixes the budget at admission, a later lower reaches it at its next turn boundary,
+a later raise only reaches later tasks. Reaching it ends the task `limited` with
+reason `budget` (home.md Budget); `home-task-worker-model.e2e.test.ts` covers the
+stop, the unbudgeted control, a live lower, a raise that does not reach a running
+task, and Home's gated raise. Task scopes stay owned by Home's task
+authorization store and its grant/revoke controls (home.md); they are not a
+schema key. Delegation-time worker resolution, fieldwise
 explicit choices, capability clamping, fallback and fixed Chat provenance are
 implemented at the Home delegate/dispatcher boundary, independently of the
 Profile store. The real `home-task-worker-model.e2e.test.ts` covers these paths,

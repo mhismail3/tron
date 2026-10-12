@@ -125,6 +125,35 @@ function thinkingBudgetsType(): ValueType {
   };
 }
 
+/** A Home task's token budget (doc 6.1): the task record's own spend counters,
+ * the only spend Tron measures (home.md Spend). An absent field is no limit. */
+export const TASK_BUDGET_FIELDS = ["inputTokens", "outputTokens"] as const;
+function taskBudgetType(): ValueType {
+  const max = 10_000_000_000;
+  return {
+    ...objectType("numberMap", (value, label) => {
+      const budget = object(value, label);
+      if (Object.keys(budget).some(key => !TASK_BUDGET_FIELDS.some(field => field === key))) {
+        throw new GatewayError("invalid_request", `${label} names a field other than inputTokens or outputTokens`);
+      }
+      const result: Record<string, number> = {};
+      for (const field of TASK_BUDGET_FIELDS) {
+        if (budget[field] !== undefined) result[field] = integer(budget[field], `${label}.${field}`, 1, max);
+      }
+      return result;
+    }, value => Object.entries(value as Record<string, number>)
+      .map(([field, tokens]) => `${field === "inputTokens" ? "input" : "output"} ${tokens}`).join(", ") || "No limit"),
+    options: [{ value: "inputTokens", label: "Input tokens" }, { value: "outputTokens", label: "Output tokens" }],
+    range: { min: 1, max, step: 1, unit: "tokens" },
+  };
+}
+
+/** A budget widens when any limited field rises or is removed (no limit). */
+const raisesBudget = (before: unknown, after: unknown): Direction => {
+  const was = (before ?? {}) as Record<string, number>, next = (after ?? {}) as Record<string, number>;
+  return TASK_BUDGET_FIELDS.some(field => was[field] !== undefined && (next[field] === undefined || next[field]! > was[field]!)) ? "widen" : "narrow";
+};
+
 function packagesType(): ValueType {
   return objectType("packages", (value, label) => {
     if (!Array.isArray(value) || value.length > 500) throw new GatewayError("invalid_request", `${label} must be an array with at most 500 entries`);
@@ -322,6 +351,16 @@ export const KEYS: readonly KeyDeclaration[] = [
     label: "Floor", help: "The least attention a change to this setting gets when an agent asks: Quiet applies it, Notify applies it and tells you, Approve waits for your tap. A turn that read web content raises it one step.",
     order: 90, importance: "advanced", control: "choice",
     confirm: "Lowering a floor lets agents make this change with less of your attention.",
+  },
+  {
+    // Profile only (doc 6.2): Home's tasks read it at dispatch. A raise never
+    // reaches a running task (widen is fixed at its start); a lower applies at
+    // its next turn boundary (narrow live). Unset is no limit, today's behaviour.
+    id: "permissions.budget.task", group: "permissions", subgroup: "Home tasks", type: taskBudgetType(),
+    layers: { profile: { store: "profile", path: ["budget", "task"] } }, timing: { narrow: "live", widen: "fixed" }, effect: "delegate",
+    floor: { widen: "approve", narrow: "quiet" }, direction: raisesBudget, writers: ["ui", "home"],
+    label: "Task budget", help: "Tokens one Home task may use before Tron stops it. Input counts cached tokens. An empty field is no limit.",
+    order: 30, importance: "advanced", control: "list", confirm: "Raising a task budget lets Home's tasks spend more.",
   },
   // Run -----------------------------------------------------------------
   {

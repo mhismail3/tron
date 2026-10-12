@@ -352,3 +352,74 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
       .toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
   });
 });
+
+/**
+ * The Home profile's task budget (settings-model.md 6.1) at the real dispatcher,
+ * worker runtime and canonical transcript: tokens are the record's own spend
+ * projection, the budget is fixed at start, a lower applies live at the next turn
+ * boundary, a raise never reaches a running task, and no turn runs after the stop.
+ */
+describe("Home task budget", () => {
+  const ui = { actor: { kind: "ui" as const, id: "device:phone" } };
+  const turn = (output: number, id: string) => fauxAssistantMessage([fauxToolCall("read", { path: "missing" }, { id })],
+    { stopReason: "toolUse", usage: { input: 2, output, cacheRead: 0, cacheWrite: 0 } } as never);
+  const install = (f: Awaited<ReturnType<typeof fixture>>) =>
+    settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => f.registry.homeOwner(), registry: f.registry }).settingsChanges;
+  const setBudget = (changes: ReturnType<typeof install>, value: Record<string, number> | undefined, context: Parameters<ReturnType<typeof install>["change"]>[2] = ui) =>
+    changes.change({ kind: "home" }, [{ key: "permissions.budget.task", layer: "profile", op: value ? "set" : "unset", ...(value ? { value } : {}) }], context);
+
+  it("stops a task at the turn boundary that reaches its budget: limited, budget, no further model request", async () => {
+    const f = await fixture();
+    const changes = install(f);
+    expect((await setBudget(changes, { outputTokens: 10 })).status).toBe("applied");
+    let calls = 0;
+    f.faux.setResponses([() => { calls++; return turn(6, "one"); }, () => { calls++; return turn(6, "two"); },
+      () => { calls++; return fauxAssistantMessage("must never be requested"); }]);
+    const { completion } = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "budgeted", intent: "Finite work", target: f.cwd });
+    const task = await completion;
+    expect(task).toMatchObject({ budget: { outputTokens: 10 }, spend: { outputTokens: 12 },
+      terminalEvidence: { outcome: "limited", reason: "budget" } });
+    expect(calls).toBe(2);
+    // Negative control: the same work without a budget runs to its report.
+    await setBudget(changes, undefined);
+    f.faux.setResponses([turn(6, "three"), turn(6, "four"), fauxAssistantMessage([reportCall("unbudgeted")], { stopReason: "toolUse" })]);
+    const free = await (await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "unbudgeted", intent: "Finite work", target: f.cwd })).completion;
+    expect(free.budget).toBeUndefined();
+    expect(free.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+  });
+
+  it("applies a lowered budget at the next boundary, never a raised one, and gates Home's raise for approval", async () => {
+    const f = await fixture();
+    const changes = install(f);
+    await setBudget(changes, { outputTokens: 100 });
+    let entered = false;
+    let release!: () => void;
+    let gate = new Promise<void>(resolve => { release = resolve; });
+    let calls = 0;
+    f.faux.setResponses([() => { calls++; return turn(6, "a"); }, async () => { calls++; entered = true; await gate; return turn(6, "b"); },
+      () => { calls++; return fauxAssistantMessage("must never be requested"); }]);
+    const lowered = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "lowered", intent: "Finite work", target: f.cwd });
+    await waitFor(() => entered, "second worker turn");
+    // Lowering narrows: the maintainer's tap applies quietly and reaches the running task.
+    expect((await setBudget(changes, { outputTokens: 5 })).status).toBe("applied");
+    release();
+    expect(await lowered.completion).toMatchObject({ budget: { outputTokens: 100 }, terminalEvidence: { outcome: "limited", reason: "budget" } });
+    expect(calls).toBe(2);
+
+    // Home asking to raise it widens spending: it waits for the maintainer's tap.
+    const held = await setBudget(changes, { outputTokens: 1_000 }, { actor: { kind: "home", id: "home" }, reason: "Longer research tasks" });
+    expect(held).toMatchObject({ status: "pending", tier: "approve" });
+
+    // A raise after start never reaches the running task: it still stops at its start budget.
+    entered = false; calls = 0;
+    gate = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([async () => { calls++; entered = true; await gate; return turn(6, "c"); }, () => { calls++; return turn(6, "d"); },
+      () => { calls++; return fauxAssistantMessage("must never be requested"); }]);
+    const raised = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "raised", intent: "Finite work", target: f.cwd });
+    await waitFor(() => entered, "first worker turn");
+    expect((await setBudget(changes, { outputTokens: 1_000 })).status).toBe("applied");
+    release();
+    expect(await raised.completion).toMatchObject({ budget: { outputTokens: 5 }, terminalEvidence: { outcome: "limited", reason: "budget" } });
+    expect(calls).toBe(1);
+  });
+});

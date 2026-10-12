@@ -2352,9 +2352,11 @@ export class RuntimeSlot {
         const finishTurn = created.session.agent.finishTurn;
         created.session.agent.finishTurn = async (turn, signal): Promise<AgentTurnDecision | undefined> => {
           const decision = await finishTurn?.(turn, signal);
-          if (!taskWorker.reportSealed) return decision ?? undefined;
+          // A task that reached its budget ends here the same way (settings-model.md 6.1).
+          const ending = taskWorker.reportSealed || await taskWorker.exceedsBudget(this.canonicalSessionEntries());
+          if (!ending) return decision ?? undefined;
           if (this.queuedMessages.length > 0) {
-            taskWorker.requestStop(() => this.abort("agent", taskWorker.identity.operationId, "task-report"));
+            taskWorker.requestStop(() => this.abort("agent", taskWorker.identity.operationId, taskWorker.reportSealed ? "task-report" : "task-budget"));
           }
           return { action: "end" };
         };
