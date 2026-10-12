@@ -499,6 +499,22 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout: 60) {
             self.switchValue(outsideRow) == macEdit.after && !self.badgeLabels(outsideRow).contains { $0.hasPrefix("Changed outside Tron") }
         }, "Apply again must restore Tron's value and clear the outside mark: \(badgeLabels(outsideRow))")
+
+        // A hand-built screen on the same change path: Extensions' Built-in switch
+        // writes `sources.extensions` at the Mac layer (no legacy document read).
+        for _ in 0..<40 where !app.buttons["Extensions"].isHittable { app.swipeDown() }
+        app.buttons["Extensions"].tap()
+        let toolSearch = app.switches["Tool search"]
+        XCTAssertTrue(toolSearch.waitForExistence(timeout: 30), "Extensions must show the Built-in switches: \(app.debugDescription)")
+        for _ in 0..<10 where !toolSearch.isHittable { app.swipeUp() }
+        let toolSearchBefore = toolSearch.value as? String
+        toolSearch.tap()
+        XCTAssertTrue(waitUntil(timeout: 30) { (toolSearch.value as? String) != toolSearchBefore }, "the Built-in switch did not change")
+        XCTAssertTrue(waitUntil(timeout: 30) {
+            let entries = (try? self.macSettingsDocument(fixture.agentDirectory))?["extensions"] as? [String] ?? []
+            return entries.contains("-builtin:tool-search") == (toolSearchBefore == "1")
+        }, "turning Tool search off must write -builtin:tool-search to the Mac settings.json")
+        keepScreenshot(app, name: "settings-surface-builtin-extension-switch")
         dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
 
@@ -512,6 +528,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
 
     /// A hand edit of the fixture's Mac `settings.json`, as an editor would make
     /// it: write a sibling file, then rename it over the store.
+    private func macSettingsDocument(_ agentDirectory: String?) throws -> [String: Any] {
+        let directory = try XCTUnwrap(agentDirectory)
+        let data = try Data(contentsOf: URL(fileURLWithPath: directory).appendingPathComponent("settings.json"))
+        return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
+
     private func editMacSettingsOutsideTron(_ agentDirectory: String?, _ edit: (inout [String: Any]) -> Void) throws {
         let directory = try XCTUnwrap(agentDirectory, "run through scripts/ios-gateway-e2e-test run-ui to name the fixture's agent directory")
         let store = URL(fileURLWithPath: directory).appendingPathComponent("settings.json")
