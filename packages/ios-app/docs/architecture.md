@@ -1665,17 +1665,23 @@ background/reconnect in the live invocation. An unresolved Disable retains the
 completion control even after authoritative status says Disabled; confirmed
 Disable returns the ring to Manage Session without replacing chat.
 App restart reads current Gateway status, without claiming or replaying an old
-command. Memory model configuration uses the same receipt path, and its picker is a row of the
-model card (#811), not a separate sheet. Manage Home is the main sheet of the Home
-chat, built from Manage Session's own components: `SessionContextUsageCard` (the
-stats card, with the state pill on its header row), `SessionModelConfigurationCard`
-(model, thinking and context window through the ordinary session RPCs, with the
-Memory model row as its footer), a rows container for the Home sub-sheets, and a
-bottom container for pause/resume and disable. The settings-approvals section
-(#758) inserts between the stats card and the model card. Manage Session mounts
-the same section on its usage card with the exact session scope; Home-only
-mounting would hide ordinary chat approval requests and push decisions. The
-hosted decline and push-approve/decline journeys protect that shared mount.
+command. Manage Home resolves the Home chat target once through the Gateway
+settings schema and gives its generic renderer the Chat and Profile write layers;
+row controls, qualifiers, options, badges, source actions, and reset behavior stay
+schema-driven, so new Profile budgets and scopes need no per-key iOS controls.
+The renderer chooses the first declared owned layer the key supports (Chat before
+Profile), never the effective value's inherited source; the Gateway validates the
+exact submitted layer. A mounted renderer accepts selections from its active child
+catalog/editor even while that child suspends the parent's presentation reads.
+The physical memory-model selection/reopen/cancel journey protects this boundary. The Home target retains the context-window row and its
+existing anchored editor/reset semantics. Manage Home uses `SessionContextUsageCard`
+for stats with the state pill on its header row, the generic settings sections for
+model and context keys, its Home sub-sheet rows, and the bottom pause/resume and
+disable container. The settings-approvals section (#758) inserts between the
+stats card and the generic settings renderer. Manage Session mounts the same
+section on its usage card with the exact session scope; Home-only mounting would
+hide ordinary chat approval requests and push decisions. The hosted decline and
+push-approve/decline journeys protect that shared mount.
 Every Home sub-sheet
 opens at medium and drags to large, through the shared managed-sheet chrome.
 Its Memory row, Chapters, Tasks and Permissions read the same single load. Task

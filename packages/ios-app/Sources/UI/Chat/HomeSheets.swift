@@ -146,10 +146,6 @@ struct HomeSheet: View {
 
     var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
     var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
-    var models: [ModelSummary] {
-        model.providerCatalog(for: .global)?.models.filter { $0.available && $0.virtual != true } ?? []
-    }
-
     var body: some View {
         Group {
             if destination.isTaskSurface {
@@ -267,12 +263,7 @@ struct HomeSheet: View {
     }
 
     private func fetch(query: HomeSheetReadQuery, identity: HomeSheetReadIdentity, requestID: UUID) async throws -> HomeSheetContent {
-        let content = try await model.readHomeSheet(query, identity: identity, isCurrent: { self.request.id == requestID && self.active })
-        // The memory model picker needs the catalog; refresh it once when Manage Home reads.
-        if query == .manage, model.providerCatalog(for: .global) == nil {
-            _ = await model.refreshProviders(target: .global)
-        }
-        return content
+        try await model.readHomeSheet(query, identity: identity, isCurrent: { self.request.id == requestID && self.active })
     }
 
     func reload() {

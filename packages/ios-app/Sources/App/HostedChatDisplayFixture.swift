@@ -276,6 +276,7 @@ private actor HostedHomeShellGateway {
     private var browserReads = 0
     private var taskListReads = 0
     private var configuredModel: ModelRef?
+    private var workerThinking = "sameAsHome"
     private var taskStopped = false
     private var taskRedelivered = false
     private var scopeRevoked = false
@@ -456,6 +457,11 @@ private actor HostedHomeShellGateway {
             if delayed { try? await Task.sleep(for: .seconds(6)) }
             designated = true
             return (.object(["homeId": .string("home-fixture"), "sessionId": .string("home-session"), "generation": .number(1)]), nil)
+        case "settings.resolve":
+            if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
+            return (homeSettingsResolution(), nil)
+        case "settings.options":
+            return (homeSettingsOptions(params), nil)
         case "settings.approvals":
             return (.object(["requests": .array(approvals)]), nil)
         case "settings.decide":
@@ -468,8 +474,16 @@ private actor HostedHomeShellGateway {
             controlCount += 1
             return (.object(["requestId": .string(id), "approved": .bool(approved)]), nil)
         case "home.pauseMemory", "home.resumeMemory", "settings.change", "home.disable":
+            if method == "settings.change", params["dryRun"]?.boolValue == true {
+                return (settingsChangePreview(params), nil)
+            }
             controlCount += 1
             let memoryChange = params["changes"]?.arrayValue?.first?.objectValue
+            if method == "settings.change", memoryChange?["key"]?.stringValue == "model.thinking[role=worker]" {
+                guard memoryChange?["layer"]?.stringValue == "profile" else { return taskRefusal() }
+                workerThinking = memoryChange?["value"]?.stringValue ?? "sameAsHome"
+                return (fixtureSettingsChangeResult(key: "model.thinking[role=worker]"), nil)
+            }
             if method == "settings.change", memoryChange?["key"]?.stringValue != "model.ref[role=memory]" { return (nil, nil) }
             if method == "settings.change", sheetState == "configure-refused" {
                 return (nil, .object(["code": .string("conflict"), "message": .string("Memory configuration refused"), "retryable": .bool(false)]))
@@ -481,7 +495,9 @@ private actor HostedHomeShellGateway {
                 configuredModel = try? memoryChange?["value"]?.decode(ModelRef.self)
             }
             if method == "home.disable" { designated = false; phase = "disabled" }
-            let result = JSONValue.object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused)])
+            let result = method == "settings.change"
+                ? fixtureSettingsChangeResult(key: "model.ref[role=memory]")
+                : JSONValue.object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused)])
             if delayed {
                 acceptedControl = result
                 try? await Task.sleep(for: .seconds(6))
@@ -527,6 +543,74 @@ private actor HostedHomeShellGateway {
         case "session.attention.read": return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil)
         default: return (nil, .object(["code": .string("not_found"), "message": .string("Not part of this fixture"), "retryable": .bool(false)]))
         }
+    }
+
+    private func homeSettingsResolution() -> JSONValue {
+        let thinkingLabel = workerThinking == "sameAsHome" ? "Same as Home" : workerThinking.capitalized
+        let choices: [JSONValue] = [
+            ("sameAsHome", "Same as Home"), ("off", "Off"), ("low", "Low"),
+            ("medium", "Medium"), ("high", "High"),
+        ].map { .object(["value": $0.0 == "sameAsHome" ? .object(["sameAs": .string("home")]) : .string($0.0), "label": .string($0.1)]) }
+        let workerThinkingKey: JSONValue = .object([
+            "key": .string("model.thinking[role=worker]"), "qualifiers": .object(["role": .string("worker")]),
+            "group": .string("model"), "subgroup": .string("Workers"),
+            "value": workerThinking == "sameAsHome" ? .object(["sameAs": .string("home")]) : .string(workerThinking),
+            "display": .string(thinkingLabel), "layer": .string(workerThinking == "sameAsHome" ? "builtin" : "profile"),
+            "applied": .bool(true), "badges": .array([.object(["kind": .string("source"), "label": .string(workerThinking == "sameAsHome" ? "Built-in" : "Profile: Home")])]),
+            "layers": .array([.object(["layer": .string("profile")]), .object(["layer": .string("builtin")])]),
+            "presentation": .object(["label": .string("Worker thinking"), "help": .string("Thinking level for Home task workers."),
+                "order": .number(45), "importance": .string("essential"), "control": .string("choice"),
+                "options": .array(choices)]),
+        ])
+        let contextWindowKey: JSONValue = .object([
+            "key": .string("model.contextWindow"), "qualifiers": .object(["model": .string("anthropic/claude-opus-5-5")]),
+            "group": .string("model"), "value": .number(200_000), "display": .string("200,000 tokens"),
+            "layer": .string("builtin"), "applied": .bool(true), "badges": .array([]),
+            "layers": .array([.object(["layer": .string("chat")]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
+            "presentation": .object(["label": .string("Context window"), "help": .string("How many tokens the model receives."),
+                "order": .number(30), "importance": .string("essential"), "control": .string("number"),
+                "optionsSource": .object(["name": .string("catalog.contextWindow"), "dependsOn": .array([])])]),
+        ])
+        let memoryName = configuredModel?.id == "memory-b" ? "Memory Model B" : configuredModel == nil ? "Not set" : "Memory Model A"
+        let memoryKey: JSONValue = .object([
+            "key": .string("model.ref[role=memory]"), "qualifiers": .object(["role": .string("memory")]),
+            "group": .string("model"), "subgroup": .string("Memory"), "value": configuredModel.flatMap { try? JSONValue.encode($0) } ?? .null,
+            "display": .string(memoryName), "layer": .string("profile"), "applied": .bool(true),
+            "badges": .array([.object(["kind": .string("source"), "label": .string("Profile: Home")])]),
+            "layers": .array([.object(["layer": .string("profile")])]),
+            "presentation": .object(["label": .string("Memory model"), "help": .string("Choose a memory model before sending."),
+                "order": .number(50), "importance": .string("advanced"), "control": .string("catalog"),
+                "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])]),
+        ])
+        return .object(["keys": .array([workerThinkingKey, contextWindowKey, memoryKey]), "sections": .array([.object([
+            "id": .string("model"), "title": .string("Model"), "order": .number(10),
+            "summary": .object(["essential": .array([]), "overrides": .array([]), "pending": .array([]), "recent": .array([]), "moreRecent": .number(0)]),
+        ])])])
+    }
+
+    private func homeSettingsOptions(_ params: [String: JSONValue]) -> JSONValue {
+        if params["key"]?.stringValue == "model.ref[role=memory]" {
+            let options: [JSONValue] = sheetState == "empty-models" ? [] : [("memory-a", "Memory Model A"), ("memory-b", "Memory Model B")].map { id, name in
+                .object(["value": .object(["provider": .string("fixture"), "id": .string(id)]), "label": .string(name)])
+            }
+            return .object(["key": params["key"]!, "source": .string("catalog.models"), "dependsOn": .array([]), "options": .array(options)])
+        }
+        return .object(["key": params["key"] ?? .string("model.contextWindow"),
+            "source": .string("catalog.contextWindow"), "dependsOn": .array([]), "options": .array([]),
+            "range": .object(["min": .number(1_024), "max": .number(200_000), "unit": .string("tokens")])])
+    }
+
+    private func settingsChangePreview(_ params: [String: JSONValue]) -> JSONValue {
+        let change = params["changes"]?.arrayValue?.first?.objectValue ?? [:]
+        let value = change["value"] ?? .null
+        if change["key"]?.stringValue == "model.ref[role=memory]", sheetState == "configure-refused" {
+            return .object(["changes": .array([.object(["error": .object([
+                "code": .string("conflict"), "message": .string("Memory configuration refused"),
+            ])])])])
+        }
+        return .object(["dryRun": .bool(true), "status": .string("applied"), "tier": .string("notify"),
+            "changes": .array([.object(["key": change["key"] ?? .string(""), "layer": change["layer"] ?? .string("profile"),
+                "status": .string("applied"), "tier": .string("notify"), "before": .string(workerThinking), "after": value])])])
     }
 
     /// One pending Mac-layer change as `settings.approvals` serves it (gateway approvalProjection).

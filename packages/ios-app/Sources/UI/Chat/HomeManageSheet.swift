@@ -35,52 +35,15 @@ extension HomeSheet {
             )
             // Home-originated and Home-task settings requests belong to Manage Home.
             .settingsApprovals(.home)
-            SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot,
-                                          onError: { mutationFailure = $0.localizedDescription }) {
-                memoryModelRow(status)
-            }
+            SettingsRendererView(
+                target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
+                writeLayer: nil,
+                writeLayers: ["chat", "profile"],
+                embedded: true
+            )
         } else {
             TronLoadingState(label: "Loading Home chat…")
         }
-    }
-
-    /// The memory model is a row of the model card: its picker is the ordinary
-    /// model picker, and a choice is the `home.configureMemory` receipt.
-    func memoryModelRow(_ status: HomeStatusDTO) -> some View {
-        let name = SessionModelSelectionPresentation.modelName(status.memory.model, catalog: models)
-        let spend = status.memory.spentTokens.map { "\($0.formatted(.number.notation(.compactName))) tokens used" }
-        return TronProgressiveSheetLink(
-            accessibilityLabel: "Memory model",
-            identity: "home.\(profileID).memory-model",
-            accent: .tronPurple,
-            detents: .contentFit
-        ) {
-            memoryModelPicker(status)
-        } label: {
-            TronSettingsRow(icon: "cpu", title: "Memory model",
-                            subtitle: status.memory.configured ? spend : "Choose a memory model before sending",
-                            accent: .tronPurple) {
-                TronInlineActionLabel(name)
-            }
-        }
-        .accessibilityValue(name)
-    }
-
-    /// The picker is its own managed child: a choice is admitted under the picker's
-    /// surface, so it stays valid while this sheet is covered by the picker.
-    func memoryModelPicker(_ status: HomeStatusDTO) -> some View {
-        HomeMemoryModelPicker(profileID: profileID, current: status.memory.model, models: models,
-                              availability: modelSelectionAvailability) {
-            refreshAfterMutation()
-        }
-    }
-
-    var modelSelectionAvailability: ModelSelectionAvailability {
-        if model.homeMutations.ownsUnresolvedCommand(profileID: profileID) { return .blocked("Check the pending Home change first") }
-        guard !model.homeMutations.isRunning(profileID: profileID),
-              case .loaded(let read, .manage(_)) = owner.state,
-              read.requestID == request.id, read.identity == identity else { return .applying }
-        return .ready
     }
 
     /// The Home sub-sheets, each a standard chevron row in the rows container. A row's
@@ -199,71 +162,5 @@ extension HomeSheet {
 
     func divider(accent: Color = .tronSessionTeal) -> some View {
         TronSettingsDivider(accent: accent)
-    }
-}
-
-/// The memory model picker: the ordinary ModelPicker over the physical catalog.
-/// A choice is the `home.configureMemory` receipt, admitted under this picker's own
-/// presentation surface; a refused choice is raised here, where it was made.
-struct HomeMemoryModelPicker: View {
-    let profileID: String
-    let current: ModelRef?
-    let models: [ModelSummary]
-    let availability: ModelSelectionAvailability
-    /// Called once the choice is accepted, so the presenting sheet re-reads its status.
-    let onApplied: () -> Void
-    @Environment(AppModel.self) private var model
-    @Environment(\.tronPresentationActivityCoordinator) private var coordinator
-    @Environment(\.tronPresentationSurfaceToken) private var token
-    @State private var failure: String?
-    /// The choice being applied. It is shown at once and released when the status
-    /// converges on it, or when the Gateway refuses it.
-    @State private var pending: ModelRef?
-
-    private var shown: ModelRef? { pending ?? current }
-
-    var body: some View {
-        Group {
-            if models.isEmpty {
-                TronPlaceholderState(title: "No available memory models", detail: "Register a physical model on this Gateway.",
-                                     icon: "cpu")
-            } else {
-                ModelPicker(selection: Binding(get: { shown }, set: { choose($0) }),
-                            models: models, selectionAvailability: availability)
-            }
-        }
-        .onChange(of: current) { _, value in
-            if value == pending { pending = nil }
-        }
-        .tronNavigationTitle("Memory Model", accent: .tronPurple)
-        .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)
-        .controlSize(.regular)
-        .alert("Home change", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
-            Button("OK", role: .cancel) { failure = nil }
-        } message: { Text(failure ?? "") }
-    }
-
-    private func choose(_ selection: ModelRef?) {
-        // Receipt retirement is not projection convergence: the installed status must
-        // own the current intent, so a choice is refused until it is available.
-        guard availability.canSelect, let selection, selection != shown,
-              models.contains(where: { $0.ref == selection }),
-              let identity = model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token),
-              let coordinator,
-              let authority = try? model.homeMutations.authority(profileID: profileID) else { return }
-        pending = selection
-        Task { @MainActor in
-            do {
-                try await model.performHomeControl(.configureMemory(selection), authority: authority)
-                guard coordinator.activity(for: identity.surfaceToken).allowsDataPublication else { return }
-                failure = nil
-                onApplied()
-            } catch {
-                pending = nil
-                guard coordinator.activity(for: identity.surfaceToken).allowsDataPublication,
-                      !(error is CancellationError) else { return }
-                failure = error.localizedDescription
-            }
-        }
     }
 }

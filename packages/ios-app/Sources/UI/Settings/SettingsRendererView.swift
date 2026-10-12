@@ -9,6 +9,10 @@ import TronMobileCore
 struct SettingsRendererView: View {
     let target: JSONValue
     let writeLayer: String?
+    /// Multi-layer owners resolve each key once. The first owned allowed layer
+    /// is the edit target; an inherited value must not redirect a Chat edit to Profile.
+    var writeLayers: [String] = []
+    var embedded = false
     var projectCWD: String? = nil
 
     @Environment(AppModel.self) private var model
@@ -48,26 +52,16 @@ struct SettingsRendererView: View {
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            // These bounded section cards own expanding glass surfaces and editor
-            // state. Keep them mounted while scrolling, like the Settings owner:
-            // lazy eviction can repeatedly invalidate the glass layout graph.
-            VStack(alignment: .leading, spacing: 20) {
-                TronSearchBar(text: $search, prompt: "Search settings")
-                if let resolution {
-                    content(resolution)
-                } else if let failure = loadError {
-                    TronPlaceholderState(title: "Settings Unavailable", detail: failure, icon: "slider.horizontal.3",
-                                         accent: .tronAmber, actionTitle: "Reload", action: reload)
-                        .frame(maxWidth: .infinity)
-                } else {
-                    TronLoadingState(label: "Loading settings…")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        Group {
+            if embedded {
+                rendererContents
+            } else {
+                ScrollView(.vertical, showsIndicators: true) {
+                    rendererContents
                 }
+                .tronScrollEdgeChrome()
             }
-            .padding(20)
         }
-        .tronScrollEdgeChrome()
         .tronConfigurationSliderHost(sliderPresentation)
         .environment(\.configurationSliderSignposts, model.performanceSignposts)
         .confirmationDialog(
@@ -104,6 +98,24 @@ struct SettingsRendererView: View {
             guard presentationActivity.allowsPresentationPublication else { return }
             await load()
         }
+    }
+
+    private var rendererContents: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            TronSearchBar(text: $search, prompt: "Search settings")
+                .accessibilityIdentifier("settings-renderer-search")
+            if let resolution {
+                content(resolution)
+            } else if let failure = loadError {
+                TronPlaceholderState(title: "Settings Unavailable", detail: failure, icon: "slider.horizontal.3",
+                                     accent: .tronAmber, actionTitle: "Reload", action: reload)
+                    .frame(maxWidth: .infinity)
+            } else {
+                TronLoadingState(label: "Loading settings…")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(embedded ? 0 : 20)
     }
 
     @ViewBuilder
@@ -222,7 +234,7 @@ struct SettingsRendererView: View {
             SettingsRendererRow(
                 setting: setting,
                 target: target,
-                editable: writeLayer.map { layer in setting.layers.contains { $0.layer == layer } } == true,
+                editable: writableLayer(for: setting) != nil,
                 dependencyDisplay: Self.dependencyDisplay(setting, in: resolution),
                 error: rowErrors[setting.id],
                 onChange: { value in change(setting, value: value) }
@@ -230,7 +242,7 @@ struct SettingsRendererView: View {
             // Keep the presenting control's identity while its accepted change
             // completes; replacing it with read-only would retire its child sheet.
             .disabled(changingID != nil)
-            if let writeLayer, !setting.layers.contains(where: { $0.layer == writeLayer }),
+            if writableLayer(for: setting) == nil,
                let editor = setting.layers.compactMap({ LayerEditor(rawValue: $0.layer) })
                 .first(where: { $0 != .project || projectCWD != nil }) {
                 Button { layerEditor = editor } label: { TronInlineActionLabel(editor.title) }
@@ -320,12 +332,20 @@ struct SettingsRendererView: View {
         }
     }
 
+    private func writableLayer(for setting: ResolvedSetting) -> String? {
+        let allowed = Set(setting.layers.map(\.layer))
+        let owned = writeLayers.isEmpty ? writeLayer.map { [$0] } ?? [] : writeLayers
+        return owned.first(where: allowed.contains)
+    }
+
     /// A dry run first: the Gateway validates (no client copy of a key's rules),
     /// a refusal shows under the row and nothing is applied, and a change whose
     /// key has confirm text asks before it is made (doc 7.5).
     private func change(_ setting: ResolvedSetting, value: JSONValue?) {
-        guard let writeLayer, setting.layers.contains(where: { $0.layer == writeLayer }),
-              changingID == nil, presentationActivity.allowsPresentationPublication else { return }
+        // A catalog/editor child sends its accepted selection through this mounted
+        // ancestor. Its covered presentation reads stop; the user's command must not.
+        guard let writeLayer = writableLayer(for: setting),
+              changingID == nil, presentationActivity.allowsDataPublication else { return }
         var object: [String: JSONValue] = [
             "key": .string(setting.key), "layer": .string(writeLayer), "op": .string(value == nil ? "unset" : "set"),
         ]
@@ -348,7 +368,8 @@ struct SettingsRendererView: View {
                 model.presentError(error)
                 return
             }
-            guard identity == model.knowledgePresentationIdentity else { return }
+            guard identity == model.knowledgePresentationIdentity,
+                  presentationActivity.allowsDataPublication else { return }
             if let failure = preview.changes.first?.error {
                 rowErrors[setting.id] = failure.message
                 return
