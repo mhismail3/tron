@@ -19,6 +19,7 @@
     "test:pi-subagents-scripts": "node --test --test-concurrency=1 scripts/check-pi-subagents.integration.test.mjs scripts/build-pi-subagents-closure.integration.test.mjs scripts/fixture-process-owner.integration.test.mjs scripts/update-pi-subagents.integration.test.mjs",
     "update:pi-subagents": "node scripts/update-pi-subagents.mjs",
     "update:pi-sdk": "node scripts/update-pi-sdk.mjs",
+    "reproduce:pi-coding-agent": "node scripts/build-pi-coding-agent-patch.mjs",
     "test:pi-sdk-rollback": "node scripts/check-pi-sdk-rollback.mjs",
     "test:sdk-behavior-trace": "vitest run src/sessions/sdk-behavior-trace.integration.test.ts",
     "update:sdk-behavior-trace": "TRON_UPDATE_SDK_BEHAVIOR_TRACE=1 vitest run src/sessions/sdk-behavior-trace.integration.test.ts",
@@ -35,7 +36,7 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.0.4",
     "@earendil-works/pi-ai": "1.0.4",
-    "@earendil-works/pi-coding-agent": "1.0.4",
+    "@earendil-works/pi-coding-agent": "file:third_party/pi-coding-agent/pi-coding-agent-1.0.4-tron.1.tgz",
     "@earendil-works/pi-tui": "1.0.4",
     "node-pty": "1.1.0",
     "proper-lockfile": "4.1.2",

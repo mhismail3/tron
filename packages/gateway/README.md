@@ -307,6 +307,39 @@ delta fails and restores. Do not submit independent
 Pi package updates, hand-edit lockfiles, run Gateway deployment/lifecycle
 commands, or promote/restart a Gateway as part of this process.
 
+### Tron-patched `pi-coding-agent`
+
+The Gateway needs the SDK's `projectDir` option (the Project layer is the
+worktree root's `.pi/`, settings-model decision 31), which no published
+release has. Until one does, `pi-coding-agent` comes from a Tron-built tarball
+instead of the registry, at the same version as the rest of the family.
+`pi-coding-agent-patch.json` is its only owner. It records the upstream tag and
+commit, the published tarball's integrity, the upstream proposal commit the patch
+backports, the patch's SHA-256, the published `pi-ai` model data that release
+bundled, the Node/npm toolchain, and the built tarball's SHA-512, under
+`third_party/pi-coding-agent/` with the upstream MIT `LICENSE`. `package.json`
+names the tarball as `file:third_party/pi-coding-agent/<file>.tgz`, so
+`package-lock.json` binds its bytes with npm's own integrity and a clean `npm ci`
+needs no other input. `npm run check:pi-sdk` accepts exactly that declaration:
+the direct dependency, the lock root and lock entry must name the declared
+tarball and integrity, and the tarball, patch and license must match; without the
+declaration a `file:` dependency fails as before. Packaging stages the
+declaration and tarball before `npm ci` in the app payload. The tarball's
+package version stays the release version, so Pi's own version checks are
+unchanged; the lockfile `resolved` value and the declaration name the patch.
+
+`npm run reproduce:pi-coding-agent` rebuilds the tarball from a fresh fetch of
+the tag, `git apply` of the patch, `npm ci` and `npm run build:offline` with the
+declared toolchain, and fails unless its SHA-512 equals the committed one
+(`--upstream <path>` uses a local clone; `--write` replaces the tarball and its
+integrity after a deliberate patch change, then refresh the lock with
+`npm install`). The unpatched tag builds the published files byte for byte, so
+the tarball differs from the registry release only in the patched modules, their
+declarations and maps, the bundled CLI chunks and two docs pages.
+`npm run update:pi-sdk` refuses while the declaration exists: rebuild it for the
+target release, or delete it and `third_party/pi-coding-agent/` once a release
+ships `projectDir` (its `removeWhen`).
+
 ### Tron-owned `pi-subagents` build
 
 The delegated provider is distributed separately from the Gateway's Pi SDK. Its

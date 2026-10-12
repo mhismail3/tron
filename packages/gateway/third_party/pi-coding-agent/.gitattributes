@@ -1,0 +1,3 @@
+# A patch keeps the context lines of the upstream files it applies to.
+*.patch -whitespace
+*.tgz binary
