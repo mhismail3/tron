@@ -199,7 +199,8 @@ A chat that claims the Home status manages Home from the composer's context ring
 Home** sheet, #725) replaces the ordinary Manage Session sheet, whose
 compaction/tool/fork/resource controls are refused for Home, and opens at the
 medium detent with drag to large, like Manage Session (#799); its child Home
-sheets open full height. The gear opens Settings in every chat, Home included
+sheets also open at the medium detent and drag to large (#807,
+`testManageHomeSubSheetsOpenAtMedium`). The gear opens Settings in every chat, Home included
 (#799). Every other chat keeps Manage Session on the ring, and the ring's
 accessibility label names the sheet it opens. The sheet presents one `home.status` read as sections — state, chat
 model and context window, Home context, memory (settings, browser, pause/resume),

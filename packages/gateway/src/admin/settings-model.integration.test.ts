@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
@@ -135,6 +136,37 @@ function piEffective(manager: SettingsManager, model: { provider: string; id: st
 }
 
 describe("settings.resolve", () => {
+  it("declares no Project or Chat layer for a key the pinned pi reads only from the agent directory", async () => {
+    // The pinned pi's own settings reference marks its agent-directory-only keys;
+    // a pi upgrade that adds or moves one fails here rather than drifting silently.
+    const reference = await readFile(join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "..", "docs", "settings.md"), "utf8");
+    const agentDirOnly = reference.split("\n").flatMap(line => {
+      const match = /^\| `([^`]+)` \|/u.exec(line);
+      return match && /Can only be set in agent-directory settings|Global setting only/u.test(line) ? [match[1]!] : [];
+    });
+    expect(agentDirOnly).toEqual(expect.arrayContaining(["cacheWarming", "defaultProjectTrust", "httpProxy"]));
+    // pi honours that: a trusted project's values for these keys are ignored.
+    const root = await mkdtemp(join(tmpdir(), "tron-settings-agent-dir-only-"));
+    try {
+      const agentDir = join(root, "agent");
+      const project = join(root, "project");
+      await mkdir(agentDir, { recursive: true });
+      await mkdir(join(project, ".pi"), { recursive: true });
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({ cacheWarming: "off", defaultProjectTrust: "never", httpProxy: "http://mac.invalid" }));
+      await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({ cacheWarming: "idle", defaultProjectTrust: "always", httpProxy: "http://project.invalid" }));
+      const pi = SettingsManager.create(project, agentDir, { projectTrusted: true });
+      expect([pi.getCacheWarmingMode(), pi.getDefaultProjectTrust(), pi.getGlobalSettings().httpProxy]).toEqual(["off", "never", "http://mac.invalid"]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+    // Every schema binding that a Project or Chat layer writes to a pi path.
+    const violations = KEYS.flatMap(key => (["project", "chat"] as const).flatMap(layer => {
+      const binding = key.layers[layer];
+      const paths = binding?.store === "pi" ? [binding.path, ...(binding.qualified ? [binding.qualified] : [])]
+        : binding?.store === "chat-settings" ? [binding.path] : [];
+      return paths.map(path => path.join(".")).filter(path => agentDirOnly.some(only => path === only || path.startsWith(`${only}.`)))
+        .map(path => `${key.id} declares ${layer} at ${path}`);
+    }));
+    expect(violations).toEqual([]);
+  });
   it("changes bounded Home profile fields through the canonical change path and reads them from profile.json", async () => {
     const f = await fixture();
     const target = { kind: "home" };
@@ -320,6 +352,13 @@ describe("settings renderer contract", () => {
       control: "number", importance: "essential", label: "Retries", range: { min: 0, max: 20, unit: "retries" },
     });
     expect(presentedRow(everything, "run.retry.maxRetries").presentation.note).toBeUndefined();
+    // One meaning per name (#760, doc 7.9 D2/D3): no two served keys share a label,
+    // so "Thinking", "Worker thinking" and "Summary thinking", and "Trust for this
+    // project" and the default trust policy, stay distinct controls.
+    const labelOwners = new Map<string, Set<string>>();
+    for (const row of everything.keys) labelOwners.set(row.presentation.label, (labelOwners.get(row.presentation.label) ?? new Set()).add(row.key));
+    expect([...labelOwners].filter(([, owners]) => owners.size > 1)).toEqual([]);
+    expect([...labelOwners.keys()].filter(label => /thinking|trust/iu.test(label)).sort().length).toBeGreaterThanOrEqual(4);
 
     // The new iPhone primitives persist through the same real change path. A
     // secret is writable but never comes back as an editable/readable value.

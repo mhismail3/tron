@@ -121,6 +121,23 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "low" }]);
   });
 
+  it("starts an explicit model that lacks Home's thinking at the closest supported level, and the brief says so (Q23)", async () => {
+    const f = await fixture();
+    const home = await f.registry.acquire(f.home.sessionId);
+    await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
+    await home.setThinking("high");
+    // Explicit model only: thinking stays same as Home (high), which this model cannot do.
+    const { observed, refusals } = await delegateThroughHome(f, { taskId: "explicit-clamp", intent: "Finite work", target: f.cwd,
+      model: { provider: f.model.provider, id: f.model.id }, reason: "A lookup needs no reasoning" });
+    expect(refusals).toEqual([]);
+    await taskIsTerminal(f, "explicit-clamp");
+    expect(observed).toEqual([{ model: f.model.id, reasoning: undefined }]);
+    const task = await f.registry.homeOwner().taskStatus("explicit-clamp");
+    expect(task.intent.text).toContain("Worker choice: model");
+    expect(task.intent.text).toContain("high clamped to off");
+    expect(readChatFixedSettings(await f.registry.readTaskEvidence(task.sessionId!))["model.thinking[role=chat]"]).toMatchObject({ from: "delegate", value: "off" });
+  });
+
   it("clamps profile thinking to the selected model and records an unavailable profile model fallback", async () => {
     const f = await fixture();
     const settings = installSettings(f);
