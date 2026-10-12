@@ -14,8 +14,8 @@ import { admitHomeMemoryPage, admitHomeMemoryEvidence } from "../home/home-memor
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import type { ChatAppliers, ChangeOutcome, ChangeRequest, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import type { ApprovalRequest } from "../admin/settings-approvals.js";
-import type { Actor } from "../admin/settings-record.js";
-import { schemaKey } from "../admin/settings-schema.js";
+import type { Actor, ChangeEntry } from "../admin/settings-record.js";
+import { SECTIONS, schemaKey } from "../admin/settings-schema.js";
 import type { SettingsTarget } from "../admin/settings-resolver.js";
 import { RECENT_SCAN_LIMIT, actorLabel, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
 import { QUALIFIER_NAMES, type Qualifiers } from "../admin/settings-types.js";
@@ -2002,11 +2002,20 @@ export class GatewayService {
         const keys = params.keys === undefined ? undefined : arrayOfStrings(params.keys, "keys", 200);
         const controls = params.renderer === undefined ? undefined : settingsRendererControls(params.renderer);
         const resolution = await this.dependencies.settingsModel.resolve(target, await this.readSettingsSession(client, target), keys);
-        const history = await this.dependencies.settingsChanges.history({ limit: RECENT_SCAN_LIMIT });
+        // History pages stop at a segment boundary. Preserve the presentation's
+        // bounded recent-entry horizon even just after a new segment is opened.
+        const history: ChangeEntry[] = [];
+        let cursor: string | undefined;
+        for (let page = 0; page < RECENT_SCAN_LIMIT; page += 1) {
+          const recent = await this.dependencies.settingsChanges.history({ limit: RECENT_SCAN_LIMIT - history.length, ...(cursor ? { cursor } : {}) });
+          history.push(...recent.entries);
+          cursor = recent.nextCursor;
+          if (!cursor || history.length >= RECENT_SCAN_LIMIT) break;
+        }
         return safeJson(presentResolution(resolution, {
           ...(controls ? { controls } : {}), ...(keys ? { keys } : {}),
           approvals: await this.dependencies.settingsChanges.pendingApprovals(),
-          history: history.entries,
+          history,
         }));
       }
       case "settings.options": {
@@ -2077,8 +2086,11 @@ export class GatewayService {
           }));
         });
       case "settings.history": {
-        rejectUnknownFields(params, ["cursor", "limit", "key", "status"], method);
+        rejectUnknownFields(params, ["cursor", "limit", "key", "status", "actor", "layer", "section"], method);
         return safeJson(await this.dependencies.settingsChanges.history({
+          ...(params.actor === undefined ? {} : { actor: oneOf(params.actor, "actor", ["agents", "ui", "home", "worker", "agent", "outside"] as const) }),
+          ...(params.layer === undefined ? {} : { layer: oneOf(params.layer, "layer", ["chat", "profile", "project", "mac"] as const) }),
+          ...(params.section === undefined ? {} : { section: oneOf(params.section, "section", SECTIONS.map(section => section.id)) }),
           ...(params.cursor === undefined ? {} : { cursor: string(params.cursor, "cursor", { max: 40 }) }),
           ...(params.limit === undefined ? {} : { limit: integer(params.limit, "limit", 1, 200) }),
           ...(params.key === undefined ? {} : { key: string(params.key, "key", { max: 200 }) }),

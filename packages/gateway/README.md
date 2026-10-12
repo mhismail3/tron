@@ -818,8 +818,14 @@ compute a value. Each entry holds the actor, target, layer, key, qualifiers,
 `before` and `after` (only `changed` for a redacted key), the reason, the tier and
 how it was reached, the status (`applied` or `failed` with its reason), the git
 result of a Project write, and `undoOf` or `applyAgainOf`. `settings.history {
-cursor?, limit?, key?, status? }` pages it newest first, one bounded segment at a
-time. `settings.undo { commandId, changeId, fence? }` writes `before` back as an
+cursor?, limit?, key?, status?, actor?, layer?, section? }` pages it newest first,
+scanning at most one bounded segment per request. Filters intersect; `actor` is
+an actor kind or `agents` (all non-iPhone actors, including outside changes).
+Omitting it is Everything. `layer` is a writable layer and `section` is a declared
+section ID. An empty page with `nextCursor` is not the end: continue until the
+cursor is absent. Settings summaries traverse this same API up to their fixed
+200-entry recent horizon, so a segment rollover does not hide recent changes.
+`settings.undo { commandId, changeId, fence? }` writes `before` back as an
 ordinary change, refused with the current value when the store no longer holds
 `after`, and refused for a redacted change, which has no `before`.
 

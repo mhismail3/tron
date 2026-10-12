@@ -10,6 +10,7 @@ import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "./settings-record.js";
 import { SettingsApprovals } from "./settings-approvals.js";
 import type { Resolution } from "./settings-resolver.js";
+import type { PresentedResolution } from "./settings-presentation.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
@@ -93,7 +94,7 @@ async function fixture(options: { segmentEntries?: number } = {}) {
     return entries;
   };
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
-  return { root, tronHome, agentDir, trust, registry, service, record, broadcasts, change, history, macDocument, faux };
+  return { root, tronHome, agentDir, trust, registry, service, record, settingsChanges, broadcasts, change, history, macDocument, faux };
 }
 
 async function gitProject(root: string, name: string) {
@@ -266,6 +267,56 @@ describe("settings.change", () => {
     expect((await f.history({ key: "permissions.projectTrust" }))[0]).toMatchObject({ after: true, tier: "approve", tierBasis: { direction: "widen" } });
     await f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: granted.changes[0]!.changeId });
     expect((await f.trust.inspect(project)).savedDecision).toBeNull();
+  });
+
+  it("filters paged Changes by actor, layer and section without dropping older matches", async () => {
+    const f = await fixture({ segmentEntries: 2 });
+    const homeRun = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 2 }], {
+      actor: { kind: "home", id: "home" }, reason: "Reduce retries",
+    });
+    await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 3 }]);
+    const worker = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.transport", layer: "mac", op: "set", value: "sse" }], {
+      actor: { kind: "worker", id: "worker", taskId: "task" }, reason: "Use streaming HTTP",
+    });
+    const profile = await f.settingsChanges.change({ kind: "home" }, [{ key: "model.thinking[role=worker]", layer: "profile", op: "set", value: "low" }], {
+      actor: { kind: "home", id: "home" }, reason: "Use less thinking for workers",
+    });
+    const ids = async (filter: Record<string, unknown>) => (await f.history(filter)).map(entry => entry.changeId);
+    expect(await ids({ actor: "agents", section: "run" })).toEqual([worker.changes[0]!.changeId, homeRun.changes[0]!.changeId]);
+    expect(await ids({ actor: "home", layer: "profile", section: "model" })).toEqual([profile.changes[0]!.changeId]);
+    expect(await ids({ actor: "home", layer: "mac", key: "run.retry.maxRetries", status: "applied" })).toEqual([homeRun.changes[0]!.changeId]);
+    expect(await ids({ actor: "ui" })).toHaveLength(1);
+    expect(await ids({})).toHaveLength(4);
+    for (const filter of [{ actor: "unknown" }, { layer: "builtin" }, { section: "unknown" }]) {
+      await expect(f.service.invoke(client(), "settings.history", filter)).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    transcript.push({ case: "Changes filters", detail: await f.history({ actor: "agents" }) });
+  });
+
+  it("bounds a sparse filtered history page to one segment and resumes without losing older matches", async () => {
+    const f = await fixture({ segmentEntries: 2 });
+    const first = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.transport", layer: "mac", op: "set", value: "sse" }], {
+      actor: { kind: "home", id: "home" }, reason: "Prefer streaming HTTP",
+    });
+    for (let value = 0; value < 5; value += 1) {
+      await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value }]);
+    }
+    const query = { key: "run.transport", limit: 50 };
+    const newest = await f.service.invoke(client(), "settings.history", query) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
+    // Sparse filters must not scan the forever-growing record in one request.
+    expect(newest.entries).toEqual([]);
+    expect(newest.nextCursor).toBeDefined();
+    const middle = await f.service.invoke(client(), "settings.history", { ...query, cursor: newest.nextCursor }) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
+    expect(middle.entries).toEqual([]);
+    expect(middle.nextCursor).toBeDefined();
+    const oldest = await f.service.invoke(client(), "settings.history", { ...query, cursor: middle.nextCursor }) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
+    expect(oldest.entries.map(entry => entry.changeId)).toEqual([first.changes[0]!.changeId]);
+    expect(oldest.nextCursor).toBeUndefined();
+    expect((await f.history(query)).map(entry => entry.changeId)).toEqual([first.changes[0]!.changeId]);
+    const resolved = await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" } }) as unknown as PresentedResolution;
+    const recent = resolved.sections.find(section => section.id === "run")!.summary.recent;
+    expect(recent.map(entry => entry.changeId)).toEqual([first.changes[0]!.changeId]);
+    transcript.push({ case: "sparse filtered paging", detail: { newest, middle, oldest, recent } });
   });
 
   it("keeps every entry forever in bounded segments and pages through them", async () => {

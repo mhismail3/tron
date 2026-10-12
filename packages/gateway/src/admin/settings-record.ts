@@ -146,24 +146,21 @@ export class SettingsChangeRecord {
   async page(input: { cursor?: string; limit?: number; filter?: (entry: ChangeEntry) => boolean }): Promise<{ entries: ChangeEntry[]; nextCursor?: string }> {
     const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
     const index = await this.index();
-    let [segmentIndex, remaining] = input.cursor ? parseCursor(input.cursor) : [index.segments.length - 1, Number.POSITIVE_INFINITY];
+    const [segmentIndex, remaining] = input.cursor ? parseCursor(input.cursor) : [index.segments.length - 1, Number.POSITIVE_INFINITY];
     const entries: ChangeEntry[] = [];
-    // One page reads at most the segments needed to fill it, each bounded.
-    while (segmentIndex >= 0 && entries.length < limit) {
-      const segment = index.segments[segmentIndex];
-      if (!segment) break;
-      const lines = await this.segmentLines(segment.name);
-      let end = Math.min(remaining, lines.length);
-      while (end > 0 && entries.length < limit) {
-        end -= 1;
-        const entry = lines[end]!;
-        if (!input.filter || input.filter(entry)) entries.push(entry);
-      }
-      if (end > 0) return { entries, nextCursor: `${segmentIndex}:${end}` };
-      segmentIndex -= 1;
-      remaining = Number.POSITIVE_INFINITY;
+    const segment = index.segments[segmentIndex];
+    if (!segment) return { entries };
+    // Bound scanned work, not just returned matches: a sparse filter over the
+    // permanent audit must yield an empty page + cursor instead of a full scan.
+    const lines = await this.segmentLines(segment.name);
+    let end = Math.min(remaining, lines.length);
+    while (end > 0 && entries.length < limit) {
+      end -= 1;
+      const entry = lines[end]!;
+      if (!input.filter || input.filter(entry)) entries.push(entry);
     }
-    return { entries, ...(segmentIndex >= 0 ? { nextCursor: `${segmentIndex}:${Number.MAX_SAFE_INTEGER}` } : {}) };
+    if (end > 0) return { entries, nextCursor: `${segmentIndex}:${end}` };
+    return { entries, ...(segmentIndex > 0 ? { nextCursor: `${segmentIndex - 1}:${Number.MAX_SAFE_INTEGER}` } : {}) };
   }
 
   /** An entry and every later fact that refers to it, oldest first. */

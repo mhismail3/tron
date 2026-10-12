@@ -722,7 +722,11 @@ above leave open:
 
 - **Record layout.** `<tronHome>/gateway/settings/changes/` holds append-only
   segments of at most 500 entries, named in `index.json`. A page of
-  `settings.history` reads one segment at a time.
+  `settings.history` reads at most one segment per request, even for sparse
+  filters. A page may be empty and still carry `nextCursor`; consumers continue
+  until that cursor is absent, not until an empty page. The real Gateway journey
+  in `settings-change.integration.test.ts` traverses empty filtered pages to an
+  older matching change without skipping or duplicating it.
 - **One target per request.** A request's changes share a target; a target with
   several layers (a project has Project and Mac) gives the cross-store order and
   rollback. Changes serialize per target, so distinct chats change concurrently.

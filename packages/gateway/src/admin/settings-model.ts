@@ -11,7 +11,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { updateJsonLocked } from "../util/json.js";
 import { writeProjectSettings } from "./project-settings-writer.js";
 import type { TrustService } from "./trust-service.js";
-import type { Actor, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
+import type { Actor, ActorKind, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
 import { readBinding, resolveSettings, targetLayers, type ChatStore, type FixedSetting, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
 import { KEYS, builtinValue, floorFor, floorInstances, hasRuntimeRequestApplier, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
@@ -548,10 +548,15 @@ export class SettingsChangePath {
     }], { ...context, undoOf: changeId, ...(session ? { session } : {}) });
   }
 
-  history(input: { cursor?: string; limit?: number; key?: string; status?: string }) {
+  history(input: { cursor?: string; limit?: number; key?: string; status?: string; actor?: ActorKind | "agents"; layer?: Exclude<LayerId, "builtin">; section?: string }) {
     return this.record.page({
       ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {}),
-      filter: entry => (!input.key || entry.key === input.key) && (!input.status || entry.status === input.status),
+      filter: entry => (!input.key || entry.key === input.key) && (!input.status || entry.status === input.status)
+        && (!input.actor || (input.actor === "agents" ? entry.actor.kind !== "ui" : entry.actor.kind === input.actor))
+        && (!input.layer || entry.layer === input.layer)
+        // The permanent record may name a key this Gateway no longer declares.
+        // It stays in Everything/key history, but has no current section.
+        && (!input.section || KEYS.find(key => key.id === entry.key)?.group === input.section),
     });
   }
 
