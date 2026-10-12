@@ -172,6 +172,35 @@ final class SettingsTrustCoordinator {
         return try value.decode(SettingsApprovalsResponse.self).requests
     }
 
+    /// One bounded audit page. Empty pages may still carry a cursor; callers
+    /// advance until it is absent rather than treating an empty page as EOF.
+    func settingsHistory(cursor: String?, actor: String?, layer: String?, section: String?, key: String?, status: String?) async throws -> SettingsChangeHistoryPage {
+        let admittedProfileGeneration = profileGeneration
+        var params: [String: JSONValue] = ["limit": .number(100)]
+        if let cursor { params["cursor"] = .string(cursor) }
+        if let actor { params["actor"] = .string(actor) }
+        if let layer { params["layer"] = .string(layer) }
+        if let section { params["section"] = .string(section) }
+        if let key { params["key"] = .string(key) }
+        if let status { params["status"] = .string(status) }
+        let value = try await client.requestValue("settings.history", JSONValue.object(params))
+        try requireProfile(admittedProfileGeneration)
+        return try value.decode(SettingsChangeHistoryPage.self)
+    }
+
+    /// Undo is an accepted domain mutation and must use the shared receipt owner.
+    func undoSettingsChange(_ changeID: String, fence: JSONValue?) async throws {
+        let admittedProfileGeneration = profileGeneration
+        let commandID = uuidSource.next().uuidString
+        var fields: [String: JSONValue] = ["commandId": .string(commandID), "changeId": .string(changeID)]
+        if let fence { fields["fence"] = fence }
+        let params = JSONValue.object(fields)
+        _ = try await mutationExecutor.performValue(method: "settings.undo", commandID: commandID) {
+            try await client.requestValue("settings.undo", params)
+        }
+        try requireProfile(admittedProfileGeneration)
+    }
+
     /// The maintainer's decision on one pending change, bound to the exact diff
     /// he saw by its digest. A Chat-layer change carries the chat's fence.
     func decideApproval(_ request: SettingsApprovalRequest, approved: Bool, fence: JSONValue?) async throws {

@@ -17,6 +17,7 @@ struct HostedSettingsRendererFixture: View {
     @State private var error: String?
     @State private var applied = 0
     @State private var thinkingOptions = -1
+    @State private var undos = 0
     private let socket = HostedSettingsRendererSocket()
     private let profile: GatewayProfile
 
@@ -40,25 +41,27 @@ struct HostedSettingsRendererFixture: View {
         NavigationStack {
             if ready {
                 Group {
-                    if ProcessInfo.processInfo.arguments.contains("-tron-mac-settings-fixture") {
+                    if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
+                        SettingsChangesView(scope: .all)
+                    } else if ProcessInfo.processInfo.arguments.contains("-tron-mac-settings-fixture") {
                         SettingsView()
                     } else {
                         SettingsRendererView(target: .object(["kind": .string("mac")]), writeLayer: "mac")
                             .tronNavigationTitle("Settings")
                     }
                 }
-                    .safeAreaInset(edge: .bottom) {
-                        HStack {
-                            Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
-                            Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
-                            if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") {
-                                Button("Cover renderer") { covering = true }
-                            }
-                            Text("thinking-options:\(thinkingOptions)").accessibilityIdentifier("fixture.settings-renderer-thinking-options")
+                .safeAreaInset(edge: .bottom) {
+                    HStack {
+                        Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
+                        Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
+                        if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") {
+                            Button("Cover renderer") { covering = true }
                         }
-                        .font(.caption2)
-                        .opacity(0.6)
+                        Text("thinking-options:\(thinkingOptions)").accessibilityIdentifier("fixture.settings-renderer-thinking-options")
+                        Text("undos:\(undos)").accessibilityIdentifier("fixture.settings-changes-undos")
                     }
+                    .font(.caption2).opacity(0.6)
+                }
             } else if let error { Text(error) }
         }
         .tronManagedSheet(isPresented: $covering, identity: "fixture.settings-cover") {
@@ -79,7 +82,7 @@ struct HostedSettingsRendererFixture: View {
         }
         .task {
             while !Task.isCancelled {
-                (applied, thinkingOptions) = await socket.counters()
+                (applied, thinkingOptions, undos) = await socket.counters()
                 heldPreviews = await socket.previewCount()
                 try? await Task.sleep(for: .milliseconds(250))
             }
@@ -110,8 +113,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var paths = ["alpha", "beta"]
     private var applied = 0
     private var thinkingOptions = -1
+    private var undos = 0
 
-    func counters() -> (Int, Int) { (applied, thinkingOptions) }
+    func counters() -> (Int, Int, Int) { (applied, thinkingOptions, undos) }
     func resume() async { }
     func ping() async throws { }
 
@@ -123,6 +127,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         switch method {
         case "settings.resolve": result = resolution()
         case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", query: params["query"]?.stringValue, cursor: params["cursor"]?.stringValue)
+<<<<<<< HEAD
         case "settings.change":
             if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview"),
                params["dryRun"]?.boolValue == true, previewsHeld == 0 {
@@ -130,12 +135,42 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 await withCheckedContinuation { heldPreview = $0 }
             }
             result = try change(params)
+||||||| parent of 6b2a02dfc (feat(ios): add native settings changes feed)
+        case "settings.change": result = try change(params)
+=======
+        case "settings.change": result = try change(params)
+        case "settings.history": result = historyPage(cursor: params["cursor"]?.stringValue, key: params["key"]?.stringValue)
+        case "settings.approvals": result = .object(["requests": .array([])])
+        case "settings.undo":
+            undos += 1
+            result = .object(["status": .string("applied"), "changeId": .string("undo-fixture")])
+>>>>>>> 6b2a02dfc (feat(ios): add native settings changes feed)
         default: result = .object([:])
         }
         try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result]))
     }
 
     private var modelName: String { model == "pro" ? "Fixture Pro" : "Fixture Lite" }
+
+    private func historyPage(cursor: String?, key: String?) -> JSONValue {
+        if key != nil || cursor == "fixture-next" {
+            return .object(["entries": .array([historyEntry()])])
+        }
+        return .object(["entries": .array([]), "nextCursor": .string("fixture-next")])
+    }
+
+    private func historyEntry() -> JSONValue {
+        .object([
+            "changeId": .string("fixture-change"), "at": .string("2026-10-12T12:00:00.000Z"),
+            "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
+            "target": .object(["kind": .string("mac")]), "layer": .string("mac"),
+            "key": .string("run.retry.maxRetries"), "op": .string("set"),
+            "before": .number(4), "after": .number(6), "tier": .string("quiet"), "status": .string("applied"),
+            "presentation": .object(["label": .string("Agent retry count"), "section": .string("run"),
+                "actor": .string("Agent"), "layer": .string("Mac"),
+                "display": .object(["before": .string("4 retries"), "after": .string("6 retries")])]),
+        ])
+    }
 
     private func resolution() -> JSONValue {
         let keys: [JSONValue] = [

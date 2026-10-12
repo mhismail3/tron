@@ -243,6 +243,19 @@ struct SessionContextSheet: View {
                         }
                         SessionContextUsageCard(snapshot: snapshot)
                             .settingsApprovals(.session(sessionID))
+                        TronProgressiveSheetLink(
+                            accessibilityLabel: "Changes",
+                            identity: "manage-session.changes.\(sessionID)",
+                            accent: .tronEmerald,
+                            detents: .fixed([.medium, .large]),
+                            destination: { SettingsChangesView(scope: .session(sessionID, projectCWD: displayedPresentation?.cwd)) }
+                        ) {
+                            TronGlassCard(accent: .tronEmerald) {
+                                manageRow(icon: "clock.arrow.circlepath", title: "Changes",
+                                          subtitle: "This chat's settings changes and approvals", accent: .tronEmerald) {}
+                            }
+                        }
+                        .accessibilityIdentifier("manage-session-changes")
                         modelConfigurationCard(snapshot)
                         SettingsRendererView(
                             target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),

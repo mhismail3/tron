@@ -731,6 +731,18 @@ Hosted journeys: `TronSmokeUITests.testManageHomeSettingsApprovalsApproveAndDecl
 `-session-settings-approvals` fixture flags, each with a request from another scope that must not
 show; the push flags stage the relay's payload through `PushNotificationTap.admit`), and `TronProjectTrustUITests.testPermissionFloorsLowerNeedsConfirmAndRaiseApplies` (the
 `floors` scenario of `HostedProjectTrustFixture`).
+
+`SettingsChangesView` is the native audit-feed owner for Settings, Manage Session and Manage Home.
+It reads one Gateway `settings.history` page at a time (an empty page with a cursor still enables
+continuation), intersects server actor/layer/section/key/status filters with the surface's Home or
+chat lineage, pins current approvals above newest-first history, and records a device-local last-look
+timestamp. Details fetch the selected key's history; undo and approval decisions use the existing
+receipt-backed `SettingsTrustCoordinator` paths. Project/outside/git reconciliation and Apply again
+remain unavailable because the required public SDK capability is missing (#764); the feed does not
+claim those capabilities.
+`TronSmokeUITests.testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt`
+exercises an empty page with a continuation cursor, then the feed/detail/undo journey against
+the hosted socket, including its exact `settings.undo` request.
 The generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is
 `SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
 in `TronPresentation.swift`. Its bounded, expandable section cards stay mounted in

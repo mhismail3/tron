@@ -1765,6 +1765,30 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["settings-approvals-header"].waitForNonExistence(timeout: 5))
     }
 
+    @MainActor
+    func testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
+        app.launch()
+        defer { app.terminate() }
+
+        let more = app.buttons["settings-changes-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10), app.debugDescription)
+        more.tap()
+        let row = app.buttons["settings-change-fixture-change"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "An empty history page with a cursor is not EOF: \(app.debugDescription)")
+        XCTAssertTrue(showsText("6 retries", in: app))
+        row.tap()
+        XCTAssertTrue(showsText("Key history", in: app))
+        let undo = app.buttons["Undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
+        undo.tap()
+        app.buttons["Undo change"].tap()
+        XCTAssertTrue(app.staticTexts["fixture.settings-changes-undos"].waitForExistence(timeout: 5))
+        XCTAssertTrue(showsText("undos:1", in: app), "Undo was issued exactly once through settings.undo")
+    }
+
     /// The generic renderer over a fixture schema (settings-model.md F1, 7.5): a new
     /// section, subgroup, key and badge kind render from served data alone; an
     /// unknown control is read-only; the Gateway refuses an invalid value inline

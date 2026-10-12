@@ -44,6 +44,10 @@ struct SettingsView: View {
                                      icon: "slider.horizontal.2.square", accent: .tronEmerald) {
                             AppLocalBehaviorSettingsView()
                         }
+                        settingsDivider(accent: .tronBlue)
+                        settingsLink("Changes", summary: "Review agent changes and pending approvals", icon: "clock.arrow.circlepath", accent: .tronBlue) {
+                            SettingsChangesView(scope: .all)
+                        }
                     }
                 }
                 .padding(.horizontal, 20)

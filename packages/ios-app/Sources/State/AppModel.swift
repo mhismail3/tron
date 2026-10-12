@@ -4378,6 +4378,27 @@ final class AppModel {
         try await settingsTrust.pendingApprovals().filter(scope.includes)
     }
 
+    func allSettingsApprovals() async throws -> [SettingsApprovalRequest] {
+        try await settingsTrust.pendingApprovals()
+    }
+
+    func settingsHistory(cursor: String?, actor: String?, layer: String?, section: String?, key: String?, status: String?) async throws -> SettingsChangeHistoryPage {
+        try await settingsTrust.settingsHistory(cursor: cursor, actor: actor, layer: layer, section: section, key: key, status: status)
+    }
+
+    func undoSettingsChange(_ entry: SettingsChangeHistoryEntry) async throws {
+        var fence: JSONValue?
+        if entry.target.kind == "session", let sessionID = entry.target.sessionId,
+           let snapshot = authoritativeSnapshot(for: sessionID) {
+            fence = .object([
+                "runtimeGeneration": .string(snapshot.runtimeGeneration),
+                "model": try snapshot.model.map(JSONValue.encode) ?? .null,
+                "revision": .number(Double(snapshot.revision)),
+            ])
+        }
+        try await settingsTrust.undoSettingsChange(entry.changeId, fence: fence)
+    }
+
     /// Approves or declines one pending change. A change to a chat's own Chat
     /// layer applies under the runtime this app last read for that chat, as the
     /// chat's own controls do; without a read the Gateway refuses it.

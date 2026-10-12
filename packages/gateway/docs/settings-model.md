@@ -1148,7 +1148,12 @@ show Hidden → Changed and are removed from the response's raw value fields.
   staged and uncommitted project edits). The record is kept forever and paged.
 - **Scopes**: the same component appears in Settings (everything), Manage
   Session (this chat and its project), and Manage Home (Home and the workers it
-  started).
+  started). iOS implements these entry points in `SettingsChangesView`; local
+  lineage filtering is applied to each bounded `settings.history` page, without
+  changing the Gateway's canonical audit or pagination contract. The native
+  surface currently offers Undo and pending approval decisions; Project/outside/git
+  reconciliation and Apply again are not shown until the required public SDK capability
+  is available (#764).
 
 ### 7.5 The rendering contract
 

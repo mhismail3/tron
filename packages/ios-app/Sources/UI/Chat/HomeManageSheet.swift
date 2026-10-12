@@ -35,6 +35,17 @@ extension HomeSheet {
             )
             // Home-originated and Home-task settings requests belong to Manage Home.
             .settingsApprovals(.home)
+            TronProgressiveSheetLink(
+                accessibilityLabel: "Changes",
+                identity: "manage-home.changes",
+                accent: .tronSessionTeal,
+                detents: .fixed([.medium, .large]),
+                destination: { SettingsChangesView(scope: .home) }
+            ) {
+                TronSettingsRow(icon: "clock.arrow.circlepath", title: "Changes",
+                                subtitle: "Home and its workers' settings changes", accent: .tronSessionTeal)
+            }
+            .accessibilityIdentifier("home-manage-changes")
             SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot,
                                           onError: { error in
                 // A model choice belongs to the Home chat. Keep its notice above Models.
