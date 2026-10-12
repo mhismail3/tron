@@ -342,7 +342,9 @@ describe("settings.change", () => {
     expect(warned.changes[0]!.git!.warning).toContain("unstaged edits");
     expect(git(busy, "diff", "--cached", "--name-only").trim().split("\n").sort()).toEqual([".pi/settings.json", "README.md"]);
 
-    // An ignored .pi: written, not staged, with the reason.
+    const localBadge = async (cwd: string) => ((await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd }, keys: ["run.transport"] })) as unknown as
+      { keys: Array<{ badges: Array<{ label: string; detail?: string }> }> }).keys[0]!.badges.find(badge => badge.label === "Local only");
+    // An ignored .pi: written, not staged, with the reason; its row says Local only.
     const ignored = await gitProject(f.root, "ignored");
     await f.trust.set(ignored, true);
     git(ignored, "rm", "-q", "--cached", ".pi/settings.json");
@@ -352,6 +354,7 @@ describe("settings.change", () => {
     const local = await f.change({ kind: "project", cwd: ignored }, transport("websocket"));
     expect(local.changes[0]!.git).toMatchObject({ staged: false, reason: ".pi is ignored by git" });
     expect(JSON.parse(await readFile(join(ignored, ".pi", "settings.json"), "utf8"))).toEqual({ transport: "websocket" });
+    expect(await localBadge(ignored)).toMatchObject({ detail: "Project: .pi is ignored by git" });
 
     // No repository: written, not staged.
     const plain = join(f.root, "plain");
@@ -360,6 +363,7 @@ describe("settings.change", () => {
     const unstaged = await f.change({ kind: "project", cwd: plain }, transport("sse"));
     expect(unstaged.changes[0]!.git).toMatchObject({ staged: false, reason: "not in a git repository" });
     expect(JSON.parse(await readFile(join(plain, ".pi", "settings.json"), "utf8"))).toEqual({ transport: "sse" });
+    expect(await localBadge(plain)).toMatchObject({ detail: "Project: not in a git repository" });
 
     // An untrusted project is never written.
     const untrusted = await gitProject(f.root, "untrusted");
@@ -373,6 +377,7 @@ describe("settings.change", () => {
     await writeFile(join(conflictedRepo, ".pi", "settings.json"), "<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> other\n");
     await expect(f.change({ kind: "project", cwd: conflictedRepo }, transport("auto"))).rejects.toMatchObject({ code: "conflict" });
     expect(await readFile(join(conflictedRepo, ".pi", "settings.json"), "utf8")).toContain("<<<<<<<");
+    expect((await f.history({ status: "failed" })).find(entry => entry.target.kind === "project" && entry.target.cwd.endsWith("conflicted-repo"))).toMatchObject({ key: "run.transport", status: "failed" });
     transcript.push({ case: "project writes", detail: await f.history({ key: "run.transport" }) });
   });
 
