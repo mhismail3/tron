@@ -983,7 +983,11 @@ holding the sealed task open. The settlement fact is the worker's canonical cust
 `tron-home-task-subagents` with `{ receiptId: "subagents:<operationId>", operationId,
 stoppedAtEnd }`. It is written only when the task launched async runs, so its absence
 proves zero Gateway stops. Its value is `null` unless every stop was accepted and every
-run was joined.
+run was joined. Stop-target enumeration takes one snapshot of the activity rows before
+awaiting workflow-child status. Artifact refresh may reorder the live activity map but
+cannot make the same row receive or count a second stop. The managed-provider journey
+in `home-task-subagents.e2e.test.ts` forces a real artifact refresh during that read and
+checks the canonical one-child stop count and terminal provider state.
 
 **Completion notices.** The provider writes an async run's completion as a `subagent-notify`
 custom message after the run is terminal, and the Gateway records a
