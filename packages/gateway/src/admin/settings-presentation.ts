@@ -1,4 +1,4 @@
-import { KEYS, SECTIONS, schemaKey, type KeyDeclaration, type SectionDeclaration } from "./settings-schema.js";
+import { KEYS, SECTIONS, recordSubject, schemaKey, type KeyDeclaration, type SectionDeclaration } from "./settings-schema.js";
 import type { ResolvedKey, Resolution, SettingsTarget } from "./settings-resolver.js";
 import type { Actor, ChangeEntry } from "./settings-record.js";
 import type { ApprovalRequest } from "./settings-approvals.js";
@@ -127,16 +127,22 @@ function declaredKey(id: string): KeyDeclaration | undefined {
  * declared formatter. Neither labels nor formatted values are written to audit. */
 export function presentHistoryEntry(entry: ChangeEntry) {
   const key = declaredKey(entry.key);
+  const subject = key ? undefined : recordSubject(entry.key);
   const redacted = entry.redacted || key?.redacted;
   const { before, after, fixedAt: _fixedAt, ...redactedEntry } = entry;
   const format = (value: unknown): string => formatStoredSetting(key?.type, value);
+  // A record subject's definition is never recorded: show what happened to it, by name.
+  const name = subject ? entry.qualifiers?.[subject.qualifier] : undefined;
+  const display = subject ? entry.op === "unset" ? { before: "Configured", after: "Removed" }
+    : entry.added ? { before: "Not configured", after: "Added" } : { before: "Configured", after: "Changed" }
+    : redacted ? { before: "Hidden", after: "Changed" } : { before: format(before), after: format(after) };
   return {
     ...(redacted ? { ...redactedEntry, changed: true as const, redacted: true as const } : entry),
     presentation: {
-      label: key?.label ?? entry.key,
-      ...(key ? { section: key.group } : {}),
+      label: key?.label ?? (subject ? `${subject.label}${name ? ` ${name}` : ""}` : entry.key),
+      ...(key ? { section: key.group } : subject ? { section: subject.group } : {}),
       actor: requesterLabel(entry.actor), layer: LAYER_LABELS[entry.layer],
-      display: redacted ? { before: "Hidden", after: "Changed" } : { before: format(before), after: format(after) },
+      display,
     },
   };
 }

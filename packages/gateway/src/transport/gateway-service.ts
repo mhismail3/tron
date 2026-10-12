@@ -15,7 +15,8 @@ import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } f
 import type { ChatAppliers, ChangeOutcome, ChangeRequest, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import type { ApprovalRequest } from "../admin/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../admin/settings-record.js";
-import { SECTIONS, schemaKey } from "../admin/settings-schema.js";
+import { SECTIONS, recordSubject, schemaKey } from "../admin/settings-schema.js";
+import type { ObservedStore } from "../admin/settings-outside.js";
 import type { SettingsTarget } from "../admin/settings-resolver.js";
 import { RECENT_SCAN_LIMIT, actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
 import { QUALIFIER_NAMES, maxTier, type Qualifiers } from "../admin/settings-types.js";
@@ -440,7 +441,8 @@ export class GatewayService {
     // Outside changes reach the same after-apply effects and broadcast, one store at a time.
     dependencies.settingsModel?.outsideChanges?.observe({
       outside: async (entries) => {
-        const outside = entries.filter(entry => entry.status === "outside");
+        const outside = entries.filter(entry => entry.status === "outside" && !recordSubject(entry.key));
+        this.recordSubjectsChangedOutside(entries.filter(entry => entry.status === "outside" && recordSubject(entry.key)));
         for (const file of new Set(outside.map(entry => entry.actor.id))) {
           const group = outside.filter(entry => entry.actor.id === file);
           await this.settingsChanged(group[0]!.target, group.map(entry => ({
@@ -454,6 +456,48 @@ export class GatewayService {
         }));
       },
     });
+  }
+
+  /** MCP servers and custom model providers changed outside Tron (doc 5.6): their
+   * own owners serve them, so the record, the push by floor and the owners'
+   * refresh events stand in for a settings row. MCP definitions load at the next
+   * reload or chat, and custom models at the next Gateway start, as for Tron's own edits. */
+  private recordSubjectsChangedOutside(entries: readonly ChangeEntry[]): void {
+    for (const file of new Set(entries.map(entry => entry.actor.id))) {
+      const group = entries.filter(entry => entry.actor.id === file);
+      const loud = group.filter(entry => entry.tier !== "quiet");
+      if (loud.length) {
+        const what = [...new Set(loud.map(entry => {
+          const subject = recordSubject(entry.key)!;
+          const name = entry.qualifiers?.[subject.qualifier];
+          return `${subject.label}${name ? ` ${name}` : ""}`;
+        }))].join(", ");
+        void this.settingsPush(group[0]!.actor, `settings-outside:${group[0]!.changeId}`, "explicit", "Changed outside Tron",
+          `${what} changed outside Tron in ${file}. Review it in Tron.`);
+      }
+      this.dependencies.broadcast("settings.changed", safeJson({
+        changeIds: group.map(entry => entry.changeId), keys: [...new Set(group.map(entry => entry.key))], layer: group[0]!.layer, target: group[0]!.target,
+      }));
+      const target = group[0]!.target;
+      if (group.some(entry => entry.key === "tools.mcp.server")) {
+        this.dependencies.broadcast("mcp.changed", target.kind === "project" ? { scope: "project", projectDir: target.cwd } : { scope: "global" });
+      }
+      if (group.some(entry => entry.key === "accounts.models.provider")) this.dependencies.broadcast("models.customChanged", {});
+    }
+  }
+
+  /** Tron's own MCP and custom-model writes are Tron's, not outside changes. */
+  private async asTronWrite<T>(stores: readonly ObservedStore[], write: () => Promise<T>): Promise<T> {
+    const outside = this.dependencies.settingsModel?.outsideChanges;
+    return outside ? outside.adopt(stores, write) : write();
+  }
+
+  private mcpStores(scope: McpScope): ObservedStore[] {
+    return scope.scope === "global" ? [{ kind: "mcp" }] : [{ kind: "project-mcp", root: scope.cwd }];
+  }
+
+  private mcpChanged(scope: McpScope): void {
+    this.dependencies.broadcast("mcp.changed", scope.scope === "global" ? { scope: "global" } : { scope: "project", projectDir: scope.cwd });
   }
 
   startModelReleaseDateRefresh(): void {
@@ -732,7 +776,8 @@ export class GatewayService {
               args = [server, ...(exposure ? ["--exposure", exposure] : []), "--", command, ...argv];
             }
           } else args = [server];
-          const result = await this.requireMcpAdmin().mutate(scope, method === "mcp.add" ? "add" : method === "mcp.remove" ? "remove" : "logout", args, server);
+          const result = await this.asTronWrite(this.mcpStores(scope), () => this.requireMcpAdmin().mutate(scope, method === "mcp.add" ? "add" : method === "mcp.remove" ? "remove" : "logout", args, server));
+          this.mcpChanged(scope);
           return safeJson({ ...(result as object), reloadRequired: method !== "mcp.logout", reloadMessage: method === "mcp.logout" ? undefined : "Existing sessions load server configuration after /reload or a new session." });
         });
       case "mcp.update":
@@ -745,7 +790,9 @@ export class GatewayService {
           if (params.enabled !== undefined) patch.enabled = boolean(params.enabled, "enabled");
           if (params.exposure !== undefined) patch.exposure = oneOf(params.exposure, "exposure", ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const);
           if (Object.keys(patch).length === 0) throw new GatewayError("invalid_request", "MCP update requires enabled or exposure");
-          return safeJson(await this.requireMcpAdmin().update(scope, server, patch));
+          const updated = await this.asTronWrite(this.mcpStores(scope), () => this.requireMcpAdmin().update(scope, server, patch));
+          this.mcpChanged(scope);
+          return safeJson(updated);
         });
       case "mcp.token.set":
         return this.mutation(client, method, params, async () => {
@@ -754,7 +801,9 @@ export class GatewayService {
           const server = string(params.server, "server", { min: 1, max: 128 });
           if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
           const token = string(params.token, "token", { min: 1, max: 16_384 });
-          return safeJson(await this.requireMcpAdmin().storeBearer(scope, server, token));
+          const stored = await this.asTronWrite(this.mcpStores(scope), () => this.requireMcpAdmin().storeBearer(scope, server, token));
+          this.mcpChanged(scope);
+          return safeJson(stored);
         });
       case "knowledge.config":
       case "knowledge.tags.configure":
@@ -2170,7 +2219,7 @@ export class GatewayService {
         return safeJson(await this.dependencies.modelConfig.validate(params.document));
       case "models.custom.put":
         return this.mutation(client, method, params, async () => {
-          const result = await this.dependencies.modelConfig.put(params.document);
+          const result = await this.asTronWrite([{ kind: "models" }], () => this.dependencies.modelConfig.put(params.document));
           this.dependencies.broadcast("models.customChanged", {});
           return safeJson(result);
         });

@@ -1002,7 +1002,13 @@ Add/remove report the affected server and require `/reload` or a new session for
 configuration changes; sign-out and new credentials are observed by running
 sessions at the next turn. `mcp.update` patches only `enabled` and `exposure` on
 an existing entry in the scope's `mcp.json`, under a file lock, retaining all
-other JSON keys and failing closed on malformed or oversized files.
+other JSON keys and failing closed on malformed or oversized files. Project scope
+is the Project root (`TrustInspection.projectDir`), not the subdirectory a chat
+runs in. Every change to an `mcp.json`, by these writers or outside Tron, broadcasts
+`mcp.changed` (`{ scope: "global" }` or `{ scope: "project", projectDir }`) so the
+MCP screen reloads; an outside change is also a settings record entry with a push
+(settings-model.md 5.6a). Tron's own writes are adopted as observed, never
+recorded as outside changes; `models.custom.put` is bracketed the same way.
 
 `mcp.token.set` stores bearer credentials through the host Keychain credential
 owner and writes only a `!command` reference in `mcp.json`; token values are

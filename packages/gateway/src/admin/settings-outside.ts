@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
@@ -9,17 +9,20 @@ import { readJsonDocument } from "../util/json.js";
 import { gitHeadState, projectSettingsPath, stagedBlob, type GitHeadState } from "./project-settings-writer.js";
 import type { ChangeEntry, GitResult, SettingsChangeRecord } from "./settings-record.js";
 import type { OutsideMark } from "./settings-resolver.js";
-import { KEYS, builtinValue, floorFor, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, builtinValue, floorFor, recordSubject, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { formatStoredSetting, type Qualifiers, type Tier } from "./settings-types.js";
 
 /**
  * Outside changes (docs/settings-model.md 5.6, foundation F2).
  *
  * The stores Tron does not own exclusively are compared with what Tron last
- * observed in them: the Mac `settings.json` and `trust.json`, and each known
- * project's `.pi/settings.json`. A per-key difference Tron did not write is one
- * `outside` record entry, whatever caused it (a hand edit, a pull, a revert, a
- * stash, a branch switch, the pi CLI): there are no per-git-case rules.
+ * observed in them: the Mac `settings.json`, `trust.json`, `mcp.json` and
+ * `models.json`, and each known project's `.pi/settings.json` and `.pi/mcp.json`.
+ * A per-key difference Tron did not write is one `outside` record entry, whatever
+ * caused it (a hand edit, a pull, a revert, a stash, a branch switch, the pi CLI):
+ * there are no per-git-case rules. `mcp.json` and `models.json` are compared per
+ * record subject (one MCP server, one custom model provider; see
+ * `RECORD_SUBJECTS`), by digest only: their definitions can carry credentials.
  *
  * Comparison is by content digest on every settings read and on a file event,
  * so dropped or coalesced events and rename-replace writes cannot hide a change.
@@ -32,10 +35,15 @@ import { formatStoredSetting, type Qualifiers, type Tier } from "./settings-type
  * stores (F2), and the record stays audit only.
  */
 
-export type ObservedStore = { kind: "mac" } | { kind: "trust" } | { kind: "project"; root: string };
+export type ObservedStore = { kind: "mac" } | { kind: "trust" } | { kind: "mcp" } | { kind: "models" }
+  | { kind: "project"; root: string } | { kind: "project-mcp"; root: string };
+type ProjectObservedStore = Extract<ObservedStore, { root: string }>;
+const isProjectStore = (store: ObservedStore): store is ProjectObservedStore => store.kind === "project" || store.kind === "project-mcp";
 
 /** The bound on known projects, least recently read first out. */
 export const OBSERVED_PROJECT_LIMIT = 64;
+const AGENT_FILES = new Set(["settings.json", "trust.json", "mcp.json", "models.json"]);
+const PROJECT_FILES = new Set(["settings.json", "mcp.json"]);
 const STAGED_LIMIT = 20;
 
 interface ObservedValue { key: string; qualifiers?: Qualifiers; value?: unknown; hash?: string }
@@ -70,7 +78,24 @@ export interface ObservedReaders {
 export interface PlannedWrite { store: ObservedStore; instance: string; changeId: string; value: unknown }
 
 export function storeId(store: ObservedStore): string {
-  return store.kind === "project" ? `project:${store.root}` : store.kind;
+  return isProjectStore(store) ? `${store.kind}:${store.root}` : store.kind;
+}
+
+/** The project's `.pi/` stores this owner compares; both follow the Project root. */
+export function projectStores(root: string): ObservedStore[] {
+  return [{ kind: "project", root }, { kind: "project-mcp", root }];
+}
+
+/** The observed file of a store. */
+export function observedFile(store: ObservedStore, agentDir: string): string {
+  switch (store.kind) {
+    case "mac": return join(agentDir, "settings.json");
+    case "trust": return join(agentDir, "trust.json");
+    case "mcp": return join(agentDir, "mcp.json");
+    case "models": return join(agentDir, "models.json");
+    case "project": return projectSettingsPath(store.root);
+    case "project-mcp": return join(store.root, ".pi", "mcp.json");
+  }
 }
 
 export function instanceId(key: string, qualifiers: Qualifiers | undefined): string {
@@ -133,6 +158,21 @@ export function piInstances(document: Record<string, unknown>, layer: "mac" | "p
   return values;
 }
 
+/** One instance per entry of a subject's container (`mcpServers`, `providers`),
+ * hashed: a server or provider definition may carry headers, keys or commands. */
+function subjectInstances(document: unknown, subjectId: string): Map<string, ObservedValue> | undefined {
+  if (!document || typeof document !== "object" || Array.isArray(document)) return undefined;
+  const subject = recordSubject(subjectId)!;
+  const container = (document as Record<string, unknown>)[subject.container];
+  if (container !== undefined && (!container || typeof container !== "object" || Array.isArray(container))) return undefined;
+  const values = new Map<string, ObservedValue>();
+  for (const [name, definition] of Object.entries((container ?? {}) as Record<string, unknown>)) {
+    const qualifiers = { [subject.qualifier]: name } as Qualifiers;
+    values.set(instanceId(subject.id, qualifiers), { key: subject.id, qualifiers, hash: createHash("sha256").update(JSON.stringify(definition)).digest("hex") });
+  }
+  return values;
+}
+
 function trustInstances(document: Record<string, unknown>): Map<string, ObservedValue> {
   const key = schemaKey("permissions.projectTrust");
   const values = new Map<string, ObservedValue>();
@@ -154,6 +194,7 @@ function observed(value: ObservedValue): ObservedValue {
   return { ...rest, hash: createHash("sha256").update(JSON.stringify(secret)).digest("hex") };
 }
 const fingerprint = (value: ObservedValue | undefined) => value === undefined ? null : value.hash ?? JSON.stringify(value.value ?? null);
+const subjectOf = (store: ObservedStore) => store.kind === "mcp" || store.kind === "project-mcp" ? "tools.mcp.server" : store.kind === "models" ? "accounts.models.provider" : undefined;
 function schemaKeyOrUndefined(id: string): KeyDeclaration | undefined { return KEYS.find(key => key.id === id); }
 
 export class OutsideChanges {
@@ -188,9 +229,9 @@ export class OutsideChanges {
     await this.mutex.run(async () => {
       const document = await this.load();
       for (const store of stores) {
-        if (store.kind === "project") this.watchProject(store.root);
+        if (isProjectStore(store)) this.watchProject(store.root);
         if ((this.writing.get(storeId(store)) ?? 0) > 0) continue;
-        entries.push(...await this.compare(document, store, undefined, undefined, store.kind === "project" ? heads?.get(store.root) : undefined, store.kind === "project" && heads?.has(store.root)));
+        entries.push(...await this.compare(document, store, undefined, undefined, isProjectStore(store) ? heads?.get(store.root) : undefined, isProjectStore(store) && heads?.has(store.root)));
       }
       if (entries.length) await this.record.append(entries);
       await this.save(document);
@@ -206,7 +247,7 @@ export class OutsideChanges {
   startWatching(failed: (error: unknown) => void): void {
     this.watching = true;
     this.failed = failed;
-    this.watchDirectory("agent", this.agentDir, name => name === "settings.json" || name === "trust.json", [{ kind: "mac" }, { kind: "trust" }]);
+    this.watchDirectory("agent", this.agentDir, name => AGENT_FILES.has(name), [{ kind: "mac" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" }]);
   }
 
   dispose(): void {
@@ -221,8 +262,8 @@ export class OutsideChanges {
     if (!this.watching || this.watchers.has(`project:${root}`)) return;
     if (this.watchers.size > OBSERVED_PROJECT_LIMIT) return;
     // `.pi/` may not exist yet; its parent's events include its creation.
-    this.watchDirectory(`project:${root}`, join(root, ".pi"), name => name === "settings.json", [{ kind: "project", root }])
-      || this.watchDirectory(`project:${root}`, root, name => name === ".pi", [{ kind: "project", root }]);
+    this.watchDirectory(`project:${root}`, join(root, ".pi"), name => PROJECT_FILES.has(name), projectStores(root))
+      || this.watchDirectory(`project:${root}`, root, name => name === ".pi", projectStores(root));
   }
 
   private watchDirectory(id: string, directory: string, relevant: (name: string) => boolean, stores: ObservedStore[]): boolean {
@@ -286,6 +327,53 @@ export class OutsideChanges {
     if (entries.length) await this.observer?.outside(entries);
   }
 
+  /**
+   * Tron's own writers outside the change path (the MCP and custom-model owners)
+   * write a store as Tron: no scan reads it meanwhile, and whatever it then holds
+   * is adopted as observed, so Tron's write is never an outside change.
+   */
+  async adopt<T>(stores: readonly ObservedStore[], write: () => Promise<T>): Promise<T> {
+    for (const id of new Set(stores.map(storeId))) this.writing.set(id, (this.writing.get(id) ?? 0) + 1);
+    try {
+      return await write();
+    } finally {
+      await this.mutex.run(async () => {
+        const document = await this.load();
+        try {
+          for (const store of stores) await this.rebaseline(document, store);
+          await this.save(document);
+        } finally {
+          for (const id of new Set(stores.map(storeId))) {
+            const count = (this.writing.get(id) ?? 1) - 1;
+            if (count > 0) this.writing.set(id, count); else this.writing.delete(id);
+          }
+        }
+      });
+    }
+  }
+
+  private async rebaseline(document: ObservedDocument, store: ObservedStore): Promise<void> {
+    const text = await this.raw(store);
+    const current = await this.values(store, text);
+    if (!current) return;
+    const id = storeId(store);
+    const state = document.stores[id];
+    const values = Object.fromEntries([...current].map(([instance, value]) => [instance, observed(value)]));
+    const git = isProjectStore(store) ? await gitHeadState(store.root) : undefined;
+    if (!state) {
+      document.stores[id] = { digest: digestOf(text), values, tron: {}, outside: {}, ...(git ? { head: git.head, staged: [] } : {}), seen: this.now().toISOString() };
+      return;
+    }
+    // An instance Tron rewrote is no longer the outside value its mark described.
+    for (const instance of Object.keys(state.outside)) {
+      if (fingerprint(state.values[instance]) !== fingerprint(values[instance])) delete state.outside[instance];
+    }
+    state.values = values;
+    state.digest = digestOf(text);
+    state.seen = this.now().toISOString();
+    if (git) state.head = git.head;
+  }
+
   private async load(): Promise<ObservedDocument> {
     if (this.document) return this.document;
     const stored = await readJsonDocument(this.path, value => {
@@ -301,20 +389,27 @@ export class OutsideChanges {
 
   private async save(document: ObservedDocument): Promise<void> {
     // Bound the known projects: the least recently read leave first.
-    const projects = Object.entries(document.stores).filter(([id]) => id.startsWith("project:"))
-      .sort(([, left], [, right]) => left.seen.localeCompare(right.seen));
-    for (const [id] of projects.slice(0, Math.max(0, projects.length - OBSERVED_PROJECT_LIMIT))) delete document.stores[id];
+    for (const prefix of ["project:", "project-mcp:"]) {
+      const projects = Object.entries(document.stores).filter(([id]) => id.startsWith(prefix))
+        .sort(([, left], [, right]) => left.seen.localeCompare(right.seen));
+      for (const [id] of projects.slice(0, Math.max(0, projects.length - OBSERVED_PROJECT_LIMIT))) delete document.stores[id];
+    }
     await durableAtomicWriteJson(this.path, document);
   }
 
   private async raw(store: ObservedStore): Promise<string | undefined> {
-    const path = store.kind === "mac" ? join(this.agentDir, "settings.json")
-      : store.kind === "trust" ? join(this.agentDir, "trust.json") : projectSettingsPath(store.root);
+    const path = observedFile(store, this.agentDir);
     try { return await readFile(path, "utf8"); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
   }
 
   private async values(store: ObservedStore, text: string | undefined): Promise<Map<string, ObservedValue> | undefined> {
+    const subject = subjectOf(store);
+    if (subject) {
+      // An absent file has no entries; an unparseable one keeps the last observed state.
+      if (text === undefined || !text.trim()) return new Map();
+      try { return subjectInstances(JSON.parse(text) as unknown, subject); } catch { return undefined; }
+    }
     if (store.kind === "trust") {
       if (text === undefined || !text.trim()) return new Map();
       try {
@@ -327,7 +422,7 @@ export class OutsideChanges {
     }
     // An unparseable project file (merge markers) has unknown values: keep the
     // last observed ones until it parses again, rather than reporting removals.
-    const document = await this.readers.project(store.root).catch(() => undefined);
+    const document = await this.readers.project((store as ProjectObservedStore).root).catch(() => undefined);
     return document === undefined ? undefined : piInstances(document, "project");
   }
 
@@ -339,7 +434,9 @@ export class OutsideChanges {
     const digest = digestOf(text);
     const at = this.now().toISOString();
     let state = document.stores[id];
-    const git = store.kind !== "project" ? undefined : headKnown ? knownHead : await gitHeadState(store.root);
+    const head = !isProjectStore(store) ? undefined : headKnown ? knownHead : await gitHeadState(store.root);
+    // The repository state names the compared file: `.pi/mcp.json` beside `.pi/settings.json`.
+    const git = head && store.kind === "project-mcp" ? { ...head, path: join(dirname(head.path), "mcp.json") } : head;
     if (state && !planned && state.digest === digest && (!git || git.head === (state.head ?? null))) {
       state.seen = at;
       return [];
@@ -393,7 +490,7 @@ export class OutsideChanges {
     state.digest = digest;
     state.seen = at;
     if (git) {
-      if (git.head !== (state.head ?? null)) entries.push(...await this.committed(store as Extract<ObservedStore, { kind: "project" }>, state, git.head, at));
+      if (git.head !== (state.head ?? null) && store.kind === "project") entries.push(...await this.committed(store, state, git.head, at));
       state.head = git.head;
     }
     return entries;
@@ -402,18 +499,20 @@ export class OutsideChanges {
   private outsideEntry(store: ObservedStore, value: ObservedValue, before: ObservedValue | undefined, after: ObservedValue | undefined,
     replaced: string | undefined, floors: FloorOverrides, git: { head: string | null; branch: string | null; root: string; path: string } | undefined, at: string): ChangeEntry {
     const key = schemaKeyOrUndefined(value.key);
+    const subject = recordSubject(value.key);
     const qualifiers = value.qualifiers ?? {};
     const builtin = key ? builtinValue(key, qualifiers) : undefined;
-    const redacted = key?.redacted === true;
+    const redacted = key?.redacted === true || subject !== undefined;
     const direction = key?.direction && !redacted ? key.direction(before?.value ?? builtin, after?.value ?? builtin) : "widen";
-    // An outside change cannot be gated: its tier, the key's floor for its
-    // direction, decides only whether it pushes (doc 5.6).
-    const { floor, source } = key ? floorFor(key, direction, floors) : { floor: "notify" as Tier, source: "code" as const };
-    const file = store.kind === "mac" ? join(this.agentDir, "settings.json") : store.kind === "trust" ? join(this.agentDir, "trust.json") : projectSettingsPath(store.root);
+    // An outside change cannot be gated: its tier, the key's (or record
+    // subject's) floor for its direction, decides only whether it pushes (doc 5.6).
+    const { floor, source } = key ? floorFor(key, direction, floors) : { floor: subject?.floor ?? "notify" as Tier, source: "code" as const };
+    const file = observedFile(store, this.agentDir);
     return {
       changeId: randomUUID(), at, actor: { kind: "outside", id: file },
-      target: store.kind === "project" ? { kind: "project", cwd: store.root } : { kind: "mac" },
-      layer: store.kind === "project" ? "project" : "mac", key: value.key,
+      target: isProjectStore(store) ? { kind: "project", cwd: store.root } : { kind: "mac" },
+      layer: isProjectStore(store) ? "project" : "mac", key: value.key,
+      ...(subject && before === undefined && after !== undefined ? { added: true as const } : {}),
       ...(Object.keys(qualifiers).length ? { qualifiers } : {}),
       op: after === undefined ? "unset" : "set",
       ...(redacted ? { changed: true as const, redacted: true as const } : {

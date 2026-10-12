@@ -524,6 +524,32 @@ export function hasChatSettingsApplier(key: KeyDeclaration): boolean {
   return hasRuntimeRequestApplier(key) || hasCompactionApplier(key);
 }
 
+/**
+ * Record subjects: configuration that has its own owner and editor rather than a
+ * schema key (doc 7.6 hand-built screens), compared with what Tron last observed
+ * so an outside edit is recorded, shown in Changes and pushed by its floor (doc
+ * 5.6). One subject instance per entry of `container`; values are compared by
+ * digest only. They never resolve as settings.
+ */
+export interface RecordSubject {
+  id: string;
+  label: string;
+  group: string;
+  container: string;
+  qualifier: QualifierName;
+  /** Fixed in code; decision 13: Tools and credential-bearing changes push. */
+  floor: Tier;
+}
+
+export const RECORD_SUBJECTS: readonly RecordSubject[] = [
+  { id: "tools.mcp.server", label: "MCP server", group: "tools", container: "mcpServers", qualifier: "server", floor: "notify" },
+  { id: "accounts.models.provider", label: "Custom model provider", group: "accounts", container: "providers", qualifier: "provider", floor: "notify" },
+];
+
+export function recordSubject(id: string): RecordSubject | undefined {
+  return RECORD_SUBJECTS.find(subject => subject.id === id);
+}
+
 export function timingFor(key: KeyDeclaration, direction: Direction): Timing {
   return typeof key.timing === "string" ? key.timing : key.timing[direction];
 }

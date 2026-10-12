@@ -955,8 +955,24 @@ debounced directory event (Mac agent directory, each known project's `.pi/`)
 prompts the same comparison, so neither a dropped event nor a rename-replace hides
 a change. The provider-request boundary reads values only. Compared stores are the
 Mac `settings.json` and `trust.json` and each known project's `.pi/settings.json`
-(projects whose settings were read, at most 64). `models.json` and `mcp.json`
-carry no schema key, so there is no per-key diff to record for them.
+(projects whose settings were read, at most 64), plus the Mac `mcp.json` and
+`models.json` and each known project's `.pi/mcp.json`. Those two files are not
+settings keys: MCP servers and custom model providers keep their own owners and
+hand-built editors ([7.6](#76-hand-built-screens)). They are compared per **record
+subject** (`RECORD_SUBJECTS` in `settings-schema.ts`): one instance per MCP server
+(`tools.mcp.server`, qualified by `server`) or per provider
+(`accounts.models.provider`, qualified by `provider`), by digest only, because a
+definition can carry headers, keys or commands. An outside entry for a subject
+records the file, the name and whether it was added, changed or removed (never
+the definition), takes the subject's code floor (`notify`: decision 13), pushes,
+broadcasts `settings.changed`, and refreshes its owner's surface: `mcp.changed`
+with the scope (`global`, or `project` and its root) for the MCP screen, and
+`models.customChanged` for the custom-model editor. A project's `.pi/mcp.json`
+follows the Project root like `.pi/settings.json`, whatever subdirectory a chat
+runs in; MCP definitions load at the next reload or chat and custom models at the
+next Gateway start, as for Tron's own edits. Tron's own MCP and custom-model
+writes go through `OutsideChanges.adopt`, so they are never outside changes.
+Subject floors are not overridable: they are not keys.
 
 - A store's first sight is its baseline. Afterwards each differing key instance is
   one `outside` entry (actor `outside`, the file as its id, the target `mac` or the
@@ -988,7 +1004,13 @@ The real-boundary journey is the `outside changes` block of
 key, no echo of Tron's write, rename-replace, redaction, Apply again and its stale
 refusal), a file event alone with quiet versus notify pushes, and a temp
 repository through staged, committed, unstaged, stash, restore, a carrying and a
-dropping branch switch, and a fast-forward pull.
+dropping branch switch, and a fast-forward pull. Its `outside changes to MCP
+servers and custom models` block drives the production MCP owner over the
+bundled pi CLI: Tron's own `mcp.add` and `models.custom.put` record nothing, a
+hand-edited Mac `mcp.json` (file event alone) and `models.json` record one
+digest-only entry each with a push and the owner's refresh event, and a pulled
+project `.pi/mcp.json` is recorded against the root with its commit while the
+chat keeps its subdirectory cwd.
 
 ### 5.7 Project writes
 
@@ -1228,9 +1250,8 @@ show Hidden → Changed and are removed from the response's raw value fields.
   started). iOS implements these entry points in `SettingsChangesView`; local
   lineage filtering is applied to each bounded `settings.history` page, without
   changing the Gateway's canonical audit or pagination contract. The native
-  surface currently offers Undo and pending approval decisions; Project/outside/git
-  reconciliation and Apply again are not shown until the required public SDK capability
-  is available (#764).
+  surface offers Undo, Apply again on an outside entry that replaced Tron's
+  value, and pending approval decisions.
 
 ### 7.5 The rendering contract
 
@@ -1289,8 +1310,9 @@ two RPCs (the Gateway README has the shapes). What the code fixes that 7.2 and
   edit", and every value still arrives with its `display`.
 - **Summaries are for the target.** `pending` and `recent` list only requests
   and record entries for the same target; `recent` scans the newest 200 record
-  entries. An `override` is any applied value above Built-in until slice 7
-  (#765) marks values fixed at start from a default apart.
+  entries. An `override` is an applied value above Built-in that is an explicit
+  choice: a value fixed at start from a default (`fixedAt.from` other than
+  `chat`) is not an override.
 - **The iPhone half** is `SettingsRendererView` (iOS architecture, presentation
   parity). It implements `toggle`, `choice`, `number`, `text`, `secret`, `list`,
   `catalog` and `readOnly`. Secret entry is write-only and never prefilled;
@@ -1425,7 +1447,7 @@ Re-verified against `main` at `b76f6ca80`.
 | Implemented: `UI/Settings/SettingsView.swift` | Mac-only schema sections with native account, package and Setup flows; device-only preferences under This iPhone. Global/Project scope pickers and superseded Mac/floor editors are removed. Changes opens the shared managed feed with filtering, scoped approvals, details, safe undo and actor/task navigation. |
 | `UI/Settings/AgentConfigurationControls.swift` | Thin layer adapters over the served control primitives. Context-window and generic numbers share `SettingsNumberSlider.swift` and `SettingsNumberSliderScale.swift`; thinking shares `SettingsChoiceSlider.swift`. All use `SettingsConfigurationValueRow.swift`. Model catalog adoption remains with the surface migration. |
 | `UI/Chat/NewSessionSheet.swift:94-96,339-343`, `NewSessionConfigurationOwner.swift` | Generic Model rows at the new chat's Chat layer, with badges. |
-| Implemented: dashboard workspace headers and New Session's workspace row | Open the same `UI/Chat/ProjectSettingsSheet.swift` as Manage Session. No-chat Project default inheritance is tested at the native and real RuntimeRegistry boundaries. Separate root, outside changes and per-key git-state acceptance still depend on #764. |
+| Implemented: dashboard workspace headers and New Session's workspace row | Open the same `UI/Chat/ProjectSettingsSheet.swift` as Manage Session. No-chat Project default inheritance is tested at the native and real RuntimeRegistry boundaries. The Project root, outside changes and per-key git-state badges are those of 5.6a and 5.7. |
 
 **Mac menu bar** (`packages/mac-app/Sources/MenuBar/MenuBarController.swift`):
 Gateway lifecycle and pairing only (Setup). It has no harness keys, and none are

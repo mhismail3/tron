@@ -66,6 +66,8 @@ export interface ChangeEntry {
   fixedAt?: FixedSetting;
   changed?: true;
   redacted?: true;
+  /** A record subject that did not exist before (an MCP server or model provider added outside Tron). */
+  added?: true;
   reason?: string;
   tier: Tier;
   tierBasis: TierBasis;

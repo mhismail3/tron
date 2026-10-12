@@ -10,12 +10,12 @@ import { isVirtualModel } from "../providers/virtual-model.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { updateJsonLocked } from "../util/json.js";
 import { gitHeadState, projectGitState, readProjectDocument, writeProjectSettings } from "./project-settings-writer.js";
-import { observedInstance, type ObservedReaders, type ObservedStore, type OutsideChanges, type PlannedWrite } from "./settings-outside.js";
+import { observedInstance, projectStores, type ObservedReaders, type ObservedStore, type OutsideChanges, type PlannedWrite } from "./settings-outside.js";
 import type { TrustService } from "./trust-service.js";
 import type { Actor, ActorKind, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
 import { readBinding, resolveSettings, targetLayers, type ChatStore, type FixedSetting, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
-import { KEYS, builtinValue, floorFor, floorInstances, chatLayerApplies, hasChatSettingsApplier, hasRuntimeRequestApplier, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, builtinValue, floorFor, floorInstances, chatLayerApplies, hasChatSettingsApplier, hasRuntimeRequestApplier, recordSubject, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
 import { formatStoredSetting, LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
 
@@ -183,7 +183,8 @@ export class SettingsModel {
     // The Project store is `.pi/` at the chat's Project root (decision 31), the
     // `projectDir` Tron gives pi; trust names that root for every chat in it.
     const inspection = cwd === undefined ? undefined : await this.dependencies.trust.inspect(cwd);
-    const observed: ObservedStore[] = [{ kind: "mac" }, { kind: "trust" }, ...(inspection ? [{ kind: "project" as const, root: inspection.projectDir }] : [])];
+    const observed: ObservedStore[] = [{ kind: "mac" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" },
+      ...(inspection ? projectStores(inspection.projectDir) : [])];
     // Every read compares the stores with what Tron last observed first (F2):
     // file events are only prompts, so a dropped event cannot hide a change.
     // One repository read serves both the comparison and the git-state badges.
@@ -623,7 +624,7 @@ export class SettingsChangePath {
         && (!input.layer || entry.layer === input.layer)
         // The permanent record may name a key this Gateway no longer declares.
         // It stays in Everything/key history, but has no current section.
-        && (!input.section || KEYS.find(key => key.id === entry.key)?.group === input.section),
+        && (!input.section || (KEYS.find(key => key.id === entry.key) ?? recordSubject(entry.key))?.group === input.section),
     });
   }
 

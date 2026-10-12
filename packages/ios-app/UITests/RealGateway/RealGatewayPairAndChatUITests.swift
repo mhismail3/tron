@@ -520,6 +520,33 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for _ in 0..<3 where app.staticTexts["Settings"].exists || app.switches["Tool search"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
 
+        // MCP servers keep their own owner (settings-model.md 5.6a): a server added to
+        // the Mac mcp.json outside Tron while the MCP screen is open reaches it with no
+        // reload (`mcp.changed` from the Gateway's file watch), and Changes records it by name.
+        menu.tap()
+        settingsAction.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 30), app.debugDescription)
+        let mcpLink = app.buttons["settings-link-MCP Servers"]
+        for _ in 0..<20 where !mcpLink.isHittable { app.swipeUp() }
+        for _ in 0..<40 where !mcpLink.isHittable { app.swipeDown() }
+        mcpLink.tap()
+        XCTAssertTrue(app.staticTexts["MCP Servers"].waitForExistence(timeout: 30), app.debugDescription)
+        let outsideServer = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "outside-mcp")).firstMatch
+        XCTAssertFalse(outsideServer.exists, "the fixture must start without the outside server")
+        try addMcpServerOutsideTron(fixture.agentDirectory, name: "outside-mcp")
+        XCTAssertTrue(outsideServer.waitForExistence(timeout: 90),
+                      "an outside mcp.json addition must reach the open MCP screen without a reload: \(app.debugDescription)")
+        keepScreenshot(app, name: "settings-mcp-outside-addition")
+        dismissTopSheet(app)
+        XCTAssertTrue(waitUntil(timeout: 15) { !app.staticTexts["MCP Servers"].exists }, "dismissing MCP Servers must return to Settings")
+        for _ in 0..<40 where !app.buttons["Changes"].isHittable { app.swipeDown() }
+        app.buttons["Changes"].tap()
+        let outsideEntry = app.staticTexts["MCP server outside-mcp"]
+        XCTAssertTrue(outsideEntry.waitForExistence(timeout: 60), "Changes must list the outside MCP addition by name: \(app.debugDescription)")
+        keepScreenshot(app, name: "settings-changes-outside-mcp")
+        for _ in 0..<3 where app.staticTexts["Settings"].exists || outsideEntry.exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
+        XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
+
         let attachment = XCTAttachment(string: coverageReport(coverage, schema: schema))
         attachment.name = "settings-surface-coverage.json"
         attachment.lifetime = .keepAlways
@@ -544,6 +571,24 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let staged = store.deletingLastPathComponent().appendingPathComponent("settings.json.outside-edit")
         try JSONSerialization.data(withJSONObject: document, options: [.prettyPrinted]).write(to: staged)
         _ = try FileManager.default.replaceItemAt(store, withItemAt: staged)
+    }
+
+    /// A hand edit of the fixture's Mac `mcp.json` adding one HTTP server, by rename-replace.
+    /// The loopback port refuses at once, so listing it opens no external connection.
+    private func addMcpServerOutsideTron(_ agentDirectory: String?, name: String) throws {
+        let directory = try XCTUnwrap(agentDirectory, "run through scripts/ios-gateway-e2e-test run-ui to name the fixture's agent directory")
+        let store = URL(fileURLWithPath: directory).appendingPathComponent("mcp.json")
+        var document = ((try? Data(contentsOf: store)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
+        var servers = document["mcpServers"] as? [String: Any] ?? [:]
+        servers[name] = ["url": "http://127.0.0.1:1/\(name)"]
+        document["mcpServers"] = servers
+        let staged = store.deletingLastPathComponent().appendingPathComponent("mcp.json.outside-edit")
+        try JSONSerialization.data(withJSONObject: document, options: [.prettyPrinted]).write(to: staged)
+        if FileManager.default.fileExists(atPath: store.path) {
+            _ = try FileManager.default.replaceItemAt(store, withItemAt: staged)
+        } else {
+            try FileManager.default.moveItem(at: staged, to: store)
+        }
     }
 
     /// What one surface showed for the schema's keys, attached as the journey's coverage report.

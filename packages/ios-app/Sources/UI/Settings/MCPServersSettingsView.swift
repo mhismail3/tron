@@ -105,7 +105,7 @@ struct MCPServersSettingsView: View {
     private var visibleServers: [MCPServerList.Server] {
         servers.filter { MCPServerPresentationPolicy.includes($0, selectedScope: selectedScope) }
     }
-    private var requestID: String { "\(model.knowledgePresentationIdentity):\(model.foregroundReconciliationGeneration):\(generation):\(selectedScope):\(projectCWD ?? "")" }
+    private var requestID: String { "\(model.knowledgePresentationIdentity):\(model.foregroundReconciliationGeneration):\(model.mcpConfigurationRevision):\(generation):\(selectedScope):\(projectCWD ?? "")" }
     private var addDraft: MCPAddServerDraft {
         MCPAddServerDraft(serverName: serverName, transport: transport, url: url, command: command, args: args, bearerToken: token)
     }

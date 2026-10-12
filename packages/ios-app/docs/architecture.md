@@ -747,9 +747,9 @@ detail owner for the exact actor task ID. Neither route infers ownership from th
 Mac after a switch; hosted chat-route and task-detail journeys exercise both links. Undo and approval decisions use the existing receipt-backed
 `SettingsTrustCoordinator` paths. Undo validates per-change refusal and captures the Chat
 configuration admission when applicable, so an acknowledged envelope cannot hide a failed change.
-Project/outside/git reconciliation and Apply again
-remain unavailable because the required public SDK capability is missing (#764); the feed does not
-claim those capabilities.
+An outside entry that replaced Tron's value offers Apply again, an ordinary receipt-backed
+`settings.applyAgain` change; outside MCP server and custom-model entries show their name and
+whether it was added, changed or removed, never the definition.
 `TronSmokeUITests.testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt`
 exercises an empty page with a continuation cursor, then the feed/detail/undo journey against
 the hosted socket, including its exact `settings.undo` request. Additional hosted journeys cover
@@ -1685,9 +1685,10 @@ bounded Git header. Workspace dirtiness is not a per-setting staging badge.
 The read carries managed activity, identity and a latest-request fence through
 trust and Git awaits. Native no-chat save/rejoin/create and real RuntimeRegistry
 inheritance journeys prove a project default remains Project provenance, not an
-explicit Chat override or Mac default. Separate Project/config-root support and
-outside/git-state/Apply-again acceptance remain blocked by #764; this UI does not
-infer a root, replay audit or claim that dependency is implemented.
+explicit Chat override or Mac default. The Project store is the Gateway-served
+Project root (`TrustInspection.projectDir`), and its rows carry the resolver's
+git-state and Changed outside Tron badges with Apply again; this UI never infers
+a root or replays audit.
 
 Settings is the Mac-layer surface, regardless of whether it was opened from the
 dashboard, an ordinary chat or Home. Its schema renderer owns Model, Context,

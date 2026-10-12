@@ -314,6 +314,8 @@ final class AppModel {
     var pairedDevices: [PairedDevice] = []
     // Invalidates surface-owned device reads without blocking control-event intake.
     var deviceCatalogRevision = 0
+    /// Invalidates the MCP server surface when an `mcp.json` changes, from Tron or outside it.
+    var mcpConfigurationRevision = 0
     let notificationInbox: NotificationInboxCoordinator
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
@@ -5184,6 +5186,8 @@ final class AppModel {
             }
         case "devices.changed":
             deviceCatalogRevision &+= 1
+        case "mcp.changed":
+            mcpConfigurationRevision &+= 1
         case "automation.changed":
             guard case .automationChanged = event.preparation else { return }
             automationCatalog.invalidate()

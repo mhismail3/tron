@@ -4,12 +4,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxProvider } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "./trust-service.js";
 import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "./settings-record.js";
 import { SettingsApprovals } from "./settings-approvals.js";
 import { OutsideChanges } from "./settings-outside.js";
+import { McpAdminService } from "./mcp-admin-service.js";
+import { ModelConfigService } from "./model-config-service.js";
 import { SettingsRiskEvaluator, type SettingsRiskInput } from "./settings-risk.js";
 import { JEV_MAX_ESTIMATED_CHARGE_CENTS } from "../knowledge/jev-client.js";
 import { readBinding, type Resolution, type SettingsStores } from "./settings-resolver.js";
@@ -33,6 +36,7 @@ const registries: RuntimeRegistry[] = [];
 const outsides: OutsideChanges[] = [];
 const transcript: Array<{ case: string; detail: unknown }> = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const outside of outsides.splice(0)) outside.dispose();
   await Promise.all(registries.splice(0).map(registry => registry.dispose().catch(() => {})));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
@@ -96,6 +100,9 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome), notifications,
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
+    // The production MCP owner over the bundled pi CLI, and the custom-model owner (gateway-main.ts).
+    mcpAdmin: new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js")),
+    modelConfig: new ModelConfigService(agentDir),
   } as unknown as GatewayServiceDependencies);
   const change = (target: Record<string, unknown>, changes: unknown[], extra: Record<string, unknown> = {}, c = client()) =>
     service.invoke(c, "settings.change", { commandId: commandId(), target, changes, ...extra }) as Promise<{ status: string; changes: Array<{ changeId: string; revision?: number; git?: Record<string, unknown> }> }>;
@@ -647,6 +654,116 @@ describe("outside changes", () => {
     expect(f.pushes.slice(pushesBefore)).toEqual([expect.objectContaining({ message: expect.stringContaining("Packages") })]);
     expect(f.pushes.slice(pushesBefore).some(push => push.message.includes("Transport"))).toBe(false);
     transcript.push({ case: "outside git", detail: await outsideEntries(f) });
+  });
+});
+
+describe("outside changes to MCP servers and custom models", () => {
+  const until = async (done: () => boolean | Promise<boolean>) => {
+    for (let attempt = 0; attempt < 100 && !(await done()); attempt += 1) await new Promise(resolve => setTimeout(resolve, 50));
+  };
+  type Presented = ChangeEntry & { presentation: { label: string; section?: string; display: { before: string; after: string } } };
+  const outsideEntries = async (f: Awaited<ReturnType<typeof fixture>>) => (await f.history()).filter(entry => entry.status === "outside") as Presented[];
+  const servers = async (f: Awaited<ReturnType<typeof fixture>>, params: Record<string, unknown>) =>
+    ((await f.service.invoke(client(), "mcp.list", params)) as { servers: Array<{ name: string; scope: string }> }).servers.map(server => `${server.scope}:${server.name}`).sort();
+  const writeJson = async (path: string, value: unknown) => {
+    // An editor's rename-replace write.
+    await writeFile(`${path}.swp`, `${JSON.stringify(value, null, 2)}\n`);
+    await rename(`${path}.swp`, path);
+  };
+
+  it("records Mac and Project mcp.json and models.json edits per server or provider by digest, pushes, refreshes their owners, and never records Tron's own writes", async () => {
+    const f = await fixture();
+    // The CLI child reads the agent directory from the environment, as under the Gateway (gateway-main.ts).
+    vi.stubEnv("PI_CODING_AGENT_DIR", f.agentDir);
+    f.outside.startWatching(() => {});
+    const project = await gitProject(f.root, "mcp-repo");
+    const subdirectory = join(project, "packages", "app");
+    await mkdir(subdirectory, { recursive: true });
+    await f.trust.set(project, true);
+    const projectTarget = { kind: "project", cwd: subdirectory };
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] }); // baselines
+    await f.service.invoke(client(), "settings.resolve", { target: projectTarget, keys: ["run.transport"] });
+    const baseline = (await outsideEntries(f)).length; // trust was set by hand before the first read
+
+    // Tron's own MCP write (through the bundled CLI) is not an outside change, and refreshes the MCP surface.
+    await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "tron-added", transport: "http", url: "http://127.0.0.1:1/tron" });
+    expect(f.broadcasts).toContainEqual({ topic: "mcp.changed", payload: { scope: "global" } });
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] });
+    expect((await outsideEntries(f)).length).toBe(baseline);
+    expect(await servers(f, { scope: "global" })).toEqual(["global:tron-added"]);
+
+    // A hand edit adding a server with a credential header: a file event alone records it by digest and pushes.
+    const globalMcp = join(f.agentDir, "mcp.json");
+    const current = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
+    await writeJson(globalMcp, { ...current, mcpServers: { ...current.mcpServers, "hand-added": { url: "http://127.0.0.1:1/hand", headers: { Authorization: "Bearer outside-secret" } } } });
+    await until(() => f.pushes.some(push => push.message.includes("MCP server hand-added")));
+    const added = (await outsideEntries(f))[0]!;
+    expect(added).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "hand-added" }, op: "set", added: true, tier: "notify", redacted: true,
+      layer: "mac", target: { kind: "mac" }, actor: { kind: "outside", id: globalMcp },
+      presentation: { label: "MCP server hand-added", section: "tools", display: { before: "Not configured", after: "Added" } } });
+    expect(f.pushes.at(-1)).toMatchObject({ title: "Changed outside Tron" });
+    expect(f.broadcasts.filter(event => event.topic === "mcp.changed").length).toBe(2);
+    expect(JSON.stringify(await f.history())).not.toContain("outside-secret");
+    expect(await readFile(f.outside.path, "utf8")).not.toContain("outside-secret");
+    // The MCP owner serves the edited file to the app.
+    expect(await servers(f, { scope: "global" })).toEqual(["global:hand-added", "global:tron-added"]);
+    // Removing the server Tron added is one more entry.
+    const afterAdd = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
+    delete afterAdd.mcpServers["tron-added"];
+    await writeJson(globalMcp, afterAdd);
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] });
+    expect((await outsideEntries(f))[0]).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "tron-added" }, op: "unset",
+      presentation: { display: { before: "Configured", after: "Removed" } } });
+
+    // Project scope follows the Project root, not the subdirectory a chat runs in.
+    const chat = await f.registry.create(subdirectory);
+    expect(chat.cwd).toBe(await realpath(subdirectory));
+    expect(chat.projectDir).toBe(await realpath(project));
+    await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "project", cwd: subdirectory, server: "project-tron", transport: "http", url: "http://127.0.0.1:1/project" });
+    expect(f.broadcasts.at(-1)).toEqual({ topic: "mcp.changed", payload: { scope: "project", projectDir: await realpath(project) } });
+    await expect(readFile(join(subdirectory, ".pi", "mcp.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    git(project, "add", ".pi/mcp.json");
+    git(project, "commit", "-q", "-m", "project mcp");
+    const beforePull = (await outsideEntries(f)).length;
+    await f.service.invoke(client(), "settings.resolve", { target: projectTarget, keys: ["run.transport"] });
+    expect((await outsideEntries(f)).length).toBe(beforePull);
+    // A pull adds a server: recorded against the root with its commit, pushed, and served by the project MCP owner.
+    const clone = join(f.root, "mcp-clone");
+    git(f.root, "clone", "-q", project, clone);
+    const cloned = JSON.parse(await readFile(join(clone, ".pi", "mcp.json"), "utf8")) as { mcpServers: Record<string, unknown> };
+    await writeFile(join(clone, ".pi", "mcp.json"), `${JSON.stringify({ ...cloned, mcpServers: { ...cloned.mcpServers, pulled: { command: "/usr/bin/false" } } }, null, 2)}\n`);
+    git(clone, "commit", "-q", "-am", "add pulled server");
+    const pushesBefore = f.pushes.length;
+    git(project, "pull", "-q", "--ff-only", clone, "main");
+    await f.service.invoke(client(), "settings.resolve", { target: projectTarget, keys: ["run.transport"] });
+    const pulled = (await outsideEntries(f))[0]!;
+    expect(pulled).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "pulled" }, added: true, layer: "project",
+      target: { kind: "project", cwd: await realpath(project) }, git: { path: ".pi/mcp.json", head: git(project, "rev-parse", "HEAD").trim(), branch: "main" } });
+    await until(() => f.pushes.length > pushesBefore);
+    expect(f.pushes.slice(pushesBefore)).toEqual([expect.objectContaining({ message: expect.stringContaining("MCP server pulled") })]);
+    expect(f.broadcasts).toContainEqual({ topic: "mcp.changed", payload: { scope: "project", projectDir: await realpath(project) } });
+    expect(await servers(f, { scope: "project", cwd: subdirectory })).toEqual(expect.arrayContaining(["project:project-tron", "project:pulled"]));
+
+    // Custom models: Tron's save is Tron's; a hand edit of a provider is recorded by digest and pushes.
+    const document = { providers: { "tron-provider": { baseUrl: "https://tron-models.invalid/v1", api: "openai-completions", apiKey: "tron-key", models: [{ id: "m" }] } } };
+    await f.service.invoke(client(), "models.custom.put", { commandId: commandId(), document });
+    expect(f.broadcasts.at(-1)).toEqual({ topic: "models.customChanged", payload: {} });
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] });
+    const beforeModels = (await outsideEntries(f)).length;
+    const modelsPath = join(f.agentDir, "models.json");
+    const saved = JSON.parse(await readFile(modelsPath, "utf8")) as { providers: Record<string, unknown> };
+    await writeJson(modelsPath, { providers: { ...saved.providers, "hand-provider": { baseUrl: "https://hand-models.invalid/v1", api: "openai-completions", apiKey: "outside-model-secret", models: [{ id: "h" }] } } });
+    await until(() => f.pushes.some(push => push.message.includes("Custom model provider hand-provider")));
+    expect((await outsideEntries(f)).length).toBe(beforeModels + 1);
+    expect((await outsideEntries(f))[0]).toMatchObject({ key: "accounts.models.provider", qualifiers: { provider: "hand-provider" }, added: true,
+      presentation: { label: "Custom model provider hand-provider", section: "accounts" } });
+    expect(f.broadcasts).toContainEqual({ topic: "models.customChanged", payload: {} });
+    expect(JSON.stringify(await f.history())).not.toContain("outside-model-secret");
+    const served = await f.service.invoke(client(), "models.custom.get", {}) as { document: { providers: Record<string, unknown> } };
+    expect(Object.keys(served.document.providers).sort()).toEqual(["hand-provider", "tron-provider"]);
+    // A section filter finds the subject entries with their section's keys.
+    expect((await f.history({ section: "tools" })).some(entry => entry.key === "tools.mcp.server")).toBe(true);
+    transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
   });
 });
 
