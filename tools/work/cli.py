@@ -40,6 +40,8 @@ def main(argv: list) -> int:
     begin = commands.add_parser("start", help="claim an issue and create its branch and worktree")
     begin.add_argument("issue", type=int, help="issue number")
     begin.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
+    begin.add_argument("--integration", action="store_true", help="explicitly claim an epic as an integration branch")
+    begin.add_argument("--base", metavar="REMOTE-BRANCH", help="start from this branch on the configured remote")
     transfer = commands.add_parser("handoff", help="transfer a claim after authoritative owner settlement proof")
     transfer.add_argument("issue", type=int)
     transfer.add_argument("--session", help="new owner session (default: WORK_SESSION_ID, PI_SESSION_ID)")
@@ -110,7 +112,8 @@ def main(argv: list) -> int:
         if args.command == "bootstrap":
             return bootstrap.run(Gh(root), root, config, args.apply, args.report)
         if args.command == "start":
-            return start.run(Gh(root), Path.cwd(), config, args.issue, args.session)
+            return start.run(Gh(root), Path.cwd(), config, args.issue, args.session,
+                             args.integration, args.base)
         if args.command == "handoff":
             return handoff.run(Gh(root), Path.cwd(), config, args.issue, args.session, args.force_maintainer, args.reason)
         if args.command == "recover":

@@ -157,6 +157,15 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           answer(response, 200, { mode: policy.mode });
           return;
         }
+        if (next.mode === "replace-held-open") {
+          if (policy.mode !== "hold-open" || !intercepted) throw new Error("no held open to replace");
+          // Discard the old response and arm the same barrier for the new
+          // transport. await-intercepted now proves a replacement answered.
+          intercepted = false;
+          for (const bridge of [...bridges]) bridge.terminate();
+          answer(response, 200, { mode: next.mode });
+          return;
+        }
         if (next.mode === "close") {
           if (![1000, 1001, 1008, 1012, 1013].includes(next.code)) throw new Error("invalid close code");
           for (const bridge of bridges) bridge.close(next.code);
@@ -180,7 +189,7 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           answer(response, 200, { mode: next.mode, pid });
           return;
         }
-        if (!["pass", "blackhole", "hold-hello", "hold-open", "hold-sync", "hold-http-response", "drop-prompt-response", "reject-upgrade"].includes(next.mode)) throw new Error("unknown fault");
+        if (!["pass", "blackhole", "hold-hello", "hold-open", "hold-sync", "reject-open", "hold-http-response", "drop-prompt-response", "reject-upgrade"].includes(next.mode)) throw new Error("unknown fault");
         if (next.http !== undefined && (next.mode !== "blackhole" || typeof next.http !== "boolean")) throw new Error("invalid http blackhole");
         if (next.mode === "reject-upgrade" && ![401, 403, 503].includes(next.status)) throw new Error("invalid rejection status");
         if (next.mode === "drop-prompt-response" && (typeof next.commandId !== "string" || !/^[A-Za-z0-9._:-]{8,160}$/.test(next.commandId))) throw new Error("invalid command identity");
@@ -368,6 +377,13 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
         try {
           frame = JSON.parse(data.toString());
           if (frame.type === "request" && typeof frame.method === "string") linkStats.dispatchedRPCs++;
+          if (policy.mode === "reject-open" && frame.type === "request" && frame.method === "session.open") {
+            // Ask the real Gateway for an absent session: its own error travels
+            // through the unchanged response decoder, unlike a fabricated reply.
+            frame.params = { sessionId: "00000000-0000-4000-8000-000000000393" };
+            data = Buffer.from(JSON.stringify(frame));
+            signalInterception();
+          }
           if (frame.type === "request" && frame.method === "system.logs.export") {
             linkStats.logsExportRequestBytes = data.length;
             if (logsExportRequestIDs.size >= 16) logsExportRequestIDs.delete(logsExportRequestIDs.values().next().value);

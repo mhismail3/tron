@@ -12,7 +12,7 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 
 | Command | Does |
 | --- | --- |
-| `start <issue>` | Claims an open, unclaimed, non-epic issue: pushes a claim commit to `claim.remote`, sets Status In progress, comments the claim, and creates the worktree `../tron-worktrees/<issue>-<slug>` on `<type>/<issue>-<slug>`. A session resumes its own claim. |
+| `start <issue> [--integration] [--base REMOTE-BRANCH]` | Claims an open, unclaimed issue: pushes a canonical claim commit to `claim.remote`, sets Status In progress, comments the claim, and creates its worktree under `../tron-worktrees/`. Ordinary start excludes epics; maintainer-approved epic integration uses `--integration`. `--base` selects a branch on the configured remote; its name is recorded as `Work-Claim-Base` and the claim commit's parent pins the exact starting commit. Without it the configured base is used. A session resumes its own claim from that immutable creation receipt, including after handoff or a base advance. Closed issues and open blockers remain refused. Never create manual ownerless epic/custom-base branches. This is not adoption: unknown/live claims must go through supported handoff. |
 | `handoff <issue> --reason TEXT [--session ID] [--force-maintainer]` | Transfers an existing claim in place; preserves the registered worktree and dirty files. Automatic transfer requires authoritative terminal settlement evidence from `packages/gateway/dist/client/work-owner-status.js`; unknown `no-report` work is eligible only when the Gateway's `ownerSettlement` proof validates its canonical task marker, invocation start/terminal receipts, and successful subagent settlement for the same task, session, and operation (including a successful join with zero stops). The helper rechecks task identity, lifecycle, operation and proof before accepting. A terminal task with zero projected live runs is not independent settlement proof. This requires both a rebuilt helper and a Gateway running the updated Home status projection; an older Gateway omits the proof and therefore fails closed. Prepare the helper with `PATH="$HOME/.nvm/versions/node/v$(cat .node-version)/bin:$PATH" npm --prefix packages/gateway run build`. The helper defaults `TRON_GATEWAY_HOST` to the local Tailscale address, matching terminal chat. Set `TRON_GATEWAY_HOST=127.0.0.1` when querying a loopback-bound development Gateway, or set it to a literal IP assigned to this Mac; it refuses other hosts before reading the local credential or opening a socket. Maintainer override requires a real TTY and exact typed confirmation. A legacy claim with no owner is `unknown`, never automatically transferable; this includes both a claim commit with no owner trailer and an established claim-style remote branch with no claim commit or claim trailers at all. The branch name plus the matching registered worktree and exact local/remote head identify the existing claim; they do not invent an old session identity. A maintainer can recover it only with `--force-maintainer` and the exact prompt `HANDOFF #<issue> FROM unknown`. This records `unknown` as the prior owner; it does not invent an identity or liveness result. The public audit includes old/new owner, reason, and exact transition commit SHA. Local and remote claim heads must match exactly (except a verified partial handoff retry); an unpushed or divergent local head is refused even with force. Only a clean descendant candidate with a settled owner can use `recover` below before ordinary handoff. |
 | `recover <issue> --expected-local SHA --expected-remote SHA --reason TEXT` | Publishes an exact clean descendant candidate as **unverified work**, without transferring ownership or changing local history. Requires the same known claim at both full commit IDs and canonical owner/children settlement; there is no force override. See [candidate recovery](#candidate-recovery). |
 | `verify [--tests CMD]...` | Runs the checks the branch's paths require, then each `--tests` command, on the current commit. Exit 0 when all pass. |
@@ -27,6 +27,18 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 Every GitHub write goes through `scripts/tron work`, which appends it to a private,
 bounded audit log at `<git common dir>/work/github-writes.jsonl` without its body.
 Reads are plain `gh` reads.
+
+Do not create manual ownerless epic/custom-base branches. Explicit `start --integration`
+creates the canonical owner claim; `--base` records the exact configured-remote
+branch, not a guessed `main`. This selects the starting tree, not a different merge
+target: `verify` and `land` still use the configured base (normally `main`).
+Creation is not adoption: existing local-only branches refuse without publication,
+and unknown/live remote claims still require supported `handoff`. Unknown-owner maintainer recovery requires a real
+terminal and exact `HANDOFF #<issue> FROM unknown` confirmation. Before continuation
+writes, verify old/new owner, pre/transition heads, unchanged tree, local/remote match,
+public audit and normal `work start` admission. Durable receipts include issue, branch,
+worktree, owner, head/tree, PR, exact test commands with actual pass/fail results and
+the next slice; historical failed gates remain failed.
 
 ## `verify` and `land`
 
@@ -45,10 +57,21 @@ start a build:
   for `.sh` and for shebang-shell files under `scripts/`;
 - each `--tests` command, run from the repository root.
 
-Checks run two at a time. Each log is kept under `<git dir>/work/logs/`, and a
-failing check prints the end of its log. A tree that passed with the same check set is
+Read-only preflight checks run two at a time. Canonical builds then run one at a
+time, in Mac → Gateway → push relay → iOS order when selected; only after they
+succeed do explicit `--tests` commands run, at most two together. Mac staging can
+replace the Gateway's source `node_modules`, and package checks can install their
+dependencies, so those publishers must settle before consumers run. The first
+failed phase prevents later phases from starting; no assertion or timeout is
+relaxed. Explicit journeys must themselves avoid conflicting writes.
+
+Each log is kept under `<git dir>/work/logs/`, and a failing check prints the end
+of its log. A tree that passed with the same check set and build-order contract is
 recorded under `<git dir>/work/verified/` and is not run again. `verify` refuses
-a dirty worktree, because it checks a commit.
+a dirty worktree, because it checks a commit. `python3 -B scripts/test-work-verify.py`
+exercises the real CLI with child-process dependency replacement, an explicit
+reader journey, failed-publisher admission, and exact-tree cache reuse; its
+repeatable evidence is `test-results/work-verify.json`.
 
 `land` refuses a detached HEAD, a base branch, a dirty worktree, a merge or rebase in
 progress, and a branch with no commits beyond the base. The privacy guard runs on the
@@ -132,6 +155,17 @@ deletes the local branch and the remote branch with a lease on the proven head.
 The tooling has no unit tests. Changes are validated by running the real commands: a
 `verify` or `land --dry-run` on the branch, and an integration run against a temporary
 repository when a change touches Git, GitHub or cleanup behavior.
+
+`python3 scripts/test-work-start.py` exercises real CLI/Git creation, custom-base
+contents and canonical ownership, idempotent resume, and fixture-only interactive
+handoff followed by ordinary successor admission. It verifies that the creation
+base survives handoff and a later base advance, and that closed/blocked/excluded
+issues, foreign/unknown claims, invalid/missing bases and local-only branch collisions
+refuse without publishing changes. Ordinary task creation remains covered. The
+process-level GitHub fixture uses isolated `HOME` and `TMPDIR`; evidence is written
+to `test-results/work-start.json`, and temporary repositories are removed on exit.
+The diagnostic signal for an ownerless integration branch is the absence of a
+`Work-Claim-Session` claim receipt: a branch name or clean worktree is not owner proof.
 
 `python3 scripts/test-work-land.py` exercises land through the real CLI, temporary Git
 remote, and process-level GitHub fixture. It covers a base advance followed by a stale

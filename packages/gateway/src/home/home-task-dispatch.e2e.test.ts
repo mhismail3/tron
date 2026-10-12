@@ -1,4 +1,5 @@
 import * as fileSystem from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { chmod, cp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -1627,7 +1628,7 @@ describe("Home task production dispatch", () => {
     evidence.push({ case: "ordinary-negative-control", taskTools: false, taskSignals: 0, ordinaryNotification: true });
   }, 20_000);
 
-  it.each(["no-effect", "successful-read", "blocked-provider", "foreground-process"] as const)("task deadline cancels and joins %s with spend-correlated diagnostic", async scenario => {
+  it.each(["no-effect", "successful-read", "blocked-provider", "foreground-process", "foreground-process-publication-gap"] as const)("task deadline cancels and joins %s with spend-correlated diagnostic", async scenario => {
     const f = await fixture();
     const originalTimer = globalThis.setTimeout;
     let expire: (() => void) | undefined;
@@ -1640,15 +1641,20 @@ describe("Home task production dispatch", () => {
     let turns = 0;
     let aborted = false;
     let providerStarted = false;
+    const foreground = scenario.startsWith("foreground-process");
     const pidPath = join(f.cwd, "child.pid");
+    const releasePath = join(f.cwd, "publish-pid");
     await writeFile(join(f.cwd, "readable.txt"), "real tool effect\n");
     if (scenario === "blocked-provider") {
       f.faux.setResponses([(_context, options) => new Promise((_resolve, reject) => {
         providerStarted = true;
         options?.signal?.addEventListener("abort", () => { aborted = true; reject(new Error("faux aborted")); }, { once: true });
       })]);
-    } else if (scenario === "foreground-process") {
-      f.faux.setResponses([fauxAssistantMessage([fauxToolCall("bash", { command: `sleep 120 & echo $! > ${JSON.stringify(pidPath)}; wait` })], { stopReason: "toolUse" })]);
+    } else if (foreground) {
+      // Expose the real open(O_TRUNC) -> write interval without loading the Mac.
+      const publicationGate = scenario === "foreground-process-publication-gap"
+        ? `: > ${JSON.stringify(pidPath)}; while [ ! -f ${JSON.stringify(releasePath)} ]; do sleep 0.01; done; ` : "";
+      f.faux.setResponses([fauxAssistantMessage([fauxToolCall("bash", { command: `sleep 120 & owned=$!; ${publicationGate}echo $owned > ${JSON.stringify(pidPath)}; wait` })], { stopReason: "toolUse" })]);
     } else {
       const response = () => {
         turns += 1;
@@ -1659,7 +1665,29 @@ describe("Home task production dispatch", () => {
     }
     const run = await dispatch(f);
     expect(expire).toBeDefined();
-    await waitFor(() => scenario === "blocked-provider" ? providerStarted : scenario === "foreground-process" ? existsSync(pidPath) : turns >= 3, "task adversary live");
+    let childPid: number | undefined;
+    let unpublishedObserved = false;
+    // File creation is not PID publication: cancellation in between used to
+    // turn Number("") into PID 0 and probe the test runner's process group.
+    await waitFor(async () => {
+      if (!foreground) return scenario === "blocked-provider" ? providerStarted : turns >= 3;
+      const text = await readFile(pidPath, "utf8").catch(() => undefined);
+      if (text === undefined) return false;
+      if (!/^[1-9]\d*\s*$/.test(text) || !Number.isSafeInteger(Number(text))) {
+        if (scenario === "foreground-process-publication-gap") {
+          expect(text).toBe("");
+          unpublishedObserved = true;
+          await writeFile(releasePath, "release");
+        }
+        return false;
+      }
+      childPid = Number(text);
+      return true;
+    }, "task adversary live with published process identity");
+    if (scenario === "foreground-process-publication-gap") expect(unpublishedObserved).toBe(true);
+    const processState = () => childPid === undefined ? null : spawnSync("ps", ["-p", String(childPid), "-o", "pid=,ppid=,pgid=,stat=,lstart=,comm="], { encoding: "utf8", timeout: 2_000 }).stdout.trim();
+    const processAtAdmission = processState();
+    if (foreground) expect(processAtAdmission).toMatch(/sleep/);
     expire!();
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "limited", reason: "deadline" });
@@ -1670,20 +1698,30 @@ describe("Home task production dispatch", () => {
     await new Promise(resolve => originalTimer(resolve, 40));
     expect(turns).toBe(turnsAtStop); expect(slot.canonicalSessionEntries()).toHaveLength(entriesAtStop);
     if (scenario === "blocked-provider") expect(aborted).toBe(true);
-    if (scenario === "foreground-process") {
+    if (foreground) {
       expect(existsSync(pidPath)).toBe(true);
-      const pid = Number(await readFile(pidPath, "utf8"));
+      const pid = childPid!;
+      expect(Number(await readFile(pidPath, "utf8"))).toBe(pid);
       // The stop SIGKILLs the shell's process group and joins the shell. The
       // background child is killed too, but the OS reaps the orphaned zombie
       // asynchronously, and `kill(pid, 0)` succeeds on a zombie, so wait for
       // the reap within the hang bound instead of sampling once.
-      await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, "the killed background child to be reaped");
+      try {
+        await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, "the killed background child to be reaped");
+      } catch (error) {
+        // One-step evidence distinguishes a live owned process, an orphaned
+        // zombie and PID reuse, without logging the fixture's private path.
+        const diagnostic = { case: scenario, childPid, processAtAdmission, processAtFailure: processState(), unpublishedObserved };
+        evidence.push(diagnostic);
+        throw new Error(`Owned child reap failed: ${JSON.stringify(diagnostic)}`, { cause: error });
+      }
     } else if (scenario !== "blocked-provider") expect(turns).toBeGreaterThanOrEqual(3);
     const signal = f.signals.find(record => record.event === "home.task.runaway-stop");
     expect(signal).toMatchObject({ taskHash: expect.stringMatching(/^[a-f0-9]{16}$/), spendReference: expect.any(String), cancelAndJoin: "joined", elapsedMs: expect.any(Number) });
     expect(JSON.stringify(signal)).not.toContain(f.cwd);
     expect(result.spend!.inputTokens + result.spend!.outputTokens).toBeGreaterThanOrEqual(scenario === "blocked-provider" ? 0 : 1);
-    evidence.push({ case: scenario, turnsAtStop, entriesAtStop, spend: result.spend, signal, noFurtherEffects: true });
+    evidence.push({ case: scenario, turnsAtStop, entriesAtStop, spend: result.spend, signal, noFurtherEffects: true,
+      ...(foreground ? { childPid, processAtAdmission, processAtStop: processState(), unpublishedObserved } : {}) });
   }, 20_000);
 
   it("records a failed exact deadline join as unknown with durable correlated evidence", async () => {

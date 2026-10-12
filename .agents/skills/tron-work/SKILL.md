@@ -22,7 +22,17 @@ when the user wants the page. Report a `work:` error as is; do not retry with st
    the epic's rules.
 2. **Claim.** `scripts/tron work start <issue>`, then work only in the worktree it
    prints. It refuses a closed, blocked, or already-claimed issue; report that and
-   stop rather than working around it. For an abandoned claim, use
+   stop rather than working around it. Maintainer-approved epic integration work
+   and custom-base work use `start <issue> --integration [--base <remote-branch>]`;
+   never create a manual ownerless epic/custom-base branch. The selected base is
+   recorded exactly in claim metadata. This is creation, not adoption: unknown/live
+   claims still require supported handoff. Unknown-owner recovery requires a real
+   maintainer terminal and exact `HANDOFF #<issue> FROM unknown` confirmation.
+   Continuation verifies old/new owner, pre/transition heads, unchanged tree,
+   local/remote match, public audit and ordinary `work start` admission before
+   writing. Durable receipts include issue, branch, worktree, owner, head/tree, PR,
+   exact test commands with actual pass/fail, and next slice; historical failed
+   gates remain failed. For an abandoned claim, use
    `scripts/tron work handoff <issue> --reason TEXT` only after authoritative settled-owner proof;
    indeterminate owners refuse. A legacy claim with no owner is `unknown` and
    never proves settlement; a maintainer can recover it only with
