@@ -11,6 +11,9 @@ import TronMobileCore
 struct HostedSettingsRendererFixture: View {
     @State private var model: AppModel
     @State private var ready = false
+    @State private var activity = PresentationActivityCoordinator()
+    @State private var covering = false
+    @State private var heldPreviews = 0
     @State private var error: String?
     @State private var applied = 0
     @State private var thinkingOptions = -1
@@ -29,6 +32,11 @@ struct HostedSettingsRendererFixture: View {
     }
 
     var body: some View {
+        TronPresentationSurface(id: "fixture.settings-renderer") { fixtureContent }
+            .environment(\.tronPresentationActivityCoordinator, activity)
+    }
+
+    private var fixtureContent: some View {
         NavigationStack {
             if ready {
                 Group {
@@ -42,12 +50,22 @@ struct HostedSettingsRendererFixture: View {
                     .safeAreaInset(edge: .bottom) {
                         HStack {
                             Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
+                            Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
+                            if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") {
+                                Button("Cover renderer") { covering = true }
+                            }
                             Text("thinking-options:\(thinkingOptions)").accessibilityIdentifier("fixture.settings-renderer-thinking-options")
                         }
                         .font(.caption2)
                         .opacity(0.6)
                     }
             } else if let error { Text(error) }
+        }
+        .tronManagedSheet(isPresented: $covering, identity: "fixture.settings-cover") {
+            NavigationStack {
+                Button("Release preview") { Task { await socket.releasePreview() } }
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { covering = false } } }
+            }
         }
         .environment(model)
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-settings-renderer-dark") ? .dark : .light)
@@ -62,6 +80,7 @@ struct HostedSettingsRendererFixture: View {
         .task {
             while !Task.isCancelled {
                 (applied, thinkingOptions) = await socket.counters()
+                heldPreviews = await socket.previewCount()
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
@@ -70,6 +89,11 @@ struct HostedSettingsRendererFixture: View {
 
 private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private let sourceActions = ProcessInfo.processInfo.arguments.contains("-settings-renderer-source-actions")
+    private var heldPreview: CheckedContinuation<Void, Never>?
+    private var previewsHeld = 0
+    func previewCount() -> Int { previewsHeld }
+    func releasePreview() { heldPreview?.resume(); heldPreview = nil }
+
     private var hello = true
     private var receiver: CheckedContinuation<Data, Error>?
     private var pending: [Data] = []
@@ -99,7 +123,13 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         switch method {
         case "settings.resolve": result = resolution()
         case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", query: params["query"]?.stringValue, cursor: params["cursor"]?.stringValue)
-        case "settings.change": result = try change(params)
+        case "settings.change":
+            if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview"),
+               params["dryRun"]?.boolValue == true, previewsHeld == 0 {
+                previewsHeld += 1
+                await withCheckedContinuation { heldPreview = $0 }
+            }
+            result = try change(params)
         default: result = .object([:])
         }
         try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result]))

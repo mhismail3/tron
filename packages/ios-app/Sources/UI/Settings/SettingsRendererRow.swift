@@ -8,6 +8,7 @@ struct SettingsRendererRow: View {
     let setting: ResolvedSetting
     let target: JSONValue
     let editable: Bool
+    var externalControl = false
     /// Changes when a key this row's options depend on changes, so they are re-requested.
     let dependencyDisplay: String
     let error: String?
@@ -23,7 +24,7 @@ struct SettingsRendererRow: View {
     private var presentation: SettingsKeyPresentation? { setting.presentation }
     private var title: String { presentation?.label ?? setting.key }
     private var control: SettingsRowControl {
-        editable ? SettingsRowControl(negotiated: presentation?.control) : .readOnly
+        editable && !externalControl ? SettingsRowControl(negotiated: presentation?.control) : .readOnly
     }
 
     private struct OptionsLoadID: Hashable {
@@ -161,7 +162,7 @@ struct SettingsRendererRow: View {
                         }
                     }
                 }
-                if editable, control != .readOnly {
+                if editable, control != .readOnly || externalControl {
                     // Action primitives are served with the source badge. A
                     // future action stays a neutral badge, never an arbitrary
                     // RPC; reset reuses the row's dry-run and receipt owner.

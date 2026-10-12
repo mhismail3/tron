@@ -248,13 +248,12 @@ struct SessionContextSheet: View {
                             target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
                             writeLayer: "chat",
                             embedded: true,
-                            ownedKeysOnly: true,
                             ownedLayers: ["chat"],
-                            excludedKeys: ["model.ref", "model.thinking", "model.contextWindow"]
+                            externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]
                         )
                         TronGlassCard(accent: .tronEmerald) {
                             manageRow(icon: "gearshape", title: "Settings",
-                                      subtitle: "Values and defaults for this chat", accent: .tronEmerald) {
+                                      subtitle: "Mac defaults, accounts, and this iPhone", accent: .tronEmerald) {
                                 destination = .settings
                             }
                             .accessibilityIdentifier("manage-session-settings")
@@ -341,8 +340,7 @@ struct SessionContextSheet: View {
                 Group {
                     switch route {
                     case .settings:
-                        SettingsRendererSheet(target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
-                                              writeLayer: "chat", projectCWD: displayedPresentation?.cwd)
+                        SettingsView(onImported: onForkCreated)
                             .environment(\.tronSettingsVisualTheme, nil)
                     case .agentInstructions:
                         AgentInstructionsSheet(sessionID: sessionID)

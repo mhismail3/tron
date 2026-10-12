@@ -794,13 +794,17 @@ actions remain display-only badges, and a negotiated read-only row cannot reset.
 `testSettingsRendererUsesCurrentDefaultSourceAction` proves one applied unset
 against the hosted socket and preserves the unknown badge without dispatching it.
 This is primitive coverage; session-surface adoption still owns the runtime fence.
-Manage Session and Manage Home embed the same schema renderer for the keys not
-already represented by the shared Chat model/context card. Home admits both Chat
-and Profile layers; Manage Session admits Chat. Other resolved values remain
-visible with their served edit-at-layer route. Read-only previews are fenced by
-the exact renderer request, presentation activity, foreground reconciliation,
-and profile identity before publishing a refusal, error, confirmation or clearing
-loading state; accepted setting mutations keep their receipt owner.
+Manage Session and Manage Home embed the same schema renderer with calm
+collapsed summaries and All settings/search. Home owns Chat then Profile;
+Manage Session owns Chat. The shared Chat card remains the only value editor
+for its live model, thinking and context window, while their generic rows retain
+schema provenance and reset actions. Other keys remain read-only with routes to
+the shared Project or Mac surface. Disposable previews own separate busy state
+from accepted mutations. Exact request, surface-token, target, foreground and
+profile fences reject stale responses; retirement releases preview state without
+cancelling a receipt. The controlled hosted preview journey holds a response
+across a covering sheet, proving no stale write and a usable row after rejoin.
+Active-child selections remain admitted when the child dismisses to its parent.
 Every edit is a `settings.change` dry run first: a refusal
 shows under its row and nothing is applied, and a change with `confirm` text asks first.
 `SettingsTrustCoordinator` owns the generic reads and the receipt-bound change, which the
@@ -1648,8 +1652,8 @@ all Global/Project scope pickers are removed; hook inventory inherits its caller
 target. Hosted Mac-settings and offline navigation journeys protect the shared
 thinking editor, no-write dismissal and native flow reachability.
 
-Manage Session's Settings destination uses `SettingsRendererSheet` for its exact
-Chat target. Fixed-source actions and live overrides go through the existing
+Manage Session embeds the renderer for its exact Chat target; its Settings
+destination opens Mac settings. Fixed-source actions and live overrides go through the existing
 settings mutation receipt owner, with runtime/model/revision captured from the
 admitted session and rechecked immediately before a send. Opening or dismissing
 never writes. The renderer uses the resolver's allowed layer list: other-layer
@@ -1657,7 +1661,8 @@ rows remain read-only and link to the Project or Mac editor rather than attempti
 a Chat write. The hosted `testManageSessionUsesCurrentDefault` journey exercises
 reset through this actual route and reopens it to check the authoritative value;
 Gateway settings-gate coverage owns persistence and provider-effect proof.
-The remaining Manage Home/card consolidation is tracked by settings epic #758.
+The shared Chat card keeps its domain receipt/revision adapter; the renderer
+owns the remaining keys and all source/reset rows.
 
 An interrupted initial chat open has a distinct `waitingForConnection` phase.
 The opening owner starts no open lease or timeout without lifecycle admission;
@@ -1707,10 +1712,11 @@ Disable returns the ring to Manage Session without replacing chat.
 App restart reads current Gateway status, without claiming or replaying an old
 command. Manage Home keeps the shared live Chat model/context card, including
 active-lineage receipt/snapshot reconciliation and its session-scoped notice above
-Models. An embedded generic renderer resolves the Home chat target and displays
-only keys whose schema declares the Profile write layer; it does not duplicate
-live Chat controls. Profile row controls, qualifiers, options, badges, source
-actions and reset stay schema-driven, with no per-key native Profile picker.
+Models. The embedded generic renderer resolves Home's Chat and Profile layers,
+preferring Chat when both allow a key. Schema source/reset rows do not duplicate
+the shared Chat card's value editors. Profile controls, qualifiers, options,
+badges, source actions and reset stay schema-driven, with no per-key native
+Profile picker.
 A mounted renderer accepts selections from its active child catalog/editor even
 while that child suspends the parent's presentation reads. The physical
 memory-model selection/reopen/cancel journey protects this boundary. Any future

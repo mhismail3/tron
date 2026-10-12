@@ -49,9 +49,8 @@ extension HomeSheet {
                 target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
                 writeLayer: nil,
                 embedded: true,
-                ownedKeysOnly: true,
                 ownedLayers: ["chat", "profile"],
-                excludedKeys: ["model.ref", "model.thinking", "model.contextWindow"]
+                externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]
             )
         } else {
             TronLoadingState(label: "Loading Home chat…")

@@ -1676,19 +1676,16 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["Stop session"].tap()
         XCTAssertTrue(app.buttons["Release terminal settlement"].waitForExistence(timeout: 5))
         app.buttons["Release terminal settlement"].tap()
-        tapScrolling(app.buttons["manage-session-settings"], in: app)
         let expand = app.buttons["settings-section-model-expand"]
         XCTAssertTrue(expand.waitForExistence(timeout: 5), app.debugDescription)
-        expand.tap()
+        tapScrolling(expand, in: app)
         let reset = app.buttons["settings-row-model.thinking_role_chat_-useCurrentDefault"]
         tapScrolling(reset, in: app)
         XCTAssertTrue(app.staticTexts["From default at start: High (Mac)"].waitForExistence(timeout: 5), app.debugDescription)
-        app.buttons["settings-renderer-done"].tap()
+        tapScrolling(expand, in: app)
         XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
-        tapScrolling(app.buttons["manage-session-settings"], in: app)
-        XCTAssertTrue(expand.waitForExistence(timeout: 5))
-        expand.tap()
+        tapScrolling(expand, in: app)
         XCTAssertTrue(app.staticTexts["From default at start: High (Mac)"].waitForExistence(timeout: 5))
     }
 
@@ -1772,6 +1769,30 @@ final class TronSmokeUITests: XCTestCase {
     /// section, subgroup, key and badge kind render from served data alone; an
     /// unknown control is read-only; the Gateway refuses an invalid value inline
     /// and nothing applies; a model without thinking offers no thinking options.
+    @MainActor
+    func testSettingsRendererRetiresCoveredPreviewWithoutWritingOrLockingRows() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-held-preview"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        let section = app.buttons["settings-section-context-expand"]
+        XCTAssertTrue(section.waitForExistence(timeout: 10))
+        tapScrolling(section, in: app)
+        let toggle = any["settings-row-context.images.block"].switches.firstMatch
+        tapScrolling(toggle, in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-held"], containing: "held:1", timeout: 5))
+        app.buttons["Cover renderer"].tap()
+        app.buttons["Release preview"].tap()
+        app.buttons["Done"].tap()
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
+        XCTAssertTrue(toggle.isEnabled, "Retiring a disposable preview must release its busy state")
+        tapScrolling(toggle, in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        keepScreenshot(named: "758-retired-preview-rejoined")
+    }
+
     @MainActor
     func testSettingsRendererRendersAFixtureSchema() {
         continueAfterFailure = false

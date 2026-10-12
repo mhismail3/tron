@@ -10,13 +10,11 @@ struct SettingsRendererView: View {
     let target: JSONValue
     let writeLayer: String?
     var embedded = false
-    /// A composed surface can retain domain-owned controls; its remaining key
-    /// membership stays schema-owned, including values read-only at this surface.
-    var ownedKeysOnly = false
     /// Ordered from the layer this surface prefers to the next owned layer.
     var ownedLayers: [String] = []
-    /// Keys represented by a domain-owned control elsewhere in the same card.
-    var excludedKeys: Set<String> = []
+    /// Receipt-aware Chat controls stay in their shared card. Their schema rows
+    /// retain provenance/reset actions without creating a second value editor.
+    var externalControlKeys: Set<String> = []
     var projectCWD: String? = nil
     /// Hand-built account, package and setup flows supplement schema rows, never replace them.
     var sectionSupplement: ((String) -> AnyView)? = nil
@@ -25,6 +23,7 @@ struct SettingsRendererView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
 
     @State private var resolution: SettingsResolution?
     @State private var loadError: String?
@@ -38,6 +37,7 @@ struct SettingsRendererView: View {
     /// Gateway refusals of a dry run, shown under their row; nothing was applied.
     @State private var rowErrors: [String: String] = [:]
     @State private var changingID: String?
+    @State private var previewingID: String?
     @State private var pendingConfirmation: PendingConfirmation?
     @State private var layerEditor: LayerEditor?
 
@@ -88,22 +88,28 @@ struct SettingsRendererView: View {
             Text(pending.message)
         }
         .tronManagedSheet(item: $layerEditor, identity: { "settings.layer.\($0.id)" }) { editor in
-            SettingsRendererSheet(
-                target: editor == .project && projectCWD != nil
-                    ? .object(["kind": .string("project"), "cwd": .string(projectCWD!)])
-                    : .object(["kind": .string("mac")]),
-                writeLayer: editor.rawValue
-            )
+            if editor == .project, let projectCWD, let profileID = model.selectedGatewayProfileID() {
+                ProjectSettingsSheet(route: ProjectSettingsRoute(cwd: projectCWD, profileID: profileID))
+            } else {
+                SettingsView()
+            }
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active {
                 loadGeneration &+= 1
-                previewGeneration &+= 1
+                retirePreview()
             }
+        }
+        .onChange(of: model.knowledgePresentationIdentity) { _, _ in retirePreview() }
+        .onChange(of: model.foregroundReconciliationGeneration) { _, _ in retirePreview() }
+        .onChange(of: target) { _, _ in
+            retirePreview()
+            resolution = nil
+            rowErrors = [:]
         }
         .onDisappear {
             loadGeneration &+= 1
-            previewGeneration &+= 1
+            retirePreview()
         }
         .task(id: PresentationActivityTaskID(
             source: LoadID(target: target, invalidationGeneration: model.settingsInvalidationGeneration,
@@ -141,18 +147,9 @@ struct SettingsRendererView: View {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         if !query.isEmpty {
             searchResults(resolution, query: query)
-        } else if ownedKeysOnly {
-            ForEach(Self.sections(resolution)) { section in
-                let keys = Self.keys(resolution, in: section.id).filter { isVisibleSetting($0) }
-                if !keys.isEmpty {
-                    TronSettingsGroup(section.title, detail: section.note) {
-                        rows(keys, resolution: resolution)
-                    }
-                }
-            }
         } else {
             ForEach(Self.sections(resolution)) { section in
-                sectionView(section, keys: Self.keys(resolution, in: section.id))
+                sectionView(section, keys: keys(resolution, in: section.id))
             }
             TronToggleRow(icon: "list.bullet", title: "All settings", detail: "Every setting, by section", isOn: $showsAll)
                 .tronGlassSurface(accent: .tronEmerald)
@@ -162,7 +159,7 @@ struct SettingsRendererView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     ForEach(Self.sections(resolution)) { section in
                         TronSettingsGroup(section.title, detail: section.note) {
-                            rows(Self.keys(resolution, in: section.id), resolution: resolution)
+                            rows(keys(resolution, in: section.id), resolution: resolution)
                         }
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("settings-all-\(section.id)")
@@ -265,13 +262,14 @@ struct SettingsRendererView: View {
                 setting: setting,
                 target: target,
                 editable: writableLayer(for: setting) != nil,
+                externalControl: externalControlKeys.contains(setting.key),
                 dependencyDisplay: Self.dependencyDisplay(setting, in: resolution),
                 error: rowErrors[setting.id],
                 onChange: { value in change(setting, value: value) }
             )
             // Keep the presenting control's identity while its accepted change
             // completes; replacing it with read-only would retire its child sheet.
-            .disabled(changingID != nil)
+            .disabled(changingID != nil || previewingID != nil)
             if writableLayer(for: setting) == nil,
                let editor = setting.layers.compactMap({ LayerEditor(rawValue: $0.layer) })
                 .first(where: { $0 != .project || projectCWD != nil }) {
@@ -285,7 +283,6 @@ struct SettingsRendererView: View {
 
     private func searchResults(_ resolution: SettingsResolution, query: String) -> some View {
         let matches = resolution.keys.filter { setting in
-            (!ownedKeysOnly || isVisibleSetting(setting)) &&
             [setting.presentation?.label, setting.key, setting.presentation?.help, setting.display]
                 .compactMap { $0 }
                 .contains { $0.localizedCaseInsensitiveContains(query) }
@@ -315,8 +312,8 @@ struct SettingsRendererView: View {
         return declared + Array(Set(undeclared)).sorted().map { SettingsRendererSection(id: $0) }
     }
 
-    private static func keys(_ resolution: SettingsResolution, in section: String) -> [ResolvedSetting] {
-        sorted(resolution.keys.filter { $0.group == section })
+    private func keys(_ resolution: SettingsResolution, in section: String) -> [ResolvedSetting] {
+        Self.sorted(resolution.keys.filter { $0.group == section })
     }
 
     private static func sorted(_ keys: [ResolvedSetting]) -> [ResolvedSetting] {
@@ -363,10 +360,6 @@ struct SettingsRendererView: View {
         }
     }
 
-    private func isVisibleSetting(_ setting: ResolvedSetting) -> Bool {
-        !excludedKeys.contains(setting.id) && !excludedKeys.contains(setting.key)
-    }
-
     private func writableLayer(for setting: ResolvedSetting) -> String? {
         if !ownedLayers.isEmpty {
             return ownedLayers.first { layer in setting.layers.contains(where: { $0.layer == layer }) }
@@ -382,7 +375,7 @@ struct SettingsRendererView: View {
         // A catalog/editor child sends its accepted selection through this mounted
         // ancestor. Its covered presentation reads stop; the user's command must not.
         guard let writeLayer = writableLayer(for: setting),
-              changingID == nil, presentationActivity.allowsDataPublication else { return }
+              changingID == nil, previewingID == nil, presentationActivity.allowsDataPublication else { return }
         var object: [String: JSONValue] = [
             "key": .string(setting.key), "layer": .string(writeLayer), "op": .string(value == nil ? "unset" : "set"),
         ]
@@ -392,22 +385,24 @@ struct SettingsRendererView: View {
         if let value { object["value"] = value }
         let change = JSONValue.object(object)
         let identity = model.knowledgePresentationIdentity
-        let activity = presentationActivity
+        let admittedSurface = surfaceToken
         let foreground = model.foregroundReconciliationGeneration
+        let requestTarget = target
         previewGeneration &+= 1
         let ticket = previewGeneration
-        changingID = setting.id
+        previewingID = setting.id
         Task { @MainActor in
             @MainActor func current() -> Bool {
                 ticket == previewGeneration && !Task.isCancelled
                     && identity == model.knowledgePresentationIdentity
                     && foreground == model.foregroundReconciliationGeneration
-                    && activity == presentationActivity && activity.allowsDataPublication
+                    && requestTarget == target
+                    && admittedSurface == surfaceToken && presentationActivity.allowsDataPublication
             }
-            defer { if ticket == previewGeneration && changingID == setting.id && pendingConfirmation == nil { changingID = nil } }
+            defer { if ticket == previewGeneration { previewingID = nil } }
             let preview: SettingsChangeResult
             do {
-                preview = try await model.previewSettingsChange(target: target, change: change)
+                preview = try await model.previewSettingsChange(target: requestTarget, change: change)
             } catch is CancellationError {
                 return
             } catch {
@@ -423,27 +418,40 @@ struct SettingsRendererView: View {
             rowErrors[setting.id] = nil
             if let confirm = preview.changes.first?.confirm {
                 pendingConfirmation = PendingConfirmation(change: change, rowID: setting.id, message: confirm)
-                changingID = nil
+                previewingID = nil
             } else {
-                changingID = nil
+                previewingID = nil
                 commit(change, rowID: setting.id)
             }
         }
+    }
+
+    /// Retirement owns preview cleanup; an accepted command is independent and
+    /// must retain its receipt until completion even while this surface is covered.
+    private func retirePreview() {
+        previewGeneration &+= 1
+        previewingID = nil
+        pendingConfirmation = nil
     }
 
     /// The mutation is unstructured so the view cannot cancel it; the reload is a disposable read.
     private func commit(_ change: JSONValue, rowID: String) {
         changingID = rowID
         let identity = model.knowledgePresentationIdentity
+        let requestTarget = target
+        let admittedSurface = surfaceToken
         Task { @MainActor in
             defer { changingID = nil }
             do {
-                try await model.changeSetting(target: target, change: change)
+                try await model.changeSetting(target: requestTarget, change: change)
+                guard identity == model.knowledgePresentationIdentity, requestTarget == target,
+                      admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
                 reloadTick &+= 1
             } catch is CancellationError {
                 return
             } catch {
-                guard identity == model.knowledgePresentationIdentity else { return }
+                guard identity == model.knowledgePresentationIdentity, requestTarget == target,
+                      admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
                 rowErrors[rowID] = error.localizedDescription
             }
         }
