@@ -818,7 +818,6 @@ final class AppModel {
         #endif
         lifecycle.delegate = self
         sessionPresentation.delegate = self
-        settingsTrust.delegate = self
         providerAuth.delegate = self
         packageConfiguration.delegate = self
         customModelConfiguration.delegate = self
@@ -974,11 +973,6 @@ final class AppModel {
 
 
 
-    func installHostedSettings(_ value: JSONValue?, for target: SettingsTarget) {
-        settingsTrust.installHostedSettings(value, for: target)
-    }
-
-
     func installHostedProviderCatalog(_ catalog: ProviderCatalog?, for target: ProviderCatalogTarget) {
         providerAuth.installHostedCatalog(catalog, for: target)
     }
@@ -1130,14 +1124,6 @@ final class AppModel {
 
     func sessionPresentationIdentity(for sessionID: String) -> SessionPresentationIdentity? {
         sessionPresentation.presentationTarget(for: sessionID)
-    }
-
-    func settings(for target: SettingsTarget) -> JSONValue? {
-        settingsTrust.settings(for: target)
-    }
-
-    func configuredDefaultModel(for target: SettingsTarget) -> ModelRef? {
-        settingsTrust.configuredDefaultModel(for: target)
     }
 
     func providerCatalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
@@ -2069,18 +2055,6 @@ final class AppModel {
 
     func restoreMountedPresentationAfterReconnect() async -> Bool {
         await sessionPresentation.reconnectMountedPresentation()
-    }
-
-    func refreshAll(
-        settingsTarget: SettingsTarget = .global,
-        providerTarget: ProviderCatalogTarget = .global
-    ) async {
-        _ = await refreshSessions()
-        guard !Task.isCancelled else { return }
-        async let providerLoad: Bool = refreshProviders(target: providerTarget)
-        async let settingLoad: Bool = refreshSettings(target: settingsTarget)
-        async let deviceLoad: Void = refreshDevices()
-        _ = await (providerLoad, settingLoad, deviceLoad)
     }
 
     @discardableResult
@@ -4344,15 +4318,6 @@ final class AppModel {
         try await providerAuth.logout(providerID: providerID, target: target)
     }
 
-    @discardableResult
-    func refreshSettings(target: SettingsTarget) async -> Bool {
-        await settingsTrust.refreshSettings(target: target)
-    }
-
-    func updateSettings(_ patch: JSONValue, target: SettingsTarget) async throws {
-        try await settingsTrust.updateSettings(patch, target: target)
-    }
-
     func mutateMCPAdmin(_ method: String, parameters: [String: JSONValue]) async throws -> JSONValue {
         let allowed = ["mcp.add", "mcp.remove", "mcp.update", "mcp.logout", "mcp.token.set", "mcp.auth.start", "mcp.auth.cancel"]
         guard allowed.contains(method) else {
@@ -5746,12 +5711,6 @@ extension AppModel: SessionPresentationStoreDelegate {
     }
 }
 
-extension AppModel: SettingsTrustCoordinatorDelegate {
-    func settingsTrustCoordinatorSurface(_ error: Error) {
-        surface(error)
-    }
-}
-
 extension AppModel: ProviderAuthCoordinatorDelegate {
     func providerAuthCoordinatorSurface(_ error: Error) {
         surface(error)
@@ -5908,9 +5867,8 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
             guard !Task.isCancelled, self.admitsLifecycle(admission),
                   activeConnectionID == admission.connectionID else { return }
             async let providerLoad = self.refreshProviders(target: .global)
-            async let settingLoad = self.refreshSettings(target: .global)
             async let deviceLoad = self.refreshDevices()
-            _ = await (providerLoad, settingLoad, deviceLoad)
+            _ = await (providerLoad, deviceLoad)
         }
     }
 

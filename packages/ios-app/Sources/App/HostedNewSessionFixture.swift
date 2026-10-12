@@ -167,8 +167,6 @@ private actor NewSessionFixtureGateway {
 
     func handle(_ method: String, params: [String: JSONValue], replacement: Bool) -> JSONValue? {
         switch method {
-        case "settings.get":
-            return .object(["effective": projectModel.map { .object(["defaultModel": .object(["provider": .string("fixture"), "id": .string($0)])]) } ?? .object([:])])
         case "settings.resolve":
             return projectResolution()
         case "settings.options":

@@ -28,6 +28,7 @@ struct OnboardingView: View {
     }
 
     @Environment(AppModel.self) private var model
+    private static let defaultModelKey = "model.ref[role=chat]"
     @Binding var selectedDetent: PresentationDetent
     let onComplete: () -> Void
     let mode: Mode
@@ -197,8 +198,8 @@ struct OnboardingView: View {
             applyDetent()
             if value == .model, selectedModel == nil {
                 Task {
-                    await model.refreshSettings(target: .global)
-                    selectedModel = model.configuredDefaultModel(for: .global) ?? model.preferredAvailableModel(for: .global)
+                    let configured = await configuredDefaultModel()
+                    selectedModel = configured ?? model.preferredAvailableModel(for: .global)
                 }
             }
         }
@@ -492,6 +493,23 @@ struct OnboardingView: View {
             surfaceOnboardingError(error)
         }
     }
+
+    /// The Mac-layer Chat model default, as the generic renderer serves it.
+    private func configuredDefaultModel() async -> ModelRef? {
+        do {
+            let resolution = try await model.resolveSettingsForRenderer(
+                target: SettingsTarget.global.gatewayTarget, keys: [Self.defaultModelKey]
+            )
+            guard let ref = resolution.setting(Self.defaultModelKey)?.value?.objectValue,
+                  let provider = ref["provider"]?.stringValue, let id = ref["id"]?.stringValue else { return nil }
+            return ModelRef(provider: provider, id: id)
+        } catch is CancellationError {
+            return nil
+        } catch {
+            model.presentError(error)
+            return nil
+        }
+    }
     private func setTrust(_ decision: Bool) async {
         guard let target = TrustTarget(cwd: selectedWorkspace) else { return }
         do {
@@ -510,9 +528,11 @@ struct OnboardingView: View {
         defer { finishing = false }
         do {
             clearOnboardingError()
-            try await model.updateSettings(
-                .object(["defaultModel": .object(["provider": .string(selectedModel.provider), "id": .string(selectedModel.id)])]),
-                target: .global
+            try await model.changeSetting(
+                target: SettingsTarget.global.gatewayTarget,
+                change: SettingsTarget.global.keyChange(Self.defaultModelKey, value: JSONValue.object([
+                    "provider": JSONValue.string(selectedModel.provider), "id": JSONValue.string(selectedModel.id),
+                ]))
             )
             model.setupComplete = true
             onComplete()

@@ -83,7 +83,7 @@ struct ExtensionsSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
                 resolutionSection
-                BuiltinExtensionsSettingsSection(projectCWD: projectCWD)
+                DefaultToolsSettingsSection(projectCWD: projectCWD)
 
                 if let packageError {
                     TronSettingsNotice(message: packageError, retry: reload)

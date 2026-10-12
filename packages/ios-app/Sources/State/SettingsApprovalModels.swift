@@ -112,7 +112,11 @@ struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
     let layer: String
     let applied: Bool
     let badges: [SettingsBadge]
-    struct Layer: Decodable, Equatable, Sendable { let layer: String }
+    struct Layer: Decodable, Equatable, Sendable {
+        let layer: String
+        /// This layer's own stored value; absent when the layer holds none.
+        let value: JSONValue?
+    }
     let layers: [Layer]
     /// Absent from a Gateway that predates the renderer contract: the row is then read-only.
     let presentation: SettingsKeyPresentation?
@@ -120,6 +124,10 @@ struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
     var id: String { settingIdentity(key: key, qualifiers: qualifiers) }
 
     func badge(_ kind: String) -> SettingsBadge? { badges.first { $0.kind == kind } }
+
+    /// The served value, or one layer's own value for a surface that edits that
+    /// layer and must not show what a higher layer overrides.
+    func value(at layer: String) -> JSONValue? { layers.first { $0.layer == layer }?.value }
 }
 
 /// `settings.resolve`: the key instances and, when the request negotiated the
@@ -129,6 +137,9 @@ struct SettingsResolution: Decodable, Sendable {
     let sections: [SettingsRendererSection]
 
     private enum CodingKeys: String, CodingKey { case keys, sections }
+
+    /// The row for an unqualified schema key, when the Gateway served it for this target.
+    func setting(_ key: String) -> ResolvedSetting? { keys.first { $0.key == key } }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)

@@ -52,6 +52,7 @@ struct ProjectTrustSummary: Equatable, Sendable {
 }
 
 private struct TrustDefaultDraft: Equatable {
+    static let key = "permissions.defaultProjectTrust"
     var decision = "ask"
 
     init() {}
@@ -61,7 +62,7 @@ private struct TrustDefaultDraft: Equatable {
     }
 
     func patch(comparedTo baseline: Self) -> JSONValue {
-        decision == baseline.decision ? .object([:]) : .object(["defaultProjectTrust": .string(decision)])
+        decision == baseline.decision ? .object([:]) : .object([Self.key: .string(decision)])
     }
 }
 
@@ -189,13 +190,22 @@ struct TrustSettingsView: View {
         let ticket = defaultLoadGeneration
         let target = SettingsTarget.global
         _ = defaultDrafts.seedBaselineIfMissing(defaultDraft, for: target)
-        guard await model.refreshSettings(target: target),
-              ticket == defaultLoadGeneration,
+        let resolution: SettingsResolution
+        do {
+            resolution = try await model.resolveSettingsForRenderer(target: target.gatewayTarget, keys: [TrustDefaultDraft.key])
+        } catch is CancellationError {
+            return
+        } catch {
+            guard ticket == defaultLoadGeneration, identity == model.knowledgePresentationIdentity,
+                  presentationActivity.allowsPresentationPublication, !Task.isCancelled else { return }
+            model.presentError(error)
+            return
+        }
+        guard ticket == defaultLoadGeneration,
               identity == model.knowledgePresentationIdentity,
               presentationActivity.allowsPresentationPublication,
               !Task.isCancelled,
-              let value = model.settings(for: target)?.objectValue?["effective"]?.objectValue,
-              let decision = value["defaultProjectTrust"]?.stringValue else { return }
+              let decision = resolution.setting(TrustDefaultDraft.key)?.value?.stringValue else { return }
         let loaded = TrustDefaultDraft(decision: decision)
         guard defaultDrafts.install(loaded, for: target, ifCurrent: defaultDraft) else { return }
         defaultDraft = loaded

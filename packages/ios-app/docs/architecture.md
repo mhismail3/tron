@@ -686,17 +686,16 @@ Global settings, provider/model catalog, package, and custom-model event hints e
 advance a dedicated invalidation generation. Successful reads publish their projection
 without advancing that generation, so a visible `.task(id:)` performs one initial read
 and one read per actual invalidation rather than feeding its own reload loop.
-`SettingsTrustCoordinator` is the sole owner of target-keyed disposable settings values,
-per-target read admission, settings and trust event revisions, settings request/mutation
-construction, and trust inspection/mutation. Every settings write goes through the Gateway's one
-change path, `settings.change` (gateway `docs/settings-model.md`): a trust decision is the
-`permissions.projectTrust` key for the project target, and its change outcome carries the resulting
-trust inspection; clearing a saved decision is an `unset`, while `true` and `false` remain distinct
-decisions. Today's hand-built settings screens still build pi-document patches, and
-`SettingsPatchChanges` turns each patch into key changes, refusing a path it does not know; it is
-deleted with those screens when the generic renderer replaces them (#769). It uses the shared
-confirmed-mutation executor, and profile retirement synchronously revokes suspended work
-and clears settings projections. Project Trust treats an accepted decision receipt as command
+`SettingsTrustCoordinator` owns settings and trust event revisions, request/mutation
+construction, and trust inspection/mutation; it keeps no settings projection. Settings are read
+only through `settings.resolve` (the generic renderer's `resolveForRenderer`, or one resolve for a
+single served key, reading `value` or the target's own layer through `ResolvedSetting.value(at:)`)
+and written only through the Gateway's one change path, `settings.change` (gateway
+`docs/settings-model.md`). Hand-built screens send schema keys with `SettingsTarget.keyChange`, so
+iOS holds no pi-document path table. A trust decision is the `permissions.projectTrust` key for the
+project target, and its change outcome carries the resulting trust inspection; clearing a saved
+decision is an `unset`, while `true` and `false` remain distinct decisions. It uses the shared
+confirmed-mutation executor, and profile retirement synchronously revokes suspended work. Project Trust treats an accepted decision receipt as command
 outcome, not the latest visible inspection: under its original presentation namespace it rejoins a
 current canonical trust read. Event and post-command inspection reads share one leaf-owned latest
 request ticket, independent of global trust-default reads; values and errors require matching
@@ -2884,7 +2883,7 @@ The stack is never persisted and is not a second state authority.
 
 Connected Services presents definitions owned by `ConnectionOwner` and uses its instance-scoped setup, policy, and disconnect receipts. Setup is owner-typed (`oauth` or `token`) and uses the Gateway's confirmed mutation receipt executor. The iOS form accepts only opaque Mac Keychain credential references, never token values or generic agent-readable secret fields. X setup is a public-client OAuth 2.0 PKCE flow: the user enters their public client ID and registered HTTPS callback, opens X consent, and pastes the redirected URL or code; the Gateway owns state verification, code exchange, refresh-token rotation, and Keychain storage, while iOS never receives tokens. Policy controls (enabled, writes, paid, and recurring) are independent and instance-scoped; capability availability is effect-specific. Dismissing a sheet retires only presentation reads; an accepted setup, policy, or disconnect mutation continues with its owner, and reconnect never replays it.
 
-MCP Servers is a separate surface over Pi's `mcp.json`: it reads global or trust-approved project configuration, decodes Pi CLI `state`, `scope`, exposure, transport, tool and bounded error fields, and shows only project rows in project scope. Needs-auth uses the sign-in warning treatment; bearer values remain transient while the Mac Keychain owner stores them. The scope switch is the shared `TronSegmentedControl` (as in the Workspace sheet), Reload is the leading toolbar button, Add Server is a glass row button below the list, and each server row is a `TronSettingsRow` whose `Manage` menu holds sign-in, on/off, exposure, token, sign-out and remove. Extensions Settings shows Built-in Extensions and Default Tools as standard toggle and selection rows; they read the active scope's document, write only on an explicit change, and keep `defaultTools` entries they do not manage. MCP sign-in adopts the exact `{ kind: "mcp", sessionId, server }` operation into the provider-auth event coordinator, including events arriving while the start RPC is pending; cancellation uses only the MCP-specific cancel command. Its callback remains in the iOS listener and is relayed only to Pi's loopback listener. Accepted mutations and authentication operations retain their Gateway owners and reconnect never replays them.
+MCP Servers is a separate surface over Pi's `mcp.json`: it reads global or trust-approved project configuration, decodes Pi CLI `state`, `scope`, exposure, transport, tool and bounded error fields, and shows only project rows in project scope. Needs-auth uses the sign-in warning treatment; bearer values remain transient while the Mac Keychain owner stores them. The scope switch is the shared `TronSegmentedControl` (as in the Workspace sheet), Reload is the leading toolbar button, Add Server is a glass row button below the list, and each server row is a `TronSettingsRow` whose `Manage` menu holds sign-in, on/off, exposure, token, sign-out and remove. Extensions Settings shows Default Tools as standard toggle and selection rows over the served `tools.active` and `tools.codemode.mode` keys; they read the scope's own layer, write only on an explicit change, and keep `tools.active` entries they do not manage. The Built-in Extensions switches were removed with the legacy document read: the Gateway serves no `sources.extensions` key, so neither their state nor their write has a served path (gateway `docs/settings-model.md` 2.3). MCP sign-in adopts the exact `{ kind: "mcp", sessionId, server }` operation into the provider-auth event coordinator, including events arriving while the start RPC is pending; cancellation uses only the MCP-specific cancel command. Its callback remains in the iOS listener and is relayed only to Pi's loopback listener. Accepted mutations and authentication operations retain their Gateway owners and reconnect never replays them.
 
 Knowledge Jev is not a ConnectionOwner capability. It uses the TypeSafe classifier credential in Provider Settings; a configured key is the consent for paid Jev work, bounded by a fixed monthly cap (user decision, 2026-09-30). MCP configuration and Jev credentials are not mirrored into connection rows.
 
