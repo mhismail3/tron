@@ -374,11 +374,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let macEditor = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-edit-layer")
         XCTAssertNotNil(macEditor, "setup.installTelemetry is Mac-only and must offer Edit at Mac here")
         macEditor?.tap()
-        XCTAssertTrue(hittableStaticText(app, "Settings") != nil, "Edit at Mac must present the Settings sheet")
-        expandAllSettings(app)
-        XCTAssertNotNil(hittableElement(app, identifier: settingRowToken("setup.installTelemetry")),
-                        "Edit at Mac did not open the Mac layer's Settings: \(app.debugDescription)")
-        dismissTopSheet(app)
+        // The layer editor is the shared Settings renderer sheet for that layer.
+        let layerSheetDone = app.buttons["settings-renderer-done"]
+        XCTAssertTrue(layerSheetDone.waitForExistence(timeout: 15), "Edit at Mac must present the Mac layer's Settings sheet: \(app.debugDescription)")
+        layerSheetDone.tap()
+        XCTAssertTrue(waitForNonExistence(layerSheetDone, timeout: 15), "the layer editor must dismiss")
         XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 10), "dismissing Settings must return to Manage Session")
         // Reopen: the Chat-layer value and its badge are read from the Gateway again.
         dismissTopSheet(app)
@@ -461,8 +461,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             settingRowToken("permissions.projectTrust"), "-edit-layer"))
         XCTAssertNotNil(trustEditor, "the project trust row must offer Edit at Mac on the Project card")
         trustEditor?.tap()
-        XCTAssertTrue(hittableStaticText(app, "Settings") != nil, "Edit at Mac on the Project card must open Settings")
-        dismissTopSheet(app)
+        let trustSheetDone = app.buttons["settings-renderer-done"]
+        XCTAssertTrue(trustSheetDone.waitForExistence(timeout: 15), "Edit at Mac on the Project card must open Settings: \(app.debugDescription)")
+        trustSheetDone.tap()
+        XCTAssertTrue(waitForNonExistence(trustSheetDone, timeout: 15), "the layer editor must dismiss")
         XCTAssertTrue(app.staticTexts["Project settings"].waitForExistence(timeout: 10))
         dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Project settings"], timeout: 15))
