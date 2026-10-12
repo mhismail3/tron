@@ -22,11 +22,6 @@ export interface KnowledgeTagEvidence {
   verdict: string;
 }
 
-export function knowledgeTagInputsDigest(record: KnowledgeRecord & { kind: "source" }): string {
-  const content = record.content;
-  return createHash("sha256").update(JSON.stringify({ title: content.title, summary: content.summary?.text ?? null, text: content.text ?? "", verdict: content.verdict?.verdict ?? null, take: content.take?.text ?? null })).digest("hex");
-}
-
 export function utf8Prefix(value: string, maximumBytes: number): string {
   let bytes = 0; let end = 0;
   for (const point of value) {
@@ -225,7 +220,6 @@ export interface KnowledgeTagDecision {
   tagIds: string[];
   model: string;
   vocabularyRevision: number;
-  inputsDigest: string;
   estimatedCostCents: number;
   callCount: number;
 }
@@ -297,5 +291,5 @@ async function decideKnowledgeTags(
     callCount += 1; estimatedCostCents += response.estimatedCostCents;
     selected.push(...chooseKnowledgeTags(response.answers, batch.map(tag => tag.id)));
   }
-  return { tagIds: selected, model: JEV_DEFAULT_MODEL, vocabularyRevision: vocabulary.revision, inputsDigest: knowledgeTagInputsDigest(record), estimatedCostCents, callCount };
+  return { tagIds: selected, model: JEV_DEFAULT_MODEL, vocabularyRevision: vocabulary.revision, estimatedCostCents, callCount };
 }
