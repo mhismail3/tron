@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import { KEYS, SECTIONS, builtinValue, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_LABELS, type FormatContext, type LayerId, type Qualifiers } from "./settings-types.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
@@ -171,11 +172,20 @@ export function readBinding(stores: SettingsStores, layer: LayerId, binding: Bin
     case "home-memory":
       return qualifiedOnly ? undefined : stores.homeMemory;
     case "trust":
-      return qualifiers.project === undefined ? undefined : stores.trust[qualifiers.project];
+      return qualifiers.project === undefined ? undefined : nearestTrustDecision(stores.trust, qualifiers.project);
     case "floors":
       // A key with one floor keeps both directions equal, so widen reads it.
       return qualifiers.key === undefined ? undefined
         : stores.floors[qualifiers.key]?.[qualifiers.direction === "narrow" ? "narrow" : "widen"];
+  }
+}
+
+/** pi's trust rule (ProjectTrustStore): the nearest saved decision on the path
+ * or one of its parents covers it, so the row shows what actually applies. */
+export function nearestTrustDecision(decisions: Record<string, boolean>, project: string): boolean | undefined {
+  for (let current = project; ; current = dirname(current)) {
+    if (Object.prototype.hasOwnProperty.call(decisions, current)) return decisions[current];
+    if (dirname(current) === current) return undefined;
   }
 }
 

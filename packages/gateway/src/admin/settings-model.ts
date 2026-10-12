@@ -897,7 +897,11 @@ export class SettingsChangePath {
       fixedAt = { value: after, from: row?.layer ?? "builtin", at: this.now().toISOString(), ref: randomUUID(), ...(row?.qualifiers ? { qualifiers: row.qualifiers } : {}) };
       request = { ...request, op: "set", value: after };
     }
-    const before = readBinding(stores, request.layer, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
+    // A trust write records this project's own decision: its `before` is that
+    // exact entry (absent when only a parent's decision covered it), so undo
+    // restores "no decision of its own" rather than copying the parent's.
+    const before = binding.store === "trust" ? stores.trust[qualifiers.project!]
+      : readBinding(stores, request.layer, binding, qualifiers, qualifiedWrite(binding, qualifiers), key.id);
     if (request.expected !== undefined && binding.store !== "chat" && !deepEqual(request.expected, before)) {
       throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, { current: (before ?? null) as never });
     }

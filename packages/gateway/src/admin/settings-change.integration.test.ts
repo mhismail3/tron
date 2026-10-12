@@ -390,6 +390,22 @@ describe("settings.change", () => {
     expect(rooted.changes[0]).toMatchObject({ qualifiers: { project: repository } });
     expect(await f.trust.inspect(subdirectory)).toMatchObject({ projectDir: repository, savedDecision: true });
     expect((await f.history({ key: "permissions.projectTrust" })).some(entry => entry.actor?.kind === "outside")).toBe(false);
+
+    // A decision saved for a parent folder covers the project (pi's nearest-entry
+    // rule): its row shows the inherited value, not Not set, and an explicit
+    // change at the project still undoes to "no decision of its own".
+    const parent = join(f.root, "workspace");
+    const child = join(parent, "child");
+    await mkdir(child, { recursive: true });
+    await f.trust.set(parent, true);
+    const trustRow = async () => (await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd: child }, keys: ["permissions.projectTrust"] }) as unknown as Resolution).keys[0]!;
+    expect(await f.trust.inspect(child)).toMatchObject({ effectiveDecision: true });
+    expect(await trustRow()).toMatchObject({ value: true, layer: "mac" });
+    const blocked = await f.change({ kind: "project", cwd: child }, [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: false }]);
+    expect(await trustRow()).toMatchObject({ value: false });
+    await f.service.invoke(client(), "settings.undo", { commandId: commandId(), changeId: blocked.changes[0]!.changeId });
+    expect((await f.trust.inspect(child)).savedDecision).toBe(true);
+    expect(JSON.parse(await readFile(join(f.agentDir, "trust.json"), "utf8"))[await realpath(child)]).toBeUndefined();
   });
 
   it("filters paged Changes by actor, layer and section without dropping older matches", async () => {
