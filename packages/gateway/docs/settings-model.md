@@ -198,7 +198,7 @@ schema data (F1); no row here is an exception to a rule.
 | `modelContextWindows` → `model.contextWindow[model]` | Model | Chat (session entry), Profile, Project, Mac | Fixed |
 | `enabledModels` → `model.offered` | Model | Project, Mac | Live (picker filter only) |
 | `compaction.thinkingLevel` → `model.thinking[role=summarizer]` | Model | Project, Mac | Live |
-| `compaction.enabled`, `reserveTokens`, `keepRecentTokens`, `instructions` | Context | Chat, Project, Mac | Live |
+| `compaction.enabled`, `reserveTokens`, `keepRecentTokens`, `instructions` | Context | Project, Mac | Live |
 | `branchSummary.reserveTokens` | Context | Project, Mac | Live |
 | `images.autoResize` | Context | Chat, Project, Mac | Fixed |
 | `images.blockImages` → `context.images.block` | Context | Chat, Project, Mac | Narrow live, widen fixed ([decision 15](#101-decisions)) |
@@ -546,7 +546,7 @@ Provenance is not a field. It is part of every resolved value
 | `model.thinking` | model | `role`, `model` | chat → `thinking_level_change`; profile (Home chat, and `role=worker` built-in `{ sameAs: "home" }`); project/mac → `defaultThinkingLevel`, `modelThinkingLevels`; summarizer → `compaction.thinkingLevel` | fixed (summarizer: live) / next-turn | quiet | ui, home, agent |
 | `model.contextWindow` | model | `model` | chat → `tron.context-window.v1`; project/mac → `modelContextWindows` | fixed / next-turn | quiet | ui, home, agent |
 | `model.ref[role=memory]` | model | `role` | profile → `profile.json` (`memory.model`) | live / next memory pass | notify | ui, home |
-| `context.compaction.reserveTokens` | context | `model` | chat; project/mac → `compaction.reserveTokens`, `compaction.modelOverrides` | live / next compaction | quiet | ui, home, agent |
+| `context.compaction.reserveTokens` | context | `model` | project/mac → `compaction.reserveTokens`, `compaction.modelOverrides` | live / next compaction | quiet | ui, home, agent |
 | `context.compaction.instructions` | context | | project/mac → `compaction.instructions` | live / next compaction | notify | ui, home |
 | `context.images.block` | context | | chat; project/mac → `images.blockImages` | narrow live, widen fixed / next-request | approve / quiet | ui, home, agent |
 | `tools.active` | tools | | chat → active tool set; profile; project/mac → `defaultTools` | fixed / next-turn | notify / quiet | ui, home, agent |

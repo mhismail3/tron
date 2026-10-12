@@ -134,7 +134,8 @@ export class SettingsModel {
       }
       case "catalog.contextWindow": {
         // The bounds `settings.change` validates the value against (contextWindowValue).
-        const model = await this.followedModel(target, session, runtime, request.qualifiers);
+        const followed = await this.followedModel(target, session, runtime, request.qualifiers);
+        const model = followed && limitsModel(runtime, followed);
         const limits = model && contextWindowLimits(model);
         return { ...base, options: [], ...(limits ? { range: { min: limits.minimum, max: limits.maximum, unit: "tokens" as const } } : {}) };
       }
@@ -1062,9 +1063,16 @@ function unsetPath(document: Record<string, unknown>, path: readonly string[]): 
   }
 }
 
+/** The model a context window's bounds come from: the registered model, never a
+ * session's budgeted copy (SessionContextWindowPolicy wraps a session runtime's
+ * `getModel` with the chat's current window, which would shrink the maximum to it). */
+function limitsModel(runtime: ModelRuntime, ref: { provider: string; id: string }): Model<any> | undefined {
+  return runtime.getPhysicalModel(ref.provider, ref.id) ?? runtime.getModel(ref.provider, ref.id);
+}
+
 function contextWindowValue(runtime: ModelRuntime, qualifier: string | undefined, value: unknown): number {
   const ref = qualifier ? parseContextModelKey(qualifier) : undefined;
-  const model = ref && runtime.getModel(ref.provider, ref.id);
+  const model = ref && limitsModel(runtime, ref);
   if (!model) throw new GatewayError("not_found", "Context window model is not registered in Tron");
   return validateContextWindow(value, contextWindowLimits(model));
 }

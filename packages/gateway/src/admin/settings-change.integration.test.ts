@@ -12,7 +12,8 @@ import { SettingsApprovals } from "./settings-approvals.js";
 import { OutsideChanges } from "./settings-outside.js";
 import { SettingsRiskEvaluator, type SettingsRiskInput } from "./settings-risk.js";
 import { JEV_MAX_ESTIMATED_CHARGE_CENTS } from "../knowledge/jev-client.js";
-import type { Resolution } from "./settings-resolver.js";
+import { readBinding, type Resolution, type SettingsStores } from "./settings-resolver.js";
+import { KEYS, type KeyDeclaration } from "./settings-schema.js";
 import type { PresentedResolution } from "./settings-presentation.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
@@ -26,6 +27,7 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
  * record and a transcript of each case are retained as an artifact.
  */
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-change.json");
+const EVERY_KEY_ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-every-key.json");
 const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
 const outsides: OutsideChanges[] = [];
@@ -84,6 +86,7 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
         async inspection => { await registry.commitProjectReload(inspection.cwd); });
     },
   }, agentDir);
+  registry.setSettings(settingsModel, settingsChanges);
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
   // The relay boundary: what would be pushed to the maintainer's iPhone.
   const pushes: Array<{ sourceId: string; title: string; message: string }> = [];
@@ -618,4 +621,126 @@ describe("outside changes", () => {
     expect(f.pushes.slice(pushesBefore).some(push => push.message.includes("Transport"))).toBe(false);
     transcript.push({ case: "outside git", detail: await outsideEntries(f) });
   });
+});
+
+/**
+ * Every declared key at every layer it allows (docs/settings-model.md 4, F1/F4),
+ * derived from `KEYS` and the served presentation, never a second key list:
+ * `settings.change` as the maintainer, the effective value and source on a target
+ * whose top layer that is, the value in the real store bytes through the schema
+ * binding, and `settings.undo` restoring the prior value. Keys added later are
+ * covered automatically. The per-instance report is a retained artifact.
+ */
+describe("every key at every allowed layer", () => {
+  it("changes, resolves, stores and undoes each declared key instance", async () => {
+    const f = await fixture();
+    const first = f.faux.getModel("first")!, second = f.faux.getModel("second")!;
+    // A Mac default model gives model-qualified keys an instance on every target.
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), defaultProvider: first.provider, defaultModel: first.id }));
+    const project = await gitProject(f.root, "every");
+    await f.trust.set(project, true);
+    const slot = await f.registry.create(project);
+    await slot.setModel(first.provider, first.id);
+    const controls = ["toggle", "choice", "number", "text", "secret", "list", "catalog", "readOnly"];
+    const targets: Record<string, Record<string, unknown>> = {
+      chat: { kind: "session", sessionId: slot.id }, profile: { kind: "home" }, project: { kind: "project", cwd: project }, mac: { kind: "mac" },
+    };
+    type Served = { key: string; qualifiers?: Record<string, string>; value: unknown; layer: string;
+      presentation: { valueKind: string; options?: Array<{ value: unknown }>; range?: { min: number; max: number }; optionsSource?: { name: string } } };
+    const resolve = async (layer: string, key: string) => {
+      const resolution = await f.service.invoke(client([slot.id]), "settings.resolve", { target: targets[layer], keys: [key], renderer: { version: 1, controls } }) as unknown as { keys: Served[] };
+      return resolution.keys[0];
+    };
+    const fence = () => { const snapshot = slot.snapshot(); return { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model, revision: snapshot.revision }; };
+    const differs = (left: unknown, right: unknown) => JSON.stringify(left ?? null) !== JSON.stringify(right ?? null);
+    /** A valid value other than the current one, from the served type and its options. */
+    const sample = async (layer: string, row: Served): Promise<unknown> => {
+      const { valueKind, options, range, optionsSource } = row.presentation;
+      if (optionsSource?.name === "catalog.models") return differs(row.value, { provider: second.provider, id: second.id }) ? { provider: second.provider, id: second.id } : { provider: first.provider, id: first.id };
+      if (optionsSource?.name === "catalog.thinkingLevels") {
+        const served = await f.service.invoke(client([slot.id]), "settings.options", { target: targets[layer], key: row.key, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }) as unknown as { options: Array<{ value: unknown }> };
+        return served.options.map(option => option.value).find(value => differs(value, row.value));
+      }
+      if (optionsSource?.name === "catalog.contextWindow") {
+        const served = await f.service.invoke(client([slot.id]), "settings.options", { target: targets[layer], key: row.key, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }) as unknown as { range: { min: number; max: number } };
+        return Math.floor((served.range.min + served.range.max) / 2);
+      }
+      if (valueKind === "boolean") return row.value !== true;
+      if (valueKind === "numberMap") return { [String(options![0]!.value)]: range!.min + 1 };
+      if (options?.length) return options.map(option => option.value).find(value => differs(value, row.value));
+      if (valueKind === "integer") return Math.floor((range!.min + range!.max) / 2) === row.value ? range!.min : Math.floor((range!.min + range!.max) / 2);
+      if (valueKind === "toolSelection") return ["read"];
+      if (valueKind === "stringList") return ["sample-entry"];
+      if (valueKind === "packages") return ["npm:sample-package"];
+      if (valueKind === "text") return "sample-text";
+      throw new Error(`No generic sample for ${row.key} (${valueKind})`);
+    };
+    /** The value in the store's own bytes, read through the schema binding. */
+    const stored = async (key: KeyDeclaration, layer: string, qualifiers: Record<string, string>) => {
+      const binding = key.layers[layer as "mac"]!;
+      const json = async (path: string) => JSON.parse(await readFile(path, "utf8").catch(() => "{}")) as Record<string, unknown>;
+      const stores = {
+        layers: ["chat", "profile", "project", "mac", "builtin"], mac: await json(join(f.agentDir, "settings.json")),
+        project: { root: project, document: await json(join(project, ".pi", "settings.json")), applied: true },
+        profile: await json(join(f.tronHome, "gateway", "home", "profile.json")),
+        trust: await json(join(f.agentDir, "trust.json")) as Record<string, boolean>,
+        floors: await json(join(f.tronHome, "gateway", "settings", "floors.json")),
+        chat: slot.settingsChatLayer(),
+      } as unknown as SettingsStores;
+      const qualified = binding.store === "pi" && binding.qualified !== undefined && qualifiers.model !== undefined;
+      return readBinding(stores, layer as "mac", binding, qualifiers, qualified, key.id);
+    };
+    const report: Array<Record<string, unknown>> = [];
+    for (const key of KEYS) {
+      for (const layer of Object.keys(key.layers)) {
+        const row = await resolve(layer, key.id);
+        const instance = { key: key.id, layer, qualifiers: row?.qualifiers };
+        if (!row) { report.push({ ...instance, result: "no instance on its target" }); continue; }
+        if (key.layers[layer as "profile"]?.store === "home-memory") {
+          // Home owns this applier (HomeOwner.configureMemory); this fixture has no
+          // Home, so the refusal is exact. home-context-data.e2e.test.ts proves it.
+          await expect(f.change(targets[layer]!, [{ key: key.id, layer, op: "set", value: { provider: second.provider, id: second.id } }], {}, client()))
+            .rejects.toMatchObject({ code: "unsupported" });
+          report.push({ ...instance, result: "Home applier: home-context-data.e2e.test.ts" });
+          continue;
+        }
+        const value = await sample(layer, row);
+        const request = [{ key: key.id, layer, op: "set", value, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }];
+        const extra = layer === "chat" ? { fence: fence() } : {};
+        if (key.writers.length === 0) {
+          await expect(f.change(targets[layer]!, request, extra, client([slot.id]))).rejects.toMatchObject({ code: "invalid_request" });
+          report.push({ ...instance, result: "refused: no writer" });
+          continue;
+        }
+        let applied: Awaited<ReturnType<typeof f.change>>;
+        try {
+          applied = await f.change(targets[layer]!, request, extra, client([slot.id]));
+        } catch (error) {
+          report.push({ ...instance, result: `refused: ${(error as Error).message}` });
+          continue;
+        }
+        expect(applied.status, `${key.id}@${layer}`).toBe("applied");
+        const after = await resolve(layer, key.id);
+        const expectedValue = key.redacted ? undefined : value;
+        expect(after!.layer, `${key.id}@${layer} source`).toBe(layer);
+        if (!key.redacted) expect(after!.value, `${key.id}@${layer} value`).toEqual(expectedValue);
+        expect(await stored(key, layer, after!.qualifiers ?? row.qualifiers ?? {}), `${key.id}@${layer} store`).toEqual(value);
+        const undo = f.service.invoke(client([slot.id]), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId, ...(layer === "chat" ? { fence: fence() } : {}) });
+        if (key.redacted) {
+          // A redacted change has no recorded `before`: never undoable, so unset it directly.
+          await expect(undo).rejects.toMatchObject({ code: "conflict" });
+          await f.change(targets[layer]!, [{ key: key.id, layer, op: "unset", ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }], extra, client([slot.id]));
+          expect(await stored(key, layer, row.qualifiers ?? {}), `${key.id}@${layer} unset`).toBeUndefined();
+        } else await undo;
+        const undone = await resolve(layer, key.id);
+        if (!key.redacted) expect(undone!.value, `${key.id}@${layer} undo`).toEqual(row.value);
+        report.push({ ...instance, result: "round-trip", value: key.redacted ? "redacted" : value });
+      }
+    }
+    transcript.push({ case: "every key", detail: report });
+    await mkdir(dirname(EVERY_KEY_ARTIFACT), { recursive: true });
+    await writeFile(EVERY_KEY_ARTIFACT, `${JSON.stringify(report, null, 2)}\n`);
+    const gaps = report.filter(entry => entry.result !== "round-trip" && entry.result !== "refused: no writer" && !String(entry.result).startsWith("Home applier"));
+    expect(gaps).toEqual([]);
+  }, 60_000);
 });

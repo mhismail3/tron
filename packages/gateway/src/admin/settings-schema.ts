@@ -259,19 +259,21 @@ export const KEYS: readonly KeyDeclaration[] = [
   // Context -------------------------------------------------------------
   {
     id: "context.compaction.enabled", group: "context", subgroup: "Compaction", type: types.boolean(),
-    layers: chatPi("compaction", "enabled"), builtin: true, timing: "live", effect: "next-compaction", floor: "quiet",
+    // No Chat layer: compaction policy reads the Project and Mac stores at each
+    // compaction boundary, and no Chat applier exists to honour a per-chat value.
+    layers: both(pi("compaction", "enabled")), builtin: true, timing: "live", effect: "next-compaction", floor: "quiet",
     writers: ANY_ACTOR, label: "Automatic compaction", help: "Summarize older conversation when the context fills.",
     order: 10, importance: "essential", control: "toggle",
   },
   {
     id: "context.compaction.reserveTokens", group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(1_024, 1_000_000, "tokens"),
-    layers: { chat: { store: "chat-settings", path: ["compaction", "reserveTokens"] }, ...both({ store: "pi", path: ["compaction", "reserveTokens"], qualified: ["compaction", "modelOverrides", "{model}", "reserveTokens"] }) },
+    layers: both({ store: "pi", path: ["compaction", "reserveTokens"], qualified: ["compaction", "modelOverrides", "{model}", "reserveTokens"] }),
     builtin: 16_384, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
     label: "Reserve", help: "Tokens kept free for the response before compaction starts.", order: 20, importance: "advanced", control: "number",
   },
   {
     id: "context.compaction.keepRecentTokens", group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(0, 1_000_000, "tokens"),
-    layers: { chat: { store: "chat-settings", path: ["compaction", "keepRecentTokens"] }, ...both({ store: "pi", path: ["compaction", "keepRecentTokens"], qualified: ["compaction", "modelOverrides", "{model}", "keepRecentTokens"] }) },
+    layers: both({ store: "pi", path: ["compaction", "keepRecentTokens"], qualified: ["compaction", "modelOverrides", "{model}", "keepRecentTokens"] }),
     builtin: 20_000, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
     label: "Keep recent", help: "Tokens of recent conversation kept verbatim after compaction.", order: 30, importance: "advanced", control: "number",
   },
