@@ -230,7 +230,8 @@ Before replacing an installed app, use the old wrapper's **Quit Tron** action.
 It stops and verifies the exact Gateway process before joining native-helper
 retirement; uncertainty leaves the wrapper open. Quit preserves approved Login
 Item registrations: the Gateway exits cleanly without launchd relaunch, and the
-native helper exits after capture/automation drain but remains registered for
+native helper exits after capture/automation drain, once the wrapper has received
+its confirmation and closed the connection, but remains registered for
 on-demand launch on the next app start. No manual disable/enable step is needed.
 Uninstall still drains and unregisters the helper before Gateway/files.
 `.notRegistered` is a no-op; `.notFound`/unknown cannot establish retirement and

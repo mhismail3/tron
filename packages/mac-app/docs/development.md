@@ -416,9 +416,15 @@ process absence alone nor a timer substitutes for a successful Quit.
 Quit leaves the approved Login Items registered. The Gateway LaunchAgent's
 successful exit policy prevents relaunch after its intentional clean stop; the
 next wrapper launch uses the existing approved LaunchAgent owner to start it.
-The native helper drains capture and automation work, then exits while its
+The native helper drains capture and automation work, confirms, then exits while its
 SMAppService registration remains enabled; its Mach service is started on demand
-by the next authenticated XPC connection. No new approval or desired-state
+by the next authenticated XPC connection. The helper exits only after the wrapper
+closes the retirement connection: the wrapper pins the helper's signature, so
+libxpc refuses a reply whose sender has already exited (`Received message
+forbidden due to code signing requirement`, `errSecCSNoSuchCode`) and the wrapper
+would correctly report unconfirmed retirement. The wrapper records
+`native-host.retirement-unconfirmed` in `~/.tron/logs` with either the XPC error
+(reply lost or refused) or `helper-reported-unjoined-capture`. No new approval or desired-state
 record is created. An unapproved or unknown service is never registered to make
 Quit succeed. A `.notFound` native-service status refuses retirement rather
 than being treated as evidence that work is absent. A retried Quit after the
@@ -805,7 +811,9 @@ xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
 `TronMacIntegrationTests` holds only real-boundary tests: spawned processes and
 pipes (`SubprocessTests`, `CodeSignatureProbeTests`, `CuaProcessOwnerTests`,
 `MenuBarTerminationTests`), a loopback WebSocket (`MenuBarLogReaderTransportTests`),
-and the built Gateway launcher (`GatewayLauncherArgvTests`). Unit tests with fakes
+the built Gateway launcher (`GatewayLauncherArgvTests`), and the production
+native-helper retirement owner in a launchd-demand-launched Mach service probe
+answering a signature-pinning client (`NativeHostRetirementTests`). Unit tests with fakes
 or in-process module calls are not kept; cover a change with its real-boundary
 test or the fixture scripts above.
 
