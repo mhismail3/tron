@@ -391,6 +391,38 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "the reopened Manage Session must show the Chat badge: \(reopenedRetry.debugDescription)")
         XCTAssertEqual(switchValue(reopenedRetry), chatLayerRetry.after, "the reopened Chat value is not the accepted value")
         keepScreenshot(app, name: "settings-surface-manage-session-chat-edit")
+
+        // The Project card, the same component Manage Session and the dashboard
+        // open (the dashboard path is TronNewSessionUITests): the Project layer and
+        // the Mac key that qualifies by this project.
+        openProjectCard(app)
+        expandAllSettings(app)
+        coverage["project"] = assertSettingsSurface(app, name: "project", layers: ["project", "mac"], schema: schema)
+        let projectEdit = toggleSetting(app, key: "context.compaction.enabled", expectingBadge: schema.label(for: "project"))
+        XCTAssertNotEqual(projectEdit.before, projectEdit.after, "the Project-layer edit was not accepted")
+        // The project's trust decision is a Mac key qualified by this project: its
+        // row offers Edit at Mac, which opens the Mac layer's Settings.
+        let trustEditor = revealedElement(app, where: NSPredicate(
+            format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@",
+            settingRowToken("permissions.projectTrust"), "-edit-layer"))
+        XCTAssertNotNil(trustEditor, "the project trust row must offer Edit at Mac on the Project card")
+        trustEditor?.tap()
+        let trustSheetDone = app.buttons["settings-done"]
+        XCTAssertTrue(trustSheetDone.waitForExistence(timeout: 15), "Edit at Mac on the Project card must open Settings: \(app.debugDescription)")
+        trustSheetDone.tap()
+        XCTAssertTrue(waitForNonExistence(trustSheetDone, timeout: 15), "the layer editor must dismiss")
+        dismissTopSheet(app)
+        XCTAssertTrue(waitUntil(timeout: 15) { app.buttons["project-settings-link"].isHittable }, "dismissing the Project card must return to Manage Session")
+        openProjectCard(app)
+        expandAllSettings(app)
+        let reopenedCompaction = settingRow(app, key: "context.compaction.enabled")
+        XCTAssertTrue(waitForBadge(reopenedCompaction, schema.label(for: "project"), timeout: 30),
+                      "the reopened Project card must show the Project badge: \(reopenedCompaction.debugDescription)")
+        XCTAssertEqual(switchValue(reopenedCompaction), projectEdit.after, "the reopened Project value is not the accepted value")
+        keepScreenshot(app, name: "settings-surface-project-layer-edit")
+        dismissTopSheet(app)
+        XCTAssertTrue(waitUntil(timeout: 15) { app.buttons["project-settings-link"].isHittable }, "dismissing the Project card must return to Manage Session")
+
         dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Manage Session"], timeout: 15))
 
@@ -445,39 +477,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }, "Apply again must restore Tron's value and clear the outside mark: \(badgeLabels(outsideRow))")
         dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
-
-        // Project card from the dashboard's workspace header: the Project layer
-        // and the Mac key that qualifies by this project.
-        let folderName = fixture.workspace.split(separator: "/").last.map(String.init) ?? fixture.workspace
-        let header = app.buttons[folderName].firstMatch
-        XCTAssertTrue(header.waitForExistence(timeout: 30), "the dashboard has no header for \(folderName): \(app.debugDescription)")
-        openProjectCard(app, header: header)
-        expandAllSettings(app)
-        coverage["project"] = assertSettingsSurface(app, name: "project", layers: ["project", "mac"], schema: schema)
-        let projectEdit = toggleSetting(app, key: "context.compaction.enabled", expectingBadge: schema.label(for: "project"))
-        XCTAssertNotEqual(projectEdit.before, projectEdit.after, "the Project-layer edit was not accepted")
-        // The project's trust decision is a Mac key qualified by this project: its
-        // row offers Edit at Mac, which opens the Mac layer's Settings.
-        let trustEditor = revealedElement(app, where: NSPredicate(
-            format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@",
-            settingRowToken("permissions.projectTrust"), "-edit-layer"))
-        XCTAssertNotNil(trustEditor, "the project trust row must offer Edit at Mac on the Project card")
-        trustEditor?.tap()
-        let trustSheetDone = app.buttons["settings-done"]
-        XCTAssertTrue(trustSheetDone.waitForExistence(timeout: 15), "Edit at Mac on the Project card must open Settings: \(app.debugDescription)")
-        trustSheetDone.tap()
-        XCTAssertTrue(waitForNonExistence(trustSheetDone, timeout: 15), "the layer editor must dismiss")
-        XCTAssertTrue(app.staticTexts["Project settings"].waitForExistence(timeout: 10))
-        dismissTopSheet(app)
-        XCTAssertTrue(waitForNonExistence(app.staticTexts["Project settings"], timeout: 15))
-        openProjectCard(app, header: header)
-        expandAllSettings(app)
-        let reopenedCompaction = settingRow(app, key: "context.compaction.enabled")
-        XCTAssertTrue(waitForBadge(reopenedCompaction, schema.label(for: "project"), timeout: 30),
-                      "the reopened Project card must show the Project badge: \(reopenedCompaction.debugDescription)")
-        XCTAssertEqual(switchValue(reopenedCompaction), projectEdit.after, "the reopened Project value is not the accepted value")
-        keepScreenshot(app, name: "settings-surface-project-layer-edit")
-        dismissTopSheet(app)
 
         let attachment = XCTAttachment(string: coverageReport(coverage, schema: schema))
         attachment.name = "settings-surface-coverage.json"
@@ -618,14 +617,17 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         done.tap()
     }
 
-    /// The Project card, from the dashboard's workspace header context menu.
+    /// The Project card from Manage Session's shared Project settings link.
     @MainActor
-    private func openProjectCard(_ app: XCUIApplication, header: XCUIElement) {
-        header.press(forDuration: 1.2)
-        let projectSettings = app.buttons["Project settings"]
-        XCTAssertTrue(projectSettings.waitForExistence(timeout: 15), app.debugDescription)
-        projectSettings.tap()
-        XCTAssertTrue(app.staticTexts["Project settings"].waitForExistence(timeout: 30), app.debugDescription)
+    private func openProjectCard(_ app: XCUIApplication) {
+        // The link sits near the top of Manage Session, above the expanded settings.
+        let link = app.buttons["project-settings-link"]
+        XCTAssertTrue(link.waitForExistence(timeout: 30), "Manage Session has no Project settings link: \(app.debugDescription)")
+        for _ in 0..<40 where !link.isHittable { app.swipeDown() }
+        XCTAssertTrue(link.isHittable, "the Project settings link is not reachable: \(app.debugDescription)")
+        link.tap()
+        XCTAssertTrue(waitUntil(timeout: 30) { !app.buttons["project-settings-link"].isHittable },
+                      "the Project card did not cover Manage Session: \(app.debugDescription)")
     }
 
     /// A switch row's value, read from the row's own switch.
