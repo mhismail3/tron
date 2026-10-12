@@ -89,7 +89,10 @@ describe("Home task authorization RPC", () => {
   }
   async function refused(f: Awaited<ReturnType<typeof fixture>>, taskId: string, intent = "Finite work") {
     let refusal: any;
-    try { const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent, target: f.cwd }); await run.completion; }
+    // These durable-authorization journeys also run after an unmaterialized Home
+    // has been evicted. Choose a model explicitly rather than reading that absent chat.
+    const model = f.faux.getModel();
+    try { const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent, target: f.cwd, model: { provider: model.provider, id: model.id } }); await run.completion; }
     catch (error) { refusal = error; }
     expect(refusal).toMatchObject({ code: "grant-required", requestId: expect.any(String) });
     expect(refusal.requestId.length).toBeGreaterThan(0);
@@ -250,7 +253,10 @@ describe("Home task bounded backlogs", () => {
     // The user's oversized input starves the inbox. When that activation settles, Home is idle and
     // the backlog is delivered by wakes: each bounded activation takes what fits, in order.
     const collect = (context: unknown) => {
-      batches.push([...JSON.stringify(context).matchAll(/Home task (backlog-\d)/g)].map(match => match[1]!));
+      // Task identity is metadata, not raw record JSON in the model text. Match
+      // the verbatim report bodies that actually reached this provider request.
+      const request = JSON.stringify(context);
+      batches.push(tasks.filter((_task, index) => request.includes(String(index).repeat(1000))).map(task => task.taskId));
       expect(JSON.stringify(context)).not.toContain("u".repeat(1000));
       return fauxAssistantMessage("Reviewed results");
     };
@@ -287,6 +293,7 @@ describe("Home task bounded backlogs", () => {
     const messages = home.canonicalSessionEntries().filter(e => e.type === "custom_message" && e.customType === "tron.home-task-result.v1") as any[];
     expect(messages.map(m => m.details.taskId)).toEqual([large.taskId, small.taskId]);
     expect(messages[0].content).toMatch(/immutable report.*task.*report/s);
+    expect(messages[0].content).toContain(`taskId=${large.taskId}`);
     expect(messages[0].content).not.toContain("x".repeat(100));
     expect(request).toContain("Small complete report");
     const pages: any[] = []; let offset = 0;
@@ -445,7 +452,8 @@ describe("Home task cold reconciliation", () => {
     expect(await readFile(authorizationPath, "utf8")).toBe(beforeAuthority);
     expect(providers).toBe(2);
     expect(f.notifications).toHaveLength(1);
-    await expect(recovered.homeOwner().dispatchTask(f.home.sessionId, { taskId: run.taskId, intent: "Finite work", target: f.cwd })).rejects.toThrow(/already exists/);
+    await expect(recovered.homeOwner().dispatchTask(f.home.sessionId, { taskId: run.taskId, intent: "Finite work", target: f.cwd,
+      model: { provider: f.faux.getModel().provider, id: f.faux.getModel().id } })).rejects.toThrow(/already exists/);
     const again = await f.restart();
     expect(await again.homeOwner().taskResult(run.taskId)).toEqual(task);
     expect(f.notifications).toHaveLength(1);

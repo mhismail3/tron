@@ -1,6 +1,7 @@
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../sessions/context-delivery-receipts.js";
+import { parseHomeTaskReport } from "./home-task-report.js";
 import { HOME_TASK_RESULT_MESSAGE, INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/invocation-receipts.js";
 import { GatewayError } from "../errors.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
@@ -194,15 +195,23 @@ export class WakeInboxOwner {
         if (!result.task || JSON.stringify(result.task.reportRef) !== JSON.stringify(task.reportRef)
           || JSON.stringify(result.task.terminalEvidence) !== JSON.stringify(task.terminalEvidence)) throw new GatewayError("conflict", "Immutable inbox result is unavailable");
         envelope.signal.throwIfAborted();
-        // Every result states its subagent counts; the facts are settled with the task, so this header is stable.
-        const header = `Home task ${task.taskId} (${task.terminalEvidence!.outcome}; subagents started ${result.subagents.started}, stopped at end ${result.subagents.stoppedAtEnd ?? "unknown"})`;
-        let content = `${header}\n${result.text}`;
+        // Keep canonical task/session identities in details; the context text is for a person to read.
+        const title = [...task.intent.text.split(/\r?\n/u, 1)[0]!.trim()].slice(0, 160).join("");
+        const durationMs = Math.max(0, Date.parse(wake.createdAt) - task.createdAt);
+        const header = `Home task: ${title || "Untitled"} | outcome: ${task.terminalEvidence!.outcome} | subagents: ${result.subagents.started} started, ${result.subagents.stoppedAtEnd ?? "unknown"} stopped at end | duration: ${durationMs}ms`;
+        const reportText = task.reportRef
+          ? (() => {
+            const canonical = parseHomeTaskReport(JSON.parse(result.text) as unknown);
+            return `${canonical.text}\n\nEvidence:\n${canonical.evidence.map(item => `- ${item}`).join("\n")}`;
+          })()
+          : `No accepted report. Outcome: ${task.terminalEvidence?.outcome ?? "unknown"}.`;
+        let content = `${header}\n\n${reportText}`;
         const message = (): HomeWakeMessage => ({ customType: HOME_TASK_RESULT_MESSAGE, display: true, content,
           details: { eventId: wake.eventId, taskId: task.taskId, resultRef: task.reportRef, terminalEvidence: task.terminalEvidence,
             operationId, routeGeneration: route.routeGeneration } });
         // A permanently oversized report is acknowledged by its immutable
         // reference, never by a truncated payload or an unbounded tool read.
-        if (cost(message()) > envelope.freshTokens - cost(count)) content = `${header}: immutable report, ${Buffer.byteLength(result.text)} bytes. Read the full immutable report through task action report with offset/limit pages.`;
+        if (cost(message()) > envelope.freshTokens - cost(count)) content = `${header}: immutable report, ${Buffer.byteLength(result.text)} bytes. Read the full immutable report through task action report with taskId=${task.taskId} and offset/limit pages.`;
         const selectedMessage = message(); const selectedTokens = cost(selectedMessage);
         const selectedBytes = canonicalMessageBytes(selectedMessage);
         if (selectedTokens > tokens || selectedBytes > bytes) break;

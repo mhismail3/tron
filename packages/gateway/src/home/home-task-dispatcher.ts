@@ -212,7 +212,7 @@ export class HomeTaskDispatcher {
       // Trust is rechecked by the neutral creation/admission boundary too.
       lease = await dispatch.createWorker(task.target, reports);
       const { slot } = lease;
-      // The worker's canonical name is its transcript's session entry, written before its first prompt.
+      // Name the worker before its first prompt; the slot persists the canonical transcript entry.
       if (title) await slot.rename(title);
       // The slot's own configuration owners record the choice in the worker's transcript
       // before its first prompt. An omitted model keeps the session's default.
@@ -499,8 +499,11 @@ export class HomeTaskDispatcher {
 
   async result(taskId: string): Promise<HomeTaskRecord> {
     await this.assertAvailable();
-    let task = await this.store.read(taskId);
-    if (!task) throw new GatewayError("conflict", "Referenced task is missing");
+    let task = await this.store.read(taskId).catch(error => {
+      if (error instanceof HomeTaskStoreError && error.code === "not-initialized") return undefined;
+      throw error;
+    });
+    if (!task) throw new GatewayError("not_found", "No task with this id");
     if (task.lifecycle === "active" && task.sessionId && task.operationId) {
       const slot = await this.sessions.acquire(task.sessionId);
       task = await this.store.update(taskId, current => {

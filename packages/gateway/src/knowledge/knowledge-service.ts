@@ -11,7 +11,7 @@ import type {
 } from "./knowledge-contract.js";
 import { KNOWLEDGE_CURATION_MAX_ITEMS, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_TAGS, KnowledgeCurationRefusal } from "./knowledge-contract.js";
 import { curationCommandId, curationFailureOutcome, curationItemRefusal, curationToolText, KnowledgeCurationJobs, validateCurationRequest } from "./knowledge-curation.js";
-import { curationStored, sourceEvidenceDigest, type KnowledgeStore } from "./knowledge-store.js";
+import { curationInputsDigest, curationStored, sourceEvidenceDigest, type KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, type ObservationSettlement } from "./knowledge-observation.js";
 import { parseKnowledgeModelObject, knowledgeModelText } from "./knowledge-model-output.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
@@ -471,7 +471,7 @@ export class KnowledgeService {
     const tags = activeTagDefinitions(config.tagVocabulary);
     if (!tags.length) throw new KnowledgeCurationRefusal("unavailable", "The controlled tag vocabulary has no active tags");
     const existing = record.content.tags;
-    const inputDigest = await import("./knowledge-store.js").then(module => module.curationInputsDigest(record.content));
+    const inputDigest = curationInputsDigest(record.content);
     if (existing && existing.vocabularyRevision === config.tagVocabulary.revision && existing.inputsDigest === inputDigest && existing.tagIds.every(id => tags.some(tag => tag.id === id))) return { revisionId: record.revisionId };
     const decision = await this.tagging.engine.decide(record, config.tagVocabulary, connectionId, jobId, signal);
     if (signal.aborted) throw new GatewayError("cancelled", "Knowledge tag run was cancelled after Jev returned; reconcile the attempt before retrying");

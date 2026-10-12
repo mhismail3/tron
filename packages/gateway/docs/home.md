@@ -927,6 +927,8 @@ profile/Home model or its recorded fallback; a direct dispatcher request without
 explicit choices return `invalid_request`; model admission refusals name at most twenty fixed,
 usable models.
 
+The operating context names Home’s live chat model and thinking at activation preparation. Unknown task IDs return `not_found`, including a not-yet-created namespace; foreign Home identities and damaged namespaces still refuse. Direct Home dispatch without a pre-resolved profile choice inherits Home’s live model/thinking; ordinary chats remain profile-free.
+
 **Worker title.** `delegate` takes an optional `title` (at most 80 characters, not blank after
 trimming). It names the worker session through the session's canonical name, written before the
 worker's first prompt, and is never persisted with the task record. A refused title is
@@ -1032,7 +1034,11 @@ holding the sealed task open. The settlement fact is the worker's canonical cust
 `tron-home-task-subagents` with `{ receiptId: "subagents:<operationId>", operationId,
 stoppedAtEnd }`. It is written only when the task launched async runs, so its absence
 proves zero Gateway stops. Its value is `null` unless every stop was accepted and every
-run was joined.
+run was joined. Stop-target enumeration takes one snapshot of the activity rows before
+awaiting workflow-child status. Artifact refresh may reorder the live activity map but
+cannot make the same row receive or count a second stop. The managed-provider journey
+in `home-task-subagents.e2e.test.ts` forces a real artifact refresh during that read and
+checks the canonical one-child stop count and terminal provider state.
 
 **Completion notices.** The provider writes an async run's completion as a `subagent-notify`
 custom message after the run is terminal, and the Gateway records a
@@ -1306,7 +1312,13 @@ do not drain the inbox.
   whose target is that `tron.home-task-result.v1` custom message (the only binding that
   is not a user message), and its attribution receipt. The wake's turn therefore begins
   with the delivered-context row of its result, then Home's reply. iOS already renders a
-  `customMessage` row and an assistant row; no user row is ever written.
+  `customMessage` row and an assistant row; no user row is ever written. Its text starts
+  with one human-readable line containing the task title (the intent's first line, capped
+  at 160 characters), outcome, subagent counts and elapsed milliseconds; it then presents
+  the accepted report text and evidence items without serializing the canonical task or
+  report record. Task/session identities, immutable report reference and terminal proof
+  remain in `details`. A never-fit report includes its task paging handle in the
+  reference text, because model payloads do not expose custom-message details.
 - **Ceiling (#749).** At most eight consecutive wake activations run with no user message
   between them. The count is derived from the canonical result messages: distinct
   operations that delivered results after the last user message, across chapters, read
@@ -1647,7 +1659,7 @@ without a retained artifact.
 | `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; a Chat-layer `tools.active` change restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |
 | `src/episodic/home-source.e2e.test.ts` | cross-chapter replay, restart, navigation and frozen-cut proof | `test-results/home-memory/continuity.json` | `npx vitest run src/episodic/home-source.e2e.test.ts` |
-| `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on explicit/profile/Home values; profile model and thinking resolve independently, unsupported thinking is clamped, provenance is captured in the brief and worker Chat, and ordinary direct dispatch retains the Gateway default; unavailable profile models fall through; invalid explicit choices are refused before any task or session; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
+| `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on explicit/profile/Home values; profile model and thinking resolve independently, unsupported thinking is clamped, provenance is captured in the brief and worker Chat, direct Home dispatch inherits the live Home choice, Home’s context names its identity, unknown tasks return not_found, and ordinary chats retain their own defaults; unavailable profile models fall through; invalid explicit choices are refused before any task or session; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries plus a deterministically held empty-PID publication interval (positive identity before cancellation, unchanged reaping and no-further-effects assertions); frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
 | `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
 | `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a run's late completion notice recorded before the settlement fact, with nothing appended after it, and a notice the bound never records counted without changing the outcome; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; task Stop leaves the exact provider mission cancelled (sanitized artifact `test-results/stopped-subagent-mission.json`); a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |

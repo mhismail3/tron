@@ -7961,7 +7961,9 @@ export class RuntimeSlot {
    * its run id from the run's status. */
   private async asyncStopTargets(): Promise<string[]> {
     const targets: string[] = [];
-    for (const activity of this.extensionActivities.values()) {
+    // Artifact refresh removes and reinserts rows while the child-status read
+    // below awaits. A live Map iterator can then visit the same run again.
+    for (const activity of [...this.extensionActivities.values()]) {
       const runId = activity.runId;
       const asyncDir = runId === undefined ? undefined : this.extensionRunOwnership.get(runId)?.asyncDir;
       if (runId === undefined || asyncDir === undefined || !this.extensionActivityOwnsLiveWork(activity)) continue;

@@ -6,7 +6,7 @@ import { homeMemoryTools } from "./home-memory-tools.js";
 import { homeProfileSection, homeProfileTool } from "./home-profile.js";
 import { markHomeMemoryCache, type HomeSystemPrompt } from "./home-request-policy.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { HOME_TASK_THINKING_LEVELS } from "./home-task-worker-choice.js";
+import { HOME_TASK_THINKING_LEVELS, type HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
 
 /**
  * Tron Home's operating context. Home is designated, and every activation runs on
@@ -46,9 +46,13 @@ export type HomeTaskToolRequest = { action: "status"; taskId: string }
  * request of that activation (#749), so no SDK `before_agent_start` hook is
  * involved: a wake starts a run without one.
  */
-export async function homeSystemPrompt(base: string, knowledge: () => KnowledgeService | undefined): Promise<HomeSystemPrompt> {
+export async function homeSystemPrompt(base: string, knowledge: () => KnowledgeService | undefined, choice: Required<HomeTaskWorkerChoice>): Promise<HomeSystemPrompt> {
   const profile = await homeProfileSection(knowledge);
-  return { instructions: `${base}\n\n${HOME_OPERATING_CONTEXT}`, profile: profile.text, profileNotes: profile.notes };
+  return {
+    instructions: `${base}\n\n${HOME_OPERATING_CONTEXT}\n\nCurrent Home chat model: ${choice.model.provider}/${choice.model.id}\nCurrent Home thinking level: ${choice.thinking}`,
+    profile: profile.text,
+    profileNotes: profile.notes,
+  };
 }
 
 /**
