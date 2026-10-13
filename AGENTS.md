@@ -176,6 +176,10 @@ test suites with an isolated `HOME` and `TMPDIR`.
   outside the tooling (`scripts/tron-ios-simulator stop` for the Development
   simulator), before your final response unless the user asked to keep it
   running.
+- Heavy runs (iOS simulator suites, real-Gateway E2E, full suites, `work verify`/`land`
+  builds and journeys) wait for a host-wide slot in `scripts/tron-heavy`; the owning
+  tools take it themselves. Check `scripts/tron-heavy status` before starting one by
+  hand, and never bypass it with `TRON_HEAVY_LEASE_HELD`.
 - Prefer commands that exit when they finish. Avoid watch mode and background
   processes unless the task needs them.
 - Reproduce load-dependent failures inside the test process (constrained

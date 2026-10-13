@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import heavy
+
 # Two checks at a time: a shared Mac runs other agents and the live Gateway too.
 CONCURRENCY = 2
 EXCERPT_LINES = 40
@@ -183,7 +185,8 @@ def _check_environment() -> Dict[str, str]:
     return {name: value for name, value in os.environ.items() if name not in dropped}
 
 
-def _run(root: Path, prelude: str, check: Check, log: Path, live: list, environment: Dict[str, str]) -> Result:
+def _run(root: Path, prelude: str, check: Check, log: Path, live: list, environment: Dict[str, str],
+         lease_fds: tuple = ()) -> Result:
     log.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     with log.open("w") as stream:
@@ -192,7 +195,7 @@ def _run(root: Path, prelude: str, check: Check, log: Path, live: list, environm
         process = subprocess.Popen(
             ["bash", "-c", f"set -eo pipefail\n{prelude}\n{check.command}"],
             cwd=root, env=environment, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
-            start_new_session=True,
+            start_new_session=True, pass_fds=lease_fds,
         )
         live.append(process)
         try:
@@ -237,7 +240,6 @@ def verify(root: Path, config: dict, tests: List[str], base_ref: str) -> bool:
     prelude = config["verify"]["prelude"]
     logs = _git_dir(root) / "work" / "logs" / head[:12]
     print(f"verify: {len(checks)} checks for {head[:12]} against {base_ref}")
-    live: list = []
     results: List[Result] = []
     # Mac staging replaces the source Gateway node_modules; the Gateway/relay
     # checks may also install dependencies. Native builds publish products used
@@ -249,6 +251,36 @@ def verify(root: Path, config: dict, tests: List[str], base_ref: str) -> bool:
     batches = [[check for check in checks if check.name not in build_names and not check.name.startswith("test-")]]
     batches.extend([check for check in checks if check.name == name] for name in build_names)
     batches.append([check for check in checks if check.name.startswith("test-")])
+    # Builds and journeys are heavy runs: they wait for a host-wide slot (#915,
+    # tools/work/heavy.py) and their trees hold its descriptor, so a journey that
+    # runs another heavy tool inherits the slot instead of waiting on itself.
+    is_heavy = any(check.name in build_names or check.name.startswith("test-") for check in checks)
+    lease = heavy.acquire(f"work verify {head[:12]} in {root.name}", "work verify") if is_heavy else None
+    lease_fds = (lease.fd,) if lease else ()
+    if lease:
+        environment = {**environment, heavy.HELD_ENV: str(lease.slot + 1)}
+    try:
+        passed = _run_batches(root, prelude, batches, logs, environment, lease_fds, results)
+    finally:
+        if lease:
+            lease.release()
+    if not passed:
+        return False
+    if _git(root, "rev-parse", "HEAD").strip() != head or dirty_paths(root):
+        raise VerifyError("the head or the worktree changed while checks ran; nothing was recorded")
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps({
+        "tree": tree,
+        "head": head,
+        "checks": [check.name for check in checks],
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }, indent=2) + "\n")
+    return True
+
+
+def _run_batches(root: Path, prelude: str, batches: List[List[Check]], logs: Path, environment: Dict[str, str],
+                 lease_fds: tuple, results: List[Result]) -> bool:
+    live: list = []
     with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
         try:
             for batch in batches:
@@ -256,7 +288,7 @@ def verify(root: Path, config: dict, tests: List[str], base_ref: str) -> bool:
                 for check in batch:
                     log = logs / f"{check.name}.log"
                     print(f"running: {check.name} (log: {log})", flush=True)
-                    futures.append(pool.submit(_run, root, prelude, check, log, live, environment))
+                    futures.append(pool.submit(_run, root, prelude, check, log, live, environment, lease_fds))
                 for future in as_completed(futures):
                     result = future.result()
                     results.append(result)
@@ -276,15 +308,4 @@ def verify(root: Path, config: dict, tests: List[str], base_ref: str) -> bool:
     failed = [result for result in results if result.exit_code != 0]
     for result in failed:
         print(f"\n--- {result.check.name}: {result.check.command}\n{_excerpt(result.log)}")
-    if failed:
-        return False
-    if _git(root, "rev-parse", "HEAD").strip() != head or dirty_paths(root):
-        raise VerifyError("the head or the worktree changed while checks ran; nothing was recorded")
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(json.dumps({
-        "tree": tree,
-        "head": head,
-        "checks": [check.name for check in checks],
-        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }, indent=2) + "\n")
-    return True
+    return not failed

@@ -1322,6 +1322,8 @@ future managed-state contract are owned by
 Tron Home is one opt-in persistent conversation per Gateway installation. It is created only by an explicit
 `home.designate`; until then every session is ordinary. [`docs/home.md`](docs/home.md) owns its designation
 record, RPC shapes, chapters, runtime profile, memory, task delegation and terminal client.
+[`docs/host-load.md`](docs/host-load.md) owns the host-load design: the Home worker budget,
+the host-wide heavy-run queue and the host-pressure signal (#915).
 
 - **Memory.** There is no memory default: Home refuses activations until its memory model
   (`model.ref[role=memory]`, changed through `settings.change`) names a physical model. Memory spend is bounded by construction and reported; there is no budget to manage. Each
