@@ -69,14 +69,16 @@ scripts/tron-ios-device stop
 ```
 
 When the user asks for a build on their phone and it is not reachable by
-`devicectl` (away from the Mac), commit and push, then run
+`devicectl` (away from the Mac), commit, then run
 `scripts/tron-ios-device share --title "<what this build is>" --notes "<what
-changed, what to test>"` and post its final `Build page:` link in the chat,
-never anywhere public. It is the same validated `Tron Device` + `LocalDevice`
-artifact delivered over the air through Speedflight; see
-[Over-the-air development install](../../../packages/ios-app/docs/development.md#over-the-air-development-install-speedflight).
-Share only when the user asks. Never print, mint or store the upload secret;
-a missing secret is a maintainer step the command names.
+changed, what to test>"` and post its `Install page:` link in the chat (a
+`notify` with the link is fine). It publishes the same validated `Tron Device` +
+`LocalDevice` artifact to the tailnet-only share host on this Mac; see
+[Over-the-air development install](../../../packages/ios-app/docs/development.md#over-the-air-development-install).
+Share only when the user asks. If the share host is not reachable, ask the user
+before running `scripts/tron-ios-device share-host enable`; never change other
+Tailscale serve ports or enable Funnel. Never upload builds to a third-party
+host.
 
 For an explicitly source-built Debug Gateway on 9848, use
 `TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device install`; this
@@ -95,8 +97,9 @@ repository-managed XcodeGen. If the tool is absent, install it with
 Use `scripts/validate-ios-artifact.py` on signed products and
 `packages/ios-app/scripts/verify-archive-privacy.sh` for a manually-created
 archive. Never install Release or DevicePerformance through the ordinary helper.
-Do not archive, upload, deploy, or erase app/Keychain data; the one upload is
-the user-requested development `share` above.
+Do not archive, upload, deploy, or erase app/Keychain data; the one exception
+is publishing a user-requested development `share` to this Mac's tailnet-only
+share host above.
 
 To measure an iOS change, agents run `scripts/tron-profile ios --self-test`,
 then the relevant `--scenario`, before and after, and judge with

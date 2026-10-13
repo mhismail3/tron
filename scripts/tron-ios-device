@@ -24,11 +24,14 @@ LOCKER="$ROOT_DIR/scripts/ios-test-lock.py"
 # Host-wide: every worktree, and the Gateway's detached install helper, lease a
 # device here.
 DEVICE_LEASE_DIR="$HOME/.tron/internal/run"
-SPEEDFLIGHT_BASE="${TRON_SPEEDFLIGHT_BASE:-https://speedflight.dev}"
-SPEEDFLIGHT_KEYCHAIN_SERVICE="speedflight.dev"
-SPEEDFLIGHT_KEYCHAIN_ACCOUNT="tron-upload-secret"
-# Opens the app after an over-the-air install (Info.plist CFBundleURLSchemes).
-SPEEDFLIGHT_DEEP_LINK="tron://"
+# Over-the-air development builds: a loopback static server (LaunchAgent) behind
+# Tailscale Serve on a dedicated HTTPS port, reachable only from the tailnet.
+SHARE_DIR="$HOME/.tron/ios-builds"
+SHARE_HTTPS_PORT=8443
+SHARE_BACKEND_PORT=8444
+SHARE_AGENT_LABEL="com.tron.ios-builds"
+SHARE_AGENT_PLIST="$HOME/Library/LaunchAgents/$SHARE_AGENT_LABEL.plist"
+SHARE_KEEP=5
 SHARE_TITLE=""
 SHARE_NOTES=""
 
@@ -40,6 +43,7 @@ Usage:
   scripts/tron-ios-device stop [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device status [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device share --title TITLE --notes NOTES [--fast-debug]
+  scripts/tron-ios-device share-host enable|status|disable
 
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
@@ -74,12 +78,16 @@ finish. The lease is keyed by the resolved device identifier, which both device
 selection and the Gateway's install use.
 
 `share` builds the same validated pair for any registered device (no device
-connected, no lease), uploads it to Speedflight and prints `Build page: <url>`,
-which installs over the air from Safari on a device in the development
-profile. It requires a clean tree whose HEAD is pushed, and the upload secret in
-the login Keychain (service speedflight.dev, account tron-upload-secret) or
-TRON_SPEEDFLIGHT_SECRET. TRON_SPEEDFLIGHT_BASE overrides the service URL.
-TRON_SPEEDFLIGHT_AUTHOR overrides the author shown on the page.
+connected, no lease) from a clean tree, publishes it to the share host and
+prints `Install page: <url>` and `Install link: itms-services://...` last. The
+page installs over the air from Safari on a device in the development profile
+with Developer Mode on. It keeps the newest 5 builds.
+
+`share-host enable` (once, maintainer-approved) installs the loopback server
+LaunchAgent com.tron.ios-builds (127.0.0.1:8444, serving ~/.tron/ios-builds)
+and runs `tailscale serve --bg --https=8443 http://127.0.0.1:8444`, so the
+builds are reachable only from the tailnet at https://<this Mac>.ts.net:8443/
+with Tailscale's certificate. `disable` reverses both and keeps the builds.
 USAGE
 }
 
@@ -460,49 +468,128 @@ build_install_launch() {
     echo "xcresult: $xcresult"
 }
 
-# Speedflight (https://speedflight.dev) serves an uploaded IPA from a page that
-# installs over the air on any device in its signing profile. The upload secret
-# is the only write credential; the page link is the only install credential.
-# Neither is printed except the page link, which is the command's result.
-share_secret() {
-    local secret="${TRON_SPEEDFLIGHT_SECRET:-}"
-    if [[ -z "$secret" ]]; then
-        secret="$(security find-generic-password -s "$SPEEDFLIGHT_KEYCHAIN_SERVICE" \
-            -a "$SPEEDFLIGHT_KEYCHAIN_ACCOUNT" -w 2>/dev/null || true)"
-    fi
-    [[ -n "$secret" ]] || die "no Speedflight upload secret: the maintainer stores one with
-  security add-generic-password -s $SPEEDFLIGHT_KEYCHAIN_SERVICE -a $SPEEDFLIGHT_KEYCHAIN_ACCOUNT -w \"\$(openssl rand -hex 24)\""
-    [[ "$secret" =~ ^[A-Za-z0-9_-]{32,128}$ ]] || die "the Speedflight upload secret must be 32-128 characters of [A-Za-z0-9_-]"
-    printf '%s' "$secret"
+tailscale_cli() {
+    command -v tailscale 2>/dev/null || printf '%s\n' /Applications/Tailscale.app/Contents/MacOS/Tailscale
 }
 
-# curl reads the URL from stdin so the secret path segment never appears in argv.
-speedflight_request() {
-    local method="$1" path="$2"
-    shift 2
-    printf 'url = "%s%s"\n' "$SPEEDFLIGHT_BASE" "$path" \
-        | curl -sfS --retry 3 --retry-all-errors --retry-delay 3 -X "$method" -K - "$@"
+# https://<this node>.<tailnet>.ts.net:8443, from Tailscale's own status.
+share_base_url() {
+    local name
+    name="$("$(tailscale_cli)" status --self --json 2>/dev/null \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null)" \
+        || die "Tailscale is not running or this Mac has no tailnet DNS name"
+    [[ "$name" == *.ts.net ]] || die "unexpected tailnet DNS name: $name"
+    printf 'https://%s:%s\n' "$name" "$SHARE_HTTPS_PORT"
+}
+
+# The server answers (200 or 404 for an empty tree) through Tailscale's HTTPS
+# with a certificate curl trusts, which is exactly what the phone needs.
+share_host_reachable() {
+    local code
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$1/" || true)"
+    [[ "$code" == 200 || "$code" == 404 ]]
+}
+
+# The existing serve handler for the dedicated port, if any.
+share_serve_handler() {
+    "$(tailscale_cli)" serve status --json 2>/dev/null | python3 -c '
+import json, sys
+port = sys.argv[1]
+try:
+    web = json.load(sys.stdin).get("Web") or {}
+except ValueError:
+    web = {}
+for host, cfg in web.items():
+    if host.endswith(":" + port):
+        for path, handler in (cfg.get("Handlers") or {}).items():
+            print(path, handler.get("Proxy") or handler.get("Path") or handler.get("Text") or "?")
+' "$SHARE_HTTPS_PORT"
+}
+
+share_host_status() {
+    local url handler
+    url="$(share_base_url)"
+    echo "Builds directory: $SHARE_DIR"
+    if launchctl print "gui/$(id -u)/$SHARE_AGENT_LABEL" >/dev/null 2>&1; then
+        echo "LaunchAgent: $SHARE_AGENT_LABEL loaded ($SHARE_AGENT_PLIST)"
+    else
+        echo "LaunchAgent: $SHARE_AGENT_LABEL not loaded"
+    fi
+    handler="$(share_serve_handler)"
+    echo "Tailscale serve :$SHARE_HTTPS_PORT: ${handler:-not configured}"
+    if share_host_reachable "$url"; then
+        echo "Reachable: $url/"
+    else
+        echo "Not reachable: $url/"
+        return 1
+    fi
+}
+
+share_host_enable() {
+    local url handler
+    url="$(share_base_url)"
+    handler="$(share_serve_handler)"
+    if [[ -n "$handler" && "$handler" != "/ http://127.0.0.1:$SHARE_BACKEND_PORT" ]]; then
+        die "port $SHARE_HTTPS_PORT already serves '$handler'; refusing to replace another serve config"
+    fi
+    mkdir -p "$SHARE_DIR" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+    # The server source is embedded so the agent never runs from a checkout.
+    python3 - "$SHARE_AGENT_PLIST" "$SHARE_AGENT_LABEL" "$ROOT_DIR/scripts/ios-share-server.py" \
+        "$SHARE_DIR" "$SHARE_BACKEND_PORT" "$HOME/Library/Logs/tron-ios-builds.log" <<'PY'
+import plistlib, sys
+plist, label, source, directory, port, log = sys.argv[1:]
+with open(plist, "wb") as handle:
+    plistlib.dump({
+        "Label": label,
+        "ProgramArguments": ["/usr/bin/python3", "-c", open(source).read(), directory, port],
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "ProcessType": "Background",
+        "StandardOutPath": log,
+        "StandardErrorPath": log,
+    }, handle)
+PY
+    launchctl bootout "gui/$(id -u)/$SHARE_AGENT_LABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$SHARE_AGENT_PLIST"
+    local code="" _attempt
+    for _attempt in $(seq 1 20); do
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$SHARE_BACKEND_PORT/" || true)"
+        [[ "$code" == 200 || "$code" == 404 ]] && break
+        sleep 0.5
+    done
+    [[ "$code" == 200 || "$code" == 404 ]] || die "loopback build server did not start; see ~/Library/Logs/tron-ios-builds.log"
+    if [[ -z "$handler" ]]; then
+        echo "+ tailscale serve --bg --https=$SHARE_HTTPS_PORT http://127.0.0.1:$SHARE_BACKEND_PORT"
+        "$(tailscale_cli)" serve --bg --https="$SHARE_HTTPS_PORT" "http://127.0.0.1:$SHARE_BACKEND_PORT"
+    fi
+    # The first HTTPS request provisions the node certificate, which takes seconds.
+    for _attempt in $(seq 1 12); do
+        share_host_reachable "$url" && break
+        sleep 5
+    done
+    share_host_status
+}
+
+share_host_disable() {
+    if [[ -n "$(share_serve_handler)" ]]; then
+        echo "+ tailscale serve --https=$SHARE_HTTPS_PORT off"
+        "$(tailscale_cli)" serve --https="$SHARE_HTTPS_PORT" off
+    fi
+    launchctl bootout "gui/$(id -u)/$SHARE_AGENT_LABEL" 2>/dev/null || true
+    rm -f "$SHARE_AGENT_PLIST"
+    echo "Share host disabled; builds remain in $SHARE_DIR (delete it to remove them)."
 }
 
 share_build() {
     [[ -n "$SHARE_TITLE" && -n "$SHARE_NOTES" ]] || die "share requires --title and --notes"
-    [[ "$SPEEDFLIGHT_BASE" == https://* || "$SPEEDFLIGHT_BASE" == http://127.0.0.1:* ]] \
-        || die "TRON_SPEEDFLIGHT_BASE must be https (or a loopback http test server)"
-    command -v jq >/dev/null || die "jq is required"
-    local secret
-    secret="$(share_secret)" || exit 1
-
-    # The page names a branch and commit, so the build must be exactly that
-    # pushed commit.
+    # The page names the commit, so the build must be exactly that commit.
     [[ -z "$(git -C "$ROOT_DIR" status --porcelain)" ]] || die "working tree is dirty: commit before sharing a build"
-    local branch commit author repo_url
+    local url branch commit
+    url="$(share_base_url)"
+    share_host_reachable "$url" \
+        || die "the share host is not reachable at $url/; the maintainer approves scripts/tron-ios-device share-host enable"
     branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
     commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
-    git -C "$ROOT_DIR" merge-base --is-ancestor "$commit" '@{u}' 2>/dev/null \
-        || die "HEAD is not pushed to its upstream: push $branch before sharing"
-    author="${TRON_SPEEDFLIGHT_AUTHOR:-$(git -C "$ROOT_DIR" config --get github.user || git -C "$ROOT_DIR" log -1 --format=%an)}"
-    repo_url="$(git -C "$ROOT_DIR" remote get-url origin 2>/dev/null | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')"
-    [[ "$repo_url" == https://* ]] || repo_url=""
 
     require_full_xcode
     validate_gateway_protocol_target_prebuild
@@ -522,24 +609,11 @@ share_build() {
     (cd "$out" && ditto -c -k --norsrc --keepParent Payload "$ipa")
     rm -rf "$out/Payload"
 
-    local meta created build_id page_url
-    meta="$(jq -n --arg title "$SHARE_TITLE" --arg notes "$SHARE_NOTES" \
-        --arg deepLink "$SPEEDFLIGHT_DEEP_LINK" --arg branch "$branch" --arg commit "$commit" \
-        --arg author "$author" --arg repoUrl "$repo_url" \
-        '{title:$title, notes:$notes, deepLink:$deepLink, branch:$branch, commit:$commit, author:$author}
-         + (if $repoUrl == "" then {} else {repoUrl:$repoUrl} end)')"
-    created="$(speedflight_request POST "/api/apps/$secret/$bundle_id/builds" \
-        -H 'Content-Type: application/json' --data "$meta")" || die "Speedflight rejected the build registration"
-    build_id="$(jq -er .buildId <<<"$created")" || die "Speedflight returned no buildId"
-    page_url="$(jq -er .pageUrl <<<"$created")" || die "Speedflight returned no pageUrl"
-    [[ "$build_id" =~ ^[A-Za-z0-9_-]+$ ]] || die "Speedflight returned an invalid buildId"
-    speedflight_request PUT "/api/apps/$secret/$bundle_id/builds/$build_id/app.ipa" \
-        --http1.1 --data-binary @"$ipa" >/dev/null || die "IPA upload failed; the registered build has no app (rerun share)"
-
     echo
-    echo "Shared $app ($commit on $branch)"
-    echo "IPA: $ipa"
-    echo "Build page: $page_url"
+    echo "Built $app ($commit on $branch)"
+    python3 "$ROOT_DIR/scripts/ios-share-publish.py" --ipa "$ipa" --dir "$SHARE_DIR" \
+        --base-url "$url" --title "$SHARE_TITLE" --notes "$SHARE_NOTES" \
+        --commit "$commit" --branch "$branch" --mode "$BUILD_MODE" --keep "$SHARE_KEEP"
 }
 
 launch_app_for_device() {
@@ -634,6 +708,14 @@ main() {
             parse_common_args "$@"
             validate_install_pair
             share_build
+            ;;
+        share-host)
+            case "${1:-}" in
+                enable) share_host_enable ;;
+                status) share_host_status ;;
+                disable) share_host_disable ;;
+                *) die "share-host takes enable, status or disable" ;;
+            esac
             ;;
         install)
             parse_common_args "$@"

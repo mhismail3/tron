@@ -546,54 +546,66 @@ unoptimized Swift/Clang compilation, in-object debug symbols, and a separate
 `Tron Device`'s Run action is only a scheme convenience; the device helper's
 launch and a launch from the device itself are not debugger sessions.
 
-### Over-the-air development install (Speedflight)
+### Over-the-air development install
 
 `devicectl` installs only reach a phone the Mac can see. When the phone is
 elsewhere, `scripts/tron-ios-device share --title TITLE --notes NOTES
-[--fast-debug]` delivers the same artifact through
-[Speedflight](https://speedflight.dev), a hosted page that installs an uploaded
-IPA from Safari on devices in its signing profile. It does not change build or
-test speed.
+[--fast-debug]` publishes the same artifact to a private install page on this
+Mac, reachable only from the maintainer's tailnet. No third party is involved.
 
-The command builds `Tron Device` + `LocalDevice` for `generic/platform=iOS`
-(no device or device lease), runs the same `validate-ios-artifact.py` and
-Gateway protocol checks as `install` (Stable by default), packages the signed
-`.app` as `packages/ios-app/build/share/TronMobile.ipa` (replaced by each
-share), uploads it and prints
-`Build page: <url>` last. The development profile carries every device
-registered to the team, and the push environment stays APNs sandbox, so an
-over-the-air install behaves like a `devicectl` install. Like that install, it
-needs Developer Mode on the phone; Apple documents over-the-air installs for ad
-hoc exports, and development-signed over-the-air installs rely on the same
-mechanism that services such as Diawi support. It is never an archive,
-a Release build or a distribution path. A device registered after the build
-needs a new share.
+The command refuses a dirty tree (the page names the commit), checks the share
+host is reachable before building, builds `Tron Device` + `LocalDevice` for
+`generic/platform=iOS` (no device or device lease), runs the same
+`validate-ios-artifact.py` and Gateway protocol checks as `install` (Stable by
+default), packages the signed `.app` as
+`packages/ios-app/build/share/TronMobile.ipa` and publishes it with
+`scripts/ios-share-publish.py`. It prints `Install page:
+https://<mac>.<tailnet>.ts.net:8443/` and `Install link: itms-services://...`
+last. On the phone, open the page in Safari and tap **Install latest**; iOS asks
+to install Tron and replaces the existing app in place (data kept). The page
+lists the newest five builds with commit, branch, title, notes and time; older
+builds are deleted on publish. `latest.plist` always names the newest build, so
+the install link itself is stable.
 
-It refuses a dirty tree or an unpushed HEAD, because the page names the branch
-and commit. The upload secret (32-128 characters of `[A-Za-z0-9_-]`) is read
-from the login Keychain item service `speedflight.dev`, account
-`tron-upload-secret`, or from `TRON_SPEEDFLIGHT_SECRET`; curl reads the request
-URL from stdin so the secret never appears in process arguments. Whoever holds
-the secret can upload to the page; whoever holds the page link can install and
-download the IPA, so post it only in a private chat. Speedflight has no account;
-the secret is the identity, and losing it means minting a new one (a new page).
-The API used is the one documented by the upstream skill
-([jakemor/speedflight](https://github.com/jakemor/speedflight), reviewed at
-`b233c6f0e3b4493011563905bfd97eefa7fdcc0c`).
+Over-the-air installation is the `itms-services` manifest mechanism, which iOS
+accepts only over HTTPS with a trusted certificate. The development profile
+carries every device registered to the team, and the push environment stays APNs
+sandbox, so the result behaves like a `devicectl` install; like that install it
+needs Developer Mode on the phone. A device registered after the build needs a
+new share. It is never an archive, a Release build or a distribution path.
 
-One-time maintainer setup, on the Mac that builds:
+The share host is set up once, with the maintainer's approval:
 
 ```bash
-security add-generic-password -s speedflight.dev -a tron-upload-secret -w "$(openssl rand -hex 24)"
+scripts/tron-ios-device share-host enable   # idempotent
+scripts/tron-ios-device share-host status
+scripts/tron-ios-device share-host disable  # undo; keeps ~/.tron/ios-builds
 ```
 
-The end-to-end journey runs the real command, with this Mac's development
-signing, against a loopback Speedflight-compatible server and writes
-`packages/ios-app/build/share-e2e/report.json`; it needs a clean, pushed
-checkout:
+`enable` writes the LaunchAgent `~/Library/LaunchAgents/com.tron.ios-builds.plist`,
+which runs `scripts/ios-share-server.py` (embedded in the plist, so no checkout
+path is needed) on `127.0.0.1:8444` serving `~/.tron/ios-builds` without
+directory listings or caching, logging requests to
+`~/Library/Logs/tron-ios-builds.log`, and runs
+`tailscale serve --bg --https=8443 http://127.0.0.1:8444`. Tailscale terminates
+HTTPS with the node's `*.ts.net` certificate; the macOS Tailscale app cannot
+serve a directory itself (sandbox), hence the loopback server. It refuses to
+replace another handler on port 8443 and never touches other serve ports or
+Funnel. `disable` runs `tailscale serve --https=8443 off` and removes the
+LaunchAgent. Anyone on the tailnet can download the IPA, which holds no secrets
+beyond what any development build does.
+
+The end-to-end journey checks the publisher and server in a temp fixture
+(retention, manifests, index escaping, content types, no listings), then runs
+the real `share` and downloads the index, `latest.plist`, the build manifest and
+the IPA over the tailnet HTTPS URL with certificate verification, and checks the
+IPA is byte-identical, validly signed and provisioned. It needs a clean checkout
+and an enabled share host, publishes a real installable build, and writes
+`packages/ios-app/build/share-e2e/report.json`:
 
 ```bash
-python3 scripts/test-tron-ios-device-share.py
+python3 scripts/test-tron-ios-device-share.py                 # full journey
+python3 scripts/test-tron-ios-device-share.py --fixture-only  # no build
 ```
 
 ### Profiling a real slowdown
