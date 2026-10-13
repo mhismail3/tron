@@ -339,24 +339,23 @@ prepare_xcodebuild_args() {
     local device_id="$3"
     local build_mode="$4"
 
+    local destination=(-destination "generic/platform=iOS")
+    local registration=()
+    if [[ -n "$device_id" ]]; then
+        destination=(-destination "platform=iOS,id=${device_id}" -destination-timeout 30)
+        registration=(-allowProvisioningDeviceRegistration)
+    fi
     XCODEBUILD_ARGS=(
         build
         -project "$PROJECT"
         -scheme "$SCHEME"
         -configuration "$CONFIG"
+        "${destination[@]}"
         -derivedDataPath "$derived_data_path"
         -resultBundlePath "$result_bundle_path"
         -allowProvisioningUpdates
+        ${registration[@]+"${registration[@]}"}
     )
-    if [[ -n "$device_id" ]]; then
-        XCODEBUILD_ARGS+=(
-            -destination "platform=iOS,id=${device_id}"
-            -destination-timeout 30
-            -allowProvisioningDeviceRegistration
-        )
-    else
-        XCODEBUILD_ARGS+=(-destination "generic/platform=iOS")
-    fi
     XCODEBUILD_ARGS+=(SWIFT_COMPILATION_MODE=singlefile)
     if [[ "$build_mode" == "fast-debug" ]]; then
         XCODEBUILD_ARGS+=(
