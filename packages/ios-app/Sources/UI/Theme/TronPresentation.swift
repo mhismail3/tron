@@ -1395,6 +1395,9 @@ struct TronSettingsRow<Trailing: View>: View {
     let title: String
     let subtitle: String?
     let subtitleLineLimit: Int?
+    /// Renders the subtitle's inline markdown (emphasis, code, links) with the
+    /// chat renderer's inline parser, for rows that preview canonical text.
+    let subtitleIsMarkdown: Bool
     let titleIsIdentifier: Bool
     let accent: Color
     let titleFont: Font
@@ -1412,6 +1415,7 @@ struct TronSettingsRow<Trailing: View>: View {
         title: String,
         subtitle: String? = nil,
         subtitleLineLimit: Int? = 2,
+        subtitleIsMarkdown: Bool = false,
         titleIsIdentifier: Bool = false,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
@@ -1423,6 +1427,7 @@ struct TronSettingsRow<Trailing: View>: View {
         self.title = title
         self.subtitle = subtitle
         self.subtitleLineLimit = subtitleLineLimit
+        self.subtitleIsMarkdown = subtitleIsMarkdown
         self.titleIsIdentifier = titleIsIdentifier
         self.accent = accent
         self.titleFont = titleFont
@@ -1469,7 +1474,9 @@ struct TronSettingsRow<Trailing: View>: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if let subtitle {
-                        Text(subtitle)
+                        Text(subtitleIsMarkdown
+                             ? MarkdownPresentation.Inline(source: subtitle).attributedString ?? AttributedString(subtitle)
+                             : AttributedString(subtitle))
                             .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
                             .foregroundStyle(subtitleColor)
                             .lineLimit(subtitleLineLimit)
@@ -1575,6 +1582,7 @@ extension TronSettingsRow where Trailing == EmptyView {
         title: String,
         subtitle: String? = nil,
         subtitleLineLimit: Int? = 2,
+        subtitleIsMarkdown: Bool = false,
         titleIsIdentifier: Bool = false,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
@@ -1586,6 +1594,7 @@ extension TronSettingsRow where Trailing == EmptyView {
             title: title,
             subtitle: subtitle,
             subtitleLineLimit: subtitleLineLimit,
+            subtitleIsMarkdown: subtitleIsMarkdown,
             titleIsIdentifier: titleIsIdentifier,
             accent: accent,
             titleFont: titleFont,

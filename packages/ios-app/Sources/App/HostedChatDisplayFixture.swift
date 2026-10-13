@@ -804,7 +804,7 @@ private actor HostedHomeShellGateway {
         [(0, 16), (16, 8), (24, 4), (28, 4), (32, 2)] + (34..<40).map { ($0, 1) }
     private static let memoryMessages: [(kind: String, text: String)] = [
         ("user", "Move the garden planning to Thursday reviews."),
-        ("talk", "Scheduled the garden review for Thursday at 10:00."),
+        ("talk", "Scheduled the **garden review** for Thursday at `10:00`."),
         ("echo", "Created calendar event: Garden review, Thursday 10:00."),
         ("event", "Task result: settings model epic #758 finished."),
         ("user", "Email me the Thursday summary."),

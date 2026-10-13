@@ -4920,8 +4920,6 @@ final class AppModel {
                 permissions = try await taskPermissions
             }
             return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks, permissions: permissions))
-        case .context:
-            return .context(try HomeContextDTO.decode(try await read("home.context")))
         case .tasks(let cursor):
             let status = try await readTaskStatus()
             var params: [String: JSONValue] = ["limit": .number(20)]

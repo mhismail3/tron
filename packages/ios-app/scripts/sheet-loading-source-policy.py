@@ -23,6 +23,7 @@ SPINNER_ALLOWED = {
     "UI/Chat/ChatDisplayViews.swift",  # inline transcript image chip
     "UI/Chat/HomePinnedRow.swift",  # chat-list Home row status
     "UI/Chat/SessionShellView.swift",  # chat-list search field
+    "UI/SwiftApps/SwiftAppViews.swift",  # renders a displayed Swift app's own ProgressView
 }
 # Visible text that names in-flight work but is not a loading placeholder.
 TEXT_ALLOWED = {

@@ -1047,10 +1047,6 @@ struct KnowledgeRecordRow: View {
             }
             .layoutPriority(1)
             Spacer(minLength: TronSpacing.md)
-            Image(systemName: "chevron.right")
-                .font(TronTypography.caption)
-                .foregroundStyle(Color.tronKnowledge)
-                .accessibilityHidden(true)
         }
     }
 }
@@ -1746,9 +1742,7 @@ struct KnowledgeDetailView: View {
                     Button { openLinkedRecord(id: replacement.id, revisionID: replacement.revisionId,
                                                  includeArchived: replacement.admission == .archived,
                                                  includePending: replacement.admission == .pending) } label: {
-                        TronSettingsRow(icon: "arrow.turn.down.right", title: "Replaced by: \(replacement.title)", accent: .tronKnowledge) {
-                            Image(systemName: "chevron.right").font(TronTypography.caption).foregroundStyle(Color.tronKnowledge)
-                        }
+                        TronSettingsRow(icon: "arrow.turn.down.right", title: "Replaced by: \(replacement.title)", accent: .tronKnowledge)
                     }.buttonStyle(.plain)
                 }
                 if choosingReplacement || source.verdict?.verdict == .superseded {
@@ -1843,9 +1837,7 @@ struct KnowledgeDetailView: View {
                     ForEach(Array(related.enumerated()), id: \.element) { index, id in
                         if index > 0 { TronSettingsDivider(accent: .tronKnowledge) }
                         Button { openLinkedRecord(id: id, revisionID: nil) } label: {
-                            TronSettingsRow(icon: "doc.text", title: citationTitles[id] ?? citationTitles.first(where: { $0.key.hasPrefix("\(id)|") })?.value ?? "Related entry", accent: .tronKnowledge) {
-                                Image(systemName: "chevron.right").font(TronTypography.caption).foregroundStyle(Color.tronKnowledge)
-                            }
+                            TronSettingsRow(icon: "doc.text", title: citationTitles[id] ?? citationTitles.first(where: { $0.key.hasPrefix("\(id)|") })?.value ?? "Related entry", accent: .tronKnowledge)
                         }
                         .buttonStyle(.plain)
                     }

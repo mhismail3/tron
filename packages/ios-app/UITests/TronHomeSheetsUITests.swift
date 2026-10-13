@@ -21,8 +21,21 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(waitFor(ring, "label CONTAINS 'Manage Home'"))
         XCTAssertTrue(waitFor(ring, "enabled == true"))
         open(app, ring, ready: "home-manage-state", name: "manage")
+        keep("00-manage-medium")
         expand(app, done: "home-sheet-done-manage")
         keep("01-manage")
+
+        // Manage Home's top card is Home's context: the state pill and the last
+        // activation, a section-segmented bar, then the legend above the metrics.
+        // There is no separate Home Context sheet.
+        XCTAssertFalse(element(app, "home-manage-context").exists, "Home Context is part of Manage Home")
+        XCTAssertTrue(element(app, "context-segmented-bar").exists)
+        XCTAssertTrue(element(app, "context-segment-memory").label.contains("260 summaries"))
+        XCTAssertTrue(element(app, "home-context-activation").label.hasPrefix("Your message"))
+        let cacheHit = element(app, "home-context-breakdown").descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH 'Cache Hit'")).firstMatch
+        XCTAssertTrue(cacheHit.exists)
+        XCTAssertLessThanOrEqual(element(app, "context-segment-free").frame.maxY, cacheHit.frame.minY, "The legend sits above the metrics")
 
         // Home Settings is its own container below the rows container.
         app.swipeUp()
@@ -31,21 +44,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertGreaterThan(settings.frame.minY, permissions.frame.maxY + 8, "Home Settings sits in a separate container")
         keep("01b-manage-bottom")
         app.swipeDown()
-
-        // Context: one card, a section-segmented bar, then the compact legend above the metrics.
-        open(app, element(app, "home-manage-context"), ready: "home-context-breakdown", name: "context")
-        expand(app, done: "home-sheet-done-context")
-        XCTAssertTrue(element(app, "context-segmented-bar").exists)
-        XCTAssertTrue(element(app, "context-segment-memory").label.contains("260 summaries"))
-        XCTAssertTrue(element(app, "home-context-activation").label.contains("Running"))
-        let cacheHit = element(app, "home-context-breakdown").descendants(matching: .any)
-            .matching(NSPredicate(format: "label BEGINSWITH 'Cache Hit'")).firstMatch
-        XCTAssertTrue(cacheHit.exists)
-        XCTAssertLessThanOrEqual(element(app, "context-segment-free").frame.maxY, cacheHit.frame.minY, "The legend sits above the metrics")
-        keep("02-context")
-        let contextOpened = reads(app)
-        app.buttons["home-sheet-done-context"].tap()
-        assertNoReads(app, since: contextOpened, "Returning from a read-only child to Manage Home re-reads nothing")
 
         // Memory: the recent messages and the summaries Home sees, without raw kind prefixes.
         open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory")
@@ -56,6 +54,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(element(app, "home-memory-row-39").label.hasPrefix("Result, Task result:"))
         let prefixed = NSPredicate(format: "label BEGINSWITH 'user:' OR label BEGINSWITH 'talk:' OR label BEGINSWITH 'echo:' OR label BEGINSWITH 'event:'")
         XCTAssertEqual(app.staticTexts.matching(prefixed).count, 0, "Memory rows never show raw kind prefixes")
+        let markdown = element(app, "home-memory-row-37")
+        XCTAssertTrue(markdown.label.contains("garden review"), markdown.label)
+        XCTAssertFalse(markdown.label.contains("**") || markdown.label.contains("`"), "Memory previews render markdown: \(markdown.label)")
         keep("03-memory")
         open(app, element(app, "home-memory-row-39"), ready: "home-memory-detail", name: "memory-item")
         XCTAssertFalse(element(app, "home-memory-remembered").exists, "A summary equal to the message is not repeated")

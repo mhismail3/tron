@@ -1920,12 +1920,17 @@ final class TronSmokeUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
         app.launch(); defer { app.terminate() }
-        let more = app.buttons["settings-changes-load-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 10))
-        more.tap()
+        // The Gateway's first filtered page is empty but not the end: opening
+        // Changes still shows the one entry, without tapping Load more.
         let row = app.buttons["settings-change-fixture-change"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.buttons["settings-changes-load-more"].exists, "The feed's end needs no Load more")
+        keepScreenshot(named: "925-changes-first-page")
         row.tap()
+        XCTAssertTrue(app.staticTexts["Key history"].waitForExistence(timeout: 5), app.debugDescription)
+        let iso = NSPredicate(format: "label MATCHES %@", ".*[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:.*")
+        XCTAssertEqual(app.descendants(matching: .any).matching(iso).count, 0, "Change detail shows readable dates, never raw ISO timestamps")
+        keepScreenshot(named: "925-change-detail")
         tapScrolling(app.buttons["Open requesting chat"], in: app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-route"],
                                   containing: "owned:true:fixture-chat", timeout: 5))

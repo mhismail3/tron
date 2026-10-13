@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 enum HomeSheetDestination: Identifiable {
-    case manage, context
+    case manage
     /// Memory browser: one chapter's memory when `sessionID` is set, else the whole view.
     case memory(sessionID: String?, chapterOrdinal: Int?)
     /// One summary line and the two halves it covers (read on open).
@@ -21,7 +21,6 @@ enum HomeSheetDestination: Identifiable {
     var id: String {
         switch self {
         case .manage: "manage"
-        case .context: "context"
         case .memory: "memory"
         case .memorySummary: "memory-summary"
         case .memoryItem: "memory-item"
@@ -38,7 +37,6 @@ enum HomeSheetDestination: Identifiable {
     var title: String {
         switch self {
         case .manage: "Manage Home"
-        case .context: "Home Context"
         case .memory, .memorySummary, .memoryItem: "Memory"
         case .evidence: "Exact Evidence"
         case .chapters, .chapter: "Chapters"
@@ -50,7 +48,6 @@ enum HomeSheetDestination: Identifiable {
     var initialQuery: HomeSheetReadQuery {
         switch self {
         case .manage: .manage
-        case .context: .context
         case .memory(let sessionID, _): .memory(sessionID: sessionID, continuation: nil)
         case .memorySummary(let line, let sessionID): .memoryPart(sessionID: sessionID, line)
         // Carried by the destination and never loaded; see `loadsPage`.
@@ -264,7 +261,6 @@ struct HomeSheet: View {
             if read.identity == identity {
                 switch content {
                 case .manage(let manage): manageSheet(manage)
-                case .context(let context): contextSheet(context)
                 case .chapters(let list): chapters(list)
                 case .memory(let view): memory(view)
                 case .evidence(let page):
@@ -288,7 +284,7 @@ struct HomeSheet: View {
     /// Presents a managed child sheet; rows use this, not their own navigation.
     func present(_ child: HomeSheetDestination) {
         switch child {
-        case .context, .memory, .chapters: returnsFromBrowsing = true
+        case .memory, .chapters: returnsFromBrowsing = true
         default: returnsFromBrowsing = false
         }
         childDestination = child
