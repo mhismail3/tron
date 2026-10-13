@@ -418,6 +418,9 @@ ordinary and Home requests with initial Mac values, a Chat override, removed Mac
 values and unset, plus optional-value fork/cold resume.
 The bounded `settings-run-applied` session diagnostic shows the runtime policy
 at request admission, rather than merely the defaults a settings read resolves.
+It is published at the first request of each agent run and again only when a
+later request in that run applies a different policy, so a ten-tool turn does
+not send the phone ten identical diagnostics.
 
 Directional request settings retain canonical `requestPins` snapshots with the
 same value/source/time/reference metadata in `tron.settings.v1`. At start and before SDK message conversion, the schema's
