@@ -481,11 +481,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         defer { app.terminate() }
         open(fixture.invitationLink())
         completeFirstRunSetup(app, inWorkspace: fixture.workspace)
-        let menu = app.buttons["dashboard.menu"]
-        XCTAssertTrue(waitForHittable(menu, timeout: 90), app.debugDescription)
-        menu.tap()
-        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 30), app.debugDescription)
-        app.buttons["Settings"].tap()
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        // The chat's own Settings route, the parent the reported sheet loss used.
+        createSession(app, inWorkspace: fixture.workspace)
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 60), app.debugDescription)
+        gear.tap()
         guard let services = hittableElement(app, identifier: "settings-link-Connected Services", timeout: 30) else {
             return XCTFail("no Connected Services link: \(app.debugDescription)")
         }
