@@ -21,6 +21,7 @@ extension HomeSheet {
         return VStack(alignment: .leading, spacing: 18) {
             statsAndModel(read.status)
             manageRows(read, unresolved: unresolved)
+            settingsRow
             manageControls(read.status, unresolved: unresolved, mutating: mutating)
         }
     }
@@ -59,33 +60,17 @@ extension HomeSheet {
     func manageRows(_ read: HomeManageDTO, unresolved: Bool) -> some View {
         let status = read.status
         let summaries = read.context.breakdown?.sections.first { $0.id == .memory }?.count
-        let memoryBrowser = model.gatewayInfo?.capabilities.contains("home-memory-browser.v1") == true
+        let memoryBrowser = model.gatewayInfo?.capabilities.contains("home-memory-view.v1") == true
         let chapterList = model.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
         return TronGlassCard(accent: .tronSessionTeal) {
             VStack(spacing: 0) {
                 navigationRow(icon: "doc.text.magnifyingglass", title: "Home Context",
                               subtitle: "Next request and delivered context", destination: .context, id: "home-manage-context")
-                if let sessionID {
-                    divider()
-                    TronProgressiveSheetLink(accessibilityLabel: "Home Settings", identity: "home.settings", accent: .tronSessionTeal) {
-                        ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat", "profile"], changesScope: .home(sessionID),
-                                         onOpenSession: onOpenSession.map { callback in { route in callback(route.sessionID) } })
-                            .tronNavigationTitle("Home Settings")
-                    } label: {
-                        TronSettingsRow(icon: "slider.horizontal.3", title: "Home Settings",
-                                        subtitle: "Every setting Home uses", accent: .tronSessionTeal) {
-                            Image(systemName: "chevron.right")
-                                .font(TronTypography.caption)
-                                .foregroundStyle(Color.tronSessionTeal)
-                        }
-                    }
-                    .accessibilityIdentifier("home-manage-settings")
-                }
                 if memoryBrowser {
                     divider()
                     navigationRow(icon: "brain", title: "Memory",
                                   subtitle: HomeStatusLinePresentation.memory(status, summaries: summaries, unresolvedCommand: unresolved),
-                                  destination: .memory(sessionID: nil), id: "home-manage-memory-browser")
+                                  destination: .memory(sessionID: nil, chapterOrdinal: nil), id: "home-manage-memory-browser")
                 }
                 if let chapter = status.chapter, chapterList {
                     divider()
@@ -103,6 +88,27 @@ extension HomeSheet {
                                   subtitle: HomeManageRowPresentation.permissions(read.permissions),
                                   destination: .permissions, id: "home-manage-permissions")
                 }
+            }
+        }
+    }
+
+    /// Every setting Home uses, in its own container below the Home sub-sheets.
+    @ViewBuilder var settingsRow: some View {
+        if let sessionID {
+            TronGlassCard(accent: .tronSessionTeal) {
+                TronProgressiveSheetLink(accessibilityLabel: "Home Settings", identity: "home.settings", accent: .tronSessionTeal) {
+                    ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat", "profile"], changesScope: .home(sessionID),
+                                     onOpenSession: onOpenSession.map { callback in { route in callback(route.sessionID) } })
+                        .tronNavigationTitle("Home Settings")
+                } label: {
+                    TronSettingsRow(icon: "slider.horizontal.3", title: "Home Settings",
+                                    subtitle: "Every setting Home uses", accent: .tronSessionTeal) {
+                        Image(systemName: "chevron.right")
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronSessionTeal)
+                    }
+                }
+                .accessibilityIdentifier("home-manage-settings")
             }
         }
     }

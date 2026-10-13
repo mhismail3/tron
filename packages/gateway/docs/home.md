@@ -95,15 +95,22 @@ Home on them, and a client applies a summary only to a row it already lists. Cat
 membership is unchanged, so search (`catalog("user")`, `readSearchCut`), `session.open`
 by id, `scope: "all"` and Home's own reads are not filtered. A designation or rollover
 that changes the chapter set publishes a list change, so clients re-list.
+`session.open` of a sealed chapter loads it read-only, warm or cold (#911): the catalog header
+proves the file's tail complete before the SDK opens it (an in-progress append is `busy`), opening
+writes no byte, and the runtime's chapter state refuses every write. Only a materializing chapter,
+or a file the ledger does not name, refuses to open (`home-session-catalog.e2e.test.ts`,
+`home-request-seam.integration.test.ts`).
 
 ### Chapter contents
 
 `home.chapterList` gives each chapter a `contents` object, absent when its canonical file cannot
 be read (a partial count is never shown): `userMessages`, `homeReplies` (assistant messages
 without a tool call), `tasksDelegated` (successful `delegate` tool results), the canonical
-`firstAt` and `lastAt` timestamps, and `topics`. `topics` holds at most five of the chapter's
-newest memory summaries, each one line of at most 120 characters, read from the open memory
-only; with no open memory it is empty. A reserved chapter has no file yet, so its counts are zero.
+`firstAt` and `lastAt` timestamps, and `topics`. `topics` holds at most eight of the chapter's
+newest summaries, drawn from the largest built merged nodes covering it (level-0 summaries only
+when no merged node is built yet). Each is one line of at most 200 characters, ended at a word
+boundary, with kind prefixes, tool/event lines and tool-call syntax removed. They are read from
+the open memory only; with no open memory it is empty. A reserved chapter has no file yet, so its counts are zero.
 
 The counts are derived, never persisted. `HomeChapterContentsReader`
 (`home/home-chapter-contents.ts`) caches each chapter's last scan in memory, keyed by its
@@ -1439,7 +1446,7 @@ vocabulary.
 ## RPCs
 
 `home.v1` is advertised in `hello` and `system.info` when the Gateway has a Home
-owner. `home-memory-browser.v1`
+owner. `home-memory-view.v1`
 additionally gates the memory-browser reads below, and `home-chapter-list.v1`
 gates `home.chapterList`; `home.v1` alone promises neither. Parameter objects are
 strict: unknown fields are `invalid_request`. **Receipted** mutations carry a
@@ -1467,7 +1474,7 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.revokeTaskScope` | `commandId`, `scopeId` | receipted | Revokes the standing scope. Repeated or missing references are no-ops. A revoked initial scope is never recreated by dispatch. |
 | `home.revokeTaskGrant` | `commandId`, `grantId` | receipted | Revokes an available grant. Consumed, revoked or missing grants are no-ops and never resurrected. |
 | `home.decideTaskGrant` | `commandId`, `requestId`, `approved` (boolean), `expiresAt` (future Unix milliseconds) | receipted | Decides the exact pending request; the command ID is the decision ID. Returns `{ decision, grant }`, with `grant: null` for deny. |
-| `home.memory.page` | `limit?` (1–50, default 20), `cursor?`, `sessionId?` (one chapter's rows only) | disposable read | [Typed memory browser](#typed-memory-browser). |
+| `home.memory.view` | `limit?` (1–50, default 30), `cursor?`, `sessionId?`, or `part?` (aligned power-of-two range) | disposable read | [Typed memory browser](#typed-memory-browser). |
 | `home.memory.evidence` | `evidence`, `offset?` | disposable read | [Typed memory browser](#typed-memory-browser). |
 
 ### `home.status`
@@ -1524,7 +1531,7 @@ HomeMemoryStatus {
 
 ### Typed memory browser
 
-`home.memory.page` and `home.memory.evidence` are disposable authenticated reads,
+`home.memory.view` and `home.memory.evidence` are disposable authenticated reads,
 not receipted mutations. Their types live in
 `src/protocol/types.ts`, and parameter admission and bounds live in
 `src/home/home-memory-browser.ts`. They read the configured
@@ -1535,40 +1542,39 @@ a chapter**. Already-running compactor work may
 finish. Unconfigured memory refuses with `conflict`; no provable canonical cut
 refuses with retryable `busy`.
 
-- **`home.memory.page`** returns `{ homeId, revision, totalItems, items, nextCursor?
-  }` in stable catalog-index order: at most `limit`
-  rows and **128 KiB of encoded JSON**. A byte-limited page continues at the first
-  unreturned index. A row has `index`, `kind`,
-  `attribution` (`user`, `assistant`, `tool`, `event`), canonical `timestamp` when
-  known, `evidence`, `projection` and `summary`.
-  - `projection` is `{ format: "memory-projection", text, omitted, omissions }`:
-    capped and redacted catalog text, **never exact
-    evidence**. It keeps at most 4,096 UTF-16 characters without splitting a
-    surrogate pair, adding `browser-cap` when it clips.
-    Context replacements carry `context-edit`. An omitted or off-branch slot stays
-    visible rather than renumbering later rows.
-  - `summary` is `{ format: "memory-summary", text, truncated }` under the same
-    bound, or `null` when unbuilt or invalidated. It is never
-    an exact transcript.
-  - `evidence` is `{ index, sessionId, entryId, sourceDigest }`: the physical
-    chapter, the canonical entry identity and the SHA-256 of its
-    original JSONL line. It is not a path or a projected address. Identity strings
-    are bounded to 200 UTF-8 bytes, the digest is 64 lowercase
-    hex digits, and references must match the current catalog. Cross-session or
-    arbitrary identities refuse with `conflict`.
-  - **Continuations** are canonical base64url `{ revision, offset, limit }` (at most
-    1,024 characters). Repeat the same `limit`. Replay returns
-    the same page while unchanged. The content-derived revision covers the Home
-    identity, generation, committed catalog and node revision, and
-    per-chapter source cuts. Any append, invalidation, summary settlement or changed
-    cut returns a retryable `conflict` with
-    `home-memory-revision-changed`. The client reloads page one. There is no cursor
-    cache and no automatic retry. Offsets beyond the catalog and
-    changed limits refuse rather than clamp.
-- **`home.memory.page` with `sessionId`** holds only that chapter's rows. `totalItems` counts them,
-  the row indices stay the catalog's, and the revision binds the chapter, so a continuation under
-  another chapter, or after any change, is `home-memory-revision-changed`. A session that is not a
-  chapter of this Home refuses with `not_found`.
+- **`home.memory.view`** returns `{ homeId, revision, totalMessages, lines, nextCursor? }`:
+  the lines of Home's current memory view (the parts `renderView` renders), **newest first**,
+  at most `limit` lines and **128 KiB of encoded JSON**. An older range is one summary line
+  covering `span` messages; a recent message is its own line. Each line is
+  `{ start, span, text, truncated, kind?, firstAt?, lastAt?, item? }`: `text` is the node's
+  text with each `user:`/`talk:`/`echo:`/`event:` kind prefix stripped and newlines joined,
+  at most 4,096 UTF-16 characters (`truncated` when cut), and `null` while the node is
+  unbuilt. `firstAt` and `lastAt` are the canonical timestamps of the range's first and last
+  message. A message line (`span: 1`) carries its `kind` and `item`. `totalMessages` counts
+  the catalog, or the chapter's messages when filtered.
+  - `item` has `index`, `kind`, `attribution` (`user`, `assistant`, `tool`, `event`),
+    canonical `timestamp` when known, `evidence`, `projection` and `summary`.
+    `projection` is `{ format: "memory-projection", text, omitted, omissions }`: capped and
+    redacted catalog text, **never exact evidence**, at most 4,096 UTF-16 characters without
+    splitting a surrogate pair (`browser-cap` when it clips; `context-edit` for context
+    replacements; an omitted slot stays visible rather than renumbering). `summary` is
+    `{ format: "memory-summary", text, truncated }` under the same bound, or `null` when
+    unbuilt. `evidence` is `{ index, sessionId, entryId, sourceDigest }`: the physical
+    chapter, the canonical entry identity and the SHA-256 of its original JSONL line,
+    identity strings bounded to 200 UTF-8 bytes; references must match the current catalog.
+  - **Continuations** are canonical base64url `{ revision, offset, limit, sessionId? }` (at
+    most 1,024 characters). Repeat the same `limit` and filter. The content-derived revision
+    covers the Home identity, generation, committed catalog and node revision, and
+    per-chapter source cuts; any append, invalidation, summary settlement or changed cut
+    returns a retryable `conflict` with `home-memory-revision-changed`, and the client
+    reloads the first page. Offsets beyond the lines refuse rather than clamp.
+  - **`sessionId`** filters to one chapter: a line crossing the chapter's boundary is split
+    into its halves recursively until each piece is inside or outside, so no line covers
+    another chapter's messages. A session that is not a chapter of this Home refuses with
+    `not_found`.
+  - **`part: { start, span }`** (aligned start, power-of-two span ≥ 2, within the catalog)
+    returns the two lines that range covers, in ascending order, so a client opens a
+    summary down to single messages. `part` and `cursor` cannot be combined.
 - **`home.memory.evidence`** accepts `{ evidence, offset? }` and returns `{ format:
   "canonical-history", evidence, text, offset, nextOffset?,
   previousOffset?, totalCharacters, metadata }`. At most **24,000 UTF-16

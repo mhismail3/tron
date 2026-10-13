@@ -4,12 +4,15 @@ import TronMobileCore
 enum HomeSheetDestination: Identifiable {
     case manage, context
     /// Memory browser: one chapter's memory when `sessionID` is set, else the whole view.
-    case memory(sessionID: String?)
-    /// A memory row's detail. Its data came with the row, so it is never read again.
-    case memoryItem(HomeMemoryPageDTO.Item, chapterOrdinal: Int?)
+    case memory(sessionID: String?, chapterOrdinal: Int?)
+    /// One summary line and the two halves it covers (read on open).
+    case memorySummary(HomeMemoryViewDTO.Line, sessionID: String?)
+    /// A memory message's detail. Its data came with the row, so it is never read again.
+    case memoryItem(HomeMemoryItemDTO)
     case evidence(HomeMemoryEvidenceDTO, origin: HomeMemoryOrigin)
     case chapters
-    case chapter(sessionID: String)
+    /// One chapter's detail, from the row the Chapters sheet already loaded.
+    case chapter(HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits)
     case tasks
     case task(String)
     case permissions
@@ -20,6 +23,7 @@ enum HomeSheetDestination: Identifiable {
         case .manage: "manage"
         case .context: "context"
         case .memory: "memory"
+        case .memorySummary: "memory-summary"
         case .memoryItem: "memory-item"
         case .evidence: "evidence"
         case .chapters: "chapters"
@@ -35,7 +39,7 @@ enum HomeSheetDestination: Identifiable {
         switch self {
         case .manage: "Manage Home"
         case .context: "Home Context"
-        case .memory, .memoryItem: "Memory"
+        case .memory, .memorySummary, .memoryItem: "Memory"
         case .evidence: "Exact Evidence"
         case .chapters, .chapter: "Chapters"
         case .tasks, .task: "Tasks"
@@ -47,11 +51,12 @@ enum HomeSheetDestination: Identifiable {
         switch self {
         case .manage: .manage
         case .context: .context
-        case .memory(let sessionID): .memory(sessionID: sessionID, continuation: nil)
+        case .memory(let sessionID, _): .memory(sessionID: sessionID, continuation: nil)
+        case .memorySummary(let line, let sessionID): .memoryPart(sessionID: sessionID, line)
         // Carried by the destination and never loaded; see `loadsPage`.
-        case .memoryItem: .memory(sessionID: nil, continuation: nil)
+        case .memoryItem, .chapter: .chapters
         case .evidence(let source, _): .evidence(source, offset: 0)
-        case .chapters, .chapter: .chapters
+        case .chapters: .chapters
         case .tasks: .tasks(nil)
         case .task(let id): .task(id)
         case .permissions, .grant: .permissions
@@ -63,15 +68,14 @@ enum HomeSheetDestination: Identifiable {
     }
 
     var loadsPage: Bool {
-        if case .memoryItem = self { false } else { true }
+        switch self { case .memoryItem, .chapter: false; default: true }
     }
 }
 
 /// The memory row an evidence page belongs to, shown in the evidence header.
 struct HomeMemoryOrigin: Hashable, Sendable {
-    let attribution: HomeMemoryPageDTO.Item.Attribution
+    let attribution: HomeMemoryItemDTO.Attribution
     let timestamp: String?
-    let chapterOrdinal: Int?
 }
 
 /// A Home control's admission, captured when the user taps it. A confirmation
@@ -129,6 +133,9 @@ struct HomeSheet: View {
     /// Rows present an existing Home sheet as a managed child, so each child keeps
     /// its own read owner and lifetime.
     @State var childDestination: HomeSheetDestination?
+    /// Manage Home's open child only reads (Context, Memory, Chapters), so its return
+    /// keeps the installed page instead of re-reading every row.
+    @State private var returnsFromBrowsing = false
     @State private var showsTerminal = false
     @State var mutationFailure: String?
     @State var confirmingDisable = false
@@ -209,6 +216,15 @@ struct HomeSheet: View {
             guard active else { owner.retireLoading(); return }
             let query = request.query
             let requestID = request.id
+            // Uncovering a sheet keeps its installed page: returning from a child is not a
+            // new request (#911). Manage Home refreshes behind its frame only after a child
+            // that can change Home (tasks, permissions, settings, terminal).
+            if owner.holds(requestID: requestID, identity: identity) {
+                if case .manage = destination, !returnsFromBrowsing { /* refresh below */ } else {
+                    returnsFromBrowsing = false
+                    return
+                }
+            }
             await owner.load(requestID: requestID, identity: identity, coordinator: coordinator,
                              isCurrent: { self.identity == identity && self.request.id == requestID },
                              preserveInstalledFrame: destination.id == "manage") {
@@ -229,9 +245,10 @@ struct HomeSheet: View {
     }
 
     @ViewBuilder private var content: some View {
-        if case .memoryItem(let item, let ordinal) = destination {
-            memoryDetail(item, chapterOrdinal: ordinal)
-        } else {
+        switch destination {
+        case .memoryItem(let item): memoryDetail(item)
+        case .chapter(let chapter, let limits): chapterDetail(chapter, limits: limits)
+        default:
             loadedContent
         }
     }
@@ -248,10 +265,8 @@ struct HomeSheet: View {
                 switch content {
                 case .manage(let manage): manageSheet(manage)
                 case .context(let context): contextSheet(context)
-                case .chapters(let list):
-                    if case .chapter(let sessionID) = destination { chapterDetail(sessionID: sessionID, list: list) }
-                    else { chapters(list) }
-                case .memory(let page, let ordinals): memory(page, chapterOrdinals: ordinals)
+                case .chapters(let list): chapters(list)
+                case .memory(let view): memory(view)
                 case .evidence(let page):
                     if case .evidence(_, let origin) = destination { evidenceSheet(page, origin: origin) }
                 case .tasks, .task, .permissions: EmptyView()
@@ -272,6 +287,10 @@ struct HomeSheet: View {
 
     /// Presents a managed child sheet; rows use this, not their own navigation.
     func present(_ child: HomeSheetDestination) {
+        switch child {
+        case .context, .memory, .chapters: returnsFromBrowsing = true
+        default: returnsFromBrowsing = false
+        }
         childDestination = child
     }
 

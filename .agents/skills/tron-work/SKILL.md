@@ -32,7 +32,10 @@ when the user wants the page. Report a `work:` error as is; do not retry with st
    local/remote match, public audit and ordinary `work start` admission before
    writing. Durable receipts include issue, branch, worktree, owner, head/tree, PR,
    exact test commands with actual pass/fail, and next slice; historical failed
-   gates remain failed. For an abandoned claim, use
+   gates remain failed. To give up a stale claim on an open issue without a new
+   owner, use `scripts/tron work release <issue> --reason TEXT`: it preserves the
+   worktree's work in a verified bundle first and refuses live or indeterminate owners;
+   report its refusal as is. To take over an abandoned claim, use
    `scripts/tron work handoff <issue> --reason TEXT` only after authoritative settled-owner proof;
    indeterminate owners refuse. A legacy claim with no owner is `unknown` and
    never proves settlement; a maintainer can recover it only with

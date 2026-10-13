@@ -78,7 +78,7 @@ struct TronThinkingSelectionRow: View {
         SettingsChoiceSelectionRow(
             title: "Thinking", icon: "brain", value: .string(selection),
             display: ThinkingLevelPresentation.title(selection),
-            options: levels.map { SettingsOption(value: .string($0), label: ThinkingLevelPresentation.title($0), detail: nil, disabledReason: nil) },
+            options: levels.map { SettingsOption(value: .string($0), label: ThinkingLevelPresentation.title($0), detail: nil, disabledReason: nil, resource: nil) },
             information: information, accent: accent,
             identifier: "thinking-level-control", sliderIdentifier: "thinking-level-slider"
         ) { if let value = $0.stringValue { selection = value } }

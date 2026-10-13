@@ -9,7 +9,7 @@ struct HomeTaskSpendDTO: Decodable, Equatable, Sendable {
     let inputTokens: Int
     let outputTokens: Int
     var valid: Bool {
-        HomeMemoryPageDTO.isDigest(sourceDigest) && safeHomeCount(inputTokens) && safeHomeCount(outputTokens)
+        HomeMemoryEvidenceDTO.isDigest(sourceDigest) && safeHomeCount(inputTokens) && safeHomeCount(outputTokens)
     }
 }
 

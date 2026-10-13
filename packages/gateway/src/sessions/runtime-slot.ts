@@ -1362,10 +1362,25 @@ export class RuntimeSlot {
 
   /** The tools this chat's selection may name: its registry, less hidden tools
    * (`setTools` refuses those). */
-  settingsToolCatalog(): Array<{ name: string; description?: string }> {
+  settingsToolCatalog(): Array<{ name: string; description?: string; resource: Record<string, unknown> }> {
     this.assertNoTrustReload();
     return this.runtime.session.getAllTools().filter(tool => tool.exposure !== "hidden")
-      .map(tool => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}) }));
+      .map(tool => {
+        const distribution = resourceDistribution(tool.sourceInfo);
+        return {
+          name: tool.name,
+          ...(tool.description ? { description: tool.description } : {}),
+          resource: {
+            name: tool.name,
+            ...(this.toolLabel(tool.name) ? { label: this.toolLabel(tool.name)! } : {}),
+            description: tool.description,
+            parameters: tool.parameters,
+            source: tool.sourceInfo.source,
+            ...(distribution ? { distribution } : {}),
+            ...(tool.namespace ? { namespace: tool.namespace } : {}),
+          },
+        };
+      });
   }
 
   /** This chat's Chat layer as its session record holds it (settings-model.md
@@ -1964,13 +1979,13 @@ export class RuntimeSlot {
     return this.createdAt;
   }
 
-  /** The name a snapshot would show, without building one. */
-  get sessionName(): string | undefined {
-    return this.isHomeChapter ? "Home" : this.runtime.session.sessionName;
-  }
-
   get sessionFile(): string | undefined {
     return this.runtime.session.sessionFile;
+  }
+
+  /** The name `snapshot()` projects, without building a snapshot: list rows read it per task (#905). */
+  get displayName(): string | undefined {
+    return this.isHomeChapter ? "Home" : this.runtime.session.sessionName || undefined;
   }
 
   get canonicalEntryCount(): number {

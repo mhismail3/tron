@@ -10,11 +10,11 @@ import type { HomeTaskSubagents } from "./home-task-subagents.js";
 import { HOME_CHAPTER_TOPIC_COUNT, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { HomeChapterList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryPage, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
+import type { HomeChapterList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryView, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { historyEntry } from "../sessions/history.js";
 import type { EpisodicMemory } from "../episodic/episodic-memory.js";
-import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, type HomeMemoryPageRequest } from "./home-memory-browser.js";
+import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, type HomeMemoryViewRequest } from "./home-memory-browser.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { EPISODIC_DEFAULTS, EpisodicMemoryError } from "../episodic/episodic-contract.js";
@@ -705,8 +705,8 @@ export class HomeOwner {
     if (!memory) return new Map();
     try {
       return await memory.browserRead(async episodic => new Map([...episodic.recentSummaries(
-        record.chapters.map(chapter => chapter.sessionId), HOME_CHAPTER_TOPIC_COUNT)]
-        .map(([sessionId, summaries]) => [sessionId, summaries.map(homeChapterTopic)])));
+        record.chapters.map(chapter => chapter.sessionId), HOME_CHAPTER_TOPIC_COUNT * 3)]
+        .map(([sessionId, summaries]) => [sessionId, [...new Set(summaries.map(homeChapterTopic).filter(Boolean))].slice(0, HOME_CHAPTER_TOPIC_COUNT)])));
     } catch (error) {
       if (error instanceof GatewayError || error instanceof EpisodicMemoryError || error instanceof HomeMemoryRefusal) return new Map();
       throw error;
@@ -1173,11 +1173,11 @@ export class HomeOwner {
     };
   }
 
-  async memoryPage(request: HomeMemoryPageRequest, signal?: AbortSignal): Promise<HomeMemoryPage> {
+  async readMemoryView(request: HomeMemoryViewRequest, signal?: AbortSignal): Promise<HomeMemoryView> {
     if (request.sessionId !== undefined && !this.record?.chapters.some(chapter => chapter.sessionId === request.sessionId)) {
       throw new GatewayError("not_found", "Session is not a chapter of Tron Home");
     }
-    return this.browserRead(async memory => memory.browserPage(request), signal);
+    return this.browserRead(async memory => memory.browserView(request), signal);
   }
 
   async memoryEvidence(evidence: HomeMemoryEvidence, offset: number, signal?: AbortSignal): Promise<HomeMemoryEvidencePage> {
