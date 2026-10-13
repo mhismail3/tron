@@ -200,8 +200,9 @@ struct SettingsRendererRow: View {
                 readOnlyRow
             }
         case .checklist:
-            if setting.key == "tools.active", let values = setting.value?.arrayValue,
-               values.allSatisfy({ $0.stringValue != nil }), options?.source == "catalog.tools" {
+            // A tool catalog opens the shared Available Tools list and details (#900).
+            if options?.source == "catalog.tools", let values = setting.value?.arrayValue,
+               values.allSatisfy({ $0.stringValue != nil }) {
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
                     SettingsToolsEditor(title: title, selected: values.compactMap(\.stringValue),
                                         options: options?.options ?? []) { onChange(.array($0.map(JSONValue.string))) }
