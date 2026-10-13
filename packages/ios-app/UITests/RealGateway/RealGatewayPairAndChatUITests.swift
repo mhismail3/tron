@@ -466,6 +466,53 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "424-real-ui-accepted-code-pairs")
     }
 
+    /// A question `ask_user` asks from inside codemode opens from the running codemode
+    /// row and accepts an answer (#929). Failure mode: the row only matched a form to a
+    /// top-level `ask_user` row, so tapping the codemode row opened its details and the
+    /// question stayed invisible until the run was stopped.
+    @MainActor
+    func testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+
+        let composer = app.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60), app.debugDescription)
+        composer.tap()
+        // The fixture's provider answers this marker with a codemode call that asks.
+        composer.typeText("CODEMODE-ASK-USER-JOURNEY: ask from inside codemode")
+        let send = app.buttons["Send message"]
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), app.debugDescription)
+        send.tap()
+
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "code")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 90), "the running codemode row never appeared: \(app.debugDescription)")
+        // The nested question is pending once the row reports its running ask_user call;
+        // until then a tap opens the row's details, so retry the tap after closing them.
+        let question = app.staticTexts["Approve the codemode step?"]
+        let deadline = Date().addingTimeInterval(60)
+        while !question.exists, Date() < deadline {
+            if row.isHittable { row.tap() }
+            if question.waitForExistence(timeout: 3) { break }
+            dismissTopSheet(app)
+        }
+        XCTAssertTrue(question.exists, "tapping the codemode row never opened its pending question: \(app.debugDescription)")
+        keepScreenshot(app, name: "929-codemode-ask-user-opened-from-row")
+        app.buttons["Approve it"].tap()
+        let submit = app.buttons["Submit answer"].exists ? app.buttons["Submit answer"] : app.buttons["Submit all answers"]
+        XCTAssertTrue(submit.waitForExistence(timeout: 10), app.debugDescription)
+        submit.tap()
+        let answered = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Codemode question answered")).firstMatch
+        XCTAssertTrue(answered.waitForExistence(timeout: 90), "the answer never reached the codemode script: \(app.debugDescription)")
+        XCTAssertTrue(answered.label.contains("Approve it"), "the codemode script read another answer: \(answered.label)")
+        keepScreenshot(app, name: "929-codemode-ask-user-answered")
+    }
+
     /// X setup through the production Settings parents against a real Gateway
     /// (#366). Failure modes: tapping Authorize X closes the setup sheet before
     /// its consent step appears, so a refused begin's error and an accepted

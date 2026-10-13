@@ -114,6 +114,7 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSurfacesServeEveryKeyAndEditAtItsLayer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
 )
 
 ui_journey_is_owned() {
@@ -513,6 +514,26 @@ const faux = fauxProvider({
   models: [{ id: "e2e-model", name: "Tron E2E Model", reasoning: true, input: ["text", "image"], contextWindow: 32768, maxTokens: 4096 }],
   tokensPerSecond: 8,
 });
+// A turn whose prompt carries the codemode journey's marker asks its question from inside
+// codemode (#929); every other turn takes the next scripted response, as before. Each
+// real-UI journey runs against its own fresh fixture, so each starts at the first one.
+const CODEMODE_MARKER = "CODEMODE-ASK-USER-JOURNEY";
+const textOf = (message) => typeof message?.content === "string" ? message.content
+  : (message?.content ?? []).map((part) => part.type === "text" ? part.text : "").join("");
+const codemodeTurn = (context) => {
+  const last = context.messages.at(-1);
+  if (last?.role === "toolResult" && last.toolName === "codemode") {
+    return fauxAssistantMessage("Codemode question answered: " + textOf(last).replace(/[ \n\t]+/g, " ").slice(0, 200));
+  }
+  if (last?.role === "user" && textOf(last).includes(CODEMODE_MARKER)) {
+    return fauxAssistantMessage([fauxToolCall("codemode", { code: 'return await tools.ask_user({ title: "Codemode approval", questions: [{ header: "Approve", question: "Approve the codemode step?", options: [{ label: "Approve it" }, { label: "Hold it" }] }] });' }, { id: "e2e-codemode-ask" })], { stopReason: "toolUse" });
+  }
+  return undefined;
+};
+const routed = (response) => (context, options) => {
+  const codemode = context.messages.some((message) => message.role === "user" && textOf(message).includes(CODEMODE_MARKER)) ? codemodeTurn(context) : undefined;
+  return codemode ?? (typeof response === "function" ? response(context, options) : response);
+};
 faux.setResponses([
   async () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -526,7 +547,7 @@ faux.setResponses([
     fauxToolCall("bash", { command: "printf third-output" }, { id: "e2e-tool-3" }),
   ], { stopReason: "toolUse" }),
   fauxAssistantMessage("Tool response complete after all three tools."),
-]);
+].map(routed));
 export default function (pi) {
   pi.registerProvider(faux.provider);
   pi.on("tool_call", async (event, ctx) => {
@@ -541,6 +562,7 @@ EOF
   "defaultProvider": "tron-e2e",
   "defaultModel": "e2e-model",
   "defaultThinkingLevel": "low",
+  "defaultTools": ["+codemode"],
   "defaultProjectTrust": "never",
   "enableAnalytics": false,
   "enableInstallTelemetry": false
