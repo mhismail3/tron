@@ -69,7 +69,8 @@ struct SwiftAppRunnerSheet: View {
                             .padding()
                     }
                 }
-                .accessibilityIdentifier("swiftApp.running")
+                // No identifier here: on a container SwiftUI pushes it onto
+                // every child, replacing the program's own identifiers.
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }

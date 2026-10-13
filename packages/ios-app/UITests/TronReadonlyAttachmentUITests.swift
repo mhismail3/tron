@@ -255,7 +255,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
     }
 
     @MainActor private func diagnostic(_ app: XCUIApplication, _ text: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'swiftApp.error' AND label CONTAINS %@", text)).firstMatch
+        app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
     @MainActor private func openSwiftDisplay(_ app: XCUIApplication, named name: String) {
