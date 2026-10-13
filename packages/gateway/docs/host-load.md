@@ -21,10 +21,12 @@ are short and serialising them costs more than it saves.
 
 ## 1. Heavy-run queue (work tooling)
 
-`scripts/tron-heavy run --class heavy -- <command>` runs one command under a
-host-wide heavy-run lease, the same flock mechanism as `scripts/ios-test-lock.py`:
-the kernel drops the lease when the holder's process tree ends, so a killed
-holder never leaves a stale lock.
+`scripts/tron-heavy run [--owner NAME] -- <command>` (owner:
+`tools/work/heavy.py`) runs one command under a host-wide heavy-run slot, a flock
+under `/tmp/tron-heavy-runs-<uid>` (independent of the per-run `HOME`/`TMPDIR`
+agents isolate). The holder passes the slot's descriptor to the command, so the
+kernel drops the slot exactly when the command tree ends: a killed holder never
+leaves a stale slot, and never frees one while its command still runs.
 
 - **Budget.** `TRON_HEAVY_SLOTS` concurrent heavy runs on this Mac (default
   2). A run that cannot take a slot waits in a FIFO queue instead of
@@ -35,7 +37,7 @@ holder never leaves a stale lock.
   prints holders and waiters with their position; a waiter prints its position
   whenever it changes, so long workflows show live progress.
 - **Host pressure.** The queue head also waits while the 1-minute load average
-  exceeds `TRON_HEAVY_MAX_LOAD` (default 2 × CPU count), re-checking every 30 s.
+  exceeds `TRON_HEAVY_MAX_LOAD` (default 2 × CPU count), re-checking every second.
   It never waits on pressure alone longer than 20 minutes, so a host that stays
   busy for reasons outside Tron still makes progress, one run at a time.
 - **Callers.** `work verify`/`land` take the lease for their build and journey

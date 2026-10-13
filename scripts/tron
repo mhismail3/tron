@@ -107,9 +107,12 @@ case "$cmd" in
     scope="${1:-all}"
     case "$scope" in
       check) (cd "$GATEWAY" && npm ci && npm run build && npm audit --omit=dev) ;;
-      test) (cd "$GATEWAY" && npm test) ;;
+      # The full suites are heavy runs: they wait for a host-wide slot (#915).
+      test) python3 "$ROOT/tools/work/heavy.py" run --owner "tron ci test in $(basename "$ROOT")" -- bash -c 'cd "$1" && npm test' _ "$GATEWAY" ;;
       all)
-        (cd "$GATEWAY" && npm ci && npm run build && npm test && npm audit --omit=dev)
+        (cd "$GATEWAY" && npm ci && npm run build)
+        python3 "$ROOT/tools/work/heavy.py" run --owner "tron ci all in $(basename "$ROOT")" -- bash -c 'cd "$1" && npm test' _ "$GATEWAY"
+        (cd "$GATEWAY" && npm audit --omit=dev)
         "$ROOT/scripts/personal-info-guard.sh"
         ;;
       *) echo "unknown ci scope: $scope" >&2; exit 64 ;;

@@ -8,6 +8,15 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+# Host-wide heavy-run queue (#915, tools/work/heavy.py): every real-Gateway run
+# waits for a slot unless it inherited one (for example from `work land`).
+case "${1:-all}" in
+  prepare|build|run|run-lan|run-ui|iterate|all)
+    if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
+      exec python3 "$repo_root/tools/work/heavy.py" run --owner "ios-gateway-e2e-test ${1:-all} in $(basename "$repo_root")" -- "$0" "$@"
+    fi
+    ;;
+esac
 gateway_dir="$repo_root/packages/gateway"
 ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091
