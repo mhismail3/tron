@@ -252,8 +252,11 @@ def verify(root: Path, config: dict, tests: List[str], base_ref: str) -> bool:
     with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
         try:
             for batch in batches:
-                futures = [pool.submit(_run, root, prelude, check, logs / f"{check.name}.log", live, environment)
-                           for check in batch]
+                futures = []
+                for check in batch:
+                    log = logs / f"{check.name}.log"
+                    print(f"running: {check.name} (log: {log})", flush=True)
+                    futures.append(pool.submit(_run, root, prelude, check, log, live, environment))
                 for future in as_completed(futures):
                     result = future.result()
                     results.append(result)

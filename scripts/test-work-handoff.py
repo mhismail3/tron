@@ -21,7 +21,8 @@ wss.on("connection", (socket, request) => {
   socket.on("message", raw => {
     const frame = JSON.parse(raw.toString());
     if (frame.type === "hello") {
-      socket.send(JSON.stringify({type:"hello", protocolVersion:7, minProtocolVersion:7}));
+      const protocol = Number(process.env.FIXTURE_PROTOCOL || 8);
+      socket.send(JSON.stringify({type:"hello", protocolVersion:protocol, minProtocolVersion:protocol}));
     } else if (frame.type === "request") {
       const current = state(); current.calls.push({method:frame.method, params:frame.params});
       fs.writeFileSync(statePath, JSON.stringify(current));
@@ -105,9 +106,9 @@ os.execv({real_git!r}, [{real_git!r}, *args])
             state.write_text(json.dumps({"comments":[],"writes":[],"calls":[],"pages":pages or {"first":{"items":[]}},"statuses":bound}))
         ws=root/"gateway-fixture.js"; ws.write_text(NODE_FIXTURE)
         gateway_env={**env,"WS_MODULE":str(ROOT/"packages/gateway/node_modules/ws"),"FIXTURE_TOKEN":TOKEN,"PORT_FILE":str(port_file)}
-        def start_gateway(bind_host, output):
+        def start_gateway(bind_host, output, protocol=8):
             output.unlink(missing_ok=True)
-            process=subprocess.Popen(["node",str(ws)],env={**gateway_env,"FIXTURE_BIND_HOST":bind_host,"PORT_FILE":str(output)},stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+            process=subprocess.Popen(["node",str(ws)],env={**gateway_env,"FIXTURE_BIND_HOST":bind_host,"PORT_FILE":str(output),"FIXTURE_PROTOCOL":str(protocol)},stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
             servers.append(process)
             deadline=time.monotonic()+10
             while not output.exists() and time.monotonic()<deadline:
@@ -258,6 +259,14 @@ os.execv({real_git!r}, [{real_git!r}, *args])
             evidence.append({"case":"assigned interface host accepted by process helper", "exit":local.returncode,"stdout":local.stdout.strip(),"stderr":local.stderr.strip()})
             assert local.returncode==0 and local.stdout.strip()=="unknown", local.stderr
             assert json.loads(state.read_text())["calls"], "assigned interface fixture did not receive the query"
+        mismatch_port_file=root/"mismatch-port"
+        mismatch_port=start_gateway("127.0.0.1",mismatch_port_file,protocol=7)
+        mismatch_env={**env,"TRON_GATEWAY_PORT":mismatch_port}
+        mismatch=subprocess.run(["node",str(ROOT/"packages/gateway/dist/client/work-owner-status.js"),"old-owner"],cwd=ROOT,env=mismatch_env,capture_output=True,text=True,timeout=10)
+        evidence.append({"case":"protocol mismatch has a distinct structured refusal","exit":mismatch.returncode,"stderr":mismatch.stderr.strip()})
+        detail=json.loads(mismatch.stderr)
+        assert mismatch.returncode==3 and detail=={"kind":"protocol_mismatch","gatewayProtocol":7,"helperProtocol":8}, mismatch.stderr
+
         before_head=git(worktree,"rev-parse","HEAD")
 
         def refuse_snapshot():

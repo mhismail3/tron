@@ -119,6 +119,8 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, f
         if old == "unknown":
             raise HandoffError("owner session is unknown; refusing handoff (maintainer may use --force-maintainer and confirm HANDOFF #<issue> FROM unknown)")
         state = owner_lifecycle(old)
+        if state.startswith("protocol-mismatch:"):
+            raise HandoffError(f"owner status unavailable: {state.removeprefix('protocol-mismatch:')}; refusing handoff (maintainer may use --force-maintainer)")
         if state != "settled":
             raise HandoffError(f"owner session {old} is {state}; refusing handoff (maintainer may use --force-maintainer)")
     else:
@@ -366,4 +368,14 @@ def owner_lifecycle(session: str) -> str:
         result = subprocess.run(["node", str(helper), session], cwd=root, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return "unknown"
+    if result.returncode == 3:
+        try:
+            detail = json.loads(result.stderr)
+        except (json.JSONDecodeError, TypeError):
+            return "unknown"
+        if isinstance(detail, dict) and detail.get("kind") == "protocol_mismatch":
+            gateway = detail.get("gatewayProtocol")
+            helper = detail.get("helperProtocol")
+            if isinstance(gateway, int) and isinstance(helper, int):
+                return f"protocol-mismatch:Gateway protocol {gateway}, helper protocol {helper}"
     return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() in {"settled", "live-or-indeterminate", "unknown"} else "unknown"
