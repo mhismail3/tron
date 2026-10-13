@@ -1633,10 +1633,13 @@ describe("Home task production dispatch", () => {
       const createWorker = OwnedSessionDispatch.prototype.createWorker;
       vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(function (this: OwnedSessionDispatch, ...args) { return hold(() => createWorker.apply(this, args)); });
     }
-    let workerPrompts = 0;
+    let workerPrompts = 0; let homeRequests = 0;
     const response = (context: unknown) => {
       if (JSON.stringify(context).includes("This is a finite Home task")) { workerPrompts += 1; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }
-      return fauxAssistantMessage([fauxToolCall("delegate", { taskId: "task-held", title: "Held dispatch", intent: "Finite work", target: f.cwd })], { stopReason: "toolUse" });
+      homeRequests += 1;
+      // Later Home requests are the refused task's one result wake.
+      return homeRequests > 1 ? fauxAssistantMessage("Dispatch was stopped")
+        : fauxAssistantMessage([fauxToolCall("delegate", { taskId: "task-held", title: "Held dispatch", intent: "Finite work", target: f.cwd })], { stopReason: "toolUse" });
     };
     f.faux.setResponses([response, response, response]);
     const home = await f.registry.acquire(f.home.sessionId);
@@ -1647,7 +1650,7 @@ describe("Home task production dispatch", () => {
       const operation = home.snapshot().operation;
       expect(operation?.kind).toBe("prompt");
       const stopping = home.abort("agent", operation!.id); void stopping.catch(() => {});
-      await waitFor(() => home.snapshot().operation === null, "Stop ends the Home turn held in delegate dispatch", { boundMs: 5_000 });
+      await waitFor(() => !home.snapshot().operation, "Stop ends the Home turn held in delegate dispatch", { boundMs: 5_000 });
       await stopping;
       await waitFor(async () => (await tasks.store.read("task-held"))?.lifecycle === "terminal", "held task settles terminal", { boundMs: 5_000 });
       const task = await tasks.store.read("task-held");
@@ -1655,9 +1658,15 @@ describe("Home task production dispatch", () => {
         terminalEvidence: { outcome: "unknown", reason: "admission-cancelled" } });
       expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.dispatch-stage", stage, outcome: "cancelled" }));
       expect(workerPrompts).toBe(0);
-      evidence.push({ case: `held-dispatch-stop-${stage}`, reason: task.terminalEvidence.reason, workerPrompts });
+      evidence.push({ case: `held-dispatch-stop-${stage}`, reason: task.terminalEvidence.reason, workerPrompts, homeRequests });
     } finally { release(); await prompting.catch(() => {}); }
+    // Like every terminal task, the refusal wakes Home once with its result. The held
+    // step's late result goes back to its owner, never into the cancelled admission.
+    await waitFor(async () => (await tasks.store.read("task-held"))?.wake?.state === "acknowledged", "refusal result consumed once", { boundMs: 5_000 });
+    await waitFor(() => !home.snapshot().operation, "wake turn settled", { boundMs: 5_000 });
+    expect(homeRequests).toBe(2);
     expect(workerPrompts, "a released step never starts the cancelled task's worker").toBe(0);
+    expect(await tasks.store.read("task-held")).toMatchObject({ lifecycle: "terminal", terminalEvidence: { reason: "admission-cancelled" } });
   }, 30_000);
 
   it("refuses a dispatch step that outlives its deadline and settles the task with the stage", async () => {
@@ -1679,7 +1688,7 @@ describe("Home task production dispatch", () => {
     try {
       await waitFor(() => entered && expire !== undefined, "authorize held under its deadline", { boundMs: 10_000 });
       expire!();
-      await expect(run).rejects.toMatchObject({ code: "unavailable" });
+      await expect(run).rejects.toMatchObject({ code: "busy" });
       const task = await tasks.store.read("task-deadline");
       expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown", reason: "admission-timeout" } });
       expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.dispatch-stage", stage: "authorize", outcome: "timeout" }));
