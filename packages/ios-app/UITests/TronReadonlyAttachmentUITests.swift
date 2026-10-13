@@ -208,9 +208,10 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["New food"].waitForExistence(timeout: 5), "Switching tabs keeps the shared store")
     }
 
-    /// #889: unsupported Swift shows a line-numbered diagnostic, and runaway
-    /// loops, recursion and growth stop at the runtime limits while the app
-    /// stays responsive.
+    /// #889: unsupported Swift shows a line-numbered diagnostic; runaway loops,
+    /// recursion and growth stop at the runtime limits; hostile arithmetic,
+    /// formats and self-containing views cannot crash the app, which stays
+    /// responsive throughout.
     @MainActor func testSwiftAppFailuresStayContainedInTheRunner() {
         continueAfterFailure = false
         let broken = launchSwift("display-swift-broken", flag: true); defer { broken.terminate() }
@@ -228,13 +229,15 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
         let taps = app.staticTexts["limits.taps"]
         XCTAssertTrue(taps.waitForExistence(timeout: 10))
-        XCTAssertTrue(diagnostic(app, "Line 32: Unknown name 'Map'").exists, "An unsupported view renders an inline diagnostic beside working views")
+        XCTAssertTrue(diagnostic(app, "Line 52: Unknown name 'Map'").exists, "An unsupported view renders an inline diagnostic beside working views")
 
         var expectedTaps = 0
         for (button, message) in [
             ("Loop forever", "ran too long"),
             ("Recurse forever", "recursion is too deep"),
             ("Grow forever", "string grew past"),
+            ("Read itself", "recursion is too deep"),
+            ("Overflow", "Integer overflow"),
         ] {
             app.buttons[button].tap()
             XCTAssertTrue(diagnostic(app, message).waitForExistence(timeout: 15), "\(button) stops with a diagnostic")
@@ -244,6 +247,17 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: \(expectedTaps)"), "The app stays responsive after \(button)")
             XCTAssertTrue(wait(diagnostic(app, message), predicate: "exists == false"), "A successful action clears the diagnostic")
         }
+
+        // A program-chosen format never reaches Foundation with a mismatched
+        // argument: %s and %@ print the value instead of reading memory.
+        app.buttons["Hostile format"].tap()
+        XCTAssertTrue(wait(app.staticTexts["limits.note"], predicate: "label == %@", value: "\(expectedTaps)|2.5|  3.0"))
+
+        app.buttons["Nest views"].tap()
+        XCTAssertTrue(diagnostic(app, "views are nested too deeply").waitForExistence(timeout: 15), "A view that contains itself stops at the depth limit")
+        keepScreenshot(app, "889-9-Nest views")
+        app.buttons["Count"].tap()
+        XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: \(expectedTaps + 1)"), "The app stays responsive after nesting views")
     }
 
     @MainActor private func launchSwift(_ scenario: String, flag: Bool) -> XCUIApplication {

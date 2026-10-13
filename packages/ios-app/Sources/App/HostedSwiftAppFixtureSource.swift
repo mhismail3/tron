@@ -262,18 +262,22 @@ enum HostedSwiftAppFixtureSource {
     }
     """#
 
-    /// Runaway programs and an unsupported view. Each must end in a
-    /// diagnostic while the rest of the app keeps working.
+    /// Runaway and hostile programs and an unsupported view. Each must end
+    /// in a diagnostic or a safe value while the rest of the app keeps working.
     static let limits = #"""
     import SwiftUI
 
     struct ContentView: View {
         @State private var taps = 0
+        @State private var note = ""
+        @State private var nested = false
 
         var body: some View {
-            VStack(spacing: 16) {
+            VStack(spacing: 12) {
                 Text("Taps: \(taps)")
                     .accessibilityIdentifier("limits.taps")
+                Text(note)
+                    .accessibilityIdentifier("limits.note")
                 Button("Count") { taps += 1 }
                 Button("Loop forever") {
                     var n = 0
@@ -284,9 +288,25 @@ enum HostedSwiftAppFixtureSource {
                     var text = "ab"
                     while true { text = text + text }
                 }
+                Button("Read itself") { taps = forever }
+                Button("Overflow") {
+                    let lowest = -9223372036854775807 - 1
+                    taps = lowest / -1
+                }
+                Button("Hostile format") {
+                    note = String(format: "%s|%@|%5.1f", taps, 2.5, 3)
+                }
+                Button("Nest views") { nested = true }
                 MapCard()
+                if nested {
+                    Nest()
+                }
             }
             .padding()
+        }
+
+        var forever: Int {
+            forever
         }
 
         func deeper(_ n: Int) -> Int {
@@ -297,6 +317,14 @@ enum HostedSwiftAppFixtureSource {
     struct MapCard: View {
         var body: some View {
             Map()
+        }
+    }
+
+    struct Nest: View {
+        var body: some View {
+            VStack {
+                Nest()
+            }
         }
     }
     """#
