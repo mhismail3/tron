@@ -101,6 +101,7 @@ private actor ComposerUploadGateway {
     private var heldCount = 0
     private var prompts: [Int] = []
     private var rejectedPrompts = 0
+    private var cameraUploads = 0
     private var continuations: [AsyncStream<String>.Continuation] = []
 
     init(losesStagingInBackground: Bool) { self.losesStagingInBackground = losesStagingInBackground }
@@ -112,7 +113,7 @@ private actor ComposerUploadGateway {
     private func publish() {
         let perPhoto = (0..<4).map { "\(stagedCount[$0, default: 0])" }.joined(separator: ",")
         let value = "attempts:\(attempts) staged:\(perPhoto) restaged:\(restaged) held:\(heldCount) "
-            + "backgrounds:\(backgroundTransitions) prompts:\(prompts.map(String.init).joined(separator: ",")) rejected:\(rejectedPrompts)"
+            + "backgrounds:\(backgroundTransitions) prompts:\(prompts.map(String.init).joined(separator: ",")) rejected:\(rejectedPrompts) camera:\(cameraUploads)"
         continuations.forEach { $0.yield(value) }
     }
 
@@ -129,6 +130,12 @@ private actor ComposerUploadGateway {
 
     func upload(_ data: Data) async throws -> String {
         let photos = await MainActor.run { Self.photos }
+        // A camera capture (JPEG) from the hosted camera journey (#937).
+        if data.starts(with: [0xFF, 0xD8]) {
+            cameraUploads += 1
+            publish()
+            return UUID().uuidString.lowercased()
+        }
         guard let index = photos.firstIndex(of: data) else { throw URLError(.badServerResponse) }
         attempts += 1
         publish()
