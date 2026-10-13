@@ -94,7 +94,7 @@ struct HomeMemoryViewDTO: Decodable, Equatable, Sendable {
         let view = try JSONDecoder.gateway.decode(Self.self, from: data)
         guard data.count <= 128 * 1024, !view.homeId.isEmpty, view.homeId.utf8.count <= 200,
               HomeMemoryEvidenceDTO.isDigest(view.revision), view.totalMessages >= 0, view.lines.count <= 50,
-              view.lines.allSatisfy({ $0.valid && $0.start + $0.span <= view.totalMessages }),
+              view.lines.allSatisfy(\.valid),
               view.nextCursor.map({ !$0.isEmpty && $0.utf8.count <= 1024 && !view.lines.isEmpty }) ?? true else {
             throw invalidHomeRead()
         }
@@ -314,6 +314,13 @@ enum HomeChapterPresentation {
     static func softPercent(_ chapter: HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits) -> Int? {
         guard let bytes = chapter.bytes, let entries = chapter.entries else { return nil }
         return max(ratio(bytes, limits.softBytes), ratio(entries, limits.softEntries))
+    }
+
+    /// The share the size line names: of the soft limit until it is reached, then of the hard limit.
+    static func limitPercent(_ chapter: HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits) -> Int? {
+        guard let bytes = chapter.bytes, let entries = chapter.entries else { return nil }
+        let soft = max(ratio(bytes, limits.softBytes), ratio(entries, limits.softEntries))
+        return soft < 100 ? soft : max(ratio(bytes, limits.hardBytes), ratio(entries, limits.hardEntries))
     }
 
     /// Contents as rows: counts the Gateway measured, and topics it named.

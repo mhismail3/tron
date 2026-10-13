@@ -38,6 +38,7 @@ extension HomeSheet {
                 TronSettingsGroup("Recent messages", detail: "Home sees each of these whole.", accent: .tronSessionTeal) {
                     memoryLines(recent)
                 }
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home-memory-recent")
             }
             if !summaries.isEmpty {
@@ -45,6 +46,7 @@ extension HomeSheet {
                                   accent: .tronSessionTeal) {
                     memoryLines(summaries)
                 }
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home-memory-summaries")
             }
             if let next = view.nextCursor {
@@ -128,7 +130,8 @@ extension HomeSheet {
             }
             if let remembered {
                 TronSettingsGroup("Home remembers", accent: .tronSessionTeal) { readingText(remembered) }
-                    .accessibilityIdentifier("home-memory-remembered")
+                    .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("home-memory-remembered")
             }
             TronGlassCard(accent: .tronSessionTeal) {
                 Button { present(.evidence(item.evidence, origin: origin)) } label: {

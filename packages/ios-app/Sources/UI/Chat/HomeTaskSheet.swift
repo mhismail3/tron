@@ -323,9 +323,9 @@ struct HomeTaskSheet: View {
         }
     }
 
-    /// Dates in the Gateway's clock, one line.
+    /// Dates in the Gateway's clock, relative, one line.
     private func dateLine(created: Int, updated: Int) -> String {
-        "Created \(Date(timeIntervalSince1970: Double(created) / 1000).formatted()) · Updated \(Date(timeIntervalSince1970: Double(updated) / 1000).formatted())"
+        "Created \(HomeSheetTime.relative(milliseconds: created)) · updated \(HomeSheetTime.relative(milliseconds: updated))"
     }
 
     static func subagentLine(_ subagents: HomeTaskDTO.Subagents) -> String {

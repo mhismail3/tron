@@ -51,7 +51,8 @@ extension HomeSheet {
                             }
                         }
                     }
-                    .accessibilityIdentifier("home-chapter-topics")
+                    .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("home-chapter-topics")
                 }
             }
             TronGlassCard(accent: .tronSessionTeal) {
@@ -81,7 +82,7 @@ extension HomeSheet {
 
     /// The chapter's name, state and dates, with its size against the rollover limit.
     private func chapterHeader(_ chapter: HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits) -> some View {
-        let percent = HomeChapterPresentation.softPercent(chapter, limits: limits)
+        let percent = HomeChapterPresentation.limitPercent(chapter, limits: limits)
         return VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("Chapter \(chapter.ordinal)")
@@ -96,7 +97,7 @@ extension HomeSheet {
             if let percent {
                 ProgressView(value: Double(min(percent, 100)), total: 100)
                     .tint(Color.tronSessionTeal)
-                    .accessibilityLabel("Size against the soft limit")
+                    .accessibilityLabel("Size against the rollover limit")
                     .accessibilityValue("\(percent) percent")
             }
             Text(HomeChapterPresentation.sizeLine(chapter, limits: limits))
