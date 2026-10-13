@@ -1238,10 +1238,14 @@ work. One per-process result is shared by every task surface.
 ### Control and spend status
 
 - **`home.taskList`** (maintainer-only) orders by `createdAt` descending, then task
-  ID ascending. It scans names within a bounded window and reads at most `limit`
-  records, and then each listed record again for its display: a page costs at most twice `limit` record reads, never report bodies. The result also carries `counts: { active, finished }`, exact over every task record and independent of `limit`: `active` is every non-terminal lifecycle (`pending` and `active`), `finished` is `terminal`. Counts are read with the page, so they cost one read of every task record per page request, and they are not a single snapshot with the items. The opaque cursor binds the last key to the restore
+  ID ascending. A page and its `counts: { active, finished }` come from one read of
+  every task record under the store mutex, never a report body: the counts need every
+  record anyway, so the page is a consistent snapshot with them. `counts` are exact
+  and independent of `limit`: `active` is every non-terminal lifecycle (`pending` and
+  `active`), `finished` is `terminal`. Identical requests in flight share that one read,
+  and a request whose client disconnected leaves the store queue (#906). The opaque cursor binds the last key to the restore
   epoch; foreign, restored and malformed cursors refuse (`conflict`,
-  `invalid-record`). Each row carries task ID, dates, `title`, `project`, `sessionId`, target, lifecycle, terminal outcome or null, spend or null, `attention` (needs-input or unknown) and `pendingGrant`. `title` is the worker session's canonical name when it has one, else the brief's first non-empty line, at most 80 characters; `project` is the target's last path component; `sessionId` is the worker session the task dispatched (the record's `sessionId`), null before dispatch. A live worker's name comes from its slot and a settled one's from the catalog's index of its file, so no transcript is read. Null spend is unavailable, not zero;
+  `invalid-record`). Each row carries task ID, dates, `title`, `project`, `sessionId`, target, lifecycle, terminal outcome or null, spend or null, `attention` (needs-input or unknown) and `pendingGrant`. `title` is the worker session's canonical name when it has one, else the brief's first non-empty line, at most 80 characters; `project` is the target's last path component; `sessionId` is the worker session the task dispatched (the record's `sessionId`), null before dispatch. A live worker's name comes from its slot (never a snapshot build) and a settled one's from the catalog's index of its file, so no transcript is read. Null spend is unavailable, not zero;
   A never-initialized listing returns `{ items: [] }`
   without creating authority.
 - **`home.taskStatus`** returns the record (its `sessionId` is the worker session), `title` and `project` (as in `home.taskList`), the exact active operation, spend, the

@@ -627,7 +627,7 @@ export class GatewayService {
         rejectUnknownFields(params, ["limit", "cursor"], method);
         if (params.limit !== undefined && (!Number.isSafeInteger(params.limit) || (params.limit as number) < 1 || (params.limit as number) > 50)) throw new GatewayError("invalid_request", "Invalid task page limit");
         return safeJson(await this.requireHome().taskList({ ...(params.limit === undefined ? {} : { limit: params.limit as number }),
-          ...(params.cursor === undefined ? {} : { cursor: string(params.cursor, "cursor", { max: 1024 }) }) }));
+          ...(params.cursor === undefined ? {} : { cursor: string(params.cursor, "cursor", { max: 1024 }) }) }, client.signal));
       }
       case "home.taskStatus": {
         rejectUnknownFields(params, ["taskId"], method);

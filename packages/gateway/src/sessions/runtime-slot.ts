@@ -213,6 +213,9 @@ function preserveEmbeddedLifecycleMarker(source: unknown, value: Record<string, 
   return isEmbeddedLifecycleArtifact(source) ? markEmbeddedLifecycleArtifact(value) : value;
 }
 
+/** An inbox admission this long holds the Home lane long enough for a person to notice. */
+const HOME_INBOX_ADMISSION_SLOW_MS = 2_000;
+
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
 /** The curated runtime a session is built with. Decided at runtime creation:
@@ -1959,6 +1962,11 @@ export class RuntimeSlot {
    * deliberately not persisted merely to retain this dashboard timestamp. */
   get catalogCreatedAt(): string {
     return this.createdAt;
+  }
+
+  /** The name a snapshot would show, without building one. */
+  get sessionName(): string | undefined {
+    return this.isHomeChapter ? "Home" : this.runtime.session.sessionName;
   }
 
   get sessionFile(): string | undefined {
@@ -8736,6 +8744,10 @@ export class RuntimeSlot {
           this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null, session.systemPrompt, ownership?.kind === "homeWake" ? "wake" : "user");
           this.operationWasHomeWake = ownership?.kind === "homeWake";
           if (this.homeRequestPolicy) {
+            // Inbox admission runs on this session's lane: every later prompt waits
+            // for it. A slow one is the first thing to name when Home stops answering (#906).
+            const inboxAdmissionStarted = performance.now();
+            try {
             homeWakeTrigger = await this.dependencies.homeInboxAdmission(this.id, operationId, ownership?.kind === "homeWake" ? "wake" : "user", async message => {
               this.inboxAttributedMessages.add(message.details.eventId);
               try { await session.sendCustomMessage(message, { triggerTurn: false }); }
@@ -8756,6 +8768,11 @@ export class RuntimeSlot {
               return { ...headroom, bytes: Math.max(0, HOME_HARD_BYTES - chapterBytes - Buffer.byteLength(JSON.stringify({ text, images })) * 4),
                 entries: Math.max(0, HOME_HARD_ENTRIES - this.canonicalEntryCount) };
             });
+            } finally {
+              const durationMs = Math.round(performance.now() - inboxAdmissionStarted);
+              if (durationMs >= HOME_INBOX_ADMISSION_SLOW_MS) this.dependencies.homeTaskDiagnostic?.({
+                event: "home.inbox.admission-slow", delivery: ownership?.kind === "homeWake" ? "wake" : "user", durationMs });
+            }
           }
         }
 

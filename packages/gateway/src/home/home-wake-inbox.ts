@@ -116,11 +116,17 @@ export class WakeInboxOwner {
     });
   }
 
+  /** Repairs what an interrupted process left. Acknowledged results are history and
+   * cost nothing beyond the one read: only an operation with a delivered result not
+   * yet acknowledged is finished again (#906 — finishing every historical operation
+   * re-read the whole store once per operation, on every Home activation). */
   async recover(route: HomeWakeRoute): Promise<void> {
     await this.mutex.run(async () => {
       const proven = new Map<string, string[]>();
+      const unfinished = new Set<string>();
       for await (const task of this.store.records()) {
         if (!task.wake || task.wake.state === "acknowledged") continue;
+        if (task.wake.state !== "claimed" && task.wake.delivery) unfinished.add(task.wake.delivery.operationId);
         if (task.wake.state === "claimed") {
           await this.change(task.taskId, current => ({ ...current, state: "pending", delivery: null }), "claim-recovered");
         } else if (task.wake.state === "pending" && task.wake.push === "pending") {
@@ -139,9 +145,7 @@ export class WakeInboxOwner {
           else if (proof !== "deferred") await this.change(task.taskId, current => ({ ...current, state: "outcome-unknown" }), `admission-proof-${proof}`);
         }
       }
-      const operations = new Set<string>(proven.keys());
-      for await (const task of this.store.records()) if (task.wake?.delivery) operations.add(task.wake.delivery.operationId);
-      for (const operation of operations) await this.finishOperation(route, operation, proven.get(operation) ?? []);
+      for (const operation of unfinished) await this.finishOperation(route, operation, proven.get(operation) ?? []);
     });
   }
 
@@ -158,13 +162,17 @@ export class WakeInboxOwner {
     append: (message: HomeWakeMessage) => Promise<void>, prepareEnvelope: () => Promise<HomeWakeEnvelope>): Promise<HomeWakeTrigger | undefined> {
     if (!route.enabled) return undefined;
     return this.mutex.run(async () => {
-      let pending = 0;
+      // One store read serves the whole selection: it changes no state, so the
+      // pending results, in delivery order, are fixed for this admission.
+      const candidates: HomeTaskRecord[] = [];
       for await (const task of this.store.records()) {
         if (task.homeId !== route.homeId || task.wake?.state !== "pending") continue;
         if (task.wake.routeGeneration !== route.routeGeneration) {
           await this.change(task.taskId, current => ({ ...current, state: "blocked" }), "route-replaced");
-        } else pending++;
+        } else candidates.push(task);
       }
+      candidates.sort(deliveryOrder);
+      const pending = candidates.length;
       if (!pending) return undefined;
       const envelope = await prepareEnvelope();
       const pendingMessage = (count: number): HomeWakeMessage => ({ customType: HOME_TASK_PENDING_MESSAGE, display: true,
@@ -178,19 +186,12 @@ export class WakeInboxOwner {
       let tokens = envelope.tokens - cost(count);
       let bytes = envelope.bytes - canonicalMessageBytes(count);
       let entries = envelope.entries - 2;
-      let cursor: { createdAt: string; eventId: string } | undefined;
       const selected: Array<{ task: HomeTaskRecord; message: HomeWakeMessage; tokens: number; bytes: number }> = [];
       let remaining = pending;
-      while (remaining > 0 && tokens > 0 && bytes > 0 && entries >= 2) {
-        let next: HomeTaskRecord | undefined;
-        for await (const task of this.store.records()) {
-          if (task.homeId !== route.homeId || task.wake?.state !== "pending" || task.wake.routeGeneration !== route.routeGeneration
-            || (cursor && wakeOrder(task.wake, cursor) <= 0)) continue;
-          if (!next || deliveryOrder(task, next) < 0) next = task;
-        }
-        if (!next) break;
+      for (const task of candidates) {
+        if (!(remaining > 0 && tokens > 0 && bytes > 0 && entries >= 2)) break;
         envelope.signal.throwIfAborted();
-        const task = next; const wake = task.wake!;
+        const wake = task.wake!;
         const result = await this.options.result(task.taskId);
         if (!result.task || JSON.stringify(result.task.reportRef) !== JSON.stringify(task.reportRef)
           || JSON.stringify(result.task.terminalEvidence) !== JSON.stringify(task.terminalEvidence)) throw new GatewayError("conflict", "Immutable inbox result is unavailable");
@@ -216,7 +217,7 @@ export class WakeInboxOwner {
         const selectedBytes = canonicalMessageBytes(selectedMessage);
         if (selectedTokens > tokens || selectedBytes > bytes) break;
         selected.push({ task, message: selectedMessage, tokens: selectedTokens, bytes: selectedBytes });
-        tokens -= selectedTokens; bytes -= selectedBytes; entries -= 2; remaining--; cursor = { createdAt: wake.createdAt, eventId: wake.eventId };
+        tokens -= selectedTokens; bytes -= selectedBytes; entries -= 2; remaining--;
       }
       envelope.signal.throwIfAborted();
       const trigger = delivery === "wake" ? selected.pop() : undefined;
