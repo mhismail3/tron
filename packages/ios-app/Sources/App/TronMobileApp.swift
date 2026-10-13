@@ -45,6 +45,8 @@ struct TronMobileApp: App {
                 HostedSubagentParityFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-new-session-fixture") {
                 HostedNewSessionFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-composer-upload-fixture") {
+                HostedComposerUploadFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-readonly-attachment-fixture") {
                 HostedReadonlyAttachmentFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-chat-display-fixture") {
