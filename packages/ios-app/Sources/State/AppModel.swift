@@ -5874,6 +5874,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
         if let mountedTarget, !sessionPresentation.owns(mountedTarget) { return true }
         guard restored else { return false }
+        // Photos whose transfer the outage interrupted upload again; staged
+        // ones are reused on this same Mac (#916).
+        if let mountedTarget { composerDrafts.resumeUnstagedUploads(for: mountedTarget) }
         let activeConnectionID = await client.activeConnectionID()
         guard admitsLifecycle(admission), activeConnectionID == admission.connectionID else { return true }
         scheduleMountedOptionalReads(admission: admission)

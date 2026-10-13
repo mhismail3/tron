@@ -6,6 +6,7 @@ import { homeMemoryTools } from "./home-memory-tools.js";
 import { homeProfileSection, homeProfileTool } from "./home-profile.js";
 import { markHomeMemoryCache, type HomeSystemPrompt } from "./home-request-policy.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import { abortableRead } from "../util/abortable-read.js";
 import { HOME_TASK_THINKING_LEVELS, type HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
 
 /**
@@ -74,7 +75,7 @@ export async function homeSystemPrompt(base: string, knowledge: () => KnowledgeS
  * mechanism that keeps Home's prompt-cache refreshes at zero.
  */
 export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess | undefined,
-  delegate: (request: HomeTaskDispatchRequest) => Promise<HomeTaskHandle>,
+  delegate: (request: HomeTaskDispatchRequest, signal?: AbortSignal) => Promise<HomeTaskHandle>,
   task: (request: HomeTaskToolRequest) => Promise<unknown>,
   knowledge: () => KnowledgeService | undefined): ExtensionFactory {
   return (pi) => {
@@ -86,8 +87,10 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
         model: Type.Optional(Type.Object({ provider: Type.String({ minLength: 1, maxLength: 120 }), id: Type.String({ minLength: 1, maxLength: 300 }) }, { additionalProperties: false })),
         thinking: Type.Optional(Type.Union(HOME_TASK_THINKING_LEVELS.map(level => Type.Literal(level)))),
         reason: Type.Optional(Type.String({ minLength: 1, maxLength: 240, description: "Required when model or thinking is explicit: why this worker choice fits this task." })) }, { additionalProperties: false }),
-      executionMode: "sequential", execute: async (_id, request) => {
-        const { taskId, sessionId, operationId } = await delegate(request);
+      executionMode: "sequential", execute: async (_id, request, signal) => {
+        // Stop ends this turn at every admission step (#919); the dispatcher settles
+        // any task record it already created and refuses a late worker.
+        const { taskId, sessionId, operationId } = await abortableRead(signal, () => delegate(request, signal));
         return { content: [{ type: "text", text: "Task admitted; a report is required for its result." }], details: { taskId, sessionId, operationId } };
       },
     });

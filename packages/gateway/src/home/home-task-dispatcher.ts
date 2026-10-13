@@ -34,6 +34,7 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; outputTokens: number }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
   | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
+  | { event: "home.task.dispatch-stage"; taskHash: string; stage: HomeTaskDispatchStage; outcome: "slow" | "timeout" | "cancelled"; durationMs: number }
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
 export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
 /** `title` names the worker session; it is never persisted with the task record. */
@@ -53,6 +54,24 @@ export interface HomeTaskControlRequest { taskId: string; operationId: string }
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord> }
 const reportDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
+/** Every awaited step of delegate admission, in order (#919). Each is bounded by
+ * the stage deadline and the delegating turn's Stop, and logs when slow. */
+export type HomeTaskDispatchStage = "choice" | "setup" | "lookup" | "budget" | "target" | "create"
+  | "authorize" | "restore-epoch" | "create-worker" | "configure-worker" | "bind";
+/** No single admission step may hold the delegating Home turn longer than this. */
+export const HOME_TASK_DISPATCH_STAGE_DEADLINE_MS = 60_000;
+/** A step slower than this is logged with its stage even when it completes. */
+export const HOME_TASK_DISPATCH_STAGE_SLOW_MS = 5_000;
+
+/** A dispatch step the delegating turn stopped or the stage deadline expired. The
+ * step itself may still be running; its owner hands any late result back. */
+class HomeTaskDispatchStageError extends GatewayError {
+  constructor(readonly stage: HomeTaskDispatchStage, readonly outcome: "timeout" | "cancelled") {
+    super(outcome === "timeout" ? "busy" : "cancelled", outcome === "timeout"
+      ? `Task dispatch step ${stage} did not finish in time` : `Task dispatch was stopped at ${stage}`, outcome === "timeout", { stage });
+  }
+}
+
 /** The longest name a task or its worker session is shown by. */
 export const HOME_TASK_TITLE_CHARACTERS = 80;
 
@@ -161,19 +180,69 @@ export class HomeTaskDispatcher {
     return { report, entryId: entry.id };
   }
 
-  async start(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest): Promise<HomeTaskHandle> {
+  /** `signal` is the delegating turn's Stop. Admission never outlives it: a stopped
+   * or expired step refuses the dispatch and settles any task record it created. */
+  async start(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, signal?: AbortSignal): Promise<HomeTaskHandle> {
+    if (signal?.aborted) throw new HomeTaskDispatchStageError("choice", "cancelled");
     await this.assertAvailable();
     const registry = this.sessions.administrativeWorkRegistry;
     const work = registry.begin({ kind: "queued-mutation", hostEpoch: registry.runtimeEpoch });
     try {
-      const handle = await this.startOwned(identity, request, work);
+      const handle = await this.startOwned(identity, request, work, signal);
       const completion = handle.completion.finally(() => work.settle());
       void completion.catch(() => {});
       return { ...handle, completion };
     } catch (error) { work.settle(); throw error; }
   }
 
-  private async startOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle): Promise<HomeTaskHandle> {
+  /** Runs one admission step under the stage deadline and the turn's Stop. The step
+   * cannot be interrupted (a stalled store or session lane ignores signals), so on
+   * refusal its late result goes to `abandon`, never back into this admission. */
+  private async stage<T>(stage: HomeTaskDispatchStage, taskId: string, signal: AbortSignal | undefined,
+    run: () => Promise<T>, abandon?: (value: T) => unknown): Promise<T> {
+    if (signal?.aborted) throw this.stageRefused(stage, taskId, "cancelled", 0);
+    const started = Date.now();
+    const step = run();
+    let timer: NodeJS.Timeout | undefined;
+    let stop: (() => void) | undefined;
+    const refused = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(this.stageRefused(stage, taskId, "timeout", Date.now() - started)), HOME_TASK_DISPATCH_STAGE_DEADLINE_MS);
+      stop = () => reject(this.stageRefused(stage, taskId, "cancelled", Date.now() - started));
+      signal?.addEventListener("abort", stop, { once: true });
+    });
+    try {
+      const value = await Promise.race([step, refused]);
+      const durationMs = Date.now() - started;
+      if (durationMs >= HOME_TASK_DISPATCH_STAGE_SLOW_MS) {
+        this.diagnostic?.({ event: "home.task.dispatch-stage", taskHash: hash(taskId), stage, outcome: "slow", durationMs });
+      }
+      return value;
+    } catch (error) {
+      if (error instanceof HomeTaskDispatchStageError) void step.then(value => abandon?.(value), () => {});
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      if (stop) signal?.removeEventListener("abort", stop);
+    }
+  }
+
+  private stageRefused(stage: HomeTaskDispatchStage, taskId: string, outcome: "timeout" | "cancelled", durationMs: number) {
+    this.diagnostic?.({ event: "home.task.dispatch-stage", taskHash: hash(taskId), stage, outcome, durationMs });
+    return new HomeTaskDispatchStageError(stage, outcome);
+  }
+
+  /** Settles a task whose admission was refused after its record exists, like
+   * every terminal task with its one result wake. Accepted identity stays durable
+   * and is never replayed. */
+  private async refuseAdmission(task: HomeTaskRecord, reason: "admission-cancelled" | "admission-timeout"): Promise<void> {
+    const final = await this.store.update(task.taskId, current => current.lifecycle === "terminal" ? current : {
+      ...current, lifecycle: "terminal", wake: this.inbox.event(current),
+      terminalEvidence: { outcome: "unknown", sessionId: current.sessionId, entryIds: [], reason } });
+    this.transition(final, reason);
+    await this.inbox.publish(final.taskId);
+  }
+
+  private async startOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle, signal: AbortSignal | undefined): Promise<HomeTaskHandle> {
     const input = structuredClone(request);
     const keys = Object.keys(input);
     if (!["taskId", "intent", "target"].every(key => keys.includes(key)) || keys.some(key => !["taskId", "intent", "target", "model", "thinking", "title", "reason", "provenance"].includes(key))
@@ -183,32 +252,34 @@ export class HomeTaskDispatcher {
     if (input.title !== undefined && (!title || [...title].length > HOME_TASK_TITLE_CHARACTERS)) throw new GatewayError("invalid_request", "Invalid task title");
     // Refused before any task record, namespace initialization or worker exists.
     const deferredThinking = input.provenance && !input.model ? input.thinking : undefined;
-    const choice = await this.sessions.admitTaskWorkerChoice(deferredThinking === undefined ? input : {});
-    const epoch = await this.setup.run(async () => {
+    const taskId = input.taskId;
+    const choice = await this.stage("choice", taskId, signal, () => this.sessions.admitTaskWorkerChoice(deferredThinking === undefined ? input : {}));
+    const epoch = await this.stage("setup", taskId, signal, () => this.setup.run(async () => {
       const created = await this.store.initialize();
       const current = await this.store.restoreEpoch();
       if (created) await this.authorization.enableInitialScope(current);
       return current;
-    });
-    if (await this.store.read(input.taskId)) throw new GatewayError("conflict", "Task already exists; accepted work is never replayed");
+    }));
+    if (await this.stage("lookup", taskId, signal, () => this.store.read(taskId))) throw new GatewayError("conflict", "Task already exists; accepted work is never replayed");
     // The Home profile's task budget, fixed at the task's start (settings-model.md 6.1):
     // a later raise never reaches this task; a later lower applies at its next turn.
-    const budget = await this.sessions.homeTaskBudget();
-    let task = await this.store.put({
-      version: 1, taskId: input.taskId, revision: 1, homeId: identity.homeId, generation: identity.generation, routeGeneration: identity.routeGeneration, wake: null,
-      intent: { text: input.intent }, intentDigest: taskIntentDigest(input.intent),
-      target: await this.sessions.canonicalTaskTarget(input.target),
+    const budget = await this.stage("budget", taskId, signal, () => this.sessions.homeTaskBudget());
+    const target = await this.stage("target", taskId, signal, () => this.sessions.canonicalTaskTarget(input.target));
+    // A record published after its admission was refused is settled, never left pending.
+    let task = await this.stage("create", taskId, signal, () => this.store.put({
+      version: 1, taskId, revision: 1, homeId: identity.homeId, generation: identity.generation, routeGeneration: identity.routeGeneration, wake: null,
+      intent: { text: input.intent }, intentDigest: taskIntentDigest(input.intent), target,
       grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
       stopIntent: null, spend: null, reportRef: null, terminalEvidence: null,
       ...(budget && Object.keys(budget).length ? { budget } : {}),
-    }, null);
+    }, null), created => { this.transition(created, "created"); void this.refuseAdmission(created, "admission-cancelled").catch(() => {}); });
     this.transition(task, "created");
     let lease: Awaited<ReturnType<OwnedSessionDispatch["createWorker"]>> | undefined;
     let deadline: OwnedOperationDeadline | undefined;
     try {
-      const authority = await this.authorization.authorize({ intentDigest: task.intentDigest,
-        target: task.target, authorizationScope: "full-work", restoreEpoch: epoch });
-      if (epoch !== await this.store.restoreEpoch()) throw new GatewayError("conflict", "Task namespace identity changed during admission");
+      const authority = await this.stage("authorize", taskId, signal, () => this.authorization.authorize({ intentDigest: task.intentDigest,
+        target: task.target, authorizationScope: "full-work", restoreEpoch: epoch }));
+      if (epoch !== await this.stage("restore-epoch", taskId, signal, () => this.store.restoreEpoch())) throw new GatewayError("conflict", "Task namespace identity changed during admission");
       const operationId = `task-${randomUUID()}`;
       const reports = new HomeTaskReportOwner({ taskId: task.taskId, homeId: task.homeId, generation: task.generation, operationId }, async () => {
         await this.store.update(task.taskId, current => {
@@ -232,8 +303,10 @@ export class HomeTaskDispatcher {
       });
       const dispatch = new OwnedSessionDispatch(this.sessions);
       // Trust is rechecked by the neutral creation/admission boundary too.
-      lease = await dispatch.createWorker(task.target, reports);
+      // A worker created after admission was refused is released, never prompted.
+      lease = await this.stage("create-worker", taskId, signal, () => dispatch.createWorker(task.target, reports), late => late.release());
       const { slot } = lease;
+      const configured = await this.stage("configure-worker", taskId, signal, async () => {
       // Name the worker before its first prompt; the slot persists the canonical transcript entry.
       if (title) await slot.rename(title);
       // The slot's own configuration owners record the choice in the worker's transcript
@@ -251,6 +324,9 @@ export class HomeTaskDispatcher {
         if (clamped) source.reason = [source.reason, clamped].filter(Boolean).join("; ");
         await slot.setThinking(thinking, undefined, undefined, source);
       }
+      return { model, clamped };
+      });
+      const { model, clamped } = configured;
       // The canonical worker brief records the actual fallback capability choice;
       // the authorized task intent/digest is never rewritten after admission.
       const appliedChoice = input.provenance
@@ -259,7 +335,11 @@ export class HomeTaskDispatcher {
       task = { ...task, revision: task.revision + 1, lifecycle: "active", sessionId: slot.id, operationId,
         grantRef: authority.kind === "one-use-grant" ? authority.grantId : null,
         scopeRef: authority.kind === "standing-scope" ? authority.scopeId : null };
-      task = await this.store.put(task, task.revision - 1);
+      const bound = task;
+      // Once bound, the record names this worker and operation; a late bind is
+      // refused by settlement rather than prompted.
+      task = await this.stage("bind", taskId, signal, () => this.store.put(bound, bound.revision - 1),
+        late => { this.transition(late, "operation-bound"); void this.refuseAdmission(late, "admission-cancelled").catch(() => {}); });
       this.transition(task, "operation-bound");
       let resolve!: (terminal: OwnedOperationTerminal) => void;
       const terminal = new Promise<OwnedOperationTerminal>(done => { resolve = done; });
@@ -349,6 +429,13 @@ export class HomeTaskDispatcher {
     } catch (error) {
       deadline?.disarm();
       lease?.release();
+      if (error instanceof HomeTaskDispatchStageError) {
+        // The refused step may still hold the store queue, so the turn's Stop never
+        // waits for this settlement; cold recovery is its backstop if it fails.
+        void this.refuseAdmission(task, error.outcome === "timeout" ? "admission-timeout" : "admission-cancelled")
+          .catch(() => { /* A store refusal emits its own diagnostic. */ });
+        throw error;
+      }
       // Accepted identity remains durable and cannot be used for prompt replay.
       const final: HomeTaskRecord = { ...task, revision: task.revision + 1, lifecycle: "terminal", wake: this.inbox.event(task),
         terminalEvidence: { outcome: "unknown", sessionId: task.sessionId, entryIds: [], reason: "admission-refused" } };

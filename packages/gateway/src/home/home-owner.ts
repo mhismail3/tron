@@ -247,7 +247,7 @@ export class HomeOwner {
 
   /** Delegate authority is sampled for the exact enabled Home, never a fork or
    * disabled chapter. Home does not inherit a project's executable resources. */
-  async dispatchTask(sessionId: string, request: HomeTaskDispatchRequest) {
+  async dispatchTask(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal) {
     await this.taskOwner();
     const record = this.record;
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) {
@@ -258,7 +258,7 @@ export class HomeOwner {
     const choice = request.model || request.provenance ? request : { ...request, ...await this.currentChatChoice(sessionId),
       ...(request.thinking === undefined ? {} : { thinking: request.thinking }) };
     if (this.record !== record) throw new GatewayError("conflict", "Home changed during task admission");
-    return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, choice);
+    return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, choice, signal);
   }
 
   /** Read the live session, not designation-time defaults or a learned note. The

@@ -917,6 +917,19 @@ intent before any worker effect, authorizes the exact snapshot, creates an ordin
 worker through `OwnedSessionDispatch`, and binds its exact operation before prompt
 admission. A task ID never replays an accepted prompt.
 
+**Bounded admission (#919).** Every awaited admission step (`choice`, `setup`,
+`lookup`, `budget`, `target`, `create`, `authorize`, `restore-epoch`,
+`create-worker`, `configure-worker`, `bind`) runs under a 60 s per-step deadline
+and the delegating Home turn's Stop. The steps themselves cannot be interrupted (a
+stalled store or session lane ignores signals), so a refusal stops waiting for
+the step, the `delegate` tool fails at once, and the step's late result returns to
+its owner: a late task record or operation binding is settled, a late worker lease is
+released and never prompted. A refused step after the pending record exists
+settles the task `unknown` with `admission-cancelled` (Stop) or
+`admission-timeout` (deadline), outside the Stop path, and like every terminal task
+its one result wake follows. A step that took 5 s or more, timed out or was cancelled
+logs `home.task.dispatch-stage` naming the stage.
+
 **Worker model and thinking.** At each `delegate` call the Gateway resolves `model.ref[role=worker]`
 and `model.thinking[role=worker]` from the typed Home profile. The built-in value for either
 field is same-as-Home, read from Home's live session at that boundary. An explicit `model` or

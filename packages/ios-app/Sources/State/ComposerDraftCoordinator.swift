@@ -11,7 +11,10 @@ struct ComposerDraftScope: Hashable, Sendable {
 struct PendingAttachment: Identifiable, Hashable, Sendable {
     /// Stable chip identity. Restored drafts use a local opaque value.
     let id: String
-    /// Disposable exact-presentation Gateway identity. It is never durable.
+    /// Staged Gateway upload identity. It belongs to the draft scope, whose
+    /// profile is one paired Mac, so it survives presentation revocation and
+    /// reconnects to that Mac (#916). It is never persisted; a Gateway that no
+    /// longer holds it (expired or reset staging) makes the chip upload again.
     let gatewayUploadID: String?
     let name: String
     let mimeType: String
@@ -386,8 +389,9 @@ enum ComposerDraftTextPolicy {
 }
 
 /// Owns bounded session-scoped composer drafts and exact-presentation transient
-/// state. Gateway uploads and sessions remain canonical; staged upload IDs are
-/// disposable and never survive presentation revocation.
+/// state. Gateway uploads and sessions remain canonical. Staged upload IDs are
+/// scope-owned: revocation cancels only in-flight upload work, and a remount or
+/// reconnect uploads only the chips that are not staged yet.
 @MainActor
 @Observable
 final class ComposerDraftCoordinator {
@@ -1539,6 +1543,9 @@ final class ComposerDraftCoordinator {
                 markTransportAccepted(admission)
             } else {
                 restoreSubmission(admission)
+                if Self.isMissingStagedUpload(error) {
+                    restageSubmittedAttachments(admission)
+                }
             }
             throw error
         }
@@ -1600,6 +1607,7 @@ final class ComposerDraftCoordinator {
         storageGenerationByScope[scope, default: 0] &+= 1
         drafts[scope] = nil
         lastAccessByScope[scope] = nil
+        discardStagedUploads(in: scope)
         attachmentsByScope[scope] = nil
         loadedScopes.remove(scope)
         textMutationRevisionByScope[scope] = nil
@@ -1720,18 +1728,28 @@ final class ComposerDraftCoordinator {
         evictInactiveDraftsIfNeeded()
     }
 
+    /// A mounted presentation restored after a reconnect retries the chips whose
+    /// transfer the outage interrupted. Staged chips and chips whose upload is
+    /// still in flight are left alone, so no photo reaches the Gateway twice.
+    func resumeUnstagedUploads(for target: SessionPresentationIdentity) {
+        guard let scope = scope(for: target) else { return }
+        beginRestoredAttachmentUploads(scope: scope, target: target)
+    }
+
     private func beginRestoredAttachmentUploads(
         scope: ComposerDraftScope,
         target: SessionPresentationIdentity
     ) {
         guard restoredUploadTasks[target] == nil,
-              attachmentsByScope[scope]?.contains(where: { $0.gatewayUploadID == nil }) == true else {
+              attachmentsByScope[scope]?.contains(where: {
+                  $0.gatewayUploadID == nil && uploadAdmissionByAttachmentID[$0.id] == nil
+              }) == true else {
             return
         }
         restoredUploadTasks[target] = Task { @MainActor [weak self] in
             guard let self else { return }
             let identities = self.attachmentsByScope[scope]?.compactMap {
-                $0.gatewayUploadID == nil ? $0.id : nil
+                $0.gatewayUploadID == nil && self.uploadAdmissionByAttachmentID[$0.id] == nil ? $0.id : nil
             } ?? []
             for identity in identities {
                 guard !Task.isCancelled else { break }
@@ -1801,6 +1819,17 @@ final class ComposerDraftCoordinator {
         }
         attachmentsByScope[scope]?[index] = attachment.replacingGatewayUploadID(uploadID)
         schedulePersistence(for: scope)
+    }
+
+    /// A draft scope that is deleted or evicted no longer owns its staged chips.
+    /// Chips captured by a live submission stay with that submission. Discard
+    /// reaches the connected Mac; another Mac's ID is unknown there and expires
+    /// with that Mac's unclaimed staging.
+    private func discardStagedUploads(in scope: ComposerDraftScope) {
+        let submitted = Set(submissionByScope[scope]?.submittedAttachments.map(\.id) ?? [])
+        for attachment in attachmentsByScope[scope] ?? [] where !submitted.contains(attachment.id) {
+            if let uploadID = attachment.gatewayUploadID { discardUpload(uploadID) }
+        }
     }
 
     private func discardUpload(_ uploadID: String) {
@@ -2119,8 +2148,7 @@ final class ComposerDraftCoordinator {
         if let mounted = lease, mounted.scope == scope {
             attachmentsByScope[scope] = Self.restoredAttachments(
                 captured: currentAdmission.submittedAttachments,
-                current: attachmentsByScope[scope] ?? [],
-                presentationWasReplaced: mounted.target != currentAdmission.snapshot.target
+                current: attachmentsByScope[scope] ?? []
             )
             schedulePersistence(for: scope)
         }
@@ -2155,22 +2183,18 @@ final class ComposerDraftCoordinator {
               rejected.transportState == .rejected else { return }
         attachmentsByScope[scope] = Self.restoredAttachments(
             captured: rejected.submittedAttachments,
-            current: attachmentsByScope[scope] ?? [],
-            presentationWasReplaced: target != rejected.snapshot.target
+            current: attachmentsByScope[scope] ?? []
         )
         submissionByScope[scope] = nil
         schedulePersistence(for: scope)
     }
 
-    /// Captured upload identities belong to the presentation that submitted
-    /// them. A newer chip with the same stable ID is authoritative, including
-    /// its fresh or deliberately absent upload ID. Only a missing chip is
-    /// restored from the capture, and route replacement makes that copy upload-
-    /// required before it can be sent again.
+    /// A newer chip with the same stable ID is authoritative, including its
+    /// fresh or deliberately absent upload ID. Only a missing chip is restored
+    /// from the capture, keeping its scope-owned staged upload ID.
     private static func restoredAttachments(
         captured: [PendingAttachment],
-        current: [PendingAttachment],
-        presentationWasReplaced: Bool
+        current: [PendingAttachment]
     ) -> [PendingAttachment] {
         var currentByID = Dictionary(
             current.map { ($0.id, $0) },
@@ -2182,7 +2206,7 @@ final class ComposerDraftCoordinator {
             if let current = currentByID.removeValue(forKey: attachment.id) {
                 restored.append(current)
             } else {
-                restored.append(presentationWasReplaced ? attachment.requiringUpload() : attachment)
+                restored.append(attachment)
             }
         }
         let capturedIDs = Set(captured.map(\.id))
@@ -2343,8 +2367,7 @@ final class ComposerDraftCoordinator {
         restoreAnnotations(handoff.snapshot.annotations, for: scope)
         attachmentsByScope[scope] = Self.restoredAttachments(
             captured: handoff.submittedAttachments,
-            current: attachmentsByScope[scope] ?? [],
-            presentationWasReplaced: false
+            current: attachmentsByScope[scope] ?? []
         )
         if attachmentsByScope[scope]?.isEmpty == true {
             attachmentsByScope[scope] = nil
@@ -2359,6 +2382,38 @@ final class ComposerDraftCoordinator {
             settledQueueAliases[target] = nil
         }
         schedulePersistence(for: scope)
+    }
+
+    /// The Gateway materializes every staged ID before it accepts a prompt; an
+    /// unknown one is `not_found` (expired, reset or another Mac's staging).
+    private static func isMissingStagedUpload(_ error: Error) -> Bool {
+        (error as? GatewayFailure)?.code == "not_found"
+    }
+
+    /// The rejected prompt does not say which staged ID was missing, so every
+    /// submitted chip that was restored to the mounted strip uploads again from
+    /// its retained bytes. The next send carries only fresh staging.
+    private func restageSubmittedAttachments(_ admission: SubmissionAdmission) {
+        guard let lease, lease.scope == admission.scope,
+              var attachments = attachmentsByScope[admission.scope] else { return }
+        let submitted = Dictionary(
+            admission.submittedAttachments.compactMap { attachment in
+                attachment.gatewayUploadID.map { (attachment.id, $0) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var changed = false
+        for index in attachments.indices {
+            guard let uploadID = attachments[index].gatewayUploadID,
+                  submitted[attachments[index].id] == uploadID else { continue }
+            discardUpload(uploadID)
+            attachments[index] = attachments[index].requiringUpload()
+            changed = true
+        }
+        guard changed else { return }
+        attachmentsByScope[admission.scope] = attachments
+        schedulePersistence(for: admission.scope)
+        beginRestoredAttachmentUploads(scope: admission.scope, target: lease.target)
     }
 
     private static func isPossiblySent(_ error: Error) -> Bool {
@@ -2445,18 +2500,8 @@ final class ComposerDraftCoordinator {
         guard let lease else { return }
         restoredUploadTasks[lease.target]?.cancel()
         restoredUploadTasks[lease.target] = nil
-        if let attachments = attachmentsByScope[lease.scope] {
-            let submittedIDs = Set(
-                submissionByScope[lease.scope]?.submittedAttachments.map(\.id) ?? []
-            )
-            for attachment in attachments where !submittedIDs.contains(attachment.id) {
-                if let uploadID = attachment.gatewayUploadID {
-                    discardUpload(uploadID)
-                }
-            }
-            attachmentsByScope[lease.scope] = attachments.map { $0.requiringUpload() }
-            schedulePersistence(for: lease.scope)
-        }
+        // Staged chips keep their scope-owned upload IDs (#916); only in-flight
+        // transfers below are cancelled and stay upload-required.
         editorRequestByTarget[lease.target] = nil
         // Transport ownership follows durable scope. Presentation revocation
         // clears only target-routed receipts; sending and accepted admissions
@@ -2500,6 +2545,7 @@ final class ComposerDraftCoordinator {
         for (scope, _) in inactive.prefix(inactive.count - Self.maxInactiveDrafts) {
             drafts[scope] = nil
             lastAccessByScope[scope] = nil
+            discardStagedUploads(in: scope)
             attachmentsByScope[scope] = nil
             loadedScopes.remove(scope)
             textMutationRevisionByScope[scope] = nil

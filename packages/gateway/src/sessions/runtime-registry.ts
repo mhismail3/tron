@@ -2003,7 +2003,7 @@ export class RuntimeRegistry {
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
       homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => this.home.taskTool(sessionId, request),
-      homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => this.dispatchHomeTask(sessionId, request),
+      homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => this.dispatchHomeTask(sessionId, request, signal),
       validateTaskMarker: (sessionId: string, marker: unknown) => this.home.validateTaskMarker(sessionId, marker),
       ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),
       homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {
@@ -3051,7 +3051,7 @@ export class RuntimeRegistry {
 
   /** Home resolves its typed worker profile at the delegate boundary. The selected
    * values are copied into this task only; later Home/profile changes cannot retarget it. */
-  private async dispatchHomeTask(sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) {
+  private async dispatchHomeTask(sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) {
     if ((request.model !== undefined || request.thinking !== undefined) && !request.reason?.trim()) {
       throw new GatewayError("invalid_request", "An explicit worker model or thinking choice needs a short reason");
     }
@@ -3107,7 +3107,7 @@ export class RuntimeRegistry {
       provenance: {
         model: { via: fallback ? "home-fallback" : !fromProfileModel ? "home-explicit" : profileModel && "provider" in profileModel ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
         thinking: { via: !fromProfileThinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
-      } });
+      } }, signal);
   }
 
   /** Admits a delegation's model and thinking level against the Gateway's own model
