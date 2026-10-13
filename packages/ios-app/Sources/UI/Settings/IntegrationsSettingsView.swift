@@ -82,6 +82,8 @@ struct IntegrationsSettingsView: View {
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Connected Services", accent: .tronCyan)
+        .onAppear { NSLog("TRON366 integrations appear") }
+        .onDisappear { NSLog("TRON366 integrations disappear") }
         .tronSettingsLayout()
         .tronSettingsVisualTheme(accent: .tronCyan)
         .task(id: PresentationActivityTaskID(source: "integrations/\(model.knowledgePresentationIdentity)/\(model.connectionState)", presentationActive: activity.allowsPresentationPublication)) {
