@@ -286,19 +286,20 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "the reader did not leave the pinned tail: \(app.debugDescription)")
         XCTAssertTrue(sent.isHittable)
         let anchorFrame = sent.frame
+        // The prompt is one accessibility element taller than the viewport;
+        // XCUI clips its frame to the visible region beneath the bar, and that
+        // clipped edge follows the title view while recovery replaces it. The
+        // rendered rows are the reader's position, so qualify their pixels too.
+        let rowsBeforeLoss = transcriptRows(app)
         try setProxyMode(fixture, mode: "blackhole")
         XCTAssertTrue(waitingStatus.waitForExistence(timeout: 60))
-        keepScreenshot(app, name: "878-simulator-anchored-reader-recovery")
-        // The status now arrives with the app-scoped recovery card, whose
-        // presence disturbs XCUI's frame report for the partly off-screen
-        // prompt even though the rows do not move (see this screenshot pair).
-        // Qualify the persistent state once that transient card retires.
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: transientNotice
         )], timeout: 20), .completed)
         keepScreenshot(app, name: "878-simulator-anchored-reader-persistent-recovery")
-        XCTAssertEqual(sent.frame.minY, anchorFrame.minY, accuracy: 3,
-                       "transport retirement moved the anchored reader")
+        let movedRows = changedPixelFraction(rowsBeforeLoss, transcriptRows(app))
+        XCTAssertLessThan(movedRows, 0.01,
+                          "transport retirement moved the anchored reader (\(movedRows) of its rows changed)")
         try setProxyMode(fixture, mode: "pass")
         try setProxyMode(fixture, mode: "hold-open")
         XCUIDevice.shared.press(.home)
@@ -1139,6 +1140,36 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(bar.frame.contains(status.frame),
                       "recovery \(status.frame) left the navigation chrome \(bar.frame)",
                       file: file, line: line)
+    }
+
+    /// The rendered transcript band between the navigation chrome and the
+    /// composer, excluding the trailing scroll indicator.
+    @MainActor
+    private func transcriptRows(_ app: XCUIApplication) -> CGImage? {
+        let screenshot = app.screenshot().image
+        let scale = screenshot.scale
+        return screenshot.cgImage?.cropping(to: CGRect(x: 30 * scale, y: 150 * scale,
+                                                       width: 330 * scale, height: 260 * scale))
+    }
+
+    /// The fraction of pixels whose color moved by more than a rounding step.
+    private func changedPixelFraction(_ before: CGImage?, _ after: CGImage?) -> Double {
+        guard let before, let after, before.width == after.width, before.height == after.height else { return 1 }
+        func pixels(_ image: CGImage) -> [UInt8] {
+            var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+            let context = CGContext(data: &bytes, width: image.width, height: image.height, bitsPerComponent: 8,
+                                    bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            context?.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            return bytes
+        }
+        let a = pixels(before), b = pixels(after)
+        var changed = 0
+        for index in stride(from: 0, to: a.count, by: 4)
+        where (0..<3).contains(where: { abs(Int(a[index + $0]) - Int(b[index + $0])) > 8 }) {
+            changed += 1
+        }
+        return Double(changed) / Double(a.count / 4)
     }
 
     @MainActor
