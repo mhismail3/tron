@@ -66,7 +66,29 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
  * A result wakes Home only through the wake owner; recovery never prompts. */
 export class WakeInboxOwner {
   private readonly mutex = new AsyncMutex();
+  /** The store write count at which a complete pass found no actionable wake. */
+  private quietAt: number | undefined;
   constructor(private readonly store: HomeTaskStore, private readonly options: Options) {}
+
+  /** Records whose wake this owner may still act on. Inert wakes (none yet,
+   * acknowledged, blocked until maintainer redelivery, or outcome-unknown with its
+   * push decided) are never yielded. A complete pass that finds none, with no store
+   * write during it, proves the inbox quiet until the next write: recovery,
+   * admission, settlement and wake attempts then read no record. Without it a
+   * quiet Home turn re-read every historical record several times on Home's
+   * session lane (#922, after #906). */
+  private async *actionable(): AsyncGenerator<HomeTaskRecord> {
+    const start = this.store.writeCount;
+    if (this.quietAt === start) return;
+    let quiet = true;
+    for await (const task of this.store.records()) {
+      const wake = task.wake;
+      if (!wake || wake.state === "acknowledged" || wake.state === "blocked" || (wake.state === "outcome-unknown" && wake.push === "decided")) continue;
+      quiet = false;
+      yield task;
+    }
+    if (quiet && this.store.writeCount === start) this.quietAt = start;
+  }
 
   event(task: HomeTaskRecord): HomeWakeEvent {
     return { eventId: `task-result-${hash(task.taskId)}`, routeGeneration: task.routeGeneration,
@@ -94,7 +116,7 @@ export class WakeInboxOwner {
   /** Results waiting for a wake, in the order a wake would deliver them. */
   async pendingTasks(homeId: string): Promise<HomeTaskRecord[]> {
     const pending: HomeTaskRecord[] = [];
-    for await (const task of this.store.records()) {
+    for await (const task of this.actionable()) {
       if (task.homeId === homeId && task.wake?.state === "pending") pending.push(task);
     }
     return pending.sort(deliveryOrder);
@@ -105,7 +127,7 @@ export class WakeInboxOwner {
   async pushPending(homeId: string, mode: "task" | "waiting"): Promise<void> {
     await this.mutex.run(async () => {
       const pending: HomeTaskRecord[] = [];
-      for await (const task of this.store.records()) {
+      for await (const task of this.actionable()) {
         if (task.homeId === homeId && task.wake?.state === "pending" && task.wake.push === "pending") pending.push(task);
       }
       if (mode === "task") { for (const task of pending) await this.pushTask(task); return; }
@@ -124,7 +146,7 @@ export class WakeInboxOwner {
     await this.mutex.run(async () => {
       const proven = new Map<string, string[]>();
       const unfinished = new Set<string>();
-      for await (const task of this.store.records()) {
+      for await (const task of this.actionable()) {
         if (!task.wake || task.wake.state === "acknowledged") continue;
         if (task.wake.state !== "claimed" && task.wake.delivery) unfinished.add(task.wake.delivery.operationId);
         if (task.wake.state === "claimed") {
@@ -165,7 +187,7 @@ export class WakeInboxOwner {
       // One store read serves the whole selection: it changes no state, so the
       // pending results, in delivery order, are fixed for this admission.
       const candidates: HomeTaskRecord[] = [];
-      for await (const task of this.store.records()) {
+      for await (const task of this.actionable()) {
         if (task.homeId !== route.homeId || task.wake?.state !== "pending") continue;
         if (task.wake.routeGeneration !== route.routeGeneration) {
           await this.change(task.taskId, current => ({ ...current, state: "blocked" }), "route-replaced");
@@ -264,7 +286,10 @@ export class WakeInboxOwner {
   async settle(route: HomeWakeRoute, operationId: string): Promise<void> {
     await this.mutex.run(async () => {
       const proven: string[] = [];
-      for await (const task of this.store.records()) {
+      // Only an operation with an actionable delivered result has anything to finish.
+      let delivered = false;
+      for await (const task of this.actionable()) {
+        if (task.wake?.delivery?.operationId === operationId) delivered = true;
         if (task.wake?.delivery?.operationId !== operationId || task.wake.state !== "admitted") continue;
         this.assertRoute(task, route);
         const proof = await this.prove(task);
@@ -275,7 +300,7 @@ export class WakeInboxOwner {
         await this.change(task.taskId, wake => ({ ...wake, state: "terminal" }), "canonical-terminal");
         proven.push(task.taskId);
       }
-      await this.finishOperation(route, operationId, proven);
+      if (delivered) await this.finishOperation(route, operationId, proven);
     });
   }
 
