@@ -395,7 +395,7 @@ struct NewSessionSheet: View {
                         .truncationMode(.middle)
                 }
                 .foregroundStyle(accent)
-                if let badge { SettingsBadgeView(badge: badge) }
+                if let badge { TronTag(TronTagModel(badge)) }
                 HStack(alignment: .top, spacing: 8) {
                     Color.clear.frame(width: 16, height: 1)
                     Text(caption)

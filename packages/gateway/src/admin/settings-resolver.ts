@@ -189,6 +189,19 @@ export function nearestTrustDecision(decisions: Record<string, boolean>, project
   }
 }
 
+/** A composing key's value from the layers below `layer`: what that layer's
+ * entries are relative to. */
+export function composedBelow(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers, layer: LayerId): unknown {
+  let value = builtinValue(key, qualifiers);
+  for (const below of BOTTOM_UP.slice(1, BOTTOM_UP.indexOf(layer))) {
+    const binding = key.layers[below as Exclude<LayerId, "builtin">];
+    if (!binding || !stores.layers.includes(below) || !layerApplied(stores, below).applied) continue;
+    const entry = readBinding(stores, below, binding, qualifiers, false, key.id);
+    if (entry !== undefined) value = key.type.compose ? key.type.compose(value, entry) : entry;
+  }
+  return value;
+}
+
 function layerApplied(stores: SettingsStores, layer: LayerId): { applied: boolean; reason?: "untrusted" } {
   if (layer === "project" && stores.project && !stores.project.applied) return { applied: false, reason: "untrusted" };
   return { applied: true };

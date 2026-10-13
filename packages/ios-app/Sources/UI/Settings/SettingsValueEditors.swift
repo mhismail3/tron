@@ -140,7 +140,7 @@ struct SettingsListEditor: View {
                         // One control per row. A direct button, not a Menu: SwiftUI menus
                         // fail to open in a sheet presented from another sheet (#877).
                         TronSettingsRow(icon: nil, title: item.text) {
-                            itemAction("trash", "Remove \(item.text)", accent: .tronError) { items.removeAll { $0.id == item.id } }
+                            removeButton(item.text) { items.removeAll { $0.id == item.id } }
                         }
                     }
                     if items.isEmpty { TronSettingsRow(icon: nil, title: "None") }
@@ -164,19 +164,17 @@ struct SettingsListEditor: View {
         .tronSaveToolbar { onChange(.array(items.map { .string($0.text) })); dismiss() }
     }
 
-    private func itemAction(_ icon: String, _ label: String, enabled: Bool = true, accent: Color = .tronEmerald,
-                            _ action: @escaping () -> Void) -> some View {
+    private func removeButton(_ item: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon)
+            Image(systemName: "trash")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(enabled ? accent : Color.tronTextMuted)
+                .foregroundStyle(Color.tronError)
                 .frame(width: 36, height: 32)
-                .glassEffect(.regular.tint(accent.opacity(0.10)).interactive(), in: Capsule())
+                .glassEffect(.regular.tint(Color.tronError.opacity(0.10)).interactive(), in: Capsule())
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityLabel(label)
+        .accessibilityLabel("Remove \(item)")
     }
 }

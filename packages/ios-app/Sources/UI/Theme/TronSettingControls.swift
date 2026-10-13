@@ -131,6 +131,64 @@ struct TronChoicePicker<ID: Hashable>: View {
     }
 }
 
+/// Several choices from one list, committed with Save. The order chosen is kept;
+/// a newly chosen item joins the end.
+struct TronChecklistPicker<ID: Hashable>: View {
+    let title: String
+    var help: String? = nil
+    let choices: [TronChoice<ID>]?
+    var optionIdentifierPrefix = "settings-option-"
+    let onSave: ([ID]) -> Void
+    @State private var chosen: [ID]
+    @State private var query = ""
+    @Environment(\.dismiss) private var dismiss
+    private let initial: [ID]
+
+    init(title: String, help: String? = nil, choices: [TronChoice<ID>]?, selected: [ID],
+         optionIdentifierPrefix: String = "settings-option-", onSave: @escaping ([ID]) -> Void) {
+        self.title = title; self.help = help; self.choices = choices
+        self.optionIdentifierPrefix = optionIdentifierPrefix; self.onSave = onSave
+        initial = selected
+        _chosen = State(initialValue: selected)
+    }
+
+    private var shown: [TronChoice<ID>] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard let choices, !trimmed.isEmpty else { return choices ?? [] }
+        return choices.filter { $0.label.localizedCaseInsensitiveContains(trimmed) || $0.detail?.localizedCaseInsensitiveContains(trimmed) == true }
+    }
+
+    var body: some View {
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                if let help { TronSettingsCaption(help).padding(.bottom, 4) }
+                if choices == nil {
+                    TronLoadingState(label: "Loading…").frame(maxWidth: .infinity, alignment: .leading)
+                }
+                ForEach(shown) { choice in
+                    let isChosen = chosen.contains(choice.id)
+                    TronCatalogOptionRow(title: choice.label, summary: choice.disabledReason, detail: choice.detail,
+                                         icon: "circle", isSelected: isChosen,
+                                         isEnabled: choice.disabledReason == nil || isChosen) {
+                        if isChosen { chosen.removeAll { $0 == choice.id } } else { chosen.append(choice.id) }
+                    }
+                    .accessibilityIdentifier(optionIdentifierPrefix + choice.label)
+                }
+                if choices != nil && shown.isEmpty { TronSettingsCaption("No options match this search") }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle(title)
+        .tronSaveToolbar(enabled: chosen != initial) {
+            onSave(chosen)
+            dismiss()
+        }
+        .modifier(TronChoiceSearch(enabled: (choices?.count ?? 0) > 12, query: $query))
+    }
+}
+
 private struct TronChoiceSearch: ViewModifier {
     let enabled: Bool
     @Binding var query: String

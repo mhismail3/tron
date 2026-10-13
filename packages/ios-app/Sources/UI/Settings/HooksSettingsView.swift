@@ -358,7 +358,6 @@ struct HooksSettingsView: View {
                             subtitle: record.handlers.isEmpty
                                 ? "No registered handlers · tool/command registration only"
                                 : "\(record.handlerCount) registered handler\(record.handlerCount == 1 ? "" : "s") · \(record.eventCount) event\(record.eventCount == 1 ? "" : "s")",
-                            subtitleLineLimit: 2,
                             accent: .tronSessionTeal
                         ) {
                             ComposerResourceBadges(hookProvenance: record.provenance, accent: .tronSessionTeal)
@@ -391,7 +390,6 @@ struct HooksSettingsView: View {
                             subtitle: event.providers.isEmpty
                                 ? "No registered handlers · supported event"
                                 : "\(event.handlerCount) handler\(event.handlerCount == 1 ? "" : "s") · \(event.providers.count) provider\(event.providers.count == 1 ? "" : "s")",
-                            subtitleLineLimit: 2,
                             accent: event.descriptor.isSupported ? .tronSessionTeal : .tronAmber
                         )
                     }

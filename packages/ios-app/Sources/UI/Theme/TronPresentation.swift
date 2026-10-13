@@ -1312,16 +1312,6 @@ enum TronSettingsGroupSurfaceStyle: Equatable, Sendable {
     case scrollOptimized
 }
 
-/// One badge, styled by its kind (doc 7.3). An unknown kind is neutral and
-/// still shows its label.
-struct SettingsBadgeView: View {
-    let badge: SettingsBadge
-
-    var body: some View {
-        TronTag(TronTagModel(badge))
-    }
-}
-
 /// A small tinted label for provenance and state ("Mac", "Changed outside Tron").
 /// The one tag primitive: rows attach tags with `tronSettingsRowTags`.
 struct TronTagModel: Identifiable {

@@ -760,7 +760,7 @@ exact-digest approve/decline receipts. Their recorded red runs distinguish the l
 regressions from subsequent successful validation.
 Changes separates disposable history errors from action failures. An undo conflict renders the Gateway’s formatted current/applied values without replacing the historical entry; both RPC and per-change failures retain that structured detail, even when an earlier outcome succeeded. The existing undo-conflict journey exercises both envelopes.
 
-`SettingsValueEditors` supplies the generic numeric-map list editor as well as secret and string-list editors. A numeric map takes every field name, label and numeric range from the served metadata; unknown fields or unsafe numeric representations stay read-only. Save sends a typed object through the ordinary preview/receipt path, and dismissal never submits a draft. The existing secret/list E2E journey also checks offered bounds, untouched-field preservation and numeric-map save/reopen/cancel; the Gateway journey proves an unoffered field cannot erase the stored map. Project Sources and Run reuse the scoped package and Hooks owners rather than returning to a Mac/Project picker. The dashboard also offers Project settings through the existing workspace browser, so a folder needs no chat to acquire defaults. Its sheet handoff samples current presentation authority at dismissal (not a cached active flag) and retains the exact Mac identity. New Session resolves its model default through the same schema and shows the shared served source badge; choosing an override removes that default-source claim. The dashboard/no-chat journey proves a Project default remains inherited at creation. Manage Session shows automatic-compaction policy once, in the generic Context group; manual Compact Now remains a separate receipt-owning Context action rather than a repeated policy footer in the model card.
+`SettingsValueEditors` supplies the generic numeric-map list editor as well as secret and string-list editors. A numeric map takes every field name, label and numeric range from the served metadata; unknown fields or unsafe numeric representations stay read-only. Save sends a typed object through the ordinary preview/receipt path, and dismissal never submits a draft. The existing secret/list E2E journey also checks offered bounds, untouched-field preservation and numeric-map save/reopen/cancel; the Gateway journey proves an unoffered field cannot erase the stored map. Project settings reuse the scoped package and Hooks owners rather than returning to a Mac/Project picker. Settings › Projects opens the existing workspace browser, so a folder needs no chat to acquire defaults. Its sheet handoff samples current presentation authority at dismissal (not a cached active flag) and retains the exact Mac identity. New Session resolves its model default through the same schema and shows the shared served source badge; choosing an override removes that default-source claim. The dashboard/no-chat journey proves a Project default remains inherited at creation. Manage Session shows automatic-compaction policy once, in the generic Context group; manual Compact Now remains a separate receipt-owning Context action rather than a repeated policy footer in the model card.
 
 The generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is
 `SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
@@ -818,12 +818,14 @@ preserve existing row identity, and repeated cursors stop rather than loop.
 Hosted coverage opens and dismisses a served catalog without writing, selects a
 model and verifies dependent thinking options refresh, and reaches a second page
 then searches without carrying the old cursor or applying any setting. `SettingsValueEditors.swift` hosts write-only
-secret replacement and ordered string-list add/remove/reorder in standard
+secret replacement and string-list add/remove in standard
 progressive sheets, fields, groups, rows and action capsules. Secret drafts
 start empty and are cleared on submission/disappearance; list drafts have local row
 identity and write only on Save. Unknown item kinds stay read-only. The
 `testSettingsRendererSecretAndListEditors` journey reopens both editors against the
-fixture socket to prove redaction and persisted ordering.
+fixture socket to prove redaction and persisted values. A `checklist` row opens
+the shared `TronChecklistPicker` over its served options and saves the chosen set
+from the toolbar; the Gateway stores it in the layer's own form.
 `testSettingsRendererOrderedChoiceUsesSharedSlider` exercises a served choice and
 `testSettingsRendererNumberUsesSharedSlider` exercises a served number through selection
 and persistence; the legacy Agent Defaults journey protects the existing
@@ -842,12 +844,13 @@ for an outside entry that refers to the Tron change it replaced.
 `testSettingsRendererUsesCurrentDefaultSourceAction` proves one applied unset
 against the hosted socket and preserves the unknown badge without dispatching it.
 This is primitive coverage; session-surface adoption still owns the runtime fence.
-Manage Session and Manage Home embed the same schema renderer: essential rows and
-sub-sheet links per section, with search on the sub-sheets. Home owns Chat then Profile;
-Manage Session owns Chat. The shared Chat card remains the only value editor
-for its live model, thinking and context window, while their generic rows retain
-schema provenance and reset actions. Other keys remain read-only with routes to
-the shared Project or Mac surface. Disposable previews own separate busy state
+Settings (the gear) owns configuration; Manage Session and Manage Home (the ring)
+own the chat's live state and keep only its direct controls: the shared Chat
+card for model, thinking and context window, Compact Now with automatic
+compaction, and, on Home, the memory model, each through the renderer's `.keys`
+presentation. The Chat card's receipt/revision adapter remains the only value
+editor for those keys; the renderer keeps their provenance and reset rows on
+Settings › This Chat. Disposable previews own separate busy state
 from accepted mutations. Exact request, surface-token, target, foreground and
 profile fences reject stale responses; retirement releases preview state without
 cancelling a receipt. The controlled hosted preview journey holds a response
@@ -1689,9 +1692,9 @@ screenshots are diagnostic evidence, not substitutes for successful interaction.
 State-boundary integration tests supplement these journeys where the native
 fixture cannot establish store/runtime behavior.
 
-`ProjectSettingsContent` is the shared Project card behind Manage Session's
-Project settings row, the dashboard workspace header's context-menu action, and
-New Session's selected-workspace row. The last route edits a project before its
+`ProjectSettingsContent` is the shared Project card behind Settings' Project row
+(from a chat) and Projects row (from the dashboard), the dashboard workspace
+header's context-menu action, and New Session's selected-workspace row. The last route edits a project before its
 first chat. Every route captures the Gateway and exact workspace; another Mac
 requires explicit Use This Server before any settings read/write. The card
 composes the generic Project-layer renderer with existing trust review and a
@@ -1704,20 +1707,25 @@ Project root (`TrustInspection.projectDir`), and its rows carry the resolver's
 git-state and Changed outside Tron badges with Apply again; this UI never infers
 a root or replays audit.
 
-Settings is the Mac-layer surface, regardless of whether it was opened from the
-dashboard, an ordinary chat or Home. Its schema renderer owns Model, Context,
-Tools, Permissions, Run and supply-section keys, summaries and search. Native
-account, MCP, package, hook and Setup flows supplement those sections without
-duplicating harness controls. Pairing and account repair remain reachable when
+Settings is ordered from the most specific scope to the most general. Its first
+card holds Changes and the scope it was opened from: This Chat and its Project
+from a chat, Home from Home, or Projects from the dashboard. Each scope row
+previews what that scope sets and opens it overrides-first, with Override a
+Setting for everything else. The Mac renderer follows, grouped into the shared
+`SettingsFamily` palette: Agent (purple), Tools & Extensions (cyan) and Data &
+Diagnostics (blue), each a titled card of one row per section; then This iPhone
+(emerald), which never changes harness behaviour. Every sub-sheet a family row
+opens inherits that accent through `TronProgressiveSheetLink`. Native account,
+MCP, package, hook and Setup flows lead their section's sub-sheet without
+duplicating harness controls, and stay reachable in the same family cards when
 resolution is offline. The default trust key is in Permissions; per-project
-trust belongs to the Project surface. This iPhone explicitly never changes
-harness behaviour. The former defaults, compaction and resource-path editors and
-all Global/Project scope pickers are removed; hook inventory inherits its caller's
-target. Hosted Mac-settings and offline navigation journeys protect the shared
-thinking editor, no-write dismissal and native flow reachability.
+trust belongs to the Project surface. The former defaults, compaction and
+resource-path editors and all Global/Project scope pickers are removed; hook
+inventory inherits its caller's target. Hosted Mac-settings and offline
+navigation journeys protect the shared thinking editor, no-write dismissal and
+native flow reachability.
 
-Manage Session embeds the renderer for its exact Chat target; its Settings
-destination opens Mac settings. Its bounded cards use an ordinary stack so the
+Manage Session's bounded cards use an ordinary stack so the
 shared Models presenter's lifetime cannot be ended by lazy eviction behind a
 nested sheet. The original popup acknowledgement/failure journeys reproduce the
 lazy-container failure and pass without relaxed assertions after that correction.
@@ -1726,15 +1734,9 @@ settings mutation receipt owner, with runtime/model/revision captured from the
 admitted session and rechecked immediately before a send. Opening or dismissing
 never writes. The renderer uses the resolver's allowed layer list: other-layer
 rows remain read-only and link to the Project or Mac editor rather than attempting
-a Chat write. The hosted `testManageSessionUsesCurrentDefault` journey exercises
-reset through this actual route and reopens it to check the authoritative value;
-`testManageSessionSectionsAtAccessibilityTypeInLightAndDark` keeps inline and sub-sheet rows reachable
-at the largest accessibility type size in light and dark;
-Gateway settings-gate coverage owns persistence and provider-effect proof.
-The shared Chat card keeps its domain receipt/revision adapter; the renderer
-owns the remaining keys and all source/reset rows. Context supplements group delivered Agent
-Instructions and loaded Project Resources; Available Tools supplements Tools, while the schema
-keeps source/reset ownership for the shared tools control. Run contains the existing Hooks flow.
+a Chat write. Gateway settings-gate coverage owns persistence and provider-effect proof.
+Manage Session keeps Agent Instructions, Available Tools and Project Resources as
+its own rows.
 Manage Home's Context section opens the existing next-request/delivered Home Context view; memory,
 chapters, tasks and permission requests retain their established domain owners.
 

@@ -1357,6 +1357,14 @@ export class RuntimeSlot {
     };
   }
 
+  /** The tools this chat's selection may name: its registry, less hidden tools
+   * (`setTools` refuses those). */
+  settingsToolCatalog(): Array<{ name: string; description?: string }> {
+    this.assertNoTrustReload();
+    return this.runtime.session.getAllTools().filter(tool => tool.exposure !== "hidden")
+      .map(tool => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}) }));
+  }
+
   /** This chat's Chat layer as its session record holds it (settings-model.md
    * 3.2): the model, thinking, explicit context window and active tools. */
   settingsChatLayer(): ChatStore {

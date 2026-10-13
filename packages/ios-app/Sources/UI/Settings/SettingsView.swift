@@ -38,9 +38,13 @@ struct SettingsView: View {
         }
     }
 
-    /// This chat's or Home's own settings, then the project's (or the project picker).
+    /// The first card: changes, then what is specific to where Settings opened —
+    /// this chat and its project, Home, or (from the dashboard) every project.
     @ViewBuilder
-    private var scopedSettings: some View {
+    private var scopeRows: some View {
+        SettingsChangesLink(scope: changesScope, subtitle: "What agents changed, and approvals waiting for you",
+                            onOpenSession: onImported)
+        TronSettingsDivider(accent: .tronEmerald)
         switch context {
         case .chat(let sessionID, let cwd):
             SettingsRendererView(
@@ -50,7 +54,8 @@ struct SettingsView: View {
                 projectCWD: cwd, presentation: .overridesLink(scope: "this chat", title: "This Chat", icon: "bubble.left.and.text.bubble.right")
             )
             if let cwd, !cwd.isEmpty, let profileID = model.selectedGatewayProfileID() {
-                TronGlassCard(accent: .tronEmerald) { ProjectSettingsLink(cwd: cwd, profileID: profileID) }
+                TronSettingsDivider(accent: .tronEmerald)
+                ProjectSettingsLink(cwd: cwd, profileID: profileID)
             }
         case .home(let sessionID):
             SettingsRendererView(
@@ -60,14 +65,12 @@ struct SettingsView: View {
                 presentation: .overridesLink(scope: "Home", title: "Home", icon: "house")
             )
         case .dashboard:
-            TronGlassCard(accent: .tronEmerald) {
-                Button { browsingProjects = true } label: {
-                    TronSettingsRow(icon: "folder.badge.gearshape", title: "Projects",
-                                    subtitle: "Choose a workspace to see what it sets", subtitleColor: .tronTextSecondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("settings-projects")
+            Button { browsingProjects = true } label: {
+                TronSettingsRow(icon: "folder.badge.gearshape", title: "Projects",
+                                subtitle: "Choose a workspace to see what it sets", subtitleColor: .tronTextSecondary)
             }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("settings-projects")
         }
     }
 
@@ -75,10 +78,8 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
-                    SettingsChangesLink(scope: changesScope, subtitle: "What agents changed, and approvals waiting for you",
-                                        onOpenSession: onImported)
-                        .tronGlassSurface(accent: .tronEmerald)
-                    scopedSettings
+                    TronGlassCard(accent: .tronEmerald) { scopeRows }
+                        .tronSettingsVisualTheme(accent: .tronEmerald)
                     if context != .dashboard {
                         TronSettingsDetailText("Defaults on this Mac. Everything above takes precedence.")
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -93,36 +94,22 @@ struct SettingsView: View {
                         sectionSubtitle: { section in
                             switch section {
                             case "accounts": "Model providers, custom models, and connected services"
+                            case "sources": "Extensions, hooks, and package sources"
                             case "setup": "Connections, import, and logs"
                             default: nil
                             }
                         },
                         unresolvedSupplement: AnyView(offlineDestinations)
                     )
-
-                    // Like every top-level group: one row, its destinations in the sub-sheet.
-                    TronGlassCard(accent: .tronEmerald) {
-                        settingsLink("This iPhone", summary: "Appearance and sessions. Stored on this iPhone only.",
-                                     icon: "iphone", accent: .tronEmerald) {
-                            ScrollView {
-                                TronGlassCard(accent: .tronEmerald) {
-                                    settingsLink("Appearance", summary: "Theme, type scale, and visual preferences",
-                                                 icon: "circle.lefthalf.filled", accent: .tronEmerald) {
-                                        AppearanceSettingsView()
-                                    }
-                                    settingsDivider(accent: .tronEmerald)
-                                    settingsLink("Sessions", summary: "Dashboard list and subagent activity",
-                                                 icon: "slider.horizontal.2.square", accent: .tronEmerald) {
-                                        AppLocalBehaviorSettingsView()
-                                    }
-                                }
-                                .tronSettingsCaption("Stored on this iPhone. Never changes harness behaviour.")
-                                .padding(20)
-                            }
-                            .tronScrollEdgeChrome()
-                            .tronNavigationTitle("This iPhone")
-                        }
+                    TronSettingsGroup("This iPhone", detail: "Stored on this iPhone. Never changes harness behaviour.",
+                                      accent: .tronEmerald) {
+                        settingsLink("Appearance", summary: "Theme, type scale, and visual preferences",
+                                     icon: "circle.lefthalf.filled") { AppearanceSettingsView() }
+                        TronSettingsDivider(accent: .tronEmerald)
+                        settingsLink("Sessions", summary: "Dashboard list and subagent activity",
+                                     icon: "slider.horizontal.2.square") { AppLocalBehaviorSettingsView() }
                     }
+                    .tronSettingsVisualTheme(accent: .tronEmerald)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
@@ -188,56 +175,74 @@ struct SettingsView: View {
         #endif
     }
 
+    /// While the schema cannot load, the hand-built flows (pairing and account
+    /// repair among them) stay reachable, in the same family cards.
     private var offlineDestinations: some View {
         VStack(spacing: 18) {
-            if let rows = sectionSupplement("tools") { TronSettingsGroup("Tools", accent: SettingsSectionStyle("tools").accent) { rows }.tronSettingsVisualTheme(accent: SettingsSectionStyle("tools").accent) }
-            if let rows = sectionSupplement("permissions") { TronSettingsGroup("Permissions", accent: SettingsSectionStyle("permissions").accent) { rows }.tronSettingsVisualTheme(accent: SettingsSectionStyle("permissions").accent) }
-            if let rows = sectionSupplement("run") { TronSettingsGroup("Run", accent: SettingsSectionStyle("run").accent) { rows }.tronSettingsVisualTheme(accent: SettingsSectionStyle("run").accent) }
-            if let rows = sectionSupplement("accounts") { TronSettingsGroup("Accounts", accent: SettingsSectionStyle("accounts").accent) { rows }.tronSettingsVisualTheme(accent: SettingsSectionStyle("accounts").accent) }
-            if let rows = sectionSupplement("sources") { TronSettingsGroup("Sources", accent: SettingsSectionStyle("sources").accent) { rows }.tronSettingsVisualTheme(accent: SettingsSectionStyle("sources").accent) }
-            if let rows = sectionSupplement("setup") { TronSettingsGroup("Setup", accent: SettingsSectionStyle("setup").accent) { rows }.tronSettingsVisualTheme(accent: SettingsSectionStyle("setup").accent) }
+            ForEach(SettingsFamily.allCases, id: \.self) { family in
+                let rows = Self.supplementedSections.filter { SettingsSectionStyle($0).family == family }
+                    .compactMap { sectionSupplement($0) }
+                if !rows.isEmpty {
+                    TronSettingsGroup(family.title, accent: family.accent) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                            if index > 0 { TronSettingsDivider(accent: family.accent) }
+                            row
+                        }
+                    }
+                    .tronSettingsVisualTheme(accent: family.accent)
+                }
+            }
         }
     }
 
+    private static let supplementedSections = ["accounts", "tools", "sources", "setup"]
+
     /// Native flows keep their established controls inside the schema's section.
     /// Harness values (including default trust) have just one generic editor.
-    /// Rows take their section's accent from the renderer; nil means none.
+    /// Rows take their family's accent from the presenting card or sheet.
     private func sectionSupplement(_ section: String) -> AnyView? {
         switch section {
         case "tools":
-            AnyView(settingsLink("MCP Servers", summary: "Tool providers and authentication",
-                                 icon: "server.rack", accent: .tronCyan) {
+            AnyView(settingsLink("MCP Servers", summary: "Tool providers and authentication", icon: "server.rack") {
                 MCPServersSettingsView(projectCWD: nil, sessionID: nil)
-            })
-        case "run":
-            AnyView(settingsLink("Hooks", summary: "Loaded event handlers from extensions",
-                                 icon: "bolt.horizontal.circle", accent: .tronAmber) {
-                HooksSettingsView(projectCWD: nil)
             })
         case "accounts":
             AnyView(VStack(spacing: 0) {
-                settingsLink("Model Providers", summary: "Provider accounts and authentication",
-                             icon: "key", accent: .tronPurple) { ProvidersSettingsView(sessionID: nil) }
-                settingsDivider(accent: .tronPurple)
-                settingsLink("Custom Models", summary: "Saved model definitions and aliases",
-                             icon: "slider.horizontal.3", accent: .tronPurple) { CustomModelsSettingsView() }
-                settingsDivider(accent: .tronPurple)
-                settingsLink("Connected Services", summary: "Accounts and service capabilities",
-                             icon: "link", accent: .tronPurple) { IntegrationsSettingsView() }
+                settingsLink("Model Providers", summary: "Provider accounts and authentication", icon: "key") {
+                    ProvidersSettingsView(sessionID: nil)
+                }
+                TronSettingsDivider()
+                settingsLink("Custom Models", summary: "Saved model definitions and aliases", icon: "slider.horizontal.3") {
+                    CustomModelsSettingsView()
+                }
+                TronSettingsDivider()
+                settingsLink("Connected Services", summary: "Accounts and service capabilities", icon: "link") {
+                    IntegrationsSettingsView()
+                }
             })
         case "sources":
-            AnyView(settingsLink("Extensions", summary: "Installed packages and what they contribute",
-                                 icon: "shippingbox", accent: .tronCyan) { ExtensionsSettingsView(projectCWD: nil) })
+            AnyView(VStack(spacing: 0) {
+                settingsLink("Extensions", summary: "Installed packages and what they contribute", icon: "shippingbox") {
+                    ExtensionsSettingsView(projectCWD: nil)
+                }
+                TronSettingsDivider()
+                settingsLink("Hooks", summary: "Loaded event handlers from extensions", icon: "bolt.horizontal.circle") {
+                    HooksSettingsView(projectCWD: nil)
+                }
+            })
         case "setup":
             AnyView(VStack(spacing: 0) {
-                settingsLink("Connections", summary: "Pair Macs, devices, and push readiness",
-                             icon: "desktopcomputer", accent: .tronBlue) { ConnectionsSettingsView() }
-                settingsDivider(accent: .tronBlue)
-                settingsLink("Import", summary: "Restore a session export",
-                             icon: "tray.and.arrow.down", accent: .tronBlue) { ImportSettingsView(onImported: onImported) }
-                settingsDivider(accent: .tronBlue)
-                settingsLink("Logs", summary: "Recent diagnostics from paired Mac gateways",
-                             icon: "text.alignleft", accent: .tronBlue) { GatewayLogsSettingsView() }
+                settingsLink("Connections", summary: "Pair Macs, devices, and push readiness", icon: "desktopcomputer") {
+                    ConnectionsSettingsView()
+                }
+                TronSettingsDivider()
+                settingsLink("Import", summary: "Restore a session export", icon: "tray.and.arrow.down") {
+                    ImportSettingsView(onImported: onImported)
+                }
+                TronSettingsDivider()
+                settingsLink("Logs", summary: "Recent diagnostics from paired Mac gateways", icon: "text.alignleft") {
+                    GatewayLogsSettingsView()
+                }
             })
         default:
             nil
@@ -248,29 +253,13 @@ struct SettingsView: View {
         _ title: String,
         summary: String,
         icon: String,
-        accent: Color,
         @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
-        TronProgressiveSheetLink(
-            accessibilityLabel: title,
-            accent: accent,
-            destination: destination
-        ) {
-            TronSettingsRow(
-                icon: icon,
-                title: title,
-                subtitle: summary,
-                subtitleLineLimit: 2,
-                accent: accent,
-                subtitleColor: .tronTextSecondary
-            )
-            .contentShape(Rectangle())
+        TronProgressiveSheetLink(accessibilityLabel: title, destination: destination) {
+            TronSettingsRow(icon: icon, title: title, subtitle: summary, subtitleColor: .tronTextSecondary)
+                .contentShape(Rectangle())
         }
         .accessibilityIdentifier("settings-link-\(title)")
-    }
-
-    private func settingsDivider(accent: Color) -> some View {
-        TronSettingsDivider(accent: accent)
     }
 }
 
@@ -349,10 +338,11 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
             }
     }
 
+    /// A destination keeps its presenter's family accent unless the link names one.
     @ViewBuilder
     private var destinationContent: some View {
-        if let accent {
-            destination().tronSettingsVisualTheme(accent: accent)
+        if let resolved = accent ?? inheritedTheme?.accent {
+            destination().tronSettingsVisualTheme(accent: resolved)
         } else {
             destination()
         }

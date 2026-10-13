@@ -18,6 +18,7 @@ import { OutsideChanges } from "./admin/settings-outside.js";
 import { SettingsApprovals } from "./admin/settings-approvals.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
+import { ScopeToolCatalog } from "./admin/tool-catalog.js";
 import { HookResources } from "./admin/hook-resources.js";
 import { AuthBroker } from "./admin/auth-broker.js";
 import { MacKeychainMcpCredentialOwner, McpAdminService } from "./admin/mcp-admin-service.js";
@@ -189,6 +190,9 @@ const settingsModel = new SettingsModel({
   trust,
   modelRuntime,
   homeMemoryModel: async () => (await sessions.homeOwner()?.memoryStatus())?.model,
+  toolCatalog: async (target) => target.kind === "session"
+    ? sessions.liveToolCatalog(target.sessionId)
+    : scopeToolCatalog.list(target.kind === "project" ? target.cwd : undefined),
 });
 const settingsRecord = new SettingsChangeRecord(config.tronHome);
 // Outside changes (docs/settings-model.md 5.6): every settings read compares the
@@ -535,6 +539,7 @@ const packages = new PackageService(
 // Hook listings load extensions for a scope without a session; the owner never
 // touches a runtime, so no session or global registration is involved.
 const hookResources = new HookResources(config.agentDir, trust, workRegistry, managedSubagents);
+const scopeToolCatalog = new ScopeToolCatalog(config.agentDir, trust, workRegistry, managedSubagents);
 const automationStore = new AutomationStore(config.tronHome, {
   changed: (automationId) => transport?.broadcast("automation.changed", {
     catalogRevision: automationStore.status().catalogRevision,

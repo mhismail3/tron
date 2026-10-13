@@ -21,9 +21,9 @@ struct ProjectSettingsLink: View {
             accent: .tronEmerald,
             destination: { ProjectSettingsContent(cwd: cwd, profileID: profileID) }
         ) {
-            TronSettingsRow(icon: "folder.badge.gearshape", title: "Project settings",
+            TronSettingsRow(icon: "folder.badge.gearshape", title: "Project",
                             subtitle: URL(fileURLWithPath: cwd).lastPathComponent,
-                            accent: .tronEmerald)
+                            accent: .tronEmerald, subtitleColor: .tronTextSecondary)
         }
         .accessibilityIdentifier("project-settings-link")
     }
@@ -97,9 +97,9 @@ struct ProjectSettingsContent: View {
                     TronSettingsGroup("Project", detail: cwd, accent: .tronEmerald) {
                         TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: trust?.stateTitle ?? "Trust",
                                         subtitle: trust?.stateDetail ?? "Checking…", subtitleColor: .tronTextSecondary) {
-                            TronProgressiveSheetLink(accessibilityLabel: "Review trust", accent: .tronAmber,
+                            TronProgressiveSheetLink(accessibilityLabel: "Review trust",
                                 destination: { TrustSettingsView(target: TrustTarget(cwd: cwd)) }) {
-                                TronInlineActionLabel("Review", accent: .tronAmber)
+                                TronInlineActionLabel("Review")
                             }
                         }
                         TronSettingsDivider()
@@ -116,20 +116,20 @@ struct ProjectSettingsContent: View {
                     SettingsRendererView(target: .object(["kind": .string("project"), "cwd": .string(cwd)]),
                                          writeLayer: "project", embedded: true, externalControlKeys: ["sources.packages"], projectCWD: cwd,
                                          presentation: .overrides(scope: "this project", allTitle: "Project Settings"))
-                    TronSettingsGroup("Resources", accent: .tronCyan) {
-                        TronProgressiveSheetLink(accessibilityLabel: "Extensions", accent: .tronCyan,
+                    TronSettingsGroup(SettingsFamily.tools.title, accent: SettingsFamily.tools.accent) {
+                        TronProgressiveSheetLink(accessibilityLabel: "Extensions",
                             destination: { ExtensionsSettingsView(projectCWD: cwd) }) {
                             TronSettingsRow(icon: "shippingbox", title: "Extensions", subtitle: "Packages installed for this project",
-                                            accent: .tronCyan, subtitleColor: .tronTextSecondary)
+                                            subtitleColor: .tronTextSecondary)
                         }
-                        TronSettingsDivider()
-                        TronProgressiveSheetLink(accessibilityLabel: "Hooks", accent: .tronCyan,
+                        TronSettingsDivider(accent: SettingsFamily.tools.accent)
+                        TronProgressiveSheetLink(accessibilityLabel: "Hooks",
                             destination: { HooksSettingsView(projectCWD: cwd) }) {
                             TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks", subtitle: "Loaded project event handlers",
-                                            accent: .tronCyan, subtitleColor: .tronTextSecondary)
+                                            subtitleColor: .tronTextSecondary)
                         }
                     }
-                    .tronSettingsVisualTheme(accent: .tronCyan)
+                    .tronSettingsVisualTheme(accent: SettingsFamily.tools.accent)
                     TronSettingsCaption("Project values live in this workspace's .pi files. Changes are staged when possible; Tron never commits them.")
                 }
             }

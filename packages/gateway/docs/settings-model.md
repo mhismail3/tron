@@ -511,7 +511,7 @@ Gateway serves it to clients; iOS holds no per-key code.
 | `subgroup` | An optional heading within the section (for example `Compaction`). |
 | `qualifiers` | Any of `role`, `model`, `provider`, `tool`, `project`, `connection`, `key`, `direction` (a floor override's direction). |
 | `type` | The value type and its static validation (range, pattern, length, item type). |
-| `options` | A static list of allowed values, or an `optionsSource`: a named Gateway source such as `catalog.models`, `catalog.thinkingLevels(model)` or `catalog.contextWindow(model)`, with the keys it depends on. |
+| `options` | A static list of allowed values, or an `optionsSource`: a named Gateway source such as `catalog.models`, `catalog.thinkingLevels(model)`, `catalog.contextWindow(model)` or `catalog.tools`, with the keys it depends on. `catalog.tools` offers a chat's live registry (less hidden tools); for a Mac or Project target, pi's built-in tools then the opt-in (`defaultActive: false`) tools the scope's extensions register, since other extension tools are active once registered whatever the selection says. A chosen name the catalog no longer offers stays listed, disabled, so it can be cleared. |
 | `layers` | The allowed layers, each with its storage binding (file and path, or session entry type). |
 | `builtin` | The built-in value, or `pi-default`. |
 | `timing` | `fixed` or `live`, or per direction `{ narrow, widen }` ([3.4](#34-timing)). |
@@ -583,7 +583,12 @@ open:
   resolves `modelOverrides ?? ordinary` on its merged settings.
 - **Relative values.** pi's `defaultTools` `+name`/`-name` lists modify the value
   below them. That is the value type's `compose`, so the resolver still takes the
-  top applied layer and composes it over the layer below.
+  top applied layer and composes it over the layer below. A change names the
+  selection it wants; the type's `encode` stores it in the layer's own form: a
+  Mac or Project layer holding modifiers (or nothing) keeps `+name`/`-name`
+  entries relative to the layers below, so a later Mac change still flows into
+  the project, and a selection equal to the one below leaves the layer unset. A
+  plain list stays plain. Direction compares what each value selects.
 - **Which keys a target shows.** A key appears for a target that has at least one
   of its allowed layers, so Home-only profile keys never appear on an ordinary
   chat.
@@ -1212,15 +1217,17 @@ that `settings.resolve` computes for the target:
   example three, then "+N more" into Changes), each with its actor, reason and
   Undo.
 
-Clients choose the presentation of these facts. On iOS (#876) a primary surface
-shows each section's essential keys as standard rows with their controls, its
-pending approvals, its hand-built rows, then one full-row link to a sub-sheet;
-the link names the latest agent change, or otherwise the remaining essential
-values or the key count. The sub-sheet holds every key of the section, essential
-first, then each subgroup and **Advanced**, with each row's source, help and
-actions (reset, Apply again, Edit at another layer), plus **search** over label,
-id, help and current value. Nothing expands in place, and every override stays
-visible on its row's source line rather than as a separate summary row.
+Clients choose the presentation of these facts. On iOS (#876) Settings groups
+related sections into titled cards that share an accent: **Agent** (Model,
+Context, Run, Accounts), **Tools & Extensions** (Tools, Permissions, Sources) and
+**Data & Diagnostics** (Setup); a section the app does not know joins **More**.
+Each section is one row whose subtitle names approvals waiting, else the latest
+agent change, else its essential values. The row opens a sub-sheet, in the same
+accent, holding the section's hand-built destinations and every key: essential
+first, then each subgroup and **Advanced**, each row with its help and source
+tags, plus search. A row has one control; a key whose source also offers an
+action (reset, Apply again) previews its value and opens its own sheet, which
+holds the control and one row per action. Nothing expands in place.
 
 ### 7.3 Badges
 
@@ -1280,8 +1287,9 @@ names one:
 | `number` | A field or slider with unit, range and step | retries, timeouts, context window |
 | `text` | A single- or multi-line field | compaction instructions, shell prefix |
 | `secret` | Write-only entry that shows "Set" or "Not set" | `httpProxy` |
-| `list` | An ordered list of a primitive, with add, remove and reorder | search paths, `enabledModels` |
-| `catalog` | A searchable picker over a Gateway-served catalog | model, tools, providers, projects |
+| `list` | A list of a primitive, with add and remove; items keep their order | search paths, `enabledModels` |
+| `checklist` | Several choices from a served option source, saved together | tools |
+| `catalog` | A searchable picker over a Gateway-served catalog | model, providers, projects |
 | `readOnly` | The `display` string | anything a client cannot edit |
 
 **Schema fields for presentation** are in [4.1](#41-fields): section, subgroup,
@@ -1330,8 +1338,9 @@ two RPCs (the Gateway README has the shapes). What the code fixes that 7.2 and
   `chat`) is not an override.
 - **The iPhone half** is `SettingsRendererView` (iOS architecture, presentation
   parity). It implements `toggle`, `choice`, `number`, `text`, `secret`, `list`,
-  `catalog` and `readOnly`. Secret entry is write-only and never prefilled;
-  ordered string lists support add, remove and reorder. Unknown list item
+  `checklist`, `catalog` and `readOnly`. Secret entry is write-only and never
+  prefilled; string lists support add and remove; a checklist saves its chosen
+  set from the toolbar. Unknown list item
   kinds remain visible read-only. Ordered choices reuse the app's existing anchored
   slider through `SettingsChoiceSlider`; bounded integer numbers use
   `SettingsNumberSlider` with the served range, unit and step. A dynamic range

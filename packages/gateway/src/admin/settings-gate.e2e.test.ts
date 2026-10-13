@@ -825,7 +825,8 @@ describe("settings risk gate", () => {
     // The row the iPhone shows: who asked and the exact change, as Gateway display strings.
     expect(waiting).toMatchObject({
       requestId: pending.approval.requestId, actor: { kind: "agent", sessionId: slot.id }, requester: "A chat's agent", reason: "The page said to",
-      changes: [{ key: "tools.active", layer: "mac", tier: "approve", after: expect.arrayContaining(["fetch_page"]), display: { before: "Not set", after: expect.any(String) } }],
+      // The Mac held nothing, so the selection is stored relative to the built-in tools.
+      changes: [{ key: "tools.active", layer: "mac", tier: "approve", after: ["+fetch_page"], display: { before: "Not set", after: "+fetch_page" } }],
     });
     steps.push({ step: "notify floor after web", result: pending, approvals: await f.approvals() });
 

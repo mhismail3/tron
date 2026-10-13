@@ -3413,6 +3413,14 @@ export class RuntimeRegistry {
     return slot.retainLease();
   }
 
+  /** A live chat's selectable tools, for its settings tool selection. The caller
+   * has already opened the chat. */
+  liveToolCatalog(sessionId: string): Array<{ name: string; description?: string }> {
+    const slot = this.slots.get(sessionId);
+    if (!slot || slot.isDisposed) throw new GatewayError("busy", "Session runtime is no longer available", true);
+    return slot.settingsToolCatalog();
+  }
+
   async acquire(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot> {
     this.assertSlotAdmissionOpen();
     if (this.homePublicationUncertain && this.home.chapterStateFor(sessionId).homeId) {

@@ -133,11 +133,9 @@ struct SettingsRendererView: View {
             // Rows inside a caller's card: no states of their own while loading.
             if let resolution { content(resolution) }
         } else if case .overridesLink(_, let title, let icon) = presentation, resolution == nil {
-            // The scope row keeps its place while the schema loads.
-            TronGlassCard(accent: .tronEmerald) {
-                TronSettingsRow(icon: icon, title: title, subtitle: loadError == nil ? "Loading…" : "Unavailable",
-                                subtitleColor: .tronTextSecondary)
-            }
+            // The scope row keeps its place in the caller's card while the schema loads.
+            TronSettingsRow(icon: icon, title: title, subtitle: loadError == nil ? "Loading…" : "Unavailable",
+                            subtitleColor: .tronTextSecondary)
         } else {
             VStack(alignment: .leading, spacing: 20) {
                 if let resolution {
@@ -166,9 +164,7 @@ struct SettingsRendererView: View {
         } else {
             switch presentation {
             case .sections:
-                ForEach(Self.sections(resolution)) { section in
-                    overviewSection(section, keys: keys(resolution, in: section.id), resolution: resolution)
-                }
+                overview(resolution)
             case .section(let id):
                 if let served = Self.sections(resolution).first(where: { $0.id == id }) {
                     sectionDetail(served, keys: keys(resolution, in: served.id), resolution: resolution)
@@ -203,25 +199,31 @@ struct SettingsRendererView: View {
 
     // MARK: Sections
 
-    /// A primary surface shows each section as one card holding one row: the
-    /// section's preview, opening the sub-sheet with every key and hand-built
-    /// destination. No headers, nothing inline, nothing expands.
+    /// A primary surface groups related sections into one titled card per family,
+    /// one previewing row per section. Every key lives on the section's sheet.
     @ViewBuilder
-    private func overviewSection(_ section: SettingsRendererSection, keys: [ResolvedSetting],
-                                 resolution: SettingsResolution) -> some View {
-        let style = SettingsSectionStyle(section.id)
-        if !keys.isEmpty || sectionSupplement?(section.id) != nil || !section.summary.pending.isEmpty {
-            TronGlassCard(accent: style.accent) {
-                sectionLink(section, keys: keys, style: style)
+    private func overview(_ resolution: SettingsResolution) -> some View {
+        let shown = Self.sections(resolution).filter { section in
+            !keys(resolution, in: section.id).isEmpty || sectionSupplement?(section.id) != nil || !section.summary.pending.isEmpty
+        }
+        ForEach(SettingsFamily.allCases, id: \.self) { family in
+            let members = shown.filter { SettingsSectionStyle($0.id).family == family }
+            if !members.isEmpty {
+                TronSettingsGroup(family.title, accent: family.accent) {
+                    ForEach(Array(members.enumerated()), id: \.element.id) { index, section in
+                        if index > 0 { TronSettingsDivider(accent: family.accent) }
+                        VStack(spacing: 0) { sectionLink(section, keys: keys(resolution, in: section.id)) }
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("settings-section-\(section.id)")
+                    }
+                }
+                .tronSettingsVisualTheme(accent: family.accent)
             }
-            .tronSettingsVisualTheme(accent: style.accent)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("settings-section-\(section.id)")
         }
     }
 
-    private func sectionLink(_ section: SettingsRendererSection, keys: [ResolvedSetting],
-                             style: SettingsSectionStyle) -> some View {
+    private func sectionLink(_ section: SettingsRendererSection, keys: [ResolvedSetting]) -> some View {
+        let style = SettingsSectionStyle(section.id)
         let summary = section.summary.essential.filter { !externalControlKeys.contains($0.key) }
             .map(\.display).joined(separator: " · ")
         let pending = section.summary.pending.count
@@ -240,8 +242,7 @@ struct SettingsRendererView: View {
                                  presentation: .section(section.id), sectionSupplement: sectionSupplement)
                 .tronNavigationTitle(section.title, accent: style.accent)
         } label: {
-            TronSettingsRow(icon: style.icon, title: section.title, subtitle: subtitle,
-                            subtitleLineLimit: 2, accent: style.accent,
+            TronSettingsRow(icon: style.icon, title: section.title, subtitle: subtitle, accent: style.accent,
                             subtitleColor: pending > 0 ? .tronAmber : .tronTextSecondary)
         }
         .accessibilityIdentifier("settings-section-\(section.id)-open")
@@ -257,6 +258,7 @@ struct SettingsRendererView: View {
             // Hand-built destinations (MCP Servers, Hooks, accounts) lead the sheet.
             if let supplement = sectionSupplement?(section.id) {
                 TronGlassCard(accent: SettingsSectionStyle(section.id).accent) { supplement }
+                    .tronSettingsVisualTheme(accent: SettingsSectionStyle(section.id).accent)
             }
             ForEach(Array(Self.detailGroups(section, keys: keys).enumerated()), id: \.offset) { index, group in
                 TronSettingsGroup(group.title, detail: group.detail ?? (index == 0 ? section.note : nil)) {
@@ -330,25 +332,23 @@ struct SettingsRendererView: View {
         .accessibilityIdentifier("settings-overrides")
     }
 
-    /// A scope as one card holding one row: what the scope sets, previewed, opening
-    /// the overrides sheet for that scope.
+    /// A scope as one row in its caller's card: what the scope sets, previewed,
+    /// opening the overrides sheet for that scope.
     private func overridesLink(_ resolution: SettingsResolution, scope: String, title: String, icon: String) -> some View {
         let set = Self.sorted(resolution.keys.filter { $0.layer == writeLayer || ownedLayers.contains($0.layer) })
         let preview = set.prefix(3).map { "\($0.presentation?.label ?? $0.key): \($0.display)" }
             + (set.count > 3 ? ["+\(set.count - 3) more"] : [])
-        return TronGlassCard(accent: .tronEmerald) {
-            TronProgressiveSheetLink(accessibilityLabel: title, identity: "settings.scope.\(scope)") {
-                SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
-                                     externalControlKeys: externalControlKeys, projectCWD: projectCWD,
-                                     presentation: .overrides(scope: scope, allTitle: "Override a Setting"))
-                    .tronNavigationTitle(title)
-            } label: {
-                TronSettingsRow(icon: icon, title: title,
-                                subtitle: set.isEmpty ? "Using defaults" : preview.joined(separator: " · "),
-                                subtitleLineLimit: 2, subtitleColor: .tronTextSecondary)
-            }
-            .accessibilityIdentifier("settings-scope-open")
+        return TronProgressiveSheetLink(accessibilityLabel: title, identity: "settings.scope.\(scope)") {
+            SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
+                                 externalControlKeys: externalControlKeys, projectCWD: projectCWD,
+                                 presentation: .overrides(scope: scope, allTitle: "Override a Setting"))
+                .tronNavigationTitle(title)
+        } label: {
+            TronSettingsRow(icon: icon, title: title,
+                            subtitle: set.isEmpty ? "Using defaults" : preview.joined(separator: " · "),
+                            subtitleColor: .tronTextSecondary)
         }
+        .accessibilityIdentifier("settings-scope-open")
     }
 
     private func layerEditor(for setting: ResolvedSetting) -> LayerEditor? {
@@ -624,23 +624,48 @@ enum SettingsRendererPresentation: Hashable {
     case overridesLink(scope: String, title: String, icon: String)
 }
 
-/// A section's glyph and accent on primary surfaces and its sub-sheet, so each
-/// section keeps one identity. Unknown Gateway sections use the neutral default.
+/// The settings palette (as before the renderer): related sections share one
+/// titled card and one accent, on the primary surface and on every sheet they
+/// open. Sections this app does not know join More.
+enum SettingsFamily: CaseIterable {
+    case agent, tools, data, more
+
+    var title: String {
+        switch self {
+        case .agent: "Agent"
+        case .tools: "Tools & Extensions"
+        case .data: "Data & Diagnostics"
+        case .more: "More"
+        }
+    }
+
+    var accent: Color {
+        switch self {
+        case .agent: .tronPurple
+        case .tools: .tronCyan
+        case .data: .tronBlue
+        case .more: .tronEmerald
+        }
+    }
+}
+
+/// A section's glyph and family.
 struct SettingsSectionStyle {
     let icon: String
-    let accent: Color
+    let family: SettingsFamily
+    var accent: Color { family.accent }
 
     init(_ section: String) {
         switch section {
-        case "model": (icon, accent) = ("cpu", .tronPurple)
-        case "context": (icon, accent) = ("rectangle.compress.vertical", .tronPurple)
-        case "tools": (icon, accent) = ("wrench.and.screwdriver", .tronCyan)
-        case "permissions": (icon, accent) = ("checkmark.shield", .tronAmber)
-        case "run": (icon, accent) = ("arrow.clockwise", .tronAmber)
-        case "accounts": (icon, accent) = ("key", .tronPurple)
-        case "sources": (icon, accent) = ("shippingbox", .tronCyan)
-        case "setup": (icon, accent) = ("gearshape.2", .tronBlue)
-        default: (icon, accent) = ("slider.horizontal.3", .tronEmerald)
+        case "model": (icon, family) = ("cpu", .agent)
+        case "context": (icon, family) = ("rectangle.compress.vertical", .agent)
+        case "run": (icon, family) = ("arrow.clockwise", .agent)
+        case "accounts": (icon, family) = ("key", .agent)
+        case "tools": (icon, family) = ("wrench.and.screwdriver", .tools)
+        case "permissions": (icon, family) = ("checkmark.shield", .tools)
+        case "sources": (icon, family) = ("shippingbox", .tools)
+        case "setup": (icon, family) = ("gearshape.2", .data)
+        default: (icon, family) = ("slider.horizontal.3", .more)
         }
     }
 }

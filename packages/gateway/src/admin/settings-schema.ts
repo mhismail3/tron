@@ -3,7 +3,7 @@ import { COMPACTION_POLICY_INSTRUCTION_LIMIT } from "../runtime/compaction-polic
 import { boolean, integer, object, string, arrayOfStrings } from "../util/validation.js";
 import {
   type Control, type Direction, type Effect, type LayerId, type QualifierName, type Tier, type Timing, type ValueType, type Writer,
-  objectType, sameAsHomeChoice, toolSelectionType, types, workerModelType,
+  DEFAULT_TOOL_NAMES, objectType, sameAsHomeChoice, toolSelectionType, types, workerModelType,
 } from "./settings-types.js";
 
 /**
@@ -304,10 +304,11 @@ export const KEYS: readonly KeyDeclaration[] = [
   // Tools ---------------------------------------------------------------
   {
     id: "tools.active", group: "tools", type: toolSelectionType(),
+    optionsSource: { name: "catalog.tools", dependsOn: [] },
     layers: { chat: { store: "chat", field: "tools" }, profile: { store: "profile", path: ["tools"] }, ...both(pi("defaultTools")) },
-    builtin: ["read", "bash", "edit", "write"], timing: "fixed", effect: "next-turn", floor: { widen: "notify", narrow: "quiet" },
+    builtin: DEFAULT_TOOL_NAMES, timing: "fixed", effect: "next-turn", floor: { widen: "notify", narrow: "quiet" },
     direction: toolsDirection, writers: ANY_ACTOR,
-    label: "Tools", help: "The tools the model may call.", order: 10, importance: "essential", control: "list",
+    label: "Tools", help: "The tools the model may call.", order: 10, importance: "essential", control: "checklist",
   },
   {
     id: "tools.codemode.mode", group: "tools", subgroup: "Code mode", type: types.choice([{ value: "on", label: "On" }, { value: "only", label: "Only code mode" }]),

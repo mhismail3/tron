@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -14,7 +14,8 @@ import { SettingsApprovals } from "./settings-approvals.js";
 import { KEYS } from "./settings-schema.js";
 import type { Resolution, ResolvedKey, SettingsTarget } from "./settings-resolver.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
-import { CONTROLS } from "./settings-types.js";
+import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "./settings-types.js";
+import { ScopeToolCatalog } from "./tool-catalog.js";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
@@ -87,6 +88,7 @@ async function fixture() {
     compaction: { modelOverrides: { [modelKey]: { reserveTokens: 30_000 } } },
   }));
   const trust = new TrustService(agentDir);
+  const scopeTools = new ScopeToolCatalog(agentDir, trust);
   const registry = new RuntimeRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -96,6 +98,9 @@ async function fixture() {
   const settingsModel = new SettingsModel({
     agentDir, tronHome, trust, modelRuntime,
     homeMemoryModel: async () => ({ provider: model.provider, id: model.id }),
+    // Production wiring (gateway-main): a chat's live registry, else the scope's.
+    toolCatalog: async target => target.kind === "session" ? registry.liveToolCatalog(target.sessionId)
+      : scopeTools.list(target.kind === "project" ? target.cwd : undefined),
   });
   const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), new SettingsApprovals(tronHome), {
     setTrust: async (project, decision) => trust.setAndApply(project, decision,
@@ -340,6 +345,56 @@ describe("settings renderer contract", () => {
       Promise<{ dryRun?: true; status: string; tier: string; changes: Array<Record<string, unknown>> }>;
   const options = (f: Fixture, request: Record<string, unknown>, target: Record<string, unknown> = macTarget) =>
     f.service.invoke(subscribed(), "settings.options", { target, ...request }) as Promise<Options>;
+
+  it("offers a tool selection's real tools and keeps a relative Project selection relative", async () => {
+    const f = await fixture();
+    await f.trust.set(f.project, true);
+    const changeAt = (target: Record<string, unknown>, value: string[]) => f.service.invoke(subscribed(), "settings.change", {
+      commandId: commandId(), target, changes: [{ key: "tools.active", layer: target.kind, op: "set", value }],
+    });
+    const projectTarget = { kind: "project", cwd: f.project };
+    const projectDocument = async () => JSON.parse(await readFile(join(f.project, ".pi", "settings.json"), "utf8")) as { defaultTools?: string[] };
+
+    // Mac and Project offer pi's built-ins, then opt-in extension tools such as codemode.
+    const scope = await options(f, { key: "tools.active" }, projectTarget);
+    expect(scope.source).toBe("catalog.tools");
+    expect(scope.options.slice(0, PI_BUILTIN_TOOL_NAMES.length).map(option => option.value)).toEqual(PI_BUILTIN_TOOL_NAMES);
+    expect(scope.options.map(option => option.value)).toContain("codemode");
+    transcript.push({ case: "tools catalog: project", response: scope });
+
+    // The built-in names are pi's own: a plain pi session registers exactly these.
+    const piDir = join(f.root, "pi-only");
+    await mkdir(piDir, { recursive: true });
+    const piSettings = SettingsManager.create(piDir, piDir);
+    const loader = new DefaultResourceLoader({ cwd: piDir, agentDir: piDir, settingsManager: piSettings, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true });
+    await loader.reload();
+    const { session: piSession } = await createAgentSession({ cwd: piDir, agentDir: piDir, sessionManager: SessionManager.inMemory(), settingsManager: piSettings, resourceLoader: loader });
+    expect(piSession.getAllTools().map(tool => tool.name)).toEqual(PI_BUILTIN_TOOL_NAMES);
+    piSession.dispose();
+    const slot = await f.registry.create(f.project);
+    const context = await slot.context() as { activeTools: string[] };
+    // A chat offers its own registry, which includes every active tool.
+    const chat = await f.service.invoke(subscribed([slot.id]), "settings.options", {
+      target: { kind: "session", sessionId: slot.id }, key: "tools.active",
+    }) as unknown as Options;
+    for (const name of context.activeTools) expect(chat.options.map(option => option.value)).toContain(name);
+
+    // The Project holds ["+write"] over the Mac's ["read", "bash"]. Choosing codemode too stays relative.
+    await changeAt(projectTarget, ["read", "bash", "write", "codemode"]);
+    expect((await projectDocument()).defaultTools).toEqual(["+write", "+codemode"]);
+    // So a Mac change still flows into the project.
+    await changeAt({ kind: "mac" }, ["read"]);
+    const followed = row(await f.service.invoke(subscribed(), "settings.resolve", { target: projectTarget }) as Resolution, "tools.active");
+    expect(followed).toMatchObject({ value: ["read", "write", "codemode"], layer: "project" });
+    // Unchoosing a tool from below is a removal entry.
+    await changeAt(projectTarget, ["write"]);
+    expect((await projectDocument()).defaultTools).toEqual(["+write", "-read"]);
+    // Choosing exactly what the Mac selects leaves the Project holding nothing.
+    await changeAt(projectTarget, ["read"]);
+    expect((await projectDocument()).defaultTools).toBeUndefined();
+    expect(row(await f.service.invoke(subscribed(), "settings.resolve", { target: projectTarget }) as Resolution, "tools.active"))
+      .toMatchObject({ value: ["read"], layer: "mac" });
+  });
 
   it("negotiates each key's control with the client, and shows every key read-only with its display when no renderer is named", async () => {
     const f = await fixture();

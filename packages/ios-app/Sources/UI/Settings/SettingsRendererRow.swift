@@ -81,6 +81,7 @@ struct SettingsRendererRow: View {
         case .text: "character.cursor.ibeam"
         case .secret: "key"
         case .list: "list.bullet"
+        case .checklist: "checklist"
         case .catalog: "square.stack.3d.up"
         case .choice, .readOnly: "slider.horizontal.3"
         }
@@ -118,7 +119,7 @@ struct SettingsRendererRow: View {
                                   foreground: model.foregroundReconciliationGeneration),
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
-            guard presentation?.optionsSource != nil, control == .choice || control == .number,
+            guard presentation?.optionsSource != nil, [.choice, .number, .checklist].contains(control),
                   presentationActivity.allowsPresentationPublication else { return }
             await loadOptions()
         }
@@ -212,12 +213,26 @@ struct SettingsRendererRow: View {
                     SettingsNumberMapEditor(title: title, help: presentation?.help ?? "", fields: fields,
                                             range: range, values: setting.value?.objectValue ?? [:], onChange: onChange)
                 }
-            } else if ["stringList", "toolSelection"].contains(presentation?.valueKind ?? ""),
+            } else if presentation?.valueKind == "stringList",
                setting.value == nil || setting.value?.arrayValue?.allSatisfy({ $0.stringValue != nil }) == true {
                 let values = setting.value?.arrayValue ?? []
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
                     SettingsListEditor(title: title, help: presentation?.help ?? "",
                                        values: values.compactMap(\.stringValue), onChange: onChange)
+                }
+            } else {
+                readOnlyRow
+            }
+        case .checklist:
+            if let values = setting.value?.arrayValue, values.allSatisfy({ $0.stringValue != nil }) {
+                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
+                    TronChecklistPicker(
+                        title: title, help: presentation?.help,
+                        choices: options?.compactMap { option in option.value.stringValue.map {
+                            TronChoice(id: $0, label: option.label, detail: option.detail, disabledReason: option.disabledReason)
+                        } },
+                        selected: values.compactMap(\.stringValue)
+                    ) { onChange(.array($0.map(JSONValue.string))) }
                 }
             } else {
                 readOnlyRow
