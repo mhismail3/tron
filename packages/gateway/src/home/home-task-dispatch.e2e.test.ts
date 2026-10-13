@@ -1621,7 +1621,9 @@ describe("Home task production dispatch", () => {
     const tasks = (f.registry.homeOwner() as any).tasks;
     let entered = false; let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
-    const hold = async <T>(run: () => Promise<T>) => { entered = true; await gate; return run(); };
+    // The held step's late completion is joined before disposal removes its files.
+    let late: Promise<unknown> | undefined;
+    const hold = <T>(run: () => Promise<T>) => { entered = true; const step = gate.then(run); late = step.catch(() => {}); return step; };
     const created = () => f.signals.some(signal => signal.event === "home.task.transition" && signal.reason === "created");
     if (stage === "authorize") {
       const authorize = tasks.authorization.authorize.bind(tasks.authorization);
@@ -1659,7 +1661,7 @@ describe("Home task production dispatch", () => {
       expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.dispatch-stage", stage, outcome: "cancelled" }));
       expect(workerPrompts).toBe(0);
       evidence.push({ case: `held-dispatch-stop-${stage}`, reason: task.terminalEvidence.reason, workerPrompts, homeRequests });
-    } finally { release(); await prompting.catch(() => {}); }
+    } finally { release(); await prompting.catch(() => {}); await late; }
     // Like every terminal task, the refusal wakes Home once with its result. The held
     // step's late result goes back to its owner, never into the cancelled admission.
     await waitFor(async () => (await tasks.store.read("task-held"))?.wake?.state === "acknowledged", "refusal result consumed once", { boundMs: 5_000 });
@@ -1682,18 +1684,25 @@ describe("Home task production dispatch", () => {
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     const authorize = tasks.authorization.authorize.bind(tasks.authorization);
-    let entered = false;
-    vi.spyOn(tasks.authorization, "authorize").mockImplementation(async (request: any) => { entered = true; await gate; return authorize(request); });
+    let entered = false; let late: Promise<unknown> | undefined;
+    vi.spyOn(tasks.authorization, "authorize").mockImplementation((request: any) => {
+      entered = true; const step = gate.then(() => authorize(request)); late = step.catch(() => {}); return step;
+    });
     const run = dispatch(f, "task-deadline"); void run.catch(() => {});
     try {
       await waitFor(() => entered && expire !== undefined, "authorize held under its deadline", { boundMs: 10_000 });
       expire!();
       await expect(run).rejects.toMatchObject({ code: "busy" });
+      await waitFor(async () => (await tasks.store.read("task-deadline"))?.lifecycle === "terminal", "expired task settles terminal", { boundMs: 5_000 });
       const task = await tasks.store.read("task-deadline");
       expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown", reason: "admission-timeout" } });
       expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.dispatch-stage", stage: "authorize", outcome: "timeout" }));
       evidence.push({ case: "held-dispatch-deadline", reason: task.terminalEvidence.reason });
-    } finally { release(); }
+    } finally { release(); await late; }
+    // The late grant decision never revives the expired admission.
+    expect(await tasks.store.read("task-deadline")).toMatchObject({ lifecycle: "terminal", sessionId: null, terminalEvidence: { reason: "admission-timeout" } });
+    // Home is idle and unmaterialized here, so the result goes out as its one push.
+    await waitFor(async () => (await tasks.store.read("task-deadline"))?.wake?.push === "decided", "expired task result published once", { boundMs: 5_000 });
   }, 30_000);
 
   it("admits once, seals exact canonical report evidence and refuses replay or conflicting reports", async () => {
