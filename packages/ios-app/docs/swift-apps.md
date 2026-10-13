@@ -154,10 +154,12 @@ fixture (`-readonly-preview-scenario display-swift…`):
   `ObservableObject` store shared through `environmentObject`, `TabView`,
   `List`, an enum `switch`, and `String(format:)`.
 - `testSwiftAppFailuresStayContainedInTheRunner` runs `broken` (line-numbered
-  unsupported syntax) and `limits`: an unsupported view, an infinite loop,
-  unbounded recursion, unbounded string growth, a self-reading computed
-  property, `Int.min / -1`, a hostile format string, and a view that contains
-  itself, each ending in a diagnostic while the app stays responsive.
+  unsupported syntax), a file nested past the parser limit, and `limits`: an
+  unsupported view, an infinite loop, unbounded recursion, unbounded string
+  growth, a self-reading computed property, `Int.min / -1`, comparing and
+  describing a value with 2^40 shared leaves, a hostile format string, and a
+  view that contains itself. Each ends in a diagnostic or a bounded value while
+  the app stays responsive.
 
 ```bash
 scripts/tron-ios-test build

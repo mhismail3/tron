@@ -223,13 +223,21 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(broken, "889-8-unsupported-syntax")
         broken.terminate()
 
+        // Nesting deep enough to overflow a recursive parser stops at the parser limit.
+        let deep = launchSwift("display-swift-deep", flag: true)
+        openSwiftDisplay(deep, named: "Deep.swift")
+        let runDeep = deep.buttons["Run Deep.swift"]
+        XCTAssertTrue(runDeep.waitForExistence(timeout: 10)); runDeep.tap()
+        XCTAssertTrue(deep.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 3: Code is nested too deeply'")).firstMatch.waitForExistence(timeout: 10))
+        deep.terminate()
+
         let app = launchSwift("display-swift-limits", flag: true)
         openSwiftDisplay(app, named: "Limits.swift")
         let run = app.buttons["Run Limits.swift"]
         XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
         let taps = app.staticTexts["limits.taps"]
         XCTAssertTrue(taps.waitForExistence(timeout: 10))
-        XCTAssertTrue(diagnostic(app, "Line 52: Unknown name 'Map'").exists, "An unsupported view renders an inline diagnostic beside working views")
+        XCTAssertTrue(diagnostic(app, "Line 62: Unknown name 'Map'").exists, "An unsupported view renders an inline diagnostic beside working views")
 
         var expectedTaps = 0
         for (button, message) in [
@@ -238,6 +246,8 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             ("Grow forever", "string grew past"),
             ("Read itself", "recursion is too deep"),
             ("Overflow", "Integer overflow"),
+            // 2^40 shared leaves: comparison is budgeted, not exponential.
+            ("Compare shared", "ran too long"),
         ] {
             app.buttons[button].tap()
             XCTAssertTrue(diagnostic(app, message).waitForExistence(timeout: 15), "\(button) stops with a diagnostic")
@@ -252,6 +262,10 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         // argument: %s and %@ print the value instead of reading memory.
         app.buttons["Hostile format"].tap()
         XCTAssertTrue(wait(app.staticTexts["limits.note"], predicate: "label == %@", value: "\(expectedTaps)|2.5|  3.0"))
+
+        // Describing the same shared value is bounded, not 2^40 elements long.
+        app.buttons["Describe shared"].tap()
+        XCTAssertTrue(wait(app.staticTexts["limits.note"], predicate: "label BEGINSWITH '[[[[' AND label ENDSWITH '…'"))
 
         app.buttons["Nest views"].tap()
         XCTAssertTrue(diagnostic(app, "views are nested too deeply").waitForExistence(timeout: 15), "A view that contains itself stops at the depth limit")

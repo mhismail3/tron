@@ -8,6 +8,11 @@ enum HostedSwiftAppFixtureSource {
         guard scenario.contains("display-swift") else { return nil }
         if scenario.contains("budget") { return ("Budget.swift", budget) }
         if scenario.contains("broken") { return ("Broken.swift", broken) }
+        if scenario.contains("deep") {
+            // Nesting past the parser limit, on line 3.
+            let nested = String(repeating: "(", count: 2_000) + "1" + String(repeating: ")", count: 2_000)
+            return ("Deep.swift", "import SwiftUI\n\nlet depth = \(nested)\n\nstruct ContentView: View {\n    var body: some View { Text(\"Deep\") }\n}\n")
+        }
         if scenario.contains("limits") { return ("Limits.swift", limits) }
         if scenario.contains("truncated") {
             // Past the document sheet's text preview limit, so the preview is truncated.
@@ -295,6 +300,16 @@ enum HostedSwiftAppFixtureSource {
                 }
                 Button("Hostile format") {
                     note = String(format: "%s|%@|%5.1f", taps, 2.5, 3)
+                }
+                Button("Compare shared") {
+                    var shared = [1]
+                    for _ in 0..<40 { shared = [shared, shared] }
+                    note = shared == shared ? "same" : "different"
+                }
+                Button("Describe shared") {
+                    var shared = [1]
+                    for _ in 0..<40 { shared = [shared, shared] }
+                    note = "\(shared)"
                 }
                 Button("Nest views") { nested = true }
                 MapCard()
