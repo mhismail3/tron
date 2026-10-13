@@ -289,6 +289,14 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         try setProxyMode(fixture, mode: "blackhole")
         XCTAssertTrue(waitingStatus.waitForExistence(timeout: 60))
         keepScreenshot(app, name: "878-simulator-anchored-reader-recovery")
+        // The status now arrives with the app-scoped recovery card, whose
+        // presence disturbs XCUI's frame report for the partly off-screen
+        // prompt even though the rows do not move (see this screenshot pair).
+        // Qualify the persistent state once that transient card retires.
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: transientNotice
+        )], timeout: 20), .completed)
+        keepScreenshot(app, name: "878-simulator-anchored-reader-persistent-recovery")
         XCTAssertEqual(sent.frame.minY, anchorFrame.minY, accuracy: 3,
                        "transport retirement moved the anchored reader")
         try setProxyMode(fixture, mode: "pass")
