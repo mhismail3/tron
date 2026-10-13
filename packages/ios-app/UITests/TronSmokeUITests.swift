@@ -2067,7 +2067,10 @@ final class TronSmokeUITests: XCTestCase {
         closeTopSheet(app)
 
         // The inline row's trailing value opens the catalog picker.
-        for _ in 0..<10 where !any["settings-row-model.ref"].isHittable { app.swipeDown() }
+        // Below the navigation chrome: a row under the bar still reports hittable,
+        // but a tap there lands on the bar.
+        let inlineModel = any["settings-row-model.ref"]
+        for _ in 0..<10 where !(inlineModel.isHittable && inlineModel.frame.minY > 160) { app.swipeDown() }
         let modelCatalogRow = any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch
         tapScrolling(modelCatalogRow, in: app)
         let lite = any["settings-option-Fixture Lite"]
