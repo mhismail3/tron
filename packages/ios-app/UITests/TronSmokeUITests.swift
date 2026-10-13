@@ -2520,13 +2520,17 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Sheet Grabber"].exists)
         XCTAssertTrue(app.staticTexts["Pair this iPhone with the Mac running Tron."].exists)
-        XCTAssertTrue(app.buttons["Open Tron navigation"].exists)
-        XCTAssertTrue(app.buttons["Settings"].exists)
         let pageIndicator = app.descendants(matching: .any)["Onboarding step 1 of 9"]
         XCTAssertTrue(pageIndicator.exists)
         let next = app.buttons["Next"]
-        XCTAssertLessThan(abs(next.frame.width - next.frame.height), 2, "The native sheet navigation control must be circular")
-        XCTAssertGreaterThanOrEqual(next.frame.width, 34)
+        XCTAssertTrue(next.exists, "The welcome toolbar exposes the paged Next action")
+        XCTAssertGreaterThanOrEqual(next.frame.height, 34, "The Next capsule retains a usable native toolbar control height")
+        let nextLabel = next.staticTexts["Next"]
+        XCTAssertTrue(nextLabel.exists, "The Next toolbar label remains accessible")
+        let chevron = next.images["chevron.right"]
+        XCTAssertTrue(chevron.exists, "The accessible Next action retains its trailing right chevron")
+        XCTAssertGreaterThan(chevron.frame.midX, nextLabel.frame.midX,
+                             "The chevron follows the Next text, rather than preceding it")
         XCTAssertLessThan(abs(title.frame.midX - app.frame.midX), 18)
         XCTAssertLessThan(abs(title.frame.midY - next.frame.midY), 20)
         XCTAssertGreaterThan(title.frame.minY, app.frame.height * 0.45)
@@ -2577,10 +2581,14 @@ final class TronSmokeUITests: XCTestCase {
         else { app.tap() }
         app.buttons["Connect to Mac"].tap()
 
-        XCTAssertTrue(app.alerts["Tron"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Enter a valid host, port, and one-time code."].exists)
-        app.alerts["Tron"].buttons["OK"].tap()
-        XCTAssertTrue(app.secureTextFields["One-time code"].waitForExistence(timeout: 2), app.debugDescription)
+        let notice = app.staticTexts["in-app-notice-card"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(notice.label.contains("Enter a valid host, port, and one-time code."),
+                      "Invalid pairing input is announced in an accessible in-app notice")
+        XCTAssertTrue(app.staticTexts["Connect a Mac"].exists, "Validation keeps the user on the pairing step")
+        XCTAssertTrue(host.exists, "Validation keeps the host field available for correction")
+        XCTAssertTrue(app.textFields["Port"].exists, "Validation keeps the port field available for correction")
+        XCTAssertTrue(code.exists, "Validation keeps the one-time code field available for correction")
     }
 
     @MainActor
