@@ -336,13 +336,14 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(empty.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         empty.buttons["home-pinned-row"].tap()
         openManageHome(empty)
-        tapManageRow(empty, "home-manage-context")
-        XCTAssertTrue(empty.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "No activation context yet")).firstMatch.waitForExistence(timeout: 5))
+        // Before Home's first activation, Manage Home's context card has no activation line.
+        XCTAssertTrue(empty.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5), empty.debugDescription)
+        XCTAssertFalse(empty.descendants(matching: .any)["home-context-activation"].exists)
         keepScreenshot(named: "home-context-empty")
     }
 
-    /// The Home Context sheet explains where the next request's context goes: one stacked
-    /// bar of the window with a meaning per section, and no entry IDs or byte counts.
+    /// Manage Home's context card explains where the next request's context goes: one
+    /// stacked bar of the window with a meaning per section, and no entry IDs or byte counts.
     @MainActor
     func testHomeContextShowsBreakdownWithoutRawIdentifiers() {
         continueAfterFailure = false
@@ -352,7 +353,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        tapManageRow(app, "home-manage-context")
         XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.descendants(matching: .any)["context-segmented-bar"].exists)
         for (id, label) in [("instructions", "Instructions"), ("profile", "About you"), ("memory", "Memory"),
@@ -454,7 +454,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Memory model"].firstMatch.waitForExistence(timeout: 5), "The memory model row is on Manage Home\n\(app.debugDescription)")
         XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
-        for row in ["home-manage-context", "home-manage-memory-browser", "home-manage-chapters", "home-manage-tasks", "home-manage-permissions"] {
+        XCTAssertFalse(app.descendants(matching: .any)["home-manage-context"].exists, "Home's context is Manage Home's top card, not a sub-sheet")
+        for row in ["home-manage-memory-browser", "home-manage-chapters", "home-manage-tasks", "home-manage-permissions"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
         }
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-pause"].exists)
@@ -515,7 +516,7 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
         let windowHeight = app.windows.firstMatch.frame.height
-        for (row, done) in [("home-manage-context", "home-sheet-done-context"), ("home-manage-memory-browser", "home-sheet-done-memory"),
+        for (row, done) in [("home-manage-memory-browser", "home-sheet-done-memory"),
                             ("home-manage-chapters", "home-sheet-done-chapters"), ("home-manage-tasks", "home-sheet-done-tasks"),
                             ("home-manage-permissions", "home-sheet-done-permissions")] {
             tapManageRow(app, row)
@@ -545,10 +546,6 @@ final class TronSmokeUITests: XCTestCase {
             title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
             XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5))
             keepScreenshot(named: "home-\(appearance)-manage-large")
-            tapManageRow(app, "home-manage-context")
-            XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5))
-            keepScreenshot(named: "home-\(appearance)-context")
-            app.buttons["home-sheet-done-context"].tap()
             tapManageRow(app, "home-manage-memory-browser")
             XCTAssertTrue(app.descendants(matching: .any)["home-memory-row-39"].waitForExistence(timeout: 5))
             keepScreenshot(named: "home-\(appearance)-memory")
@@ -594,7 +591,6 @@ final class TronSmokeUITests: XCTestCase {
     func testHomeCrossSurfaceProofMatrix() {
         continueAfterFailure = false
         let sheets: [(row: String, doneID: String, content: String, name: String)] = [
-            ("home-manage-context", "context", "home-context-breakdown", "context"),
             ("home-manage-memory-browser", "memory", "home-memory-row-39", "memory-browser"),
             ("home-manage-chapters", "chapters", "home-chapter-2", "chapters"),
             ("home-manage-tasks", "tasks", "home-task-active", "tasks"),
@@ -704,7 +700,7 @@ final class TronSmokeUITests: XCTestCase {
             openManageHome(app)
             if state == "browser-unsupported" {
                 XCTAssertFalse(app.descendants(matching: .any)["home-manage-memory-browser"].exists)
-                XCTAssertTrue(app.descendants(matching: .any)["home-manage-context"].exists)
+                XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].exists)
             }
             if state == "empty-models" {
                 revealHomeSetting(app, "Memory model")
@@ -903,7 +899,7 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "manage-home-large")
         XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-chapters"].exists)
-        for row in ["home-manage-context", "home-manage-memory-browser", "home-manage-tasks",
+        for row in ["home-manage-memory-browser", "home-manage-tasks",
                     "home-manage-permissions", "home-manage-pause", "home-manage-disable"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
         }
