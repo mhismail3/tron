@@ -130,7 +130,8 @@ async function verdict(client: GatewayProtocolClient, session: string, deadline:
 
   // 2. Absence. The user listing omits delegated sessions and Home chapters, so the session root is read too;
   //    the root is trusted only when it holds every idle listed session.
-  if (!row && new RegExp(`^${SESSION_ID.source}$`, "u").test(session)) {
+  const sessionShaped = new RegExp(`^${SESSION_ID.source}$`, "u").test(session);
+  if (!row && sessionShaped) {
     const agentDir = resolve(process.env.PI_CODING_AGENT_DIR ?? join(resolveTronHome(), "agent"));
     const root = SettingsManager.create(process.cwd(), agentDir, { projectTrusted: false }).getSessionDir() ?? join(agentDir, "sessions");
     const ids = await idsUnder(root, deadline);
@@ -169,7 +170,9 @@ async function verdict(client: GatewayProtocolClient, session: string, deadline:
   }
   return { state: "indeterminate", reason: row
     ? `session ${session} exists, is idle and is no settled Home task; it can be resumed`
-    : `owner ${session} is not a Gateway session id and is no Home task; another runtime may hold it` };
+    : sessionShaped
+      ? `session ${session} has a file but no user listing (a delegated session or Home chapter) and is no settled Home task`
+      : `owner ${session} is not a Gateway session id and is no Home task; another runtime may hold it` };
 }
 
 async function main(): Promise<void> {
