@@ -20,7 +20,7 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | `cleanup [--all] [--dry-run]` | Removes a task worktree and its branches once its pull request merged at its head (or its issue is closed and it holds only its claim commit). Names what it keeps and why. |
 | `dashboard [--html P] [--json P]` | Read-only view of claims, Status, epics, stale work, orphans and main CI. |
 | `comment <issue> --body-file F` | Privacy-checks, then posts a public issue comment. |
-| `issue create\|labels\|close\|parent\|block` | Files issues and changes labels and links. Labels are optional; only declared labels are accepted. `close` posts a comment, closes, and sets Status Done. Epics may close only when all linked children are closed (every page is checked before any write, for either close reason). |
+| `issue create\|labels\|close\|reopen\|parent\|block` | Files issues and changes labels and links. Labels are optional; only declared labels are accepted. `close` posts a comment, closes, and sets Status Done. Epics may close only when all linked children are closed (every page is checked before any write, for either close reason). `reopen <issue> --comment-file F` requires the reason as a non-empty, privacy-checked comment, posts it with an audit marker, reopens, and sets Status In progress when the issue is claimed (claims are left as they are) or Ready otherwise; it refuses an open issue it did not reopen, and a re-run finishes a partial reopen without a second comment. `parent --replace-parent` moves a task from its current epic to another. |
 | `project add\|set` | Adds an issue to the Project, or sets Status (Proposed, Ready, Blocked) and Priority. |
 | `bootstrap [--apply]` | Plans or converges labels and the Project fields to `.github/work.json`. Adds and updates only. |
 
@@ -187,10 +187,12 @@ Git repositories and linked worktrees, checking exact-head evidence retention, 3
 pruning, and remote-branch/worktree removal. Evidence is written to
 `test-results/work-cleanup.json`; the temporary repositories are removed on exit.
 
-`python3 scripts/test-work-close.py` exercises epic/task close through the real CLI
-and Git with a process-level GitHub fixture in an isolated temporary home. It covers
-completed epics, unfinished children on later pages, failed reads, foreign claims,
-and idempotent recovery after a partial close. Regenerable evidence is written to
+`python3 scripts/test-work-close.py` exercises epic/task close and reopen through the
+real CLI and Git with a process-level GitHub fixture in an isolated temporary home. It
+covers completed epics, unfinished children on later pages, failed reads, foreign claims,
+and idempotent recovery after a partial close; and for reopen, refusal without a reason
+or of an open issue, the Ready/In progress Status choice, the audited write, and
+idempotent recovery after a partial reopen. Regenerable evidence is written to
 `test-results/work-close.json`; the fixture repository and home are removed on exit.
 
 `python3 scripts/test-work-handoff.py` exercises handoff through the real CLI and Git
