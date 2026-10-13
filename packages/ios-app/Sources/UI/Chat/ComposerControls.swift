@@ -547,11 +547,13 @@ enum ChatComposerPolicy {
     static func hasSendableContent(
         text: String,
         attachmentCount: Int,
-        hasResource: Bool
+        hasResource: Bool,
+        annotationCount: Int
     ) -> Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || attachmentCount > 0
             || hasResource
+            || annotationCount > 0
     }
 
     static func isTextEditable(isTranscriptReady: Bool) -> Bool {

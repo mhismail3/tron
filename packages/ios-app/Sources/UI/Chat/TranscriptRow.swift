@@ -239,12 +239,7 @@ struct TranscriptRow: View, Equatable {
                                     part.text,
                                     hasAttachments: !displayedAttachments.isEmpty
                                 ) {
-                                    UserPromptText(text: text)
-                                        .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
-                                        .padding(.top, ChatPromptContainerStyle.topPadding)
-                                        .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
-                                        .modifier(UserPromptGlassModifier())
-                                        .modifier(ChatMessageCopyMenu(text: text))
+                                    ChatUserPromptContent(text: text)
                                 }
                             } else {
                                 MarkdownText(
@@ -254,6 +249,13 @@ struct TranscriptRow: View, Equatable {
                                         source: part.text ?? ""
                                     ),
                                     streaming: streaming
+                                )
+                                // Only canonical assistant response text is quotable.
+                                .environment(
+                                    \.chatAnnotationSource,
+                                    item.role == .assistant
+                                        ? ChatAnnotationSource(itemID: item.id, partID: part.id)
+                                        : nil
                                 )
                             }
                         case .thinking:
