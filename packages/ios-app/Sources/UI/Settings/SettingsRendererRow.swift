@@ -8,10 +8,15 @@ struct SettingsRendererRow: View {
     let setting: ResolvedSetting
     let target: JSONValue
     let editable: Bool
+    /// Sub-sheet rows show source, help and actions; primary rows only title and control.
+    var detailed = false
     var externalControl = false
     /// Changes when a key this row's options depend on changes, so they are re-requested.
     let dependencyDisplay: String
     let error: String?
+    /// "Edit at Mac/Project" for a key this surface cannot write.
+    var layerEditorTitle: String? = nil
+    var onEditLayer: () -> Void = {}
     let onChange: (JSONValue?) -> Void
     /// Apply again on an outside change this row's badge names (settings-model.md 5.6).
     var onApplyAgain: ((String) -> Void)? = nil
@@ -21,7 +26,6 @@ struct SettingsRendererRow: View {
     @State private var options: [SettingsOption]?
     @State private var dynamicRange: SettingsRange?
     @State private var optionsGeneration = 0
-    @State private var showsHelp = false
 
     private var presentation: SettingsKeyPresentation? { setting.presentation }
     private var title: String { presentation?.label ?? setting.key }
@@ -36,6 +40,27 @@ struct SettingsRendererRow: View {
         let foreground: Int
     }
 
+    /// Source first ("Mac · openai-codex/gpt-6-astra"), then the key's help, on detailed rows only.
+    private var subtitle: String? {
+        guard detailed else { return nil }
+        let source = setting.badges.map(\.label).joined(separator: " · ")
+        let lines = [source, presentation?.help ?? "", presentation?.note ?? ""].filter { !$0.isEmpty }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
+    /// Every row carries a glyph so titles align; the glyph names the control kind.
+    private var icon: String {
+        switch control {
+        case .toggle: "switch.2"
+        case .number: "number"
+        case .text: "character.cursor.ibeam"
+        case .secret: "key"
+        case .list: "list.bullet"
+        case .catalog: "square.stack.3d.up"
+        case .choice, .readOnly: "slider.horizontal.3"
+        }
+    }
+
     private var numberRange: SettingsRange? {
         presentation?.optionsSource == nil ? presentation?.range : dynamicRange
     }
@@ -47,6 +72,11 @@ struct SettingsRendererRow: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(settingsRowIdentifier(setting))
+        // Each source with its detail ("Changed outside Tron, Mac: On → Off"); the
+        // visible line names sources only. Primary rows carry no source.
+        .accessibilityValue(detailed ? setting.badges.map { badge in
+            badge.detail.map { "\(badge.label), \($0)" } ?? badge.label
+        }.joined(separator: " · ") : "")
         .onChange(of: dependencyDisplay) { _, _ in
             optionsGeneration &+= 1
             options = nil
@@ -73,7 +103,7 @@ struct SettingsRendererRow: View {
     private var controlRow: some View {
         switch control {
         case .toggle:
-            TronToggleRow(icon: "switch.2", title: title, detail: setting.display,
+            TronToggleRow(icon: icon, title: title, detail: subtitle,
                           isOn: Binding(get: { setting.value?.boolValue == true }, set: { onChange(.bool($0)) }))
         case .choice:
             let choices = presentation?.optionsSource != nil ? (options ?? []) : (presentation?.options?.map {
@@ -81,13 +111,14 @@ struct SettingsRendererRow: View {
             } ?? [])
             if choices.isEmpty {
                 // A source with nothing to offer (a model that does not think) is a value, not a menu.
-                readOnlyRow(subtitle: options == nil ? nil : "No options for the current choice")
+                readOnlyRow
             } else if presentation?.valueKind == "orderedChoice", let value = setting.value {
-                SettingsChoiceSelectionRow(title: title, icon: "slider.horizontal.3", value: value,
-                                           display: setting.display, options: choices, onChange: { onChange($0) })
+                SettingsChoiceSelectionRow(title: title, icon: icon, value: value,
+                                           display: setting.display, options: choices, information: subtitle,
+                                           onChange: { onChange($0) })
                     .controlSize(.small)
             } else {
-                TronSelectionRow(icon: "list.bullet", title: title, value: setting.display) {
+                TronSelectionRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
                     ForEach(choices) { option in
                         Button(option.label) { onChange(option.value) }
                             .disabled(option.disabledReason != nil)
@@ -97,17 +128,18 @@ struct SettingsRendererRow: View {
         case .number:
             if let range = numberRange, range.supportsIntegerSlider,
                case .number(let raw) = setting.value, let value = Int(exactly: raw) {
-                SettingsNumberSelectionRow(title: title, value: value, display: setting.display, range: range) {
+                SettingsNumberSelectionRow(title: title, value: value, display: setting.display, range: range,
+                                           icon: icon, information: subtitle) {
                     onChange(.number(Double($0)))
                 }
+                .controlSize(.small)
             } else {
-                readOnlyRow(subtitle: presentation?.optionsSource != nil && options == nil
-                            ? nil : "Update Tron to edit this number")
+                readOnlyRow
             }
         case .text:
-            SettingsRendererTextRow(title: title, value: setting.value?.stringValue ?? "", onCommit: { onChange(.string($0)) })
+            SettingsRendererTextRow(title: title, icon: icon, subtitle: subtitle, value: setting.value?.stringValue ?? "", onCommit: { onChange(.string($0)) })
         case .secret:
-            TronSelectionSheetRow(icon: "lock", title: title, value: setting.display) {
+            TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
                 SettingsSecretEditor(title: title, help: presentation?.help ?? "", onChange: onChange)
             }
         case .list:
@@ -121,92 +153,69 @@ struct SettingsRendererRow: View {
                    if case .number(let number) = value { return Int(exactly: number) != nil }
                    return false
                }) == true {
-                TronSelectionSheetRow(icon: "list.number", title: title, value: setting.display) {
+                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
                     SettingsNumberMapEditor(title: title, help: presentation?.help ?? "", fields: fields,
                                             range: range, values: setting.value?.objectValue ?? [:], onChange: onChange)
                 }
             } else if ["stringList", "toolSelection"].contains(presentation?.valueKind ?? ""),
                setting.value == nil || setting.value?.arrayValue?.allSatisfy({ $0.stringValue != nil }) == true {
                 let values = setting.value?.arrayValue ?? []
-                TronSelectionSheetRow(icon: "list.bullet", title: title, value: setting.display) {
+                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
                     SettingsListEditor(title: title, help: presentation?.help ?? "",
                                        values: values.compactMap(\.stringValue), onChange: onChange)
                 }
             } else {
-                readOnlyRow(subtitle: "Update Tron to edit this list")
+                readOnlyRow
             }
         case .catalog:
-            TronSelectionSheetRow(icon: "square.stack.3d.up", title: title, value: setting.display) {
+            TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
                 SettingsCatalogPicker(setting: setting, target: target, title: title) { onChange($0) }
             }
         case .readOnly:
-            readOnlyRow(subtitle: nil)
+            readOnlyRow
         }
     }
 
-    private func readOnlyRow(subtitle: String?) -> some View {
-        TronSettingsRow(icon: nil, title: title, subtitle: subtitle) {
-            Text(setting.display)
-                .font(TronTypography.body)
-                .foregroundStyle(Color.tronTextSecondary)
-                .multilineTextAlignment(.trailing)
+    /// A value this surface shows but does not edit: trailing, like every other value.
+    private var readOnlyRow: some View {
+        TronSettingsRow(icon: icon, title: title, subtitle: subtitle, subtitleColor: .tronTextSecondary) {
+            TronDynamicValue(text: setting.display, color: .tronTextSecondary)
                 .textSelection(.enabled)
         }
     }
 
+    /// Row actions and messages below the standard row, only when they exist.
+    /// Source actions (reset, follow default, edit at another layer) live on the
+    /// detailed sub-sheet row; refusals show wherever the change was attempted.
     @ViewBuilder
     private var details: some View {
-        let badges = setting.badges
-        let note = presentation?.note
-        if !badges.isEmpty || note != nil || error != nil || presentation?.help.isEmpty == false {
-            VStack(alignment: .leading, spacing: 6) {
-                if !badges.isEmpty || presentation?.help.isEmpty == false {
-                    HStack(spacing: 6) {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 6) { ForEach(Array(badges.enumerated()), id: \.offset) { SettingsBadgeView(badge: $0.element) } }
-                            VStack(alignment: .leading, spacing: 4) { ForEach(Array(badges.enumerated()), id: \.offset) { SettingsBadgeView(badge: $0.element) } }
-                        }
-                        Spacer(minLength: 0)
-                        if let help = presentation?.help, !help.isEmpty {
-                            Button { showsHelp.toggle() } label: {
-                                Image(systemName: showsHelp ? "info.circle.fill" : "info.circle")
-                                    .foregroundStyle(Color.tronTextSecondary)
-                                    .frame(minWidth: 44, minHeight: 32)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(showsHelp ? "Hide help for \(title)" : "Help for \(title)")
-                        }
-                    }
-                }
-                if editable, control != .readOnly || externalControl {
-                    // Action primitives are served with the source badge. A
-                    // future action stays a neutral badge, never an arbitrary
-                    // RPC; reset reuses the row's dry-run and receipt owner.
-                    ForEach(Array(badges.compactMap(\.action).enumerated()), id: \.offset) { _, action in
-                        if ["useCurrentDefault", "followDefault"].contains(action.kind) {
+        let actions = detailed ? setting.badges.compactMap(\.action) : []
+        let resets = editable && (control != .readOnly || externalControl)
+            ? actions.filter { ["useCurrentDefault", "followDefault"].contains($0.kind) } : []
+        let applyAgain = onApplyAgain == nil ? [] : actions.filter { $0.kind == "applyAgain" && $0.changeId != nil }
+        if !resets.isEmpty || !applyAgain.isEmpty || layerEditorTitle != nil || error != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                if !resets.isEmpty || !applyAgain.isEmpty || layerEditorTitle != nil {
+                    HStack(spacing: 8) {
+                        // Action primitives are served with the source badge. A future
+                        // action stays absent, never an arbitrary RPC; reset reuses the
+                        // row's dry-run and receipt owner, Apply again the change record.
+                        ForEach(Array(resets.enumerated()), id: \.offset) { _, action in
                             Button { onChange(nil) } label: { TronInlineActionLabel(action.label) }
                                 .buttonStyle(.plain)
                                 .accessibilityIdentifier("\(settingsRowIdentifier(setting))-\(action.kind)")
                         }
+                        ForEach(Array(applyAgain.enumerated()), id: \.offset) { _, action in
+                            Button { if let id = action.changeId { onApplyAgain?(id) } } label: { TronInlineActionLabel(action.label) }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("\(settingsRowIdentifier(setting))-applyAgain")
+                        }
+                        if let layerEditorTitle {
+                            Button(action: onEditLayer) { TronInlineActionLabel(layerEditorTitle) }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("\(settingsRowIdentifier(setting))-edit-layer")
+                        }
                     }
-                }
-                // Apply again acts on the change record, like Undo in Changes:
-                // it is offered wherever the Gateway serves it, at its own layer.
-                ForEach(Array(badges.compactMap(\.action).filter { $0.kind == "applyAgain" }.enumerated()), id: \.offset) { _, action in
-                    if let changeID = action.changeId, let onApplyAgain {
-                        Button { onApplyAgain(changeID) } label: { TronInlineActionLabel(action.label) }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("\(settingsRowIdentifier(setting))-applyAgain")
-                    }
-                }
-                if showsHelp, let help = presentation?.help {
-                    TronSettingsCaption(help)
-                }
-                if let note {
-                    Text(note)
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .accessibilityIdentifier("\(settingsRowIdentifier(setting))-note")
                 }
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle")
@@ -216,7 +225,8 @@ struct SettingsRendererRow: View {
                         .accessibilityIdentifier("\(settingsRowIdentifier(setting))-error")
                 }
             }
-            .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+            .padding(.leading, TronSettingsLayoutPolicy.dividerLeadingPadding)
+            .padding(.trailing, TronSettingsLayoutPolicy.rowHorizontalPadding)
             .padding(.bottom, 12)
         }
     }
@@ -251,13 +261,15 @@ struct SettingsRendererRow: View {
 /// A text value committed when editing ends; the Gateway validates it.
 private struct SettingsRendererTextRow: View {
     let title: String
+    let icon: String
+    let subtitle: String?
     let value: String
     let onCommit: (String) -> Void
     @State private var text: String?
     @FocusState private var focused: Bool
 
     var body: some View {
-        TronSettingsRow(icon: "text.cursor", title: title) {
+        TronSettingsRow(icon: icon, title: title, subtitle: subtitle, subtitleColor: .tronTextSecondary) {
             TextField(title, text: Binding(get: { text ?? value }, set: { text = $0 }),
                       prompt: Text("(empty)").foregroundStyle(Color.tronTextMuted))
                 .textInputAutocapitalization(.never).autocorrectionDisabled()

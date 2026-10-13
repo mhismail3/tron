@@ -13,11 +13,10 @@ final class TronNewSessionUITests: XCTestCase {
         let select = app.buttons["Use current folder"]
         XCTAssertTrue(select.waitForExistence(timeout: 5), app.debugDescription)
         select.tap()
-        let section = app.buttons["settings-section-model-expand"]
-        XCTAssertTrue(section.waitForExistence(timeout: 5), app.debugDescription)
-        for _ in 0..<5 where !section.isHittable { app.swipeUp() }
-        section.tap()
+        // The essential Model key is an inline row on Project settings.
         let row = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<5 where !row.isHittable { app.swipeUp() }
         row.buttons.firstMatch.buttons.firstMatch.tap()
         let choice = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Project Pro'")).firstMatch
         XCTAssertTrue(choice.waitForExistence(timeout: 5))
@@ -42,14 +41,11 @@ final class TronNewSessionUITests: XCTestCase {
         let project = app.buttons["project-settings-link"]
         XCTAssertTrue(project.waitForExistence(timeout: 10))
         project.tap()
-        let section = app.buttons["settings-section-model-expand"]
-        XCTAssertTrue(section.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Project settings"].exists)
-        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.filter(\.isHittable).count, 1)
-        for _ in 0..<5 where !section.isHittable { app.swipeUp() }
-        section.tap()
         let row = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Project settings"].exists)
+        XCTAssertFalse(app.buttons["Show all"].exists, "Project settings never expands in place")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.filter(\.isHittable).count, 1)
         let control = row.buttons.firstMatch.buttons.firstMatch
         for _ in 0..<5 where !control.isHittable { app.swipeUp() }
         control.tap()

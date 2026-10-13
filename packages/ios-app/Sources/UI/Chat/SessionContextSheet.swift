@@ -250,7 +250,7 @@ struct SessionContextSheet: View {
                             ownedLayers: ["chat"],
                             externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"],
                             projectCWD: displayedPresentation?.cwd,
-                            sectionSupplement: { AnyView(settingsSectionSupplement($0)) }
+                            sectionSupplement: { settingsSectionSupplement($0) }
                         )
                         TronGlassCard(accent: .tronEmerald) {
                             manageRow(icon: "gearshape", title: "Settings",
@@ -504,27 +504,32 @@ struct SessionContextSheet: View {
         }
     }
 
-    @ViewBuilder
-    private func settingsSectionSupplement(_ section: String) -> some View {
-        if section == "context" {
-            if let snapshot = displayedPresentation {
-                manualCompactionRow(snapshot)
+    /// Hand-built rows inside their schema section; nil for a section without any.
+    private func settingsSectionSupplement(_ section: String) -> AnyView? {
+        switch section {
+        case "context":
+            AnyView(VStack(spacing: 0) {
+                if let snapshot = displayedPresentation {
+                    manualCompactionRow(snapshot)
+                    divider()
+                }
+                manageRow(icon: "doc.text.magnifyingglass", title: "Agent Instructions",
+                          subtitle: "Delivered: complete assembled instructions", accent: sessionRowAccent) { destination = .agentInstructions }
                 divider()
-            }
-            manageRow(icon: "doc.text.magnifyingglass", title: "Agent Instructions",
-                      subtitle: "Delivered: complete assembled instructions", accent: sessionRowAccent) { destination = .agentInstructions }
-            divider()
-            manageRow(icon: "shippingbox", title: "Project Resources",
-                      subtitle: "Loaded skills, subagents, prompts, and commands", accent: sessionRowAccent) { destination = .projectResources }
-        } else if section == "tools" {
-            manageRow(icon: "wrench.and.screwdriver", title: "Available Tools",
-                      subtitle: "Loaded tools and this chat's active selection", accent: sessionRowAccent) { destination = .tools }
-        } else if section == "run" {
-            TronProgressiveSheetLink(accessibilityLabel: "Hooks", accent: sessionRowAccent,
+                manageRow(icon: "shippingbox", title: "Project Resources",
+                          subtitle: "Loaded skills, subagents, prompts, and commands", accent: sessionRowAccent) { destination = .projectResources }
+            })
+        case "tools":
+            AnyView(manageRow(icon: "wrench.and.screwdriver", title: "Available Tools",
+                              subtitle: "Loaded tools and this chat's active selection", accent: sessionRowAccent) { destination = .tools })
+        case "run":
+            AnyView(TronProgressiveSheetLink(accessibilityLabel: "Hooks", accent: sessionRowAccent,
                 destination: { HooksSettingsView(projectCWD: displayedPresentation?.cwd) }) {
                 TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks",
-                                subtitle: "Loaded event handlers", accent: sessionRowAccent)
-            }
+                                subtitle: "Loaded event handlers", accent: sessionRowAccent, subtitleColor: .tronTextSecondary)
+            })
+        default:
+            nil
         }
     }
 

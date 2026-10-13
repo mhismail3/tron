@@ -55,12 +55,8 @@ extension HomeSheet {
                 ownedLayers: ["chat", "profile"],
                 externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"],
                 sectionSupplement: { section in
-                    AnyView(Group {
-                        if section == "context" {
-                            navigationRow(icon: "doc.text.magnifyingglass", title: "Home Context",
-                                          subtitle: "Next request and delivered context", destination: .context, id: "home-manage-context")
-                        }
-                    })
+                    section == "context" ? AnyView(navigationRow(icon: "doc.text.magnifyingglass", title: "Home Context",
+                        subtitle: "Next request and delivered context", destination: .context, id: "home-manage-context")) : nil
                 }
             )
         } else {

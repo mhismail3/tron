@@ -1212,10 +1212,15 @@ that `settings.resolve` computes for the target:
   example three, then "+N more" into Changes), each with its actor, reason and
   Undo.
 
-A section with nothing overridden, pending or recent shows only its essential
-values. Expanding a section shows all its keys: essential first, then
-**Advanced**. **All settings** shows every key of the surface's target, grouped
-by section, and **search** matches label, id, help and current value.
+Clients choose the presentation of these facts. On iOS (#876) a primary surface
+shows each section's essential keys as standard rows with their controls, its
+pending approvals, its hand-built rows, then one full-row link to a sub-sheet;
+the link names the latest agent change, or otherwise the remaining essential
+values or the key count. The sub-sheet holds every key of the section, essential
+first, then each subgroup and **Advanced**, with each row's source, help and
+actions (reset, Apply again, Edit at another layer), plus **search** over label,
+id, help and current value. Nothing expands in place, and every override stays
+visible on its row's source line rather than as a separate summary row.
 
 ### 7.3 Badges
 

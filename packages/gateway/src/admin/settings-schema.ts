@@ -254,7 +254,8 @@ export const KEYS: readonly KeyDeclaration[] = [
     optionsSource: { name: "catalog.models", dependsOn: [] },
     layers: { profile: { store: "home-memory" } }, timing: "live", effect: "next-memory-pass", floor: "notify", writers: ["ui", "home"],
     label: "Memory model", help: "The model Home's memory uses to compact its conversation. Unset until chosen.", order: 50,
-    importance: "advanced", control: "catalog", fallback: "readOnly",
+    // Essential: Home cannot answer until it is chosen, so it belongs on Manage Home's primary surface.
+    importance: "essential", control: "catalog", fallback: "readOnly",
   },
   // Context -------------------------------------------------------------
   {

@@ -115,21 +115,22 @@ struct ProjectSettingsContent: View {
                     SettingsRendererView(target: .object(["kind": .string("project"), "cwd": .string(cwd)]),
                                          writeLayer: "project", embedded: true, externalControlKeys: ["sources.packages"], projectCWD: cwd,
                                          sectionSupplement: { section in
-                        AnyView(Group {
-                            if section == "sources" {
-                                TronProgressiveSheetLink(accessibilityLabel: "Packages", accent: .tronEmerald,
-                                    destination: { ExtensionsSettingsView(projectCWD: cwd) }) {
-                                    TronSettingsRow(icon: "shippingbox", title: "Packages",
-                                                    subtitle: "Installed for this project", accent: .tronEmerald)
-                                }
-                            } else if section == "run" {
-                                TronProgressiveSheetLink(accessibilityLabel: "Hooks", accent: .tronEmerald,
-                                    destination: { HooksSettingsView(projectCWD: cwd) }) {
-                                    TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks",
-                                                    subtitle: "Loaded project event handlers", accent: .tronEmerald)
-                                }
-                            }
-                        })
+                        switch section {
+                        case "sources":
+                            AnyView(TronProgressiveSheetLink(accessibilityLabel: "Packages", accent: .tronCyan,
+                                destination: { ExtensionsSettingsView(projectCWD: cwd) }) {
+                                TronSettingsRow(icon: "shippingbox", title: "Packages", subtitle: "Installed for this project",
+                                                accent: .tronCyan, subtitleColor: .tronTextSecondary)
+                            })
+                        case "run":
+                            AnyView(TronProgressiveSheetLink(accessibilityLabel: "Hooks", accent: .tronAmber,
+                                destination: { HooksSettingsView(projectCWD: cwd) }) {
+                                TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks", subtitle: "Loaded project event handlers",
+                                                accent: .tronAmber, subtitleColor: .tronTextSecondary)
+                            })
+                        default:
+                            nil
+                        }
                     })
                     TronSettingsCaption("Project values live in this workspace's .pi files. Changes are staged when possible; Tron never commits them.")
                 }

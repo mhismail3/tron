@@ -403,9 +403,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(state.label, "Ready")
         XCTAssertTrue(app.descendants(matching: .any)["session-usage-summary"].exists, "The stats card comes from the Home chat's session")
         XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].exists)
-        searchHomeSettings(app, "Memory model")
-        XCTAssertTrue(app.buttons["Memory model"].firstMatch.exists, "The schema supplies the memory model row")
-        app.buttons["Clear search"].tap()
+        XCTAssertFalse(revealHomeSetting(app, "Memory model"), "The schema's essential memory model row is inline on Manage Home")
+        XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
         for row in ["home-manage-context", "home-manage-memory-browser", "home-manage-chapters", "home-manage-tasks", "home-manage-permissions"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
@@ -619,7 +618,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        searchHomeSettings(app, "Memory model")
+        revealHomeSetting(app, "Memory model")
         app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
         let choice = app.buttons["settings-option-Memory Model B"]
         XCTAssertTrue(choice.waitForExistence(timeout: 5))
@@ -633,7 +632,7 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-memory-model-configured")
         app.buttons["home-sheet-done-manage"].tap()
         openManageHome(app)
-        searchHomeSettings(app, "Memory model")
+        revealHomeSetting(app, "Memory model")
         XCTAssertEqual(app.buttons["Memory model"].firstMatch.value as? String, "Memory Model B")
         app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
         XCTAssertTrue(app.buttons["settings-option-Memory Model A"].waitForExistence(timeout: 5))
@@ -659,12 +658,12 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertTrue(app.descendants(matching: .any)["home-manage-context"].exists)
             }
             if state == "empty-models" {
-                searchHomeSettings(app, "Memory model")
+                revealHomeSetting(app, "Memory model")
                 app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
                 XCTAssertTrue(app.staticTexts["No options match this search"].waitForExistence(timeout: 5))
                 XCTAssertFalse(app.buttons["settings-option-Memory Model B"].exists)
             } else if state == "configure-refused" {
-                searchHomeSettings(app, "Memory model")
+                revealHomeSetting(app, "Memory model")
                 app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
                 let choice = app.buttons["settings-option-Memory Model B"]
                 XCTAssertTrue(choice.waitForExistence(timeout: 5))
@@ -1373,27 +1372,30 @@ final class TronSmokeUITests: XCTestCase {
                       "Opening and dismissing an inherited value must not call settings.change")
     }
 
+    /// Reveals a Home setting's control: an essential key is an inline row on
+    /// Manage Home; any other key lives on its section's sub-sheet. Returns
+    /// whether a sub-sheet was opened (the caller closes it before Manage Home).
     @MainActor
-    private func searchHomeSettings(_ app: XCUIApplication, _ query: String) {
+    @discardableResult
+    private func revealHomeSetting(_ app: XCUIApplication, _ label: String, section: String = "model") -> Bool {
         let title = app.staticTexts["Manage Home"].firstMatch
         if app.buttons["home-sheet-done-manage"].frame.minY > app.windows.firstMatch.frame.height * 0.4 {
             title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
                 thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
         }
-        let search = app.textFields["settings-renderer-search"]
-        reveal(search, in: app)
-        XCTAssertTrue(search.waitForExistence(timeout: 5), app.debugDescription)
-        search.tap()
-        search.typeText(query)
-        // With the live Chat card above Profile settings, matching rows can be
-        // below the keyboard. Scroll inside the sheet's visible content region.
-        let controls = app.buttons.matching(NSPredicate(format: "label == %@", query))
-        for _ in 0..<3 {
-            if controls.allElementsBoundByIndex.contains(where: \.isHittable) { break }
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
-                thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)))
+        let controls = app.buttons.matching(NSPredicate(format: "label == %@", label))
+        var opened = false
+        if !controls.firstMatch.waitForExistence(timeout: 3) {
+            let link = app.buttons["settings-section-\(section)-open"]
+            reveal(link, in: app)
+            link.tap()
+            XCTAssertTrue(app.descendants(matching: .any)["settings-section-\(section)-detail"].waitForExistence(timeout: 5),
+                          app.debugDescription)
+            opened = true
         }
+        for _ in 0..<8 where !controls.allElementsBoundByIndex.contains(where: \.isHittable) { app.swipeUp() }
         XCTAssertTrue(controls.allElementsBoundByIndex.contains(where: \.isHittable), app.debugDescription)
+        return opened
     }
 
     @MainActor
@@ -1406,19 +1408,21 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        searchHomeSettings(app, "Worker thinking")
+        var opened = revealHomeSetting(app, "Worker thinking")
         app.buttons.matching(NSPredicate(format: "label == %@", "Worker thinking")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
         XCTAssertTrue(app.buttons["Low"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["Low"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+        if opened { closeTopSheet(app) }
         app.buttons["home-sheet-done-manage"].tap()
         openManageHome(app)
-        searchHomeSettings(app, "Worker thinking")
+        opened = revealHomeSetting(app, "Worker thinking")
         XCTAssertTrue(app.staticTexts["Low"].waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "manage-home-profile-worker-thinking")
         app.buttons.matching(NSPredicate(format: "label == %@", "Worker thinking")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
         XCTAssertTrue(app.buttons["Medium"].waitForExistence(timeout: 5))
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+        if opened { closeTopSheet(app) }
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"), "Dismissing a choice must not change Profile")
     }
@@ -1688,29 +1692,30 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["Stop session"].tap()
         XCTAssertTrue(app.buttons["Release terminal settlement"].waitForExistence(timeout: 5))
         app.buttons["Release terminal settlement"].tap()
-        let expand = app.buttons["settings-section-model-expand"]
-        XCTAssertTrue(expand.waitForExistence(timeout: 5), app.debugDescription)
-        tapScrolling(expand, in: app)
+        let open = app.buttons["settings-section-model-open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 5), app.debugDescription)
+        let source = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "From default at start: High (Mac)")).firstMatch
+        tapScrolling(open, in: app)
         let reset = app.buttons["settings-row-model.thinking_role_chat_-useCurrentDefault"]
         tapScrolling(reset, in: app)
-        XCTAssertTrue(app.staticTexts["From default at start: High (Mac)"].waitForExistence(timeout: 5), app.debugDescription)
-        // Bring the summary below the native sheet chrome before collapsing;
-        // a partially clipped button can still report isHittable.
-        for _ in 0..<4 where expand.frame.minY < 160 { app.swipeDown() }
-        tapScrolling(expand, in: app)
+        XCTAssertTrue(source.waitForExistence(timeout: 5), app.debugDescription)
+        closeTopSheet(app)
         XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Do not repeat generic policy in the model card")
-        let context = app.buttons["settings-section-context-expand"]
-        tapScrolling(context, in: app)
-        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings-row-context.compaction.enabled").count, 1)
+        // Context's essential key is an inline row beside the manual compaction action.
+        let compaction = app.descendants(matching: .any).matching(identifier: "settings-row-context.compaction.enabled")
+        XCTAssertTrue(compaction.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(compaction.count, 1)
         XCTAssertTrue(app.buttons["manage-session-compact"].exists, "Manual compaction remains a Context action")
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
-        tapScrolling(expand, in: app)
-        XCTAssertTrue(app.staticTexts["From default at start: High (Mac)"].waitForExistence(timeout: 5))
+        for _ in 0..<6 where !open.isHittable { app.swipeDown() }
+        tapScrolling(open, in: app)
+        XCTAssertTrue(source.waitForExistence(timeout: 5))
     }
 
-    /// Manage Session's sections collapsed and expanded in light and dark at the
-    /// largest accessibility type size: every row stays reachable (#766).
+    /// Manage Session's sections and a section sub-sheet in light and dark at
+    /// the largest accessibility type size: every row stays reachable (#766).
     @MainActor
     func testManageSessionSectionsAtAccessibilityTypeInLightAndDark() {
         continueAfterFailure = false
@@ -1721,23 +1726,22 @@ final class TronSmokeUITests: XCTestCase {
             app.launch()
             XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
             app.buttons["Stop session"].tap()
-            let model = app.buttons["settings-section-model-expand"]
-            let context = app.buttons["settings-section-context-expand"]
+            let model = app.buttons["settings-section-model-open"]
             XCTAssertTrue(model.waitForExistence(timeout: 5), app.debugDescription)
-            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-collapsed")
+            XCTAssertFalse(app.buttons["Show all"].exists, "Manage Session never expands settings in place")
+            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-primary")
+            let compaction = app.descendants(matching: .any)["settings-row-context.compaction.enabled"]
+            scrollTo(compaction, in: app)
+            XCTAssertTrue(compaction.isHittable, "The inline Context row must stay reachable at XXXL")
+            XCTAssertTrue(showsText("1 setting", in: app), "A one-key section summary is singular")
+            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-context")
+            for _ in 0..<8 where !model.isHittable { app.swipeDown() }
             tapScrolling(model, in: app)
             let reset = app.buttons["settings-row-model.thinking_role_chat_-useCurrentDefault"]
             XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
             scrollTo(reset, in: app)
-            XCTAssertTrue(reset.isHittable, "The expanded Model row must stay reachable at XXXL")
-            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-model-expanded")
-            tapScrolling(context, in: app)
-            XCTAssertTrue(app.staticTexts["1 setting"].exists, "A one-key section summary is singular")
-            let compaction = app.descendants(matching: .any)["settings-row-context.compaction.enabled"]
-            XCTAssertTrue(compaction.waitForExistence(timeout: 5), app.debugDescription)
-            scrollTo(compaction, in: app)
-            XCTAssertTrue(compaction.isHittable, "The expanded Context row must stay reachable at XXXL")
-            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-context-expanded")
+            XCTAssertTrue(reset.isHittable, "The Model sub-sheet row must stay reachable at XXXL")
+            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-model-sheet")
             app.terminate()
         }
     }
@@ -1989,9 +1993,7 @@ final class TronSmokeUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
-        let section = app.buttons["settings-section-context-expand"]
-        XCTAssertTrue(section.waitForExistence(timeout: 10))
-        tapScrolling(section, in: app)
+        XCTAssertTrue(any["settings-section-context"].waitForExistence(timeout: 10))
         let toggle = any["settings-row-context.images.block"].switches.firstMatch
         tapScrolling(toggle, in: app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-held"], containing: "held:1", timeout: 5))
@@ -2016,24 +2018,30 @@ final class TronSmokeUITests: XCTestCase {
         let applied = app.staticTexts["fixture.settings-renderer-applied"]
         let thinking = app.staticTexts["fixture.settings-renderer-thinking-options"]
         XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(showsText("Fixture Pro · High", in: app), "The Model summary shows its essential values")
+        // Primary surfaces: essential keys inline with their controls, no in-place expansion.
+        XCTAssertTrue(any["settings-row-model.ref"].exists, "Essential keys are standard inline rows")
+        XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:4", timeout: 5), "An inline choice asks for its options")
+        XCTAssertFalse(app.buttons["Show all"].exists, "Primary settings never expand in place")
+        XCTAssertFalse(showsText("The model new chats start with", in: app), "Help lives on sub-sheet rows only")
         XCTAssertTrue(showsText("Lab", in: app), "A section the app never heard of renders from its served title")
-        keepScreenshot(named: "settings-renderer-collapsed")
+        keepScreenshot(named: "settings-renderer-primary")
 
-        // The Run section: the override, the pending approval and the recent agent change.
+        // The Run section: its essential key inline, the pending approval, and the
+        // agent's latest change on the link to the sub-sheet that holds every key.
         scrollTo(any["settings-section-run"], in: app)
         XCTAssertTrue(any["settings-section-run-pending"].exists)
-        XCTAssertTrue(showsText("Home changed Retries", in: app))
-        tapScrolling(app.buttons["settings-section-run-expand"], in: app)
-        let retries = any["settings-row-run.retry.maxRetries"]
-        XCTAssertTrue(retries.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(any["settings-row-run.retry.maxRetries"].exists)
+        XCTAssertFalse(any["settings-row-run.transport"].exists, "Advanced keys live in the section sub-sheet")
+        XCTAssertTrue(showsText("Home changed Retries", in: app), "The section link names the agent's latest change")
+        tapScrolling(app.buttons["settings-section-run-open"], in: app)
+        XCTAssertTrue(any["settings-section-run-detail"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(any["settings-row-run.transport"].exists)
         XCTAssertTrue(showsText("Advanced", in: app), "Advanced keys follow the essential ones")
-        keepScreenshot(named: "settings-renderer-run-expanded")
+        XCTAssertTrue(showsText("How many times a failed request is retried", in: app), "Sub-sheet rows carry source and help")
+        keepScreenshot(named: "settings-renderer-run-sheet")
+        closeTopSheet(app)
 
-        // An invalid value: the Gateway's dry run refuses it under the row; nothing applies.
-        // Numeric controls now share the anchored slider; exercise the Gateway's
-        // negative validation through the fixture's text setting instead.
-        tapScrolling(app.buttons["settings-section-lab-expand"], in: app)
+        // An invalid value: the Gateway's dry run refuses it under the inline row; nothing applies.
         let invalid = any["settings-row-lab.invalidValue"]
         scrollTo(invalid, in: app)
         let field = invalid.textFields.firstMatch
@@ -2045,43 +2053,38 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2))
         keepScreenshot(named: "settings-renderer-invalid")
 
-        // The new key in the new subgroup, the unknown control and the read-only secret.
-        scrollTo(any["settings-row-lab.focusMode"], in: app)
+        // The new subgroup, the unknown badge, the unknown control and the read-only secret.
+        tapScrolling(app.buttons["settings-section-lab-open"], in: app)
+        XCTAssertTrue(any["settings-section-lab-detail"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(showsText("Experiments", in: app), "A subgroup the app never heard of")
-        XCTAssertTrue(showsText("New", in: app), "An unknown badge kind renders neutrally with its label")
+        XCTAssertTrue(showsText("New", in: app), "An unknown badge kind shows its label as source text")
         scrollTo(any["settings-row-lab.palette"], in: app)
         XCTAssertTrue(showsText("Teal", in: app), "An unknown control shows its display read-only")
         scrollTo(any["settings-row-lab.secretToken"], in: app)
-        XCTAssertTrue(any["settings-row-lab.secretToken-note"].exists)
         XCTAssertTrue(showsText("Update Tron to edit", in: app))
+        keepScreenshot(named: "settings-renderer-lab-sheet")
+        closeTopSheet(app)
 
-        // Switching to a model without thinking: the options are asked for again, and there are none.
-        XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:-1", timeout: 2), "Collapsed rows ask for nothing")
-        for _ in 0..<10 where !app.buttons["settings-section-model-expand"].isHittable { app.swipeDown() }
-        app.buttons["settings-section-model-expand"].tap()
-        XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:4", timeout: 5))
-        // The row's trailing value opens the catalog picker.
+        // The inline row's trailing value opens the catalog picker.
+        for _ in 0..<10 where !any["settings-row-model.ref"].isHittable { app.swipeDown() }
         let modelCatalogRow = any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch
         tapScrolling(modelCatalogRow, in: app)
         let lite = any["settings-option-Fixture Lite"]
         XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "settings-renderer-catalog")
         XCTAssertTrue(app.images["Selected"].exists, "The catalog marks the current value like the existing pickers")
-        app.buttons["Done"].tap()
+        closeTopSheet(app)
         XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2), "Opening and dismissing the catalog must not write settings")
         tapScrolling(modelCatalogRow, in: app)
         XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
         lite.tap()
+        // Switching to a model without thinking: the options are asked for again, and there are none.
         XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
         XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:0", timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "No options for the current choice")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(any["settings-row-model.thinking"].descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "Off")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
 
-        // All settings, then search.
-        reveal(any["settings-renderer-all"], in: app)
-        any["settings-renderer-all"].tap()
-        reveal(any["settings-all-lab"], in: app)
-        XCTAssertTrue(any["settings-all-lab"].exists, app.debugDescription)
-        keepScreenshot(named: "settings-renderer-all")
+        // Search lives on the full renderer, never on a primary surface.
         let search = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Search settings")).firstMatch
         for _ in 0..<12 where !search.isHittable { app.swipeDown() }
         search.tap()
@@ -2091,6 +2094,15 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(any["settings-row-run.retry.maxRetries"].exists)
         XCTAssertFalse(any["settings-row-run.transport"].exists, "Search shows only matching rows")
         keepScreenshot(named: "settings-renderer-search")
+    }
+
+    /// Dismisses the frontmost sheet by its own Done; covered sheets' Done
+    /// buttons are not hittable.
+    @MainActor
+    private func closeTopSheet(_ app: XCUIApplication) {
+        let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.last { $0.isHittable }
+        XCTAssertNotNil(done, app.debugDescription)
+        done?.tap()
     }
 
     /// Source actions are renderer primitives, not per-key code. The fixture
@@ -2103,16 +2115,18 @@ final class TronSmokeUITests: XCTestCase {
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-source-actions"]
         app.launch()
         defer { app.terminate() }
-        XCTAssertTrue(app.buttons["settings-section-model-expand"].waitForExistence(timeout: 10))
-        app.buttons["settings-section-model-expand"].tap()
+        XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["settings-row-model.ref-useCurrentDefault"].exists, "Source actions live on the sub-sheet row")
+        app.buttons["settings-section-model-open"].tap()
         let reset = app.buttons["settings-row-model.ref-useCurrentDefault"]
         XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.buttons["Unsupported action"].exists)
         keepScreenshot(named: "settings-current-default-before")
         tapScrolling(reset, in: app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
-        XCTAssertTrue(showsText("Fixture Lite", in: app))
-        XCTAssertTrue(showsText("Future source", in: app), "Unknown actions do not hide their value or badge")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "value == %@", "Fixture Lite")).firstMatch
+            .waitForExistence(timeout: 5), "The reset value reads back on the sub-sheet row")
+        XCTAssertTrue(showsText("Future source", in: app), "Unknown actions do not hide their value or source")
         keepScreenshot(named: "settings-current-default-after")
     }
 
@@ -2127,7 +2141,6 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
         XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
-        app.buttons["settings-section-model-expand"].tap()
         tapScrolling(any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch, in: app)
         XCTAssertTrue(any["settings-option-Fixture Pro"].waitForExistence(timeout: 5))
         XCTAssertFalse(any["settings-option-Fixture Page Two"].exists)
@@ -2159,7 +2172,6 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
         XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
-        tapScrolling(app.buttons["settings-section-model-expand"], in: app)
         let row = any["settings-row-model.thinking"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         keepScreenshot(named: "settings-renderer-ordered-choice-row")
@@ -2189,7 +2201,6 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
         XCTAssertTrue(any["settings-section-run"].waitForExistence(timeout: 10))
-        tapScrolling(app.buttons["settings-section-run-expand"], in: app)
         let row = any["settings-row-run.retry.maxRetries"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         keepScreenshot(named: "settings-renderer-number-row")
@@ -2209,12 +2220,73 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(numberButton.value as? String, "10 retries",
                        "The served dynamic range wins over the static 0–100 declaration")
         keepScreenshot(named: "settings-renderer-number-persisted")
+        // The advanced key lives on the Run sub-sheet.
+        tapScrolling(app.buttons["settings-section-run-open"], in: app)
         let future = any["settings-row-run.futureNumber"]
         XCTAssertTrue(future.waitForExistence(timeout: 5))
         XCTAssertTrue(future.staticTexts["Future numeric value"].exists)
         XCTAssertFalse(future.buttons["settings-number-control"].exists,
                        "An out-of-representation range must stay visible read-only, never trap")
         keepScreenshot(named: "settings-renderer-number-unsupported")
+    }
+
+    @MainActor
+    func testDEBUGNestedMenuOnMain() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        let ordinary = app.buttons["session-row-home-shell-fixture:ordinary-session"]
+        XCTAssertTrue(ordinary.waitForExistence(timeout: 10), app.debugDescription)
+        ordinary.tap()
+        let gear = app.navigationBars.buttons["Manage Session"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 10))
+        gear.tap()
+        let settings = app.buttons["manage-session-settings"]
+        reveal(settings, in: app)
+        settings.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+        let sessions = app.buttons["settings-link-Sessions"]
+        reveal(sessions, in: app)
+        sessions.tap()
+        let menu = app.buttons["Show finished subagents"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 2)
+        menu.tap()
+        print("DEBUGNESTED \(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "minute")).count) \(app.debugDescription.contains("Only active"))")
+        keepScreenshot(named: "DEBUG-nested-menu")
+    }
+
+    @MainActor
+    func testDEBUGListMenuInLabSheet() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
+        tapScrolling(app.buttons["settings-section-run-open"], in: app)
+        let transport = any["settings-row-run.transport"].buttons.firstMatch.buttons.firstMatch
+        tapScrolling(transport, in: app)
+        print("DEBUGMENU1 \(app.buttons["WebSocket"].waitForExistence(timeout: 3))")
+        app.terminate(); app.launch()
+        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
+        tapScrolling(app.buttons["settings-section-lab-open"], in: app)
+        let paths = any["settings-row-lab.paths"]
+        tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(app.buttons["Edit beta"].waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 3)
+        app.buttons["Edit beta"].tap()
+        print("DEBUGMENU2 \(app.buttons["Move up"].waitForExistence(timeout: 3))")
+        app.buttons["Edit beta"].tap()
+        print("DEBUGMENU3 \(app.buttons["Move up"].waitForExistence(timeout: 3))")
+        app.buttons["Edit beta"].press(forDuration: 0.6)
+        print("DEBUGMENU4 \(app.buttons["Move up"].waitForExistence(timeout: 3))")
+        let frame = app.buttons["Edit beta"].frame
+        print("DEBUGFRAME \(frame) hittable \(app.buttons["Edit beta"].isHittable)")
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+        print("DEBUGMENU5 \(app.buttons["Move up"].waitForExistence(timeout: 3))")
+        keepScreenshot(named: "DEBUG-coordinate-tap")
     }
 
     /// Write-only replacement and ordered-list operations cross the real client
@@ -2228,7 +2300,7 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
         XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
-        tapScrolling(app.buttons["settings-section-lab-expand"], in: app)
+        tapScrolling(app.buttons["settings-section-lab-open"], in: app)
         let password = any["settings-row-lab.password"]
         reveal(password, in: app)
         tapScrolling(password.buttons.firstMatch.buttons.firstMatch, in: app)
@@ -2243,13 +2315,15 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(password.buttons.firstMatch.buttons.firstMatch, in: app)
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         XCTAssertEqual(field.value as? String, "New value", "Reopening never pre-fills a secret")
-        app.buttons["Done"].tap()
+        closeTopSheet(app)
 
         let paths = any["settings-row-lab.paths"]
         tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
         XCTAssertTrue(app.buttons["Edit beta"].waitForExistence(timeout: 5))
         keepScreenshot(named: "settings-renderer-list-before-edit")
         app.buttons["Edit beta"].tap()
+        keepScreenshot(named: "DEBUG-after-edit-tap")
+        if !app.buttons["Move up"].waitForExistence(timeout: 3) { print("DEBUGTREE \(app.debugDescription)") }
         app.buttons["Move up"].tap()
         app.buttons["Edit alpha"].tap()
         app.buttons["Remove"].tap()
@@ -2264,7 +2338,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Edit gamma"].exists)
         XCTAssertFalse(app.buttons["Edit alpha"].exists)
         keepScreenshot(named: "settings-renderer-list-persisted")
-        app.buttons["Done"].tap()
+        closeTopSheet(app)
 
         // A numeric map uses only field names and bounds served by this unknown
         // fixture schema. Saving preserves untouched fields; Done never writes.
@@ -2286,7 +2360,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(red.value as? String, "2")
         XCTAssertEqual(blue.value as? String, "9")
         blue.tap(); blue.typeText(XCUIKeyboardKey.delete.rawValue + "7\n")
-        app.buttons["Done"].tap()
+        closeTopSheet(app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:3", timeout: 5))
         tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
         XCTAssertEqual(blue.value as? String, "9", "Dismissed draft must not replace the saved numeric map")
@@ -2304,11 +2378,14 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
         XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10), app.debugDescription)
-        keepScreenshot(named: "settings-renderer-dark-xxxl-collapsed")
-        tapScrolling(app.buttons["settings-section-run-expand"], in: app)
-        XCTAssertTrue(any["settings-row-run.retry.maxRetries"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-dark-xxxl-primary")
         scrollTo(any["settings-row-run.retry.maxRetries"], in: app)
-        keepScreenshot(named: "settings-renderer-dark-xxxl-expanded")
+        XCTAssertTrue(any["settings-row-run.retry.maxRetries"].isHittable, "Inline rows stay reachable at XXXL")
+        tapScrolling(app.buttons["settings-section-run-open"], in: app)
+        let transport = any["settings-row-run.transport"]
+        XCTAssertTrue(transport.waitForExistence(timeout: 5), app.debugDescription)
+        scrollTo(transport, in: app)
+        keepScreenshot(named: "settings-renderer-dark-xxxl-run-sheet")
     }
 
     /// Any element whose label contains the text: a settings row combines its labels.
@@ -2360,11 +2437,8 @@ final class TronSmokeUITests: XCTestCase {
         app.launchArguments = ["-tron-mac-settings-fixture"]
         app.launch()
         defer { app.terminate() }
-        let modelSection = app.buttons["settings-section-model-expand"]
-        XCTAssertTrue(modelSection.waitForExistence(timeout: 5))
-        modelSection.tap()
         let thinking = app.descendants(matching: .any)["settings-row-model.thinking"]
-        XCTAssertTrue(thinking.waitForExistence(timeout: 3))
+        XCTAssertTrue(thinking.waitForExistence(timeout: 5), "Mac Settings shows essential keys inline")
         tapScrolling(thinking.buttons.firstMatch.buttons.firstMatch, in: app)
         let slider = app.descendants(matching: .any)["settings-choice-slider"]
         XCTAssertTrue(slider.waitForExistence(timeout: 3))
@@ -2374,7 +2448,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(slider.waitForNonExistence(timeout: 3))
         XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
         XCTAssertFalse(app.buttons["Settings Scope"].exists)
-        modelSection.tap()
         for _ in 0..<12 where !app.staticTexts["This iPhone"].isHittable { app.swipeUp() }
         XCTAssertTrue(app.staticTexts["This iPhone"].exists)
         XCTAssertTrue(app.staticTexts["Stored on this iPhone. Never changes harness behaviour."].exists)

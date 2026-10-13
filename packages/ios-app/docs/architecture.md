@@ -764,17 +764,24 @@ Changes separates disposable history errors from action failures. An undo confli
 
 The generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is
 `SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
-in `TronPresentation.swift`. Its bounded, expandable section cards stay mounted in
-an ordinary vertical stack, like Settings: lazy eviction of expanding glass cards
-can continuously invalidate SwiftUI's layout graph during a scroll. The fixture-schema
-and secret/list journeys exercise scrolling through those cards and subsequent editing;
-a main-thread sample distinguishes this layout hang from a Gateway request timeout.
+in `TronPresentation.swift`. It restores the pre-schema Settings design language
+(#876): primary surfaces are titled section cards, each with that section's glyph and
+accent (`SettingsSectionStyle`), holding the section's essential keys as standard
+two-line rows with right-aligned controls, pending approvals, hand-built supplement
+rows, and one full-row link that opens the section on a standard progressive sub-sheet.
+Primary rows show only title and control; the sub-sheet rows add the source line, help
+and actions. Nothing expands or collapses in place, and primary surfaces carry no search.
+Section cards stay mounted in an ordinary vertical stack, like Settings: lazy eviction of
+glass cards can continuously invalidate SwiftUI's layout graph during a scroll. The
+fixture-schema and secret/list journeys exercise scrolling and subsequent editing; a
+main-thread sample distinguishes this layout hang from a Gateway request timeout.
 It sends
 `SettingsRendererContract` (version 1; `toggle`, `choice`, `number`, `text`, `secret`,
 `list`, `catalog`, `readOnly`) with `settings.resolve` and renders whatever comes back: sections in Gateway order
-with their summary (essential values, overrides with a layer badge, waiting approvals, recent
-agent changes) as the section's expand row, every key on expand (essential, then Advanced, with
-subgroup headings), All settings, and search over label, id, help and display. A control it
+with their essential rows, waiting approvals and a link whose secondary line names the latest
+agent change (else remaining essential values or the key count); the section sub-sheet holds
+every key (essential, then each subgroup and Advanced as titled groups) and search over label,
+id, help and display. A control it
 does not implement, or a missing presentation, renders the `display` read-only; an unknown
 badge kind is neutral; a group no section declares is shown under its id, so a value is never
 hidden. Choices with an `optionsSource` and catalogs come from `settings.options`, re-requested
@@ -818,7 +825,9 @@ fixture socket to prove redaction and persisted ordering.
 `testSettingsRendererNumberUsesSharedSlider` exercises a served number through selection
 and persistence; the legacy Agent Defaults journey protects the existing
 AgentConfigurationControls callers, which share the same choice and value-row primitives.
-Source badges may carry `useCurrentDefault` or `followDefault` actions. The row
+Source badges render as the sub-sheet row's source line (labels joined by " · ";
+the row's accessibility value adds each badge's detail). They may carry
+`useCurrentDefault` or `followDefault` actions. The sub-sheet row
 renders the Gateway's label with the shared inline action capsule and routes an
 unset through the same change owner; it contains no per-key reset logic. Unknown
 actions remain display-only badges, and a negotiated read-only row cannot reset.
@@ -830,8 +839,8 @@ for an outside entry that refers to the Tron change it replaced.
 `testSettingsRendererUsesCurrentDefaultSourceAction` proves one applied unset
 against the hosted socket and preserves the unknown badge without dispatching it.
 This is primitive coverage; session-surface adoption still owns the runtime fence.
-Manage Session and Manage Home embed the same schema renderer with calm
-collapsed summaries and All settings/search. Home owns Chat then Profile;
+Manage Session and Manage Home embed the same schema renderer: essential rows and
+sub-sheet links per section, with search on the sub-sheets. Home owns Chat then Profile;
 Manage Session owns Chat. The shared Chat card remains the only value editor
 for its live model, thinking and context window, while their generic rows retain
 schema provenance and reset actions. Other keys remain read-only with routes to
@@ -1716,7 +1725,7 @@ never writes. The renderer uses the resolver's allowed layer list: other-layer
 rows remain read-only and link to the Project or Mac editor rather than attempting
 a Chat write. The hosted `testManageSessionUsesCurrentDefault` journey exercises
 reset through this actual route and reopens it to check the authoritative value;
-`testManageSessionSectionsAtAccessibilityTypeInLightAndDark` keeps every expanded row reachable
+`testManageSessionSectionsAtAccessibilityTypeInLightAndDark` keeps inline and sub-sheet rows reachable
 at the largest accessibility type size in light and dark;
 Gateway settings-gate coverage owns persistence and provider-effect proof.
 The shared Chat card keeps its domain receipt/revision adapter; the renderer

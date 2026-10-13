@@ -119,13 +119,15 @@ final class TronProjectTrustUITests: XCTestCase {
         app.launchArguments = ["-tron-project-trust-fixture", "-project-trust-scenario", "floors"]
         app.launch()
         defer { app.terminate() }
-        let section = app.buttons["settings-section-permissions-expand"]
+        // Floors are advanced keys: they live on the Permissions sub-sheet.
+        let section = app.buttons["settings-section-permissions-open"]
         XCTAssertTrue(section.waitForExistence(timeout: 15), app.debugDescription)
         section.tap()
         let row = app.descendants(matching: .any)["settings-row-permissions.floor_direction_widen_key_permissions.projectTrust"]
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(counts(app, contain: "floor:approve previews:0 applies:0"), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Project trust (widen)"].exists && app.staticTexts["Built-in"].exists, app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Project trust (widen)"].exists
+                      && row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Built-in")).firstMatch.exists, app.debugDescription)
 
         // Lowering: the dry run carries confirm text, and nothing is applied until confirmed.
         choose(app, row: row, option: "Quiet")
@@ -142,8 +144,9 @@ final class TronProjectTrustUITests: XCTestCase {
         confirm.tap()
         XCTAssertTrue(counts(app, contain: "floor:quiet previews:2 applies:1"), app.debugDescription)
         XCTAssertTrue(waitForValue(row.buttons.firstMatch, "Quiet"), app.debugDescription)
-        // The override is now the Mac layer's, named by the row's layer badge.
-        XCTAssertTrue(app.staticTexts["Mac"].waitForExistence(timeout: 5), app.debugDescription)
+        // The override is now the Mac layer's, named in the row's source line.
+        XCTAssertTrue(row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mac")).firstMatch
+            .waitForExistence(timeout: 5), app.debugDescription)
 
         // Raising: the dry run needs no confirm, so the choice applies directly.
         choose(app, row: row, option: "Approve")

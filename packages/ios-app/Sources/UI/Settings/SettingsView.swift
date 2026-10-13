@@ -30,7 +30,7 @@ struct SettingsView: View {
                         writeLayer: "mac",
                         embedded: true,
                         externalControlKeys: ["sources.packages"],
-                        sectionSupplement: { AnyView(sectionSupplement($0)) },
+                        sectionSupplement: { sectionSupplement($0) },
                         unresolvedSupplement: AnyView(offlineDestinations)
                     )
 
@@ -104,57 +104,57 @@ struct SettingsView: View {
 
     private var offlineDestinations: some View {
         VStack(spacing: 18) {
-            TronSettingsGroup("Tools") { sectionSupplement("tools") }
-            TronSettingsGroup("Permissions") { sectionSupplement("permissions") }
-            TronSettingsGroup("Run") { sectionSupplement("run") }
-            TronSettingsGroup("Accounts") { sectionSupplement("accounts") }
-            TronSettingsGroup("Sources") { sectionSupplement("sources") }
-            TronSettingsGroup("Setup") { sectionSupplement("setup") }
+            if let rows = sectionSupplement("tools") { TronSettingsGroup("Tools", accent: SettingsSectionStyle("tools").accent) { rows }.tronSettingsVisualTheme(accent: SettingsSectionStyle("tools").accent) }
+            if let rows = sectionSupplement("permissions") { TronSettingsGroup("Permissions", accent: SettingsSectionStyle("permissions").accent) { rows }.tronSettingsVisualTheme(accent: SettingsSectionStyle("permissions").accent) }
+            if let rows = sectionSupplement("run") { TronSettingsGroup("Run", accent: SettingsSectionStyle("run").accent) { rows }.tronSettingsVisualTheme(accent: SettingsSectionStyle("run").accent) }
+            if let rows = sectionSupplement("accounts") { TronSettingsGroup("Accounts", accent: SettingsSectionStyle("accounts").accent) { rows }.tronSettingsVisualTheme(accent: SettingsSectionStyle("accounts").accent) }
+            if let rows = sectionSupplement("sources") { TronSettingsGroup("Sources", accent: SettingsSectionStyle("sources").accent) { rows }.tronSettingsVisualTheme(accent: SettingsSectionStyle("sources").accent) }
+            if let rows = sectionSupplement("setup") { TronSettingsGroup("Setup", accent: SettingsSectionStyle("setup").accent) { rows }.tronSettingsVisualTheme(accent: SettingsSectionStyle("setup").accent) }
         }
     }
 
     /// Native flows keep their established controls inside the schema's section.
     /// Harness values (including default trust) have just one generic editor.
-    @ViewBuilder
-    private func sectionSupplement(_ section: String) -> some View {
+    /// Rows take their section's accent from the renderer; nil means none.
+    private func sectionSupplement(_ section: String) -> AnyView? {
         switch section {
         case "tools":
-            settingsDivider(accent: .tronCyan)
-            settingsLink("MCP Servers", summary: "Tool providers and authentication",
-                         icon: "server.rack", accent: .tronCyan) {
+            AnyView(settingsLink("MCP Servers", summary: "Tool providers and authentication",
+                                 icon: "server.rack", accent: .tronCyan) {
                 MCPServersSettingsView(projectCWD: nil, sessionID: nil)
-            }
+            })
         case "run":
-            settingsDivider(accent: .tronPurple)
-            settingsLink("Hooks", summary: "Loaded event handlers from extensions",
-                         icon: "bolt.horizontal.circle", accent: .tronPurple) {
+            AnyView(settingsLink("Hooks", summary: "Loaded event handlers from extensions",
+                                 icon: "bolt.horizontal.circle", accent: .tronAmber) {
                 HooksSettingsView(projectCWD: nil)
-            }
+            })
         case "accounts":
-            settingsLink("Model Providers", summary: "Provider accounts and authentication",
-                         icon: "key", accent: .tronPurple) { ProvidersSettingsView(sessionID: nil) }
-            settingsDivider(accent: .tronPurple)
-            settingsLink("Custom Models", summary: "Saved model definitions and aliases",
-                         icon: "slider.horizontal.3", accent: .tronPurple) { CustomModelsSettingsView() }
-            settingsDivider(accent: .tronPurple)
-            settingsLink("Connected Services", summary: "Accounts and service capabilities",
-                         icon: "link", accent: .tronPurple) { IntegrationsSettingsView() }
+            AnyView(VStack(spacing: 0) {
+                settingsLink("Model Providers", summary: "Provider accounts and authentication",
+                             icon: "key", accent: .tronPurple) { ProvidersSettingsView(sessionID: nil) }
+                settingsDivider(accent: .tronPurple)
+                settingsLink("Custom Models", summary: "Saved model definitions and aliases",
+                             icon: "slider.horizontal.3", accent: .tronPurple) { CustomModelsSettingsView() }
+                settingsDivider(accent: .tronPurple)
+                settingsLink("Connected Services", summary: "Accounts and service capabilities",
+                             icon: "link", accent: .tronPurple) { IntegrationsSettingsView() }
+            })
         case "sources":
-            settingsDivider(accent: .tronCyan)
-            settingsLink("Extensions", summary: "Installed packages and what they contribute",
-                         icon: "shippingbox", accent: .tronCyan) { ExtensionsSettingsView(projectCWD: nil) }
+            AnyView(settingsLink("Extensions", summary: "Installed packages and what they contribute",
+                                 icon: "shippingbox", accent: .tronCyan) { ExtensionsSettingsView(projectCWD: nil) })
         case "setup":
-            settingsDivider(accent: .tronBlue)
-            settingsLink("Connections", summary: "Pair Macs, devices, and push readiness",
-                         icon: "desktopcomputer", accent: .tronBlue) { ConnectionsSettingsView() }
-            settingsDivider(accent: .tronBlue)
-            settingsLink("Import", summary: "Restore a session export",
-                         icon: "tray.and.arrow.down", accent: .tronBlue) { ImportSettingsView(onImported: onImported) }
-            settingsDivider(accent: .tronBlue)
-            settingsLink("Logs", summary: "Recent diagnostics from paired Mac gateways",
-                         icon: "text.alignleft", accent: .tronBlue) { GatewayLogsSettingsView() }
+            AnyView(VStack(spacing: 0) {
+                settingsLink("Connections", summary: "Pair Macs, devices, and push readiness",
+                             icon: "desktopcomputer", accent: .tronBlue) { ConnectionsSettingsView() }
+                settingsDivider(accent: .tronBlue)
+                settingsLink("Import", summary: "Restore a session export",
+                             icon: "tray.and.arrow.down", accent: .tronBlue) { ImportSettingsView(onImported: onImported) }
+                settingsDivider(accent: .tronBlue)
+                settingsLink("Logs", summary: "Recent diagnostics from paired Mac gateways",
+                             icon: "text.alignleft", accent: .tronBlue) { GatewayLogsSettingsView() }
+            })
         default:
-            EmptyView()
+            nil
         }
     }
 

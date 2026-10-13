@@ -599,7 +599,7 @@ private actor HostedHomeShellGateway {
             "badges": .array([.object(["kind": .string("source"), "label": .string("Profile: Home")])]),
             "layers": .array([.object(["layer": .string("profile")])]),
             "presentation": .object(["label": .string("Memory model"), "help": .string("Choose a memory model before sending."),
-                "order": .number(50), "importance": .string("advanced"), "control": .string("catalog"),
+                "order": .number(50), "importance": .string("essential"), "control": .string("catalog"),
                 "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])]),
         ])
         return .object(["keys": .array([workerThinkingKey, contextWindowKey, memoryKey]), "sections": .array([.object([
