@@ -154,12 +154,7 @@ struct ChatPendingPromptRow: View, Equatable {
                         .foregroundStyle(Color.tronTextSecondary)
                         .accessibilityLabel(presentation.statusTitle)
                     if !displayText.isEmpty {
-                        UserPromptText(text: displayText)
-                            .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
-                            .padding(.top, ChatPromptContainerStyle.topPadding)
-                            .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
-                            .modifier(UserPromptGlassModifier())
-                            .modifier(ChatMessageCopyMenu(text: displayText))
+                        ChatUserPromptContent(text: displayText)
                     }
                     let attachmentChips = QueuedMessageAttachmentPresentation.chips(
                         attachmentCount: presentation.attachmentCount,
@@ -203,10 +198,13 @@ struct ChatPendingPromptRow: View, Equatable {
             if let resource = presentation.resourceInvocation, !resource.isExtensionCommand {
                 CanonicalResourceChip(resource: resource)
             }
+            if let parsed = ChatAnnotationEnvelope.parse(displayText) {
+                ChatSentAnnotationChips(annotations: parsed.annotations)
+            }
             ChatPromptCard(
                 behavior: presentation.cardBehavior,
                 title: presentation.cardTitle,
-                text: displayText,
+                text: ChatAnnotationEnvelope.body(of: displayText),
                 detail: presentation.cardDetail,
                 attachmentContent: {
                     if !chips.isEmpty {
@@ -218,7 +216,7 @@ struct ChatPendingPromptRow: View, Equatable {
                 },
                 statusContent: { EmptyView() }
             )
-            .modifier(ChatMessageCopyMenu(text: displayText))
+            .modifier(ChatMessageCopyMenu(text: ChatAnnotationEnvelope.body(of: displayText)))
         }
     }
 }
@@ -245,15 +243,18 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                 Spacer(minLength: 24)
                 VStack(alignment: .trailing, spacing: 4) {
                     resourceChip
+                    if let parsed = ChatAnnotationEnvelope.parse(displayText) {
+                        ChatSentAnnotationChips(annotations: parsed.annotations)
+                    }
                     ChatPromptCard(
                         behavior: presentation.cardBehavior,
                         title: presentation.cardTitle,
-                        text: displayText,
+                        text: ChatAnnotationEnvelope.body(of: displayText),
                         detail: presentation.cardDetail,
                         attachmentContent: { queuedAttachmentChips },
                         statusContent: { EmptyView() }
                     )
-                    .modifier(ChatMessageCopyMenu(text: displayText))
+                    .modifier(ChatMessageCopyMenu(text: ChatAnnotationEnvelope.body(of: displayText)))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -268,12 +269,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                 resourceChip
                 attachmentStrip
                 if !displayText.isEmpty {
-                    UserPromptText(text: displayText)
-                        .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
-                        .padding(.top, ChatPromptContainerStyle.topPadding)
-                        .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
-                        .modifier(UserPromptGlassModifier())
-                        .modifier(ChatMessageCopyMenu(text: displayText))
+                    ChatUserPromptContent(text: displayText)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)

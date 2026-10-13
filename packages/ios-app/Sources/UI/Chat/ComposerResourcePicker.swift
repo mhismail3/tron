@@ -953,11 +953,22 @@ struct ComposerResourceDetailSheet: View {
     }
 }
 
-struct ComposerResourceChip: View {
-    let sessionID: String?
-    let resource: ComposerResourceEntry
+/// The one chip for content staged above the composer input (skills,
+/// prompts, commands and annotations): a glass compact pill whose label opens
+/// its detail and whose trailing control removes it. Callers own the sheet.
+struct ComposerStagedChip<Accessory: View>: View {
+    static var accessibilityIdentifier: String { "composer.staged-chip" }
+
+    let icon: String
+    let title: String
+    let tone: ChatNotificationTone
+    let accent: Color
+    var foregroundOverride: Color? = nil
+    let openLabel: String
+    let removeLabel: String
+    let onOpen: () -> Void
     let onRemove: () -> Void
-    @State private var showsDetail = false
+    @ViewBuilder let accessory: Accessory
 
     var body: some View {
         ChatCompactPillSurface(
@@ -968,24 +979,21 @@ struct ComposerResourceChip: View {
             cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius
         ) {
             HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
-                Button { showsDetail = true } label: {
+                Button(action: onOpen) {
                     HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
                         ChatCompactPillLabel(
-                            icon: resourceIcon,
-                            title: resource.friendlyName,
+                            icon: icon,
+                            title: title,
                             tone: tone,
                             iconSize: TronTypography.sizeBody,
                             titleWeight: .bold,
-                            foregroundOverride: resource.source == .skill ? accent : nil
+                            foregroundOverride: foregroundOverride
                         )
-                        ComposerResourceBadges(
-                            origin: resource.resourceOrigin, scope: resource.resourceScope,
-                            accent: accent
-                        )
+                        accessory
                     }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Show resource details, \(resource.friendlyName)")
+                .accessibilityLabel(openLabel)
 
                 Button(action: onRemove) {
                     Image(systemName: "xmark.circle.fill")
@@ -995,10 +1003,37 @@ struct ComposerResourceChip: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Remove resource, \(resource.friendlyName)")
+                .accessibilityLabel(removeLabel)
             }
         }
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(Self.accessibilityIdentifier)
+    }
+}
+
+struct ComposerResourceChip: View {
+    let sessionID: String?
+    let resource: ComposerResourceEntry
+    let onRemove: () -> Void
+    @State private var showsDetail = false
+
+    var body: some View {
+        ComposerStagedChip(
+            icon: resourceIcon,
+            title: resource.friendlyName,
+            tone: tone,
+            accent: accent,
+            foregroundOverride: resource.source == .skill ? accent : nil,
+            openLabel: "Show resource details, \(resource.friendlyName)",
+            removeLabel: "Remove resource, \(resource.friendlyName)",
+            onOpen: { showsDetail = true },
+            onRemove: onRemove
+        ) {
+            ComposerResourceBadges(
+                origin: resource.resourceOrigin, scope: resource.resourceScope,
+                accent: accent
+            )
+        }
         .tronManagedSheet(
             isPresented: $showsDetail,
             identity: "composer.canonical-resource.\(resource.id)"
