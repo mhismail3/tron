@@ -24,6 +24,16 @@ LOCKER="$ROOT_DIR/scripts/ios-test-lock.py"
 # Host-wide: every worktree, and the Gateway's detached install helper, lease a
 # device here.
 DEVICE_LEASE_DIR="$HOME/.tron/internal/run"
+# Over-the-air development builds: a loopback static server (LaunchAgent) behind
+# Tailscale Serve on a dedicated HTTPS port, reachable only from the tailnet.
+SHARE_DIR="$HOME/.tron/ios-builds"
+SHARE_HTTPS_PORT=8443
+SHARE_BACKEND_PORT=8444
+SHARE_AGENT_LABEL="com.tron.ios-builds"
+SHARE_AGENT_PLIST="$HOME/Library/LaunchAgents/$SHARE_AGENT_LABEL.plist"
+SHARE_KEEP=5
+SHARE_TITLE=""
+SHARE_NOTES=""
 
 usage() {
     cat <<'USAGE'
@@ -32,6 +42,8 @@ Usage:
   scripts/tron-ios-device launch [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device stop [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device status [--device-id ID] [--device-name NAME]
+  scripts/tron-ios-device share --title TITLE --notes NOTES [--fast-debug]
+  scripts/tron-ios-device share-host enable|status|disable
 
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
@@ -64,6 +76,18 @@ command: build, install and launch. A command that finds it held exits 73
 naming the holder's worktree, PID and start time; wait for that command to
 finish. The lease is keyed by the resolved device identifier, which both device
 selection and the Gateway's install use.
+
+`share` builds the same validated pair for any registered device (no device
+connected, no lease) from a clean tree, publishes it to the share host and
+prints `Install page: <url>` and `Install link: itms-services://...` last. The
+page installs over the air from Safari on a device in the development profile
+with Developer Mode on. It keeps the newest 5 builds.
+
+`share-host enable` (once, maintainer-approved) installs the loopback server
+LaunchAgent com.tron.ios-builds (127.0.0.1:8444, serving ~/.tron/ios-builds)
+and runs `tailscale serve --bg --https=8443 http://127.0.0.1:8444`, so the
+builds are reachable only from the tailnet at https://<this Mac>.ts.net:8443/
+with Tailscale's certificate. `disable` reverses both and keeps the builds.
 USAGE
 }
 
@@ -192,6 +216,12 @@ parse_common_args() {
                 BUILD_MODE="fast-debug"
                 shift
                 ;;
+            --title|--notes)
+                [[ "$CMD" == "share" ]] || die "$1 is only valid with share"
+                [ -n "${2:-}" ] || die "$1 requires a value"
+                if [[ "$1" == "--title" ]]; then SHARE_TITLE="$2"; else SHARE_NOTES="$2"; fi
+                shift 2
+                ;;
             -h|--help)
                 usage
                 exit 0
@@ -309,23 +339,30 @@ XCODEBUILD_ARGS=()
 # recompiles the entire app for any edit (~150s versus ~17s measured for a
 # one-file change). The LocalDevice xcconfig stays whole-module, so the
 # scheme's Instruments Profile action still builds the release-like binary.
+# An empty device id builds for any registered device (share); the signed
+# development profile then carries every device registered to the team.
 prepare_xcodebuild_args() {
     local derived_data_path="$1"
     local result_bundle_path="$2"
     local device_id="$3"
     local build_mode="$4"
 
+    local destination=(-destination "generic/platform=iOS")
+    local registration=()
+    if [[ -n "$device_id" ]]; then
+        destination=(-destination "platform=iOS,id=${device_id}" -destination-timeout 30)
+        registration=(-allowProvisioningDeviceRegistration)
+    fi
     XCODEBUILD_ARGS=(
         build
         -project "$PROJECT"
         -scheme "$SCHEME"
         -configuration "$CONFIG"
-        -destination "platform=iOS,id=${device_id}"
-        -destination-timeout 30
+        "${destination[@]}"
         -derivedDataPath "$derived_data_path"
         -resultBundlePath "$result_bundle_path"
         -allowProvisioningUpdates
-        -allowProvisioningDeviceRegistration
+        ${registration[@]+"${registration[@]}"}
     )
     XCODEBUILD_ARGS+=(SWIFT_COMPILATION_MODE=singlefile)
     if [[ "$build_mode" == "fast-debug" ]]; then
@@ -339,14 +376,13 @@ prepare_xcodebuild_args() {
     fi
 }
 
-build_install_launch() {
-    require_full_xcode
-    validate_gateway_protocol_target_prebuild
-
-    local device_id
-    device_id="$(resolve_device_id)"
-    [ -n "$device_id" ] || die "could not resolve a physical iOS device"
-
+# Builds and validates the canonical app for DEVICE_ID (empty: any registered
+# device) and sets BUILT_APP, BUILD_LOG and BUILD_XCRESULT. Leaves cwd at IOS_DIR.
+BUILT_APP=""
+BUILD_LOG=""
+BUILD_XCRESULT=""
+build_validated_app() {
+    local device_id="$1"
     xcodebuild -version
     printf 'iPhoneOS SDK %s\n' "$(xcrun --sdk iphoneos --show-sdk-version)"
     cd "$IOS_DIR"
@@ -356,8 +392,6 @@ build_install_launch() {
     fi
     [[ -n "$xcodegen" ]] || die "xcodegen resolution returned an empty command"
     "$xcodegen" generate
-
-    local bundle_id="$PHYSICAL_BUNDLE_ID"
 
     local ts log xcresult
     ts="$(date +%s)-$$"
@@ -404,6 +438,22 @@ build_install_launch() {
     python3 "$ROOT_DIR/scripts/validate-ios-artifact.py" "$app" \
         --configuration "$CONFIG" --require-profile
     validate_gateway_protocol_target "$app"
+    BUILT_APP="$app"
+    BUILD_LOG="$log"
+    BUILD_XCRESULT="$xcresult"
+}
+
+build_install_launch() {
+    require_full_xcode
+    validate_gateway_protocol_target_prebuild
+
+    local device_id
+    device_id="$(resolve_device_id)"
+    [ -n "$device_id" ] || die "could not resolve a physical iOS device"
+
+    build_validated_app "$device_id"
+    local app="$BUILT_APP" log="$BUILD_LOG" xcresult="$BUILD_XCRESULT"
+    local bundle_id="$PHYSICAL_BUNDLE_ID"
 
     xcrun devicectl device install app --device "$device_id" "$app"
 
@@ -416,6 +466,154 @@ build_install_launch() {
     echo "Bundle ID: ${bundle_id:-unknown}"
     echo "Full log: $log"
     echo "xcresult: $xcresult"
+}
+
+tailscale_cli() {
+    command -v tailscale 2>/dev/null || printf '%s\n' /Applications/Tailscale.app/Contents/MacOS/Tailscale
+}
+
+# https://<this node>.<tailnet>.ts.net:8443, from Tailscale's own status.
+share_base_url() {
+    local name
+    name="$("$(tailscale_cli)" status --self --json 2>/dev/null \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null)" \
+        || die "Tailscale is not running or this Mac has no tailnet DNS name"
+    [[ "$name" == *.ts.net ]] || die "unexpected tailnet DNS name: $name"
+    printf 'https://%s:%s\n' "$name" "$SHARE_HTTPS_PORT"
+}
+
+# The server answers (200 or 404 for an empty tree) through Tailscale's HTTPS
+# with a certificate curl trusts, which is exactly what the phone needs.
+share_host_reachable() {
+    local code
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$1/" || true)"
+    [[ "$code" == 200 || "$code" == 404 ]]
+}
+
+# The existing serve handler for the dedicated port, if any.
+share_serve_handler() {
+    "$(tailscale_cli)" serve status --json 2>/dev/null | python3 -c '
+import json, sys
+port = sys.argv[1]
+try:
+    web = json.load(sys.stdin).get("Web") or {}
+except ValueError:
+    web = {}
+for host, cfg in web.items():
+    if host.endswith(":" + port):
+        for path, handler in (cfg.get("Handlers") or {}).items():
+            print(path, handler.get("Proxy") or handler.get("Path") or handler.get("Text") or "?")
+' "$SHARE_HTTPS_PORT"
+}
+
+share_host_status() {
+    local url handler
+    url="$(share_base_url)"
+    echo "Builds directory: $SHARE_DIR"
+    if launchctl print "gui/$(id -u)/$SHARE_AGENT_LABEL" >/dev/null 2>&1; then
+        echo "LaunchAgent: $SHARE_AGENT_LABEL loaded ($SHARE_AGENT_PLIST)"
+    else
+        echo "LaunchAgent: $SHARE_AGENT_LABEL not loaded"
+    fi
+    handler="$(share_serve_handler)"
+    echo "Tailscale serve :$SHARE_HTTPS_PORT: ${handler:-not configured}"
+    if share_host_reachable "$url"; then
+        echo "Reachable: $url/"
+    else
+        echo "Not reachable: $url/"
+        return 1
+    fi
+}
+
+share_host_enable() {
+    local url handler
+    url="$(share_base_url)"
+    handler="$(share_serve_handler)"
+    if [[ -n "$handler" && "$handler" != "/ http://127.0.0.1:$SHARE_BACKEND_PORT" ]]; then
+        die "port $SHARE_HTTPS_PORT already serves '$handler'; refusing to replace another serve config"
+    fi
+    mkdir -p "$SHARE_DIR" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+    # The server source is embedded so the agent never runs from a checkout.
+    python3 - "$SHARE_AGENT_PLIST" "$SHARE_AGENT_LABEL" "$ROOT_DIR/scripts/ios-share-server.py" \
+        "$SHARE_DIR" "$SHARE_BACKEND_PORT" "$HOME/Library/Logs/tron-ios-builds.log" <<'PY'
+import plistlib, sys
+plist, label, source, directory, port, log = sys.argv[1:]
+with open(plist, "wb") as handle:
+    plistlib.dump({
+        "Label": label,
+        "ProgramArguments": ["/usr/bin/python3", "-c", open(source).read(), directory, port],
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "ProcessType": "Background",
+        "StandardOutPath": log,
+        "StandardErrorPath": log,
+    }, handle)
+PY
+    launchctl bootout "gui/$(id -u)/$SHARE_AGENT_LABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$SHARE_AGENT_PLIST"
+    local code="" _attempt
+    for _attempt in $(seq 1 20); do
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$SHARE_BACKEND_PORT/" || true)"
+        [[ "$code" == 200 || "$code" == 404 ]] && break
+        sleep 0.5
+    done
+    [[ "$code" == 200 || "$code" == 404 ]] || die "loopback build server did not start; see ~/Library/Logs/tron-ios-builds.log"
+    if [[ -z "$handler" ]]; then
+        echo "+ tailscale serve --bg --https=$SHARE_HTTPS_PORT http://127.0.0.1:$SHARE_BACKEND_PORT"
+        "$(tailscale_cli)" serve --bg --https="$SHARE_HTTPS_PORT" "http://127.0.0.1:$SHARE_BACKEND_PORT"
+    fi
+    # The first HTTPS request provisions the node certificate, which takes seconds.
+    for _attempt in $(seq 1 12); do
+        share_host_reachable "$url" && break
+        sleep 5
+    done
+    share_host_status
+}
+
+share_host_disable() {
+    if [[ -n "$(share_serve_handler)" ]]; then
+        echo "+ tailscale serve --https=$SHARE_HTTPS_PORT off"
+        "$(tailscale_cli)" serve --https="$SHARE_HTTPS_PORT" off
+    fi
+    launchctl bootout "gui/$(id -u)/$SHARE_AGENT_LABEL" 2>/dev/null || true
+    rm -f "$SHARE_AGENT_PLIST"
+    echo "Share host disabled; builds remain in $SHARE_DIR (delete it to remove them)."
+}
+
+share_build() {
+    [[ -n "$SHARE_TITLE" && -n "$SHARE_NOTES" ]] || die "share requires --title and --notes"
+    # The page names the commit, so the build must be exactly that commit.
+    [[ -z "$(git -C "$ROOT_DIR" status --porcelain)" ]] || die "working tree is dirty: commit before sharing a build"
+    local url branch commit
+    url="$(share_base_url)"
+    share_host_reachable "$url" \
+        || die "the share host is not reachable at $url/; the maintainer approves scripts/tron-ios-device share-host enable"
+    branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
+    commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+
+    require_full_xcode
+    validate_gateway_protocol_target_prebuild
+    build_validated_app ""
+    local app="$BUILT_APP"
+    local bundle_id
+    bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")"
+    [[ "$bundle_id" == "$PHYSICAL_BUNDLE_ID" ]] || die "built $bundle_id, expected $PHYSICAL_BUNDLE_ID"
+
+    local out ipa
+    # One IPA per worktree: each share replaces the previous one.
+    out="$IOS_DIR/build/share"
+    rm -rf "$out"
+    mkdir -p "$out/Payload"
+    ditto "$app" "$out/Payload/$(basename "$app")"
+    ipa="$out/TronMobile.ipa"
+    (cd "$out" && ditto -c -k --norsrc --keepParent Payload "$ipa")
+    rm -rf "$out/Payload"
+
+    echo
+    echo "Built $app ($commit on $branch)"
+    python3 "$ROOT_DIR/scripts/ios-share-publish.py" --ipa "$ipa" --dir "$SHARE_DIR" \
+        --base-url "$url" --title "$SHARE_TITLE" --notes "$SHARE_NOTES" \
+        --commit "$commit" --branch "$branch" --mode "$BUILD_MODE" --keep "$SHARE_KEEP"
 }
 
 launch_app_for_device() {
@@ -498,11 +696,27 @@ status_installed_app() {
     fi
 }
 
+CMD=""
 main() {
     local cmd="${1:-help}"
     local device_id
+    CMD="$cmd"
     shift || true
     case "$cmd" in
+        share)
+            # Device selection does not apply: share signs for every registered device.
+            parse_common_args "$@"
+            validate_install_pair
+            share_build
+            ;;
+        share-host)
+            case "${1:-}" in
+                enable) share_host_enable ;;
+                status) share_host_status ;;
+                disable) share_host_disable ;;
+                *) die "share-host takes enable, status or disable" ;;
+            esac
+            ;;
         install)
             parse_common_args "$@"
             validate_install_pair

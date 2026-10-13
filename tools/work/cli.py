@@ -78,9 +78,15 @@ def main(argv: list) -> int:
     close_issue.add_argument("issue", type=int)
     close_issue.add_argument("--reason", required=True, choices=("completed", "not_planned"))
     close_issue.add_argument("--comment-file", required=True, type=Path, help="Markdown closing comment; not logged")
+    reopen_issue = issue_commands.add_parser("reopen", help="post the stated reason, reopen and restore Status")
+    reopen_issue.add_argument("issue", type=int)
+    reopen_issue.add_argument("--comment-file", required=True, type=Path,
+                              help="Markdown reason for reopening (required, posted publicly); not logged")
     parent_issue = issue_commands.add_parser("parent", help="link a task under an epic")
     parent_issue.add_argument("issue", type=int)
     parent_issue.add_argument("--epic", required=True, type=int)
+    parent_issue.add_argument("--replace-parent", action="store_true",
+                              help="move the task from its current epic to this one")
     blocker_issue = issue_commands.add_parser("block", help="add a native blocked-by relationship")
     blocker_issue.add_argument("issue", type=int)
     blocker_issue.add_argument("--blocked-by", required=True, type=int)
@@ -139,8 +145,11 @@ def main(argv: list) -> int:
             if args.issue_command == "close":
                 tracking.close_issue(gh, root, config, args.issue, args.reason, args.comment_file)
                 return 0
+            if args.issue_command == "reopen":
+                tracking.reopen_issue(gh, root, config, args.issue, args.comment_file)
+                return 0
             if args.issue_command == "parent":
-                tracking.add_parent(gh, root, config, args.issue, args.epic)
+                tracking.add_parent(gh, root, config, args.issue, args.epic, args.replace_parent)
                 return 0
             if args.issue_command == "block":
                 tracking.add_blocker(gh, root, config, args.issue, args.blocked_by)

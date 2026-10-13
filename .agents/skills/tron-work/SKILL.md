@@ -79,5 +79,13 @@ scripts/tron work project set <issue> --status Proposed --priority P2
 
 Labels are optional. Epics (`--type epic`) are for maintainer-approved efforts; put
 their goal and rules in the body, and link tasks with `issue parent <task> --epic <epic>`
-and `issue block <task> --blocked-by <blocker>`. Public text is privacy-checked by the
+and `issue block <task> --blocked-by <blocker>`; move a task to another epic with
+`issue parent <task> --epic <epic> --replace-parent`. Public text is privacy-checked by the
 command.
+
+## Reopen a closed issue
+
+When an issue was closed without its acceptance being met (for example by a closing
+keyword in an unrelated PR), write the reason with its evidence to a file and run
+`scripts/tron work issue reopen <issue> --comment-file <reason.md>`. The reason is
+required and posted publicly; the write is audited.
