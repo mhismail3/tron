@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 
 export interface KnowledgeModelOutputDiagnostics {
   modelId: string;
@@ -18,6 +18,34 @@ export class KnowledgeModelOutputError extends Error {
 
 function boundedMessage(value: string): string {
   return value.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 500);
+}
+
+/** JSON Schema subset accepted by OpenAI strict structured outputs: every
+ * object closes `additionalProperties` and lists every property as required. */
+export type KnowledgeJsonSchema = Record<string, unknown>;
+
+/** OpenAI-operated Responses endpoints whose strict `text.format` json_schema
+ * constrains the reply itself. A prompt alone does not hold the contract:
+ * `openai/gpt-6-luna` answered with prose before the object (#292). Other
+ * providers keep the prompt contract and the strict extractor below. */
+const STRUCTURED_OUTPUT_ENDPOINTS: Record<string, readonly string[]> = {
+  "openai-responses": ["openai"],
+  "azure-openai-responses": ["azure"],
+  "openai-codex-responses": ["openai-codex"],
+};
+
+/** Request-side half of the Knowledge JSON contract: ask a provider that can
+ * enforce the schema to do so. Parsing stays strict either way, so a provider
+ * that ignores the format still fails as model-output-invalid. */
+export function knowledgeJsonRequest(model: Model<Api>, name: string, schema: KnowledgeJsonSchema): Pick<SimpleStreamOptions, "onPayload"> {
+  if (!STRUCTURED_OUTPUT_ENDPOINTS[model.api]?.includes(model.provider)) return {};
+  return {
+    onPayload: payload => {
+      if (!payload || typeof payload !== "object") return undefined;
+      const body = payload as { text?: Record<string, unknown> };
+      return { ...body, text: { ...body.text, format: { type: "json_schema", name, strict: true, schema } } };
+    },
+  };
 }
 
 /** Reply diagnostics contain shape only; they never retain model text. */
