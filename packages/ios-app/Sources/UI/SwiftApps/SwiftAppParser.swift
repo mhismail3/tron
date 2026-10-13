@@ -577,7 +577,7 @@ struct SwiftAppParser {
             let open = position
             if (try? skipBalanced(open: "(", close: ")")) != nil {
                 let close = position - 1
-                if current.isSymbol("->") { advance(); try? skipType() }
+                if current.isSymbol("->") { advance(); _ = try? skipType() }
                 if current.isIdentifier("in") {
                     let end = position
                     var expectName = true

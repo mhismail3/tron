@@ -42,7 +42,7 @@ final class SwiftAppRuntime {
         for name in program.typeOrder {
             guard let declaration = program.types[name] else { continue }
             for property in declaration.stored where property.isStatic {
-                staticStorage["\(name).\(property.name)"] = try property.initialValue.map { try evaluate($0, in: globals) } ?? .none
+                staticStorage["\(name).\(property.name)"] = try property.initialValue.map { try evaluate($0, in: globals) } ?? .nilValue
             }
         }
     }
@@ -91,7 +91,7 @@ final class SwiftAppRuntime {
             scope.declare(parameters[0], .tuple(arguments.map { SwiftAppLabeledValue(label: nil, value: $0) }))
         } else {
             for (index, name) in parameters.enumerated() where name != "_" {
-                scope.declare(name, index < arguments.count ? arguments[index] : .none)
+                scope.declare(name, index < arguments.count ? arguments[index] : .nilValue)
             }
         }
         return try run(closure.literal.body, in: scope)
@@ -141,7 +141,7 @@ final class SwiftAppRuntime {
             try tick()
             switch statement {
             case .declaration(let name, let expression):
-                scope.declare(name, try expression.map { try evaluate($0, in: scope) } ?? .none)
+                scope.declare(name, try expression.map { try evaluate($0, in: scope) } ?? .nilValue)
             case .expression(let expression, let line):
                 let value: SwiftAppValue
                 do { value = try evaluate(expression, in: scope) }
@@ -271,7 +271,7 @@ final class SwiftAppRuntime {
         case .integer(let value): return .int(value)
         case .double(let value): return .double(value)
         case .bool(let value): return .bool(value)
-        case .nilLiteral: return .none
+        case .nilLiteral: return .nilValue
         case .string(let parts):
             var text = ""
             for part in parts {

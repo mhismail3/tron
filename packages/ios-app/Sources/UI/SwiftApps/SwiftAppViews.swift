@@ -189,7 +189,7 @@ struct SwiftAppModifiedView: View {
             let content = try nodes()
             return AnyView(ScrollView(horizontal ? .horizontal : .vertical) { content })
         case "List":
-            if node.unlabeled.first != nil, node.closures.count == 1 {
+            if node.unlabeled.contains(where: { if case .closure = $0 { false } else { true } }) {
                 // `List(items) { item in … }` is a List around a ForEach.
                 let rows = SwiftAppViewNode(name: "ForEach", arguments: node.arguments)
                 return AnyView(List { SwiftAppNodeView(runtime: runtime, node: rows) })

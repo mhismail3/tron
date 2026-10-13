@@ -24,9 +24,9 @@ extension SwiftAppRuntime {
             if let property = declaration.stored.first(where: { $0.name == name && !$0.isStatic }) {
                 switch property.wrapper {
                 case let wrapper? where Self.stateWrappers.contains(wrapper):
-                    return instance.state.values[name] ?? .none
+                    return instance.state.values[name] ?? .nilValue
                 case "Binding":
-                    return (instance.properties[name] ?? .none).resolved
+                    return (instance.properties[name] ?? .nilValue).resolved
                 case "EnvironmentObject":
                     guard let object = instance.environmentObjects[property.typeName ?? ""] else {
                         throw SwiftAppRuntimeError("No environmentObject of type \(property.typeName ?? "?") for '\(name)'")
@@ -35,7 +35,7 @@ extension SwiftAppRuntime {
                 case "Environment":
                     return .builtin("dismiss", nil)
                 default:
-                    return instance.properties[name] ?? .none
+                    return instance.properties[name] ?? .nilValue
                 }
             }
         case .record(_, let box):
@@ -75,7 +75,7 @@ extension SwiftAppRuntime {
             case .record, .object:
                 // `$item.done` projects a binding to the field.
                 return .binding(SwiftAppBinding(
-                    get: { [weak self] in (try? self?.property(of: binding.get(), name)) ?? .none },
+                    get: { [weak self] in (try? self?.property(of: binding.get(), name)) ?? .nilValue },
                     set: { [weak self] newValue in
                         guard let self, let updated = try? self.setting(binding.get(), path: [.field(name)], to: newValue) else { return }
                         binding.set(updated)
@@ -112,8 +112,8 @@ extension SwiftAppRuntime {
             switch name {
             case "count": return .int(values.count)
             case "isEmpty": return .bool(values.isEmpty)
-            case "first": return values.first ?? .none
-            case "last": return values.last ?? .none
+            case "first": return values.first ?? .nilValue
+            case "last": return values.last ?? .nilValue
             case "indices": return .range(0, values.count)
             case "startIndex": return .int(0)
             case "endIndex": return .int(values.count)
@@ -124,8 +124,8 @@ extension SwiftAppRuntime {
             case "count": return .int(text.count)
             case "isEmpty": return .bool(text.isEmpty)
             case "capitalized": return .string(text.capitalized)
-            case "first": return text.first.map { .string(String($0)) } ?? .none
-            case "last": return text.last.map { .string(String($0)) } ?? .none
+            case "first": return text.first.map { .string(String($0)) } ?? .nilValue
+            case "last": return text.last.map { .string(String($0)) } ?? .nilValue
             case "description": return base
             default: break
             }
@@ -148,9 +148,9 @@ extension SwiftAppRuntime {
         case .tuple(let elements):
             if let element = elements.first(where: { $0.label == name }) { return element.value }
             if let index = Int(name), elements.indices.contains(index) { return elements[index].value }
-        case .none:
+        case .nilValue:
             // Optional chaining reads through nil.
-            return .none
+            return .nilValue
         default:
             break
         }
@@ -169,7 +169,7 @@ extension SwiftAppRuntime {
            let property = instance.declaration.stored.first(where: { $0.name == name }) {
             if let wrapper = property.wrapper, Self.stateWrappers.contains(wrapper) {
                 let state = instance.state
-                return SwiftAppBinding(get: { state.values[name] ?? .none }, set: { state.values[name] = $0 })
+                return SwiftAppBinding(get: { state.values[name] ?? .nilValue }, set: { state.values[name] = $0 })
             }
             if property.wrapper == "Binding", case .binding(let binding)? = instance.properties[name] { return binding }
             if property.wrapper == "EnvironmentObject", let object = instance.environmentObjects[property.typeName ?? ""] {
@@ -177,7 +177,7 @@ extension SwiftAppRuntime {
             }
         }
         if let receiver = scope.selfReference, case .object(_, let object) = receiver, object.fields[name] != nil {
-            return SwiftAppBinding(get: { object.fields[name] ?? .none }, set: { object.fields[name] = $0 })
+            return SwiftAppBinding(get: { object.fields[name] ?? .nilValue }, set: { object.fields[name] = $0 })
         }
         throw SwiftAppRuntimeError("Cannot make a binding to '\(name)'; declare it with @State")
     }
@@ -225,10 +225,10 @@ extension SwiftAppRuntime {
         switch (base.resolved, first) {
         case (.record(var record), .field(let name)):
             guard record.fields[name] != nil else { throw SwiftAppRuntimeError("\(record.typeName) has no stored property '\(name)'") }
-            record.fields[name] = try setting(record.fields[name] ?? .none, path: rest, to: value)
+            record.fields[name] = try setting(record.fields[name] ?? .nilValue, path: rest, to: value)
             return .record(record)
         case (.object(let object), .field(let name)):
-            object.fields[name] = try setting(object.fields[name] ?? .none, path: rest, to: value)
+            object.fields[name] = try setting(object.fields[name] ?? .nilValue, path: rest, to: value)
             return .object(object)
         case (.array(var values), .index(let index)):
             guard values.indices.contains(index) else { throw SwiftAppRuntimeError("Index \(index) is out of range") }
@@ -356,7 +356,7 @@ extension SwiftAppRuntime {
             for caseName in declaration.cases where SwiftAppValue.equal(try rawValue(of: caseName, in: declaration), raw) {
                 return .member(caseName, nil)
             }
-            return .none
+            return .nilValue
         case .structure where declaration.isView || declaration.isApp:
             return .view(SwiftAppViewNode(name: declaration.name, arguments: arguments, declaration: declaration))
         case .structure, .classType:
@@ -389,9 +389,9 @@ extension SwiftAppRuntime {
             if let argument = arguments.first(where: { $0.label == property.name }) {
                 values[property.name] = argument.value.resolved
             } else if let initial = property.initialValue {
-                values[property.name] = (try? evaluate(initial, in: globals)) ?? .none
+                values[property.name] = (try? evaluate(initial, in: globals)) ?? .nilValue
             } else {
-                values[property.name] = SwiftAppValue.none
+                values[property.name] = SwiftAppValue.nilValue
             }
         }
         return SwiftAppStateStore(values: values)

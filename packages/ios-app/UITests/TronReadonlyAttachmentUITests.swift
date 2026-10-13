@@ -117,6 +117,56 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         }
     }
 
+    /// #889: a displayed `.swift` file runs as a native, interactive app only
+    /// behind the experimental flag; without it the document sheet is unchanged.
+    @MainActor func testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag() {
+        continueAfterFailure = false
+        // The flag is sticky across launches, so the control turns it off explicitly.
+        let control = launch("display-swift", extraArguments: ["-tron.experimental.swiftApps", "NO"]); defer { control.terminate() }
+        openSwiftDisplay(control)
+        XCTAssertFalse(control.buttons["Run Habits.swift"].exists, "Without the flag the shared document sheet has no run control")
+        control.terminate()
+
+        let app = launch("display-swift", extraArguments: ["-tron.experimental.swiftApps", "YES"])
+        openSwiftDisplay(app)
+        let run = app.buttons["Run Habits.swift"]
+        XCTAssertTrue(run.waitForExistence(timeout: 10), "The flag adds the run control to the .swift document sheet")
+        keepScreenshot(app, "889-1-swift-source-sheet")
+        run.tap()
+
+        let summary = app.staticTexts["habits.summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10), "The interpreted app renders natively")
+        XCTAssertEqual(summary.label, "0 of 3 done today")
+        XCTAssertTrue(app.staticTexts["4 day streak"].exists)
+        keepScreenshot(app, "889-2-app-running")
+
+        app.buttons["Complete Drink water"].tap()
+        XCTAssertTrue(wait(summary, predicate: "label == '1 of 3 done today'"), "Button actions mutate interpreted @State through a @Binding")
+        XCTAssertTrue(app.staticTexts["5 day streak"].waitForExistence(timeout: 5))
+
+        app.segmentedControls.buttons["Done"].tap()
+        XCTAssertTrue(wait(app.staticTexts["Read 20 pages"], predicate: "exists == false"), "The segmented Picker filters rows")
+        XCTAssertTrue(app.staticTexts["Drink water"].exists)
+        keepScreenshot(app, "889-3-app-filtered")
+        app.segmentedControls.buttons["All"].tap()
+
+        let field = app.textFields["Habit name"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Meditate")
+        app.buttons["Add"].tap()
+        XCTAssertTrue(app.staticTexts["Meditate"].waitForExistence(timeout: 5), "TextField binding and array append work")
+        XCTAssertTrue(wait(summary, predicate: "label == '1 of 4 done today'"))
+        keepScreenshot(app, "889-4-app-after-add")
+    }
+
+    @MainActor private func openSwiftDisplay(_ app: XCUIApplication) {
+        let display = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Habits.swift'")).firstMatch
+        XCTAssertTrue(display.waitForExistence(timeout: 15)); display.tap()
+        let reader = app.textViews.matching(NSPredicate(format: "value BEGINSWITH 'import SwiftUI'")).firstMatch
+        XCTAssertTrue(reader.waitForExistence(timeout: 10), "The .swift source is shown in the shared document sheet")
+    }
+
     @MainActor func testDocumentDisplaySheetKeepsExistingLargeDetent() {
         continueAfterFailure = false
         let app = launch("display-file"); defer { app.terminate() }
@@ -214,9 +264,9 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepEvidence(app, name: "348-readonly-\(scenario)")
     }
 
-    @MainActor private func launch(_ scenario: String) -> XCUIApplication {
+    @MainActor private func launch(_ scenario: String, extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-readonly-attachment-fixture", "-readonly-preview-scenario", scenario, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchArguments = ["-tron-readonly-attachment-fixture", "-readonly-preview-scenario", scenario, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extraArguments
         if scenario.contains("accessibility") {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         }

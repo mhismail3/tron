@@ -79,7 +79,7 @@ enum SwiftAppBuiltins {
                 return (.array(values), .void)
             case "removeLast", "popLast":
                 guard let removed = values.popLast() else {
-                    if name == "popLast" { return (value, .none) }
+                    if name == "popLast" { return (value, .nilValue) }
                     throw SwiftAppRuntimeError("removeLast() on an empty array")
                 }
                 return (.array(values), removed)
@@ -149,19 +149,19 @@ enum SwiftAppBuiltins {
             return .string(first?.display ?? "")
         case "Int":
             switch first {
-            case .string(let text)?: return Int(text.trimmingCharacters(in: .whitespaces)).map { .int($0) } ?? .none
+            case .string(let text)?: return Int(text.trimmingCharacters(in: .whitespaces)).map { .int($0) } ?? .nilValue
             case .double(let number)?: return .int(Int(number))
             case .int?: return first!
             default: return .int(0)
             }
         case "Double", "Float", "CGFloat":
             switch first {
-            case .string(let text)?: return Double(text.trimmingCharacters(in: .whitespaces)).map { .double($0) } ?? .none
+            case .string(let text)?: return Double(text.trimmingCharacters(in: .whitespaces)).map { .double($0) } ?? .nilValue
             case let value?: return .double(try value.asDouble())
             default: return .double(0)
             }
         case "Bool":
-            if case .string(let text)? = first { return text == "true" ? .bool(true) : text == "false" ? .bool(false) : .none }
+            if case .string(let text)? = first { return text == "true" ? .bool(true) : text == "false" ? .bool(false) : .nilValue }
             return first ?? .bool(false)
         case "Array", "Set":
             return .array(try first?.asArray() ?? [])
@@ -230,8 +230,8 @@ enum SwiftAppBuiltins {
             }
             // Font and animation refinements (`.title.bold()`, `.spring().delay(1)`) keep the base.
             return receiver
-        case .none:
-            return .none
+        case .nilValue:
+            return .nilValue
         default: break
         }
         throw SwiftAppRuntimeError("Unsupported method '\(name)' on \(receiver.resolved.debugDisplay)")
@@ -332,21 +332,21 @@ enum SwiftAppBuiltins {
         case "first", "last":
             guard let condition = arguments.first(where: { $0.label == "where" })?.value ?? function else { break }
             let ordered = name == "first" ? values : values.reversed()
-            return try ordered.first { try predicate(condition, $0, runtime: runtime) } ?? .none
+            return try ordered.first { try predicate(condition, $0, runtime: runtime) } ?? .nilValue
         case "firstIndex", "lastIndex":
             let indices = name == "firstIndex" ? Array(values.indices) : values.indices.reversed()
             if let needle = arguments.first(where: { $0.label == "of" })?.value {
-                return indices.first { SwiftAppValue.equal(values[$0], needle) }.map { .int($0) } ?? .none
+                return indices.first { SwiftAppValue.equal(values[$0], needle) }.map { .int($0) } ?? .nilValue
             }
             guard let condition = arguments.first(where: { $0.label == "where" })?.value ?? function else { break }
-            return try indices.first { try predicate(condition, values[$0], runtime: runtime) }.map { .int($0) } ?? .none
+            return try indices.first { try predicate(condition, values[$0], runtime: runtime) }.map { .int($0) } ?? .nilValue
         case "count":
             guard let condition = arguments.first(where: { $0.label == "where" })?.value else { break }
             return .int(try values.filter { try predicate(condition, $0, runtime: runtime) }.count)
         case "sorted": return try sorted(values, arguments, runtime: runtime)
         case "reversed": return .array(values.reversed())
         case "shuffled": return .array(values.shuffled())
-        case "randomElement": return values.randomElement() ?? .none
+        case "randomElement": return values.randomElement() ?? .nilValue
         case "enumerated":
             return .array(values.enumerated().map {
                 .tuple([SwiftAppLabeledValue(label: "offset", value: .int($0.offset)), SwiftAppLabeledValue(label: "element", value: $0.element)])
@@ -359,7 +359,7 @@ enum SwiftAppBuiltins {
             let separator = (try? argument(arguments, "separator"))?.display ?? ""
             return .string(values.map(\.display).joined(separator: separator))
         case "min", "max":
-            guard var best = values.first else { return .none }
+            guard var best = values.first else { return .nilValue }
             for value in values.dropFirst() where try SwiftAppValue.compare(value, best) == (name == "min") { best = value }
             return best
         default: break

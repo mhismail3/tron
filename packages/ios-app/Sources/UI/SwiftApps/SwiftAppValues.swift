@@ -79,7 +79,7 @@ struct SwiftAppViewNode {
 @MainActor
 indirect enum SwiftAppValue {
     case void
-    case none
+    case nilValue
     case int(Int)
     case double(Double)
     case bool(Bool)
@@ -102,12 +102,12 @@ indirect enum SwiftAppValue {
     case doubleRange(Double, Double)
     case tuple([SwiftAppLabeledValue])
 
-    var isNone: Bool { if case .none = self { true } else { false } }
+    var isNone: Bool { if case .nilValue = self { true } else { false } }
 
     var display: String {
         switch self {
         case .void: "()"
-        case .none: "nil"
+        case .nilValue: "nil"
         case .int(let v): String(v)
         case .double(let v): String(v)
         case .bool(let v): String(v)
@@ -182,10 +182,10 @@ indirect enum SwiftAppValue {
             var value = self
             for name in keyPath {
                 switch value {
-                case .record(let record): value = record.fields[name] ?? .none
-                case .object(let object): value = object.fields[name] ?? .none
+                case .record(let record): value = record.fields[name] ?? .nilValue
+                case .object(let object): value = object.fields[name] ?? .nilValue
                 case .tuple(let items):
-                    value = items.first(where: { $0.label == name })?.value ?? .none
+                    value = items.first(where: { $0.label == name })?.value ?? .nilValue
                 default: break
                 }
             }
@@ -200,7 +200,7 @@ indirect enum SwiftAppValue {
 
     static func equal(_ a: SwiftAppValue, _ b: SwiftAppValue) -> Bool {
         switch (a.resolved, b.resolved) {
-        case (.none, .none): true
+        case (.nilValue, .nilValue): true
         case (.void, .void): true
         case (.int(let x), .int(let y)): x == y
         case (.int(let x), .double(let y)): Double(x) == y
@@ -211,7 +211,7 @@ indirect enum SwiftAppValue {
         case (.member(let x, _), .member(let y, _)): x == y
         case (.array(let x), .array(let y)): x.count == y.count && zip(x, y).allSatisfy { equal($0, $1) }
         case (.record(let x), .record(let y)):
-            x.typeName == y.typeName && x.keys.allSatisfy { key in equal(x.fields[key] ?? .none, y.fields[key] ?? .none) }
+            x.typeName == y.typeName && x.keys.allSatisfy { key in equal(x.fields[key] ?? .nilValue, y.fields[key] ?? .nilValue) }
         case (.object(let x), .object(let y)): x === y
         case (.range(let a, let b), .range(let c, let d)): a == c && b == d
         default: false

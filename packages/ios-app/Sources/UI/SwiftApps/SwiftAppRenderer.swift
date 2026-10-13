@@ -177,7 +177,7 @@ enum SwiftAppRenderer {
             let count = try binding.get().asArray().count
             elements = (0..<count).map { index in
                 .binding(SwiftAppBinding(
-                    get: { (try? binding.get().asArray()).flatMap { $0.indices.contains(index) ? $0[index] : nil } ?? .none },
+                    get: { (try? binding.get().asArray()).flatMap { $0.indices.contains(index) ? $0[index] : nil } ?? .nilValue },
                     set: { newValue in
                         guard var values = try? binding.get().asArray(), values.indices.contains(index) else { return }
                         values[index] = newValue

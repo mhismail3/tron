@@ -1,13 +1,19 @@
 import SwiftUI
 
 /// Experimental gate for running displayed `.swift` files (#889). Off by
-/// default; the launch argument `-tron.experimental.swiftApps YES` (or the
-/// same UserDefaults key) enables it, so normal use never shows the control.
+/// default, so normal use never shows the control. Launching once with
+/// `-tron.experimental.swiftApps YES` enables it and records that choice, so a
+/// device launched through `devicectl`/`simctl` keeps it across later normal
+/// launches; launching with `NO` turns it off again.
 enum SwiftAppExperiment {
     static let defaultsKey = "tron.experimental.swiftApps"
 
     static func canRun(fileNamed name: String) -> Bool {
-        UserDefaults.standard.bool(forKey: defaultsKey) && name.lowercased().hasSuffix(".swift")
+        let defaults = UserDefaults.standard
+        if let launchValue = defaults.volatileDomain(forName: UserDefaults.argumentDomain)[defaultsKey] {
+            defaults.set((launchValue as? NSString)?.boolValue ?? (launchValue as? Bool ?? false), forKey: defaultsKey)
+        }
+        return defaults.bool(forKey: defaultsKey) && name.lowercased().hasSuffix(".swift")
     }
 }
 
@@ -54,6 +60,9 @@ struct SwiftAppRunnerSheet: View {
         if let root = runtime.rootDeclaration {
             SwiftAppCustomView(runtime: runtime, node: SwiftAppViewNode(name: root.name, arguments: [], declaration: root))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // The interpreted app looks like a standard iOS app, not Tron:
+                // controls and text use their system default fonts.
+                .environment(\.font, nil)
                 .overlay(alignment: .bottom) {
                     if let message = runtime.actionError {
                         SwiftAppErrorView(message: message)
