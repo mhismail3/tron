@@ -31,6 +31,7 @@ struct TronMarkdownView: View {
                     inlineBlock(value, identity: "block:\(index)")
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(value.accessibilitySource)
+                        .accessibilityAddTraits(.isStaticText)
                         .accessibilityRespondsToUserInteraction(false)
                         .frame(alignment: .topLeading)
                 case .heading(let level, let value):
@@ -117,6 +118,10 @@ struct TronMarkdownView: View {
             .alignmentGuide(.firstTextBaseline) { _ in
                 ChatSelectableTextLayout.firstBaseline(style: style, sizeCategory: sizeCategory)
             }
+            // Assistive technologies read it as the static text it replaces.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(value.accessibilitySource)
+            .accessibilityAddTraits(.isStaticText)
         } else {
             streamingInline(value, identity: identity)
         }
