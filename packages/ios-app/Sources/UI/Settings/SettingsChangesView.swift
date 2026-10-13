@@ -93,10 +93,7 @@ struct SettingsChangesView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     // Changes is the audit of settings that changed without you:
                     // agents' changes and edits outside Tron, each undoable.
-                    Text("Settings agents changed, and edits made outside Tron. Open one to see it in full or undo it.")
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    TronSettingsCaption("Settings agents changed, and edits made outside Tron. Open one to see it in full or undo it.")
                     if loading && entries.isEmpty {
                         TronLoadingState(label: "Loading changes…")
                             .frame(maxWidth: .infinity)

@@ -2114,6 +2114,39 @@ final class TronSmokeUITests: XCTestCase {
             .matching(NSPredicate(format: "label CONTAINS %@", "Off")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 
+    /// Sheet intro text renders at the settings row subtitle's size and text style
+    /// (#900): at a large type size each wrapped intro line is one row-subtitle line.
+    @MainActor
+    func testSheetIntroTextMatchesRowSubtitleSize() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
+        app.launch()
+        defer { app.terminate() }
+        let subtitle = app.staticTexts["Paired Macs, devices, and push"]
+        XCTAssertTrue(subtitle.waitForExistence(timeout: 10), app.debugDescription)
+        let line = subtitle.frame.height
+        XCTAssertGreaterThan(line, 8)
+        tapScrolling(app.buttons["Changes"].firstMatch, in: app)
+        let intro = app.staticTexts["Settings agents changed, and edits made outside Tron. Open one to see it in full or undo it."]
+        XCTAssertTrue(intro.waitForExistence(timeout: 5), app.debugDescription)
+        // A medium-detent sheet is drawn slightly scaled; measure at large, settled.
+        app.staticTexts["Changes"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+        var frame = intro.frame
+        for _ in 0..<10 {
+            _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 0.3)
+            if intro.frame == frame { break }
+            frame = intro.frame
+        }
+        keepScreenshot(named: "900-changes-intro")
+        let lines = (frame.height / line).rounded()
+        XCTAssertGreaterThanOrEqual(lines, 1)
+        XCTAssertEqual(frame.height, lines * line, accuracy: 0.5,
+                       "The intro uses the row subtitle's size: \(frame.height) is not \(lines) lines of \(line)")
+    }
+
     /// Opens one section's sheet from Settings.
     @MainActor
     private func openRendererSection(_ app: XCUIApplication, _ id: String) {

@@ -1424,7 +1424,8 @@ overlays retain their existing themed geometry and contrast rather than expandin
 and mounted placeholder previews; recovery ownership and loading/error transitions remain unchanged.
 
 Passive Settings explanations use `TronSettingsCaption` / `tronSettingsCaption` immediately below their
-owning group or action, with no glass container or icon. `TronSettingsNotice` is reserved for actionable
+owning group or action, with no glass container or icon. Sheet intros (Changes, key help such as Agent
+approvals, Available Tools, Home Chapters) use the same component; never style intro `Text` locally. `TronSettingsNotice` is reserved for actionable
 failures, using the shared icon column, reading typography and right-aligned Retry pill. Do not introduce
 page-local info cards or banner layouts.
 through an offline read and successful foreground reconciliation without tapping Retry, plus caption

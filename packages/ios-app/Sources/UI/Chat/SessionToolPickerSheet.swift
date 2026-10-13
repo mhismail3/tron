@@ -141,7 +141,7 @@ struct SessionToolPickerSheet: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    TronSettingsDetailText("Turn tools on or off for this chat only. Defaults for new chats are in Settings → Extensions. Changes apply while the agent is idle.")
+                    TronSettingsCaption("Turn tools on or off for this chat only. Defaults for new chats are in Settings → Extensions. Changes apply while the agent is idle.")
                     if let errorMessage {
                         TronSettingsNotice(message: errorMessage, accent: .tronError)
                     }

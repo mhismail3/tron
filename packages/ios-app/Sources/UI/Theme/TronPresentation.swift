@@ -41,6 +41,9 @@ enum TronTypography {
     /// Left-aligned secondary copy uses the selected reading family, including
     /// live state and selections. Monospace is reserved for trailing values.
     static var secondaryDescription: Font { sans(size: sizeSecondary) }
+    /// A settings row's subtitle, and every sheet intro and caption: one size so
+    /// explanatory copy never reads smaller than the rows around it.
+    static func settingsSubtext(adjustment: CGFloat) -> Font { sans(size: sizeSecondary + adjustment) }
     /// Right-aligned values use the selected code family.
     static var secondaryCodeDescription: Font { code(size: sizeSecondary) }
     /// Shared section-label treatment used by every sheet and settings group.
@@ -1367,7 +1370,7 @@ struct TronSettingsGroup<Content: View>: View {
                     .font(TronTypography.sheetSectionHeader)
                     .foregroundStyle(Color.tronTextPrimary)
                     .accessibilityAddTraits(.isHeader)
-                if let detail { TronSettingsDetailText(detail) }
+                if let detail { TronSettingsCaption(detail, inset: 0) }
             }
             switch surfaceStyle {
             case .uncontained:
@@ -1386,20 +1389,6 @@ struct TronSettingsGroup<Content: View>: View {
 
 /// The explanatory line under a settings section title. Sheets that build
 /// their own header or intro use this so the size tracks the settings groups.
-struct TronSettingsDetailText: View {
-    let text: String
-    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
-
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Text(text)
-            .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
-            .foregroundStyle(Color.tronTextMuted)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
 struct TronSettingsRow<Trailing: View>: View {
     /// Nil for dense lists whose rows share one kind and gain nothing from a glyph.
     let icon: String?
@@ -1482,7 +1471,7 @@ struct TronSettingsRow<Trailing: View>: View {
                     }
                     if let subtitle {
                         Text(subtitle)
-                            .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
+                            .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
                             .foregroundStyle(subtitleColor)
                             .lineLimit(subtitleLineLimit)
                             .truncationMode(.tail)

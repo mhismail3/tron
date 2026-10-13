@@ -2100,7 +2100,9 @@ horizontal navigation pushes; Appearance uses the custom Liquid Glass segmented
 color-mode control with a compact 40-point color-mode height and keeps font axes directly beneath each
 font choice before its preview. Every font-selection title renders through `TronFontLoader` with that candidate family (and Recursive's mono axis in the code list), while the description retains the selected reading typography. Text and code previews share the same 14-point row padding without an
 extra code-only minimum height. Passive Settings explanations use `TronSettingsCaption`: reading-family
-secondary text directly on the sheet, without a card, icon, or tap affordance. `tronSettingsCaption`
+secondary text directly on the sheet, without a card, icon, or tap affordance. It is the one component for
+sheet intros, key help, group details and captions, and renders in the settings row subtitle's size and
+colour (`TronTypography.settingsSubtext`), so explanatory copy never reads smaller than its rows. `tronSettingsCaption`
 attaches that copy eight points below the group or action it explains. Actionable failures instead use
 `TronSettingsNotice`, with standard row/icon geometry and a right-aligned Retry capsule. Main Settings and progressive
 sub-sheets apply `tronSettingsLayout`: Manage Session's icon column, row/divider insets, reading-family
