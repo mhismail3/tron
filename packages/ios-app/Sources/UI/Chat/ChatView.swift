@@ -47,6 +47,7 @@ struct ChatView: View {
     @State private var composerHeightLedger = ChatComposerHeightLedger()
     @State private var interactionTraceLedger = ChatInteractionTraceLedger()
     @State private var composerResponder = ChatComposerResponder()
+    @State private var annotationPresenter = ChatAnnotationPresenter()
     @State private var keyboardObserver = ChatKeyboardObserver()
     @State private var layoutTransaction = ChatLayoutTransaction()
     @State private var installedComposerResourceCatalog: (
@@ -154,6 +155,9 @@ struct ChatView: View {
                     onOpenSheet: { sessionPresentation.presentDisplay(.showSheet($0)) }
                 )
             }
+            // Same usable region as the floating display: the bubble stays
+            // above the composer and keyboard without measuring either.
+            .overlay { ChatAnnotationBubbleHost(presenter: annotationPresenter) }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // The complete composer is the sole structural inset owner, so
                 // the keyboard, multiline text, and attachment chips push the
@@ -176,6 +180,10 @@ struct ChatView: View {
         }
         .background { TronBackdrop().ignoresSafeArea(.all) }
         .environment(\.canonicalResourceSessionID, sessionID)
+        .environment(\.chatAnnotationPresenter, annotationPresenter)
+        .onChange(of: composerScope, initial: true) { _, scope in
+            annotationPresenter.bind(drafts: model.composerDrafts, scope: scope)
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -1595,6 +1603,11 @@ struct ChatView: View {
         presentationTarget.map(model.composerDrafts.submittedAttachments(for:)) ?? []
     }
 
+    private var composerAnnotations: [ChatAnnotation] {
+        guard let composerScope else { return [] }
+        return model.composerDrafts.annotations(for: composerScope)
+    }
+
     private var selectedComposerResource: ComposerResourceEntry? {
         guard let composerScope,
               let command = model.composerDrafts.selectedResource(for: composerScope) else { return nil }
@@ -2676,6 +2689,7 @@ struct ChatView: View {
             extensionRetainedContent: extensionRetainedContent,
             pendingAttachments: pendingAttachments,
             selectedResource: selectedComposerResource,
+            annotations: composerAnnotations,
             resourcePicker: presentedComposerResourcePicker,
             resourceResults: presentedComposerResourcePicker == nil ? [] : composerResourceResults,
             submissionTransitionID: layoutTransaction.activeSubmissionGenerationID,
@@ -2719,6 +2733,14 @@ struct ChatView: View {
                 guard let composerScope else { return }
                 model.composerDrafts.removeSelectedResource(for: composerScope)
             },
+            onUpdateAnnotation: { id, comment in
+                guard let composerScope else { return }
+                model.composerDrafts.updateAnnotation(id: id, comment: comment, for: composerScope)
+            },
+            onRemoveAnnotation: { id in
+                guard let composerScope else { return }
+                model.composerDrafts.removeAnnotation(id: id, for: composerScope)
+            },
             onSelectResource: selectComposerResource,
             onDismissResourcePicker: dismissComposerResourcePicker,
             onShowContext: {
@@ -2750,7 +2772,8 @@ struct ChatView: View {
             hasContent: ChatComposerPolicy.hasSendableContent(
                 text: composerText,
                 attachmentCount: pendingAttachments.count,
-                hasResource: selectedComposerResource != nil
+                hasResource: selectedComposerResource != nil,
+                annotationCount: composerAnnotations.count
             ),
             isSending: sending
         )

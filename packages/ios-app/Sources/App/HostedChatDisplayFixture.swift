@@ -107,6 +107,7 @@ struct HostedHomeDashboardFixture: View {
     @State private var homeStatusCount = 0
     @State private var taskListReads = 0
     @State private var sheetReadPeak = 0
+    @State private var homeReads = ""
     @State private var reconnectRequested = false
     @State private var configuredModel = "none"
     @State private var controlCount = 0
@@ -176,6 +177,7 @@ struct HostedHomeDashboardFixture: View {
                                 .accessibilityIdentifier("fixture.home-task-list-reads")
                             Text("sheet-read-peak:\(sheetReadPeak)")
                                 .accessibilityIdentifier("fixture.home-sheet-read-peak")
+                            Text("home-reads:\(homeReads)").accessibilityIdentifier("fixture.home-read-counts")
                             Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.capabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
                                 .accessibilityIdentifier("fixture.home-diagnostics")
                         }
@@ -230,6 +232,7 @@ struct HostedHomeDashboardFixture: View {
         }
         .task(id: ready) {
             guard ready else { return }
+            await gateway.observeHomeReads { summary in homeReads = summary }
             while !Task.isCancelled {
                 homeStatusCount = await gateway.statusCount()
                 taskListReads = await gateway.taskListReadCount()
@@ -289,7 +292,6 @@ private actor HostedHomeShellGateway {
     private var sheetReadPeak = 0
     private var configuredModel: ModelRef?
     private var workerThinking = "sameAsHome"
-    private var taskStopped = false
     private var taskRedelivered = false
     private var scopeRevoked = false
     private var grantRevoked = false
@@ -344,7 +346,13 @@ private actor HostedHomeShellGateway {
                          "bytes": .number(25_165_824), "entries": .number(50_001),
                          "contents": .object(["firstAt": .string(isoAgo(40 * 86_400)), "lastAt": .string(isoAgo(10 * 86_400)),
                              "userMessages": .number(412), "homeReplies": .number(409), "tasksDelegated": .number(7),
-                             "topics": .array([.string("Quarterly planning"), .string("Travel bookings"), .string("Kitchen renovation")])])]),
+                             "topics": .array([
+                                 .string("Planned the spring garden: raised beds along the south fence and Thursday reviews."),
+                                 .string("Booked the Lisbon trip for May and asked Home to watch for fare drops."),
+                                 .string("Reviewed the kitchen renovation quote and asked for a second countertop bid."),
+                                 .string("Settled the quarterly budget and moved savings into the travel fund."),
+                                 .string("Finished the settings model epic and delivered its report."),
+                             ])])]),
                 .object(["sessionId": .string("home-session"), "ordinal": .number(2), "state": .string("active"),
                          "createdAt": .string(isoAgo(3 * 86_400)), "activationStarted": .bool(true),
                          "sessionPresent": .bool(true), "bytes": .number(480), "entries": .number(12),
@@ -367,9 +375,24 @@ private actor HostedHomeShellGateway {
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
     func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
-    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "context-window.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-browser.v1"]) : ["sessions.v1"] }
+    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "context-window.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"] }
+
+    /// Every Home read a sheet sent, so journeys can prove a return to a sheet re-reads nothing.
+    private var homeReads: [String: Int] = [:]
+    /// Publishes each count before the read is answered, so the label is current
+    /// by the time the sheet shows the content (no poll delay).
+    private var onHomeRead: (@MainActor @Sendable (String) -> Void)?
+    func observeHomeReads(_ observer: @escaping @MainActor @Sendable (String) -> Void) { onHomeRead = observer }
+    func homeReadSummary() -> String {
+        ["home.status", "home.context", "home.chapterList", "home.memory.view", "home.taskList", "home.taskStatus"]
+            .map { "\($0)=\(homeReads[$0, default: 0])" }.joined(separator: ",")
+    }
 
     func handle(_ method: String, _ params: [String: JSONValue]) async throws -> (JSONValue?, JSONValue?) {
+        if method.hasPrefix("home.") {
+            homeReads[method, default: 0] += 1
+            if let onHomeRead { await onHomeRead(homeReadSummary()) }
+        }
         switch method {
         case "terminal.list":
             return (nil, .object(["code": .string("unavailable"),
@@ -418,13 +441,6 @@ private actor HostedHomeShellGateway {
                 return (nil, .object(["code": .string("conflict"), "message": .string("Home task namespace refused: not-initialized"), "retryable": .bool(false)]))
             }
             return (taskPermissions(), nil)
-        case "home.stopTask", "home.steerTask":
-            guard params["commandId"]?.stringValue != nil, params["taskId"]?.stringValue == "active",
-                  params["operationId"]?.stringValue == "task-operation", params["controllerGeneration"] == nil,
-                  !taskStopped, method != "home.steerTask" || params["text"]?.stringValue == "Use the exact task" else { return taskRefusal() }
-            controlCount += 1
-            if method == "home.stopTask" { taskStopped = true }
-            return (.object(["accepted": .bool(true)]), nil)
         case "home.redeliverTaskResult":
             guard params["commandId"]?.stringValue != nil, params["taskId"]?.stringValue == "terminal",
                   params["homeId"]?.stringValue == "home-fixture", params["routeGeneration"]?.intValue == 2 else { return taskRefusal() }
@@ -455,13 +471,13 @@ private actor HostedHomeShellGateway {
             return (try await heldSheetRead { chapterListFixture() }, nil)
         case "home.context":
             return (try await heldSheetRead { contextProjection() }, nil)
-        case "home.memory.page":
+        case "home.memory.view":
             browserReads += 1
             if browserState == "loading", browserReads == 1 { try? await Task.sleep(for: .seconds(4)) }
             if browserState == "error", browserReads == 1 {
                 return (nil, .object(["code": .string("busy"), "message": .string("Canonical source unavailable"), "retryable": .bool(true)]))
             }
-            return (memoryPage(next: params["cursor"] != nil, empty: browserState == "empty", sessionID: params["sessionId"]?.stringValue), nil)
+            return (memoryView(params, empty: browserState == "empty"), nil)
         case "home.memory.evidence":
             let offset = params["offset"]?.intValue ?? 0
             let first = "Canonical original, not the memory projection"
@@ -681,7 +697,7 @@ private actor HostedHomeShellGateway {
         .object(["sourceDigest": .string(String(repeating: "a", count: 64)), "inputTokens": .number(12), "outputTokens": .number(3)])
     }
     private func taskSummary(_ id: String) -> JSONValue {
-        let terminal = id == "terminal" || taskStopped
+        let terminal = id == "terminal"
         // The Gateway sends whole epoch milliseconds; the task DTOs decode them as Int.
         let now = nowMilliseconds()
         let created = id == "active" ? now - 2 * 3_600_000 : now - 86_400_000
@@ -707,7 +723,7 @@ private actor HostedHomeShellGateway {
             ? "Continue epic #758 (settings model) on its integration branch. Implement the next slice, keep draft PR 798 updated, and do not merge."
             : "Draft the email that summarises Thursday's garden review and send it for approval.")])
         record["operationId"] = .string("task-operation")
-        let terminal = id == "terminal" || taskStopped
+        let terminal = id == "terminal"
         record["terminalEvidence"] = terminal ? .object(["outcome": .string(id == "active" ? "interrupted" : "final"), "reason": .string("explicit-report"), "sessionId": .string("worker-session"), "entryIds": .array([.string("terminal-entry")])]) : .null
         record["wake"] = terminal ? .object(["state": .string(id == "terminal" && !taskRedelivered ? "blocked" : "pending"),
             "routeGeneration": .number(taskRedelivered ? 2 : 1), "delivery": .null,
@@ -774,70 +790,88 @@ private actor HostedHomeShellGateway {
     private func isoAgo(_ seconds: TimeInterval) -> String {
         ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-seconds))
     }
-    /// Memory entries belong to chapters: the sealed chapter (1) holds the first
-    /// entry and the active chapter (2) the second, so a chapter-filtered page is one item.
+    /// The exact evidence of one memory message, in the chapter that holds it.
     private func evidence(index: Int = 0, sessionID: String = "home-chapter-sealed") -> JSONValue {
         .object(["index": .number(Double(index)), "sessionId": .string(sessionID), "entryId": .string("source-entry"),
                  "sourceDigest": .string(String(repeating: "a", count: 64))])
     }
-    /// Six memory items of mixed kinds. The sealed chapter (1) holds item 0; the
-    /// active chapter (2) holds the rest. The unfiltered view pages three at a time.
-    private struct FixtureMemoryItem {
-        let index: Int
-        let sessionID: String
-        let json: JSONValue
+    /// Home's memory view over 40 messages: chapter 1 (sealed) holds messages 0–31
+    /// and chapter 2 (active) 32–39. Older ranges are summary lines (`0+16`, `16+8`,
+    /// `24+4`, `28+4`, `32+2`); the six newest messages are their own lines.
+    private static let memoryTotal = 40
+    private static let memorySealedEnd = 32
+    private static let memoryViewParts: [(start: Int, span: Int)] =
+        [(0, 16), (16, 8), (24, 4), (28, 4), (32, 2)] + (34..<40).map { ($0, 1) }
+    private static let memoryMessages: [(kind: String, text: String)] = [
+        ("user", "Move the garden planning to Thursday reviews."),
+        ("talk", "Scheduled the garden review for Thursday at 10:00."),
+        ("echo", "Created calendar event: Garden review, Thursday 10:00."),
+        ("event", "Task result: settings model epic #758 finished."),
+        ("user", "Email me the Thursday summary."),
+        ("talk", "Will email the summary Thursday morning."),
+    ]
+
+    private func memoryItem(_ index: Int) -> JSONValue {
+        let message = Self.memoryMessages[index % Self.memoryMessages.count]
+        let attribution = ["user": "user", "talk": "assistant", "echo": "tool", "event": "event"][message.kind]!
+        let session = index < Self.memorySealedEnd ? "home-chapter-sealed" : "home-session"
+        let summary: JSONValue = index % 6 == 1 ? .null : .object(["format": .string("memory-summary"),
+            "text": .string(message.kind + ": " + message.text), "truncated": .bool(false)])
+        return .object([
+            "index": .number(Double(index)), "kind": .string(message.kind), "attribution": .string(attribution),
+            "timestamp": .string(memoryTime(index)), "evidence": evidence(index: index, sessionID: session),
+            "projection": .object(["format": .string("memory-projection"), "text": .string(message.text),
+                "omitted": .bool(false), "omissions": .array([])]),
+            "summary": summary,
+        ])
     }
 
-    private func memoryItems() -> [FixtureMemoryItem] {
-        let sealed = "home-chapter-sealed", active = "home-session"
-        return [
-            memoryItem(index: 0, session: sealed, kind: "user", attribution: "user", minutesAgo: 4_320,
-                       summary: "Asked to move garden planning to Thursday reviews",
-                       projection: "Move the garden planning to Thursday reviews.", omitted: false, omissions: []),
-            memoryItem(index: 1, session: active, kind: "talk", attribution: "assistant", minutesAgo: 40, summary: nil,
-                       projection: "Scheduled the garden review for Thursday at 10:00.", omitted: true, omissions: ["browser-cap"]),
-            memoryItem(index: 2, session: active, kind: "echo", attribution: "tool", minutesAgo: 35,
-                       summary: "Calendar tool created the Thursday review",
-                       projection: "Created calendar event: Garden review, Thursday 10:00.", omitted: false, omissions: []),
-            memoryItem(index: 3, session: active, kind: "event", attribution: "event", minutesAgo: 25,
-                       summary: "Settings model epic #758 reported done",
-                       projection: "Task result: settings model epic #758 finished.", omitted: false, omissions: []),
-            memoryItem(index: 4, session: active, kind: "user", attribution: "user", minutesAgo: 12,
-                       summary: "Wants the Thursday summary emailed",
-                       projection: "Email me the Thursday summary.", omitted: false, omissions: []),
-            memoryItem(index: 5, session: active, kind: "talk", attribution: "assistant", minutesAgo: 3,
-                       summary: "Confirmed the email goes out Thursday",
-                       projection: "Will email the summary Thursday morning.", omitted: false, omissions: []),
-        ]
-    }
+    private func memoryTime(_ index: Int) -> String { isoAgo(Double(Self.memoryTotal - index) * 3 * 3_600) }
 
-    private func memoryItem(index: Int, session: String, kind: String, attribution: String, minutesAgo: Double,
-                            summary: String?, projection: String, omitted: Bool, omissions: [String]) -> FixtureMemoryItem {
-        var json: [String: JSONValue] = [
-            "index": .number(Double(index)), "kind": .string(kind), "attribution": .string(attribution),
-            "timestamp": .string(isoAgo(minutesAgo * 60)), "evidence": evidence(index: index, sessionID: session),
-            "projection": .object(["format": .string("memory-projection"), "text": .string(projection),
-                "omitted": .bool(omitted), "omissions": .array(omissions.map { .string($0) })]),
-        ]
-        json["summary"] = summary.map { text in
-            .object(["format": .string("memory-summary"), "text": .string(text), "truncated": .bool(index == 0)])
-        } ?? .null
-        return FixtureMemoryItem(index: index, sessionID: session, json: .object(json))
-    }
-
-    /// A page of memory: one chapter's items when filtered; otherwise pages of three.
-    private func memoryPage(next: Bool, empty: Bool, sessionID: String? = nil) -> JSONValue {
-        let items = memoryItems()
-        let revision = JSONValue.string(String(repeating: "a", count: 64))
-        if let sessionID {
-            return .object(["homeId": .string("home-fixture"), "revision": revision,
-                "totalItems": .number(Double(items.count)), "items": .array(items.filter { $0.sessionID == sessionID }.map(\.json))])
+    private func memorySummaryText(start: Int, span: Int) -> String {
+        switch (start, span) {
+        case (0, 16): "Planned the spring garden: moved reviews to Thursdays, chose raised beds for the south fence, and set a weekly email summary."
+        case (16, 8): "Booked the Lisbon trip for May, compared two hotels near Alfama and asked Home to watch for fare drops."
+        case (24, 4): "Reviewed the kitchen renovation quote and asked for a second bid on the countertops."
+        case (28, 4): "Closed out chapter 1: settings model epic #758 finished and its report was delivered."
+        case (32, 2): "Started chapter 2 by asking for the Thursday garden review and a reminder to order mulch."
+        default: "Messages \(start + 1)–\(start + span): garden planning, travel and renovation follow-ups."
         }
-        let page = empty ? [] : (next ? Array(items[3...]) : Array(items[..<3]))
-        var result: [String: JSONValue] = ["homeId": .string("home-fixture"), "revision": revision,
-            "totalItems": .number(empty ? 0 : Double(items.count)), "items": .array(page.map(\.json))]
-        if !next && !empty { result["nextCursor"] = .string("fixture-next") }
-        return .object(result)
+    }
+
+    private func memoryLine(start: Int, span: Int) -> JSONValue {
+        var line: [String: JSONValue] = ["start": .number(Double(start)), "span": .number(Double(span)),
+            "truncated": .bool(false), "firstAt": .string(memoryTime(start)), "lastAt": .string(memoryTime(start + span - 1))]
+        if span == 1 {
+            let message = Self.memoryMessages[start % Self.memoryMessages.count]
+            line["text"] = .string(message.text); line["kind"] = .string(message.kind); line["item"] = memoryItem(start)
+        } else {
+            line["text"] = .string(memorySummaryText(start: start, span: span))
+        }
+        return .object(line)
+    }
+
+    /// `home.memory.view`: newest first; the whole view pages ten lines then the rest,
+    /// a chapter answers its own lines, and a part answers its two halves.
+    private func memoryView(_ params: [String: JSONValue], empty: Bool) -> JSONValue {
+        let revision = JSONValue.string(String(repeating: "a", count: 64))
+        func view(_ lines: [JSONValue], next: String? = nil) -> JSONValue {
+            var result: [String: JSONValue] = ["homeId": .string("home-fixture"), "revision": revision,
+                "totalMessages": .number(Double(empty ? 0 : Self.memoryTotal)), "lines": .array(empty ? [] : lines)]
+            if let next, !empty { result["nextCursor"] = .string(next) }
+            return .object(result)
+        }
+        if let part = params["part"]?.objectValue, let start = part["start"]?.intValue, let span = part["span"]?.intValue {
+            return view([memoryLine(start: start, span: span / 2), memoryLine(start: start + span / 2, span: span / 2)])
+        }
+        let range = switch params["sessionId"]?.stringValue {
+        case "home-chapter-sealed": 0..<Self.memorySealedEnd
+        case "home-session": Self.memorySealedEnd..<Self.memoryTotal
+        default: 0..<Self.memoryTotal
+        }
+        let lines = Self.memoryViewParts.filter { range.contains($0.start) }.reversed().map { memoryLine(start: $0.start, span: $0.span) }
+        guard params["sessionId"] == nil, lines.count > 10 else { return view(Array(lines)) }
+        return params["cursor"] == nil ? view(Array(lines.prefix(10)), next: "fixture-next") : view(Array(lines.dropFirst(10)))
     }
 
     /// `home.context`: the activation's request sizes with the body-free breakdown

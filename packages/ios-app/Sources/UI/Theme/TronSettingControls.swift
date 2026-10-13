@@ -1,16 +1,21 @@
 import SwiftUI
 
-/// Passive explanations sit on the sheet, never in a surface that looks tappable.
+/// Passive explanations sit on the sheet, never in a surface that looks tappable:
+/// sheet intros, help and captions, in the settings row subtitle's size and colour
+/// on every sheet (#900), so explanatory copy never reads smaller than its rows.
 struct TronSettingsCaption: View {
     let text: String
-    init(_ text: String) { self.text = text }
+    /// Captions sit 4 points inside the sheet's content edge; a group's detail
+    /// aligns with its header instead.
+    var inset: CGFloat = 4
+    init(_ text: String, inset: CGFloat = 4) { self.text = text; self.inset = inset }
     var body: some View {
         Text(text)
-            .font(TronTypography.secondaryDescription)
+            .font(TronTypography.settingsSubtext(adjustment: TronSettingsLayoutPolicy.metadataSizeAdjustment))
             .foregroundStyle(Color.tronTextSecondary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4)
+            .padding(.horizontal, inset)
     }
 }
 

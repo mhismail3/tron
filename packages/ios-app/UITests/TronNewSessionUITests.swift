@@ -22,7 +22,7 @@ final class TronNewSessionUITests: XCTestCase {
         // The shared model picker: open a collapsed provider section, as a user would.
         let collapsed = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@ AND value == %@", " models", "collapsed")).firstMatch
         if collapsed.waitForExistence(timeout: 3) { collapsed.tap() }
-        let choice = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Project Pro'")).firstMatch
+        let choice = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Project Pro,'")).firstMatch
         XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.filter(\.isHittable).count, 1,
                        "The nested catalog uses the canonical progressive sheet, not a second toolbar")

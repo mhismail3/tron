@@ -41,6 +41,9 @@ enum TronTypography {
     /// Left-aligned secondary copy uses the selected reading family, including
     /// live state and selections. Monospace is reserved for trailing values.
     static var secondaryDescription: Font { sans(size: sizeSecondary) }
+    /// A settings row's subtitle, and every sheet intro and caption: one size so
+    /// explanatory copy never reads smaller than the rows around it.
+    static func settingsSubtext(adjustment: CGFloat) -> Font { sans(size: sizeSecondary + adjustment) }
     /// Right-aligned values use the selected code family.
     static var secondaryCodeDescription: Font { code(size: sizeSecondary) }
     /// Shared section-label treatment used by every sheet and settings group.
@@ -1367,7 +1370,7 @@ struct TronSettingsGroup<Content: View>: View {
                     .font(TronTypography.sheetSectionHeader)
                     .foregroundStyle(Color.tronTextPrimary)
                     .accessibilityAddTraits(.isHeader)
-                if let detail { TronSettingsDetailText(detail) }
+                if let detail { TronSettingsCaption(detail, inset: 0) }
             }
             switch surfaceStyle {
             case .uncontained:
@@ -1386,20 +1389,6 @@ struct TronSettingsGroup<Content: View>: View {
 
 /// The explanatory line under a settings section title. Sheets that build
 /// their own header or intro use this so the size tracks the settings groups.
-struct TronSettingsDetailText: View {
-    let text: String
-    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
-
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Text(text)
-            .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
-            .foregroundStyle(Color.tronTextMuted)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
 struct TronSettingsRow<Trailing: View>: View {
     /// Nil for dense lists whose rows share one kind and gain nothing from a glyph.
     let icon: String?
@@ -1458,13 +1447,12 @@ struct TronSettingsRow<Trailing: View>: View {
                     )
                     .accessibilityHidden(true)
             }
-            // Compact value actions still use standard row insets; at larger
-            // accessibility sizes they sit below the label, not beside a sliver.
-            let stacksAction = controlSize == .small && dynamicTypeSize.isAccessibilitySize
-            let layout = stacksAction
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: TronSpacing.md))
-                : AnyLayout(TronSettingsRowLayout(spacing: TronSpacing.xl))
-            layout {
+            // At accessibility sizes a trailing control that competes with the
+            // labels sits below them, so titles wrap only at word boundaries (#868).
+            TronSettingsRowLayout(
+                spacing: TronSpacing.xl,
+                stackedSpacing: dynamicTypeSize.isAccessibilitySize ? TronSpacing.md : nil
+            ) {
                 VStack(alignment: .leading, spacing: 3) {
                     if titleIsIdentifier && !title.contains(where: \.isWhitespace) {
                         // Opaque sources are one token, never broken at a slash
@@ -1482,7 +1470,7 @@ struct TronSettingsRow<Trailing: View>: View {
                     }
                     if let subtitle {
                         Text(subtitle)
-                            .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
+                            .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
                             .foregroundStyle(subtitleColor)
                             .lineLimit(subtitleLineLimit)
                             .truncationMode(.tail)
@@ -1507,42 +1495,67 @@ struct TronSettingsRow<Trailing: View>: View {
 }
 
 /// A settings row's labels and trailing control. The control keeps its natural
-/// width when both fit on one line, so the subtitle uses the rest of the row;
-/// only when they compete does the control cap at 45% and truncate.
+/// width when both fit on one line, so the subtitle uses the rest of the row.
+/// When they compete, the control caps at 45% and truncates; with
+/// `stackedSpacing` (accessibility sizes) it moves below the labels instead,
+/// leading-aligned at its natural width.
 private struct TronSettingsRowLayout: Layout {
     let spacing: CGFloat
+    let stackedSpacing: CGFloat?
 
-    private func widths(_ subviews: Subviews, in width: CGFloat) -> (labels: CGFloat, trailing: CGFloat) {
-        guard subviews.count == 2 else { return (width, 0) }
+    private struct Arrangement {
+        var labels: CGFloat
+        var trailing: CGFloat
+        var stacked = false
+    }
+
+    private func arrange(_ subviews: Subviews, in width: CGFloat) -> Arrangement {
+        guard subviews.count == 2 else { return Arrangement(labels: width, trailing: 0) }
         let trailingIdeal = subviews[1].sizeThatFits(.unspecified).width
-        guard trailingIdeal > 0.5 else { return (width, 0) }
+        guard trailingIdeal > 0.5 else { return Arrangement(labels: width, trailing: 0) }
         let available = max(0, width - spacing)
         let labelsIdeal = subviews[0].sizeThatFits(.unspecified).width
         if labelsIdeal + trailingIdeal <= available {
             // A flexible control (a field) may take the room the labels leave.
             let room = available - labelsIdeal
             let trailing = max(trailingIdeal, min(room, subviews[1].sizeThatFits(ProposedViewSize(width: room, height: nil)).width))
-            return (available - trailing, trailing)
+            return Arrangement(labels: available - trailing, trailing: trailing)
+        }
+        if stackedSpacing != nil {
+            return Arrangement(labels: width, trailing: min(trailingIdeal, width), stacked: true)
         }
         let trailing = min(trailingIdeal, available * 0.45)
-        return (available - trailing, trailing)
+        return Arrangement(labels: available - trailing, trailing: trailing)
+    }
+
+    private func heights(_ subviews: Subviews, _ arrangement: Arrangement) -> (labels: CGFloat, trailing: CGFloat) {
+        (subviews.first?.sizeThatFits(ProposedViewSize(width: arrangement.labels, height: nil)).height ?? 0,
+         subviews.count == 2 ? subviews[1].sizeThatFits(ProposedViewSize(width: arrangement.trailing, height: nil)).height : 0)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? subviews.reduce(0) { $0 + $1.sizeThatFits(.unspecified).width } + spacing
-        let (labels, trailing) = widths(subviews, in: width)
-        let heights = [subviews.first?.sizeThatFits(ProposedViewSize(width: labels, height: nil)).height ?? 0,
-                       subviews.count == 2 ? subviews[1].sizeThatFits(ProposedViewSize(width: trailing, height: nil)).height : 0]
-        return CGSize(width: width, height: heights.max() ?? 0)
+        let arrangement = arrange(subviews, in: width)
+        let (labels, trailing) = heights(subviews, arrangement)
+        let height = arrangement.stacked ? labels + (stackedSpacing ?? 0) + trailing : max(labels, trailing)
+        return CGSize(width: width, height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let (labels, trailing) = widths(subviews, in: bounds.width)
+        let arrangement = arrange(subviews, in: bounds.width)
+        if arrangement.stacked {
+            let (labels, _) = heights(subviews, arrangement)
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading,
+                              proposal: ProposedViewSize(width: arrangement.labels, height: nil))
+            subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + labels + (stackedSpacing ?? 0)), anchor: .topLeading,
+                              proposal: ProposedViewSize(width: arrangement.trailing, height: nil))
+            return
+        }
         subviews.first?.place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
-                              proposal: ProposedViewSize(width: labels, height: nil))
+                              proposal: ProposedViewSize(width: arrangement.labels, height: nil))
         if subviews.count == 2 {
             subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing,
-                              proposal: ProposedViewSize(width: trailing, height: nil))
+                              proposal: ProposedViewSize(width: arrangement.trailing, height: nil))
         }
     }
 }

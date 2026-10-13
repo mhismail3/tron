@@ -4878,7 +4878,7 @@ final class AppModel {
             try HomeStatusDTO.decode(try await read("home.status"))
         }
         func requireMemoryBrowser() throws {
-            guard lifecycle.gatewayInfo?.capabilities.contains("home-memory-browser.v1") == true else {
+            guard lifecycle.gatewayInfo?.capabilities.contains("home-memory-view.v1") == true else {
                 throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the memory browser.", retryable: false, details: nil)
             }
         }
@@ -4940,20 +4940,15 @@ final class AppModel {
             return .chapters(try await readChapterList())
         case .memory(let sessionID, let continuation):
             try requireMemoryBrowser()
-            var values: [String: JSONValue] = ["limit": .number(20)]
+            var values: [String: JSONValue] = ["limit": .number(30)]
             if let continuation { values["cursor"] = .string(continuation.cursor) }
             if let sessionID { values["sessionId"] = .string(sessionID) }
-            // Each row names its chapter by ordinal; the list supplies the mapping.
-            // Both reads are independent, so they travel together.
-            let readsChapters = chapterListCapable()
-            async let pageValue = read("home.memory.page", .object(values))
-            async let chapterValue: JSONValue? = readsChapters ? read("home.chapterList") : nil
-            let page = try HomeMemoryPageDTO.decode(try await pageValue, continuation: continuation)
-            var ordinals: [String: Int] = [:]
-            if let chapterValue = try await chapterValue {
-                for chapter in try HomeChapterListDTO.decode(chapterValue).chapters { ordinals[chapter.sessionId] = chapter.ordinal }
-            }
-            return .memory(page, chapterOrdinals: ordinals)
+            return .memory(try HomeMemoryViewDTO.decode(try await read("home.memory.view", .object(values)), continuation: continuation))
+        case .memoryPart(let sessionID, let line):
+            try requireMemoryBrowser()
+            var values: [String: JSONValue] = ["part": .object(["start": .number(Double(line.start)), "span": .number(Double(line.span))])]
+            if let sessionID { values["sessionId"] = .string(sessionID) }
+            return .memory(try HomeMemoryViewDTO.decode(try await read("home.memory.view", .object(values)), continuation: nil, part: line))
         case .evidence(let source, let offset):
             try requireMemoryBrowser()
             let params = JSONValue.object(["evidence": try JSONValue.encode(source), "offset": .number(Double(offset))])
@@ -5889,6 +5884,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
         if let mountedTarget, !sessionPresentation.owns(mountedTarget) { return true }
         guard restored else { return false }
+        // Photos whose transfer the outage interrupted upload again; staged
+        // ones are reused on this same Mac (#916).
+        if let mountedTarget { composerDrafts.resumeUnstagedUploads(for: mountedTarget) }
         let activeConnectionID = await client.activeConnectionID()
         guard admitsLifecycle(admission), activeConnectionID == admission.connectionID else { return true }
         scheduleMountedOptionalReads(admission: admission)

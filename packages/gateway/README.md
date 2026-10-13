@@ -817,7 +817,8 @@ qualifiers?, query?, cursor?, limit? }` serves a key's choices: its static
 options, or its `optionsSource` (`catalog.models`, searchable and paged;
 `catalog.thinkingLevels` for the `model` qualifier or the target's chat model,
 empty for a model without reasoning; `catalog.contextWindow` as a `range` with
-the bounds `settings.change` enforces).
+the bounds `settings.change` enforces; and `catalog.tools`, whose options carry
+the selected tool's serializable `resource` record for shared list/detail UI).
 `settings.change { commandId, target, fence?, changes[], reason?, dryRun? }` is the one path every setting changes through
 ([docs/settings-model.md](docs/settings-model.md) 5). Each change is `{ key,
 qualifiers?, layer, op: "set" | "unset", value?, expected? }`. The Gateway
@@ -1351,12 +1352,13 @@ record, RPC shapes, chapters, runtime profile, memory, task delegation and termi
   `home.decideTaskGrant` RPCs list and revoke authority, or approve or deny an exact durable request with a one-use,
   expiry-bound grant. Home cannot approve its own requests.
 - **Task control.** `home.taskList`, `home.taskStatus`, `home.steerTask` and `home.stopTask` expose durable spend
-  and shared control. Terminal `/home task`, `/home steer` and `/home stop` target one task. Steering shares the
+  and shared control. A list row reads its worker's name without building a session snapshot or a catalog
+  acquisition, so a page stays cheap however large the catalog or the live transcripts are. Terminal `/home task`, `/home steer` and `/home stop` target one task. Steering shares the
   session lane; Stop persists exact intent and cancels outside blocked admission. Canonical usage identities dedupe
   tokens before display. Task results never trigger an automatic Home call: terminal tasks co-commit a durable inbox
   event, delivered on the next maintainer Home message, and make one advisory push decision at most.
-- **Protocol.** `home.v1` is advertised in `hello` and `system.info`. `home-memory-browser.v1` additionally gates the
-  typed memory browser, `home.memory.page` and `home.memory.evidence`: disposable reads of projected summaries and
+- **Protocol.** `home.v1` is advertised in `hello` and `system.info`. `home-memory-view.v1` additionally gates the
+  typed memory browser, `home.memory.view` and `home.memory.evidence`: disposable reads of projected summaries and
   canonical history. The RPC table, the `home.status` shape, the memory browser contract and the terminal `/home`
   command table are in [`docs/home.md`](docs/home.md#rpcs).
 
@@ -1958,7 +1960,7 @@ A client that stops waiting for a disposable read sends `{type:"cancel",id}` and
 receives no answer: the Gateway abandons that request's work and records
 `rpc.cancelled` with the stage it interrupted. Cancellation applies only to
 `session.open`, `session.list`, `session.transcript`, `session.history.list`,
-`session.history.entry`, `home.memory.page`, `home.memory.evidence`,
+`session.history.entry`, `home.memory.view`, `home.memory.evidence`,
 `session.search`, `model.list`, `provider.list` and `provider.usage`; a cancel for
 any other method is ignored. An accepted mutation
 or admitted prompt is never cancelled, and neither is a `session.sync`
@@ -1969,7 +1971,7 @@ Seven of those eleven methods have server-side deadlines
 10 s for `session.open`, whose cold load may parse a large transcript before its
 subscription commits, and 5 s for `session.list` and the transcript pages
 (`session.transcript`, `session.history.list`, `session.history.entry`) and the
-Home browser (`home.memory.page`, `home.memory.evidence`). A read
+Home browser (`home.memory.view`, `home.memory.evidence`). A read
 that outlives its deadline is aborted, answered `busy` with
 `details.retryAfterMs`, and recorded once as `gateway.shed` with
 `reason=deadline`; the phone waits that hint (bounded to 10 s), retries the read

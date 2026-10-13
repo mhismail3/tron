@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
-import type { HomeMemoryEvidence, HomeMemoryPage } from "../protocol/types.js";
-import { HOME_MEMORY_PAGE_BYTES, encodeHomeMemoryCursor, homeMemoryItem, homeMemoryRevisionChanged, type HomeMemoryPageRequest } from "../home/home-memory-browser.js";
+import type { HomeMemoryEvidence, HomeMemoryView } from "../protocol/types.js";
+import { HOME_MEMORY_PAGE_BYTES, encodeHomeMemoryCursor, homeMemoryItem, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "../home/home-memory-browser.js";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
@@ -376,59 +376,96 @@ export class EpisodicMemory {
       || message.sourceDigest !== evidence.sourceDigest) throw homeMemoryRevisionChanged();
   }
 
-  /**
-   * One page of catalog rows in index order. A chapter-filtered page keeps the catalog's own
-   * indices, so a continuation names the same rows, and its revision binds the chapter: a
-   * continuation under another chapter, or after any change, is `home-memory-revision-changed`.
-   */
-  browserPage(request: HomeMemoryPageRequest): HomeMemoryPage {
+  /** The same hierarchical lines the model-facing memory view renders, newest first.
+   * Chapter filtering recursively splits only parts crossing chapter boundaries. */
+  browserView(request: HomeMemoryViewRequest): HomeMemoryView {
     this.assertOpen();
     const chapter = request.sessionId;
-    const revision = chapter === undefined ? this.browserRevision() : episodicDigest(JSON.stringify([this.browserRevision(), chapter]));
+    const baseRevision = this.browserRevision();
+    const revision = chapter === undefined ? baseRevision : episodicDigest(JSON.stringify([baseRevision, chapter]));
     if (request.cursor && request.cursor.revision !== revision) throw homeMemoryRevisionChanged();
-    const matches = (index: number): boolean => chapter === undefined || this.messages.get(index)!.sessionId === chapter;
-    const offset = request.cursor?.offset ?? 0;
-    if (offset > this.messages.size || request.cursor && offset === this.messages.size) throw homeMemoryRevisionChanged();
-    let totalItems = 0;
-    for (let index = 0; index < this.messages.size; index += 1) if (matches(index)) totalItems += 1;
-    const result: HomeMemoryPage = { homeId: this.dependencies.sessionId, revision, totalItems, items: [] };
-    let position = offset;
-    // Leave room for the largest cursor and page metadata. Each row is bounded
-    // independently, so one row always fits and no cursor can strand a row.
-    let bytes = Buffer.byteLength(JSON.stringify(result)) + 1024;
-    for (; position < this.messages.size && result.items.length < request.limit; position += 1) {
-      if (!matches(position)) continue;
-      const message = this.messages.get(position)!;
-      const item = homeMemoryItem(message, this.nodes.get(nodeAddress(0, position)));
-      const size = Buffer.byteLength(JSON.stringify(item)) + 1;
-      if (bytes + size > HOME_MEMORY_PAGE_BYTES) break;
-      bytes += size; result.items.push(item);
+    const matches = (index: number): boolean => chapter === undefined || this.messages.get(index)?.sessionId === chapter;
+    const ranges: EpisodicViewPart[] = [];
+    const add = (part: EpisodicViewPart): void => {
+      if (part.start >= this.messages.size) return;
+      const end = Math.min(part.start + part.span, this.messages.size);
+      let inside = 0;
+      for (let i = part.start; i < end; i += 1) if (matches(i)) inside += 1;
+      if (inside === 0) return;
+      if (inside === end - part.start) { ranges.push(part); return; }
+      if (part.span === 1) return;
+      const half = part.span / 2;
+      add({ level: part.level - 1, index: part.index * 2, start: part.start, span: half });
+      add({ level: part.level - 1, index: part.index * 2 + 1, start: part.start + half, span: half });
+    };
+    if (request.part) {
+      const { start, span } = request.part;
+      if (start + span > this.messages.size) throw new GatewayError("invalid_request", "Home memory part is past the catalog end");
+      const level = Math.log2(span), index = start / span;
+      const half = span / 2;
+      const parts = [
+        { level: level - 1, index: index * 2, start, span: half },
+        { level: level - 1, index: index * 2 + 1, start: start + half, span: half },
+      ];
+      const lines = parts.map(part => homeMemoryLine(part, this.messages, this.nodes, nodeAddress));
+      return { homeId: this.dependencies.sessionId, revision, totalMessages: this.messages.size, lines };
     }
-    if (!result.items.length && position < this.messages.size) throw new GatewayError("unsupported", "Home memory row exceeds the browser bound");
-    let next = position;
-    while (next < this.messages.size && !matches(next)) next += 1;
-    if (next < this.messages.size) result.nextCursor = encodeHomeMemoryCursor({ revision, offset: next, limit: request.limit });
+    for (const part of this.view) add(part);
+    ranges.reverse(); // Home's view is chronological; the browser presents newest first.
+    const offset = request.cursor?.offset ?? 0;
+    if (offset > ranges.length || request.cursor && offset === ranges.length) throw homeMemoryRevisionChanged();
+    const totalMessages = chapter === undefined ? this.messages.size : [...this.messages.values()].filter(m => m.sessionId === chapter).length;
+    const result: HomeMemoryView = { homeId: this.dependencies.sessionId, revision, totalMessages, lines: [] };
+    let position = offset;
+    let bytes = Buffer.byteLength(JSON.stringify(result)) + 1024;
+    for (; position < ranges.length && result.lines.length < request.limit; position += 1) {
+      const line = homeMemoryLine(ranges[position]!, this.messages, this.nodes, nodeAddress);
+      const size = Buffer.byteLength(JSON.stringify(line)) + 1;
+      if (bytes + size > HOME_MEMORY_PAGE_BYTES) break;
+      bytes += size;
+      result.lines.push(line);
+    }
+    if (!result.lines.length && position < ranges.length) throw new GatewayError("unsupported", "Home memory line exceeds the browser bound");
+    if (position < ranges.length) result.nextCursor = encodeHomeMemoryCursor({ revision, offset: position, limit: request.limit, ...(chapter === undefined ? {} : { sessionId: chapter }) });
     return result;
   }
 
   /**
-   * The newest summary texts of each listed session's messages, newest first: at most
-   * `limit` per session, from the catalog's own level-0 nodes (the summaries browserPage
-   * shows). One reverse pass over the catalog, so the cost is the catalog's size, not the
-   * number of sessions. Unbuilt summaries are skipped, never placeholders.
+   * Largest built summary ranges for each chapter, newest first. Decomposes each
+   * contiguous chapter interval into maximal aligned dyadic nodes; leaf summaries
+   * are used only when no merged node exists for that chapter.
    */
   recentSummaries(sessionIds: readonly string[], limit: number): Map<string, string[]> {
     this.assertOpen();
     const result = new Map(sessionIds.map(sessionId => [sessionId, [] as string[]]));
-    let open = result.size;
-    for (let index = this.messages.size - 1; index >= 0 && open > 0; index -= 1) {
-      const message = this.messages.get(index)!;
-      const summaries = result.get(message.sessionId);
-      if (!summaries || summaries.length >= limit) continue;
-      const node = this.nodes.get(nodeAddress(0, index));
-      if (!node) continue;
-      summaries.push(node.text);
-      if (summaries.length === limit) open -= 1;
+    const catalog = new Map<string, number[]>();
+    for (const message of this.messages.values()) {
+      if (!result.has(message.sessionId)) continue;
+      const indices = catalog.get(message.sessionId) ?? [];
+      indices.push(message.index);
+      catalog.set(message.sessionId, indices);
+    }
+    for (const [sessionId, summaries] of result) {
+      const indices = catalog.get(sessionId) ?? [];
+      if (!indices.length) continue;
+      const start = indices[0]!, end = indices.at(-1)! + 1;
+      const merged: Array<{ start: number; span: number; text: string }> = [];
+      let cursor = start;
+      while (cursor < end) {
+        let chosen: { span: number; text: string } | undefined;
+        for (let span = 2 ** EPISODIC_MAX_LEVEL; span >= 2; span /= 2) {
+          if (cursor % span || cursor + span > end) continue;
+          const node = this.nodes.get(nodeAddress(Math.log2(span), cursor / span));
+          if (node) { chosen = { span, text: node.text }; break; }
+        }
+        if (chosen) { merged.push({ start: cursor, ...chosen }); cursor += chosen.span; }
+        else cursor += 1;
+      }
+      const sources = merged.length ? merged.sort((a, b) => b.start - a.start).map(item => item.text)
+        : indices.sort((a, b) => b - a).flatMap(index => {
+          const node = this.nodes.get(nodeAddress(0, index)); return node ? [node.text] : [];
+        });
+      summaries.push(...sources.slice(0, limit));
     }
     return result;
   }

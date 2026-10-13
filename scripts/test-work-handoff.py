@@ -27,7 +27,8 @@ wss.on("connection", (socket, request) => {
       const current = state(); current.calls.push({method:frame.method, params:frame.params});
       fs.writeFileSync(statePath, JSON.stringify(current));
       let result;
-      if (frame.method === "home.taskList") {
+      if (frame.method === "session.list") result = {sessions: [], listRevision: 1, projectionToken: "fixture"};
+      else if (frame.method === "home.taskList") {
         const page = current.pages[frame.params.cursor || "first"] || {items:[]};
         result = page;
       } else if (frame.method === "home.taskStatus") {
@@ -118,7 +119,7 @@ os.execv({real_git!r}, [{real_git!r}, *args])
             return output.read_text()
         env["TRON_GATEWAY_PORT"]=start_gateway("127.0.0.1", port_file)
 
-        terminal=lambda i:{"taskId":i,"lifecycle":"terminal"}
+        terminal=lambda i,session="old-owner":{"taskId":i,"lifecycle":"terminal","sessionId":session}
         settled={"operationId":"operation-natural","sessionId":"old-owner","lifecycle":"terminal","terminalEvidence":{"outcome":"final","reason":"explicit-report","sessionId":"old-owner"},"subagents":{"started":0,"stoppedAtEnd":0},"subagentRuns":{"total":0,"runs":[]},"ownerSettlement":None}
         def recovery_journeys():
             # Recovery is deliberately separate from handoff: it publishes an exact, clean
@@ -257,7 +258,7 @@ os.execv({real_git!r}, [{real_git!r}, *args])
             local_env={**env,"TRON_GATEWAY_HOST":local_ip,"TRON_GATEWAY_PORT":local_port}
             local= subprocess.run(["node",str(ROOT/"packages/gateway/dist/client/work-owner-status.js"),"old-owner"],cwd=ROOT,env=local_env,capture_output=True,text=True,timeout=10)
             evidence.append({"case":"assigned interface host accepted by process helper", "exit":local.returncode,"stdout":local.stdout.strip(),"stderr":local.stderr.strip()})
-            assert local.returncode==0 and local.stdout.strip()=="unknown", local.stderr
+            assert local.returncode==0 and json.loads(local.stdout)["state"]=="indeterminate", local.stderr
             assert json.loads(state.read_text())["calls"], "assigned interface fixture did not receive the query"
         mismatch_port_file=root/"mismatch-port"
         mismatch_port=start_gateway("127.0.0.1",mismatch_port_file,protocol=7)
@@ -288,9 +289,9 @@ os.execv({real_git!r}, [{real_git!r}, *args])
             assert before[2]["writes"]==after[2]["writes"] and before[2]["comments"]==after[2]["comments"], "refusal wrote audit"
             return data
 
-        data=assert_refused("active-only owner refused without task status",lambda:fixture({"first":{"items":[{"taskId":"active","lifecycle":"active"}]}},{"active":{}}),"refusing handoff")
-        assert [c["method"] for c in data["calls"]]==["home.taskList"]
-        terminal=lambda i:{"taskId":i,"lifecycle":"terminal"}
+        data=assert_refused("active-only owner refused without task status",lambda:fixture({"first":{"items":[{"taskId":"active","lifecycle":"active","sessionId":"old-owner"}]}},{"active":{}}),"is live")
+        assert [c["method"] for c in data["calls"]]==["session.list","session.list","home.taskList"]
+        terminal=lambda i,session="old-owner":{"taskId":i,"lifecycle":"terminal","sessionId":session}
         settled={"operationId":"operation-natural","sessionId":"old-owner","lifecycle":"terminal","terminalEvidence":{"outcome":"final","reason":"explicit-report","sessionId":"old-owner"},"subagents":{"started":0,"stoppedAtEnd":0},"subagentRuns":{"total":0,"runs":[]},"ownerSettlement":None}
         data=assert_refused("malformed or missing terminal evidence refuses",lambda:fixture({"first":{"items":[terminal("bad"),terminal("missing")]}},{"bad":{**settled,"terminalEvidence":None}}),"refusing handoff")
         assert [c["params"].get("taskId") for c in data["calls"] if c["method"]=="home.taskStatus"]==["bad"]
@@ -366,7 +367,7 @@ os.execv({real_git!r}, [{real_git!r}, *args])
             fixture({"first":{"items":[terminal("natural")]}},{"natural":value})
             result=subprocess.run(["node",str(ROOT/"packages/gateway/dist/client/work-owner-status.js"),"old-owner"],cwd=ROOT,env=env,capture_output=True,text=True,timeout=30)
             evidence.append({"case":label,"exit":result.returncode,"stdout":result.stdout.strip()})
-            assert result.returncode==0 and result.stdout.strip()=="settled", result.stderr
+            assert result.returncode==0 and json.loads(result.stdout)["state"]=="settled", result.stderr
         fixture({"first":{"items":[terminal("natural")] }},{"natural":unknown_terminal})
         env["PATH"]=str(git_bin)+os.pathsep+env.get("PATH","")
         natural=call("handoff","41","--session","new-owner","--reason","naturally settled")
@@ -454,7 +455,7 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         git(repo,"commit","--allow-empty","-m","Claim\n\nWork-Claim-Issue: 41\nWork-Claim-Session: old-owner"); git(repo,"push","--force","-u","origin","feat/41-fixture")
         git(repo,"checkout","main"); git(repo,"worktree","add",str(worktree),"feat/41-fixture")
         fixture(); r=call("handoff","41","--session","new-owner","--reason","owner settled")
-        evidence.append({"case":"unknown owner state refuses without writes","exit":r.returncode,"stderr":r.stderr.strip()}); assert r.returncode and "unknown" in r.stderr
+        evidence.append({"case":"indeterminate owner state refuses without writes","exit":r.returncode,"stderr":r.stderr.strip()}); assert r.returncode and "is indeterminate" in r.stderr
         r=call("handoff","41","--session","new-owner","--reason","owner settled","--force-maintainer")
         evidence.append({"case":"force requires TTY","exit":r.returncode,"stderr":r.stderr.strip()}); assert r.returncode and "interactive terminal" in r.stderr
         git(worktree,"commit","--allow-empty","-m","Claim retry\n\nWork-Claim-Issue: 41\nWork-Claim-Session: old-owner"); git(worktree,"push","--force-with-lease")
@@ -490,12 +491,13 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         git(repo,"commit","--allow-empty","-m","Claim\n\nWork-Claim-Issue: 41\nWork-Claim-Session: old-owner"); git(repo,"push","--force","-u","origin","feat/41-fixture")
         git(repo,"checkout","main"); git(repo,"worktree","add",str(worktree),"feat/41-fixture")
         unrelated={**settled,"sessionId":"someone-else","terminalEvidence":{**settled["terminalEvidence"],"sessionId":"someone-else"}}
-        fixture({"first":{"items":[{"taskId":"busy","lifecycle":"active"},terminal("unrelated")],"nextCursor":"later"},"later":{"items":[terminal("owner")] }},{"unrelated":unrelated,"owner":settled})
+        fixture({"first":{"items":[{"taskId":"busy","lifecycle":"active","sessionId":"someone-else"},terminal("unrelated","someone-else")],"nextCursor":"later"},"later":{"items":[terminal("owner")] }},{"unrelated":unrelated,"owner":settled})
         refs_before=git(repo,"for-each-ref","--format=%(refname) %(objectname)").splitlines()
         ref=call("handoff","41","--session","new-owner","--reason","settled owner"); data=json.loads(state.read_text())
         evidence.append({"case":"matching finished owner behind unrelated terminal row and later page transfers without force","exit":ref.returncode,"stderr":ref.stderr.strip(),"gatewayCalls":data["calls"]})
         if ref.returncode==0:
-            assert [c["method"] for c in data["calls"]]==["home.taskList","home.taskStatus","home.taskList","home.taskStatus","home.taskStatus"]
+            # Only the matching row's status is read, twice (the settlement must not race).
+            assert [c["method"] for c in data["calls"]]==["session.list","session.list","home.taskList","home.taskList","home.taskStatus","home.taskStatus"]
             handed=git(worktree,"rev-parse","HEAD"); assert git(worktree,"rev-parse","origin/feat/41-fixture")==handed
             assert len(data["writes"])==1 and "old-owner" in data["comments"][0] and "new-owner" in data["comments"][0]
             assert {line.split()[0] for line in refs_before} <= {line.split()[0] for line in git(repo,"for-each-ref","--format=%(refname) %(objectname)").splitlines()}

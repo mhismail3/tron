@@ -1,5 +1,6 @@
 import * as fileSystem from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, cp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -849,6 +850,65 @@ describe("Home task list RPC", () => {
     await expect(fenced.invoke(client, "home.taskList", {})).rejects.toMatchObject({ code: "conflict", details: { reason: "unsafe-state" } });
     evidence.push({ case: "task-list-pages", first, second, third, staleCursorRefused: true, recoveryFenceRefused: true });
   }, 20_000);
+
+  // #906: on Stable (100 records, most of them delivered results) a Home prompt
+  // waited minutes in admission while the phone re-read the task list: every scan
+  // re-read the store several times, recovery re-finished every historical wake
+  // operation, and each list read re-read every record, behind the same mutex.
+  // Counting record reads at the file boundary makes that cost exact.
+  it("reads the task store once per list and per Home admission, however many lists are in flight", async () => {
+    const f = await fixture();
+    await f.registry.homeOwner().configureMemory({ model: { provider: f.faux.getModel().provider, id: f.faux.getModel().id } });
+    const owner = f.registry.homeOwner();
+    const store = (owner as any).tasks.store as HomeTaskStore;
+    f.faux.setResponses([fauxAssistantMessage([reportCall("seed", "Seed result")], { stopReason: "toolUse" }), fauxAssistantMessage("Wake reply")]);
+    const seed = await dispatch(f, "seed");
+    await seed.completion;
+    await waitFor(async () => (await owner.taskResult("seed")).wake?.state === "acknowledged", "seed result acknowledged");
+    const delivered = (await store.read("seed"))!;
+    // History like Stable's: each record a result some earlier wake delivered and acknowledged.
+    for (let i = 0; i < 99; i++) {
+      const { createdAt: _c, updatedAt: _u, ...write } = structuredClone(delivered);
+      await store.put({ ...write, taskId: `history-${i}`, revision: 1,
+        wake: { ...write.wake!, eventId: `task-result-${createHash("sha256").update(`history-${i}`).digest("hex")}`, delivery: { ...write.wake!.delivery!, operationId: `history-operation-${i}` } } }, null);
+    }
+    const directory = join(f.tronHome, "gateway/home/tasks");
+    const records = new Set<string>();
+    for (const name of await readdir(directory)) {
+      if (name === "authorization.json") continue;
+      const info = await fileSystem.stat(join(directory, name));
+      records.add(`${info.dev}:${info.ino}`);
+    }
+    expect(records.size).toBe(100);
+    const anchor = await fileSystem.open(f.cwd, "r");
+    const prototype = Object.getPrototypeOf(anchor); const stat = prototype.stat;
+    await anchor.close();
+    let reads = 0;
+    // A secure record read stats its open handle twice: before and after the read.
+    vi.spyOn(prototype, "stat").mockImplementation(async function(this: import("node:fs/promises").FileHandle, ...args: unknown[]) {
+      const info = await stat.apply(this, args);
+      if (records.has(`${info.dev}:${info.ino}`)) reads += 0.5;
+      return info;
+    });
+    const service = new GatewayService({ sessions: f.registry, home: owner } as unknown as GatewayServiceDependencies);
+    const client = { clientId: "task-list-reader" } as ClientContext;
+    reads = 0;
+    const lists = await Promise.all(Array.from({ length: 20 }, () => service.invoke(client, "home.taskList", { limit: 50 }))) as Array<{ items: unknown[]; counts: { finished: number } }>;
+    expect(lists.every(page => page.items.length === 50 && page.counts.finished === 100)).toBe(true);
+    const listReads = reads;
+    f.faux.setResponses([fauxAssistantMessage("Home answered")]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    reads = 0;
+    await home.prompt("are you there?");
+    const admissionReads = reads;
+    await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle");
+    evidence.push({ case: "task-store-reads-per-list-and-admission", records: records.size, listReads, admissionReads });
+    // Twenty identical reads in flight share one pass over the records.
+    expect(listReads).toBe(100);
+    // Admission scans the store twice (recovery, then selection), each a validating
+    // pass and a reading pass, and never once per delivered operation in the history.
+    expect(admissionReads).toBeLessThanOrEqual(400);
+  }, 60_000);
 });
 
 describe("Home task production dispatch", () => {

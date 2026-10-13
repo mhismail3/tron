@@ -39,7 +39,7 @@ export interface SettingsModelDependencies {
   toolCatalog?: (target: SettingsTarget) => Promise<readonly ToolCatalogEntry[]>;
 }
 
-export interface ToolCatalogEntry { name: string; description?: string }
+export interface ToolCatalogEntry { name: string; description?: string; resource: Record<string, unknown> }
 
 /**
  * The settings model's read side: loads each store a target's layers read,
@@ -160,7 +160,7 @@ export class SettingsModel {
         const names = new Set(catalog.map(tool => tool.name));
         const missing = (Array.isArray(chosen) ? chosen as string[] : []).filter(name => !names.has(name));
         return { ...base, options: [
-          ...catalog.map(tool => ({ value: tool.name, label: tool.name, ...(tool.description ? { detail: firstSentence(tool.description) } : {}) })),
+          ...catalog.map(tool => ({ value: tool.name, label: tool.name, ...(tool.description ? { detail: firstSentence(tool.description) } : {}), resource: tool.resource })),
           ...missing.map(name => ({ value: name, label: name, disabledReason: "Not available here" })),
         ] };
       }
@@ -370,7 +370,7 @@ function firstSentence(text: string): string {
   return end === -1 ? line : line.slice(0, end + 1);
 }
 
-export interface SettingsOption { value: unknown; label: string; detail?: string; disabledReason?: string }
+export interface SettingsOption { value: unknown; label: string; detail?: string; disabledReason?: string; resource?: Record<string, unknown> }
 
 export interface SettingsOptionsResult {
   key: string;

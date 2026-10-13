@@ -584,6 +584,26 @@ describe("episodic memory end to end", () => {
     expect(edited!.index).toBe(editIndex);
 
     await memory.whenReady(memory.status().messages);
+
+    // The memory browser (#911) shows the lines this view renders, newest first:
+    // older ranges as summary lines, recent messages with their items, and a
+    // summary opens into its two halves down to single messages.
+    const rendered = memory.status().view.parts;
+    const browser = memory.browserView({ limit: 50 });
+    expect(browser.lines.map(line => [line.start, line.span]))
+      .toEqual([...rendered].reverse().slice(0, 50).map(part => [part.start, part.messages]));
+    expect(browser.lines.some(line => line.span > 1 && line.text !== null && line.item === undefined)).toBe(true);
+    for (const line of browser.lines) {
+      expect(line.text ?? "").not.toMatch(/(?:^|\s)(?:user|talk|echo|event):\s/u);
+      if (line.span === 1) expect(line.item).toMatchObject({ index: line.start, kind: line.kind });
+    }
+    let summary = browser.lines.find(line => line.span > 1)!;
+    while (summary.span > 1) {
+      const halves = memory.browserView({ limit: 50, part: { start: summary.start, span: summary.span } }).lines;
+      expect(halves.map(line => [line.start, line.span])).toEqual([[summary.start, summary.span / 2], [summary.start + summary.span / 2, summary.span / 2]]);
+      summary = halves[0]!;
+    }
+    expect(summary.item?.index).toBe(summary.start);
     await memory.dispose();
   }, 300_000);
 

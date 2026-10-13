@@ -89,6 +89,15 @@ surfaces share its width owner. Camera, Safari, system pickers, video and
 content-fit detents keep their existing presentation policy. Audit coverage is
 structural, not a claim that every destination was exercised by this journey.
 
+`testHomeSheetsJourney` (`TronHomeSheetsUITests`) walks Manage Home and every sub-sheet
+at its large detent and keeps one screenshot per sheet plus a `home-sheet-measurements`
+JSON attachment (tap-to-content times and Home read counts). It proves the Context
+card's segmented bar and legend, the memory hierarchy (recent messages, summaries opened
+down to one message, a chapter's own lines), that a chapter opens from its loaded row and
+that closing a child re-reads nothing (`fixture.home-read-counts` publishes every Home read
+before it is answered), and that task detail opens the worker session and has no Stop,
+Steer or Reload. Regenerate with the same `--only-testing` filter.
+
 `testHomeCrossSurfaceProofMatrix` is the cross-surface proof for the Home stack. In one
 hosted run it mounts the production chat in light and dark, at normal and accessibility
 Dynamic Type, opens Manage Home from the composer context ring and each child sheet from it (Home context,
@@ -109,8 +118,8 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeAcceptedControlContinuesInBackground \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeBackgroundReconnectAndUnresolvedCompletion \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeRejectsStaleRouteAction \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskListStopSteerAndRedelivery \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskDetailOpensWorkerChat \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskListAndRedelivery \
+  --only-testing TronMobileUITests/TronHomeSheetsUITests/testHomeSheetsJourney \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomePermissionRevokeRequiresConfirmation \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence \
@@ -146,7 +155,7 @@ reconnect after a dropped transport, or physical-iPhone behavior.
 
 canonical evidence identity/offsets, latest-request and managed-lifecycle
 
-The hosted Gateway fixture uses the real `home.status`, `home.memory.page` and
+The hosted Gateway fixture uses the real `home.status`, `home.memory.view` and
 `home.memory.evidence` DTO shapes; it proves native navigation, physical-model
 selection/refusal, empty/blocked/loading/error/reload states, distinct summary/
 projection/canonical labeling, attribution and page replacement. Its model
@@ -545,6 +554,68 @@ unoptimized Swift/Clang compilation, in-object debug symbols, and a separate
 `get-task-allow` manually or strip it from the development-signed artifact.
 `Tron Device`'s Run action is only a scheme convenience; the device helper's
 launch and a launch from the device itself are not debugger sessions.
+
+### Over-the-air development install
+
+`devicectl` installs only reach a phone the Mac can see. When the phone is
+elsewhere, `scripts/tron-ios-device share --title TITLE --notes NOTES
+[--fast-debug]` publishes the same artifact to a private install page on this
+Mac, reachable only from the maintainer's tailnet. No third party is involved.
+
+The command refuses a dirty tree (the page names the commit), checks the share
+host is reachable before building, builds `Tron Device` + `LocalDevice` for
+`generic/platform=iOS` (no device or device lease), runs the same
+`validate-ios-artifact.py` and Gateway protocol checks as `install` (Stable by
+default), packages the signed `.app` as
+`packages/ios-app/build/share/TronMobile.ipa` and publishes it with
+`scripts/ios-share-publish.py`. It prints `Install page:
+https://<mac>.<tailnet>.ts.net:8443/` and `Install link: itms-services://...`
+last. On the phone, open the page in Safari and tap **Install latest**; iOS asks
+to install Tron and replaces the existing app in place (data kept). The page
+lists the newest five builds with commit, branch, title, notes and time; older
+builds are deleted on publish. `latest.plist` always names the newest build, so
+the install link itself is stable.
+
+Over-the-air installation is the `itms-services` manifest mechanism, which iOS
+accepts only over HTTPS with a trusted certificate. The development profile
+carries every device registered to the team, and the push environment stays APNs
+sandbox, so the result behaves like a `devicectl` install; like that install it
+needs Developer Mode on the phone. A device registered after the build needs a
+new share. It is never an archive, a Release build or a distribution path.
+
+The share host is set up once, with the maintainer's approval:
+
+```bash
+scripts/tron-ios-device share-host enable   # idempotent
+scripts/tron-ios-device share-host status
+scripts/tron-ios-device share-host disable  # undo; keeps ~/.tron/ios-builds
+```
+
+`enable` writes the LaunchAgent `~/Library/LaunchAgents/com.tron.ios-builds.plist`,
+which runs `scripts/ios-share-server.py` (embedded in the plist, so no checkout
+path is needed) on `127.0.0.1:8444` serving `~/.tron/ios-builds` without
+directory listings or caching, logging requests to
+`~/Library/Logs/tron-ios-builds.log`, and runs
+`tailscale serve --bg --https=8443 http://127.0.0.1:8444`. Tailscale terminates
+HTTPS with the node's `*.ts.net` certificate; the macOS Tailscale app cannot
+serve a directory itself (sandbox), hence the loopback server. It refuses to
+replace another handler on port 8443 and never touches other serve ports or
+Funnel. `disable` runs `tailscale serve --https=8443 off` and removes the
+LaunchAgent. Anyone on the tailnet can download the IPA, which holds no secrets
+beyond what any development build does.
+
+The end-to-end journey checks the publisher and server in a temp fixture
+(retention, manifests, index escaping, content types, no listings), then runs
+the real `share` and downloads the index, `latest.plist`, the build manifest and
+the IPA over the tailnet HTTPS URL with certificate verification, and checks the
+IPA is byte-identical, validly signed and provisioned. It needs a clean checkout
+and an enabled share host, publishes a real installable build, and writes
+`packages/ios-app/build/share-e2e/report.json`:
+
+```bash
+python3 scripts/test-tron-ios-device-share.py                 # full journey
+python3 scripts/test-tron-ios-device-share.py --fixture-only  # no build
+```
 
 ### Profiling a real slowdown
 
@@ -1432,7 +1503,8 @@ overlays retain their existing themed geometry and contrast rather than expandin
 and mounted placeholder previews; recovery ownership and loading/error transitions remain unchanged.
 
 Passive Settings explanations use `TronSettingsCaption` / `tronSettingsCaption` immediately below their
-owning group or action, with no glass container or icon. `TronSettingsNotice` is reserved for actionable
+owning group or action, with no glass container or icon. Sheet intros (Changes, key help such as Agent
+approvals, Available Tools, Home Chapters) use the same component; never style intro `Text` locally. `TronSettingsNotice` is reserved for actionable
 failures, using the shared icon column, reading typography and right-aligned Retry pill. Do not introduce
 page-local info cards or banner layouts.
 through an offline read and successful foreground reconciliation without tapping Retry, plus caption
@@ -1819,6 +1891,15 @@ configuration `Test`, and plan `UIValidation`, under `scripts/ios-test-lock.py` 
 `scripts/ios-test-process.py`; resolve the exact owned destination through
 `scripts/ios-test-simulator.py validate`. Use `-only-testing:TronMobileUITests/TronSmokeUITests/<test>`
 for focused interaction checks rather than running every journey during diagnosis.
+
+`TronComposerUploadUITests` launches `-tron-composer-upload-fixture`: the real `ChatView`,
+composer edit-menu Paste, draft coordinator and scene lifecycle against a scripted Gateway that
+mirrors upload staging (an unclaimed staged ID survives reconnects; a prompt with an unknown ID is
+`not_found`). Four photos are pasted, the third transfer is in flight when the app backgrounds,
+and the fixture counts every staging the Gateway receives. One journey asserts that after the
+reconnect and a reopened chat each photo is staged exactly once (`restaged:0`) and the prompt
+carries all four; the other loses staging while backgrounded and asserts the rejected send
+re-uploads every photo and the retried send carries all four (#916).
 
 `TronReadonlyAttachmentUITests` launches `-tron-readonly-attachment-fixture` against a
 `HOSTED_TEST` scripted Gateway/media owner, then drives real `ChatView`, sheet controls,

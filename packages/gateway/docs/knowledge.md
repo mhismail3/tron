@@ -493,11 +493,20 @@ validates the extracted object, then each consumer validates its existing schema
 and bounds. Prose alone is never evidence. Reflector and synthesis remain plain
 text. Provider errors/aborts and empty replies still fail before JSON parsing.
 
-The pinned Pi `ModelRuntime.completeSimple` has no typed JSON response-format
-contract; its constrained sampling is for tools, not text replies. Raw
-`samplingParams`/`onPayload` overrides are not a portable enforced contract across
-OpenAI API and subscription transports. Knowledge therefore uses the strict
-extractor, not provider-specific overrides or permissive repair. The retained
+A prompt alone does not hold that contract: `openai/gpt-6-luna` answered the
+summary prompt with a prose preamble before the object (#292). The extractor
+refuses any structural delimiter in surrounding prose, such as a quoted
+`[unknown]` evidence marker, so prompt-only compliance is not dependable. The pinned Pi `completeSimple` has no provider-neutral JSON response
+format, so `knowledgeJsonRequest` adds the provider's own enforced contract where
+one exists: on OpenAI-operated Responses endpoints (`openai`, `azure`,
+`openai-codex`) each JSON request carries a strict `text.format` json_schema
+that mirrors its consumer's validation. Every other provider keeps the prompt
+contract. Parsing stays strict on every path, so a provider that ignores the
+format still fails as `model-output-invalid`, and a well-formed summary object
+outside its schema is `model-output-invalid` too, never `unavailable`.
+`knowledge-summary-model-contract.integration.test.ts` drives the real summary
+job and OpenAI Responses adapter over a socket with the recorded reply shape and
+the rejected shapes. There is no permissive repair. The retained
 `knowledge.model-failed` shape diagnostic identifies rejected replies without
 retaining source/model text; each field occurs once in the failure reason.
 

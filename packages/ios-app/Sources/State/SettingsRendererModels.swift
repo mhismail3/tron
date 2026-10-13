@@ -78,6 +78,7 @@ struct SettingsOption: Decodable, Equatable, Sendable, Identifiable {
     let label: String
     let detail: String?
     let disabledReason: String?
+    let resource: JSONValue?
 
     var id: JSONValue { value }
 }

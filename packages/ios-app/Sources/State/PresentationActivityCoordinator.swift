@@ -343,16 +343,22 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
                         // A sheet owns its own scrolls; the covered chat's
                         // secondary-scroll exclusion must not cross this boundary.
                         .environment(\.chatOwnsStatusBar, false)
+                        .onAppear { NSLog("TRON366 sheet %@ content appear", identity) }
+                        .onDisappear { NSLog("TRON366 sheet %@ content disappear", identity) }
                 }
+                .onAppear { NSLog("TRON366 sheet %@ surface appear", identity) }
+                .onDisappear { NSLog("TRON366 sheet %@ surface disappear", identity) }
             }
             .onChange(of: isPresented, initial: true) { _, presented in
+                NSLog("TRON366 sheet %@ isPresented=%d\n%@", identity, presented ? 1 : 0, presented ? "" : Thread.callStackSymbols.prefix(40).joined(separator: "\n"))
                 if presented {
                     registerIfPossible()
                 } else {
                     lease.beginDismissal()
                 }
             }
-            .onDisappear { retireAllTokens() }
+            .onDisappear { NSLog("TRON366 sheet %@ presenter disappear", identity); retireAllTokens() }
+            .onAppear { NSLog("TRON366 sheet %@ presenter appear", identity) }
     }
 
     private func registerIfPossible() {
@@ -362,6 +368,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     }
 
     private func didDismiss() {
+        NSLog("TRON366 sheet %@ didDismiss isPresented=%d", identity, isPresented ? 1 : 0)
         if lease.dismissingToken == nil, !isPresented { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: isPresented ? identity : nil)
         apply(transition)

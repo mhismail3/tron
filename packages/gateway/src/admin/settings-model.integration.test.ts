@@ -327,7 +327,7 @@ describe("settings renderer contract", () => {
   const commandId = () => `settings-renderer-${String(++command).padStart(4, "0")}`;
   const macTarget: SettingsTarget = { kind: "mac" };
   type Fixture = Awaited<ReturnType<typeof fixture>>;
-  type Options = { key: string; source: string; dependsOn: string[]; options: Array<{ value: unknown; label: string; detail?: string; disabledReason?: string }>; range?: unknown; nextCursor?: string };
+  type Options = { key: string; source: string; dependsOn: string[]; options: Array<{ value: unknown; label: string; detail?: string; disabledReason?: string; resource?: Record<string, unknown> }>; range?: unknown; nextCursor?: string };
 
   /** The presented resolution for a target, with the renderer the client names (if any). */
   const resolveWith = (f: Fixture, target: Record<string, unknown>, renderer?: Record<string, unknown>) =>
@@ -360,6 +360,10 @@ describe("settings renderer contract", () => {
     expect(scope.source).toBe("catalog.tools");
     expect(scope.options.slice(0, PI_BUILTIN_TOOL_NAMES.length).map(option => option.value)).toEqual(PI_BUILTIN_TOOL_NAMES);
     expect(scope.options.map(option => option.value)).toContain("codemode");
+    const read = scope.options.find(option => option.value === "read")!;
+    expect(read.resource).toMatchObject({ name: "read", label: expect.any(String), description: expect.any(String), parameters: { type: "object", properties: expect.any(Object) } });
+    const codemode = scope.options.find(option => option.value === "codemode")!;
+    expect(codemode.resource).toMatchObject({ name: "codemode", description: expect.any(String), parameters: { type: "object" } });
     transcript.push({ case: "tools catalog: project", response: scope });
 
     // The built-in names are pi's own: a plain pi session registers exactly these.

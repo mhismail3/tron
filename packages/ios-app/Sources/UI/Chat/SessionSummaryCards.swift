@@ -135,20 +135,44 @@ struct SessionModelSummaryCard<Controls: View, Footer: View>: View {
     }
 }
 
-/// The stats card both Manage Session and Manage Home show. Only Manage Home
-/// supplies an accessory (its state pill), placed on a header row above the usage.
+/// A context window divided into named sections: the bar's segments and the
+/// compact legend under it. Home Context supplies it from `home.context`.
+struct SessionContextSegments: Equatable {
+    struct Segment: Identifiable, Equatable {
+        let id: String
+        let label: String
+        let tokens: Int
+        let color: Color
+        /// The section's count in words ("260 summaries"), for VoiceOver.
+        let detail: String?
+    }
+    let used: Int
+    let window: Int
+    let segments: [Segment]
+}
+
+/// The stats card Manage Session, Manage Home and Home Context show. Manage Home
+/// and Home Context supply an accessory (a state pill), placed on a header row above
+/// the usage; Home Context also supplies segments, which replace the plain bar with
+/// one segment per section and a compact legend above the metrics.
 struct SessionContextUsageCard<Accessory: View>: View {
     let snapshot: SessionContextPresentation
     let accessory: Accessory?
+    var segments: SessionContextSegments?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    init(snapshot: SessionContextPresentation, accessory: Accessory?) {
+    init(snapshot: SessionContextPresentation, accessory: Accessory?, segments: SessionContextSegments? = nil) {
         self.snapshot = snapshot
         self.accessory = accessory
+        self.segments = segments
     }
 
     var body: some View {
-        let usage = SessionContextUsagePresentation(snapshot.contextUsage)
+        let usage = segments.map { segments in
+            SessionContextUsagePresentation.available(
+                used: segments.used, window: segments.window,
+                percent: segments.window > 0 ? min(100, Double(segments.used) / Double(segments.window) * 100) : 0)
+        } ?? SessionContextUsagePresentation(snapshot.contextUsage)
         let cacheValue = snapshot.stats.latestCacheHitRate.map {
             "\($0.formatted(.number.precision(.fractionLength(1))))%"
         } ?? "—"
@@ -185,10 +209,15 @@ struct SessionContextUsageCard<Accessory: View>: View {
                     }
                     .fixedSize(horizontal: false, vertical: true)
                 }
-                ProgressView(value: percent, total: 100)
-                    .tint(Color.tronEmerald)
-                    .accessibilityLabel("Context used")
-                    .accessibilityValue("\(Int(percent.rounded())) percent")
+                if let segments {
+                    SessionContextSegmentedBar(segments: segments)
+                    SessionContextSegmentLegend(segments: segments)
+                } else {
+                    ProgressView(value: percent, total: 100)
+                        .tint(Color.tronEmerald)
+                        .accessibilityLabel("Context used")
+                        .accessibilityValue("\(Int(percent.rounded())) percent")
+                }
             case .unavailable:
                 Text("0% used")
                     .font(SessionSummaryTypography.headline)
@@ -245,6 +274,71 @@ struct SessionContextUsageCard<Accessory: View>: View {
         .frame(maxWidth: .infinity, minHeight: 42)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(label): \(value)")
+    }
+}
+
+/// The usage bar split by section, in section order; the free remainder is the track.
+struct SessionContextSegmentedBar: View {
+    let segments: SessionContextSegments
+
+    var body: some View {
+        let window = CGFloat(max(segments.window, 1))
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                ForEach(segments.segments) { segment in
+                    Rectangle()
+                        .fill(segment.color)
+                        .frame(width: geometry.size.width * min(1, CGFloat(segment.tokens) / window))
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(height: 6)
+        .background(Capsule().fill(Color.tronSlate.opacity(0.18)))
+        .clipShape(Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Context window: \(segments.used.formatted()) of \(segments.window.formatted()) tokens")
+        .accessibilityIdentifier("context-segmented-bar")
+    }
+}
+
+/// One compact line per section: its dot, its name and its size, two to a row.
+struct SessionContextSegmentLegend: View {
+    let segments: SessionContextSegments
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 16, alignment: .leading),
+                            count: dynamicTypeSize.isAccessibilitySize ? 1 : 2)
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
+            ForEach(segments.segments) { segment in
+                item(Circle().fill(segment.color), label: segment.label, tokens: segment.tokens)
+                    .accessibilityLabel([segment.label, segment.detail, "\(segment.tokens.formatted()) tokens"]
+                        .compactMap { $0 }.joined(separator: ", "))
+                    .accessibilityIdentifier("context-segment-\(segment.id)")
+            }
+            item(Circle().stroke(Color.tronSlate.opacity(0.7), lineWidth: 1), label: "Free",
+                 tokens: max(0, segments.window - segments.used))
+                .accessibilityLabel("Free, \(max(0, segments.window - segments.used).formatted()) tokens")
+                .accessibilityIdentifier("context-segment-free")
+        }
+        .padding(.top, 2)
+    }
+
+    private func item(_ dot: some View, label: String, tokens: Int) -> some View {
+        HStack(spacing: 7) {
+            dot.frame(width: 8, height: 8).accessibilityHidden(true)
+            Text(label)
+                .font(SessionSummaryTypography.metricLabel)
+                .foregroundStyle(Color.tronTextSecondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(tokens.formatted(.number.notation(.compactName)))
+                .font(SessionSummaryTypography.usageValue)
+                .foregroundStyle(Color.tronTextPrimary)
+                .lineLimit(1)
+        }
+        .accessibilityElement(children: .ignore)
     }
 }
 
