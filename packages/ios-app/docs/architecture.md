@@ -1733,11 +1733,17 @@ an unexplained spinner. Retirement of the opening's captured transport is
 resumable on the existing connected callback, not a second reconnect loop.
 A same-session installed transcript with a retained authoritative snapshot stays
 visible independently of subscription admission. Its persistent recovery treatment
-uses the shared transcript notice and Retry pills in the route's usable viewport,
-above the edge blur—not in the flipped transcript or a new structural inset.
-It reads lifecycle admission and the synchronization owner's existing exact-target,
-connection-generation failure latch; transient app notices do not own this state.
-Retry on a failed mounted synchronization uses that owner's retry operation. A
+is one line beneath the chat title in the navigation chrome—a tone-colored reason
+with Retry beside it (`ChatRecoveryStatusLine`)—never a control floating over
+transcript rows, inside the flipped transcript, or a new structural inset (#878).
+A missing transport is shown only once the app-scoped recovery episode has
+outlived its two-second grace (`AppModel.isConnectionRecoveryVisible`). Background
+retirement ends that episode and activation starts a fresh grace, so the
+reconnect every foreground performs stays quiet unless it is slow. Gateway
+rejections and the synchronization owner's existing exact-target,
+connection-generation failure latch show at once; transient app notices do not
+own this state. Retry while disconnected retries the selected Mac's connection;
+on a failed mounted synchronization it uses that owner's retry operation. A
 fresh route without a snapshot keeps the full empty-state treatment and never
 claims retention. Gateway failures on an unchanged admitted transport remain
 explicit failures; replacing the transport makes interrupted opens resumable.

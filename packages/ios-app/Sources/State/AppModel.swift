@@ -1104,6 +1104,13 @@ final class AppModel {
             && lifecycle.admission?.connectionID != nil
     }
 
+    /// Whether the selected Mac's missing transport has outlived the recovery
+    /// grace. The app-scoped recovery episode is the one owner of that decision;
+    /// a mounted chat reads it rather than raw admission, so the reconnect every
+    /// foreground performs after background retirement is not shown as an
+    /// outage (#878).
+    var isConnectionRecoveryVisible: Bool { recoveryDisplayNoticeEpisode != nil }
+
     func sessionStructureRevision(for sessionID: String) -> Int {
         sessionPresentation.structureRevision(for: sessionID)
     }
@@ -1793,6 +1800,10 @@ final class AppModel {
         recordSceneTransition(to: .active)
         let requiresRetirementBarrier = lifecycle.routeActivationRequiresRetirementBarrier
         let lifecycleTask = lifecycle.becameActive()
+        // Background retirement emits no transport loss of its own. Start the
+        // grace at activation so a replacement that stays unavailable becomes
+        // visible on the same schedule as any other loss, and a fast one never does.
+        if requiresRetirementBarrier { beginRecoveryDisplayEpisodeIfNeeded() }
         return Task { @MainActor [weak self] in
             // A true background transition must first finish retiring the old
             // socket; an inactive/active transition already has a safe route
@@ -1893,6 +1904,9 @@ final class AppModel {
         sessionCatalog.markDisconnected()
         let draftCheckpoint = composerDrafts.checkpointDrafts()
         lifecycle.enteredBackground()
+        // A backgrounded scene is not an outage, and a grace that elapsed while
+        // suspended must not surface the instant the scene returns.
+        finishRecoveryDisplayEpisode()
         // Intervals still open when the scene retires end as `backgrounded`, not
         // as the failure their eventual cancellation would otherwise report.
         performanceSignposts.endOpenIntervalsAtBackground()

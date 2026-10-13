@@ -145,11 +145,6 @@ struct ChatView: View {
     private var contentSurface: some View {
         transcript
             .overlay(alignment: .top) { topBlur }
-            // Recovery is route chrome, not flipped/edge-to-edge transcript
-            // content. Keep it in the native usable viewport above the blur.
-            .overlay(alignment: .top) {
-                if hasRetainedTranscript { openingSurface }
-            }
             .overlay {
                 // The inset and native navigation/keyboard layout propose the
                 // same usable region to this overlay as to the transcript.
@@ -1250,7 +1245,9 @@ struct ChatView: View {
             earlierRow: { installed in earlierMessagesChip(installed: installed) },
             openingSurface: {
                 Group {
-                    if !hasRetainedTranscript { openingSurface }
+                    // A retained transcript reports recovery in the
+                    // navigation chrome instead (`retainedRecoveryStatus`).
+                    if !hasRetainedTranscript { openingPhaseSurface }
                 }
             },
             onEditQueuedMessage: { sessionPresentation.queuedMessageEditor = .init(id: $0) },
@@ -1844,23 +1841,36 @@ struct ChatView: View {
         return true
     }
 
-    @ViewBuilder private var openingSurface: some View {
-        if hasRetainedTranscript && !model.admitsSessionPresentationOpen {
-            openingUnavailableSurface(
-                title: "Waiting for connection",
-                message: "This conversation will resume when the Mac reconnects."
-            )
-        } else if hasRetainedTranscript && model.hasFailedConversationSynchronization(sessionID: sessionID) {
-            openingUnavailableSurface(
-                title: "Conversation unavailable",
-                message: "The conversation could not catch up. Retry to reconnect the live view."
-            )
-        } else if hasRetainedTranscript {
-            if case .failed(let message) = sessionPresentation.open.phase {
-                openingUnavailableSurface(title: "Conversation unavailable", message: message)
-            }
+    /// Persistent recovery for a retained same-session transcript. It is route
+    /// chrome beneath the title, never a control floating over readable rows.
+    /// A missing transport is shown only once the app's recovery episode says
+    /// it outlived the grace: every foreground reconnects after background
+    /// retirement, and that expected replacement is not an outage (#878).
+    /// Gateway and synchronization failures stay visible until resolved.
+    private var retainedRecoveryStatus: ChatRetainedRecoveryStatus? {
+        guard hasRetainedTranscript else { return nil }
+        if !model.admitsSessionPresentationOpen {
+            return model.isConnectionRecoveryVisible ? .waitingForConnection : nil
+        }
+        if model.hasFailedConversationSynchronization(sessionID: sessionID) {
+            return .unavailable("The conversation could not catch up. Retry to reconnect the live view.")
+        }
+        if case .failed(let message) = sessionPresentation.open.phase { return .unavailable(message) }
+        return nil
+    }
+
+    /// One Retry for every recovery treatment. A missing transport retries the
+    /// selected Mac's connection; the opening resumes on its connected callback.
+    @MainActor
+    private func retryRecovery() async {
+        if !model.admitsSessionPresentationOpen {
+            if let profile = model.profiles.selected { model.retryGatewayConnection(for: profile) }
+            await beginOpeningPresentation(retryingFailure: true)
+        } else if model.hasFailedConversationSynchronization(sessionID: sessionID),
+                  let target = model.presentationTarget(for: sessionID) {
+            _ = await model.retryConversationSynchronization(target: target)
         } else {
-            openingPhaseSurface
+            await beginOpeningPresentation(retryingFailure: true)
         }
     }
 
@@ -1887,42 +1897,14 @@ struct ChatView: View {
                 ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)
             ))
         case .waitingForConnection:
-            openingUnavailableSurface(
+            openingEmptyUnavailableSurface(
                 title: "Waiting for connection",
                 message: "This conversation will open when the Mac reconnects."
             )
         case .failed(let message):
-            openingUnavailableSurface(title: "Conversation unavailable", message: message)
+            openingEmptyUnavailableSurface(title: "Conversation unavailable", message: message)
         case .presented, .ready:
             EmptyView()
-        }
-    }
-
-    @ViewBuilder private func openingUnavailableSurface(title: String, message: String) -> some View {
-        if hasRetainedTranscript {
-            VStack {
-                HStack(spacing: 8) {
-                    TranscriptNotice(title: title, detailBody: message,
-                                     icon: "exclamationmark.triangle.fill", tone: .warning)
-                    Button("Retry") {
-                        Task {
-                            if model.hasFailedConversationSynchronization(sessionID: sessionID),
-                               let target = model.presentationTarget(for: sessionID) {
-                                _ = await model.retryConversationSynchronization(target: target)
-                            } else {
-                                await beginOpeningPresentation(retryingFailure: true)
-                            }
-                        }
-                    }
-                        .buttonStyle(.plain)
-                        .chatTranscriptPill()
-                }
-                .padding(.horizontal, 12)
-                Spacer().allowsHitTesting(false)
-            }
-            .padding(.top, 12)
-        } else {
-            openingEmptyUnavailableSurface(title: title, message: message)
         }
     }
 
@@ -1936,7 +1918,7 @@ struct ChatView: View {
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronTextSecondary)
                 .multilineTextAlignment(.center)
-            Button("Retry") { Task { await beginOpeningPresentation(retryingFailure: true) } }
+            Button("Retry") { Task { await retryRecovery() } }
                 .buttonStyle(.plain)
                 .chatTranscriptPill()
         }
@@ -2803,14 +2785,22 @@ struct ChatView: View {
             .accessibilityLabel("Back")
         }
         ToolbarItem(placement: .principal) {
-            Text(chatTitle)
-                .font(TronTypography.headline)
-                .foregroundStyle(Color.tronEmerald)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(width: titleWidth)
-                .clipped()
-                .accessibilityLabel(chatTitle)
+            VStack(spacing: 1) {
+                Text(chatTitle)
+                    .font(TronTypography.headline)
+                    .foregroundStyle(Color.tronEmerald)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(width: titleWidth)
+                    .clipped()
+                    .accessibilityLabel(chatTitle)
+                if let status = retainedRecoveryStatus {
+                    ChatRecoveryStatusLine(status: status) { Task { await retryRecovery() } }
+                        .frame(maxWidth: titleWidth)
+                        .transition(.opacity)
+                }
+            }
+            .animation(ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion), value: retainedRecoveryStatus)
         }
         if model.isShowingHistoricalTranscript {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -3701,6 +3691,78 @@ struct ChatView: View {
             do { try await model.uploadFile(url, target: target) }
             catch is CancellationError { return }
             catch { model.presentComposerActionError(error, target: target) }
+        }
+    }
+}
+
+/// Why a retained transcript is not live. `ChatView.retainedRecoveryStatus`
+/// is its only producer; transient app notices never own this state.
+enum ChatRetainedRecoveryStatus: Equatable {
+    case waitingForConnection
+    case unavailable(String)
+
+    var title: String {
+        switch self {
+        case .waitingForConnection: "Waiting for connection"
+        case .unavailable: "Conversation unavailable"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .waitingForConnection: "This conversation will resume when the Mac reconnects."
+        case .unavailable(let message): message
+        }
+    }
+
+    var tone: ChatNotificationTone {
+        switch self {
+        case .waitingForConnection: .warning
+        case .unavailable: .error
+        }
+    }
+}
+
+/// A one-line recovery subtitle beneath the chat title, in the navigation
+/// chrome, with its Retry beside it. The reason stays one accessibility element
+/// whose value carries the full explanation; Retry is independently reachable.
+struct ChatRecoveryStatusLine: View {
+    let status: ChatRetainedRecoveryStatus
+    let retry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .imageScale(.small)
+                    .accessibilityHidden(true)
+                Text(status.title)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .font(TronTypography.caption)
+            .foregroundStyle(status.tone.primaryColor)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(status.title)
+            .accessibilityValue(status.message)
+            .accessibilityIdentifier("chat-recovery-status")
+            Button("Retry", action: retry)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+                .buttonStyle(.plain)
+                .fixedSize()
+                // The visible word is small; the touch target still meets
+                // the bar's hit-testing area without growing the chrome.
+                .padding(.horizontal, 6)
+                .contentShape(Rectangle().inset(by: -8))
+                .accessibilityHint("Reconnects this conversation")
+        }
+        .minimumScaleFactor(0.8)
+        // The navigation bar has a fixed height; the long-press large content
+        // viewer carries the reason at accessibility text sizes instead.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .accessibilityShowsLargeContentViewer {
+            Label(status.title, systemImage: "exclamationmark.triangle.fill")
         }
     }
 }
