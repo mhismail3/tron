@@ -507,6 +507,15 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let refusedCallback = "https://example.test/callback?refused=1"
         callback.tap(); callback.typeText(refusedCallback)
         let authorize = app.buttons["Authorize X"]
+        // A user copies the client ID and callback from the X developer console,
+        // so the app returns from another app before Authorize X.
+        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+        safari.activate()
+        XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 20), "Safari did not become foreground")
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20), "Tron did not return to the foreground")
+        safari.terminate()
+        XCTAssertTrue(title.waitForExistence(timeout: 10), app.debugDescription)
         authorize.tap()
 
         // The Gateway refuses the query-bearing callback. The refusal must stay
