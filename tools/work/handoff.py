@@ -79,6 +79,10 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, f
     if number < 1:
         raise HandoffError("issue number must be positive")
     session = claim_session(new_session)
+    if force and not (new_session or os.environ.get("WORK_SESSION_ID")):
+        # A terminal opened from a chat inherits that chat's PI_SESSION_ID: a maintainer
+        # handoff from Home's terminal once claimed for Home's own chapter (#929).
+        raise HandoffError("--force-maintainer needs the receiving session named with --session")
     reason = reason.strip()
     if not reason or len(reason) > 500 or any(ord(char) < 32 for char in reason):
         raise HandoffError("reason must be 1–500 printable characters")
