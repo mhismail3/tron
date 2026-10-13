@@ -67,7 +67,7 @@ def run() -> None:
             repo.mkdir()
             for directory in ("home", "tmp", "bin", "state"):
                 (root / directory).mkdir()
-            env = {**os.environ, "HOME": str(root / "home"), "TMPDIR": str(root / "tmp"),
+            env = {**os.environ, "HOME": str(root / "home"), "TMPDIR": str(root / "tmp"), "TRON_HEAVY_DIR": str(root / "heavy"),
                    "PATH": f"{root / 'bin'}:{os.environ['PATH']}", "WORK_VERIFY_FIXTURE": str(root),
                    "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
             for name in ("npm", "npx", "xcodebuild", "journey"):

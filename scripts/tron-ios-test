@@ -4,6 +4,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Host-wide heavy-run queue (#915, tools/work/heavy.py): builds and suites wait for
+# a slot unless they inherited one (for example from `work land`).
+case "${1:-checkpoint}" in
+  checkpoint|prepare|build|run|diagnose)
+    if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
+      exec python3 "$ROOT/tools/work/heavy.py" run --owner "tron-ios-test ${1:-checkpoint} in $(basename "$ROOT")" -- "$0" "$@"
+    fi
+    ;;
+esac
 IOS="$ROOT/packages/ios-app"
 # shellcheck disable=SC1091
 source "$ROOT/config/ci-toolchain.env"
