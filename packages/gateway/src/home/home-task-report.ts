@@ -4,6 +4,17 @@ import { AsyncMutex } from "../util/async-mutex.js";
 
 export const HOME_TASK_MARKER = "tron-home-task";
 export const HOME_TASK_REPORT = "tron-home-task-report";
+/** One operation's canonical span: the entries after its marker, up to the next task
+ * marker. A resumed task continues in its predecessor's session (#929), so a later
+ * operation's entries are never this operation's evidence. `index` is -1 without a marker. */
+export function homeTaskOperationSpan<T extends FileEntry>(entries: readonly T[], operationId: string): { index: number; run: T[] } {
+  const isMarker = (entry: T) => entry.type === "custom" && entry.customType === HOME_TASK_MARKER;
+  const index = entries.findIndex(entry => isMarker(entry) && (entry as { data?: { operationId?: unknown } }).data?.operationId === operationId);
+  if (index < 0) return { index, run: [] };
+  const next = entries.findIndex((entry, position) => position > index && isMarker(entry));
+  return { index, run: entries.slice(index + 1, next < 0 ? undefined : next) };
+}
+
 export interface HomeTaskWorkerIdentity {
   taskId: string;
   homeId: string;

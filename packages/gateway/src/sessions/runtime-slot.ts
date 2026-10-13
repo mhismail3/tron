@@ -1011,7 +1011,8 @@ export class RuntimeSlot {
     interrupted: boolean,
     creationProfile: RuntimeProfile = "ordinary",
     homeMaterializationAuthority?: HomeMaterializationAuthority,
-    private readonly taskWorker?: HomeTaskReportOwner,
+    // Rebound only by `bindTaskWorker` when a settled task resumes in place (#929).
+    private taskWorker?: HomeTaskReportOwner,
   ) {
     this.explicitHomeSessionId = creationProfile === "home" ? sessionManager.getSessionId() : undefined;
     this.homeMaterializationAuthority = homeMaterializationAuthority
@@ -1237,6 +1238,15 @@ export class RuntimeSlot {
   }
   hasBuiltinMcpCommand(): boolean {
     return isBuiltinMcpCommand(this.runtime.session.extensionRunner.getCommand("mcp"));
+  }
+
+  /** Whether this is a Home task worker and whether its task operation still runs here.
+   * `settled`: a worker session whose last task stopped or ended; a maintainer message
+   * resumes it in place rather than being refused (#929). */
+  get homeTaskWorkerState(): "none" | "active" | "settled" {
+    if (this.taskWorker?.controlsActive) return "active";
+    return this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)
+      ? "settled" : "none";
   }
 
   /** Immutable task addresses are file-wide evidence, not the selected model
@@ -2416,11 +2426,13 @@ export class RuntimeSlot {
   }
 
   private async initialize(): Promise<void> {
+    // A task resumed in place appends its own marker after its predecessor's (#929): every
+    // marker must name a distinct operation of a task bound to this session.
     const markers = this.canonicalTaskEvidence().filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
-    if (markers.length > 1) throw new GatewayError("conflict", "Conflicting canonical task markers");
-    if (markers.length) {
-      const marker = markers[0];
-      if (marker?.type !== "custom") throw new GatewayError("conflict", "Task authority is unavailable");
+    const operations = new Set(markers.map(marker => marker.type === "custom" ? (marker.data as { operationId?: unknown } | null)?.operationId : undefined));
+    if (operations.size !== markers.length) throw new GatewayError("conflict", "Conflicting canonical task markers");
+    for (const marker of markers) {
+      if (marker.type !== "custom") throw new GatewayError("conflict", "Task authority is unavailable");
       await this.dependencies.validateTaskMarker(this.id, marker.data);
     }
     this.runtime = await createAgentSessionRuntime(this.runtimeFactory(), {
@@ -2747,6 +2759,40 @@ export class RuntimeSlot {
    * the idle check, the durable commit and the rebuild: the next prompt always
    * sees the new profile. A busy slot refuses retryably and changes nothing.
    */
+  /** A settled task resumes in place (#929): this session's next task operation is owned by
+   * `report`. Refused while any run, admission, subagent or previous task operation is live,
+   * so the predecessor's operation is never shared. The runtime is rebuilt over the same
+   * session manager, keeping identity, subscribers and presentation, so the task worker's
+   * tools and producer gates belong to the new operation. */
+  async bindTaskWorker(report: HomeTaskReportOwner): Promise<void> {
+    await this.lane.run(async () => {
+      this.assertIdle();
+      if (this.liveProfile() === "home" || this.dependencies.homeChapterState(this.id).homeId) {
+        throw new GatewayError("conflict", "A Home chapter cannot run a task");
+      }
+      if (this.taskWorker?.controlsActive || this.taskWait || this.activeOperationId !== undefined || this.operation !== undefined
+        || this.catalogHasActiveSubagents || this.isAgentAdmissionSettling) {
+        throw new GatewayError("conflict", "The worker session is still running; stop it before resuming");
+      }
+      const markers = this.canonicalTaskEvidence().filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
+      if (!markers.length) throw new GatewayError("conflict", "Only a Home task worker session can resume a task");
+      const work = this.dependencies.workRegistry.begin({
+        kind: "administrative-provider-package-operation",
+        sessionId: this.id,
+        hostEpoch: this.ui.hostEpoch,
+      });
+      try {
+        this.taskWorker = report;
+        await this.replaceRuntime();
+        this.revision += 1;
+        this.emit("session.resourcesChanged", {});
+        this.publishSnapshot();
+      } finally {
+        work.settle();
+      }
+    });
+  }
+
   async replaceRuntimeForProfile(commit: () => Promise<void>): Promise<void> {
     await this.lane.run(async () => {
       this.assertUsable();
@@ -4041,10 +4087,14 @@ export class RuntimeSlot {
   }
 
   private async notifyOwnedTerminal(terminal: OwnedOperationTerminal): Promise<void> {
-    const observer = this.ownedTerminalObservers.get(terminal.operationId)
-      ?? (this.taskWait?.wakeOperationId === terminal.operationId ? this.taskWait.observer : undefined);
+    // A held task's next turn reports to the task, even when Home's steering started that turn;
+    // the steering's own observer still learns its terminal.
+    const own = this.ownedTerminalObservers.get(terminal.operationId);
+    const wake = this.taskWait?.wakeOperationId === terminal.operationId ? this.taskWait.observer : undefined;
+    const observer = wake ?? own;
     if (!observer) return;
     this.ownedTerminalObservers.delete(terminal.operationId);
+    if (wake && own) await own(terminal);
     // Only the task's own turns (its first operation, then each wake) hold or settle it; a steer
     // or other owned operation reports to its own observer and never touches the wait.
     if (this.taskWorker && (terminal.operationId === this.taskWorker.identity.operationId || this.taskWait?.wakeOperationId === terminal.operationId)) {
@@ -4055,6 +4105,14 @@ export class RuntimeSlot {
       this.taskWait = undefined;
     }
     await observer(terminal);
+  }
+
+  /** A message the maintainer sent, or Home's exact-operation steering, to this worker's task. */
+  private sharedTaskSteering(ownership: PromptOwnership | undefined): boolean {
+    if (!this.taskWorker) return false;
+    if (!ownership) return true;
+    const fence = ownership.taskFence;
+    return !!fence && fence.taskId === this.taskWorker.identity.taskId && fence.operationId === this.taskWorker.identity.operationId;
   }
 
   /** The task operation a turn reports under. A wake that continues the held task is the task's
@@ -8501,11 +8559,15 @@ export class RuntimeSlot {
         if (ownership?.operationId === this.taskWorker.identity.operationId) {
           await this.persistCanonicalCustomEntry(HOME_TASK_MARKER,
             JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...this.taskWorker.identity, sessionId: this.id })), `task:${operationId}`);
-        } else if (ownership?.kind === "subagentWake" && this.taskWait && this.taskWait.wakeOperationId === undefined
+        } else if ((ownership?.kind === "subagentWake" || this.sharedTaskSteering(ownership)) && this.taskWait && this.taskWait.wakeOperationId === undefined
           && this.taskWorker.acceptsSteering && this.activeOperationId === undefined && this.operation === undefined && !session.isStreaming) {
-          // The provider's wake continues the task this operation holds open; its marker stays the first one.
+          // The provider's wake, or the maintainer's or Home's message (#929), continues the task this
+          // operation holds open between turns; its marker stays the first one.
         } else {
           const fence = ownership?.taskFence;
+          // The maintainer and Home share one ordered steering lane per worker (#929): a maintainer
+          // message to a running task joins that lane whatever behavior the composer chose.
+          if (!ownership && this.taskWorker.acceptsSteering) behavior = "steer";
           if (behavior !== "steer" || this.activeOperationId !== this.taskWorker.identity.operationId
             || !session.isStreaming || !this.taskWorker.acceptsSteering
             || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.activeOperationId))) {
@@ -8735,7 +8797,7 @@ export class RuntimeSlot {
           this.publishSnapshot();
         } else if (!queuesIntoActiveRun) {
           this.activeOperationId = operationId;
-          if (ownership?.kind === "subagentWake" && this.taskWait && this.taskWait.wakeOperationId === undefined) {
+          if ((ownership?.kind === "subagentWake" || this.sharedTaskSteering(ownership)) && this.taskWait && this.taskWait.wakeOperationId === undefined) {
             this.taskWait.wakeOperationId = operationId;
           }
           // The canonical leaf immediately before Pi sees the input is the exact

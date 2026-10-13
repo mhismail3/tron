@@ -359,37 +359,100 @@ def _audit_comment(gh: Gh, number: int, old: str, new: str, head: str, transitio
 OWNER_STATES = {"settled", "live", "absent", "indeterminate"}
 
 
-def owner_status(session: str) -> tuple[str, str]:
-    """(state, reason) from the Gateway owner helper (README.md, "Owner status").
+def _owner_helper(root: Path) -> tuple[Path | None, str]:
+    """The owner-status helper built from this checkout's current Gateway source (#924).
 
-    Every failure is `indeterminate` with an actionable reason, so callers fail closed.
-    The helper bounds itself at 20s; this timeout only guards a wedged process.
+    `dist` is whatever the last build left. A stale helper once printed an older verdict
+    format, which read as an indeterminate owner and sent the maintainer to
+    `--force-maintainer`. The build is stamped with the source tree it came from and
+    rebuilt under a lock whenever that tree differs or has uncommitted changes.
     """
+    gateway = root / "packages/gateway"
+    helper = gateway / "dist/client/work-owner-status.js"
+    stamp = gateway / "dist/.work-owner-status-source"
+    def source() -> str | None:
+        tree = subprocess.run(["git", "rev-parse", "HEAD:packages/gateway/src"], cwd=root, capture_output=True, text=True)
+        dirty = subprocess.run(["git", "status", "--porcelain", "--", "packages/gateway/src", "packages/gateway/tsconfig.json"],
+                               cwd=root, capture_output=True, text=True)
+        if tree.returncode or dirty.returncode or dirty.stdout.strip():
+            return None
+        return tree.stdout.strip()
+    def current(key: str | None) -> bool:
+        return key is not None and helper.is_file() and stamp.is_file() and stamp.read_text().strip() == key
+    key = source()
+    if current(key):
+        return helper, ""
+    compiler = gateway / "node_modules/typescript/bin/tsc"
+    if not compiler.is_file():
+        return None, "owner status helper is stale and cannot be rebuilt: run `npm ci` in packages/gateway"
+    with open(gateway / "tsconfig.json") as anchor:
+        fcntl.flock(anchor.fileno(), fcntl.LOCK_EX)
+        try:
+            if current(key):
+                return helper, ""
+            try:
+                built = subprocess.run(["node", str(compiler), "-p", str(gateway / "tsconfig.json")], cwd=gateway,
+                                       capture_output=True, text=True, timeout=300)
+            except (subprocess.TimeoutExpired, OSError) as error:
+                return None, f"owner status helper rebuild failed: {error}"
+            if built.returncode or not helper.is_file():
+                detail = ((built.stdout + built.stderr).strip().splitlines() or ["no output"])[-1]
+                return None, f"owner status helper rebuild failed: {detail}"
+            if key is not None:
+                stamp.write_text(key + "\n")
+            return helper, ""
+        finally:
+            fcntl.flock(anchor.fileno(), fcntl.LOCK_UN)
+
+
+def _run_helper(*args: str) -> tuple[dict | None, str]:
     root = Path(__file__).resolve().parents[2]
-    helper = root / "packages/gateway/dist/client/work-owner-status.js"
-    if not helper.is_file():
-        return "indeterminate", "owner status helper is not built; run `npm run build` in packages/gateway"
+    helper, failure = _owner_helper(root)
+    if helper is None:
+        return None, failure
     try:
-        result = subprocess.run(["node", str(helper), session], cwd=root, capture_output=True, text=True, timeout=40)
+        result = subprocess.run(["node", str(helper), *args], cwd=root, capture_output=True, text=True, timeout=40)
     except subprocess.TimeoutExpired:
-        return "indeterminate", "owner status helper did not exit within 40s"
+        return None, "owner status helper did not exit within 40s"
     except OSError as error:
-        return "indeterminate", f"cannot run the owner status helper: {error}"
+        return None, f"cannot run the owner status helper: {error}"
     if result.returncode == 3:
         try:
             detail = json.loads(result.stderr)
         except (json.JSONDecodeError, TypeError):
             detail = None
         if isinstance(detail, dict) and detail.get("kind") == "protocol_mismatch":
-            return "indeterminate", (f"Gateway protocol {detail.get('gatewayProtocol')}, helper protocol "
-                                     f"{detail.get('helperProtocol')}; rebuild the helper from the Gateway's source")
+            return None, (f"Gateway protocol {detail.get('gatewayProtocol')}, helper protocol "
+                          f"{detail.get('helperProtocol')}; the Gateway and this checkout differ")
     if result.returncode == 0:
         try:
             verdict = json.loads(result.stdout)
         except json.JSONDecodeError:
             verdict = None
-        if (isinstance(verdict, dict) and verdict.get("state") in OWNER_STATES
-                and isinstance(verdict.get("reason"), str)):
-            return verdict["state"], verdict["reason"]
+        if isinstance(verdict, dict) and isinstance(verdict.get("state"), str) and isinstance(verdict.get("reason"), str):
+            return verdict, ""
     detail = (result.stderr.strip().splitlines() or ["no output"])[-1]
-    return "indeterminate", f"owner status helper failed: {detail}"
+    return None, f"owner status helper failed: {detail}"
+
+
+def owner_status(session: str) -> tuple[str, str]:
+    """(state, reason) from the Gateway owner helper (README.md, "Owner status").
+
+    Every failure is `indeterminate` with an actionable reason, so callers fail closed.
+    The helper bounds itself at 20s; this timeout only guards a wedged process.
+    """
+    verdict, failure = _run_helper(session)
+    if verdict is None or verdict["state"] not in OWNER_STATES:
+        return "indeterminate", failure or f"owner status helper returned {verdict}"
+    return verdict["state"], verdict["reason"]
+
+
+def home_task(session: str) -> tuple[str | None, str]:
+    """(taskId, reason): the live Home task this session runs, or None with the reason."""
+    verdict, failure = _run_helper("--home-task", session)
+    if verdict is None:
+        return None, failure
+    task = verdict.get("taskId")
+    if verdict["state"] == "live" and isinstance(task, str) and task:
+        return task, verdict["reason"]
+    return None, verdict["reason"]

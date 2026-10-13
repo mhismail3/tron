@@ -2577,6 +2577,15 @@ export class GatewayService {
         throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
       }
     }
+    if (slot.homeTaskWorkerState === "settled") {
+      // A message to a Home worker whose task stopped or settled continues that task in place
+      // (#929): same session, worktree and claim, with this message as its instruction.
+      if (resourceInvocation !== undefined || uploadIds.length > 0) {
+        throw new GatewayError("invalid_request", "A stopped Home worker continues from a text message; send attachments after it resumes");
+      }
+      const resumed = await this.requireHome().resumeWorkerSession(slot.id, text);
+      return { operationId: resumed.operationId };
+    }
     const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
     const visiblePrompt = [resourceArguments ?? text, attachments.envelope].filter(Boolean).join("\n\n");
     const prompt = resourceSource === undefined

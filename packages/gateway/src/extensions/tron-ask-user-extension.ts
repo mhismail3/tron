@@ -10,7 +10,8 @@ import { TRON_FORM_CAPABILITY } from "../sessions/extension-adapter-contract.js"
 import type { FormCapableUI } from "../sessions/extension-adapter-contract.js";
 
 export { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
-import { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
+import { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_INTERRUPTED, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
+export { TRON_ASK_USER_INTERRUPTED } from "./tron-ask-user-contract.js";
 
 interface AskUserOption {
   label: string;
@@ -72,17 +73,24 @@ export function createTronAskUserExtension(): ExtensionFactory {
       ],
       parameters,
       executionMode: "sequential",
-      execute: async (_toolCallId, request: AskUserParameters, signal, _onUpdate, context) => {
+      execute: async (toolCallId, request: AskUserParameters, signal, _onUpdate, context) => {
         if (!context?.ui || !context.hasUI) throw new Error("ask_user requires an interactive Tron form host");
         const form = toForm(request);
-        if (signal?.aborted) return cancelledResult(form, AGENT_ABORTED_TEXT);
+        // A stopped run leaves its unanswered question in the transcript (also when asked
+        // from inside codemode, whose nested result never reaches the transcript), so a
+        // resume in place can ask it again.
+        const interrupted = () => {
+          pi.appendEntry(TRON_ASK_USER_INTERRUPTED, { version: 1, toolCallId, title: form.title, questions: resultQuestions(form) });
+          return cancelledResult(form, AGENT_ABORTED_TEXT);
+        };
+        if (signal?.aborted) return interrupted();
         const requestForm = (context.ui as typeof context.ui & FormCapableUI)[TRON_FORM_CAPABILITY];
         if (!requestForm) throw new Error("Tron semantic form host is unavailable");
         const answer = await requestForm({
           form,
           ...(signal === undefined ? {} : { signal }),
         });
-        if (signal?.aborted) return cancelledResult(form, AGENT_ABORTED_TEXT);
+        if (signal?.aborted) return interrupted();
         if (answer === undefined) return cancelledResult(form, USER_CANCELLED_TEXT);
         const details = formResult(form, answer);
         return {
