@@ -449,7 +449,7 @@ final class TronSmokeUITests: XCTestCase {
         openManageHome(app)
         let state = app.descendants(matching: .any)["home-manage-state"]
         XCTAssertEqual(state.label, "Ready")
-        XCTAssertTrue(app.descendants(matching: .any)["session-usage-summary"].exists, "The stats card comes from the Home chat's session")
+        XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].exists, "The stats card comes from the Home chat's session")
         XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].exists)
         XCTAssertTrue(app.buttons["Memory model"].firstMatch.waitForExistence(timeout: 5), "The memory model row is on Manage Home\n\(app.debugDescription)")
         XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
@@ -1967,21 +1967,29 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(decline, in: app)
         app.buttons["Decline change"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:2 approved:1", timeout: 5))
-        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        drainChanges(app)
         XCTAssertTrue(app.buttons["settings-change-project-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
         // Filters are their own sheet: each is one choice row with a picker.
         chooseChangesFilter(app, row: "settings-changes-actor", option: "Everyone")
-        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        drainChanges(app)
         XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
         chooseChangesFilter(app, row: "settings-changes-status", option: "Failed")
-        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        drainChanges(app)
         XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-fixture-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-project-change"].exists)
         keepScreenshot(named: "758-changes-scoped-filter-intersection")
+    }
+
+    /// Changes follows empty filtered pages on its own and offers Load more only
+    /// for further history; follow every offered page so absence is meaningful.
+    @MainActor
+    private func drainChanges(_ app: XCUIApplication) {
+        let more = app.buttons["settings-changes-load-more"]
+        for _ in 0..<6 where more.waitForExistence(timeout: 2) { tapScrolling(more, in: app) }
     }
 
     /// Opens Changes' Filters sheet, picks `option` on one filter row, and returns to the feed.
@@ -2006,10 +2014,7 @@ final class TronSmokeUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
         app.launch(); defer { app.terminate() }
-        let more = app.buttons["settings-changes-load-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 5))
-        tapScrolling(more, in: app)
-        XCTAssertTrue(app.buttons["settings-change-fixture-change"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["settings-change-fixture-change"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Since you last looked"].exists)
         keepScreenshot(named: "758-changes-since-last-visit")
     }
@@ -2022,11 +2027,8 @@ final class TronSmokeUITests: XCTestCase {
             app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-undo-refused"]
             if outcomeFailure { app.launchArguments.append("-settings-undo-outcome-refused") }
             app.launch(); defer { app.terminate() }
-            let more = app.buttons["settings-changes-load-more"]
-            XCTAssertTrue(more.waitForExistence(timeout: 5))
-            tapScrolling(more, in: app)
             let entry = app.buttons["settings-change-fixture-change"]
-            XCTAssertTrue(entry.waitForExistence(timeout: 5))
+            XCTAssertTrue(entry.waitForExistence(timeout: 10), app.debugDescription)
             tapScrolling(entry, in: app)
             tapScrolling(app.buttons["Undo"], in: app)
             app.buttons["Undo change"].tap()
@@ -2047,11 +2049,8 @@ final class TronSmokeUITests: XCTestCase {
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-redacted"]
         app.launch()
         defer { app.terminate() }
-        let more = app.buttons["settings-changes-load-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 10), app.debugDescription)
-        tapScrolling(more, in: app)
         let entry = app.buttons["settings-change-fixture-change"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(entry.waitForExistence(timeout: 10), app.debugDescription)
         tapScrolling(entry, in: app)
         XCTAssertTrue(app.staticTexts["Not undoable"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(showsText("Hidden", in: app))
@@ -2068,11 +2067,10 @@ final class TronSmokeUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
 
-        let more = app.buttons["settings-changes-load-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 10), app.debugDescription)
-        more.tap()
+        // The first filtered page is empty but has a cursor: it is not EOF, and
+        // opening Changes follows it without a Load more tap.
         let row = app.buttons["settings-change-fixture-change"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "An empty history page with a cursor is not EOF: \(app.debugDescription)")
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "An empty history page with a cursor is not EOF: \(app.debugDescription)")
         XCTAssertTrue(showsText("6 retries", in: app))
         row.tap()
         XCTAssertTrue(showsText("Key history", in: app))
