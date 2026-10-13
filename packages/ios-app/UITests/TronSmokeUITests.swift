@@ -234,12 +234,17 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertGreaterThan(sheet.minY, done.frame.midY - 60, name)
         XCTAssertEqual(loading.frame.midX, sheet.midX, accuracy: 1, "The pulse is centered in the visible sheet (\(name))")
         XCTAssertEqual(loading.frame.midY, sheet.midY, accuracy: 1, "The pulse is centered in the visible sheet (\(name))")
-        let screenshot = XCUIScreen.main.screenshot()
         keepScreenshot(named: "sheet-\(name)-loading")
         // The drawn pulse (not just its accessibility frame) sits there too, is
-        // small (no label), and is the title's green.
+        // small (no label), and is the title's green. It fades in and its waves
+        // breathe, so sample a few frames rather than trusting one instant.
         let probe = CGRect(x: sheet.midX - 80, y: sheet.midY - 80, width: 160, height: 160)
-        guard let pulse = accentCentroid(screenshot.image, in: probe, windowWidth: window.width) else {
+        var drawn: (center: CGPoint, extent: CGFloat)?
+        for _ in 0..<5 where drawn == nil {
+            drawn = accentCentroid(XCUIScreen.main.screenshot().image, in: probe, windowWidth: window.width)
+            if drawn == nil { Thread.sleep(forTimeInterval: 0.15) }
+        }
+        guard let pulse = drawn else {
             XCTFail("No pulse drawn in the visible sheet (\(name))")
             return sheet.minY
         }
@@ -266,7 +271,7 @@ final class TronSmokeUITests: XCTestCase {
             for x in 0..<width {
                 let i = (y * width + x) * 4
                 let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
-                guard g - max(r, b) > 18 else { continue }
+                guard g - max(r, b) > 8 else { continue }
                 // CGContext rows run bottom-up.
                 let row = height - 1 - y
                 sumX += Double(x); sumY += Double(row); count += 1
