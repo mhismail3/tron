@@ -1709,14 +1709,14 @@ Project root (`TrustInspection.projectDir`), and its rows carry the resolver's
 git-state and Changed outside Tron badges with Apply again; this UI never infers
 a root or replays audit.
 
-Settings (the gear) is this Mac and this iPhone: Changes, then one row per
-destination in the shared `SettingsGroupKind` palette: Agent (purple: Model,
+Settings (the gear) is this Mac and this iPhone. Its toolbar holds Notifications
+and Changes beside each other; the sheet is one row per destination in the shared `SettingsGroupKind` palette: Agent (purple: Model,
 Context, Run, Permissions), Tools & Extensions (cyan: Tools, MCP Servers,
 Extensions, Hooks), Accounts (indigo: Model Providers, Custom Models, Connected
 Services), Data & Diagnostics (blue: Connections, Logs, Setup with Import) and
 This iPhone (emerald), which never changes harness behaviour. Schema sections the
 app does not place join More. Every sheet a row opens inherits its card's accent
-through `TronProgressiveSheetLink`. A chat's settings are one row away in Manage Session and
+through `TronProgressiveSheetLink`, and a sheet's toolbar actions (`tronToolbarAction`) take the same accent as its title. A chat's settings are one row away in Manage Session and
 Manage Home (`ChatSettingsView`): Changes for that chat, then every section for
 the chat's target with each value's source tag. The Project
 card shows the project's sections and its MCP Servers, Extensions and Hooks.

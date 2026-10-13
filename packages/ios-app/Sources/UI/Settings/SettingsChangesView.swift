@@ -5,16 +5,27 @@ import TronMobileCore
 /// stack and Done button inside a progressive settings destination.
 struct SettingsChangesLink: View {
     let scope: SettingsChangesScope
-    let subtitle: String
+    /// The row's subtitle; without one the link is a toolbar icon.
+    var subtitle: String?
     var accent: Color = .tronEmerald
     var onOpenSession: ((AppModel.SessionNavigationRoute) -> Void)?
     @State private var presented = false
 
     var body: some View {
-        Button { presented = true } label: {
-            TronSettingsRow(icon: "clock.arrow.circlepath", title: "Changes", subtitle: subtitle, accent: accent)
+        Group {
+            if let subtitle {
+                Button { presented = true } label: {
+                    TronSettingsRow(icon: "clock.arrow.circlepath", title: "Changes", subtitle: subtitle, accent: accent)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button { presented = true } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                        .foregroundStyle(accent)
+                }
+            }
         }
-        .buttonStyle(.plain)
         .accessibilityLabel("Changes")
         .tronManagedSheet(isPresented: $presented, identity: "settings.changes.\(scope.storageKey)") {
             SettingsChangesView(scope: scope, onOpenSession: onOpenSession.map { callback in

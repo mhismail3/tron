@@ -28,11 +28,6 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
-                    TronGlassCard(accent: .tronEmerald) {
-                        SettingsChangesLink(scope: .all, subtitle: "What agents changed, and approvals waiting for you",
-                                            onOpenSession: onImported)
-                    }
-                    .tronSettingsVisualTheme(accent: .tronEmerald)
                     SettingsGroupCard(.agent) {
                         SettingsSectionLinks(ids: ["model", "context", "run", "permissions"], sections: sections,
                                              target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
@@ -102,11 +97,13 @@ struct SettingsView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .topBarLeading) {
                     NotificationInboxToolbarButton(
                         unreadCount: model.notificationInbox.unreadCount,
                         action: { showsNotifications = true }
                     )
+                    SettingsChangesLink(scope: .all, onOpenSession: onImported)
+                        .tronSettingsVisualTheme(accent: .tronEmerald)
                 }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Settings") }
                 ToolbarItem(placement: .confirmationAction) {

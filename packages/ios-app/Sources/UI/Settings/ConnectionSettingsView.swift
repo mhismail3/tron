@@ -255,9 +255,11 @@ struct ConnectionsSettingsView: View {
                     model.isAddingServer = true
                     showAddServer = true
                 } label: {
-                    TronToolbarTextLabel("Add Server", systemImage: "plus")
+                    Image(systemName: "plus")
+                        .font(TronTypography.buttonSM)
                 }
                 .tronToolbarAction()
+                .accessibilityLabel("Add Server")
                 .accessibilityHint("Opens the Connect a Mac pairing screen")
             }
         }

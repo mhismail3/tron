@@ -288,8 +288,10 @@ extension View {
         ))
     }
 
-    func tronToolbarAction(accent: Color = .tronEmerald) -> some View {
-        foregroundStyle(accent)
+    /// A toolbar action takes `accent` when given, else its sheet's inherited
+    /// settings accent (the colour of its title), else emerald.
+    func tronToolbarAction(accent: Color? = nil) -> some View {
+        modifier(TronToolbarActionAccent(accent: accent))
     }
 
     func tronNavigationTitle(_ title: String, accent: Color = .tronEmerald) -> some View {
@@ -1142,6 +1144,15 @@ struct TronConfirmationSheet: View {
     }
 
     private var accent: Color { destructive ? .tronError : .tronEmerald }
+}
+
+private struct TronToolbarActionAccent: ViewModifier {
+    let accent: Color?
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    func body(content: Content) -> some View {
+        content.foregroundStyle(accent ?? settingsTheme?.accent ?? .tronEmerald)
+    }
 }
 
 struct TronToolbarTextLabel: View {
