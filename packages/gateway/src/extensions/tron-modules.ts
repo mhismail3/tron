@@ -51,7 +51,7 @@ export interface TronModuleHost {
    * slot that answers this. */
   homeMemoryTools: (sessionId: string) => HomeMemoryToolAccess | undefined;
   homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
-  homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
+  homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
   /** Session search for Home's research tools, late-bound: the service is
    * installed after the registry exists, and may be absent on this Gateway. */
   sessionSearch: () => ((request: SessionSearchRequest, signal?: AbortSignal) => Promise<SessionSearchResponse>) | undefined;
@@ -237,7 +237,7 @@ export const TRON_HOME_MODULE: TronModule = {
   tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"],
   commands: [],
   factory: (host) => createTronHomeExtension(() => host.homeMemoryTools(host.sessionId()),
-    request => host.homeDelegate(host.sessionId(), request),
+    (request, signal) => host.homeDelegate(host.sessionId(), request, signal),
     request => host.homeTask(host.sessionId(), request),
     () => host.knowledge),
 };

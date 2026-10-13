@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { HomeTaskStore, taskIntentDigest } from "./home-task-store.js";
+import { HOME_TASK_DISPATCH_STAGE_DEADLINE_MS } from "./home-task-dispatcher.js";
 import { HomeMemoryRefusal } from "./home-request-policy.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
@@ -1610,6 +1611,100 @@ describe("Home task production dispatch", () => {
     await waitFor(() => homeCalls === 3, "wake request for the settled result");
     evidence.push({ case: "production-delegate", taskOutcome: "final", homeRequests: homeCalls });
   }, 20_000);
+  // #919: a dispatch step that never returns once the task record exists. Stop must
+  // end Home's turn, the task must settle terminal with the stage named, and no
+  // worker prompt may start. The held step ignores the signal, as a stalled store does.
+  it.each(["authorize", "restore-epoch", "create-worker"] as const)("Stop ends a Home turn held in delegate dispatch at %s and settles the task", async stage => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    const tasks = (f.registry.homeOwner() as any).tasks;
+    let entered = false; let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    // The held step's late completion is joined before disposal removes its files.
+    let late: Promise<unknown> | undefined;
+    const hold = <T>(run: () => Promise<T>) => { entered = true; const step = gate.then(run); late = step.catch(() => {}); return step; };
+    const created = () => f.signals.some(signal => signal.event === "home.task.transition" && signal.reason === "created");
+    if (stage === "authorize") {
+      const authorize = tasks.authorization.authorize.bind(tasks.authorization);
+      vi.spyOn(tasks.authorization, "authorize").mockImplementation((request: any) => hold(() => authorize(request)));
+    } else if (stage === "restore-epoch") {
+      const restoreEpoch = tasks.store.restoreEpoch.bind(tasks.store);
+      vi.spyOn(tasks.store, "restoreEpoch").mockImplementation(() => created() ? hold(restoreEpoch) : restoreEpoch());
+    } else {
+      const createWorker = OwnedSessionDispatch.prototype.createWorker;
+      vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(function (this: OwnedSessionDispatch, ...args) { return hold(() => createWorker.apply(this, args)); });
+    }
+    let workerPrompts = 0; let homeRequests = 0;
+    const response = (context: unknown) => {
+      if (JSON.stringify(context).includes("This is a finite Home task")) { workerPrompts += 1; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }
+      homeRequests += 1;
+      // Later Home requests are the refused task's one result wake.
+      return homeRequests > 1 ? fauxAssistantMessage("Dispatch was stopped")
+        : fauxAssistantMessage([fauxToolCall("delegate", { taskId: "task-held", title: "Held dispatch", intent: "Finite work", target: f.cwd })], { stopReason: "toolUse" });
+    };
+    f.faux.setResponses([response, response, response]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const prompting = home.prompt("Delegate this finite work"); void prompting.catch(() => {});
+    try {
+      await waitFor(() => entered, `dispatch held at ${stage}`, { boundMs: 10_000 });
+      expect(created(), "the task record exists before the held step").toBe(true);
+      const operation = home.snapshot().operation;
+      expect(operation?.kind).toBe("prompt");
+      const stopping = home.abort("agent", operation!.id); void stopping.catch(() => {});
+      await waitFor(() => !home.snapshot().operation, "Stop ends the Home turn held in delegate dispatch", { boundMs: 5_000 });
+      await stopping;
+      await waitFor(async () => (await tasks.store.read("task-held"))?.lifecycle === "terminal", "held task settles terminal", { boundMs: 5_000 });
+      const task = await tasks.store.read("task-held");
+      expect(task).toMatchObject({ lifecycle: "terminal", sessionId: null, operationId: null,
+        terminalEvidence: { outcome: "unknown", reason: "admission-cancelled" } });
+      expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.dispatch-stage", stage, outcome: "cancelled" }));
+      expect(workerPrompts).toBe(0);
+      evidence.push({ case: `held-dispatch-stop-${stage}`, reason: task.terminalEvidence.reason, workerPrompts, homeRequests });
+    } finally { release(); await prompting.catch(() => {}); await late; }
+    // Like every terminal task, the refusal wakes Home once with its result. The held
+    // step's late result goes back to its owner, never into the cancelled admission.
+    await waitFor(async () => (await tasks.store.read("task-held"))?.wake?.state === "acknowledged", "refusal result consumed once", { boundMs: 5_000 });
+    await waitFor(() => !home.snapshot().operation, "wake turn settled", { boundMs: 5_000 });
+    expect(homeRequests).toBe(2);
+    expect(workerPrompts, "a released step never starts the cancelled task's worker").toBe(0);
+    expect(await tasks.store.read("task-held")).toMatchObject({ lifecycle: "terminal", terminalEvidence: { reason: "admission-cancelled" } });
+  }, 30_000);
+
+  it("refuses a dispatch step that outlives its deadline and settles the task with the stage", async () => {
+    const f = await fixture();
+    const tasks = (f.registry.homeOwner() as any).tasks;
+    const originalTimer = globalThis.setTimeout;
+    let expire: (() => void) | undefined;
+    // Test-only deadline seam, as the 24-hour task deadline journey uses.
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: any, ms: number, ...args: any[]) => {
+      if (ms === HOME_TASK_DISPATCH_STAGE_DEADLINE_MS) expire = callback;
+      return originalTimer(callback, ms, ...args);
+    }) as typeof setTimeout);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const authorize = tasks.authorization.authorize.bind(tasks.authorization);
+    let entered = false; let late: Promise<unknown> | undefined;
+    vi.spyOn(tasks.authorization, "authorize").mockImplementation((request: any) => {
+      entered = true; const step = gate.then(() => authorize(request)); late = step.catch(() => {}); return step;
+    });
+    const run = dispatch(f, "task-deadline"); void run.catch(() => {});
+    try {
+      await waitFor(() => entered && expire !== undefined, "authorize held under its deadline", { boundMs: 10_000 });
+      expire!();
+      await expect(run).rejects.toMatchObject({ code: "busy" });
+      await waitFor(async () => (await tasks.store.read("task-deadline"))?.lifecycle === "terminal", "expired task settles terminal", { boundMs: 5_000 });
+      const task = await tasks.store.read("task-deadline");
+      expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown", reason: "admission-timeout" } });
+      expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.dispatch-stage", stage: "authorize", outcome: "timeout" }));
+      evidence.push({ case: "held-dispatch-deadline", reason: task.terminalEvidence.reason });
+    } finally { release(); await late; }
+    // The late grant decision never revives the expired admission.
+    expect(await tasks.store.read("task-deadline")).toMatchObject({ lifecycle: "terminal", sessionId: null, terminalEvidence: { reason: "admission-timeout" } });
+    // Home is idle and unmaterialized here, so the result goes out as its one push.
+    await waitFor(async () => (await tasks.store.read("task-deadline"))?.wake?.push === "decided", "expired task result published once", { boundMs: 5_000 });
+  }, 30_000);
+
   it("admits once, seals exact canonical report evidence and refuses replay or conflicting reports", async () => {
     const f = await fixture();
     let postReport = 0;
