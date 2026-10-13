@@ -466,6 +466,85 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "424-real-ui-accepted-code-pairs")
     }
 
+    /// X setup through the production Settings parents against a real Gateway
+    /// (#366). Failure modes: tapping Authorize X closes the setup sheet before
+    /// its consent step appears, so a refused begin's error and an accepted
+    /// begin's Open X consent row are both lost with the sheet. The refused
+    /// begin is the Gateway's own callback validation and the accepted begin
+    /// only persists a pending setup and builds a consent URL locally: no X
+    /// endpoint, browser or credential is touched.
+    @MainActor
+    func testXSetupAuthorizeKeepsSheetForErrorAndConsentStep() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        // The chat's own Settings route, the parent the reported sheet loss used.
+        createSession(app, inWorkspace: fixture.workspace)
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 60), app.debugDescription)
+        gear.tap()
+        guard let services = hittableElement(app, identifier: "settings-link-Connected Services", timeout: 30) else {
+            return XCTFail("no Connected Services link: \(app.debugDescription)")
+        }
+        services.tap()
+        let connect = app.buttons["Connect for X"]
+        XCTAssertTrue(connect.waitForExistence(timeout: 60), "the fixture Gateway must offer X: \(app.debugDescription)")
+        connect.tap()
+        let title = app.staticTexts["Set up X"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30), app.debugDescription)
+
+        // The shared text row exposes its title on the row, not on the field.
+        func field(_ title: String) -> XCUIElement {
+            app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch.textFields.firstMatch
+        }
+        let client = field("Public client ID")
+        let callback = field("Registered callback URL")
+        XCTAssertTrue(client.waitForExistence(timeout: 10), app.debugDescription)
+        client.tap(); client.typeText("e2e-public-client")
+        let refusedCallback = "https://example.test/callback?refused=1"
+        callback.tap(); callback.typeText(refusedCallback)
+        let authorize = app.buttons["Authorize X"]
+        // A user copies the client ID and callback from the X developer console,
+        // so the app returns from another app before Authorize X.
+        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+        safari.activate()
+        XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 20), "Safari did not become foreground")
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20), "Tron did not return to the foreground")
+        safari.terminate()
+        XCTAssertTrue(title.waitForExistence(timeout: 10), app.debugDescription)
+        authorize.tap()
+
+        // The Gateway refuses the query-bearing callback. The refusal must stay
+        // on the same sheet with the draft intact, and Authorize X must return.
+        let refusal = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "must be HTTPS")).firstMatch
+        XCTAssertTrue(refusal.waitForExistence(timeout: 60), "the begin refusal was not shown: \(app.debugDescription)")
+        XCTAssertTrue(waitForEnabled(authorize, timeout: 30), app.debugDescription)
+        XCTAssertTrue(title.exists && refusal.exists, "the refusal must remain on the setup sheet: \(app.debugDescription)")
+        XCTAssertEqual(client.value as? String, "e2e-public-client")
+        XCTAssertEqual(callback.value as? String, refusedCallback)
+        keepScreenshot(app, name: "366-real-ui-x-begin-refusal-stays")
+
+        // Retry on the same sheet with a valid callback reaches the consent step.
+        // Replace the whole draft: caret placement inside a scrolled field is not stable.
+        callback.tap()
+        callback.typeKey("a", modifierFlags: .command)
+        callback.typeText("https://example.test/callback")
+        XCTAssertEqual(callback.value as? String, "https://example.test/callback")
+        authorize.tap()
+        let consent = app.buttons["Open X consent"]
+        XCTAssertTrue(consent.waitForExistence(timeout: 60), "Authorize X lost the consent step: \(app.debugDescription)")
+        XCTAssertTrue(title.exists, app.debugDescription)
+        XCTAssertTrue(app.buttons["Complete setup"].exists, app.debugDescription)
+        XCTAssertFalse(refusal.exists, "a successful retry must clear the earlier refusal")
+        XCTAssertEqual(client.value as? String, "e2e-public-client")
+        keepScreenshot(app, name: "366-real-ui-x-consent-step")
+    }
+
     /// Settings surfaces serve the schema's keys (docs/settings-model.md 7.7). For
     /// each surface, every key whose layers include one the surface's target has
     /// is a reachable row with a layer badge and a value; a key with none of them
