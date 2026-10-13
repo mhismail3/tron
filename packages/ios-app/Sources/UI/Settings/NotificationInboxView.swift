@@ -58,7 +58,6 @@ struct NotificationInboxView: View {
                     NotificationInboxRowList(
                         notifications: NotificationInboxPresentationPolicy.recent(window),
                         filter: filter,
-                        style: .glass,
                         pagesOlderRows: false,
                         onSelect: select
                     )
@@ -68,20 +67,11 @@ struct NotificationInboxView: View {
                     ) {
                         viewMoreRow
                     }
-                    if let failure = model.notificationInbox.failure {
-                        TronSettingsNotice(
-                            message: failure,
-                            accent: .tronAmber,
-                            retry: { Task { await model.refreshNotificationInbox() } }
-                        )
-                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
                 .padding(.bottom, 40)
             }
-            .scrollBounceBehavior(.always)
-            .refreshable { await model.refreshNotificationInbox() }
             .tronScrollEdgeChrome()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -198,12 +188,14 @@ struct NotificationInboxView: View {
 
 /// The one row list both inbox sheets mount: the selected filter's server
 /// window, its loading/empty states, and — for full history — one keyset page
-/// trigger per profile. The primary sheet passes its recent prefix and glass
-/// rows; history passes the whole window and plain tinted rows.
+/// trigger per profile. The primary sheet passes its recent prefix; history
+/// passes the whole window. Rows follow the coordinator live: the inbox owner
+/// applies `notification.inbox.changed` and reconnects, so neither sheet has
+/// its own refresh or connection treatment (connection state is the app-global
+/// reconnect notice's).
 struct NotificationInboxRowList: View {
     let notifications: [NotificationInboxItem]
     let filter: NotificationInboxFilter
-    let style: NotificationInboxRowStyle
     let pagesOlderRows: Bool
     let onSelect: (NotificationInboxItem) -> Void
 
@@ -231,9 +223,21 @@ struct NotificationInboxRowList: View {
 
     @ViewBuilder
     private func rows(relativeTo date: Date) -> some View {
-        LazyVStack(spacing: TronSpacing.md) {
+        let showsGateway = model.notificationInboxSpansMultipleGateways
+        LazyVStack(spacing: TronSpacing.xs) {
             ForEach(notifications) { item in
-                NotificationInboxRow(item: item, relativeTo: date, style: style) { onSelect(item) }
+                NotificationInboxRow(
+                    item: item,
+                    title: NotificationInboxRowTitle.title(
+                        for: item.notification,
+                        sessionTitle: model.notificationSessionTitle(
+                            profileID: item.profileID,
+                            sessionID: item.notification.sessionId
+                        )
+                    ),
+                    showsGateway: showsGateway,
+                    relativeTo: date
+                ) { onSelect(item) }
             }
             if pagesOlderRows {
                 ForEach(model.notificationInbox.olderPageTriggers(filter: filter), id: \.self) { trigger in
@@ -310,24 +314,14 @@ private struct NotificationInboxHistoryView: View {
                     NotificationInboxRowList(
                         notifications: model.notificationInbox.notifications(filter: filter),
                         filter: filter,
-                        style: .plain,
                         pagesOlderRows: true,
                         onSelect: select
                     )
-                    if let failure = model.notificationInbox.failure {
-                        TronSettingsNotice(
-                            message: failure,
-                            accent: .tronAmber,
-                            retry: { Task { await model.refreshNotificationInbox() } }
-                        )
-                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
                 .padding(.bottom, 40)
             }
-            .scrollBounceBehavior(.always)
-            .refreshable { await model.refreshNotificationInbox() }
             .tronScrollEdgeChrome()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -367,9 +361,15 @@ private struct NotificationInboxHistoryView: View {
     }
 }
 
-enum NotificationInboxRowStyle {
-    case glass
-    case plain
+/// A row is titled by its chat, so the kind appears once (the row's icon).
+/// The Gateway's own title is the fallback when the chat is not in the loaded
+/// catalog: Home's rows are titled "Home"; an ask's title is its kind, which
+/// the icon already shows.
+enum NotificationInboxRowTitle {
+    static func title(for notification: GatewayNotificationInboxItem, sessionTitle: String?) -> String {
+        if let sessionTitle { return sessionTitle }
+        return notification.title == notification.kind.label ? "Chat" : notification.title
+    }
 }
 
 /// The inbox rows' relative time, identical to formatting with a new default
@@ -388,70 +388,63 @@ enum NotificationInboxRelativeTime {
             return shared.formatter.localizedString(for: date, relativeTo: reference)
         }
         let formatter = RelativeDateTimeFormatter()
+        formatter.dateTimeStyle = .named
+        formatter.unitsStyle = .abbreviated
         shared = (locale, calendar, formatter)
         return formatter.localizedString(for: date, relativeTo: reference)
     }
 }
 
+/// One inbox row on the shared settings row: the chat and time on the title
+/// line, the message below, the kind as the icon, and the Gateway only when
+/// more than one is paired. Unread rows carry the accent tint; read rows sit
+/// clear on the sheet surface.
 private struct NotificationInboxRow: View {
     let item: NotificationInboxItem
+    let title: String
+    let showsGateway: Bool
     let relativeTo: Date
-    let style: NotificationInboxRowStyle
     let action: () -> Void
 
-    private var accent: Color {
-        item.notification.isUnread ? .tronEmerald : .tronTextMuted
-    }
+    private var isUnread: Bool { item.notification.isUnread }
 
     var body: some View {
         Button(action: action) {
-            switch style {
-            case .glass:
-                TronGlassCard(accent: accent) { rowContent.padding(TronSpacing.lg) }
-            case .plain:
-                rowContent
-                    .padding(TronSpacing.lg)
-                    .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
-                            .stroke(accent.opacity(0.22), lineWidth: 0.75)
-                    }
-            }
+            TronSettingsRow(
+                icon: item.notification.kind.icon,
+                title: title,
+                subtitle: item.notification.message,
+                subtitleLineLimit: 2,
+                accent: isUnread ? .tronEmerald : .tronTextMuted,
+                titleFont: TronTypography.sans(size: TronTypography.sizeBodyLG, weight: isUnread ? .semibold : .medium),
+                titleColor: isUnread ? .tronTextPrimary : .tronTextSecondary,
+                subtitleColor: isUnread ? .tronTextSecondary : .tronTextMuted,
+                titleTrailing: relativeTime,
+                titleLineLimit: 1,
+                subtitleFont: TronTypography.body
+            )
+            .tronSettingsRowTags(showsGateway
+                ? [TronTagModel(label: item.profileLabel, tint: .tronTextSecondary)]
+                : [])
+            .tronListRowHighlight(isUnread)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(item.notification.title), \(item.notification.isUnread ? "unread" : "read")")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([
+            title,
+            item.notification.kind.label,
+            item.notification.message,
+            relativeTime,
+            showsGateway ? item.profileLabel : nil,
+        ].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityValue(isUnread ? "Unread" : "Read")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("notifications.row.\(item.notification.id)")
     }
 
-    private var rowContent: some View {
-        HStack(alignment: .center, spacing: TronSpacing.md) {
-            Image(systemName: item.notification.kind.icon)
-                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                .foregroundStyle(accent)
-                .frame(width: 28, alignment: .center)
-            VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                Text(item.notification.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(item.notification.isUnread ? Color.tronTextPrimary : Color.tronTextSecondary)
-                    .lineLimit(1)
-                Text(item.notification.message)
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(item.notification.isUnread ? Color.tronTextSecondary : Color.tronTextMuted)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-                Text(rowDetail)
-                    .font(TronTypography.caption)
-                    .foregroundStyle(Color.tronTextMuted)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var rowDetail: String {
-        let created = GatewayTimestamp.parse(item.notification.createdAt)
-        let relative = created.map { NotificationInboxRelativeTime.string(for: $0, relativeTo: relativeTo) } ?? "Recently"
-        return "\(item.profileLabel) · \(item.notification.kind.label) · \(relative)"
+    private var relativeTime: String {
+        GatewayTimestamp.parse(item.notification.createdAt)
+            .map { NotificationInboxRelativeTime.string(for: $0, relativeTo: relativeTo) } ?? "Recently"
     }
 }
 
