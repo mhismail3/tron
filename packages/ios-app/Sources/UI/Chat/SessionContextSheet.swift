@@ -237,6 +237,7 @@ struct SessionContextSheet: View {
                             .settingsApprovals(.session(sessionID))
                         modelConfigurationCard(snapshot)
                         sessionSection(snapshot)
+                        settingsSection(snapshot)
                         exportSection
                     } else {
                         TronLoadingState(label: "Loading session…")
@@ -492,21 +493,6 @@ struct SessionContextSheet: View {
                     divider()
                 }
                 gitRow
-                if let profileID = model.selectedGatewayProfileID(), !snapshot.cwd.isEmpty {
-                    divider()
-                    ProjectSettingsLink(cwd: snapshot.cwd, profileID: profileID, accent: sessionRowAccent)
-                }
-                divider()
-                TronProgressiveSheetLink(accessibilityLabel: "Chat Settings", identity: "session.\(sessionID).chat-settings",
-                                         accent: sessionRowAccent) {
-                    ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd,
-                                     changesScope: .session(sessionID, projectCWD: snapshot.cwd))
-                        .tronNavigationTitle("Chat Settings")
-                } label: {
-                    TronSettingsRow(icon: "slider.horizontal.3", title: "Chat Settings",
-                                    subtitle: "Every setting this chat uses", accent: sessionRowAccent)
-                }
-                .accessibilityIdentifier("chat-settings-link")
                 divider()
                 manageRow(icon: "doc.text.magnifyingglass", title: "Agent Instructions",
                           subtitle: "The complete assembled instructions", accent: sessionRowAccent) { destination = .agentInstructions }
@@ -534,6 +520,28 @@ struct SessionContextSheet: View {
                         accent: sessionRowAccent
                     )
                 }
+            }
+        }
+    }
+
+    /// The project's and this chat's settings, in Settings' own accent.
+    private func settingsSection(_ snapshot: SessionContextPresentation) -> some View {
+        TronGlassCard(accent: .tronEmerald) {
+            VStack(spacing: 0) {
+                if let profileID = model.selectedGatewayProfileID(), !snapshot.cwd.isEmpty {
+                    ProjectSettingsLink(cwd: snapshot.cwd, profileID: profileID)
+                    TronSettingsDivider(accent: .tronEmerald)
+                }
+                TronProgressiveSheetLink(accessibilityLabel: "Chat Settings", identity: "session.\(sessionID).chat-settings",
+                                         accent: .tronEmerald) {
+                    ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd,
+                                     changesScope: .session(sessionID, projectCWD: snapshot.cwd))
+                        .tronNavigationTitle("Chat Settings")
+                } label: {
+                    TronSettingsRow(icon: "slider.horizontal.3", title: "Chat Settings",
+                                    subtitle: "Every setting this chat uses", accent: .tronEmerald)
+                }
+                .accessibilityIdentifier("chat-settings-link")
             }
         }
     }
