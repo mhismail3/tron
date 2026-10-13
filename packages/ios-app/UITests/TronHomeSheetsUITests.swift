@@ -175,7 +175,10 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
     }
 
+    /// Every kept step also proves the sheet's rows come from the shared row
+    /// without a trailing chevron (#925): a row is tappable by its container.
     @MainActor private func keep(_ name: String) {
+        XCTAssertFalse(XCUIApplication().images["chevron.right"].exists, "\(name): Manage Home rows carry no trailing chevron")
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
