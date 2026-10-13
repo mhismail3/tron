@@ -514,7 +514,9 @@ share_build() {
     [[ "$bundle_id" == "$PHYSICAL_BUNDLE_ID" ]] || die "built $bundle_id, expected $PHYSICAL_BUNDLE_ID"
 
     local out ipa
-    out="$IOS_DIR/build/share/$(date +%Y%m%d-%H%M%S)-$$"
+    # One IPA per worktree: each share replaces the previous one.
+    out="$IOS_DIR/build/share"
+    rm -rf "$out"
     mkdir -p "$out/Payload"
     ditto "$app" "$out/Payload/$(basename "$app")"
     ipa="$out/TronMobile.ipa"

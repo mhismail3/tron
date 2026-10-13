@@ -558,7 +558,8 @@ test speed.
 The command builds `Tron Device` + `LocalDevice` for `generic/platform=iOS`
 (no device or device lease), runs the same `validate-ios-artifact.py` and
 Gateway protocol checks as `install` (Stable by default), packages the signed
-`.app` as an IPA under `packages/ios-app/build/share/`, uploads it and prints
+`.app` as `packages/ios-app/build/share/TronMobile.ipa` (replaced by each
+share), uploads it and prints
 `Build page: <url>` last. The development profile carries every device
 registered to the team, and the push environment stays APNs sandbox, so an
 over-the-air install behaves like a `devicectl` install. Like that install, it
