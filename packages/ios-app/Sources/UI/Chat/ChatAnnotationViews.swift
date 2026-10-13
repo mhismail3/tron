@@ -117,18 +117,11 @@ struct ChatSentAnnotationChips: View {
     let annotations: [ChatAnnotation]
 
     var body: some View {
-        // Trailing-aligned like the canonical resource chip; several wrap to
-        // a horizontally scrolling row that keeps the newest at the edge.
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(annotations) { ChatSentAnnotationChip(annotation: $0) }
-            }
-            .chatSecondaryScrollContent()
+        // Trailing-aligned like the canonical resource chip, one per line so
+        // every quote stays readable beside the message it belongs to.
+        VStack(alignment: .trailing, spacing: 4) {
+            ForEach(annotations) { ChatSentAnnotationChip(annotation: $0) }
         }
-        .scrollClipDisabled()
-        .defaultScrollAnchor(.trailing)
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Annotations")
@@ -189,6 +182,7 @@ struct ChatAnnotationSheet: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(18)
             }
             .scrollDismissesKeyboard(.interactively)
@@ -246,6 +240,11 @@ struct ChatAnnotationBubbleHost: View {
     let presenter: ChatAnnotationPresenter
     @State private var comment = ""
     @State private var bubbleHeight: CGFloat = 0
+    @State private var region: CGRect = .zero
+    /// The region's bottom when Annotate was chosen. The transcript follows
+    /// its bottom edge as the keyboard rises, so the selection moves by the
+    /// same amount and the bubble follows it.
+    @State private var capturedRegionMaxY: CGFloat?
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -256,7 +255,8 @@ struct ChatAnnotationBubbleHost: View {
             if let request = presenter.pending {
                 let frame = proxy.frame(in: .global)
                 let width = min(proxy.size.width - Self.margin * 2, 360)
-                let anchorTop = request.selectionRect.minY - frame.minY
+                let shift = (capturedRegionMaxY ?? frame.maxY) - frame.maxY
+                let anchorTop = request.selectionRect.minY - shift - frame.minY
                 let y = ChatAnnotationBubbleLayout.top(
                     anchorTop: anchorTop,
                     bubbleHeight: bubbleHeight,
@@ -265,15 +265,18 @@ struct ChatAnnotationBubbleHost: View {
                 )
                 bubble(request)
                     .frame(width: width)
+                    .fixedSize(horizontal: false, vertical: true)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bubbleHeight = $0 }
                     .offset(x: (proxy.size.width - width) / 2, y: y)
                     .transition(reduceMotion ? .opacity : .scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
                     .id(request.id)
             }
         }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { region = $0 }
         .animation(ChatMotion.composerSurfaceResize(reduceMotion: reduceMotion), value: presenter.pending?.id)
         .onChange(of: presenter.pending?.id) { _, id in
             comment = ""
+            capturedRegionMaxY = id == nil ? nil : region.maxY
             focused = id != nil
         }
     }

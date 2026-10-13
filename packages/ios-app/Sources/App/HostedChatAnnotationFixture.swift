@@ -79,6 +79,11 @@ struct HostedChatAnnotationFixture: View {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
                 model.invalidateHostedPendingPresentation()
                 model.installHostedSubscribedSnapshot(snapshot)
+                let sessionID = snapshot.sessionId
+                probe.fixtureOpenPresentation = {
+                    guard let target = model.presentationTarget(for: sessionID) else { throw CancellationError() }
+                    return target.generation
+                }
                 ready = true
             } catch { self.error = String(describing: error) }
         }
