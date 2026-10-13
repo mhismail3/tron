@@ -118,11 +118,10 @@ struct SettingsRendererRow: View {
                                            onChange: { onChange($0) })
                     .controlSize(.small)
             } else {
-                TronSelectionRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
-                    ForEach(choices) { option in
-                        Button(option.label) { onChange(option.value) }
-                            .disabled(option.disabledReason != nil)
-                    }
+                // A picker sheet, not a Menu: section sub-sheets are presented from
+                // other sheets, where SwiftUI menus fail to open (#877).
+                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
+                    SettingsChoicePicker(title: title, options: choices, selected: setting.value) { onChange($0) }
                 }
             }
         case .number:
@@ -178,7 +177,7 @@ struct SettingsRendererRow: View {
 
     /// A value this surface shows but does not edit: trailing, like every other value.
     private var readOnlyRow: some View {
-        TronSettingsRow(icon: icon, title: title, subtitle: subtitle, subtitleColor: .tronTextSecondary) {
+        TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
             TronDynamicValue(text: setting.display, color: .tronTextSecondary)
                 .textSelection(.enabled)
         }
@@ -269,7 +268,7 @@ private struct SettingsRendererTextRow: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        TronSettingsRow(icon: icon, title: title, subtitle: subtitle, subtitleColor: .tronTextSecondary) {
+        TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
             TextField(title, text: Binding(get: { text ?? value }, set: { text = $0 }),
                       prompt: Text("(empty)").foregroundStyle(Color.tronTextMuted))
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -287,6 +286,36 @@ private struct SettingsRendererTextRow: View {
         guard let text, text != value else { self.text = nil; return }
         self.text = nil
         onCommit(text)
+    }
+}
+
+/// A short served choice list in the same option rows as the catalog picker.
+private struct SettingsChoicePicker: View {
+    let title: String
+    let options: [SettingsOption]
+    let selected: JSONValue?
+    let onChoose: (JSONValue) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(options) { option in
+                    TronCatalogOptionRow(
+                        title: option.label, summary: option.disabledReason, detail: option.detail,
+                        icon: "circle", isSelected: option.value == selected, isEnabled: option.disabledReason == nil
+                    ) {
+                        onChoose(option.value)
+                        dismiss()
+                    }
+                    .accessibilityIdentifier("settings-option-\(option.label)")
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle(title)
     }
 }
 

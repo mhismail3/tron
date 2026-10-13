@@ -138,13 +138,17 @@ struct SettingsListEditor: View {
                 TronSettingsGroup(title) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         if index > 0 { TronSettingsDivider() }
+                        // Direct actions, not a Menu: SwiftUI menus fail to open in a
+                        // sheet presented from another sheet (#877), and this editor is
+                        // always at least one sheet deep.
                         TronSettingsRow(icon: nil, title: item.text) {
-                            TronInlineMenu("Edit") {
-                                Button("Move up") { items.swapAt(index, index - 1) }.disabled(index == 0)
-                                Button("Move down") { items.swapAt(index, index + 1) }.disabled(index + 1 == items.count)
-                                Button("Remove", role: .destructive) { items.removeAll { $0.id == item.id } }
+                            HStack(spacing: 6) {
+                                itemAction("arrow.up", "Move \(item.text) up", enabled: index > 0) { items.swapAt(index, index - 1) }
+                                itemAction("arrow.down", "Move \(item.text) down", enabled: index + 1 < items.count) {
+                                    items.swapAt(index, index + 1)
+                                }
+                                itemAction("trash", "Remove \(item.text)", accent: .tronError) { items.removeAll { $0.id == item.id } }
                             }
-                            .accessibilityLabel("Edit \(item.text)")
                         }
                     }
                     if items.isEmpty { TronSettingsRow(icon: nil, title: "None") }
@@ -170,5 +174,21 @@ struct SettingsListEditor: View {
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
         .tronNavigationTitle(title)
+    }
+
+    private func itemAction(_ icon: String, _ label: String, enabled: Bool = true, accent: Color = .tronEmerald,
+                            _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(enabled ? accent : Color.tronTextMuted)
+                .frame(width: 36, height: 32)
+                .glassEffect(.regular.tint(accent.opacity(0.10)).interactive(), in: Capsule())
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 }

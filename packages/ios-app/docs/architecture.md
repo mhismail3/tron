@@ -785,7 +785,10 @@ id, help and display. A control it
 does not implement, or a missing presentation, renders the `display` read-only; an unknown
 badge kind is neutral; a group no section declares is shown under its id, so a value is never
 hidden. Choices with an `optionsSource` and catalogs come from `settings.options`, re-requested
-when a key in `dependsOn` changes. `orderedChoice` uses `SettingsChoiceSlider.swift`, and bounded integer `number`
+when a key in `dependsOn` changes. Any other `choice` opens a picker sheet of the shared
+`TronCatalogOptionRow`s, and the string-list editor uses direct per-item move/remove actions:
+section sub-sheets are presented from other sheets, where SwiftUI menus fail to open (#877).
+`orderedChoice` uses `SettingsChoiceSlider.swift`, and bounded integer `number`
 settings use `SettingsNumberSlider.swift`; both use the same anchored
 `ConfigurationSliderContainer` and track as existing thinking and context-window
 rows. The Gateway supplies number bounds, unit and step as well as choice values

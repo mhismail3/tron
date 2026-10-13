@@ -1410,18 +1410,19 @@ final class TronSmokeUITests: XCTestCase {
         openManageHome(app)
         var opened = revealHomeSetting(app, "Worker thinking")
         app.buttons.matching(NSPredicate(format: "label == %@", "Worker thinking")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-        XCTAssertTrue(app.buttons["Low"].waitForExistence(timeout: 5), app.debugDescription)
-        app.buttons["Low"].tap()
+        XCTAssertTrue(app.buttons["settings-option-Low"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["settings-option-Low"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
         if opened { closeTopSheet(app) }
         app.buttons["home-sheet-done-manage"].tap()
         openManageHome(app)
         opened = revealHomeSetting(app, "Worker thinking")
-        XCTAssertTrue(app.staticTexts["Low"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == %@ AND value == %@", "Worker thinking", "Low")).firstMatch
+            .waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "manage-home-profile-worker-thinking")
         app.buttons.matching(NSPredicate(format: "label == %@", "Worker thinking")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-        XCTAssertTrue(app.buttons["Medium"].waitForExistence(timeout: 5))
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+        XCTAssertTrue(app.buttons["settings-option-Medium"].waitForExistence(timeout: 5))
+        closeTopSheet(app) // the choice picker, without choosing
         if opened { closeTopSheet(app) }
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"), "Dismissing a choice must not change Profile")
@@ -2230,65 +2231,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-renderer-number-unsupported")
     }
 
-    @MainActor
-    func testDEBUGNestedMenuOnMain() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-        app.launch()
-        defer { app.terminate() }
-        let ordinary = app.buttons["session-row-home-shell-fixture:ordinary-session"]
-        XCTAssertTrue(ordinary.waitForExistence(timeout: 10), app.debugDescription)
-        ordinary.tap()
-        let gear = app.navigationBars.buttons["Manage Session"]
-        XCTAssertTrue(gear.waitForExistence(timeout: 10))
-        gear.tap()
-        let settings = app.buttons["manage-session-settings"]
-        reveal(settings, in: app)
-        settings.tap()
-        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
-        let sessions = app.buttons["settings-link-Sessions"]
-        reveal(sessions, in: app)
-        sessions.tap()
-        let menu = app.buttons["Show finished subagents"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
-        Thread.sleep(forTimeInterval: 2)
-        menu.tap()
-        print("DEBUGNESTED \(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "minute")).count) \(app.debugDescription.contains("Only active"))")
-        keepScreenshot(named: "DEBUG-nested-menu")
-    }
-
-    @MainActor
-    func testDEBUGListMenuInLabSheet() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-settings-renderer-fixture"]
-        app.launch()
-        defer { app.terminate() }
-        let any = app.descendants(matching: .any)
-        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
-        tapScrolling(app.buttons["settings-section-run-open"], in: app)
-        let transport = any["settings-row-run.transport"].buttons.firstMatch.buttons.firstMatch
-        tapScrolling(transport, in: app)
-        print("DEBUGMENU1 \(app.buttons["WebSocket"].waitForExistence(timeout: 3))")
-        app.terminate(); app.launch()
-        XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10))
-        tapScrolling(app.buttons["settings-section-lab-open"], in: app)
-        let paths = any["settings-row-lab.paths"]
-        tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
-        XCTAssertTrue(app.buttons["Edit beta"].waitForExistence(timeout: 5))
-        Thread.sleep(forTimeInterval: 3)
-        app.buttons["Edit beta"].tap()
-        print("DEBUGMENU2 \(app.buttons["Move up"].waitForExistence(timeout: 3))")
-        app.buttons["Edit beta"].tap()
-        print("DEBUGMENU3 \(app.buttons["Move up"].waitForExistence(timeout: 3))")
-        app.buttons["Edit beta"].press(forDuration: 0.6)
-        print("DEBUGMENU4 \(app.buttons["Move up"].waitForExistence(timeout: 3))")
-        let frame = app.buttons["Edit beta"].frame
-        print("DEBUGFRAME \(frame) hittable \(app.buttons["Edit beta"].isHittable)")
-        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
-        print("DEBUGMENU5 \(app.buttons["Move up"].waitForExistence(timeout: 3))")
-        keepScreenshot(named: "DEBUG-coordinate-tap")
-    }
-
     /// Write-only replacement and ordered-list operations cross the real client
     /// socket; reopening reads the stored result rather than the editor's draft.
     @MainActor
@@ -2319,14 +2261,11 @@ final class TronSmokeUITests: XCTestCase {
 
         let paths = any["settings-row-lab.paths"]
         tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
-        XCTAssertTrue(app.buttons["Edit beta"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Move beta up"].waitForExistence(timeout: 5))
         keepScreenshot(named: "settings-renderer-list-before-edit")
-        app.buttons["Edit beta"].tap()
-        keepScreenshot(named: "DEBUG-after-edit-tap")
-        if !app.buttons["Move up"].waitForExistence(timeout: 3) { print("DEBUGTREE \(app.debugDescription)") }
-        app.buttons["Move up"].tap()
-        app.buttons["Edit alpha"].tap()
-        app.buttons["Remove"].tap()
+        // Direct row actions work at any sheet depth (#877).
+        app.buttons["Move beta up"].tap()
+        app.buttons["Remove alpha"].tap()
         app.textFields["Value"].tap()
         app.textFields["Value"].typeText("gamma")
         app.buttons["Add"].tap()
@@ -2334,9 +2273,9 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:2", timeout: 5))
         XCTAssertTrue(paths.buttons.matching(NSPredicate(format: "value == %@", "beta, gamma")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
-        XCTAssertTrue(app.buttons["Edit beta"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Edit gamma"].exists)
-        XCTAssertFalse(app.buttons["Edit alpha"].exists)
+        XCTAssertTrue(app.buttons["Move beta up"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Remove gamma"].exists)
+        XCTAssertFalse(app.buttons["Remove alpha"].exists)
         keepScreenshot(named: "settings-renderer-list-persisted")
         closeTopSheet(app)
 

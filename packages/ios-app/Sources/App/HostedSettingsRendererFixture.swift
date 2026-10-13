@@ -315,17 +315,17 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                     extra: ["note": .string("Update Tron to edit"), "redacted": .bool(true)])),
         ]
         let sections: [JSONValue] = [
-            section("model", "Model", 10, essential: [("Model", modelName), ("Thinking", model == "pro" ? thinking.capitalized : "Off")],
-                    overrides: [("Model", modelName)]),
-            section("context", "Context", 20, essential: [("Block images", blockImages ? "On" : "Off")]),
+            section("model", "Model", 10, essential: [("model.ref", modelName), ("model.thinking", model == "pro" ? thinking.capitalized : "Off")],
+                    overrides: [("model.ref", modelName)]),
+            section("context", "Context", 20, essential: [("context.images.block", blockImages ? "On" : "Off")]),
             section("tools", "Tools", 30, essential: []),
             section("permissions", "Permissions", 40, essential: []),
             section("accounts", "Accounts", 60, essential: []),
             section("sources", "Sources", 70, essential: []),
             section("setup", "Setup", 80, essential: []),
-            section("run", "Run", 50, essential: [("Retries", "\(retries) retries")], overrides: [("Retries", "\(retries) retries")],
+            section("run", "Run", 50, essential: [("run.retry.maxRetries", "\(retries) retries")], overrides: [("run.retry.maxRetries", "\(retries) retries")],
                     pending: true, recent: true),
-            section("lab", "Lab", 95, essential: [("Focus mode", focusMode.capitalized)]),
+            section("lab", "Lab", 95, essential: [("lab.focusMode", focusMode.capitalized)]),
         ]
         return .object(["target": .object(["kind": .string("mac")]), "layers": .array([.string("mac"), .string("builtin")]),
                         "renderer": .object(["version": .number(1)]), "keys": .array(keys), "sections": .array(sections),
