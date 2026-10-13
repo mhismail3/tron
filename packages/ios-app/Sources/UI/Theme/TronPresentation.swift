@@ -660,6 +660,34 @@ struct TronReadOnlyTextView: UIViewRepresentable {
 // MARK: - Search and selection controls
 
 extension View {
+    /// The standard commit for a sheet that edits a draft: Save at the top left,
+    /// opposite the close button. Saving is never a row in the content.
+    func tronSaveToolbar(enabled: Bool = true, action: @escaping () -> Void) -> some View {
+        modifier(TronSaveToolbarModifier(enabled: enabled, action: action))
+    }
+}
+
+private struct TronSaveToolbarModifier: ViewModifier {
+    let enabled: Bool
+    let action: () -> Void
+    @Environment(\.tronSettingsVisualTheme) private var theme
+
+    func body(content: Content) -> some View {
+        content.toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(action: action) {
+                    Text("Save")
+                        .font(TronTypography.buttonSM)
+                        .foregroundStyle(enabled ? theme?.accent ?? .tronEmerald : .tronTextMuted)
+                }
+                .disabled(!enabled)
+                .accessibilityIdentifier("tron-sheet-save")
+            }
+        }
+    }
+}
+
+extension View {
     /// The standard sheet search: a round button at the bottom right that opens
     /// a search field above the keyboard. Closing clears the query.
     func tronFloatingSearch(text: Binding<String>, prompt: String = "Search", identifier: String? = nil) -> some View {
@@ -685,9 +713,9 @@ private struct TronFloatingSearchModifier: ViewModifier {
                     Spacer()
                     Button { withAnimation(.snappy) { active = true } } label: {
                         Image(systemName: "magnifyingglass")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                            .font(TronTypography.sans(size: 24, weight: .semibold))
                             .foregroundStyle(theme?.accent ?? .tronEmerald)
-                            .frame(width: 52, height: 52)
+                            .frame(width: 56, height: 56)
                             .glassEffect(.regular.tint((theme?.accent ?? .tronEmerald).opacity(0.12)).interactive(), in: Circle())
                     }
                     .buttonStyle(.plain)
@@ -1442,7 +1470,7 @@ struct TronSettingsRow<Trailing: View>: View {
         icon: String?,
         title: String,
         subtitle: String? = nil,
-        subtitleLineLimit: Int? = nil,
+        subtitleLineLimit: Int? = 2,
         titleIsIdentifier: Bool = false,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
@@ -1483,7 +1511,7 @@ struct TronSettingsRow<Trailing: View>: View {
             let stacksAction = controlSize == .small && dynamicTypeSize.isAccessibilitySize
             let layout = stacksAction
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: TronSpacing.md))
-                : AnyLayout(HStackLayout(alignment: .center, spacing: TronSpacing.xl))
+                : AnyLayout(TronSettingsRowLayout(spacing: TronSpacing.xl))
             layout {
                 VStack(alignment: .leading, spacing: 3) {
                     if titleIsIdentifier && !title.contains(where: \.isWhitespace) {
@@ -1512,8 +1540,9 @@ struct TronSettingsRow<Trailing: View>: View {
                     if !tags.isEmpty { tagList.padding(.top, 3) }
                 }
                 .padding(.vertical, labelsOwnInsets ? TronSpacing.xl : 0)
-                if !stacksAction { Spacer(minLength: TronSpacing.md) }
-                trailing.environment(\.tronSettingsRowTags, [])
+                // One subview for the layout, however many views the caller passed.
+                HStack(spacing: TronSpacing.md) { trailing }
+                    .environment(\.tronSettingsRowTags, [])
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -1522,6 +1551,47 @@ struct TronSettingsRow<Trailing: View>: View {
         .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A settings row's labels and trailing control. The control keeps its natural
+/// width when both fit on one line, so the subtitle uses the rest of the row;
+/// only when they compete does the control cap at 45% and truncate.
+private struct TronSettingsRowLayout: Layout {
+    let spacing: CGFloat
+
+    private func widths(_ subviews: Subviews, in width: CGFloat) -> (labels: CGFloat, trailing: CGFloat) {
+        guard subviews.count == 2 else { return (width, 0) }
+        let trailingIdeal = subviews[1].sizeThatFits(.unspecified).width
+        guard trailingIdeal > 0.5 else { return (width, 0) }
+        let available = max(0, width - spacing)
+        let labelsIdeal = subviews[0].sizeThatFits(.unspecified).width
+        if labelsIdeal + trailingIdeal <= available {
+            // A flexible control (a field) may take the room the labels leave.
+            let room = available - labelsIdeal
+            let trailing = max(trailingIdeal, min(room, subviews[1].sizeThatFits(ProposedViewSize(width: room, height: nil)).width))
+            return (available - trailing, trailing)
+        }
+        let trailing = min(trailingIdeal, available * 0.45)
+        return (available - trailing, trailing)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? subviews.reduce(0) { $0 + $1.sizeThatFits(.unspecified).width } + spacing
+        let (labels, trailing) = widths(subviews, in: width)
+        let heights = [subviews.first?.sizeThatFits(ProposedViewSize(width: labels, height: nil)).height ?? 0,
+                       subviews.count == 2 ? subviews[1].sizeThatFits(ProposedViewSize(width: trailing, height: nil)).height : 0]
+        return CGSize(width: width, height: heights.max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let (labels, trailing) = widths(subviews, in: bounds.width)
+        subviews.first?.place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
+                              proposal: ProposedViewSize(width: labels, height: nil))
+        if subviews.count == 2 {
+            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing,
+                              proposal: ProposedViewSize(width: trailing, height: nil))
+        }
     }
 }
 
@@ -1539,7 +1609,7 @@ extension TronSettingsRow where Trailing == EmptyView {
         icon: String?,
         title: String,
         subtitle: String? = nil,
-        subtitleLineLimit: Int? = nil,
+        subtitleLineLimit: Int? = 2,
         titleIsIdentifier: Bool = false,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),

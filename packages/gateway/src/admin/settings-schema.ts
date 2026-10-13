@@ -205,7 +205,7 @@ export const KEYS: readonly KeyDeclaration[] = [
       ...both({ store: "pi", path: ["defaultThinkingLevel"], qualified: ["modelThinkingLevels", "{model}"] }),
     },
     timing: "fixed", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
-    label: "Thinking", help: "How much the model reasons before it answers. A model that lacks a level uses the closest one it supports.",
+    label: "Thinking", help: "How much the model reasons before it answers.",
     order: 20, importance: "essential", control: "choice",
   },
   {
@@ -213,19 +213,19 @@ export const KEYS: readonly KeyDeclaration[] = [
     optionsSource: { name: "catalog.contextWindow", dependsOn: ["model.ref[role=chat]"] },
     layers: { chat: { store: "chat", field: "contextWindow" }, ...both(pi("modelContextWindows", "{model}")) },
     timing: "fixed", effect: "next-turn", floor: "quiet", writers: ANY_ACTOR,
-    label: "Context window", help: "How many tokens of conversation the model is given. Bounded by the model's capacity and compaction headroom.",
+    label: "Context window", help: "Tokens of conversation the model is given.",
     order: 30, importance: "essential", control: "number",
   },
   {
     id: "model.thinkingBudgets", group: "model", subgroup: "Thinking budgets", type: thinkingBudgetsType(),
     layers: both(pi("thinkingBudgets")), timing: "fixed", effect: "new-chat", floor: "quiet", writers: ANY_ACTOR,
-    label: "Thinking budgets", help: "Token budgets per thinking level for models that take a budget. Empty fields leave that level unset.", order: 60, importance: "advanced",
+    label: "Thinking budgets", help: "Token budget per thinking level, for models that take one.", order: 60, importance: "advanced",
     control: "list",
   },
   {
     id: "model.offered", group: "model", type: types.stringList(500),
     layers: both(pi("enabledModels")), timing: "live", effect: "next-turn", floor: "quiet", writers: ["ui", "home"],
-    label: "Offered models", help: "Model patterns offered in the model picker. Empty offers every available model.", order: 70,
+    label: "Offered models", help: "Models offered in the picker. Empty offers every model.", order: 70,
     importance: "advanced", control: "list",
   },
   {
@@ -240,7 +240,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     optionsSource: { name: "catalog.models", dependsOn: [] },
     layers: { profile: { store: "profile", path: ["model", "worker"] } }, builtin: { sameAs: "home" },
     timing: "fixed", effect: "delegate", floor: "notify", writers: ["ui", "home"],
-    label: "Worker model", help: "The model Home's task workers start with. Same as Home follows Home's model when Home delegates.",
+    label: "Worker model", help: "The model Home's task workers start with.",
     order: 40, importance: "essential", control: "catalog", fallback: "readOnly",
   },
   {
@@ -253,7 +253,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "model.ref[role=memory]", group: "model", fixed: { role: "memory" }, subgroup: "Memory", type: types.modelRef(),
     optionsSource: { name: "catalog.models", dependsOn: [] },
     layers: { profile: { store: "home-memory" } }, timing: "live", effect: "next-memory-pass", floor: "notify", writers: ["ui", "home"],
-    label: "Memory model", help: "The model Home's memory uses to compact its conversation. Unset until chosen.", order: 50,
+    label: "Memory model", help: "The model Home's memory uses to compact its history.", order: 50,
     // Essential: Home cannot answer until it is chosen, so it belongs on Manage Home's primary surface.
     importance: "essential", control: "catalog", fallback: "readOnly",
   },
@@ -276,7 +276,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "context.compaction.keepRecentTokens", group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(0, 1_000_000, "tokens"),
     layers: { chat: { store: "chat-settings", path: ["compaction", "keepRecentTokens"] }, ...both({ store: "pi", path: ["compaction", "keepRecentTokens"], qualified: ["compaction", "modelOverrides", "{model}", "keepRecentTokens"] }) },
     builtin: 20_000, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
-    label: "Keep recent", help: "Tokens of recent conversation kept verbatim after compaction.", order: 30, importance: "advanced", control: "number",
+    label: "Keep recent", help: "Recent tokens kept verbatim after compaction.", order: 30, importance: "advanced", control: "number",
   },
   {
     id: "context.compaction.instructions", group: "context", subgroup: "Compaction", type: types.text(COMPACTION_POLICY_INSTRUCTION_LIMIT, { raw: true }),
@@ -298,7 +298,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "context.images.block", group: "context", subgroup: "Images", type: types.boolean(["Blocked", "Allowed"]),
     layers: chatPi("images", "blockImages"), builtin: false, timing: { narrow: "live", widen: "fixed" }, effect: "next-request",
     floor: { widen: "approve", narrow: "quiet" }, direction: turnsOn, writers: ANY_ACTOR,
-    label: "Block images", help: "Replace images with a placeholder before they reach the model.", order: 70, importance: "advanced", control: "toggle",
+    label: "Block images", help: "Replace images with a placeholder for the model.", order: 70, importance: "advanced", control: "toggle",
     confirm: "Allowing images again lets the model see image content.",
   },
   // Tools ---------------------------------------------------------------
@@ -333,7 +333,7 @@ export const KEYS: readonly KeyDeclaration[] = [
   {
     id: "permissions.projectTrust", group: "permissions", qualifier: "project", type: types.boolean(["Trusted", "Not trusted"]),
     layers: { mac: { store: "trust" } }, timing: "live", effect: "reload", floor: { widen: "approve", narrow: "notify" }, direction: grants,
-    writers: ["ui", "home"], label: "Trust for this project", help: "Whether this project's extensions, hooks and settings load. A repo can never grant itself trust.",
+    writers: ["ui", "home"], label: "Trust for this project", help: "Lets this project's extensions, hooks and settings load.",
     order: 10, importance: "essential", control: "toggle", confirm: "Trusting a project runs its extensions and hooks.",
   },
   {
@@ -351,7 +351,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "permissions.floor", group: "permissions", subgroup: "Floors", qualifier: "key", type: tierType(),
     layers: { mac: { store: "floors" } }, builtinFor: (qualifiers) => codeFloor(qualifiers),
     timing: "live", effect: "next-change", floor: { widen: "approve", narrow: "quiet" }, direction: lowers, writers: ["ui"],
-    label: "Floor", help: "The least attention a change to this setting gets when an agent asks: Quiet applies it, Notify applies it and tells you, Approve waits for your tap. A turn that read web content raises it one step.",
+    label: "Floor", help: "Quiet applies an agent's change, Notify also tells you, Approve waits for you.",
     order: 90, importance: "advanced", control: "choice",
     confirm: "Lowering a floor lets agents make this change with less of your attention.",
   },
@@ -362,7 +362,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "permissions.budget.task", group: "permissions", subgroup: "Home tasks", type: taskBudgetType(),
     layers: { profile: { store: "profile", path: ["budget", "task"] } }, timing: { narrow: "live", widen: "fixed" }, effect: "delegate",
     floor: { widen: "approve", narrow: "quiet" }, direction: raisesBudget, writers: ["ui", "home"],
-    label: "Task budget", help: "Tokens one Home task may use before Tron stops it. Input counts cached tokens. An empty field is no limit.",
+    label: "Task budget", help: "Tokens one Home task may use, cached included. Empty is no limit.",
     order: 30, importance: "advanced", control: "list", confirm: "Raising a task budget lets Home's tasks spend more.",
   },
   // Run -----------------------------------------------------------------
@@ -426,14 +426,14 @@ export const KEYS: readonly KeyDeclaration[] = [
   {
     id: "run.httpProxy", group: "run", subgroup: "Connection", type: types.text(4_096), redacted: true,
     layers: { mac: pi("httpProxy") }, timing: "live", effect: "restart", floor: "notify", writers: ["ui"],
-    label: "HTTP proxy", help: "Proxy for model requests. Applies after the Gateway restarts.", order: 120, importance: "advanced", control: "secret",
+    label: "HTTP proxy", help: "Proxy for model requests. Applies after a restart.", order: 120, importance: "advanced", control: "secret",
   },
   {
     id: "run.cacheWarming", group: "run", subgroup: "Connection",
     type: types.choice([{ value: "off", label: "Off" }, { value: "streaming", label: "While running" }, { value: "idle", label: "Also between runs" }]),
     layers: { mac: pi("cacheWarming") }, builtin: "streaming", timing: "live", effect: "next-turn", floor: { widen: "notify", narrow: "quiet" },
     direction: (_b, a) => a === "idle" ? "widen" : "narrow", writers: ["ui", "home"],
-    label: "Cache warming", help: "Keep provider prompt caches warm. Warming between runs costs money.", order: 130, importance: "advanced", control: "choice",
+    label: "Cache warming", help: "Keep prompt caches warm between runs. Costs money.", order: 130, importance: "advanced", control: "choice",
   },
   // Sources -------------------------------------------------------------
   ...(["extensions", "skills", "prompts", "themes"] as const).map((name, index): KeyDeclaration => ({
@@ -456,7 +456,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     // No writer: the runtime snapshots its session folder under the ownership
     // lock at start, so it changes only while the Gateway is stopped.
     id: "setup.sessionDir", group: "setup", type: types.text(4_096), layers: { mac: pi("sessionDir") }, timing: "live", effect: "restart",
-    floor: "notify", writers: [], label: "Session folder", help: "Where chats are stored. Changes apply after the Gateway restarts.",
+    floor: "notify", writers: [], label: "Session folder", help: "Where chats are stored. Applies after a restart.",
     order: 10, importance: "advanced", control: "text",
   },
   {

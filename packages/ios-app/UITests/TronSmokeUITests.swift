@@ -2019,25 +2019,18 @@ final class TronSmokeUITests: XCTestCase {
         let applied = app.staticTexts["fixture.settings-renderer-applied"]
         let thinking = app.staticTexts["fixture.settings-renderer-thinking-options"]
         XCTAssertTrue(any["settings-section-model"].waitForExistence(timeout: 10), app.debugDescription)
-        // Primary surfaces: essential keys inline with their controls, no in-place expansion.
-        XCTAssertTrue(any["settings-row-model.ref"].exists, "Essential keys are standard inline rows")
-        XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:4", timeout: 5), "An inline choice asks for its options")
+        // Primary surfaces: one row per section, every key on its sub-sheet.
+        XCTAssertFalse(any["settings-row-model.ref"].exists, "Keys live on section sub-sheets")
         XCTAssertFalse(app.buttons["Show all"].exists, "Primary settings never expand in place")
-        XCTAssertFalse(showsText("The model new chats start with", in: app), "Help lives on sub-sheet rows only")
         XCTAssertTrue(showsText("Lab", in: app), "A section the app never heard of renders from its served title")
         keepScreenshot(named: "settings-renderer-primary")
 
-        // The Run section: its essential key inline, the pending approval, and the
-        // agent's latest change on the link to the sub-sheet that holds every key.
+        // The Run section's row names what waits for you; its sheet holds every key.
         scrollTo(any["settings-section-run"], in: app)
-        XCTAssertTrue(any["settings-section-run-pending"].exists)
-        XCTAssertTrue(any["settings-row-run.retry.maxRetries"].exists)
-        XCTAssertFalse(any["settings-row-run.transport"].exists, "Advanced keys live in the section sub-sheet")
-        XCTAssertTrue(showsText("Home changed Retries", in: app), "The section link names the agent's latest change")
+        XCTAssertTrue(showsText("1 waiting for you", in: app), "The section row leads with a waiting approval")
         tapScrolling(app.buttons["settings-section-run-open"], in: app)
         XCTAssertTrue(any["settings-section-run-detail"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(any["settings-row-run.transport"].exists)
-        XCTAssertTrue(showsText("Advanced", in: app), "Advanced keys follow the essential ones")
         XCTAssertTrue(showsText("How many times a failed request is retried", in: app), "Sub-sheet rows carry source and help")
         keepScreenshot(named: "settings-renderer-run-sheet")
         closeTopSheet(app)

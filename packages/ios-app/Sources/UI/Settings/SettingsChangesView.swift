@@ -81,7 +81,10 @@ struct SettingsChangesView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     // Changes is the audit of settings that changed without you:
                     // agents' changes and edits outside Tron, each undoable.
-                    TronSettingsCaption("Settings that agents changed, and edits made outside Tron. Open a change to see it in full or undo it; approvals agents are waiting on appear first.")
+                    Text("Settings agents changed, and edits made outside Tron. Open one to see it in full or undo it.")
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if loading && entries.isEmpty {
                         TronLoadingState(label: "Loading changes…")
                             .frame(maxWidth: .infinity)
@@ -262,7 +265,7 @@ struct SettingsChangesView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(entry.title).font(TronTypography.headline).foregroundStyle(Color.tronTextPrimary)
                         Spacer(minLength: 8)
-                        Text(entry.status.capitalized).font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold)).foregroundStyle(entry.status == "failed" ? Color.tronError : Color.tronEmerald)
+                        Text(entry.status.capitalized).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(entry.status == "failed" ? Color.tronError : Color.tronEmerald)
                     }
                     if let display = entry.presentation?.display {
                         Text("\(display.before) → \(display.after)")
@@ -280,7 +283,7 @@ struct SettingsChangesView: View {
                             Text("NEW").font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold)).foregroundStyle(Color.tronEmerald).accessibilityLabel("Since you last looked")
                         }
                     }
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM)).foregroundStyle(Color.tronTextSecondary)
+                    .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
@@ -301,7 +304,7 @@ struct SettingsChangesView: View {
                         else if let display = change.display { Text("\(display.before) → \(display.after)").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextSecondary) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text("Asked by \(request.requester)").font(TronTypography.sans(size: TronTypography.sizeBodySM)).foregroundStyle(Color.tronTextSecondary)
+                Text("Asked by \(request.requester)").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
                 HStack {
                     Button("Approve") { confirm(request, approved: true) }.buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronSuccess))
                     Button("Decline", role: .destructive) { confirm(request, approved: false) }.buttonStyle(TronActionButtonStyle(role: .destructive, accent: .tronError))
@@ -475,13 +478,13 @@ private struct SettingsChangeDetailView: View {
                         Button(undoing ? "Undoing…" : "Undo") { showingUndo = true }
                             .buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronEmerald))
                             .disabled(undoing)
-                    } else { Text("Not undoable").font(TronTypography.sans(size: TronTypography.sizeBodySM)).foregroundStyle(Color.tronTextSecondary) }
+                    } else { Text("Not undoable").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
                     if let actionError { TronSettingsNotice(message: actionError, title: "Action unavailable") }
                     Text("Key history").font(TronTypography.headline).accessibilityAddTraits(.isHeader)
                     ForEach(history) { item in
                         TronGlassCard(accent: .tronEmerald) {
                             VStack(alignment: .leading, spacing: 5) {
-                                Text(item.at).font(TronTypography.sans(size: TronTypography.sizeBodySM)).foregroundStyle(Color.tronTextSecondary)
+                                Text(item.at).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
                                 Text(item.presentation?.display.before ?? "—").font(TronTypography.secondaryCodeDescription)
                                 Text("→ \(item.presentation?.display.after ?? "—")").font(TronTypography.secondaryCodeDescription)
                             }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
@@ -533,7 +536,7 @@ private struct SettingsChangeDetailView: View {
 
     private func detailValue(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold)).foregroundStyle(Color.tronTextSecondary)
+            Text(title).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronTextSecondary)
             Text(value).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
