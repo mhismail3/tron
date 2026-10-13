@@ -496,8 +496,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let title = app.staticTexts["Set up X"]
         XCTAssertTrue(title.waitForExistence(timeout: 30), app.debugDescription)
 
-        let client = app.textFields["Public client ID"]
-        let callback = app.textFields["Registered callback URL"]
+        // The shared text row exposes its title on the row, not on the field.
+        func field(_ title: String) -> XCUIElement {
+            app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch.textFields.firstMatch
+        }
+        let client = field("Public client ID")
+        let callback = field("Registered callback URL")
         XCTAssertTrue(client.waitForExistence(timeout: 10), app.debugDescription)
         client.tap(); client.typeText("e2e-public-client")
         let refusedCallback = "https://example.test/callback?refused=1"
@@ -516,8 +520,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "366-real-ui-x-begin-refusal-stays")
 
         // Retry on the same sheet with a valid callback reaches the consent step.
+        // Replace the whole draft: caret placement inside a scrolled field is not stable.
         callback.tap()
-        callback.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "?refused=1".count))
+        callback.typeKey("a", modifierFlags: .command)
+        callback.typeText("https://example.test/callback")
         XCTAssertEqual(callback.value as? String, "https://example.test/callback")
         authorize.tap()
         let consent = app.buttons["Open X consent"]
