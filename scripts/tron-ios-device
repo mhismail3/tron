@@ -24,6 +24,13 @@ LOCKER="$ROOT_DIR/scripts/ios-test-lock.py"
 # Host-wide: every worktree, and the Gateway's detached install helper, lease a
 # device here.
 DEVICE_LEASE_DIR="$HOME/.tron/internal/run"
+SPEEDFLIGHT_BASE="${TRON_SPEEDFLIGHT_BASE:-https://speedflight.dev}"
+SPEEDFLIGHT_KEYCHAIN_SERVICE="speedflight.dev"
+SPEEDFLIGHT_KEYCHAIN_ACCOUNT="tron-upload-secret"
+# Opens the app after an over-the-air install (Info.plist CFBundleURLSchemes).
+SPEEDFLIGHT_DEEP_LINK="tron://"
+SHARE_TITLE=""
+SHARE_NOTES=""
 
 usage() {
     cat <<'USAGE'
@@ -32,6 +39,7 @@ Usage:
   scripts/tron-ios-device launch [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device stop [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device status [--device-id ID] [--device-name NAME]
+  scripts/tron-ios-device share --title TITLE --notes NOTES [--fast-debug]
 
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
@@ -64,6 +72,14 @@ command: build, install and launch. A command that finds it held exits 73
 naming the holder's worktree, PID and start time; wait for that command to
 finish. The lease is keyed by the resolved device identifier, which both device
 selection and the Gateway's install use.
+
+`share` builds the same validated pair for any registered device (no device
+connected, no lease), uploads it to Speedflight and prints `Build page: <url>`,
+which installs over the air from Safari on a device in the development
+profile. It requires a clean tree whose HEAD is pushed, and the upload secret in
+the login Keychain (service speedflight.dev, account tron-upload-secret) or
+TRON_SPEEDFLIGHT_SECRET. TRON_SPEEDFLIGHT_BASE overrides the service URL.
+TRON_SPEEDFLIGHT_AUTHOR overrides the author shown on the page.
 USAGE
 }
 
@@ -192,6 +208,12 @@ parse_common_args() {
                 BUILD_MODE="fast-debug"
                 shift
                 ;;
+            --title|--notes)
+                [[ "$CMD" == "share" ]] || die "$1 is only valid with share"
+                [ -n "${2:-}" ] || die "$1 requires a value"
+                if [[ "$1" == "--title" ]]; then SHARE_TITLE="$2"; else SHARE_NOTES="$2"; fi
+                shift 2
+                ;;
             -h|--help)
                 usage
                 exit 0
@@ -309,6 +331,8 @@ XCODEBUILD_ARGS=()
 # recompiles the entire app for any edit (~150s versus ~17s measured for a
 # one-file change). The LocalDevice xcconfig stays whole-module, so the
 # scheme's Instruments Profile action still builds the release-like binary.
+# An empty device id builds for any registered device (share); the signed
+# development profile then carries every device registered to the team.
 prepare_xcodebuild_args() {
     local derived_data_path="$1"
     local result_bundle_path="$2"
@@ -320,13 +344,19 @@ prepare_xcodebuild_args() {
         -project "$PROJECT"
         -scheme "$SCHEME"
         -configuration "$CONFIG"
-        -destination "platform=iOS,id=${device_id}"
-        -destination-timeout 30
         -derivedDataPath "$derived_data_path"
         -resultBundlePath "$result_bundle_path"
         -allowProvisioningUpdates
-        -allowProvisioningDeviceRegistration
     )
+    if [[ -n "$device_id" ]]; then
+        XCODEBUILD_ARGS+=(
+            -destination "platform=iOS,id=${device_id}"
+            -destination-timeout 30
+            -allowProvisioningDeviceRegistration
+        )
+    else
+        XCODEBUILD_ARGS+=(-destination "generic/platform=iOS")
+    fi
     XCODEBUILD_ARGS+=(SWIFT_COMPILATION_MODE=singlefile)
     if [[ "$build_mode" == "fast-debug" ]]; then
         XCODEBUILD_ARGS+=(
@@ -339,14 +369,13 @@ prepare_xcodebuild_args() {
     fi
 }
 
-build_install_launch() {
-    require_full_xcode
-    validate_gateway_protocol_target_prebuild
-
-    local device_id
-    device_id="$(resolve_device_id)"
-    [ -n "$device_id" ] || die "could not resolve a physical iOS device"
-
+# Builds and validates the canonical app for DEVICE_ID (empty: any registered
+# device) and sets BUILT_APP, BUILD_LOG and BUILD_XCRESULT. Leaves cwd at IOS_DIR.
+BUILT_APP=""
+BUILD_LOG=""
+BUILD_XCRESULT=""
+build_validated_app() {
+    local device_id="$1"
     xcodebuild -version
     printf 'iPhoneOS SDK %s\n' "$(xcrun --sdk iphoneos --show-sdk-version)"
     cd "$IOS_DIR"
@@ -356,8 +385,6 @@ build_install_launch() {
     fi
     [[ -n "$xcodegen" ]] || die "xcodegen resolution returned an empty command"
     "$xcodegen" generate
-
-    local bundle_id="$PHYSICAL_BUNDLE_ID"
 
     local ts log xcresult
     ts="$(date +%s)-$$"
@@ -404,6 +431,22 @@ build_install_launch() {
     python3 "$ROOT_DIR/scripts/validate-ios-artifact.py" "$app" \
         --configuration "$CONFIG" --require-profile
     validate_gateway_protocol_target "$app"
+    BUILT_APP="$app"
+    BUILD_LOG="$log"
+    BUILD_XCRESULT="$xcresult"
+}
+
+build_install_launch() {
+    require_full_xcode
+    validate_gateway_protocol_target_prebuild
+
+    local device_id
+    device_id="$(resolve_device_id)"
+    [ -n "$device_id" ] || die "could not resolve a physical iOS device"
+
+    build_validated_app "$device_id"
+    local app="$BUILT_APP" log="$BUILD_LOG" xcresult="$BUILD_XCRESULT"
+    local bundle_id="$PHYSICAL_BUNDLE_ID"
 
     xcrun devicectl device install app --device "$device_id" "$app"
 
@@ -416,6 +459,86 @@ build_install_launch() {
     echo "Bundle ID: ${bundle_id:-unknown}"
     echo "Full log: $log"
     echo "xcresult: $xcresult"
+}
+
+# Speedflight (https://speedflight.dev) serves an uploaded IPA from a page that
+# installs over the air on any device in its signing profile. The upload secret
+# is the only write credential; the page link is the only install credential.
+# Neither is printed except the page link, which is the command's result.
+share_secret() {
+    local secret="${TRON_SPEEDFLIGHT_SECRET:-}"
+    if [[ -z "$secret" ]]; then
+        secret="$(security find-generic-password -s "$SPEEDFLIGHT_KEYCHAIN_SERVICE" \
+            -a "$SPEEDFLIGHT_KEYCHAIN_ACCOUNT" -w 2>/dev/null || true)"
+    fi
+    [[ -n "$secret" ]] || die "no Speedflight upload secret: the maintainer stores one with
+  security add-generic-password -s $SPEEDFLIGHT_KEYCHAIN_SERVICE -a $SPEEDFLIGHT_KEYCHAIN_ACCOUNT -w \"\$(openssl rand -hex 24)\""
+    [[ "$secret" =~ ^[A-Za-z0-9_-]{32,128}$ ]] || die "the Speedflight upload secret must be 32-128 characters of [A-Za-z0-9_-]"
+    printf '%s' "$secret"
+}
+
+# curl reads the URL from stdin so the secret path segment never appears in argv.
+speedflight_request() {
+    local method="$1" path="$2"
+    shift 2
+    printf 'url = "%s%s"\n' "$SPEEDFLIGHT_BASE" "$path" \
+        | curl -sfS --retry 3 --retry-all-errors --retry-delay 3 -X "$method" -K - "$@"
+}
+
+share_build() {
+    [[ -n "$SHARE_TITLE" && -n "$SHARE_NOTES" ]] || die "share requires --title and --notes"
+    [[ "$SPEEDFLIGHT_BASE" == https://* || "$SPEEDFLIGHT_BASE" == http://127.0.0.1:* ]] \
+        || die "TRON_SPEEDFLIGHT_BASE must be https (or a loopback http test server)"
+    command -v jq >/dev/null || die "jq is required"
+    local secret
+    secret="$(share_secret)" || exit 1
+
+    # The page names a branch and commit, so the build must be exactly that
+    # pushed commit.
+    [[ -z "$(git -C "$ROOT_DIR" status --porcelain)" ]] || die "working tree is dirty: commit before sharing a build"
+    local branch commit author repo_url
+    branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
+    commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+    git -C "$ROOT_DIR" merge-base --is-ancestor "$commit" '@{u}' 2>/dev/null \
+        || die "HEAD is not pushed to its upstream: push $branch before sharing"
+    author="${TRON_SPEEDFLIGHT_AUTHOR:-$(git -C "$ROOT_DIR" config --get github.user || git -C "$ROOT_DIR" log -1 --format=%an)}"
+    repo_url="$(git -C "$ROOT_DIR" remote get-url origin 2>/dev/null | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')"
+    [[ "$repo_url" == https://* ]] || repo_url=""
+
+    require_full_xcode
+    validate_gateway_protocol_target_prebuild
+    build_validated_app ""
+    local app="$BUILT_APP"
+    local bundle_id
+    bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")"
+    [[ "$bundle_id" == "$PHYSICAL_BUNDLE_ID" ]] || die "built $bundle_id, expected $PHYSICAL_BUNDLE_ID"
+
+    local out ipa
+    out="$IOS_DIR/build/share/$(date +%Y%m%d-%H%M%S)-$$"
+    mkdir -p "$out/Payload"
+    ditto "$app" "$out/Payload/$(basename "$app")"
+    ipa="$out/TronMobile.ipa"
+    (cd "$out" && ditto -c -k --norsrc --keepParent Payload "$ipa")
+    rm -rf "$out/Payload"
+
+    local meta created build_id page_url
+    meta="$(jq -n --arg title "$SHARE_TITLE" --arg notes "$SHARE_NOTES" \
+        --arg deepLink "$SPEEDFLIGHT_DEEP_LINK" --arg branch "$branch" --arg commit "$commit" \
+        --arg author "$author" --arg repoUrl "$repo_url" \
+        '{title:$title, notes:$notes, deepLink:$deepLink, branch:$branch, commit:$commit, author:$author}
+         + (if $repoUrl == "" then {} else {repoUrl:$repoUrl} end)')"
+    created="$(speedflight_request POST "/api/apps/$secret/$bundle_id/builds" \
+        -H 'Content-Type: application/json' --data "$meta")" || die "Speedflight rejected the build registration"
+    build_id="$(jq -er .buildId <<<"$created")" || die "Speedflight returned no buildId"
+    page_url="$(jq -er .pageUrl <<<"$created")" || die "Speedflight returned no pageUrl"
+    [[ "$build_id" =~ ^[A-Za-z0-9_-]+$ ]] || die "Speedflight returned an invalid buildId"
+    speedflight_request PUT "/api/apps/$secret/$bundle_id/builds/$build_id/app.ipa" \
+        --http1.1 --data-binary @"$ipa" >/dev/null || die "IPA upload failed; the registered build has no app (rerun share)"
+
+    echo
+    echo "Shared $app ($commit on $branch)"
+    echo "IPA: $ipa"
+    echo "Build page: $page_url"
 }
 
 launch_app_for_device() {
@@ -498,11 +621,19 @@ status_installed_app() {
     fi
 }
 
+CMD=""
 main() {
     local cmd="${1:-help}"
     local device_id
+    CMD="$cmd"
     shift || true
     case "$cmd" in
+        share)
+            # Device selection does not apply: share signs for every registered device.
+            parse_common_args "$@"
+            validate_install_pair
+            share_build
+            ;;
         install)
             parse_common_args "$@"
             validate_install_pair

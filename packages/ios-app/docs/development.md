@@ -546,6 +546,55 @@ unoptimized Swift/Clang compilation, in-object debug symbols, and a separate
 `Tron Device`'s Run action is only a scheme convenience; the device helper's
 launch and a launch from the device itself are not debugger sessions.
 
+### Over-the-air development install (Speedflight)
+
+`devicectl` installs only reach a phone the Mac can see. When the phone is
+elsewhere, `scripts/tron-ios-device share --title TITLE --notes NOTES
+[--fast-debug]` delivers the same artifact through
+[Speedflight](https://speedflight.dev), a hosted page that installs an uploaded
+IPA from Safari on devices in its signing profile. It does not change build or
+test speed.
+
+The command builds `Tron Device` + `LocalDevice` for `generic/platform=iOS`
+(no device or device lease), runs the same `validate-ios-artifact.py` and
+Gateway protocol checks as `install` (Stable by default), packages the signed
+`.app` as an IPA under `packages/ios-app/build/share/`, uploads it and prints
+`Build page: <url>` last. The development profile carries every device
+registered to the team, and the push environment stays APNs sandbox, so an
+over-the-air install behaves like a `devicectl` install. Like that install, it
+needs Developer Mode on the phone; Apple documents over-the-air installs for ad
+hoc exports, and development-signed over-the-air installs rely on the same
+mechanism that services such as Diawi support. It is never an archive,
+a Release build or a distribution path. A device registered after the build
+needs a new share.
+
+It refuses a dirty tree or an unpushed HEAD, because the page names the branch
+and commit. The upload secret (32-128 characters of `[A-Za-z0-9_-]`) is read
+from the login Keychain item service `speedflight.dev`, account
+`tron-upload-secret`, or from `TRON_SPEEDFLIGHT_SECRET`; curl reads the request
+URL from stdin so the secret never appears in process arguments. Whoever holds
+the secret can upload to the page; whoever holds the page link can install and
+download the IPA, so post it only in a private chat. Speedflight has no account;
+the secret is the identity, and losing it means minting a new one (a new page).
+The API used is the one documented by the upstream skill
+([jakemor/speedflight](https://github.com/jakemor/speedflight), reviewed at
+`b233c6f0e3b4493011563905bfd97eefa7fdcc0c`).
+
+One-time maintainer setup, on the Mac that builds:
+
+```bash
+security add-generic-password -s speedflight.dev -a tron-upload-secret -w "$(openssl rand -hex 24)"
+```
+
+The end-to-end journey runs the real command, with this Mac's development
+signing, against a loopback Speedflight-compatible server and writes
+`packages/ios-app/build/share-e2e/report.json`; it needs a clean, pushed
+checkout:
+
+```bash
+python3 scripts/test-tron-ios-device-share.py
+```
+
 ### Profiling a real slowdown
 
 Agent-runnable measurements go through `scripts/tron-profile`. Every tool it

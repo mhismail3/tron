@@ -68,6 +68,16 @@ scripts/tron-ios-device status
 scripts/tron-ios-device stop
 ```
 
+When the user asks for a build on their phone and it is not reachable by
+`devicectl` (away from the Mac), commit and push, then run
+`scripts/tron-ios-device share --title "<what this build is>" --notes "<what
+changed, what to test>"` and post its final `Build page:` link in the chat,
+never anywhere public. It is the same validated `Tron Device` + `LocalDevice`
+artifact delivered over the air through Speedflight; see
+[Over-the-air development install](../../../packages/ios-app/docs/development.md#over-the-air-development-install-speedflight).
+Share only when the user asks. Never print, mint or store the upload secret;
+a missing secret is a maintainer step the command names.
+
 For an explicitly source-built Debug Gateway on 9848, use
 `TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device install`; this
 still verifies the source and iOS artifact contract but does not claim Stable is
@@ -85,7 +95,8 @@ repository-managed XcodeGen. If the tool is absent, install it with
 Use `scripts/validate-ios-artifact.py` on signed products and
 `packages/ios-app/scripts/verify-archive-privacy.sh` for a manually-created
 archive. Never install Release or DevicePerformance through the ordinary helper.
-Do not archive, upload, deploy, or erase app/Keychain data.
+Do not archive, upload, deploy, or erase app/Keychain data; the one upload is
+the user-requested development `share` above.
 
 To measure an iOS change, agents run `scripts/tron-profile ios --self-test`,
 then the relevant `--scenario`, before and after, and judge with
@@ -176,6 +187,7 @@ reclaim simulators yourself.
   naming the holder) with raw `xcodebuild`, `simctl` or `devicectl`; wait for
   the holder's command to finish.
 - Never install a production Release artifact through the ordinary device
-  helper or automate signing, archive delivery, upload, or deployment.
+  helper or automate signing, archive delivery, upload, or deployment. The
+  user-requested development `share` is not a release path.
 - Never modify `.codex/environments/environment.toml`; old names may appear only
   there and in the bounded compatibility branch above.
