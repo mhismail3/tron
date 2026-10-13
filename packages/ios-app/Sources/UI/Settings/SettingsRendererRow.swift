@@ -13,6 +13,11 @@ struct SettingsRendererRow: View {
     /// One of several instances of a key (per project, per model): titled by its
     /// instance, with the key's label and help on the enclosing group.
     var instanced = false
+    /// A row has one control. When its source also offers actions, the row
+    /// previews the value and opens this sheet, which holds control and actions.
+    var detailDestination: AnyView? = nil
+    /// On a key's own sheet: each action is its own full-width row.
+    var actionsAsRows = false
     var externalControl = false
     /// Changes when a key this row's options depend on changes, so they are re-requested.
     let dependencyDisplay: String
@@ -121,6 +126,22 @@ struct SettingsRendererRow: View {
 
     @ViewBuilder
     private var controlRow: some View {
+        if let detailDestination {
+            TronProgressiveSheetLink(accessibilityLabel: title, identity: "settings.key.\(setting.id)") {
+                detailDestination
+            } label: {
+                TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
+                    TronDynamicValue(text: setting.display, color: .tronTextSecondary)
+                }
+            }
+            .accessibilityIdentifier("\(settingsRowIdentifier(setting))-open")
+        } else {
+            control(for: control)
+        }
+    }
+
+    @ViewBuilder
+    private func control(for control: SettingsRowControl) -> some View {
         switch control {
         case .toggle:
             TronToggleRow(icon: icon, title: title, detail: subtitle,
@@ -227,47 +248,43 @@ struct SettingsRendererRow: View {
         }
     }
 
-    /// Row actions and messages below the standard row, only when they exist.
-    /// Source actions (reset, follow default, edit at another layer) live on the
-    /// detailed sub-sheet row; refusals show wherever the change was attempted.
+    /// A key's actions, as full-width rows on its own sheet (`actionsAsRows`), and
+    /// any refusal under the row wherever the change was attempted.
     @ViewBuilder
     private var details: some View {
-        let actions = detailed ? setting.badges.compactMap(\.action) : []
+        let actions = actionsAsRows ? setting.badges.compactMap(\.action) : []
         let resets = editable && (control != .readOnly || externalControl)
             ? actions.filter { ["useCurrentDefault", "followDefault"].contains($0.kind) } : []
         let applyAgain = onApplyAgain == nil ? [] : actions.filter { $0.kind == "applyAgain" && $0.changeId != nil }
-        if !resets.isEmpty || !applyAgain.isEmpty || error != nil {
-            VStack(alignment: .trailing, spacing: 8) {
-                if !resets.isEmpty || !applyAgain.isEmpty {
-                    HStack(spacing: 8) {
-                        Spacer(minLength: 0)
-                        // Action primitives are served with the source badge. A future
-                        // action stays absent, never an arbitrary RPC; reset reuses the
-                        // row's dry-run and receipt owner, Apply again the change record.
-                        ForEach(Array(resets.enumerated()), id: \.offset) { _, action in
-                            Button { onChange(nil) } label: { TronInlineActionLabel(action.label) }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("\(settingsRowIdentifier(setting))-\(action.kind)")
-                        }
-                        ForEach(Array(applyAgain.enumerated()), id: \.offset) { _, action in
-                            Button { if let id = action.changeId { onApplyAgain?(id) } } label: { TronInlineActionLabel(action.label) }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("\(settingsRowIdentifier(setting))-applyAgain")
-                        }
-                    }
-                }
-                if let error {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronError)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("\(settingsRowIdentifier(setting))-error")
-                }
+        // Action primitives are served with the source badge. A future action stays
+        // absent, never an arbitrary RPC; reset reuses the row's dry-run and receipt
+        // owner, Apply again the change record.
+        ForEach(Array(resets.enumerated()), id: \.offset) { _, action in
+            TronSettingsDivider()
+            Button { onChange(nil) } label: {
+                TronSettingsRow(icon: "arrow.uturn.backward", title: action.label)
             }
-            .padding(.leading, TronSettingsLayoutPolicy.dividerLeadingPadding)
-            .padding(.trailing, TronSettingsLayoutPolicy.rowHorizontalPadding)
-            .padding(.bottom, 12)
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("\(settingsRowIdentifier(setting))-\(action.kind)")
+        }
+        ForEach(Array(applyAgain.enumerated()), id: \.offset) { _, action in
+            TronSettingsDivider()
+            Button { if let id = action.changeId { onApplyAgain?(id) } } label: {
+                TronSettingsRow(icon: "arrow.clockwise", title: action.label)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("\(settingsRowIdentifier(setting))-applyAgain")
+        }
+        if let error {
+            Label(error, systemImage: "exclamationmark.triangle")
+                .font(TronTypography.secondaryDescription)
+                .foregroundStyle(Color.tronError)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, TronSettingsLayoutPolicy.dividerLeadingPadding)
+                .padding(.trailing, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                .padding(.bottom, 12)
+                .accessibilityIdentifier("\(settingsRowIdentifier(setting))-error")
         }
     }
 

@@ -23,6 +23,8 @@ struct SettingsRendererView: View {
     /// Hand-built account, package and setup flows supplement schema rows, never
     /// replace them. Nil means the section has no hand-built rows.
     var sectionSupplement: ((String) -> AnyView?)? = nil
+    /// The link's secondary line for a section the schema serves no keys for.
+    var sectionSubtitle: ((String) -> String?)? = nil
     /// Pairing/account repair must remain reachable while the schema cannot load.
     var unresolvedSupplement: AnyView? = nil
 
@@ -130,6 +132,12 @@ struct SettingsRendererView: View {
         if case .keys = presentation {
             // Rows inside a caller's card: no states of their own while loading.
             if let resolution { content(resolution) }
+        } else if case .overridesLink(_, let title, let icon) = presentation, resolution == nil {
+            // The scope row keeps its place while the schema loads.
+            TronGlassCard(accent: .tronEmerald) {
+                TronSettingsRow(icon: icon, title: title, subtitle: loadError == nil ? "Loading…" : "Unavailable",
+                                subtitleColor: .tronTextSecondary)
+            }
         } else {
             VStack(alignment: .leading, spacing: 20) {
                 if let resolution {
@@ -167,6 +175,24 @@ struct SettingsRendererView: View {
                 }
             case .overrides(let scope, let allTitle):
                 overrides(resolution, scope: scope, allTitle: allTitle)
+            case .detail(let id):
+                if let setting = resolution.keys.first(where: { $0.id == id }) {
+                    TronSettingsGroup(setting.presentation?.label ?? setting.key) {
+                        SettingsRendererRow(
+                            setting: setting, target: target, editable: writableLayer(for: setting) != nil,
+                            detailed: true, actionsAsRows: true,
+                            externalControl: externalControlKeys.contains(setting.key),
+                            dependencyDisplay: Self.dependencyDisplay(setting, in: resolution), error: rowErrors[setting.id],
+                            layerEditorTitle: layerEditor(for: setting)?.title,
+                            onEditLayer: { if let editor = layerEditor(for: setting) { layerEditor = editor } },
+                            onChange: { value in change(setting, value: value) },
+                            onApplyAgain: { changeID in applyAgain(changeID, rowID: setting.id) }
+                        )
+                        .disabled(changingID != nil || previewingID != nil)
+                    }
+                }
+            case .overridesLink(let scope, let title, let icon):
+                overridesLink(resolution, scope: scope, title: title, icon: icon)
             case .keys(let ids):
                 let chosen = ids.flatMap { id in resolution.keys.filter { $0.key == id } }
                 if dividerBeforeKeys, !chosen.isEmpty { TronSettingsDivider() }
@@ -177,42 +203,16 @@ struct SettingsRendererView: View {
 
     // MARK: Sections
 
-    /// A primary surface shows a section's essential values as standard rows with
-    /// right-aligned controls, its hand-built rows, then one full-row link to a
-    /// sub-sheet holding every key with its source, help and actions. Nothing expands.
+    /// A primary surface shows each section as one card holding one row: the
+    /// section's preview, opening the sub-sheet with every key and hand-built
+    /// destination. No headers, nothing inline, nothing expands.
     @ViewBuilder
     private func overviewSection(_ section: SettingsRendererSection, keys: [ResolvedSetting],
                                  resolution: SettingsResolution) -> some View {
         let style = SettingsSectionStyle(section.id)
-        // A key served once per project or model (trust, floors) is a list, not a
-        // primary control: it lives on the sub-sheet, grouped under its label.
-        let inline = keys.filter { $0.presentation?.importance == "essential" && !externalControlKeys.contains($0.key)
-            && Self.instanceCount($0, in: keys) == 1 }
-        let supplement = sectionSupplement?(section.id)
-        let pending = section.summary.pending
-        if !keys.isEmpty || supplement != nil || !pending.isEmpty {
-            TronSettingsGroup(section.title, accent: style.accent) {
-                VStack(spacing: 0) {
-                    rows(inline, resolution: resolution, detailed: false)
-                    if !pending.isEmpty {
-                        if !inline.isEmpty { TronSettingsDivider() }
-                        TronSettingsRow(
-                            icon: "hourglass",
-                            title: pending.count == 1 ? "1 waiting for you" : "\(pending.count) waiting for you",
-                            subtitle: pending.map { "\($0.requester): \($0.labels.joined(separator: ", "))" }.joined(separator: "\n"),
-                            accent: .tronAmber, subtitleColor: .tronTextSecondary
-                        )
-                        .accessibilityIdentifier("settings-section-\(section.id)-pending")
-                    }
-                    if let supplement {
-                        if !inline.isEmpty || !pending.isEmpty { TronSettingsDivider() }
-                        supplement
-                    }
-                    if !keys.isEmpty {
-                        if !inline.isEmpty || !pending.isEmpty || supplement != nil { TronSettingsDivider() }
-                        sectionLink(section, keys: keys, inline: inline, style: style)
-                    }
-                }
+        if !keys.isEmpty || sectionSupplement?(section.id) != nil || !section.summary.pending.isEmpty {
+            TronGlassCard(accent: style.accent) {
+                sectionLink(section, keys: keys, style: style)
             }
             .tronSettingsVisualTheme(accent: style.accent)
             .accessibilityElement(children: .contain)
@@ -220,28 +220,29 @@ struct SettingsRendererView: View {
         }
     }
 
-    private func sectionLink(_ section: SettingsRendererSection, keys: [ResolvedSetting], inline: [ResolvedSetting],
+    private func sectionLink(_ section: SettingsRendererSection, keys: [ResolvedSetting],
                              style: SettingsSectionStyle) -> some View {
-        let shown = Set(inline.map(\.key)).union(externalControlKeys)
-        // Values already visible inline or in the shared model card are not repeated.
-        let summary = section.summary.essential.filter { !shown.contains($0.key) }
+        let summary = section.summary.essential.filter { !externalControlKeys.contains($0.key) }
             .map(\.display).joined(separator: " · ")
-        let count = keys.count == 1 ? "1 setting" : "\(keys.count) settings"
-        // An agent's latest change is the highest-signal fact a section can show.
+        let pending = section.summary.pending.count
+        // Most actionable first: approvals waiting, then an agent's latest change.
         let recent = section.summary.recent.first.map { change in
             let more = section.summary.recent.count - 1 + section.summary.moreRecent
             return "\(change.actor) changed \(change.label)" + (more > 0 ? " and \(more) more" : "")
         }
-        let title = "\(section.title) Settings"
-        return TronProgressiveSheetLink(accessibilityLabel: title, identity: "settings.section.\(section.id)",
+        let subtitle = pending > 0 ? (pending == 1 ? "1 waiting for you" : "\(pending) waiting for you")
+            : recent ?? summary.nonEmpty ?? sectionSubtitle?(section.id)
+            ?? (keys.isEmpty ? section.note : keys.count == 1 ? "1 setting" : "\(keys.count) settings")
+        return TronProgressiveSheetLink(accessibilityLabel: section.title, identity: "settings.section.\(section.id)",
                                         accent: style.accent) {
             SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
                                  externalControlKeys: externalControlKeys, projectCWD: projectCWD,
-                                 presentation: .section(section.id))
-                .tronNavigationTitle(title, accent: style.accent)
+                                 presentation: .section(section.id), sectionSupplement: sectionSupplement)
+                .tronNavigationTitle(section.title, accent: style.accent)
         } label: {
-            TronSettingsRow(icon: style.icon, title: title, subtitle: recent ?? (summary.isEmpty ? count : summary),
-                            subtitleLineLimit: 2, accent: style.accent, subtitleColor: .tronTextSecondary)
+            TronSettingsRow(icon: style.icon, title: section.title, subtitle: subtitle,
+                            subtitleLineLimit: 2, accent: style.accent,
+                            subtitleColor: pending > 0 ? .tronAmber : .tronTextSecondary)
         }
         .accessibilityIdentifier("settings-section-\(section.id)-open")
     }
@@ -253,6 +254,10 @@ struct SettingsRendererView: View {
     private func sectionDetail(_ section: SettingsRendererSection, keys: [ResolvedSetting],
                                resolution: SettingsResolution) -> some View {
         VStack(alignment: .leading, spacing: 20) {
+            // Hand-built destinations (MCP Servers, Hooks, accounts) lead the sheet.
+            if let supplement = sectionSupplement?(section.id) {
+                TronGlassCard(accent: SettingsSectionStyle(section.id).accent) { supplement }
+            }
             ForEach(Array(Self.detailGroups(section, keys: keys).enumerated()), id: \.offset) { index, group in
                 TronSettingsGroup(group.title, detail: group.detail ?? (index == 0 ? section.note : nil)) {
                     VStack(spacing: 0) {
@@ -325,6 +330,45 @@ struct SettingsRendererView: View {
         .accessibilityIdentifier("settings-overrides")
     }
 
+    /// A scope as one card holding one row: what the scope sets, previewed, opening
+    /// the overrides sheet for that scope.
+    private func overridesLink(_ resolution: SettingsResolution, scope: String, title: String, icon: String) -> some View {
+        let set = Self.sorted(resolution.keys.filter { $0.layer == writeLayer || ownedLayers.contains($0.layer) })
+        let preview = set.prefix(3).map { "\($0.presentation?.label ?? $0.key): \($0.display)" }
+            + (set.count > 3 ? ["+\(set.count - 3) more"] : [])
+        return TronGlassCard(accent: .tronEmerald) {
+            TronProgressiveSheetLink(accessibilityLabel: title, identity: "settings.scope.\(scope)") {
+                SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
+                                     externalControlKeys: externalControlKeys, projectCWD: projectCWD,
+                                     presentation: .overrides(scope: scope, allTitle: "Override a Setting"))
+                    .tronNavigationTitle(title)
+            } label: {
+                TronSettingsRow(icon: icon, title: title,
+                                subtitle: set.isEmpty ? "Using defaults" : preview.joined(separator: " · "),
+                                subtitleLineLimit: 2, subtitleColor: .tronTextSecondary)
+            }
+            .accessibilityIdentifier("settings-scope-open")
+        }
+    }
+
+    private func layerEditor(for setting: ResolvedSetting) -> LayerEditor? {
+        writableLayer(for: setting) == nil
+            ? setting.layers.compactMap({ LayerEditor(rawValue: $0.layer) }).first(where: { $0 != .project || projectCWD != nil })
+            : nil
+    }
+
+    /// A row offers one control. A detailed row whose source also offers actions
+    /// (reset, Apply again) previews its value and opens its own sheet instead.
+    private func detailDestination(_ setting: ResolvedSetting) -> AnyView? {
+        guard setting.badges.contains(where: { badge in
+            badge.action.map { ["useCurrentDefault", "followDefault", "applyAgain"].contains($0.kind) } ?? false
+        }) else { return nil }
+        return AnyView(SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
+                                            externalControlKeys: externalControlKeys, projectCWD: projectCWD,
+                                            presentation: .detail(setting.id))
+            .tronNavigationTitle(setting.presentation?.label ?? setting.key))
+    }
+
     /// Rows in Gateway order. Detailed rows (sub-sheets) carry source tags, help and
     /// the row's actions; primary rows show only the title and its control.
     @ViewBuilder
@@ -332,15 +376,14 @@ struct SettingsRendererView: View {
                       instanced: Bool = false) -> some View {
         ForEach(Array(keys.enumerated()), id: \.element.id) { index, setting in
             if index > 0 { TronSettingsDivider() }
-            let editor = writableLayer(for: setting) == nil
-                ? setting.layers.compactMap({ LayerEditor(rawValue: $0.layer) }).first(where: { $0 != .project || projectCWD != nil })
-                : nil
+            let editor = layerEditor(for: setting)
             SettingsRendererRow(
                 setting: setting,
                 target: target,
                 editable: writableLayer(for: setting) != nil,
                 detailed: detailed,
                 instanced: instanced,
+                detailDestination: detailed ? detailDestination(setting) : nil,
                 externalControl: externalControlKeys.contains(setting.key),
                 dependencyDisplay: Self.dependencyDisplay(setting, in: resolution),
                 error: rowErrors[setting.id],
@@ -561,6 +604,10 @@ struct SettingsRendererView: View {
     }
 }
 
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
+}
+
 /// What a renderer shows. Surfaces choose; the Gateway still supplies every word.
 enum SettingsRendererPresentation: Hashable {
     /// Every section: essential rows inline, then one link to the section's sub-sheet.
@@ -571,6 +618,10 @@ enum SettingsRendererPresentation: Hashable {
     case overrides(scope: String, allTitle: String)
     /// Just these keys, as inline rows inside a caller's card.
     case keys([String])
+    /// One key on its own sheet: its control, then each action as its own row.
+    case detail(String)
+    /// A scope (this chat, Home) as one previewing row that opens its overrides.
+    case overridesLink(scope: String, title: String, icon: String)
 }
 
 /// A section's glyph and accent on primary surfaces and its sub-sheet, so each

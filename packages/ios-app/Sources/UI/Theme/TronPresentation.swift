@@ -1496,22 +1496,9 @@ struct TronSettingsRow<Trailing: View>: View {
                         }
                         .scrollBounceBehavior(.basedOnSize)
                         .accessibilityLabel(title)
-                    } else if tags.isEmpty {
+                    } else {
                         Text(title).font(titleFont).foregroundStyle(titleColor)
                             .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        // Tags sit on the title's line when they fit, else just below it.
-                        ViewThatFits(in: .horizontal) {
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text(title).font(titleFont).foregroundStyle(titleColor)
-                                tagList
-                            }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(title).font(titleFont).foregroundStyle(titleColor)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                tagList
-                            }
-                        }
                     }
                     if let subtitle {
                         Text(subtitle)
@@ -1521,6 +1508,8 @@ struct TronSettingsRow<Trailing: View>: View {
                             .truncationMode(.tail)
                             .fixedSize(horizontal: false, vertical: subtitleLineLimit == nil)
                     }
+                    // Tags are a row's last content: left-aligned under its text.
+                    if !tags.isEmpty { tagList.padding(.top, 3) }
                 }
                 .padding(.vertical, labelsOwnInsets ? TronSpacing.xl : 0)
                 if !stacksAction { Spacer(minLength: TronSpacing.md) }
@@ -1538,7 +1527,10 @@ struct TronSettingsRow<Trailing: View>: View {
 
 private extension TronSettingsRow {
     var tagList: some View {
-        HStack(spacing: 4) { ForEach(tags) { TronTag($0) } }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) { ForEach(tags) { TronTag($0) } }
+            VStack(alignment: .leading, spacing: 4) { ForEach(tags) { TronTag($0) } }
+        }
     }
 }
 

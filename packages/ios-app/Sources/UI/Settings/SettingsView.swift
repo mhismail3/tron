@@ -47,24 +47,22 @@ struct SettingsView: View {
                 target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
                 writeLayer: "chat", embedded: true, ownedLayers: ["chat"],
                 externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"],
-                projectCWD: cwd, presentation: .overrides(scope: "this chat", allTitle: "Chat Settings")
+                projectCWD: cwd, presentation: .overridesLink(scope: "this chat", title: "This Chat", icon: "bubble.left.and.text.bubble.right")
             )
             if let cwd, !cwd.isEmpty, let profileID = model.selectedGatewayProfileID() {
-                TronSettingsGroup("Project", accent: .tronEmerald) {
-                    ProjectSettingsLink(cwd: cwd, profileID: profileID)
-                }
+                TronGlassCard(accent: .tronEmerald) { ProjectSettingsLink(cwd: cwd, profileID: profileID) }
             }
         case .home(let sessionID):
             SettingsRendererView(
                 target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
                 writeLayer: nil, embedded: true, ownedLayers: ["chat", "profile"],
                 externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"],
-                presentation: .overrides(scope: "Home", allTitle: "Home Settings")
+                presentation: .overridesLink(scope: "Home", title: "Home", icon: "house")
             )
         case .dashboard:
-            TronSettingsGroup("Projects", accent: .tronEmerald) {
+            TronGlassCard(accent: .tronEmerald) {
                 Button { browsingProjects = true } label: {
-                    TronSettingsRow(icon: "folder.badge.gearshape", title: "Project settings",
+                    TronSettingsRow(icon: "folder.badge.gearshape", title: "Projects",
                                     subtitle: "Choose a workspace to see what it sets", subtitleColor: .tronTextSecondary)
                 }
                 .buttonStyle(.plain)
@@ -92,22 +90,37 @@ struct SettingsView: View {
                         embedded: true,
                         externalControlKeys: ["sources.packages"],
                         sectionSupplement: { sectionSupplement($0) },
+                        sectionSubtitle: { section in
+                            switch section {
+                            case "accounts": "Model providers, custom models, and connected services"
+                            case "setup": "Connections, import, and logs"
+                            default: nil
+                            }
+                        },
                         unresolvedSupplement: AnyView(offlineDestinations)
                     )
 
-                    TronSettingsGroup(
-                        "This iPhone",
-                        detail: "Stored on this iPhone. Never changes harness behaviour.",
-                        accent: .tronEmerald
-                    ) {
-                        settingsLink("Appearance", summary: "Theme, type scale, and visual preferences",
-                                     icon: "circle.lefthalf.filled", accent: .tronEmerald) {
-                            AppearanceSettingsView()
-                        }
-                        settingsDivider(accent: .tronEmerald)
-                        settingsLink("Sessions", summary: "Dashboard list and subagent activity",
-                                     icon: "slider.horizontal.2.square", accent: .tronEmerald) {
-                            AppLocalBehaviorSettingsView()
+                    // Like every top-level group: one row, its destinations in the sub-sheet.
+                    TronGlassCard(accent: .tronEmerald) {
+                        settingsLink("This iPhone", summary: "Appearance and sessions. Stored on this iPhone only.",
+                                     icon: "iphone", accent: .tronEmerald) {
+                            ScrollView {
+                                TronGlassCard(accent: .tronEmerald) {
+                                    settingsLink("Appearance", summary: "Theme, type scale, and visual preferences",
+                                                 icon: "circle.lefthalf.filled", accent: .tronEmerald) {
+                                        AppearanceSettingsView()
+                                    }
+                                    settingsDivider(accent: .tronEmerald)
+                                    settingsLink("Sessions", summary: "Dashboard list and subagent activity",
+                                                 icon: "slider.horizontal.2.square", accent: .tronEmerald) {
+                                        AppLocalBehaviorSettingsView()
+                                    }
+                                }
+                                .tronSettingsCaption("Stored on this iPhone. Never changes harness behaviour.")
+                                .padding(20)
+                            }
+                            .tronScrollEdgeChrome()
+                            .tronNavigationTitle("This iPhone")
                         }
                     }
                 }
