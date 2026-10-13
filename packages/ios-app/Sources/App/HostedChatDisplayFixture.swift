@@ -106,6 +106,7 @@ struct HostedHomeDashboardFixture: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var homeStatusCount = 0
     @State private var taskListReads = 0
+    @State private var homeReads = ""
     @State private var reconnectRequested = false
     @State private var configuredModel = "none"
     @State private var controlCount = 0
@@ -173,6 +174,7 @@ struct HostedHomeDashboardFixture: View {
                                 .accessibilityIdentifier("fixture.home-status-count")
                             Text("task-list-reads:\(taskListReads)")
                                 .accessibilityIdentifier("fixture.home-task-list-reads")
+                            Text("home-reads:\(homeReads)").accessibilityIdentifier("fixture.home-read-counts")
                             Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.capabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
                                 .accessibilityIdentifier("fixture.home-diagnostics")
                         }
@@ -227,6 +229,7 @@ struct HostedHomeDashboardFixture: View {
         }
         .task(id: ready) {
             guard ready else { return }
+            await gateway.observeHomeReads { summary in homeReads = summary }
             while !Task.isCancelled {
                 homeStatusCount = await gateway.statusCount()
                 taskListReads = await gateway.taskListReadCount()
@@ -329,7 +332,22 @@ private actor HostedHomeShellGateway {
     func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
     func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "context-window.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"] }
 
+    /// Every Home read a sheet sent, so journeys can prove a return to a sheet re-reads nothing.
+    private var homeReads: [String: Int] = [:]
+    /// Publishes each count before the read is answered, so the label is current
+    /// by the time the sheet shows the content (no poll delay).
+    private var onHomeRead: (@MainActor @Sendable (String) -> Void)?
+    func observeHomeReads(_ observer: @escaping @MainActor @Sendable (String) -> Void) { onHomeRead = observer }
+    func homeReadSummary() -> String {
+        ["home.status", "home.context", "home.chapterList", "home.memory.view", "home.taskList", "home.taskStatus"]
+            .map { "\($0)=\(homeReads[$0, default: 0])" }.joined(separator: ",")
+    }
+
     func handle(_ method: String, _ params: [String: JSONValue]) async throws -> (JSONValue?, JSONValue?) {
+        if method.hasPrefix("home.") {
+            homeReads[method, default: 0] += 1
+            if let onHomeRead { await onHomeRead(homeReadSummary()) }
+        }
         switch method {
         case "terminal.list":
             return (nil, .object(["code": .string("unavailable"),

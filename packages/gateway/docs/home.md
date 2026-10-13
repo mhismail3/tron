@@ -95,9 +95,11 @@ Home on them, and a client applies a summary only to a row it already lists. Cat
 membership is unchanged, so search (`catalog("user")`, `readSearchCut`), `session.open`
 by id, `scope: "all"` and Home's own reads are not filtered. A designation or rollover
 that changes the chapter set publishes a list change, so clients re-list.
-`session.open` of a sealed chapter loads it read-only, warm or cold: its runtime's chapter
-state refuses every write. Only a materializing chapter, or a file the ledger does not name,
-refuses to open (`home-session-catalog.e2e.test.ts`).
+`session.open` of a sealed chapter loads it read-only, warm or cold (#911): the catalog header
+proves the file's tail complete before the SDK opens it (an in-progress append is `busy`), opening
+writes no byte, and the runtime's chapter state refuses every write. Only a materializing chapter,
+or a file the ledger does not name, refuses to open (`home-session-catalog.e2e.test.ts`,
+`home-request-seam.integration.test.ts`).
 
 ### Chapter contents
 

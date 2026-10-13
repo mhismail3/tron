@@ -848,7 +848,7 @@ The ring opens Manage Session or Manage Home: the chat's live state, its direct
 controls (the shared Chat card for model, thinking and context window; Compact Now
 with automatic compaction; on Home, the memory model) and its curated rows. In
 Manage Session a separate emerald card holds Project Settings and Chat Settings;
-Manage Home lists Home Settings with its rows. The chat's gear opens Settings.
+Manage Home holds Home Settings in its own container below its sub-sheet rows. The chat's gear opens Settings.
 Chat Settings and Home Settings open `ChatSettingsView`: the chat's Changes, then
 each section as it applies to the chat. The
 Chat card edits through its session receipt/revision adapter; the same keys in the
@@ -1812,8 +1812,8 @@ memory-model selection/reopen/cancel journey protects this boundary. Any future
 consolidation of the live Chat card must preserve receipt plus applied-revision
 acknowledgement with Models open, not replace it with optimistic catalog dismissal.
 Manage Home uses `SessionContextUsageCard` for stats with the state pill on its
-header row, the shared Chat card, Profile settings, its Home sub-sheet rows, and
-the bottom pause/resume and disable container. The settings-approvals section
+header row, the shared Chat card, Profile settings, its Home sub-sheet rows, the
+Home Settings container, and the bottom pause/resume and disable container. The settings-approvals section
 (#758) inserts between the stats card and shared Chat card. Manage Session mounts the same
 section on its usage card with the exact session scope; Home-only mounting would
 hide ordinary chat approval requests and push decisions. The hosted decline and
@@ -1823,25 +1823,39 @@ opens at medium and drags to large, through the shared managed-sheet chrome.
 Its Memory row, Chapters, Tasks and Permissions read the same single load. Task
 recovery appears in Tasks and Permissions only when it needs attention; an
 available recovery is the normal state and has no row. The browser
-additionally requires authenticated `home-memory-browser.v1` and the chapter
+additionally requires authenticated `home-memory-view.v1` and the chapter
 list `home-chapter-list.v1`; the context sheet requires only `home.v1`. The memory
 picker is the schema's catalog control, whose Gateway option source excludes
 virtual/unavailable models. It sends the Profile key through `settings.change`,
 then reloads canonical resolution; dismissal alone does not save a selection.
 Home pause/disable retain their existing mutation and unresolved-receipt owner.
 No budget or authorization semantics are inferred by the renderer. The Home Context
-sheet reads `home.context`: one bar of the context window split by its breakdown
-sections (instructions, about you, memory, this chapter, task results, input),
-with a legend row per section and the free remainder. It shows no entry IDs or
-byte counts, and falls back to the plain request sizes when the Gateway omits
-`breakdown`. The breakdown is an estimate, never SDK canonical usage or
-prompt/memory bodies. Browser rows show the summary (or projection), a role glyph, and the
-relative time and chapter; a row opens a detail sheet with the summary, the
-projection, and one standard row to Exact Evidence. Evidence shows its role,
-time and chapter in a metadata card, the canonical text in a reading card, and
-its entry reference in the footer. Pagination replaces one page; a chapter's
-memory is the same browser filtered by `sessionId`. Canonical text is selectable.
-Loading, empty, blocked and retryable error states use shared presentation owners.
+sheet reads `home.context` into one `SessionContextUsageCard`: the activation's
+state pill and start as its header, a bar split by the breakdown sections
+(instructions, about you, memory, this chapter, task results, input) in their dot
+colors, a compact two-column legend with the free remainder, then the Home chat's
+cache, input, output and cost metrics (`SessionContextSegments` is the card's only
+extension; Manage Session passes none). It shows no entry IDs or byte counts, and
+falls back to the plain request sizes when the Gateway omits `breakdown`. The
+breakdown is an estimate, never SDK canonical usage or prompt/memory bodies.
+The memory browser reads `home.memory.view`: the lines Home's memory view holds,
+newest first, as standard rows in Manage Home's accent without chevrons or raw
+kind prefixes. "Recent messages" are per-message lines (speaker glyph and label,
+text, relative time); "Summaries" are the older ranges Home sees as one summary
+line each ("Summary of N messages" and their dates). A summary opens a sheet with
+its text and the two lines it covers (a `part` read), down to single messages.
+A message opens its detail: the message as recorded, "Home remembers" only when
+its summary says something else, and one row to Exact Evidence. Evidence shows
+its speaker and time, the canonical text in a reading group, and its entry
+reference. Pagination replaces one page; a chapter's memory is the same browser
+filtered by `sessionId`. Canonical text is selectable. Chapters list rows with a
+state pill; a chapter's detail is built from the row already loaded (no read):
+a header card with dates and the size bar and line, its counts, Topics from Home's
+merged summaries, Browse memory, and Open chapter transcript only for a sealed
+chapter (the current chapter is the chat itself). A Home sheet uncovered by its
+child keeps its installed page (`HomeSheetReadOwner.holds`); only Manage Home
+refreshes behind its frame. Loading, empty, blocked and retryable error states use
+shared presentation owners.
 The shared `tronTopBlurSurface` establishes full available width **before** attaching
 edge chrome. `tronScrollEdgeChrome` and document underlap delegate to that same
 owner: a native scroll viewport can fill a sheet while SwiftUI otherwise sizes its
@@ -3087,12 +3101,15 @@ milliseconds; spend shows the task's input and output token counts, or is unavai
 an unknown outcome nor a last assistant reply is labeled success.
 
 `HomeTaskSheet` uses the same managed chrome, glass cards, typography, loading,
-placeholder and action owners as the other Home sheets. Task rows show a title
-(the worker's name, else the brief's first line, else the project), the project,
-a state pill, and the relative update time, with no spend. The task detail shows
-the brief (six lines, then Show all), the result, the worker (its model, subagent
-launches, and live runs with their state pills), spend when reported, and
-standard action rows: Open worker chat, Stop, Steer and Redeliver. Task
+placeholder and action owners as the other Home sheets. Task rows are standard
+rows: a state glyph, a title (the worker's name, else the brief's first line,
+else the project), the project and relative update time, and a state pill, with
+no spend. The task detail shows a header card (title, state pill, project and
+relative dates), the Brief group (six lines, then Show all), the result, the
+Worker group (model, subagent launches, token spend when reported, and live runs
+with their state pills), and Redeliver when offered. Its toolbar's Open Session
+opens the worker's own chat, where the task is stopped or steered (#911); the
+detail has no Stop, Steer or Reload. Task
 permissions are a Manage Home row: standing scopes, one-use grants and pending
 requests, each a row with a state pill, and Revoke asks for confirmation. It first reads status to
 show the task-only recovery fence and reason without issuing a fenced list or
@@ -3108,8 +3125,7 @@ installed read; accepted commands remain with `HomeMutationCoordinator` and its
 command ID/receipt invocation after dismissal. Unknown completion allows only
 receipt checks, never automatic mutation replay.
 
-Stop and steer capture task and operation from detail; the operation is the control fence;
-there is no transfer/takeover or successor targeting. Permissions list standing
+Permissions list standing
 scopes and one-use grant states/expiry. Revocation does not stop admitted work.
 Grant review displays the exact stored target, intent revision/digest, scope,
 restore epoch. Native DatePicker requires the
