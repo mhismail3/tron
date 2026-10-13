@@ -1104,6 +1104,13 @@ final class AppModel {
             && lifecycle.admission?.connectionID != nil
     }
 
+    /// Whether the selected Mac's missing transport has outlived the recovery
+    /// grace. The app-scoped recovery episode is the one owner of that decision;
+    /// a mounted chat reads it rather than raw admission, so the reconnect every
+    /// foreground performs after background retirement is not shown as an
+    /// outage (#878).
+    var isConnectionRecoveryVisible: Bool { recoveryDisplayNoticeEpisode != nil }
+
     func sessionStructureRevision(for sessionID: String) -> Int {
         sessionPresentation.structureRevision(for: sessionID)
     }
@@ -1893,6 +1900,9 @@ final class AppModel {
         sessionCatalog.markDisconnected()
         let draftCheckpoint = composerDrafts.checkpointDrafts()
         lifecycle.enteredBackground()
+        // A backgrounded scene is not an outage, and a grace that elapsed while
+        // suspended must not surface the instant the scene returns.
+        finishRecoveryDisplayEpisode()
         // Intervals still open when the scene retires end as `backgrounded`, not
         // as the failure their eventual cancellation would otherwise report.
         performanceSignposts.endOpenIntervalsAtBackground()
@@ -5744,7 +5754,12 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     }
 
     func lifecycleRecordDiagnostic(event: String, message: String) {
-        if event == "reconnect.failure" || event == "reconnect.exhausted" || event == "reconnect.stopped" {
+        // Every scheduled reconnect starts the grace, including the one each
+        // foreground performs after background retirement (which emits no
+        // transport loss of its own): a replacement that outlives the grace is
+        // shown on one schedule, and a fast one never is (#878).
+        if event == "reconnect.scheduled" || event == "reconnect.failure"
+            || event == "reconnect.exhausted" || event == "reconnect.stopped" {
             beginRecoveryDisplayEpisodeIfNeeded()
         }
         let recordedEvents = ["reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "reconnect.parked", "reconnect.parked-resume", "reconnect.skipped", "path.changed", "detail.tap", "detail.preparation"]
