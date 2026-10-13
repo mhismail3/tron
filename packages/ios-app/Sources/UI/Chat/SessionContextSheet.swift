@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 private enum ManageSessionDestination: String, Identifiable {
-    case settings, agentInstructions, tools, projectResources, history, processHistory, terminal, workspace
+    case agentInstructions, tools, projectResources, history, processHistory, terminal, workspace
     var id: String { rawValue }
 }
 
@@ -318,9 +318,6 @@ struct SessionContextSheet: View {
             ) { route in
                 Group {
                     switch route {
-                    case .settings:
-                        SettingsView(onImported: onForkCreated)
-                            .environment(\.tronSettingsVisualTheme, nil)
                     case .agentInstructions:
                         AgentInstructionsSheet(sessionID: sessionID)
                     case .tools:
@@ -527,7 +524,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    /// The project's, this chat's and this Mac's settings, in Settings' own accent.
+    /// The project's and this chat's settings, in Settings' own accent.
     private func settingsSection(_ snapshot: SessionContextPresentation) -> some View {
         TronGlassCard(accent: .tronEmerald) {
             VStack(spacing: 0) {
@@ -538,19 +535,13 @@ struct SessionContextSheet: View {
                 TronProgressiveSheetLink(accessibilityLabel: "Chat Settings", identity: "session.\(sessionID).chat-settings",
                                          accent: .tronEmerald) {
                     ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd,
-                                     changesScope: .session(sessionID, projectCWD: snapshot.cwd))
+                                     changesScope: .session(sessionID, projectCWD: snapshot.cwd), onOpenSession: onForkCreated)
                         .tronNavigationTitle("Chat Settings")
                 } label: {
                     TronSettingsRow(icon: "slider.horizontal.3", title: "Chat Settings",
                                     subtitle: "Every setting this chat uses", accent: .tronEmerald)
                 }
                 .accessibilityIdentifier("chat-settings-link")
-                TronSettingsDivider(accent: .tronEmerald)
-                manageRow(icon: "gearshape", title: "Settings",
-                          subtitle: "Mac defaults, accounts, and this iPhone", accent: .tronEmerald) {
-                    destination = .settings
-                }
-                .accessibilityIdentifier("manage-session-settings")
             }
         }
     }

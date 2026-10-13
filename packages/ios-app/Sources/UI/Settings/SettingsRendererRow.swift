@@ -355,7 +355,7 @@ private struct SettingsModelPicker: View {
         var seen: Set<String> = []
         repeat {
             guard let page = try? await model.settingsOptions(target: target, key: setting.key, qualifiers: setting.qualifiers,
-                                                              query: nil, cursor: cursor) else { return }
+                                                              cursor: cursor) else { return }
             options += page.options
             cursor = page.nextCursor
         } while cursor.map { seen.insert($0).inserted } == true
@@ -395,7 +395,7 @@ private struct SettingsRendererTextRow: View {
     }
 }
 
-/// A searchable, paged catalog over the Gateway's option source. Presentation
+/// A paged catalog over the Gateway's option source. Presentation
 /// uses the same option row as ModelPicker; values and cursors remain opaque.
 private struct SettingsCatalogPicker: View {
     let setting: ResolvedSetting
@@ -520,7 +520,7 @@ private struct SettingsCatalogPicker: View {
         do {
             let response = try await model.settingsOptions(
                 target: requestedSource.target, key: requestedSource.key, qualifiers: requestedSource.qualifiers,
-                query: nil, cursor: cursor
+                cursor: cursor
             )
             guard isCurrent() else { return }
             // Values identify rows across pages; overlapping server pages must

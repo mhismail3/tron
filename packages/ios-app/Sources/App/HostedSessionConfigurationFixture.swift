@@ -202,7 +202,9 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             ]), .object([
                 "key": .string("context.compaction.enabled"), "group": .string("context"),
                 "value": .bool(true), "display": .string("On"), "layer": .string("mac"),
-                "applied": .bool(false), "layers": .array([]), "badges": .array([]),
+                "applied": .bool(false), "badges": .array([]),
+                // As the Gateway serves it: a chat can set its own compaction.
+                "layers": .array([.object(["layer": .string("chat")]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
                 "presentation": .object(["label": .string("Automatic compaction"), "help": .string("Automatic compaction policy."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("toggle")]),
             ])]), "sections": .array([

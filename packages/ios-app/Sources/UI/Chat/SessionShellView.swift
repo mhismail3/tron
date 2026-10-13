@@ -1260,7 +1260,7 @@ struct SessionShellView: View {
         .listRowInsets(SessionDashboardLayout.headerInsets)
         .contextMenu {
             if !group.path.isEmpty, let profileID = group.profileID ?? model.selectedGatewayProfileID() {
-                Button("Project settings", systemImage: "folder.badge.gearshape") {
+                Button("Project Settings", systemImage: "folder.badge.gearshape") {
                     projectSettings = ProjectSettingsRoute(cwd: group.path, profileID: profileID)
                 }
             }

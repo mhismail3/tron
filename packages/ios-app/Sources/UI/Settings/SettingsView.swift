@@ -263,6 +263,8 @@ struct ChatSettingsView: View {
     let ownedLayers: [String]
     var projectCWD: String?
     let changesScope: SettingsChangesScope
+    /// Opens a change's requesting chat or task chat from Changes.
+    var onOpenSession: ((AppModel.SessionNavigationRoute) -> Void)?
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
 
@@ -275,7 +277,8 @@ struct ChatSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 18) {
                 TronGlassCard {
-                    SettingsChangesLink(scope: changesScope, subtitle: "What agents changed, and approvals waiting for you")
+                    SettingsChangesLink(scope: changesScope, subtitle: "What agents changed, and approvals waiting for you",
+                                        onOpenSession: onOpenSession)
                 }
                 TronSettingsGroup("Settings", detail: "Each value shows where it comes from: this chat, its project, this Mac, or built in.") {
                     if sections.isEmpty {

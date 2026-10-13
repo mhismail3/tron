@@ -4411,8 +4411,8 @@ final class AppModel {
     /// A settings change this app made: every surface's snapshot is stale.
     func noteSettingsChanged() { settingsTrust.noteSettingsChanged() }
 
-    func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, query: String?, cursor: String? = nil) async throws -> SettingsOptionsResponse {
-        try await settingsTrust.settingsOptions(target: target, key: key, qualifiers: qualifiers, query: query, cursor: cursor)
+    func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, cursor: String? = nil) async throws -> SettingsOptionsResponse {
+        try await settingsTrust.settingsOptions(target: target, key: key, qualifiers: qualifiers, cursor: cursor)
     }
 
     func previewSettingsChange(target: JSONValue, change: JSONValue) async throws -> SettingsChangeResult {

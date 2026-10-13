@@ -229,12 +229,11 @@ final class SettingsTrustCoordinator {
         return try value.decode(SettingsResolution.self)
     }
 
-    /// `settings.options`: the choices a key's control offers, filtered by `query`.
-    func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, query: String?, cursor: String? = nil) async throws -> SettingsOptionsResponse {
+    /// `settings.options`: one page of the choices a key's control offers.
+    func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, cursor: String? = nil) async throws -> SettingsOptionsResponse {
         let admittedProfileGeneration = profileGeneration
         var params: [String: JSONValue] = ["target": target, "key": .string(key)]
         if let qualifiers { params["qualifiers"] = .object(qualifiers.mapValues { JSONValue.string($0) }) }
-        if let query { params["query"] = .string(query) }
         if let cursor { params["cursor"] = .string(cursor) }
         let value = try await client.requestValue("settings.options", JSONValue.object(params))
         try requireProfile(admittedProfileGeneration)

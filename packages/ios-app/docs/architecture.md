@@ -847,8 +847,8 @@ This is primitive coverage; session-surface adoption still owns the runtime fenc
 The ring opens Manage Session or Manage Home: the chat's live state, its direct
 controls (the shared Chat card for model, thinking and context window; Compact Now
 with automatic compaction; on Home, the memory model) and its curated rows. In
-Manage Session a separate emerald card holds Project Settings, Chat Settings and
-Settings (this Mac and iPhone); Manage Home lists Home Settings with its rows.
+Manage Session a separate emerald card holds Project Settings and Chat Settings;
+Manage Home lists Home Settings with its rows. The chat's gear opens Settings.
 Chat Settings and Home Settings open `ChatSettingsView`: the chat's Changes, then
 each section as it applies to the chat. The
 Chat card edits through its session receipt/revision adapter; the same keys in the

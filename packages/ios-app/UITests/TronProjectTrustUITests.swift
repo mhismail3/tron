@@ -119,10 +119,7 @@ final class TronProjectTrustUITests: XCTestCase {
         app.launchArguments = ["-tron-project-trust-fixture", "-project-trust-scenario", "floors"]
         app.launch()
         defer { app.terminate() }
-        // Floors are advanced keys: they live on the Permissions sub-sheet.
-        let section = app.buttons["settings-section-permissions-open"]
-        XCTAssertTrue(section.waitForExistence(timeout: 15), app.debugDescription)
-        section.tap()
+        // The fixture mounts the Permissions section sheet, where an approval level is a row.
         let row = app.descendants(matching: .any)["settings-row-permissions.floor_direction_widen_key_permissions.projectTrust"]
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(counts(app, contain: "floor:approve previews:0 applies:0"), app.debugDescription)
@@ -136,7 +133,7 @@ final class TronProjectTrustUITests: XCTestCase {
         XCTAssertTrue(counts(app, contain: "floor:approve previews:1 applies:0"), app.debugDescription)
         keepScreenshot(app, name: "758-permission-floor-lower-confirm")
         // Native confirmation may adapt to a popover with outside dismissal.
-        app.staticTexts["permissions"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
         XCTAssertTrue(counts(app, contain: "floor:approve previews:1 applies:0"), "Cancelling must not lower the floor")
         choose(app, row: row, option: "Quiet")

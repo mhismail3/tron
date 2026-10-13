@@ -145,7 +145,7 @@ struct ProjectSettingsContent: View {
             .padding(20)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Project settings")
+        .tronNavigationTitle("Project Settings")
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active { generation &+= 1 }
         }
