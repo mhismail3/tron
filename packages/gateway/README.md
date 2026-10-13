@@ -9,7 +9,10 @@ the same session branch and never enter model context. Plain prompt bodies remai
 only in their canonical user entries rather than being duplicated into receipts;
 resource arguments are bounded but preserve tabs and multiline text. A missing
 terminal record after an accepted start is `outcomeUnknown` and is never
-automatically replayed. When Pi appends a canonical successful assistant reply,
+automatically replayed. An admission that fails before any run starts (a Home
+memory refusal while delivering a waiting result, for one) also restores the
+phase it took, so the session is idle again rather than "running" with nothing
+running (#881, `home-wake.e2e.test.ts`). When Pi appends a canonical successful assistant reply,
 RuntimeSlot starts the exact completion's durable attention settlement immediately
 rather than waiting for `agent_settled` (#522). A response completion is not an
 operation terminal outcome: automatic compaction and same-owner continuation may
