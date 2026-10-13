@@ -677,15 +677,21 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
 
     @MainActor
     private func openSettingsSectionIfServed(_ app: XCUIApplication, _ group: String) -> XCUIElement? {
-        let identifier = "settings-section-\(group)-open"
-        let link = app.buttons[identifier]
-        guard link.waitForExistence(timeout: 5) else { return nil }
-        for _ in 0..<15 where !link.isHittable { app.swipeDown() }
-        // A covered surface beneath (Manage Session under the Project card) can hold
-        // the same link; only the top-most is hittable. No reachable link means this
-        // surface serves the section nothing, which the per-key checks then prove.
-        guard let hittable = hittableElement(app, identifier: identifier, timeout: 10) else { return nil }
-        hittable.tap()
+        let links = app.buttons.matching(identifier: "settings-section-\(group)-open")
+        guard links.firstMatch.waitForExistence(timeout: 5) else { return nil }
+        // The top-most surface's link is the last in tree order; a covered surface
+        // beneath (Manage Session under the Project card) can hold the same link.
+        // Scroll toward it: a blind downward swipe at the top of a medium sheet
+        // would drag the sheet itself.
+        let link = links.allElementsBoundByIndex.last!
+        let window = app.windows.firstMatch.frame
+        for _ in 0..<24 where !link.isHittable {
+            if link.frame.minY < window.minY + 160 { app.swipeDown() } else { app.swipeUp() }
+        }
+        // No reachable link means this surface serves the section nothing, which
+        // the per-key checks then prove.
+        guard link.isHittable else { return nil }
+        link.tap()
         let detail = app.descendants(matching: .any)["settings-section-\(group)-detail"]
         XCTAssertTrue(detail.waitForExistence(timeout: 30), "the \(group) sub-sheet did not open: \(app.debugDescription)")
         return detail
