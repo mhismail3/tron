@@ -111,7 +111,9 @@ struct SettingsRendererView: View {
     private var rendererContents: some View {
         if isInline {
             // Rows inside a caller's card: no states of their own while loading.
-            if let snapshot { content(snapshot) }
+            // Before its rows arrive it is still a (zero-height) view, because an
+            // empty one never appears and so would never start its own read.
+            if let snapshot { content(snapshot) } else { Color.clear.frame(height: 0) }
         } else {
             VStack(alignment: .leading, spacing: 20) {
                 if let snapshot {

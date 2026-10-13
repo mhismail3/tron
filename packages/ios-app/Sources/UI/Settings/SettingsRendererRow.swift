@@ -287,12 +287,26 @@ struct SettingsRendererRow: View {
 /// A model key (`catalog.models`) uses the app's one model picker over the
 /// configured providers' catalog, like every other model choice in the app.
 /// Choosing sends the model reference through the row's change owner.
+/// A model key's choices in the shared ModelPicker. The Gateway decides which
+/// models the key accepts (Home's memory takes no virtual model); the provider
+/// catalog supplies how each one is shown.
 private struct SettingsModelPicker: View {
     let setting: ResolvedSetting
     let target: JSONValue
     let title: String
     let onChoose: (JSONValue) -> Void
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var served: [SettingsOption]?
+
+    /// Every model the Gateway serves for the key, once each page is read.
+    private var servedModels: Set<ModelRef>? {
+        served.map { Set($0.compactMap { option in
+            guard let value = option.value.objectValue, let provider = value["provider"]?.stringValue,
+                  let id = value["id"]?.stringValue else { return nil }
+            return ModelRef(provider: provider, id: id)
+        }) }
+    }
 
     private var catalogTarget: ProviderCatalogTarget {
         if target.objectValue?["kind"]?.stringValue == "session", let id = target.objectValue?["sessionId"]?.stringValue {
@@ -310,15 +324,42 @@ private struct SettingsModelPicker: View {
             },
             set: { ref in
                 guard let ref else { return }
+                // A pick closes the picker, as every settings choice does.
                 onChoose(.object(["provider": .string(ref.provider), "id": .string(ref.id)]))
+                dismiss()
             }
         )
     }
 
     var body: some View {
-        ModelPicker(selection: selection, models: model.providerCatalog(for: catalogTarget)?.models.filter(\.available) ?? [])
+        let catalog = model.providerCatalog(for: catalogTarget)?.models.filter(\.available)
+        let models = servedModels.flatMap { served in
+            catalog?.filter { served.contains(ModelRef(provider: $0.provider, id: $0.id)) }
+        }
+        Group {
+            if let models, models.isEmpty {
+                TronPlaceholderState(title: "No Models", detail: "No available model can be used here.", icon: "cpu")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ModelPicker(selection: selection, models: models ?? [])
+            }
+        }
             .tronNavigationTitle(title)
             .task { try? await model.refreshModelCatalog(target: catalogTarget, force: false) }
+            .task { await readServedPages() }
+    }
+
+    private func readServedPages() async {
+        var options: [SettingsOption] = []
+        var cursor: String?
+        var seen: Set<String> = []
+        repeat {
+            guard let page = try? await model.settingsOptions(target: target, key: setting.key, qualifiers: setting.qualifiers,
+                                                              query: nil, cursor: cursor) else { return }
+            options += page.options
+            cursor = page.nextCursor
+        } while cursor.map { seen.insert($0).inserted } == true
+        served = options
     }
 }
 

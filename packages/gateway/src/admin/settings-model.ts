@@ -134,7 +134,8 @@ export class SettingsModel {
     const base = { key: key.id, source: name, dependsOn: [...dependsOn] };
     switch (name) {
       case "catalog.models":
-        return { ...base, ...await this.catalogModelOptions(runtime, request) };
+        // Home's memory runs one fixed physical model, so it is never offered a virtual one.
+        return { ...base, ...await this.catalogModelOptions(runtime, request, key.id === "model.ref[role=memory]") };
       case "catalog.thinkingLevels": {
         const model = await this.followedModel(target, session, runtime, request.qualifiers);
         const supported = model ? getSupportedThinkingLevels(model) : [];
@@ -180,8 +181,8 @@ export class SettingsModel {
     return chat ? runtime.getModel(chat.provider, chat.id) : undefined;
   }
 
-  private async catalogModelOptions(runtime: ModelRuntime, request: SettingsOptionsRequest): Promise<Pick<SettingsOptionsResult, "options" | "nextCursor">> {
-    const models = await catalogModelEntries(runtime);
+  private async catalogModelOptions(runtime: ModelRuntime, request: SettingsOptionsRequest, physicalOnly: boolean): Promise<Pick<SettingsOptionsResult, "options" | "nextCursor">> {
+    const models = (await catalogModelEntries(runtime)).filter(model => !physicalOnly || !model.virtual);
     const query = request.query?.toLowerCase();
     const matching = query ? models.filter(model => [model.name, model.id, model.provider].some(field => field.toLowerCase().includes(query))) : models;
     const offset = request.cursor === undefined ? 0 : catalogCursorOffset(request.cursor);
@@ -384,7 +385,7 @@ export interface SettingsOptionsResult {
 
 /** The registered models as the model picker lists them: the display name, and
  * whether this account can use each one (the same test `model.list` applies). */
-async function catalogModelEntries(runtime: ModelRuntime): Promise<Array<{ provider: string; id: string; name: string; available: boolean }>> {
+async function catalogModelEntries(runtime: ModelRuntime): Promise<Array<{ provider: string; id: string; name: string; available: boolean; virtual: boolean }>> {
   const eligibility = openAIModelEligibility(runtime);
   await eligibility?.refresh();
   const providerIds = new Set(runtime.getModels().map(model => model.provider));
@@ -393,7 +394,7 @@ async function catalogModelEntries(runtime: ModelRuntime): Promise<Array<{ provi
     catch { return []; }
   }))).flat().map(model => `${model.provider}\0${model.id}`));
   const projected = runtime.getModels().map(model => ({
-    provider: model.provider, id: model.id,
+    provider: model.provider, id: model.id, virtual: isVirtualModel(model),
     name: eligibility?.displayName(model.provider, model.id) ?? model.name,
     available: available.has(`${model.provider}\0${model.id}`) && (eligibility?.isEligibleInRuntime(runtime, model.provider, model.id) ?? true),
   }));

@@ -846,10 +846,11 @@ against the hosted socket and preserves the unknown badge without dispatching it
 This is primitive coverage; session-surface adoption still owns the runtime fence.
 The ring opens Manage Session or Manage Home: the chat's live state, its direct
 controls (the shared Chat card for model, thinking and context window; Compact Now
-with automatic compaction; on Home, the memory model) and its curated rows. A
-separate emerald card below them reaches settings: Project Settings and Chat Settings (Home Settings on
-Home), which opens `ChatSettingsView`: the chat's Changes, then each section as it
-applies to the chat. The
+with automatic compaction; on Home, the memory model) and its curated rows. In
+Manage Session a separate emerald card holds Project Settings, Chat Settings and
+Settings (this Mac and iPhone); Manage Home lists Home Settings with its rows.
+Chat Settings and Home Settings open `ChatSettingsView`: the chat's Changes, then
+each section as it applies to the chat. The
 Chat card edits through its session receipt/revision adapter; the same keys in the
 chat's sections edit through `settings.change` at the Chat layer, with the same
 controls (the model picker, the thinking and context sliders) everywhere. Disposable previews own separate busy state

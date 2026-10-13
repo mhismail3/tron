@@ -403,7 +403,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(state.label, "Ready")
         XCTAssertTrue(app.descendants(matching: .any)["session-usage-summary"].exists, "The stats card comes from the Home chat's session")
         XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].exists)
-        XCTAssertFalse(revealHomeSetting(app, "Memory model"), "The schema's essential memory model row is inline on Manage Home")
+        XCTAssertTrue(app.buttons["Memory model"].firstMatch.waitForExistence(timeout: 5), "The memory model row is on Manage Home\n\(app.debugDescription)")
         XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
         for row in ["home-manage-context", "home-manage-memory-browser", "home-manage-chapters", "home-manage-tasks", "home-manage-permissions"] {
@@ -620,9 +620,10 @@ final class TronSmokeUITests: XCTestCase {
         openManageHome(app)
         revealHomeSetting(app, "Memory model")
         app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-        let choice = app.buttons["settings-option-Memory Model B"]
-        XCTAssertTrue(choice.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["settings-option-Virtual model"].exists)
+        // The shared model picker lists only what the Gateway serves for the key.
+        let choice = modelPickerRow(app, "Memory Model B")
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(modelPickerRow(app, "Virtual model").exists)
         choice.tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "fixture/memory-b", timeout: 5))
         let modelRow = app.buttons["Memory model"].firstMatch
@@ -635,7 +636,7 @@ final class TronSmokeUITests: XCTestCase {
         revealHomeSetting(app, "Memory model")
         XCTAssertEqual(app.buttons["Memory model"].firstMatch.value as? String, "Memory Model B")
         app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-        XCTAssertTrue(app.buttons["settings-option-Memory Model A"].waitForExistence(timeout: 5))
+        XCTAssertTrue(modelPickerRow(app, "Memory Model A").waitForExistence(timeout: 5))
         app.buttons["Done"].firstMatch.tap()
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"),
@@ -660,13 +661,13 @@ final class TronSmokeUITests: XCTestCase {
             if state == "empty-models" {
                 revealHomeSetting(app, "Memory model")
                 app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-                XCTAssertTrue(app.staticTexts["No options match this search"].waitForExistence(timeout: 5))
-                XCTAssertFalse(app.buttons["settings-option-Memory Model B"].exists)
+                XCTAssertTrue(app.staticTexts["No Models"].waitForExistence(timeout: 5), app.debugDescription)
+                XCTAssertFalse(modelPickerRow(app, "Memory Model B").exists)
             } else if state == "configure-refused" {
                 revealHomeSetting(app, "Memory model")
                 app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-                let choice = app.buttons["settings-option-Memory Model B"]
-                XCTAssertTrue(choice.waitForExistence(timeout: 5))
+                let choice = modelPickerRow(app, "Memory Model B")
+                XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
                 choice.tap()
                 XCTAssertTrue(app.staticTexts["Memory configuration refused"].waitForExistence(timeout: 5))
                 XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "none", timeout: 3))
@@ -1372,26 +1373,38 @@ final class TronSmokeUITests: XCTestCase {
                       "Opening and dismissing an inherited value must not call settings.change")
     }
 
-    /// Reveals a Home setting's control: an essential key is an inline row on
-    /// Manage Home; any other key lives on its section's sub-sheet. Returns
-    /// whether a sub-sheet was opened (the caller closes it before Manage Home).
+    /// A model row in the shared ModelPicker, named by the model's display name.
+    /// A collapsed provider section is opened first, as a user would.
+    private func modelPickerRow(_ app: XCUIApplication, _ name: String) -> XCUIElement {
+        let collapsed = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@ AND value == %@", " models", "collapsed")).firstMatch
+        if collapsed.waitForExistence(timeout: 3) { collapsed.tap() }
+        return app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+    }
+
+    /// Reveals a Home setting's control: the memory model is a row on Manage Home;
+    /// any other key is in Home Settings, on its section's sheet. Returns how many
+    /// sheets it opened (the caller closes them before Manage Home).
     @MainActor
     @discardableResult
-    private func revealHomeSetting(_ app: XCUIApplication, _ label: String, section: String = "model") -> Bool {
+    private func revealHomeSetting(_ app: XCUIApplication, _ label: String, section: String = "model") -> Int {
         let title = app.staticTexts["Manage Home"].firstMatch
         if app.buttons["home-sheet-done-manage"].frame.minY > app.windows.firstMatch.frame.height * 0.4 {
             title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
                 thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
         }
         let controls = app.buttons.matching(NSPredicate(format: "label == %@", label))
-        var opened = false
+        var opened = 0
         if !controls.firstMatch.waitForExistence(timeout: 3) {
+            let settings = app.buttons["home-manage-settings"]
+            reveal(settings, in: app)
+            settings.tap()
             let link = app.buttons["settings-section-\(section)-open"]
+            XCTAssertTrue(link.waitForExistence(timeout: 5), app.debugDescription)
             reveal(link, in: app)
             link.tap()
             XCTAssertTrue(app.descendants(matching: .any)["settings-section-\(section)-detail"].waitForExistence(timeout: 5),
                           app.debugDescription)
-            opened = true
+            opened = 2
         }
         for _ in 0..<8 where !controls.allElementsBoundByIndex.contains(where: \.isHittable) { app.swipeUp() }
         XCTAssertTrue(controls.allElementsBoundByIndex.contains(where: \.isHittable), app.debugDescription)
@@ -1413,7 +1426,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["settings-option-Low"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["settings-option-Low"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
-        if opened { closeTopSheet(app) }
+        for _ in 0..<opened { closeTopSheet(app) }
         app.buttons["home-sheet-done-manage"].tap()
         openManageHome(app)
         opened = revealHomeSetting(app, "Worker thinking")
@@ -1423,7 +1436,7 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label == %@", "Worker thinking")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
         XCTAssertTrue(app.buttons["settings-option-Medium"].waitForExistence(timeout: 5))
         closeTopSheet(app) // the choice picker, without choosing
-        if opened { closeTopSheet(app) }
+        for _ in 0..<opened { closeTopSheet(app) }
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"), "Dismissing a choice must not change Profile")
     }

@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 private enum ManageSessionDestination: String, Identifiable {
-    case agentInstructions, tools, projectResources, history, processHistory, terminal, workspace
+    case settings, agentInstructions, tools, projectResources, history, processHistory, terminal, workspace
     var id: String { rawValue }
 }
 
@@ -318,6 +318,9 @@ struct SessionContextSheet: View {
             ) { route in
                 Group {
                     switch route {
+                    case .settings:
+                        SettingsView(onImported: onForkCreated)
+                            .environment(\.tronSettingsVisualTheme, nil)
                     case .agentInstructions:
                         AgentInstructionsSheet(sessionID: sessionID)
                     case .tools:
@@ -524,7 +527,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    /// The project's and this chat's settings, in Settings' own accent.
+    /// The project's, this chat's and this Mac's settings, in Settings' own accent.
     private func settingsSection(_ snapshot: SessionContextPresentation) -> some View {
         TronGlassCard(accent: .tronEmerald) {
             VStack(spacing: 0) {
@@ -542,6 +545,12 @@ struct SessionContextSheet: View {
                                     subtitle: "Every setting this chat uses", accent: .tronEmerald)
                 }
                 .accessibilityIdentifier("chat-settings-link")
+                TronSettingsDivider(accent: .tronEmerald)
+                manageRow(icon: "gearshape", title: "Settings",
+                          subtitle: "Mac defaults, accounts, and this iPhone", accent: .tronEmerald) {
+                    destination = .settings
+                }
+                .accessibilityIdentifier("manage-session-settings")
             }
         }
     }
