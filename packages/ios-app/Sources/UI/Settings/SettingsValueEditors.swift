@@ -19,19 +19,11 @@ struct SettingsSecretEditor: View {
                     .tronField(monospaced: true, compact: true)
                     .accessibilityLabel("New value")
                     .tronSettingsCaption(help)
-                TronSettingsGroup("Change value") {
-                    TronSettingsRow(icon: "checkmark", title: "Replace value") {
-                        Button { let value = draft; draft = ""; onChange(.string(value)); dismiss() } label: {
-                            TronInlineActionLabel("Save")
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(draft.isEmpty)
+                TronGlassCard(accent: .tronEmerald) {
+                    Button { draft = ""; onChange(nil); dismiss() } label: {
+                        TronSettingsRow(icon: "arrow.uturn.backward", title: "Follow the default")
                     }
-                    TronSettingsDivider()
-                    TronSettingsRow(icon: "arrow.uturn.backward", title: "Follow the default") {
-                        Button { draft = ""; onChange(nil); dismiss() } label: { TronInlineActionLabel("Restore") }
-                            .buttonStyle(.plain)
-                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(18)
@@ -39,6 +31,7 @@ struct SettingsSecretEditor: View {
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
         .tronNavigationTitle(title)
+        .tronSaveToolbar(enabled: !draft.isEmpty) { let value = draft; draft = ""; onChange(.string(value)); dismiss() }
         .onDisappear { draft = "" }
     }
 }
@@ -84,12 +77,22 @@ struct SettingsNumberMapEditor: View {
                     ForEach(Array(fields.enumerated()), id: \.offset) { index, field in
                         if index > 0 { TronSettingsDivider() }
                         if let key = field.value.stringValue {
-                            TronSettingsRow(icon: nil, title: field.label, subtitle: range.unit) {
-                                TextField("Not set", text: Binding(get: { drafts[key] ?? "" }, set: { drafts[key] = $0 }))
-                                    .keyboardType(.numbersAndPunctuation).submitLabel(.done)
-                                    .focused($editing).onSubmit { editing = false }
-                                    .tronInlineField(monospaced: true)
-                                    .accessibilityLabel(field.label)
+                            // The standard value row: label left, a fixed-width field right.
+                            TronSettingsRow(icon: nil, title: field.label) {
+                                HStack(spacing: 6) {
+                                    TextField("Not set", text: Binding(get: { drafts[key] ?? "" }, set: { drafts[key] = $0 }))
+                                        .keyboardType(.numbersAndPunctuation).submitLabel(.done)
+                                        .focused($editing).onSubmit { editing = false }
+                                        .tronInlineField(monospaced: true)
+                                        .multilineTextAlignment(.trailing)
+                                        .frame(width: 120)
+                                        .accessibilityLabel(field.label)
+                                    if let unit = range.unit {
+                                        Text(unit)
+                                            .font(TronTypography.secondaryDescription)
+                                            .foregroundStyle(Color.tronTextSecondary)
+                                    }
+                                }
                             }
                         }
                     }
@@ -98,25 +101,21 @@ struct SettingsNumberMapEditor: View {
                 if payload == nil {
                     TronSettingsNotice(message: "Enter whole numbers within the offered range.")
                 }
-                TronSettingsRow(icon: "checkmark", title: "Save values") {
-                    Button {
-                        guard let payload else { return }
-                        editing = false
-                        onChange(payload)
-                        dismiss()
-                    } label: { TronInlineActionLabel("Save") }
-                    .buttonStyle(.plain).disabled(payload == nil)
-                }
-                .tronGlassSurface(accent: .tronEmerald)
             }.padding(18)
         }
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
         .tronNavigationTitle(title)
+        .tronSaveToolbar(enabled: payload != nil) {
+            guard let payload else { return }
+            editing = false
+            onChange(payload)
+            dismiss()
+        }
     }
 }
 
-/// Ordered string values keep stable local row identity while editing. The
+/// String values keep stable local row identity while editing. The
 /// Gateway alone validates item syntax, count and allowed values on Save.
 struct SettingsListEditor: View {
     private struct Item: Identifiable { let id = UUID(); var text: String }
@@ -138,13 +137,10 @@ struct SettingsListEditor: View {
                 TronSettingsGroup(title) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         if index > 0 { TronSettingsDivider() }
+                        // One control per row. A direct button, not a Menu: SwiftUI menus
+                        // fail to open in a sheet presented from another sheet (#877).
                         TronSettingsRow(icon: nil, title: item.text) {
-                            TronInlineMenu("Edit") {
-                                Button("Move up") { items.swapAt(index, index - 1) }.disabled(index == 0)
-                                Button("Move down") { items.swapAt(index, index + 1) }.disabled(index + 1 == items.count)
-                                Button("Remove", role: .destructive) { items.removeAll { $0.id == item.id } }
-                            }
-                            .accessibilityLabel("Edit \(item.text)")
+                            removeButton(item.text) { items.removeAll { $0.id == item.id } }
                         }
                     }
                     if items.isEmpty { TronSettingsRow(icon: nil, title: "None") }
@@ -159,16 +155,26 @@ struct SettingsListEditor: View {
                         .buttonStyle(.plain).disabled(next.isEmpty)
                 }
                 .tronGlassSurface(accent: .tronEmerald)
-                TronSettingsRow(icon: "checkmark", title: "Save list") {
-                    Button { onChange(.array(items.map { .string($0.text) })); dismiss() } label: { TronInlineActionLabel("Save") }
-                        .buttonStyle(.plain)
-                }
-                .tronGlassSurface(accent: .tronEmerald)
             }
             .padding(18)
         }
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
         .tronNavigationTitle(title)
+        .tronSaveToolbar { onChange(.array(items.map { .string($0.text) })); dismiss() }
+    }
+
+    private func removeButton(_ item: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "trash")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(Color.tronError)
+                .frame(width: 36, height: 32)
+                .glassEffect(.regular.tint(Color.tronError.opacity(0.10)).interactive(), in: Capsule())
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Remove \(item)")
     }
 }

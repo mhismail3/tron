@@ -15,7 +15,8 @@ import { McpAdminService } from "./mcp-admin-service.js";
 import { ModelConfigService } from "./model-config-service.js";
 import { SettingsRiskEvaluator, type SettingsRiskInput } from "./settings-risk.js";
 import { JEV_MAX_ESTIMATED_CHARGE_CENTS } from "../knowledge/jev-client.js";
-import { readBinding, type Resolution, type SettingsStores } from "./settings-resolver.js";
+import { CONTROLS } from "./settings-types.js";
+import { composedBelow, readBinding, type Resolution, type SettingsStores } from "./settings-resolver.js";
 import { KEYS, type KeyDeclaration } from "./settings-schema.js";
 import type { PresentedResolution } from "./settings-presentation.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -464,10 +465,7 @@ describe("settings.change", () => {
     expect(oldest.entries.map(entry => entry.changeId)).toEqual([first.changes[0]!.changeId]);
     expect(oldest.nextCursor).toBeUndefined();
     expect((await f.history(query)).map(entry => entry.changeId)).toEqual([first.changes[0]!.changeId]);
-    const resolved = await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" } }) as unknown as PresentedResolution;
-    const recent = resolved.sections.find(section => section.id === "run")!.summary.recent;
-    expect(recent.map(entry => entry.changeId)).toEqual([first.changes[0]!.changeId]);
-    transcript.push({ case: "sparse filtered paging", detail: { newest, middle, oldest, recent } });
+    transcript.push({ case: "sparse filtered paging", detail: { newest, middle, oldest } });
   });
 
   it("keeps every entry forever in bounded segments and pages through them", async () => {
@@ -816,7 +814,7 @@ describe("every key at every allowed layer", () => {
     await f.trust.set(project, true);
     const slot = await f.registry.create(project);
     await slot.setModel(first.provider, first.id);
-    const controls = ["toggle", "choice", "number", "text", "secret", "list", "catalog", "readOnly"];
+    const controls = [...CONTROLS];
     const targets: Record<string, Record<string, unknown>> = {
       chat: { kind: "session", sessionId: slot.id }, profile: { kind: "home" }, project: { kind: "project", cwd: project }, mac: { kind: "mac" },
     };
@@ -863,7 +861,9 @@ describe("every key at every allowed layer", () => {
         chat: slot.settingsChatLayer(),
       } as unknown as SettingsStores;
       const qualified = binding.store === "pi" && binding.qualified !== undefined && qualifiers.model !== undefined;
-      return readBinding(stores, layer as "mac", binding, qualifiers, qualified, key.id);
+      const raw = readBinding(stores, layer as "mac", binding, qualifiers, qualified, key.id);
+      // A composing layer may store its selection relative to the layers below.
+      return key.type.compose && raw !== undefined ? key.type.compose(composedBelow(stores, key, qualifiers, layer as "mac"), raw) : raw;
     };
     for (const key of KEYS) {
       for (const layer of Object.keys(key.layers).filter(layer => layer === only)) {

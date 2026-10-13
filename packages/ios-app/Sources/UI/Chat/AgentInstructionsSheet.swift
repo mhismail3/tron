@@ -482,7 +482,6 @@ private struct AgentInstructionsSectionSheet: View {
                 icon: "doc.text",
                 title: entry.name ?? "Instructions",
                 subtitle: [path, "\(entry.text.count.formatted()) characters"].compactMap { $0 }.joined(separator: " · "),
-                subtitleLineLimit: 2,
                 accent: AgentInstructionsPresentation.accent(entry.source)
             )
         }

@@ -599,13 +599,12 @@ private actor HostedHomeShellGateway {
             "badges": .array([.object(["kind": .string("source"), "label": .string("Profile: Home")])]),
             "layers": .array([.object(["layer": .string("profile")])]),
             "presentation": .object(["label": .string("Memory model"), "help": .string("Choose a memory model before sending."),
-                "order": .number(50), "importance": .string("advanced"), "control": .string("catalog"),
+                "order": .number(50), "importance": .string("essential"), "control": .string("catalog"),
                 "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])]),
         ])
         return .object(["keys": .array([workerThinkingKey, contextWindowKey, memoryKey]), "sections": .array([.object([
             "id": .string("model"), "title": .string("Model"), "order": .number(10),
-            "summary": .object(["essential": .array([]), "overrides": .array([]), "pending": .array([]), "recent": .array([]), "moreRecent": .number(0)]),
-        ]), .object(["id": .string("context"), "title": .string("Context"), "order": .number(20), "summary": .object([:])])])])
+        ]), .object(["id": .string("context"), "title": .string("Context"), "order": .number(20)])])])
     }
 
     private func homeSettingsOptions(_ params: [String: JSONValue]) -> JSONValue {

@@ -255,9 +255,11 @@ struct ConnectionsSettingsView: View {
                     model.isAddingServer = true
                     showAddServer = true
                 } label: {
-                    TronToolbarTextLabel("Add Server", systemImage: "plus")
+                    Image(systemName: "plus")
+                        .font(TronTypography.buttonSM)
                 }
                 .tronToolbarAction()
+                .accessibilityLabel("Add Server")
                 .accessibilityHint("Opens the Connect a Mac pairing screen")
             }
         }
@@ -1201,33 +1203,18 @@ struct GatewayServerInfoSheet: View {
     }
 }
 
-struct ImportSettingsView: View {
+/// Imports a session export into a new session in the default workspace.
+struct ImportSessionRow: View {
     @Environment(AppModel.self) private var model
     let onImported: (AppModel.SessionNavigationRoute) -> Void
     @State private var showSessionImporter = false
 
-    init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
-        self.onImported = onImported
-    }
-
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                TronSettingsGroup("Session file", detail: "Open a canonical Tron session export in a new session.") {
-                    Button { showSessionImporter = true } label: {
-                        TronSettingsRow(
-                            icon: "square.and.arrow.down",
-                            title: "Import Session",
-                            subtitle: "JSON, JSONL, or plain-text session export"
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(20)
+        Button { showSessionImporter = true } label: {
+            TronSettingsRow(icon: "square.and.arrow.down", title: "Import Session",
+                            subtitle: "JSON, JSONL, or plain-text session export", subtitleColor: .tronTextSecondary)
         }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle("Import")
+        .buttonStyle(.plain)
         .fileImporter(
             isPresented: $showSessionImporter,
             allowedContentTypes: [.json, .plainText, .data],

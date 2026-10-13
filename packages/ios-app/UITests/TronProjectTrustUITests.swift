@@ -119,13 +119,12 @@ final class TronProjectTrustUITests: XCTestCase {
         app.launchArguments = ["-tron-project-trust-fixture", "-project-trust-scenario", "floors"]
         app.launch()
         defer { app.terminate() }
-        let section = app.buttons["settings-section-permissions-expand"]
-        XCTAssertTrue(section.waitForExistence(timeout: 15), app.debugDescription)
-        section.tap()
+        // The fixture mounts the Permissions section sheet, where an approval level is a row.
         let row = app.descendants(matching: .any)["settings-row-permissions.floor_direction_widen_key_permissions.projectTrust"]
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(counts(app, contain: "floor:approve previews:0 applies:0"), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Project trust (widen)"].exists && app.staticTexts["Built-in"].exists, app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Project trust: loosening"].exists
+                      && row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Built-in")).firstMatch.exists, app.debugDescription)
 
         // Lowering: the dry run carries confirm text, and nothing is applied until confirmed.
         choose(app, row: row, option: "Quiet")
@@ -134,7 +133,7 @@ final class TronProjectTrustUITests: XCTestCase {
         XCTAssertTrue(counts(app, contain: "floor:approve previews:1 applies:0"), app.debugDescription)
         keepScreenshot(app, name: "758-permission-floor-lower-confirm")
         // Native confirmation may adapt to a popover with outside dismissal.
-        app.staticTexts["permissions"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
         XCTAssertTrue(counts(app, contain: "floor:approve previews:1 applies:0"), "Cancelling must not lower the floor")
         choose(app, row: row, option: "Quiet")
@@ -142,8 +141,9 @@ final class TronProjectTrustUITests: XCTestCase {
         confirm.tap()
         XCTAssertTrue(counts(app, contain: "floor:quiet previews:2 applies:1"), app.debugDescription)
         XCTAssertTrue(waitForValue(row.buttons.firstMatch, "Quiet"), app.debugDescription)
-        // The override is now the Mac layer's, named by the row's layer badge.
-        XCTAssertTrue(app.staticTexts["Mac"].waitForExistence(timeout: 5), app.debugDescription)
+        // The override is now the Mac layer's, named in the row's source line.
+        XCTAssertTrue(row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mac")).firstMatch
+            .waitForExistence(timeout: 5), app.debugDescription)
 
         // Raising: the dry run needs no confirm, so the choice applies directly.
         choose(app, row: row, option: "Approve")

@@ -6,13 +6,13 @@ import TronMobileCore
 /// control's declared fallback, or read-only, so a key never disappears.
 enum SettingsRendererContract {
     static let version = 1
-    static let controls = ["toggle", "choice", "number", "text", "secret", "list", "catalog", "readOnly"]
+    static let controls = ["toggle", "choice", "number", "text", "secret", "list", "checklist", "catalog", "readOnly"]
 }
 
 /// The control one row renders with. A control this app does not implement, or
 /// a missing presentation, is read-only: the row still shows its `display`.
 enum SettingsRowControl: String, Equatable, Sendable {
-    case toggle, choice, number, text, secret, list, catalog, readOnly
+    case toggle, choice, number, text, secret, list, checklist, catalog, readOnly
 
     init(negotiated control: String?) {
         self = control.flatMap(Self.init(rawValue:)) ?? .readOnly
@@ -46,6 +46,8 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
 struct SettingsChoice: Decodable, Equatable, Sendable {
     let value: JSONValue
     let label: String
+    /// One line on what choosing it changes.
+    let detail: String?
 }
 
 struct SettingsRange: Decodable, Equatable, Sendable {
@@ -89,95 +91,35 @@ struct SettingsOptionsResponse: Decodable, Equatable, Sendable {
     let nextCursor: String?
 }
 
-/// One section's summary (gateway docs/settings-model.md 7.2). An absent list
-/// is empty, so a newer Gateway's extra fields never hide a section.
-struct SettingsSectionSummary: Decodable, Equatable, Sendable {
-    let essential: [SettingsSummaryValue]
-    let overrides: [SettingsSummaryOverride]
-    let pending: [SettingsPendingSummary]
-    let recent: [SettingsRecentChange]
-    let moreRecent: Int
-
-    private enum CodingKeys: String, CodingKey { case essential, overrides, pending, recent, moreRecent }
-
-    init(essential: [SettingsSummaryValue] = [], overrides: [SettingsSummaryOverride] = [],
-         pending: [SettingsPendingSummary] = [], recent: [SettingsRecentChange] = [], moreRecent: Int = 0) {
-        self.essential = essential
-        self.overrides = overrides
-        self.pending = pending
-        self.recent = recent
-        self.moreRecent = moreRecent
-    }
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        essential = try container.decodeIfPresent([SettingsSummaryValue].self, forKey: .essential) ?? []
-        overrides = try container.decodeIfPresent([SettingsSummaryOverride].self, forKey: .overrides) ?? []
-        pending = try container.decodeIfPresent([SettingsPendingSummary].self, forKey: .pending) ?? []
-        recent = try container.decodeIfPresent([SettingsRecentChange].self, forKey: .recent) ?? []
-        moreRecent = try container.decodeIfPresent(Int.self, forKey: .moreRecent) ?? 0
-    }
-}
-
-struct SettingsSummaryValue: Decodable, Equatable, Sendable {
-    let key: String
-    let qualifiers: [String: String]?
-    let label: String
-    let display: String
-}
-
-struct SettingsSummaryOverride: Decodable, Equatable, Sendable {
-    let key: String
-    let qualifiers: [String: String]?
-    let label: String
-    let display: String
-    let layer: String
-    let layerLabel: String
-}
-
-struct SettingsPendingSummary: Decodable, Equatable, Sendable {
-    let requestId: String
-    let requester: String
-    let labels: [String]
-}
-
-struct SettingsRecentChange: Decodable, Equatable, Sendable {
-    let changeId: String
-    let key: String
-    let label: String
-    let actor: String
-    let reason: String?
-    let at: String
-}
-
 /// A section the Gateway orders. Its id and title are Gateway text: a section
 /// iOS has never heard of renders with the same generic code.
 struct SettingsRendererSection: Decodable, Equatable, Sendable, Identifiable {
     let id: String
     let title: String
+    /// The one line shown beside the title; a group no section declares has none.
+    let description: String?
     let order: Int
     let note: String?
-    let summary: SettingsSectionSummary
 
-    private enum CodingKeys: String, CodingKey { case id, title, order, note, summary }
+    private enum CodingKeys: String, CodingKey { case id, title, description, order, note }
 
     /// A group a key names that no served section declares: shown under its id,
     /// last, so its values are never hidden.
     init(id: String) {
         self.id = id
         title = id
+        description = nil
         order = .max
         note = nil
-        summary = SettingsSectionSummary()
     }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         title = try container.decodeIfPresent(String.self, forKey: .title) ?? id
+        description = try container.decodeIfPresent(String.self, forKey: .description)
         order = try container.decodeIfPresent(Int.self, forKey: .order) ?? 0
         note = try container.decodeIfPresent(String.self, forKey: .note)
-        summary = try container.decodeIfPresent(SettingsSectionSummary.self, forKey: .summary) ?? SettingsSectionSummary()
     }
 }
 

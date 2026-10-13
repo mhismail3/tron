@@ -227,7 +227,8 @@ struct KnowledgeDashboardView: View {
     /// word costs one request rather than one per keystroke.
     @State private var effectiveSearch = ""
     @State private var searchDebouncer = KnowledgeSearchDebouncer()
-    @State private var loading = false
+    /// A surface starts loading: its empty state waits for the first read.
+    @State private var loading = true
     @State private var error: String?
     @State private var loadingMore = false
     @State private var coverageStore = KnowledgeCoveragePresentationStore()

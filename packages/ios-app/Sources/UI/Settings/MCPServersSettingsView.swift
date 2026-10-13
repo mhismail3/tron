@@ -81,7 +81,8 @@ struct MCPServersSettingsView: View {
     @State private var servers: [MCPServerList.Server] = []
     @State private var serverErrorCount = 0
     @State private var selectedScope = "global"
-    @State private var loading = false
+    /// A surface starts loading: its empty state waits for the first read.
+    @State private var loading = true
     @State private var error: String?
     @State private var generation = 0
     @State private var showingAdd = false

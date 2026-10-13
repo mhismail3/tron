@@ -27,7 +27,7 @@ struct HostedNewSessionFixture: View {
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(original, token: "fixture-only-token")
-        if scenario != "project-dashboard" { try! profiles.save(replacement, token: "fixture-only-replacement-token", selecting: false) }
+        try! profiles.save(replacement, token: "fixture-only-replacement-token", selecting: false)
         let model = AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { request in
             NewSessionFixtureSocket(gateway: gateway, replacement: request.url?.host == "replacement.example.test")
         }), profiles: profiles, cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "new-session-fixture")))
@@ -44,14 +44,10 @@ struct HostedNewSessionFixture: View {
         _model = State(initialValue: model)
     }
     var body: some View {
-        Group {
-            if scenario == "project-dashboard" {
-                SessionShellView().safeAreaInset(edge: .bottom) { fixtureStatus }
-            } else { NavigationStack { fixtureStatus } }
-        }
+        NavigationStack { fixtureStatus }
         .environment(model)
         .tronPresentation()
-        .tronManagedSheet(isPresented: Binding(get: { ready && showing && scenario != "project-dashboard" }, set: { showing = $0 }), identity: "fixture.new-session") {
+        .tronManagedSheet(isPresented: Binding(get: { ready && showing }, set: { showing = $0 }), identity: "fixture.new-session") {
             NewSessionSheet(initialDraftText: "Fixture original prompt") { route in
                 callbacks += 1; owned = model.ownsNavigationRoute(route)
                 showing = false
@@ -159,8 +155,7 @@ private actor NewSessionFixtureGateway {
                     "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
                     "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
             ])]),
-            "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10),
-                "summary": .object(["essential": .array([])])])]),
+            "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10)])]),
             "diagnostics": .array([])
         ])
     }
@@ -204,6 +199,16 @@ private actor NewSessionFixtureGateway {
         case "session.list", "session.listUpdated": return .object(["sessions": .array([])])
         case "system.metadata": return .object([:])
         case "attention.list": return .object(["items": .array([])])
+        // The provider catalog the shared model picker presents the served choice from.
+        case "provider.list":
+            return .object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),
+                "configured": .bool(true), "authMethods": .array([]), "modelCount": .number(1)])])])
+        case "model.list":
+            return .object(["models": .array([.object(["provider": .string("fixture"), "id": .string("project-pro"),
+                "name": .string("Project Pro"), "reasoning": .bool(false), "input": .array([.string("text")]),
+                "contextWindow": .number(8192), "maxTokens": .number(1024), "available": .bool(true), "virtual": .bool(false)])]),
+                "nextCursor": .null])
+        case "model.recent": return .object(["models": .array([])])
         case "filesystem.list": return .object(["path": params["path"] ?? .string("/fixture/original"), "entries": .array([.object(["name": .string("replacement"), "path": .string("/fixture/replacement"), "kind": .string("directory"), "hidden": .bool(false)])])])
         default: return nil
         }

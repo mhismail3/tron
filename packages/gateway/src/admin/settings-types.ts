@@ -21,7 +21,7 @@ export type Writer = "ui" | "home" | "worker" | "agent";
 export type Direction = "widen" | "narrow";
 export type Timing = "fixed" | "live";
 export type Effect = "next-turn" | "next-request" | "new-chat" | "reload" | "restart" | "next-memory-pass" | "next-compaction" | "next-change" | "delegate";
-export const CONTROLS = ["toggle", "choice", "number", "text", "secret", "list", "catalog", "readOnly"] as const;
+export const CONTROLS = ["toggle", "choice", "number", "text", "secret", "list", "checklist", "catalog", "readOnly"] as const;
 export type Control = typeof CONTROLS[number];
 /** The renderer contract the Gateway speaks (doc 7.5). A client names the
  * controls it implements and its version; anything else falls back. */
@@ -50,8 +50,12 @@ export interface ValueType {
   /** A layer value that modifies the value below it rather than replacing it.
    * pi's `defaultTools` `+name`/`-name` lists are the one such type today. */
   compose?(below: unknown, value: unknown): unknown;
+  /** For a composing type: how a layer stores a chosen value, given the value
+   * composed below it and what the layer holds now. Undefined: hold nothing. */
+  encode?(value: unknown, below: unknown, current: unknown): unknown;
   /** Static options for `choice` controls. */
-  options?: readonly { value: unknown; label: string }[];
+  /** A choice's `detail` is one line on what choosing it changes. */
+  options?: readonly { value: unknown; label: string; detail?: string }[];
   range?: { min: number; max: number; step?: number; unit?: string };
 }
 
@@ -86,7 +90,7 @@ export const types = {
       range: { min, max, ...(step ? { step } : {}), unit },
     };
   },
-  choice(values: readonly { value: string; label: string }[], ordered = false): ValueType {
+  choice(values: readonly { value: string; label: string; detail?: string }[], ordered = false): ValueType {
     const allowed = values.map(option => option.value);
     return {
       kind: ordered ? "orderedChoice" : "choice",
@@ -154,7 +158,7 @@ export function sameAsHomeChoice(inner: ValueType): ValueType {
     kind: `${inner.kind}OrSameAsHome`,
     validate: (value, label, context) => isSameAsHome(value) ? { sameAs: "home" } : inner.validate(value, label, context),
     format: (value, context) => isSameAsHome(value) ? "Same as Home" : inner.format(value, context),
-    ...(inner.options ? { options: [{ value: { sameAs: "home" }, label: "Same as Home" }, ...inner.options] } : {}),
+    ...(inner.options ? { options: [{ value: { sameAs: "home" }, label: "Same as Home", detail: "Uses Home's own choice" }, ...inner.options] } : {}),
   };
 }
 
@@ -164,6 +168,9 @@ export function isSameAsHome(value: unknown): value is { sameAs: "home" } {
 
 const TOOL_ENTRY = /^[+-]?[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 export const DEFAULT_TOOL_NAMES = ["read", "bash", "edit", "write"];
+/** pi's built-in tools (`allToolNames` in pi's core/tools, which pi does not
+ * export). The tool catalog's integration test holds this to a live session. */
+export const PI_BUILTIN_TOOL_NAMES = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"];
 
 function isToolModifier(entry: string) {
   return entry.startsWith("+") || entry.startsWith("-");
@@ -193,6 +200,19 @@ export function toolSelectionType(): ValueType {
       if (base && entries.length > 0 && entries.every(isToolModifier)) return applyToolModifiers([...base], entries);
       return applyToolModifiers(entries.filter(entry => !isToolModifier(entry)).length > 0 || entries.length === 0
         ? entries.filter(entry => !isToolModifier(entry)) : [...DEFAULT_TOOL_NAMES], entries);
+    },
+    // A chosen selection keeps the layer's form: a layer of `+name`/`-name`
+    // entries (or one holding nothing) stays relative to the layers below it, so
+    // a later Mac change still flows through; a plain list stays a plain list.
+    encode: (value, below, current) => {
+      const chosen = value as string[];
+      if (chosen.some(isToolModifier)) return chosen;
+      const stored = Array.isArray(current) ? current as string[] : [];
+      if (stored.length > 0 && !stored.every(isToolModifier)) return chosen;
+      const base = Array.isArray(below) ? below as string[] : DEFAULT_TOOL_NAMES;
+      const entries = [...chosen.filter(name => !base.includes(name)).map(name => `+${name}`),
+        ...base.filter(name => !chosen.includes(name)).map(name => `-${name}`)];
+      return entries.length > 0 ? entries : undefined;
     },
   };
 }

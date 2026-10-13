@@ -13,17 +13,18 @@ struct ProjectSettingsRoute: Identifiable {
 struct ProjectSettingsLink: View {
     let cwd: String
     let profileID: String
+    /// The row's glyph matches the rows around it.
+    var accent: Color = .tronEmerald
 
     var body: some View {
         TronProgressiveSheetLink(
-            accessibilityLabel: "Project settings",
+            accessibilityLabel: "Project Settings",
             identity: "project.settings.\(profileID).\(cwd)",
             accent: .tronEmerald,
             destination: { ProjectSettingsContent(cwd: cwd, profileID: profileID) }
         ) {
-            TronSettingsRow(icon: "folder.badge.gearshape", title: "Project settings",
-                            subtitle: URL(fileURLWithPath: cwd).lastPathComponent,
-                            accent: .tronEmerald)
+            TronSettingsRow(icon: "folder.badge.gearshape", title: "Project Settings",
+                            subtitle: URL(fileURLWithPath: cwd).lastPathComponent, accent: accent)
         }
         .accessibilityIdentifier("project-settings-link")
     }
@@ -49,6 +50,7 @@ struct ProjectSettingsSheet: View {
         .tronTopBlur(.sheet)
         .tronPresentation()
         .tronSettingsLayout()
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }
 }
@@ -91,57 +93,68 @@ struct ProjectSettingsContent: View {
                         Task { await model.switchGateway(profile) }
                     }
                 } else {
+                    // Every header row is present from the first frame, so loading
+                    // fills values in place instead of inserting rows (no flicker).
                     TronSettingsGroup("Project", detail: cwd, accent: .tronEmerald) {
-                        if let trust {
-                            TronSettingsRow(icon: trust.stateIcon, title: trust.stateTitle, subtitle: trust.stateDetail)
-                        }
-                        if let git {
-                            TronSettingsDivider()
-                            TronValueRow(icon: "arrow.triangle.branch", title: "Workspace",
-                                         value: git.isRepository ? (git.branch ?? "Detached HEAD") : "No repository")
-                            if git.isDirty {
-                                TronSettingsCaption("The workspace has uncommitted changes.")
+                        TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: trust?.stateTitle ?? "Trust",
+                                        subtitle: trust?.stateDetail ?? " ", subtitleColor: .tronTextSecondary) {
+                            TronProgressiveSheetLink(accessibilityLabel: "Review trust",
+                                destination: { TrustSettingsView(target: TrustTarget(cwd: cwd)) }) {
+                                TronInlineActionLabel("Review")
                             }
                         }
                         TronSettingsDivider()
-                        TronProgressiveSheetLink(accessibilityLabel: "Review trust", accent: .tronAmber,
-                            destination: { TrustSettingsView(target: TrustTarget(cwd: cwd)) }) {
-                            TronSettingsRow(icon: "checkmark.shield", title: "Review trust", accent: .tronAmber)
+                        TronSettingsRow(icon: "arrow.triangle.branch", title: "Workspace",
+                                        subtitle: git.map { !$0.isRepository ? "Not a Git repository"
+                                            : $0.isDirty ? "Uncommitted changes" : "No uncommitted changes" } ?? " ",
+                                        subtitleColor: .tronTextSecondary) {
+                            TronDynamicValue(text: git.map { $0.isRepository ? ($0.branch ?? "Detached HEAD") : "—" } ?? "")
                         }
                     }
                     if let error {
                         TronSettingsNotice(message: error, retry: { reload &+= 1 })
                     }
-                    SettingsRendererView(target: .object(["kind": .string("project"), "cwd": .string(cwd)]),
-                                         writeLayer: "project", embedded: true, externalControlKeys: ["sources.packages"], projectCWD: cwd,
-                                         sectionSupplement: { section in
-                        AnyView(Group {
-                            if section == "sources" {
-                                TronProgressiveSheetLink(accessibilityLabel: "Packages", accent: .tronEmerald,
-                                    destination: { ExtensionsSettingsView(projectCWD: cwd) }) {
-                                    TronSettingsRow(icon: "shippingbox", title: "Packages",
-                                                    subtitle: "Installed for this project", accent: .tronEmerald)
-                                }
-                            } else if section == "run" {
-                                TronProgressiveSheetLink(accessibilityLabel: "Hooks", accent: .tronEmerald,
-                                    destination: { HooksSettingsView(projectCWD: cwd) }) {
-                                    TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks",
-                                                    subtitle: "Loaded project event handlers", accent: .tronEmerald)
-                                }
-                            }
-                        })
-                    })
+                    let sections = (model.settingsSnapshot(for: SettingsTarget.project(cwd: cwd).gatewayTarget).map { SettingsRendererView.sections($0.resolution) } ?? [])
+                        .filter { $0.id != "sources" }
+                    SettingsGroupCard(.agent) {
+                        SettingsSectionLinks(ids: sections.map(\.id), sections: sections, target: SettingsTarget.project(cwd: cwd).gatewayTarget,
+                                             writeLayer: "project", projectCWD: cwd)
+                    }
+                    SettingsGroupCard(.tools) {
+                        TronProgressiveSheetLink(accessibilityLabel: "MCP Servers",
+                            destination: { MCPServersSettingsView(projectCWD: cwd, initialScope: "project") }) {
+                            TronSettingsRow(icon: "server.rack", title: "MCP Servers", subtitle: "Servers this project adds",
+                                            subtitleColor: .tronTextSecondary)
+                        }
+                        TronSettingsDivider()
+                        TronProgressiveSheetLink(accessibilityLabel: "Extensions",
+                            destination: { ExtensionsSettingsView(projectCWD: cwd) }) {
+                            TronSettingsRow(icon: "shippingbox", title: "Extensions", subtitle: "Packages installed for this project",
+                                            subtitleColor: .tronTextSecondary)
+                        }
+                        TronSettingsDivider()
+                        TronProgressiveSheetLink(accessibilityLabel: "Hooks",
+                            destination: { HooksSettingsView(projectCWD: cwd) }) {
+                            TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks", subtitle: "Event handlers this project loads",
+                                            subtitleColor: .tronTextSecondary)
+                        }
+                    }
                     TronSettingsCaption("Project values live in this workspace's .pi files. Changes are staged when possible; Tron never commits them.")
                 }
             }
             .padding(20)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Project settings")
+        .tronNavigationTitle("Project Settings")
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active { generation &+= 1 }
         }
         .onDisappear { generation &+= 1 }
+        .task(id: PresentationActivityTaskID(source: model.settingsFreshness,
+                                             presentationActive: presentationActivity.allowsPresentationPublication)) {
+            guard presentationActivity.allowsPresentationPublication, model.selectedGatewayProfileID() == profileID else { return }
+            try? await model.refreshSettingsSnapshot(for: SettingsTarget.project(cwd: cwd).gatewayTarget)
+        }
         .task(id: PresentationActivityTaskID(source: readID,
                                            presentationActive: presentationActivity.allowsPresentationPublication)) {
             await load()

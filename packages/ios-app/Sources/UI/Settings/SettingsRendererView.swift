@@ -4,36 +4,31 @@ import TronMobileCore
 /// The generic settings renderer (gateway docs/settings-model.md F1, 7.1-7.5).
 /// Every word, section, order, control and badge is Gateway data from
 /// `settings.resolve`; this view decides layout and style only, so a key, a
-/// section or a choice the Gateway adds needs no app change. Surfaces adopt it
-/// in slices 8 and 11 (#766, #769); `writeLayer` nil renders read-only.
+/// section or a choice the Gateway adds needs no app change. It reads the
+/// target's shared `SettingsSnapshot`, so a sheet opened from another surface
+/// shows what that surface already has, and only refreshes when it is stale.
+/// `writeLayer` nil with no `ownedLayers` renders read-only.
 struct SettingsRendererView: View {
     let target: JSONValue
     let writeLayer: String?
-    var embedded = false
     /// Ordered from the layer this surface prefers to the next owned layer.
     var ownedLayers: [String] = []
-    /// Receipt-aware Chat controls stay in their shared card. Their schema rows
-    /// retain provenance/reset actions without creating a second value editor.
-    var externalControlKeys: Set<String> = []
     var projectCWD: String? = nil
-    /// Hand-built account, package and setup flows supplement schema rows, never replace them.
-    var sectionSupplement: ((String) -> AnyView)? = nil
-    /// Pairing/account repair must remain reachable while the schema cannot load.
-    var unresolvedSupplement: AnyView? = nil
+    let presentation: SettingsRendererPresentation
+    /// Inside a caller's scroll view (a hand-built sheet that shows a section's keys).
+    var embedded = false
+    /// `.keys` rows that follow a caller's row get their divider only once loaded,
+    /// so a card never shows a dangling separator.
+    var dividerBeforeKeys = false
 
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
 
-    @State private var resolution: SettingsResolution?
     @State private var loadError: String?
-    @State private var loadGeneration = 0
+    @State private var retryTick = 0
     @State private var previewGeneration = 0
-    @State private var reloadTick = 0
-    @State private var search = ""
     @State private var sliderPresentation = ConfigurationSliderPresentation()
-    @State private var expanded: Set<String> = []
-    @State private var showsAll = false
     /// Gateway refusals of a dry run, shown under their row; nothing was applied.
     @State private var rowErrors: [String: String] = [:]
     @State private var changingID: String?
@@ -53,22 +48,21 @@ struct SettingsRendererView: View {
         let message: String
     }
 
-    private struct LoadID: Hashable {
+    private struct RefreshID: Hashable {
         let target: JSONValue
-        let invalidationGeneration: Int
-        let foregroundGeneration: Int
-        let reloadTick: Int
+        let freshness: SettingsFreshness
+        let retryTick: Int
     }
+
+    private var snapshot: SettingsSnapshot? { model.settingsSnapshot(for: target) }
 
     var body: some View {
         Group {
-            if embedded {
+            if embedded || isInline {
                 rendererContents
             } else {
-                ScrollView(.vertical, showsIndicators: true) {
-                    rendererContents
-                }
-                .tronScrollEdgeChrome()
+                ScrollView(.vertical, showsIndicators: true) { rendererContents }
+                    .tronScrollEdgeChrome()
             }
         }
         .tronConfigurationSliderHost(sliderPresentation)
@@ -94,271 +88,269 @@ struct SettingsRendererView: View {
                 SettingsView()
             }
         }
-        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
-            if !active {
-                loadGeneration &+= 1
-                retirePreview()
-            }
-        }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in if !active { retirePreview() } }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in retirePreview() }
         .onChange(of: model.foregroundReconciliationGeneration) { _, _ in retirePreview() }
         .onChange(of: target) { _, _ in
             retirePreview()
-            resolution = nil
             rowErrors = [:]
         }
-        .onDisappear {
-            loadGeneration &+= 1
-            retirePreview()
-        }
+        .onDisappear { retirePreview() }
         .task(id: PresentationActivityTaskID(
-            source: LoadID(target: target, invalidationGeneration: model.settingsInvalidationGeneration,
-                           foregroundGeneration: model.foregroundReconciliationGeneration, reloadTick: reloadTick),
+            source: RefreshID(target: target, freshness: model.settingsFreshness, retryTick: retryTick),
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             guard presentationActivity.allowsPresentationPublication else { return }
-            await load()
+            await refresh()
         }
     }
 
+    private var isInline: Bool { if case .keys = presentation { true } else { false } }
+
+    @ViewBuilder
     private var rendererContents: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            TronSearchBar(text: $search, prompt: "Search settings")
-                .accessibilityIdentifier("settings-renderer-search")
-            if let resolution {
-                content(resolution)
-            } else if let failure = loadError {
-                TronPlaceholderState(title: "Settings Unavailable", detail: failure, icon: "slider.horizontal.3",
-                                     accent: .tronAmber, actionTitle: "Reload", action: reload)
-                    .frame(maxWidth: .infinity)
-            } else {
-                TronLoadingState(label: "Loading settings…")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        if isInline {
+            // Rows inside a caller's card: no states of their own while loading.
+            // Before its rows arrive it is still a (zero-height) view, because an
+            // empty one never appears and so would never start its own read.
+            if let snapshot { content(snapshot) } else { Color.clear.frame(height: 0) }
+        } else {
+            VStack(alignment: .leading, spacing: 20) {
+                if let snapshot {
+                    content(snapshot)
+                } else if let failure = loadError {
+                    TronPlaceholderState(title: "Settings Unavailable", detail: failure, icon: "slider.horizontal.3",
+                                         accent: .tronAmber, actionTitle: "Reload") { loadError = nil; retryTick &+= 1 }
+                        .frame(maxWidth: .infinity)
+                } else {
+                    TronLoadingState(label: "Loading settings…")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            if resolution == nil, let unresolvedSupplement {
-                unresolvedSupplement
-            }
+            .padding(embedded ? 0 : 20)
         }
-        .padding(embedded ? 0 : 20)
     }
 
     @ViewBuilder
-    private func content(_ resolution: SettingsResolution) -> some View {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !query.isEmpty {
-            searchResults(resolution, query: query)
-        } else {
-            ForEach(Self.sections(resolution)) { section in
-                sectionView(section, keys: keys(resolution, in: section.id))
+    private func content(_ snapshot: SettingsSnapshot) -> some View {
+        let resolution = snapshot.resolution
+        switch presentation {
+        case .section(let id):
+            sectionDetail(id, resolution: resolution, options: snapshot.options)
+        case .instances(let key):
+            instancesDetail(key, resolution: resolution, options: snapshot.options)
+        case .detail(let id):
+            if let setting = resolution.keys.first(where: { $0.id == id }) {
+                TronSettingsGroup(setting.presentation?.label ?? setting.key) {
+                    row(setting, resolution: resolution, options: snapshot.options, detailed: true, actionsAsRows: true)
+                }
             }
-            TronToggleRow(icon: "list.bullet", title: "All settings", detail: "Every setting, by section", isOn: $showsAll)
-                .tronGlassSurface(accent: .tronEmerald)
-                .accessibilityIdentifier("settings-renderer-all")
-            if showsAll {
-                // One child group: its sections reuse the summary sections' ids.
-                VStack(alignment: .leading, spacing: 20) {
-                    ForEach(Self.sections(resolution)) { section in
-                        TronSettingsGroup(section.title, detail: section.note) {
-                            rows(keys(resolution, in: section.id), resolution: resolution)
+        case .keys(let ids):
+            let chosen = ids.flatMap { id in resolution.keys.filter { $0.key == id } }
+            if dividerBeforeKeys, !chosen.isEmpty { TronSettingsDivider() }
+            rows(chosen, resolution: resolution, options: snapshot.options, detailed: false)
+        }
+    }
+
+    // MARK: Sheets
+
+    /// One section on its own sheet: the essential keys first, then each Gateway
+    /// subgroup and the remaining advanced keys as standard titled groups. A key
+    /// served once per project or model gets its own group, titled by its label
+    /// with its help once, and one row per instance; a key with many instances
+    /// is one row that opens them on their own sheet.
+    @ViewBuilder
+    private func sectionDetail(_ id: String, resolution: SettingsResolution, options: [String: SettingsOptionsResponse]) -> some View {
+        let section = Self.sections(resolution).first { $0.id == id } ?? SettingsRendererSection(id: id)
+        let keys = Self.sorted(resolution.keys.filter { $0.group == id })
+        VStack(alignment: .leading, spacing: 20) {
+            ForEach(Array(Self.detailGroups(section, keys: keys).enumerated()), id: \.offset) { index, group in
+                Group {
+                    // A key with many instances is one row, titled by the key itself.
+                    if let many = group.manyInstances {
+                        TronGlassCard { instancesLink(many, count: group.keys.count) }
+                    } else {
+                        TronSettingsGroup(group.title, detail: group.detail ?? (index == 0 ? section.note : nil)) {
+                            VStack(spacing: 0) {
+                                rows(group.keys, resolution: resolution, options: options, detailed: true, instanced: group.instanced)
+                            }
                         }
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("settings-all-\(section.id)")
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("settings-detail-\(id)-\(index)")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("settings-section-\(id)-detail")
+    }
+
+    /// Every instance of one key. Instances that each govern another setting are
+    /// grouped by that setting's section and described by its help.
+    @ViewBuilder
+    private func instancesDetail(_ key: String, resolution: SettingsResolution, options: [String: SettingsOptionsResponse]) -> some View {
+        let instances = resolution.keys.filter { $0.key == key }
+        let governed = { (instance: ResolvedSetting) in
+            instance.qualifiers?["key"].flatMap { governedKey in resolution.keys.first { $0.key == governedKey } }
+        }
+        let sections = Self.sections(resolution)
+        let groups = Dictionary(grouping: instances) { governed($0)?.group ?? "" }
+        VStack(alignment: .leading, spacing: 20) {
+            if let help = instances.first?.presentation?.help { TronSettingsCaption(help) }
+            ForEach(sections.map(\.id).filter { groups[$0] != nil } + (groups[""] == nil ? [] : [""]), id: \.self) { group in
+                TronSettingsGroup(sections.first { $0.id == group }?.title ?? (instances.first?.presentation?.label ?? key)) {
+                    VStack(spacing: 0) {
+                        let members = (groups[group] ?? []).sorted { (RowTitle.instance($0), $0.id) < (RowTitle.instance($1), $1.id) }
+                        ForEach(Array(members.enumerated()), id: \.element.id) { index, instance in
+                            if index > 0 { TronSettingsDivider() }
+                            row(instance, resolution: resolution, options: options, detailed: true, instanced: true,
+                                instanceHelp: governed(instance)?.presentation?.help)
+                        }
                     }
                 }
             }
         }
-    }
-
-    // MARK: Sections
-
-    private func sectionView(_ section: SettingsRendererSection, keys: [ResolvedSetting]) -> some View {
-        let isExpanded = expanded.contains(section.id)
-        let summary = section.summary
-        return TronSettingsGroup(section.title, detail: section.note) {
-            // The summary row is the section's expand control: calm by default, every key one tap away.
-            Button {
-                if isExpanded { expanded.remove(section.id) } else { expanded.insert(section.id) }
-            } label: {
-                TronSettingsRow(
-                    icon: nil,
-                    title: summary.essential.map(\.display).joined(separator: " · ").nonEmpty ?? (keys.count == 1 ? "1 setting" : "\(keys.count) settings"),
-                    subtitle: summary.essential.isEmpty ? nil : summary.essential.map(\.label).joined(separator: " · ")
-                ) {
-                    TronInlineActionLabel(isExpanded ? "Show less" : "Show all")
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint(isExpanded ? "Shows the summary only" : "Shows every setting in \(section.title)")
-            .accessibilityIdentifier("settings-section-\(section.id)-expand")
-            ForEach(Array(summary.overrides.enumerated()), id: \.offset) { _, override in
-                TronSettingsDivider()
-                TronSettingsRow(icon: nil, title: override.label, subtitle: override.display) {
-                    SettingsBadgeView(badge: SettingsBadge(kind: "layer", label: override.layerLabel, detail: nil))
-                }
-            }
-            if !summary.pending.isEmpty {
-                TronSettingsDivider()
-                TronSettingsRow(
-                    icon: "hourglass",
-                    title: summary.pending.count == 1 ? "1 waiting for you" : "\(summary.pending.count) waiting for you",
-                    subtitle: summary.pending.map { "\($0.requester): \($0.labels.joined(separator: ", "))" }.joined(separator: "\n"),
-                    accent: .tronAmber
-                )
-                .accessibilityIdentifier("settings-section-\(section.id)-pending")
-            }
-            ForEach(summary.recent, id: \.changeId) { change in
-                TronSettingsDivider()
-                TronSettingsRow(icon: "clock.arrow.circlepath", title: "\(change.actor) changed \(change.label)", subtitle: change.reason)
-            }
-            if summary.moreRecent > 0 {
-                TronSettingsDivider()
-                TronSettingsRow(icon: nil, title: "+\(summary.moreRecent) more changes")
-            }
-            if isExpanded {
-                TronSettingsDivider()
-                expandedRows(keys)
-            }
-            if let sectionSupplement {
-                sectionSupplement(section.id)
-            }
-        }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("settings-section-\(section.id)")
+        .accessibilityIdentifier("settings-instances-\(key)-detail")
     }
 
-    @ViewBuilder
-    private func expandedRows(_ keys: [ResolvedSetting]) -> some View {
-        let essential = keys.filter { $0.presentation?.importance == "essential" }
-        let advanced = keys.filter { $0.presentation?.importance != "essential" }
-        if let resolution {
-            rows(essential, resolution: resolution)
-            if !advanced.isEmpty {
-                Text("Advanced")
-                    .font(TronTypography.sans(size: TronTypography.sizeSecondary, weight: .semibold))
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-                    .padding(.top, 12)
-                rows(advanced, resolution: resolution)
-            }
+    private func instancesLink(_ setting: ResolvedSetting, count: Int) -> some View {
+        TronProgressiveSheetLink(accessibilityLabel: setting.presentation?.label ?? setting.key,
+                                 identity: "settings.instances.\(setting.key)") {
+            SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers, projectCWD: projectCWD,
+                                 presentation: .instances(key: setting.key))
+                .tronNavigationTitle(setting.presentation?.label ?? setting.key)
+        } label: {
+            TronSettingsRow(icon: "list.bullet.indent", title: setting.presentation?.label ?? setting.key,
+                            subtitle: setting.presentation?.help, subtitleColor: .tronTextSecondary)
+        }
+        .accessibilityIdentifier("settings-instances-\(setting.key)-open")
+    }
+
+    private struct DetailGroup {
+        let title: String
+        var detail: String? = nil
+        var instanced = false
+        var keys: [ResolvedSetting]
+        /// One key with more instances than a group should list inline.
+        var manyInstances: ResolvedSetting? { instanced && keys.count > SettingsRendererView.inlineInstanceLimit ? keys.first : nil }
+    }
+
+    static let inlineInstanceLimit = 8
+
+    private static func detailGroups(_ section: SettingsRendererSection, keys: [ResolvedSetting]) -> [DetailGroup] {
+        var groups: [DetailGroup] = []
+        func add(_ title: String, _ key: ResolvedSetting, detail: String? = nil, instanced: Bool = false) {
+            if let index = groups.firstIndex(where: { $0.title == title && $0.instanced == instanced }) { groups[index].keys.append(key) }
+            else { groups.append(DetailGroup(title: title, detail: detail, instanced: instanced, keys: [key])) }
+        }
+        let single = keys.filter { instanceCount($0, in: keys) == 1 }
+        for key in single where key.subgroup == nil && key.presentation?.importance == "essential" { add(section.title, key) }
+        for key in single { if let subgroup = key.subgroup { add(subgroup, key) } }
+        for key in keys where instanceCount(key, in: keys) > 1 {
+            let many = instanceCount(key, in: keys) > inlineInstanceLimit
+            add(key.presentation?.label ?? key.key, key, detail: many ? nil : key.presentation?.help, instanced: true)
+        }
+        for key in single where key.subgroup == nil && key.presentation?.importance != "essential" { add("Advanced", key) }
+        return groups
+    }
+
+    private static func instanceCount(_ setting: ResolvedSetting, in keys: [ResolvedSetting]) -> Int {
+        keys.reduce(0) { $0 + ($1.key == setting.key ? 1 : 0) }
+    }
+
+    private enum RowTitle {
+        static func instance(_ setting: ResolvedSetting) -> String {
+            SettingsRendererRow.instanceName(setting) ?? setting.id
         }
     }
 
-    /// Rows in Gateway order, with each subgroup's heading before its first row.
+    // MARK: Rows
+
+    private func layerEditor(for setting: ResolvedSetting) -> LayerEditor? {
+        writableLayer(for: setting) == nil
+            ? setting.layers.compactMap({ LayerEditor(rawValue: $0.layer) }).first(where: { $0 != .project || projectCWD != nil })
+            : nil
+    }
+
+    /// A row offers one control. A detailed row whose source also offers actions
+    /// (reset, Apply again) previews its value and opens its own sheet instead.
+    private func detailDestination(_ setting: ResolvedSetting) -> AnyView? {
+        guard setting.badges.contains(where: { badge in
+            badge.action.map { ["useCurrentDefault", "followDefault", "applyAgain"].contains($0.kind) } ?? false
+        }) else { return nil }
+        return AnyView(SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
+                                            projectCWD: projectCWD, presentation: .detail(setting.id))
+            .tronNavigationTitle(setting.presentation?.label ?? setting.key))
+    }
+
+    /// Rows in Gateway order. Detailed rows (sub-sheets) carry source tags, help and
+    /// the row's actions; primary rows show only the title and its control.
     @ViewBuilder
-    private func rows(_ keys: [ResolvedSetting], resolution: SettingsResolution) -> some View {
+    private func rows(_ keys: [ResolvedSetting], resolution: SettingsResolution, options: [String: SettingsOptionsResponse],
+                      detailed: Bool, instanced: Bool = false) -> some View {
         ForEach(Array(keys.enumerated()), id: \.element.id) { index, setting in
-            if let subgroup = setting.subgroup, index == 0 || keys[index - 1].subgroup != subgroup {
-                Text(subgroup)
-                    .font(TronTypography.sans(size: TronTypography.sizeSecondary, weight: .semibold))
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-                    .padding(.top, 12)
-            } else if index > 0 {
-                TronSettingsDivider()
-            }
-            SettingsRendererRow(
-                setting: setting,
-                target: target,
-                editable: writableLayer(for: setting) != nil,
-                externalControl: externalControlKeys.contains(setting.key),
-                dependencyDisplay: Self.dependencyDisplay(setting, in: resolution),
-                error: rowErrors[setting.id],
-                onChange: { value in change(setting, value: value) },
-                onApplyAgain: { changeID in applyAgain(changeID, rowID: setting.id) }
-            )
-            // Keep the presenting control's identity while its accepted change
-            // completes; replacing it with read-only would retire its child sheet.
-            .disabled(changingID != nil || previewingID != nil)
-            if writableLayer(for: setting) == nil,
-               let editor = setting.layers.compactMap({ LayerEditor(rawValue: $0.layer) })
-                .first(where: { $0 != .project || projectCWD != nil }) {
-                Button { layerEditor = editor } label: { TronInlineActionLabel(editor.title) }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("\(settingsRowIdentifier(setting))-edit-layer")
-                    .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-                    .padding(.bottom, 12)
-            }
+            if index > 0 { TronSettingsDivider() }
+            row(setting, resolution: resolution, options: options, detailed: detailed, instanced: instanced)
         }
     }
 
-    private func searchResults(_ resolution: SettingsResolution, query: String) -> some View {
-        let matches = resolution.keys.filter { setting in
-            [setting.presentation?.label, setting.key, setting.presentation?.help, setting.display]
-                .compactMap { $0 }
-                .contains { $0.localizedCaseInsensitiveContains(query) }
-        }
-        return VStack(alignment: .leading, spacing: 20) {
-            if matches.isEmpty {
-                TronSettingsCaption("No setting matches \u{201C}\(query)\u{201D}.")
-            }
-            ForEach(Self.sections(resolution).filter { section in matches.contains { $0.group == section.id } }) { section in
-                TronSettingsGroup(section.title) {
-                    rows(Self.sorted(matches.filter { $0.group == section.id }), resolution: resolution)
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("settings-renderer-results")
+    private func row(_ setting: ResolvedSetting, resolution: SettingsResolution, options: [String: SettingsOptionsResponse],
+                     detailed: Bool, instanced: Bool = false, instanceHelp: String? = nil, actionsAsRows: Bool = false) -> some View {
+        let editor = layerEditor(for: setting)
+        return SettingsRendererRow(
+            setting: setting,
+            target: target,
+            editable: writableLayer(for: setting) != nil,
+            detailed: detailed,
+            instanced: instanced,
+            detailDestination: detailed && !actionsAsRows ? detailDestination(setting) : nil,
+            actionsAsRows: actionsAsRows,
+            instanceHelp: instanceHelp,
+            options: options[setting.id],
+            error: rowErrors[setting.id],
+            layerEditorTitle: editor?.title,
+            onEditLayer: { if let editor { layerEditor = editor } },
+            onChange: { value in change(setting, value: value) },
+            onApplyAgain: { changeID in applyAgain(changeID, rowID: setting.id) }
+        )
+        // Keep the presenting control's identity while its accepted change
+        // completes; replacing it with read-only would retire its child sheet.
+        .disabled(changingID != nil || previewingID != nil)
     }
 
     // MARK: Ordering
 
     /// The Gateway's sections, plus any group a key names that no section declares,
     /// so a value is never hidden.
-    private static func sections(_ resolution: SettingsResolution) -> [SettingsRendererSection] {
+    static func sections(_ resolution: SettingsResolution) -> [SettingsRendererSection] {
         let declared = resolution.sections.sorted { $0.order < $1.order }
         let known = Set(declared.map(\.id))
         let undeclared = resolution.keys.map(\.group).filter { !known.contains($0) }
         return declared + Array(Set(undeclared)).sorted().map { SettingsRendererSection(id: $0) }
     }
 
-    private func keys(_ resolution: SettingsResolution, in section: String) -> [ResolvedSetting] {
-        Self.sorted(resolution.keys.filter { $0.group == section })
-    }
-
     private static func sorted(_ keys: [ResolvedSetting]) -> [ResolvedSetting] {
         keys.sorted { ($0.presentation?.order ?? .max, $0.id) < ($1.presentation?.order ?? .max, $1.id) }
     }
 
-    /// The displays of the keys an options source depends on: when one changes,
-    /// the row asks the Gateway for its options again (doc 7.5).
-    private static func dependencyDisplay(_ setting: ResolvedSetting, in resolution: SettingsResolution) -> String {
-        (setting.presentation?.optionsSource?.dependsOn ?? []).map { key in
-            resolution.keys.first { $0.key == key }?.display ?? ""
-        }.joined(separator: "|")
-    }
-
     // MARK: Reads and changes
 
-    private func reload() {
-        loadError = nil
-        reloadTick &+= 1
-    }
-
-    private func load() async {
-        let foreground = model.foregroundReconciliationGeneration
+    /// Brings the shared snapshot up to date. A failure shows only while there is
+    /// nothing to show; otherwise the current snapshot stays and the error is surfaced.
+    private func refresh() async {
         let identity = model.knowledgePresentationIdentity
         let activity = presentationActivity
-        guard activity.allowsPresentationPublication, !Task.isCancelled else { return }
-        loadGeneration &+= 1
-        let ticket = loadGeneration
-        func current() -> Bool {
-            ticket == loadGeneration && !Task.isCancelled && identity == model.knowledgePresentationIdentity
-                && foreground == model.foregroundReconciliationGeneration
-                && activity == presentationActivity && activity.allowsPresentationPublication
-        }
         do {
-            let value = try await model.resolveSettingsForRenderer(target: target)
-            guard current() else { return }
-            resolution = value
+            try await model.refreshSettingsSnapshot(for: target)
+            guard identity == model.knowledgePresentationIdentity, activity == presentationActivity else { return }
             loadError = nil
         } catch is CancellationError {
             return
         } catch {
-            guard current() else { return }
-            if resolution == nil { loadError = error.localizedDescription } else { model.presentError(error) }
+            guard identity == model.knowledgePresentationIdentity, activity == presentationActivity,
+                  activity.allowsPresentationPublication else { return }
+            if snapshot == nil { loadError = error.localizedDescription } else { model.presentError(error) }
         }
     }
 
@@ -442,7 +434,7 @@ struct SettingsRendererView: View {
                 guard identity == model.knowledgePresentationIdentity, requestTarget == target,
                       admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
                 rowErrors[rowID] = nil
-                reloadTick &+= 1
+                model.noteSettingsChanged()
             } catch is CancellationError {
                 return
             } catch {
@@ -473,7 +465,7 @@ struct SettingsRendererView: View {
                 try await model.changeSetting(target: requestTarget, change: change)
                 guard identity == model.knowledgePresentationIdentity, requestTarget == target,
                       admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
-                reloadTick &+= 1
+                model.noteSettingsChanged()
             } catch is CancellationError {
                 return
             } catch {
@@ -485,38 +477,16 @@ struct SettingsRendererView: View {
     }
 }
 
-/// The same renderer on a managed native sheet; its caller owns the target,
-/// never a global/project scope picker.
-struct SettingsRendererSheet: View {
-    let target: JSONValue
-    let writeLayer: String
-    var projectCWD: String? = nil
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            SettingsRendererView(target: target, writeLayer: writeLayer, projectCWD: projectCWD)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .principal) { TronSheetTitle(title: "Settings") }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { dismiss() } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
-                        }
-                        .accessibilityLabel("Done")
-                        .accessibilityIdentifier("settings-renderer-done")
-                    }
-                }
-        }
-        .tronTopBlur(.sheet)
-        .presentationDragIndicator(.hidden)
-    }
-}
-
-private extension String {
-    var nonEmpty: String? { isEmpty ? nil : self }
+/// What a renderer shows. Surfaces choose; the Gateway still supplies every word.
+enum SettingsRendererPresentation: Hashable {
+    /// One section's sheet: every key, grouped, with sources, help and actions.
+    case section(String)
+    /// Every instance of one key on its own sheet (per project, per governed setting).
+    case instances(key: String)
+    /// Just these keys, as inline rows inside a caller's card.
+    case keys([String])
+    /// One key on its own sheet: its control, then each action as its own row.
+    case detail(String)
 }
 
 /// Converts a resolved row into the Gateway's identifier alphabet for UI tests.

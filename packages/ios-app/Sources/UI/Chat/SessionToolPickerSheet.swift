@@ -222,7 +222,6 @@ struct SessionToolPickerSheet: View {
                     icon: nil,
                     title: tool.title,
                     subtitle: tool.detail,
-                    subtitleLineLimit: 2,
                     accent: .tronSessionTeal
                 )
             }

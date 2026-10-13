@@ -187,7 +187,6 @@ struct ChatView: View {
         }
         .modifier(ChatRoutes(
             sessionID: sessionID,
-            projectCWD: model.sessionContextPresentation(for: sessionID)?.cwd,
             initialHistoryEntryID: initialHistoryEntryID,
             onForkCreated: onForkCreated,
             showContext: $sessionPresentation.showContext,
@@ -2832,17 +2831,14 @@ struct ChatView: View {
             }
         }
         ToolbarItem(placement: .primaryAction) {
-            // The route owns this choice even while Home status is loading.
-            // Home keeps direct Settings; ordinary chats enter through Manage Session.
-            Button {
-                if isHomeRoute { sessionPresentation.showSettings = true }
-                else { sessionPresentation.showContext = true }
-            } label: {
+            // Two surfaces: the context ring opens Manage Session/Home (this chat,
+            // its settings and project); the gear opens Settings (this Mac and iPhone).
+            Button { sessionPresentation.showSettings = true } label: {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                     .foregroundStyle(Color.tronEmerald)
             }
-            .accessibilityLabel(isHomeRoute ? "Settings" : "Manage Session")
+            .accessibilityLabel("Settings")
         }
     }
 

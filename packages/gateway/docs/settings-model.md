@@ -368,8 +368,7 @@ runtime setting. Existing chats without provenance do not acquire fabricated
 history. Fork and cold resume preserve the metadata and tool choice; a later
 canonical choice wins over an older SDK system frame.
 
-The resolver exposes source badges and `fixedAt`. Inherited snapshots do not
-count as explicit overrides in section summaries. A fixed-key Chat unset means
+The resolver exposes source badges and `fixedAt`. A fixed-key Chat unset means
 “Use the current default”: it resolves the lower layers once, records the source,
 and applies that exact value through the normal audit/approval path. Subsequent
 default changes still cannot move it. The generic iOS renderer understands this
@@ -511,7 +510,7 @@ Gateway serves it to clients; iOS holds no per-key code.
 | `subgroup` | An optional heading within the section (for example `Compaction`). |
 | `qualifiers` | Any of `role`, `model`, `provider`, `tool`, `project`, `connection`, `key`, `direction` (a floor override's direction). |
 | `type` | The value type and its static validation (range, pattern, length, item type). |
-| `options` | A static list of allowed values, or an `optionsSource`: a named Gateway source such as `catalog.models`, `catalog.thinkingLevels(model)` or `catalog.contextWindow(model)`, with the keys it depends on. |
+| `options` | A static list of allowed values, or an `optionsSource`: a named Gateway source such as `catalog.models`, `catalog.thinkingLevels(model)`, `catalog.contextWindow(model)` or `catalog.tools`, with the keys it depends on. `catalog.tools` offers a chat's live registry (less hidden tools); for a Mac or Project target, pi's built-in tools then the opt-in (`defaultActive: false`) tools the scope's extensions register, since other extension tools are active once registered whatever the selection says. A chosen name the catalog no longer offers stays listed, disabled, so it can be cleared. |
 | `layers` | The allowed layers, each with its storage binding (file and path, or session entry type). |
 | `builtin` | The built-in value, or `pi-default`. |
 | `timing` | `fixed` or `live`, or per direction `{ narrow, widen }` ([3.4](#34-timing)). |
@@ -528,7 +527,7 @@ Gateway serves it to clients; iOS holds no per-key code.
 |---|---|
 | `label`, `help` | The row title and a one-paragraph explanation, written for the maintainer. |
 | `order` | Position within its section and subgroup. |
-| `importance` | `essential` (in the section summary) or `advanced` (on demand). |
+| `importance` | `essential` (first on its section's sheet) or `advanced` (under Advanced). |
 | `control` | One of the fixed control primitives, with an optional `fallback` control for older clients. |
 | `unit`, `format` | How the Gateway formats `display` ("200K tokens", "3 retries"). |
 | `confirm` | Optional confirmation text when the maintainer's own tap changes a key whose tier would be `approve` for anyone else. |
@@ -583,7 +582,12 @@ open:
   resolves `modelOverrides ?? ordinary` on its merged settings.
 - **Relative values.** pi's `defaultTools` `+name`/`-name` lists modify the value
   below them. That is the value type's `compose`, so the resolver still takes the
-  top applied layer and composes it over the layer below.
+  top applied layer and composes it over the layer below. A change names the
+  selection it wants; the type's `encode` stores it in the layer's own form: a
+  Mac or Project layer holding modifiers (or nothing) keeps `+name`/`-name`
+  entries relative to the layers below, so a later Mac change still flows into
+  the project, and a selection equal to the one below leaves the layer unset. A
+  plain list stays plain. Direction compares what each value selects.
 - **Which keys a target shows.** A key appears for a target that has at least one
   of its allowed layers, so Home-only profile keys never appear on an ordinary
   chat.
@@ -896,9 +900,8 @@ Its bounded transcript remains `test-results/settings-change.json`.
 Pending changes use the pattern of Home task grants (`home.decideTaskGrant`):
 
 - a push with Approve and Decline;
-- a **Pending approval** badge on the row, the pending item at the top of
-  Changes, and a "Waiting for you" entry in the section summary
-  ([7.2](#72-sections-and-their-summaries));
+- a **Pending approval** badge on the row and the pending item at the top of
+  Changes ([7.4](#74-the-changes-feed));
 - a decision RPC bound to the exact pending diff (no approve-then-swap).
 
 A pending change **expires after 24 hours** ([decision 8](#101-decisions)). An
@@ -1186,36 +1189,41 @@ explicit model is a profile change with a `notify` floor.
 The maintainer is a power user who must be **able** to see and change every setting,
 but ideally rarely needs to. Agents manage settings for projects and sessions;
 he checks the few things that carry signal. So every surface opens calm, with
-a short summary per section, and the full key list is one step away. Nothing is
-hidden: a value that is not in a summary is in the section's full list, in All
-settings, and in search.
+one line describing each section, and the section's full key list is one step
+away. Nothing is hidden: every key is on its section's sheet. What needs him
+(approvals, agents' changes) is in Changes ([7.4](#74-the-changes-feed)).
 
-Everything a surface shows (which keys are in a summary, which badges a row
-carries, what a value reads as) comes from the schema and resolver output. iOS
-decides layout and style, never meaning.
+Everything a surface shows (a section's words, which badges a row carries, what
+a value reads as) comes from the schema and resolver output. iOS decides layout
+and style, never meaning.
 
-### 7.2 Sections and their summaries
+### 7.2 Sections
 
 Every settings surface shows the same sections in the same order: **Model,
 Context, Tools, Permissions, Run**, then **Accounts, Sources, Setup, This
-iPhone** where the surface has them. Collapsed, each section shows a summary
-that `settings.resolve` computes for the target:
+iPhone** where the surface has them. `settings.resolve` serves each section that
+has a key for the target as `{ id, title, description, order, note? }`; the
+`description` is the one line a client shows beside the title.
 
-- **Effective values that matter**: the section's `essential` keys, as `display`
-  strings (for example "Opus 5.5 · High thinking · 200K").
-- **What is overridden, and by which layer**: every key whose effective value is
-  set above Built-in by an explicit value, with its layer badge ("Retries 6 ·
-  Chat"). Values fixed at start from a default are not overrides and stay out of
-  the summary.
-- **Pending approvals** in this section, with Approve and Decline.
-- **Recent agent changes** in this section, newest first and capped (for
-  example three, then "+N more" into Changes), each with its actor, reason and
-  Undo.
-
-A section with nothing overridden, pending or recent shows only its essential
-values. Expanding a section shows all its keys: essential first, then
-**Advanced**. **All settings** shows every key of the surface's target, grouped
-by section, and **search** matches label, id, help and current value.
+On iOS (#876) the gear's **Settings** is this Mac and this iPhone, one row per
+destination in five titled cards that share an accent: **Agent** (Model, Context,
+Run, Permissions), **Tools & Extensions** (Tools, MCP Servers, Extensions, Hooks),
+**Accounts** (Model Providers, Custom Models, Connected Services), **Data &
+Diagnostics** (Connections, Logs, Setup) and **This iPhone**. Sources' keys show
+in Extensions and Setup's beside Import; a section the app does not place joins
+**More**. A chat's own settings are one row in **Manage Session** (Home's in Manage
+Home), beside its Project Settings row: Chat Settings opens the chat's Changes,
+then every section for that chat, each value tagged with where it comes from. A section row carries its
+`description` and opens the section's sheet in its card's accent: essential keys
+first, then each subgroup and **Advanced**, each row with its help and source
+tags. A key with many instances (the approval levels) is one row opening them,
+grouped by the section of the setting each governs and described by its help. A
+row has one control; a key whose source also offers an action (reset, Apply
+again) previews its value and opens its own sheet, which holds the control and
+one row per action. Every choice option carries a `detail` line on what it
+changes. All surfaces for a target read one shared snapshot of the resolution and
+its rows' options, so a sheet never re-reads what the surface beneath it shows.
+Nothing expands in place.
 
 ### 7.3 Badges
 
@@ -1275,8 +1283,9 @@ names one:
 | `number` | A field or slider with unit, range and step | retries, timeouts, context window |
 | `text` | A single- or multi-line field | compaction instructions, shell prefix |
 | `secret` | Write-only entry that shows "Set" or "Not set" | `httpProxy` |
-| `list` | An ordered list of a primitive, with add, remove and reorder | search paths, `enabledModels` |
-| `catalog` | A searchable picker over a Gateway-served catalog | model, tools, providers, projects |
+| `list` | A list of a primitive, with add and remove; items keep their order | search paths, `enabledModels` |
+| `checklist` | Several choices from a served option source, saved together | tools |
+| `catalog` | A searchable picker over a Gateway-served catalog | model, providers, projects |
 | `readOnly` | The `display` string | anything a client cannot edit |
 
 **Schema fields for presentation** are in [4.1](#41-fields): section, subgroup,
@@ -1318,15 +1327,11 @@ two RPCs (the Gateway README has the shapes). What the code fixes that 7.2 and
 - **No renderer, no controls.** A client that sends no `renderer` is treated as
   implementing no control: every editable key is read-only with "Update Tron to
   edit", and every value still arrives with its `display`.
-- **Summaries are for the target.** `pending` and `recent` list only requests
-  and record entries for the same target; `recent` scans the newest 200 record
-  entries. An `override` is an applied value above Built-in that is an explicit
-  choice: a value fixed at start from a default (`fixedAt.from` other than
-  `chat`) is not an override.
 - **The iPhone half** is `SettingsRendererView` (iOS architecture, presentation
   parity). It implements `toggle`, `choice`, `number`, `text`, `secret`, `list`,
-  `catalog` and `readOnly`. Secret entry is write-only and never prefilled;
-  ordered string lists support add, remove and reorder. Unknown list item
+  `checklist`, `catalog` and `readOnly`. Secret entry is write-only and never
+  prefilled; string lists support add and remove; a checklist saves its chosen
+  set from the toolbar. Unknown list item
   kinds remain visible read-only. Ordered choices reuse the app's existing anchored
   slider through `SettingsChoiceSlider`; bounded integer numbers use
   `SettingsNumberSlider` with the served range, unit and step. A dynamic range
@@ -1434,7 +1439,7 @@ Re-verified against `main` at `b76f6ca80`.
 
 | Today | Becomes |
 |---|---|
-| `admin/settings-service.ts` `get`: two documents plus an effective object | Removed with its last client: `settings.resolve` from the schema serves every key with value, `display`, layer, applied flag, badges and section summaries, for a target (Mac, project, session or profile). |
+| `admin/settings-service.ts` `get`: two documents plus an effective object | Removed with its last client: `settings.resolve` from the schema serves every key with value, `display`, layer, applied flag and badges, and its sections, for a target (Mac, project, session or profile). |
 | `transport/gateway-service.ts` `settings.get` | Removed (no alias); Home's default-model fallback reads the Mac layer through the resolver. |
 | Implemented: memory model in `profile.json`, applied by `HomeOwner` behind `settings.change` | One-time startup transfer consumes the legacy `home.json` model before admission; runtime has no fallback. |
 | `home/home-task-dispatcher.ts:190-193`, `home-task-worker-choice.ts`, `tron-home-extension.ts:29,77` ("omit both for the Gateway default") | Home's `delegate` handler fills omitted `model` and `thinking` from the profile (`sameAs: home`) before admission, clamping thinking to the model; an explicit choice wins with its reason ([6.3](#63-worker-model-same-as-home)). |
@@ -1449,7 +1454,7 @@ Re-verified against `main` at `b76f6ca80`.
 
 | Today | Becomes |
 |---|---|
-| Per-screen settings views with per-key controls | One generic renderer over the served schema: the control primitives, badges, section summaries and negotiation ([7.5](#75-the-rendering-contract)). |
+| Per-screen settings views with per-key controls | One generic renderer over the served schema: the control primitives, badges, sections and negotiation ([7.5](#75-the-rendering-contract)). |
 | Ordinary-chat gear (`UI/Chat/ChatView.swift`) and Settings row (`UI/Chat/SessionContextSheet.swift`) | The gear opens Manage Session at medium; its Settings row opens the Mac-layer child, then dismisses back to Manage Session. Home's route keeps direct Settings even while status loads; its circle still opens Manage Home (#799). The hosted context-ring/gear journey proves both entry paths and return navigation. |
 | `UI/Chat/ChatComposerView.swift:259` context ring | Unchanged: it opens Manage Session in ordinary chats and Manage Home (medium detent) in the Home chat (#748, #799). |
 | `UI/Chat/SessionContextSheet.swift:530-590` model card, thinking and context window; `:649-690` session section | The generic sections plus the Project card, this chat's Changes and the Settings row. |
@@ -1478,7 +1483,7 @@ was added after the first numbering; it lands after slice 4 and before slice 8.
 | 5 | Tiers: floors with the maintainer's overrides, the one-step web mark, approval by tap with 24-hour expiry and the requester told, Approve and Decline on the push, and the `settings` tool. Implemented ([5.4a](#54a-implemented-tiers-floors-and-the-web-mark)); the push actions need the relay's category release deployed first ([decision 35](#101-decisions)) | L | Gateway, iOS, push relay | 4 | #763 |
 | 6 | Outside changes: stores compared with the record, "Changed outside Tron" with Apply again, notification by floor, git-state badges | M | Gateway, iOS | 4 | #764 |
 | 7 | Fixed-at-start values carry provenance, with "Use the current default"; live keys reach open chats; Chat-layer values for every key that allows Chat; per-direction timing | M | Gateway, iOS | 3, 4 | #765 |
-| 14 | The generic renderer: served schema, control primitives, `settings.options`, `dryRun` validation, badges and section summaries from the resolver, negotiation with fallback to read-only. Partially implemented ([7.5a](#75a-implemented-the-renderer-contract)), including shared stepped/continuous number and ordered-choice controls, stale-options fencing, and real Manage Home open/dismiss captures; complete catalog consolidation and broader surface parity acceptance remain | L | Gateway, iOS | 3, 4 | #780 |
+| 14 | The generic renderer: served schema, control primitives, `settings.options`, `dryRun` validation, badges and sections from the resolver, negotiation with fallback to read-only. Partially implemented ([7.5a](#75a-implemented-the-renderer-contract)), including shared stepped/continuous number and ordered-choice controls, stale-options fencing, and real Manage Home open/dismiss captures; complete catalog consolidation and broader surface parity acceptance remain | L | Gateway, iOS | 3, 4 | #780 |
 | 8 | Manage Session and Manage Home show the sections through the generic renderer (D1, D2, D5, D6, D7) | L | iOS | 2, 7, 14 | #766 |
 | 9 | The Home profile becomes a typed layer for the Home chat: worker model and thinking "same as Home" filled into `delegate` by Home, memory model, task budgets | M | Gateway, iOS | 4 | #767 |
 | 10 | The Project card in Manage Session: the Project layer with git-state badges, trust, and outside changes | M | iOS | 6, 8 | #768 |

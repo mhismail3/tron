@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -14,7 +14,8 @@ import { SettingsApprovals } from "./settings-approvals.js";
 import { KEYS } from "./settings-schema.js";
 import type { Resolution, ResolvedKey, SettingsTarget } from "./settings-resolver.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
-import { CONTROLS } from "./settings-types.js";
+import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "./settings-types.js";
+import { ScopeToolCatalog } from "./tool-catalog.js";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
@@ -87,6 +88,7 @@ async function fixture() {
     compaction: { modelOverrides: { [modelKey]: { reserveTokens: 30_000 } } },
   }));
   const trust = new TrustService(agentDir);
+  const scopeTools = new ScopeToolCatalog(agentDir, trust);
   const registry = new RuntimeRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -96,6 +98,9 @@ async function fixture() {
   const settingsModel = new SettingsModel({
     agentDir, tronHome, trust, modelRuntime,
     homeMemoryModel: async () => ({ provider: model.provider, id: model.id }),
+    // Production wiring (gateway-main): a chat's live registry, else the scope's.
+    toolCatalog: async target => target.kind === "session" ? registry.liveToolCatalog(target.sessionId)
+      : scopeTools.list(target.kind === "project" ? target.cwd : undefined),
   });
   const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), new SettingsApprovals(tronHome), {
     setTrust: async (project, decision) => trust.setAndApply(project, decision,
@@ -341,12 +346,62 @@ describe("settings renderer contract", () => {
   const options = (f: Fixture, request: Record<string, unknown>, target: Record<string, unknown> = macTarget) =>
     f.service.invoke(subscribed(), "settings.options", { target, ...request }) as Promise<Options>;
 
+  it("offers a tool selection's real tools and keeps a relative Project selection relative", async () => {
+    const f = await fixture();
+    await f.trust.set(f.project, true);
+    const changeAt = (target: Record<string, unknown>, value: string[]) => f.service.invoke(subscribed(), "settings.change", {
+      commandId: commandId(), target, changes: [{ key: "tools.active", layer: target.kind, op: "set", value }],
+    });
+    const projectTarget = { kind: "project", cwd: f.project };
+    const projectDocument = async () => JSON.parse(await readFile(join(f.project, ".pi", "settings.json"), "utf8")) as { defaultTools?: string[] };
+
+    // Mac and Project offer pi's built-ins, then opt-in extension tools such as codemode.
+    const scope = await options(f, { key: "tools.active" }, projectTarget);
+    expect(scope.source).toBe("catalog.tools");
+    expect(scope.options.slice(0, PI_BUILTIN_TOOL_NAMES.length).map(option => option.value)).toEqual(PI_BUILTIN_TOOL_NAMES);
+    expect(scope.options.map(option => option.value)).toContain("codemode");
+    transcript.push({ case: "tools catalog: project", response: scope });
+
+    // The built-in names are pi's own: a plain pi session registers exactly these.
+    const piDir = join(f.root, "pi-only");
+    await mkdir(piDir, { recursive: true });
+    const piSettings = SettingsManager.create(piDir, piDir);
+    const loader = new DefaultResourceLoader({ cwd: piDir, agentDir: piDir, settingsManager: piSettings, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true });
+    await loader.reload();
+    const { session: piSession } = await createAgentSession({ cwd: piDir, agentDir: piDir, sessionManager: SessionManager.inMemory(), settingsManager: piSettings, resourceLoader: loader });
+    expect(piSession.getAllTools().map(tool => tool.name)).toEqual(PI_BUILTIN_TOOL_NAMES);
+    piSession.dispose();
+    const slot = await f.registry.create(f.project);
+    const context = await slot.context() as { activeTools: string[] };
+    // A chat offers its own registry, which includes every active tool.
+    const chat = await f.service.invoke(subscribed([slot.id]), "settings.options", {
+      target: { kind: "session", sessionId: slot.id }, key: "tools.active",
+    }) as unknown as Options;
+    for (const name of context.activeTools) expect(chat.options.map(option => option.value)).toContain(name);
+
+    // The Project holds ["+write"] over the Mac's ["read", "bash"]. Choosing codemode too stays relative.
+    await changeAt(projectTarget, ["read", "bash", "write", "codemode"]);
+    expect((await projectDocument()).defaultTools).toEqual(["+write", "+codemode"]);
+    // So a Mac change still flows into the project.
+    await changeAt({ kind: "mac" }, ["read"]);
+    const followed = row(await f.service.invoke(subscribed(), "settings.resolve", { target: projectTarget }) as Resolution, "tools.active");
+    expect(followed).toMatchObject({ value: ["read", "write", "codemode"], layer: "project" });
+    // Unchoosing a tool from below is a removal entry.
+    await changeAt(projectTarget, ["write"]);
+    expect((await projectDocument()).defaultTools).toEqual(["+write", "-read"]);
+    // Choosing exactly what the Mac selects leaves the Project holding nothing.
+    await changeAt(projectTarget, ["read"]);
+    expect((await projectDocument()).defaultTools).toBeUndefined();
+    expect(row(await f.service.invoke(subscribed(), "settings.resolve", { target: projectTarget }) as Resolution, "tools.active"))
+      .toMatchObject({ value: ["read"], layer: "mac" });
+  });
+
   it("negotiates each key's control with the client, and shows every key read-only with its display when no renderer is named", async () => {
     const f = await fixture();
     const everything = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
     expect(everything.renderer).toEqual({ version: 1 });
     expect(presentedRow(everything, "model.thinking[role=chat]", { model: f.modelKey }).presentation).toMatchObject({
-      control: "choice", valueKind: "orderedChoice", options: expect.arrayContaining([{ value: "high", label: "High" }]),
+      control: "choice", valueKind: "orderedChoice", options: expect.arrayContaining([{ value: "high", label: "High", detail: expect.any(String) }]),
     });
     expect(presentedRow(everything, "run.retry.maxRetries").presentation).toMatchObject({
       control: "number", importance: "essential", label: "Retries", range: { min: 0, max: 20, unit: "retries" },
@@ -402,49 +457,14 @@ describe("settings renderer contract", () => {
       .rejects.toMatchObject({ code: "invalid_request" });
   });
 
-  it("serves each section's essential values, overrides, pending approvals and recent agent changes", async () => {
+  it("serves each section with its title, one-line description and order, only where the target has keys", async () => {
     const f = await fixture();
     const before = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    const model = section(before, "model");
-    expect(model).toMatchObject({ title: "Model", order: 10 });
-    expect(model.summary.essential.map(entry => entry.key)).toEqual(["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]);
-    expect(model.summary.essential[1]).toMatchObject({ qualifiers: { role: "chat", model: f.modelKey }, label: "Thinking", display: expect.any(String) });
+    expect(section(before, "model")).toEqual({ id: "model", title: "Model", description: "Models, thinking, and context window", order: 10 });
+    for (const served of before.sections) expect(served.description.length, served.id).toBeGreaterThan(0);
     // A section the target has no key in is not presented at all.
     expect(before.sections.map(entry => entry.id)).not.toContain("accounts");
-
-    // A maintainer's own Mac-layer change is an override, named by its layer; it is not an agent change.
-    const tapped = await maintainerChange(f, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6, expected: 5 }]);
-    expect(tapped.status).toBe("applied");
-    const afterTap = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    expect(section(afterTap, "run").summary.overrides).toContainEqual({
-      key: "run.retry.maxRetries", label: "Retries", display: "6 retries", layer: "mac", layerLabel: "Mac",
-    });
-    expect(section(afterTap, "run").summary.recent).toEqual([]);
-
-    // A quiet change by a chat's agent, with its reason, is recent.
-    await f.settingsChanges.change(macTarget, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 7, expected: 6 }],
-      { actor: { kind: "agent", id: "chat-1", sessionId: "chat-1" }, reason: "The provider is flaky today" });
-    const afterAgent = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    const run = section(afterAgent, "run");
-    expect(run.summary.recent).toEqual([{
-      changeId: expect.any(String), key: "run.retry.maxRetries", label: "Retries", actor: "A chat's agent",
-      reason: "The provider is flaky today", at: expect.any(String),
-    }]);
-    expect(run.summary.moreRecent).toBe(0);
-    expect(run.summary.overrides).toContainEqual(expect.objectContaining({ key: "run.retry.maxRetries", display: "7 retries", layerLabel: "Mac" }));
-    transcript.push({ case: "section summary: run", response: run });
-
-    // An approve-tier request by Home is held: pending in its section, for this target only.
-    const held = await f.settingsChanges.change(macTarget, [{ key: "permissions.projectTrust", qualifiers: { project: join(f.root, "other") }, layer: "mac", op: "set", value: true }],
-      { actor: { kind: "home", id: "home" }, reason: "The maintainer asked me to work there" });
-    expect(held).toMatchObject({ status: "pending", tier: "approve" });
-    const withPending = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    expect(section(withPending, "permissions").summary.pending).toEqual([{
-      requestId: held.approval!.requestId, requester: "Home", labels: ["Trust for this project"],
-    }]);
-    const otherTarget = await resolveWith(f, { kind: "project", cwd: f.project });
-    expect(section(otherTarget, "permissions").summary.pending).toEqual([]);
-    transcript.push({ case: "section summary: permissions pending", response: section(withPending, "permissions") });
+    transcript.push({ case: "sections", response: before.sections });
   });
 
   it("covers only the named keys when a keys filter is given", async () => {
@@ -452,7 +472,6 @@ describe("settings renderer contract", () => {
     const filtered = await f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, keys: ["run.retry.maxRetries"], renderer: { version: 1, controls: ["number"] } }) as unknown as PresentedResolution;
     expect(filtered.keys.map(key => key.key)).toEqual(["run.retry.maxRetries"]);
     expect(filtered.sections.map(entry => entry.id)).toEqual(["run"]);
-    expect(section(filtered, "run").summary.essential).toEqual([{ key: "run.retry.maxRetries", label: "Retries", display: "5 retries" }]);
   });
 
   it("serves option lists that follow the target's model, page catalogs, and refuse keys with no options", async () => {
@@ -465,7 +484,7 @@ describe("settings renderer contract", () => {
     const levels = await options(f, { key: "model.thinking[role=chat]" });
     expect(levels).toMatchObject({ source: "catalog.thinkingLevels", dependsOn: ["model.ref[role=chat]"] });
     expect(levels.options.map(option => option.value)).toEqual(getSupportedThinkingLevels(reasoner));
-    expect(levels.options).toContainEqual({ value: "high", label: "High" });
+    expect(levels.options).toContainEqual({ value: "high", label: "High", detail: expect.any(String) });
 
     // A named model is followed instead: a model without reasoning offers no thinking level.
     const followed = await options(f, { key: "model.thinking[role=chat]", qualifiers: { model: plainKey } });

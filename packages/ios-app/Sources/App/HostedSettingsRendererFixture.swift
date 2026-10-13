@@ -50,11 +50,11 @@ struct HostedSettingsRendererFixture: View {
                         SettingsChangesView(scope: ProcessInfo.processInfo.arguments.contains("-settings-changes-session")
                             ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,
                             onOpenSession: { openedRoute = $0 })
-                    } else if ProcessInfo.processInfo.arguments.contains("-tron-mac-settings-fixture") {
-                        SettingsView()
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") {
+                        // The Context sheet itself, so the fixture's cover control stays reachable.
+                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("context"))
                     } else {
-                        SettingsRendererView(target: .object(["kind": .string("mac")]), writeLayer: "mac")
-                            .tronNavigationTitle("Settings")
+                        SettingsView()
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
@@ -141,7 +141,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         let result: JSONValue
         switch method {
         case "settings.resolve": result = resolution()
-        case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", query: params["query"]?.stringValue, cursor: params["cursor"]?.stringValue)
+        case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", cursor: params["cursor"]?.stringValue)
         case "settings.change":
             if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview"),
                params["dryRun"]?.boolValue == true, previewsHeld == 0 {
@@ -265,6 +265,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
 
     private func resolution() -> JSONValue {
         let keys: [JSONValue] = [
+            // A catalog source the app has no dedicated picker for, so the generic
+            // paged catalog renders it (real model keys use the shared model picker).
             key("model.ref", group: "model", value: .object(["provider": .string("fixture"), "id": .string(model)]), display: modelName,
                 layer: "mac", badges: sourceActions ? [.object([
                     "kind": .string("source"), "label": .string("Fixture source"),
@@ -273,7 +275,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                     "kind": .string("future"), "label": .string("Future source"),
                     "action": .object(["kind": .string("futureAction"), "label": .string("Unsupported action")]),
                 ])] : [], presentation: presentation("Model", "The model new chats start with.", 10, "essential", "catalog",
-                    extra: ["optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])),
+                    extra: ["optionsSource": .object(["name": .string("fixture.catalog"), "dependsOn": .array([])])])),
             key("model.thinking", group: "model", value: model == "pro" ? .string(thinking) : .string("off"),
                 display: model == "pro" ? thinking.capitalized : "Off", presentation: presentation("Thinking", "How much the model reasons.", 20,
                     "essential", "choice", extra: ["valueKind": .string("orderedChoice"), "optionsSource": .object(["name": .string("catalog.thinkingLevels"),
@@ -315,31 +317,28 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                     extra: ["note": .string("Update Tron to edit"), "redacted": .bool(true)])),
         ]
         let sections: [JSONValue] = [
-            section("model", "Model", 10, essential: [("Model", modelName), ("Thinking", model == "pro" ? thinking.capitalized : "Off")],
-                    overrides: [("Model", modelName)]),
-            section("context", "Context", 20, essential: [("Block images", blockImages ? "On" : "Off")]),
-            section("tools", "Tools", 30, essential: []),
-            section("permissions", "Permissions", 40, essential: []),
-            section("accounts", "Accounts", 60, essential: []),
-            section("sources", "Sources", 70, essential: []),
-            section("setup", "Setup", 80, essential: []),
-            section("run", "Run", 50, essential: [("Retries", "\(retries) retries")], overrides: [("Retries", "\(retries) retries")],
-                    pending: true, recent: true),
-            section("lab", "Lab", 95, essential: [("Focus mode", focusMode.capitalized)]),
+            section("model", "Model", 10, "Models, thinking, and context window"),
+            section("context", "Context", 20, "Compaction and image handling"),
+            section("tools", "Tools", 30, "Available tools, code mode, and shell"),
+            section("permissions", "Permissions", 40, "Project trust and agent approvals"),
+            section("accounts", "Accounts", 60, "Providers, custom models, and services"),
+            section("sources", "Sources", 70, "Packages and how they install"),
+            section("setup", "Setup", 80, "Import, session storage, and telemetry"),
+            section("run", "Run", 50, "Message delivery, retries, and transport"),
+            section("lab", "Lab", 95, "A section this app has never seen"),
         ]
         return .object(["target": .object(["kind": .string("mac")]), "layers": .array([.string("mac"), .string("builtin")]),
                         "renderer": .object(["version": .number(1)]), "keys": .array(keys), "sections": .array(sections),
                         "diagnostics": .array([])])
     }
 
-    private func options(key: String, query: String?, cursor: String?) throws -> JSONValue {
+    private func options(key: String, cursor: String?) throws -> JSONValue {
         switch key {
         case "model.ref":
             let entries = [("pro", "Fixture Pro"), ("lite", "Fixture Lite"), ("page", "Fixture Page Two")]
-                .filter { query?.isEmpty != false || $0.1.localizedCaseInsensitiveContains(query!) }
             let offset = Int(cursor ?? "0") ?? 0
             let page = Array(entries.dropFirst(offset).prefix(2))
-            var result: [String: JSONValue] = ["key": .string(key), "source": .string("catalog.models"), "dependsOn": .array([]),
+            var result: [String: JSONValue] = ["key": .string(key), "source": .string("fixture.catalog"), "dependsOn": .array([]),
                 "options": .array(page.map { id, label in
                     .object(["value": .object(["provider": .string("fixture"), "id": .string(id)]), "label": .string(label), "detail": .string("fixture")])
                 })]
@@ -420,19 +419,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         .object(["value": .string(value), "label": .string(label)])
     }
 
-    private func section(_ id: String, _ title: String, _ order: Int, essential: [(String, String)], overrides: [(String, String)] = [],
-                         pending: Bool = false, recent: Bool = false) -> JSONValue {
-        .object(["id": .string(id), "title": .string(title), "order": .number(Double(order)), "summary": .object([
-            "essential": .array(essential.map { .object(["key": .string($0.0), "label": .string($0.0), "display": .string($0.1)]) }),
-            "overrides": .array(overrides.map { .object(["key": .string($0.0), "label": .string($0.0), "display": .string($0.1),
-                                                          "layer": .string("mac"), "layerLabel": .string("Mac")]) }),
-            "pending": .array(pending ? [.object(["requestId": .string("fixture-request"), "requester": .string("Home"),
-                                                  "labels": .array([.string("Transport")])])] : []),
-            "recent": .array(recent ? [.object(["changeId": .string("fixture-change"), "key": .string("run.retry.maxRetries"),
-                                                "label": .string("Retries"), "actor": .string("Home"),
-                                                "reason": .string("The provider is flaky today"), "at": .string("2026-01-01T00:00:00.000Z")])] : []),
-            "moreRecent": .number(pending ? 2 : 0),
-        ])])
+    private func section(_ id: String, _ title: String, _ order: Int, _ description: String) -> JSONValue {
+        .object(["id": .string(id), "title": .string(title), "description": .string(description), "order": .number(Double(order))])
     }
 
     private func enqueue(_ frame: JSONValue) throws {

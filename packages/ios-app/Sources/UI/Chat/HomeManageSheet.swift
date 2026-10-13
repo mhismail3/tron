@@ -35,34 +35,20 @@ extension HomeSheet {
             )
             // Home-originated and Home-task settings requests belong to Manage Home.
             .settingsApprovals(.home)
-            SettingsChangesLink(scope: .home(sessionID), subtitle: "Home and its workers' settings changes", accent: .tronSessionTeal,
-                                onOpenSession: onOpenSession.map { callback in { route in callback(route.sessionID) } })
-            .accessibilityIdentifier("home-manage-changes")
             SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot,
                                           onError: { error in
                 // A model choice belongs to the Home chat. Keep its notice above Models.
                 if let target = model.presentationTarget(for: sessionID) {
                     model.presentError(error, scope: .session(id: target.sessionID, generation: target.generation))
                 }
-            }) { EmptyView() }
-            // The shared Chat card owns receipt + applied-revision reconciliation.
-            // Schema rows cover the remaining Chat and Profile keys without duplicating
-            // its model, thinking or context-window controls.
-            SettingsRendererView(
-                target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
-                writeLayer: nil,
-                embedded: true,
-                ownedLayers: ["chat", "profile"],
-                externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"],
-                sectionSupplement: { section in
-                    AnyView(Group {
-                        if section == "context" {
-                            navigationRow(icon: "doc.text.magnifyingglass", title: "Home Context",
-                                          subtitle: "Next request and delivered context", destination: .context, id: "home-manage-context")
-                        }
-                    })
-                }
-            )
+            }) {
+                // Home's memory model is part of its configuration: Home cannot
+                // answer until it is set. Every other Home setting is in the card below.
+                SettingsRendererView(
+                    target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: nil, ownedLayers: ["chat", "profile"],
+                    presentation: .keys(["model.ref[role=memory]"])
+                )
+            }
         } else {
             TronLoadingState(label: "Loading Home chat…")
         }
@@ -77,19 +63,38 @@ extension HomeSheet {
         let chapterList = model.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
         return TronGlassCard(accent: .tronSessionTeal) {
             VStack(spacing: 0) {
+                navigationRow(icon: "doc.text.magnifyingglass", title: "Home Context",
+                              subtitle: "Next request and delivered context", destination: .context, id: "home-manage-context")
+                if let sessionID {
+                    divider()
+                    TronProgressiveSheetLink(accessibilityLabel: "Home Settings", identity: "home.settings", accent: .tronSessionTeal) {
+                        ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat", "profile"], changesScope: .home(sessionID),
+                                         onOpenSession: onOpenSession.map { callback in { route in callback(route.sessionID) } })
+                            .tronNavigationTitle("Home Settings")
+                    } label: {
+                        TronSettingsRow(icon: "slider.horizontal.3", title: "Home Settings",
+                                        subtitle: "Every setting Home uses", accent: .tronSessionTeal) {
+                            Image(systemName: "chevron.right")
+                                .font(TronTypography.caption)
+                                .foregroundStyle(Color.tronSessionTeal)
+                        }
+                    }
+                    .accessibilityIdentifier("home-manage-settings")
+                }
                 if memoryBrowser {
+                    divider()
                     navigationRow(icon: "brain", title: "Memory",
                                   subtitle: HomeStatusLinePresentation.memory(status, summaries: summaries, unresolvedCommand: unresolved),
                                   destination: .memory(sessionID: nil), id: "home-manage-memory-browser")
                 }
                 if let chapter = status.chapter, chapterList {
-                    if memoryBrowser { divider() }
+                    divider()
                     navigationRow(icon: "book", title: "Chapters",
                                   subtitle: HomeManageRowPresentation.chapters(read.chapters, fallback: chapter),
                                   destination: .chapters, id: "home-manage-chapters")
                 }
                 if status.taskRecovery != nil {
-                    if memoryBrowser || (status.chapter != nil && chapterList) { divider() }
+                    divider()
                     navigationRow(icon: "checklist", title: "Tasks",
                                   subtitle: HomeManageRowPresentation.tasks(read.tasks, admitted: status.admitsTaskReads),
                                   destination: .tasks, id: "home-manage-tasks")

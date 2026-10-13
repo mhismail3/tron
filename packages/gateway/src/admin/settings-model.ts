@@ -14,7 +14,7 @@ import { observedInstance, projectStores, type ObservedReaders, type ObservedSto
 import type { TrustService } from "./trust-service.js";
 import type { Actor, ActorKind, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
-import { readBinding, resolveSettings, targetLayers, type ChatStore, type FixedSetting, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
+import { composedBelow, readBinding, resolveSettings, targetLayers, type ChatStore, type FixedSetting, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
 import { KEYS, builtinValue, floorFor, floorInstances, chatLayerApplies, hasChatSettingsApplier, hasRuntimeRequestApplier, recordSubject, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
 import { formatStoredSetting, LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
@@ -34,7 +34,12 @@ export interface SettingsModelDependencies {
   modelRuntime: ModelRuntime;
   /** Home's Profile memory model; Home owns its reader and applier (doc 6.1). */
   homeMemoryModel?: () => Promise<{ provider: string; id: string } | undefined>;
+  /** The tools a target's selection can name (`catalog.tools`): a chat's live
+   * registry, or the built-in and opt-in extension tools of a scope. */
+  toolCatalog?: (target: SettingsTarget) => Promise<readonly ToolCatalogEntry[]>;
 }
+
+export interface ToolCatalogEntry { name: string; description?: string }
 
 /**
  * The settings model's read side: loads each store a target's layers read,
@@ -121,21 +126,24 @@ export class SettingsModel {
     if (!key) throw new GatewayError("invalid_request", `Unknown setting ${request.key}`);
     if (!key.optionsSource) {
       if (!key.type.options) throw new GatewayError("invalid_request", `${key.label} has no options to choose from`);
-      return { key: key.id, source: "static", dependsOn: [], options: key.type.options.map(option => ({ value: option.value, label: option.label })) };
+      return { key: key.id, source: "static", dependsOn: [], options: key.type.options.map(option => ({
+        value: option.value, label: option.label, ...(option.detail ? { detail: option.detail } : {}) })) };
     }
     const { name, dependsOn } = key.optionsSource;
     const runtime = session?.modelRuntime ?? this.dependencies.modelRuntime;
     const base = { key: key.id, source: name, dependsOn: [...dependsOn] };
     switch (name) {
       case "catalog.models":
-        return { ...base, ...await this.catalogModelOptions(runtime, request) };
+        // Home's memory runs one fixed physical model, so it is never offered a virtual one.
+        return { ...base, ...await this.catalogModelOptions(runtime, request, key.id === "model.ref[role=memory]") };
       case "catalog.thinkingLevels": {
         const model = await this.followedModel(target, session, runtime, request.qualifiers);
         const supported = model ? getSupportedThinkingLevels(model) : [];
         // pi reports only "off" for a model without reasoning: there is no level to offer.
         const levels = supported.length === 1 && supported[0] === "off" ? [] : supported;
-        const labels = new Map(schemaKey("model.thinking[role=chat]").type.options!.map(option => [option.value, option.label]));
-        return { ...base, options: levels.map(level => ({ value: level, label: labels.get(level) ?? level })) };
+        const declared = new Map(schemaKey("model.thinking[role=chat]").type.options!.map(option => [option.value, option]));
+        return { ...base, options: levels.map(level => ({ value: level, label: declared.get(level)?.label ?? level,
+          ...(declared.get(level)?.detail ? { detail: declared.get(level)!.detail } : {}) })) };
       }
       case "catalog.contextWindow": {
         // The bounds `settings.change` validates the value against (contextWindowValue).
@@ -143,6 +151,18 @@ export class SettingsModel {
         const model = followed && limitsModel(runtime, followed);
         const limits = model && contextWindowLimits(model);
         return { ...base, options: [], ...(limits ? { range: { min: limits.minimum, max: limits.maximum, unit: "tokens" as const } } : {}) };
+      }
+      case "catalog.tools": {
+        if (!this.dependencies.toolCatalog) throw new GatewayError("unsupported", "This Gateway has no tool catalog");
+        const catalog = await this.dependencies.toolCatalog(target);
+        // A chosen name the catalog no longer offers stays listed, so it can be cleared.
+        const chosen = (await this.resolve(target, session, [key.id])).keys[0]?.value;
+        const names = new Set(catalog.map(tool => tool.name));
+        const missing = (Array.isArray(chosen) ? chosen as string[] : []).filter(name => !names.has(name));
+        return { ...base, options: [
+          ...catalog.map(tool => ({ value: tool.name, label: tool.name, ...(tool.description ? { detail: firstSentence(tool.description) } : {}) })),
+          ...missing.map(name => ({ value: name, label: name, disabledReason: "Not available here" })),
+        ] };
       }
       default:
         throw new GatewayError("unsupported", `${name} is not a settings option source`);
@@ -161,8 +181,8 @@ export class SettingsModel {
     return chat ? runtime.getModel(chat.provider, chat.id) : undefined;
   }
 
-  private async catalogModelOptions(runtime: ModelRuntime, request: SettingsOptionsRequest): Promise<Pick<SettingsOptionsResult, "options" | "nextCursor">> {
-    const models = await catalogModelEntries(runtime);
+  private async catalogModelOptions(runtime: ModelRuntime, request: SettingsOptionsRequest, physicalOnly: boolean): Promise<Pick<SettingsOptionsResult, "options" | "nextCursor">> {
+    const models = (await catalogModelEntries(runtime)).filter(model => !physicalOnly || !model.virtual);
     const query = request.query?.toLowerCase();
     const matching = query ? models.filter(model => [model.name, model.id, model.provider].some(field => field.toLowerCase().includes(query))) : models;
     const offset = request.cursor === undefined ? 0 : catalogCursorOffset(request.cursor);
@@ -343,6 +363,13 @@ export interface SettingsOptionsRequest {
   limit?: number;
 }
 
+/** A tool's description as one option line. */
+function firstSentence(text: string): string {
+  const line = text.trim().split("\n")[0]!;
+  const end = line.search(/[.!?](\s|$)/);
+  return end === -1 ? line : line.slice(0, end + 1);
+}
+
 export interface SettingsOption { value: unknown; label: string; detail?: string; disabledReason?: string }
 
 export interface SettingsOptionsResult {
@@ -358,7 +385,7 @@ export interface SettingsOptionsResult {
 
 /** The registered models as the model picker lists them: the display name, and
  * whether this account can use each one (the same test `model.list` applies). */
-async function catalogModelEntries(runtime: ModelRuntime): Promise<Array<{ provider: string; id: string; name: string; available: boolean }>> {
+async function catalogModelEntries(runtime: ModelRuntime): Promise<Array<{ provider: string; id: string; name: string; available: boolean; virtual: boolean }>> {
   const eligibility = openAIModelEligibility(runtime);
   await eligibility?.refresh();
   const providerIds = new Set(runtime.getModels().map(model => model.provider));
@@ -367,7 +394,7 @@ async function catalogModelEntries(runtime: ModelRuntime): Promise<Array<{ provi
     catch { return []; }
   }))).flat().map(model => `${model.provider}\0${model.id}`));
   const projected = runtime.getModels().map(model => ({
-    provider: model.provider, id: model.id,
+    provider: model.provider, id: model.id, virtual: isVirtualModel(model),
     name: eligibility?.displayName(model.provider, model.id) ?? model.name,
     available: available.has(`${model.provider}\0${model.id}`) && (eligibility?.isEligibleInRuntime(runtime, model.provider, model.id) ?? true),
   }));
@@ -879,6 +906,15 @@ export class SettingsChangePath {
     if (request.op === "set") {
       after = await key.type.validate(request.value, key.id, { admitModel: (ref) => this.admitModel(runtime, ref) });
       if (key.optionsSource?.name === "catalog.contextWindow") after = contextWindowValue(runtime, qualifiers.model, after);
+      if (key.type.encode && binding.store === "pi") {
+        // A chosen selection is stored in the layer's own form (relative or plain).
+        after = key.type.encode(after, composedBelow(stores, key, qualifiers, request.layer),
+          readBinding(stores, request.layer, binding, qualifiers, false, key.id));
+        if (after === undefined) {
+          const { value: _chosen, ...rest } = request;
+          request = { ...rest, op: "unset" };
+        } else request = { ...request, value: after };
+      }
     } else if (request.op !== "unset") {
       throw new GatewayError("invalid_request", "op must be set or unset");
     }
@@ -912,7 +948,10 @@ export class SettingsChangePath {
       throw new GatewayError("conflict", `${key.label} changed since it was read; refresh and try again`, false, { current: (before ?? null) as never });
     }
     const builtin = builtinValue(key, qualifiers);
-    const direction = key.direction ? key.direction(before ?? builtin, after ?? builtin) : "widen";
+    // A composing layer's entries are relative: compare what each value selects.
+    const below = key.type.compose ? composedBelow(stores, key, qualifiers, request.layer) : builtin;
+    const selects = (value: unknown) => value === undefined ? below : key.type.compose ? key.type.compose(below, value) : value;
+    const direction = key.direction ? key.direction(selects(before), selects(after)) : "widen";
     const { floor, source } = floorFor(key, direction, stores.floors);
     const web = context.web === true;
     const basis: TierBasis = { direction, floor, floorSource: source, web, risk: null };

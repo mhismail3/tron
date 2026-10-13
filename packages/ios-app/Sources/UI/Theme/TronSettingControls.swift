@@ -64,6 +64,113 @@ struct TronSelectionRow<Choices: View>: View {
     }
 }
 
+/// One option of a `TronChoiceRow`/`TronChoicePicker`.
+struct TronChoice<ID: Hashable>: Identifiable {
+    let id: ID
+    let label: String
+    var detail: String? = nil
+    var disabledReason: String? = nil
+}
+
+/// The standard single-choice row: the chosen value in a right-aligned capsule
+/// that opens a picker sheet of option rows. Use it instead of a menu; SwiftUI
+/// menus fail to open in a sheet presented from another sheet (#877).
+struct TronChoiceRow<ID: Hashable>: View {
+    let icon: String
+    let title: String
+    var detail: String? = nil
+    let choices: [TronChoice<ID>]
+    let selected: ID?
+    var accent: Color = .tronEmerald
+    let onChoose: (ID) -> Void
+
+    var body: some View {
+        TronSelectionSheetRow(icon: icon, title: title, detail: detail,
+                              value: choices.first { $0.id == selected }?.label ?? "None", accent: accent) {
+            TronChoicePicker(title: title, choices: choices, selected: selected, onChoose: onChoose)
+        }
+    }
+}
+
+/// A picker sheet of standard option rows; long lists get the floating search.
+struct TronChoicePicker<ID: Hashable>: View {
+    let title: String
+    let choices: [TronChoice<ID>]
+    let selected: ID?
+    var optionIdentifierPrefix = "settings-option-"
+    let onChoose: (ID) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(choices) { choice in
+                    TronCatalogOptionRow(title: choice.label, summary: choice.disabledReason, detail: choice.detail,
+                                         icon: "circle", isSelected: choice.id == selected,
+                                         isEnabled: choice.disabledReason == nil) {
+                        onChoose(choice.id)
+                        dismiss()
+                    }
+                    .accessibilityIdentifier(optionIdentifierPrefix + choice.label)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle(title)
+    }
+}
+
+/// Several choices from one list, committed with Save. The order chosen is kept;
+/// a newly chosen item joins the end.
+struct TronChecklistPicker<ID: Hashable>: View {
+    let title: String
+    var help: String? = nil
+    let choices: [TronChoice<ID>]?
+    var optionIdentifierPrefix = "settings-option-"
+    let onSave: ([ID]) -> Void
+    @State private var chosen: [ID]
+    @Environment(\.dismiss) private var dismiss
+    private let initial: [ID]
+
+    init(title: String, help: String? = nil, choices: [TronChoice<ID>]?, selected: [ID],
+         optionIdentifierPrefix: String = "settings-option-", onSave: @escaping ([ID]) -> Void) {
+        self.title = title; self.help = help; self.choices = choices
+        self.optionIdentifierPrefix = optionIdentifierPrefix; self.onSave = onSave
+        initial = selected
+        _chosen = State(initialValue: selected)
+    }
+
+    var body: some View {
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                if let help { TronSettingsCaption(help).padding(.bottom, 4) }
+                if choices == nil {
+                    TronLoadingState(label: "Loading…").frame(maxWidth: .infinity, alignment: .leading)
+                }
+                ForEach(choices ?? []) { choice in
+                    let isChosen = chosen.contains(choice.id)
+                    TronCatalogOptionRow(title: choice.label, summary: choice.disabledReason, detail: choice.detail,
+                                         icon: "circle", isSelected: isChosen,
+                                         isEnabled: choice.disabledReason == nil || isChosen) {
+                        if isChosen { chosen.removeAll { $0 == choice.id } } else { chosen.append(choice.id) }
+                    }
+                    .accessibilityIdentifier(optionIdentifierPrefix + choice.label)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle(title)
+        .tronSaveToolbar(enabled: chosen != initial) {
+            onSave(chosen)
+            dismiss()
+        }
+    }
+}
+
 /// The same selected-value row can open a richer picker instead of a menu.
 struct TronSelectionSheetRow<Destination: View>: View {
     let icon: String
@@ -139,8 +246,7 @@ struct TronCatalogOptionRow: View {
                         Text(detail)
                             .font(TronTypography.secondaryDescription)
                             .foregroundStyle(Color.tronTextSecondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                            .lineLimit(2)
                     }
                 }
                 Spacer(minLength: 8)

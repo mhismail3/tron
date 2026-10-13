@@ -25,7 +25,6 @@ struct ChatForkNavigationOwner {
 /// confirmed fork route after the complete outer context-sheet dismissal.
 struct ChatRoutes: ViewModifier {
     let sessionID: String
-    let projectCWD: String?
     let initialHistoryEntryID: String?
     let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     @Binding var showContext: Bool
