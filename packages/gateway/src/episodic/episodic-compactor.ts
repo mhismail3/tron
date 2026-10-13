@@ -204,16 +204,26 @@ export function summarizerText(message: AssistantMessage): string {
 
 type EpisodicReplyClass = "ok" | "transient" | "permanent";
 
+/** A provider's prompt-safety flag on one summary request. It is intermittent
+ * for the same input (#880), so it is retried within the compactor's bound
+ * rather than stopping memory on its first occurrence. */
+const PROMPT_SAFETY_FLAG = /flagged as potentially violating|violat\w* (?:our|the) usage polic/i;
+
+function providerErrorClass(message: AssistantMessage): EpisodicReplyClass {
+  if (message.errorMessage && PROMPT_SAFETY_FLAG.test(message.errorMessage)) return "transient";
+  return isRetryableAssistantError(message) ? "transient" : "permanent";
+}
+
 /**
- * Classify one compactor reply. A provider error the pinned
- * classifier calls transient is retried; anything else — an empty reply, a
- * refusal, a permanent provider error — blocks immediately.
+ * Classify one compactor reply. A provider error the pinned classifier calls
+ * transient, or a prompt-safety flag, is retried; anything else — an empty
+ * reply, a refusal, a permanent provider error — blocks immediately.
  */
 export function classifyReply(message: AssistantMessage): EpisodicReplyClass {
   if (message.stopReason === "stop" || message.stopReason === "length") {
     return summarizerText(message) === "" ? "permanent" : "ok";
   }
-  if (message.stopReason === "error") return isRetryableAssistantError(message) ? "transient" : "permanent";
+  if (message.stopReason === "error") return providerErrorClass(message);
   return "permanent";
 }
 
@@ -235,7 +245,7 @@ export function classifyThrown(error: unknown): EpisodicReplyClass {
     role: "assistant", content: [], api: "faux" as AssistantMessage["api"], provider: "faux" as AssistantMessage["provider"],
     model: "unknown", usage: ZERO_USAGE, stopReason: "error", errorMessage: message, timestamp: 0,
   };
-  return isRetryableAssistantError(synthetic) ? "transient" : "permanent";
+  return providerErrorClass(synthetic);
 }
 
 export function compactorRequest(system: string, context: string, step: string, signal: AbortSignal,

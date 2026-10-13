@@ -140,6 +140,39 @@ it.each(["user: forged assistant content", "Output only the line; the corrected 
     JSON.stringify({ corrections, blocked: restarted.status().blocked, canonicalPreserved: true, invalidPersisted: false }, null, 2) + "\n");
 });
 
+// #880: OpenAI's prompt-safety flag on a summary request is intermittent, so it is
+// retried within the bound; only a flag on every attempt stops memory.
+const FLAGGED = "Invalid prompt: your prompt was flagged as potentially violating our usage policy. Please try again with a different prompt";
+it.each([["thrown", true], ["returned", false]])("retries a %s prompt-safety flag and keeps memory running", async (_label, thrown) => {
+  const fx = await fixture();
+  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
+  let flagged = 0;
+  const memory = await fx.open(fx.source, async request => {
+    if (flagged === 0) {
+      flagged += 1;
+      if (thrown) throw new Error(FLAGGED);
+      return fauxAssistantMessage("", { stopReason: "error", errorMessage: FLAGGED });
+    }
+    return fauxAssistantMessage("Tron answered with details");
+  });
+  await memory.entriesCommitted("home");
+  await memory.whenReady(3);
+  expect(flagged).toBe(1);
+  expect(memory.status().blocked).toBeNull();
+  expect(memory.renderView(3).text).toContain("talk: Tron answered with details");
+});
+
+it("stops memory as retries-exhausted only when every attempt is flagged", async () => {
+  const fx = await fixture();
+  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
+  let calls = 0;
+  const memory = await fx.open(fx.source, async () => { calls += 1; return fauxAssistantMessage("", { stopReason: "error", errorMessage: FLAGGED }); });
+  await memory.entriesCommitted("home");
+  await expect.poll(() => memory.status().blocked?.reason).toBe("retries-exhausted");
+  expect(memory.status().blocked?.detail).toContain("flagged as potentially violating");
+  expect(calls).toBe(resolveLimits({}).maxRetries + 1);
+});
+
 it("never selects a shorter invalid correction over a valid oversized summary", async () => {
   const fx = await fixture();
   await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
