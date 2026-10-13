@@ -236,8 +236,6 @@ struct SessionContextSheet: View {
                         SessionContextUsageCard(snapshot: snapshot)
                             .settingsApprovals(.session(sessionID))
                         modelConfigurationCard(snapshot)
-                        ChatSettingsCard(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd,
-                                         changesScope: .session(sessionID, projectCWD: snapshot.cwd), accent: sessionRowAccent)
                         sessionSection(snapshot)
                         exportSection
                     } else {
@@ -494,6 +492,21 @@ struct SessionContextSheet: View {
                     divider()
                 }
                 gitRow
+                if let profileID = model.selectedGatewayProfileID(), !snapshot.cwd.isEmpty {
+                    divider()
+                    ProjectSettingsLink(cwd: snapshot.cwd, profileID: profileID, accent: sessionRowAccent)
+                }
+                divider()
+                TronProgressiveSheetLink(accessibilityLabel: "Chat Settings", identity: "session.\(sessionID).chat-settings",
+                                         accent: sessionRowAccent) {
+                    ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd,
+                                     changesScope: .session(sessionID, projectCWD: snapshot.cwd))
+                        .tronNavigationTitle("Chat Settings")
+                } label: {
+                    TronSettingsRow(icon: "slider.horizontal.3", title: "Chat Settings",
+                                    subtitle: "Every setting this chat uses", accent: sessionRowAccent)
+                }
+                .accessibilityIdentifier("chat-settings-link")
                 divider()
                 manageRow(icon: "doc.text.magnifyingglass", title: "Agent Instructions",
                           subtitle: "The complete assembled instructions", accent: sessionRowAccent) { destination = .agentInstructions }

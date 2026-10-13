@@ -1211,9 +1211,9 @@ Run, Permissions), **Tools & Extensions** (Tools, MCP Servers, Extensions, Hooks
 **Accounts** (Model Providers, Custom Models, Connected Services), **Data &
 Diagnostics** (Connections, Logs, Setup) and **This iPhone**. Sources' keys show
 in Extensions and Setup's beside Import; a section the app does not place joins
-**More**. A chat's own settings are in **Manage Session** (Home's in Manage Home),
-next to the chat: Changes, then every section for that chat, each value tagged
-with where it comes from, and the chat's Project. A section row carries its
+**More**. A chat's own settings are one row in **Manage Session** (Home's in Manage
+Home), beside its Project Settings row: Chat Settings opens the chat's Changes,
+then every section for that chat, each value tagged with where it comes from. A section row carries its
 `description` and opens the section's sheet in its card's accent: essential keys
 first, then each subgroup and **Advanced**, each row with its help and source
 tags. A key with many instances (the approval levels) is one row opening them,

@@ -255,37 +255,43 @@ struct SettingsSectionLinks: View {
     }
 }
 
-/// What applies to one chat, next to the chat: its changes, then every settings
-/// section for it. Each value carries where it comes from (Chat, Profile, Project,
-/// Mac or Built-in); a value this chat can set has its control, any other a link to
-/// the layer that owns it. An ordinary chat also links its project.
-struct ChatSettingsCard: View {
+/// Every setting one chat uses, opened from Manage Session or Manage Home: the
+/// chat's changes, then each section as it applies to the chat. A value carries
+/// where it comes from (Chat, Profile, Project, Mac or Built-in); one this chat can
+/// set has its control, any other a link to the layer that owns it. Setup and
+/// package sources are this Mac's and the project's, so they are not listed here.
+struct ChatSettingsView: View {
     let sessionID: String
     /// The layers this chat writes, in order of preference.
     let ownedLayers: [String]
     var projectCWD: String?
     let changesScope: SettingsChangesScope
-    let accent: Color
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
 
+    private static let chatSections = ["model", "context", "tools", "run", "permissions"]
     private var target: JSONValue { SettingsTarget.sessionGatewayTarget(sessionID) }
 
     var body: some View {
         let sections = model.settingsSnapshot(for: target).map { SettingsRendererView.sections($0.resolution) } ?? []
-        TronSettingsGroup("Settings", detail: "What applies to this chat, and where each value comes from.", accent: accent) {
-            SettingsChangesLink(scope: changesScope, subtitle: "What agents changed, and approvals waiting for you")
-            if !sections.isEmpty {
-                TronSettingsDivider()
-                SettingsSectionLinks(ids: sections.map(\.id), sections: sections, target: target,
-                                     writeLayer: nil, ownedLayers: ownedLayers, projectCWD: projectCWD)
+        let unplaced = sections.map(\.id).filter { !SettingsGroupKind.placedSections.contains($0) }
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 18) {
+                TronGlassCard {
+                    SettingsChangesLink(scope: changesScope, subtitle: "What agents changed, and approvals waiting for you")
+                }
+                TronSettingsGroup("Settings", detail: "Each value shows where it comes from: this chat, its project, this Mac, or built in.") {
+                    if sections.isEmpty {
+                        TronLoadingState(label: "Loading settings…").padding(16)
+                    } else {
+                        SettingsSectionLinks(ids: Self.chatSections + unplaced, sections: sections, target: target,
+                                             writeLayer: nil, ownedLayers: ownedLayers, projectCWD: projectCWD)
+                    }
+                }
             }
-            if let projectCWD, !projectCWD.isEmpty, let profileID = model.selectedGatewayProfileID() {
-                TronSettingsDivider()
-                ProjectSettingsLink(cwd: projectCWD, profileID: profileID)
-            }
+            .padding(20)
         }
-        .tronSettingsVisualTheme(accent: accent)
+        .tronScrollEdgeChrome()
         .task(id: PresentationActivityTaskID(source: model.settingsFreshness,
                                              presentationActive: presentationActivity.allowsPresentationPublication)) {
             guard presentationActivity.allowsPresentationPublication else { return }

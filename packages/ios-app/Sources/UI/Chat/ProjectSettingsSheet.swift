@@ -13,17 +13,18 @@ struct ProjectSettingsRoute: Identifiable {
 struct ProjectSettingsLink: View {
     let cwd: String
     let profileID: String
+    /// The row's glyph matches the rows around it.
+    var accent: Color = .tronEmerald
 
     var body: some View {
         TronProgressiveSheetLink(
-            accessibilityLabel: "Project settings",
+            accessibilityLabel: "Project Settings",
             identity: "project.settings.\(profileID).\(cwd)",
             accent: .tronEmerald,
             destination: { ProjectSettingsContent(cwd: cwd, profileID: profileID) }
         ) {
-            TronSettingsRow(icon: "folder.badge.gearshape", title: "Project",
-                            subtitle: "Settings for \(URL(fileURLWithPath: cwd).lastPathComponent)",
-                            accent: .tronEmerald, subtitleColor: .tronTextSecondary)
+            TronSettingsRow(icon: "folder.badge.gearshape", title: "Project Settings",
+                            subtitle: URL(fileURLWithPath: cwd).lastPathComponent, accent: accent)
         }
         .accessibilityIdentifier("project-settings-link")
     }

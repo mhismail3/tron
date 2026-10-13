@@ -20,10 +20,6 @@ extension HomeSheet {
         let mutating = model.homeMutations.isRunning(profileID: profileID)
         return VStack(alignment: .leading, spacing: 18) {
             statsAndModel(read.status)
-            if let sessionID {
-                ChatSettingsCard(sessionID: sessionID, ownedLayers: ["chat", "profile"],
-                                 changesScope: .home(sessionID), accent: .tronSessionTeal)
-            }
             manageRows(read, unresolved: unresolved)
             manageControls(read.status, unresolved: unresolved, mutating: mutating)
         }
@@ -69,6 +65,21 @@ extension HomeSheet {
             VStack(spacing: 0) {
                 navigationRow(icon: "doc.text.magnifyingglass", title: "Home Context",
                               subtitle: "Next request and delivered context", destination: .context, id: "home-manage-context")
+                if let sessionID {
+                    divider()
+                    TronProgressiveSheetLink(accessibilityLabel: "Home Settings", identity: "home.settings", accent: .tronSessionTeal) {
+                        ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat", "profile"], changesScope: .home(sessionID))
+                            .tronNavigationTitle("Home Settings")
+                    } label: {
+                        TronSettingsRow(icon: "slider.horizontal.3", title: "Home Settings",
+                                        subtitle: "Every setting Home uses", accent: .tronSessionTeal) {
+                            Image(systemName: "chevron.right")
+                                .font(TronTypography.caption)
+                                .foregroundStyle(Color.tronSessionTeal)
+                        }
+                    }
+                    .accessibilityIdentifier("home-manage-settings")
+                }
                 if memoryBrowser {
                     divider()
                     navigationRow(icon: "brain", title: "Memory",

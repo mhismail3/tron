@@ -846,7 +846,10 @@ against the hosted socket and preserves the unknown badge without dispatching it
 This is primitive coverage; session-surface adoption still owns the runtime fence.
 The ring opens Manage Session or Manage Home: the chat's live state, its direct
 controls (the shared Chat card for model, thinking and context window; Compact Now
-with automatic compaction; on Home, the memory model) and `ChatSettingsCard`. The
+with automatic compaction; on Home, the memory model) and its curated rows. Two of
+those rows reach settings: Project Settings and Chat Settings (Home Settings on
+Home), which opens `ChatSettingsView`: the chat's Changes, then each section as it
+applies to the chat. The
 Chat card edits through its session receipt/revision adapter; the same keys in the
 chat's sections edit through `settings.change` at the Chat layer, with the same
 controls (the model picker, the thinking and context sliders) everywhere. Disposable previews own separate busy state
@@ -1713,9 +1716,9 @@ Extensions, Hooks), Accounts (indigo: Model Providers, Custom Models, Connected
 Services), Data & Diagnostics (blue: Connections, Logs, Setup with Import) and
 This iPhone (emerald), which never changes harness behaviour. Schema sections the
 app does not place join More. Every sheet a row opens inherits its card's accent
-through `TronProgressiveSheetLink`. A chat's settings are in Manage Session and
-Manage Home (`ChatSettingsCard`): Changes for that chat, every section for the
-chat's target with each value's source tag, and the Project card. The Project
+through `TronProgressiveSheetLink`. A chat's settings are one row away in Manage Session and
+Manage Home (`ChatSettingsView`): Changes for that chat, then every section for
+the chat's target with each value's source tag. The Project
 card shows the project's sections and its MCP Servers, Extensions and Hooks.
 `SettingsTrustCoordinator` owns one bounded `SettingsSnapshot` per target (the
 resolution and its rows' served options, read together); every renderer for a

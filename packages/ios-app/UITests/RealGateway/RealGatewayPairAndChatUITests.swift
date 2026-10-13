@@ -388,9 +388,13 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         ring.tap()
         XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
         burst("manage-session")
+        for _ in 0..<4 { app.swipeUp() }
+        burst("manage-session-rows")
+        openSheet("chat-settings-link", "chat-settings")
         openSheet("settings-section-model-open", "chat-model", section: "model"); dismissTopSheet(app)
         openSheet("settings-section-run-open", "chat-run", section: "run"); dismissTopSheet(app)
-        dismissTopSheet(app)
+        dismissTopSheet(app) // Chat Settings
+        dismissTopSheet(app) // Manage Session
 
         // Settings: this Mac.
         let gear = app.navigationBars.buttons["Settings"]
