@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { GatewayError } from "../errors.js";
 
 export type RelayNotificationOutcome = "accepted_by_apns" | "retryable" | "invalid_token" | "invalid_grant" | "permanent_failure" | "ambiguous" | "rate_limited" | "in_progress";
+export interface RelayNotificationResult { status: RelayNotificationOutcome; reason?: string }
 export interface RelayFetchResponse { status: number; headers: Headers; body: ReadableStream<Uint8Array> | null; }
 export type RelayFetch = (input: string, init: RequestInit) => Promise<RelayFetchResponse>;
 
@@ -10,6 +11,7 @@ const RESPONSE_MAX_BYTES = 16 * 1_024;
 const REQUEST_MAX_BYTES = 2 * 1_024;
 // APNs owns a bounded 15-second provider request; the caller must not abort first.
 const TIMEOUT_MS = 20_000;
+const CAPABILITIES_TIMEOUT_MS = 5_000;
 const PUBLIC_HOST_LABEL = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
 function fixedPushOrigin(raw: string | undefined): URL | undefined {
@@ -57,10 +59,13 @@ function exactResult(value: unknown): { status: Exclude<RelayNotificationOutcome
   if (object.apnsId !== undefined && typeof object.apnsId !== "string") return undefined;
   if (object.reason !== undefined && typeof object.reason !== "string") return undefined;
   if (object.retryAfterSeconds !== undefined && (!Number.isSafeInteger(object.retryAfterSeconds) || (object.retryAfterSeconds as number) < 1)) return undefined;
+  const reason = typeof object.reason === "string" && /^[A-Za-z0-9_.-]{1,96}$/u.test(object.reason)
+    ? object.reason
+    : undefined;
   return ["accepted_by_apns", "retryable", "invalid_token", "permanent_failure", "ambiguous", "rate_limited", "in_progress"].includes(object.status)
     ? {
       status: object.status as Exclude<RelayNotificationOutcome, "invalid_grant">,
-      ...(typeof object.reason === "string" ? { reason: object.reason } : {}),
+      ...(reason ? { reason } : {}),
     }
     : undefined;
 }
@@ -80,36 +85,25 @@ export class PushRelayClient {
     grantId: string;
     secret: string;
     requestId: string;
-    message: string;
-    title?: string;
-    sessionId?: string;
-    machineId?: string;
-    expiresAt: string;
-  }): Promise<RelayNotificationOutcome> {
-    if (!this.origin) return "retryable";
+    relayEnvelope: string;
+  }): Promise<RelayNotificationResult> {
+    if (!this.origin) return { status: "retryable", reason: "relay_unavailable" };
     const path = "/v3/notifications";
-    const body = JSON.stringify({
-      version: 1,
-      kind: "agent_alert",
-      requestId: input.requestId,
-      message: input.message,
-      ...(input.title ? { title: input.title } : {}),
-      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-      ...(input.machineId ? { machineId: input.machineId } : {}),
-      expiresAt: input.expiresAt,
-    });
+    const body = input.relayEnvelope;
     if (Buffer.byteLength(body) > REQUEST_MAX_BYTES) throw new GatewayError("invalid_request", "Notification request exceeds its bounded payload");
     const response = await this.request("POST", path, input.grantId, input.secret, input.requestId, body);
     const text = await boundedBody(response);
     let parsed: unknown;
-    try { parsed = text ? JSON.parse(text) : undefined; } catch { return response.status >= 500 ? "retryable" : "ambiguous"; }
+    try { parsed = text ? JSON.parse(text) : undefined; } catch {
+      return { status: response.status >= 500 ? "retryable" : "ambiguous", reason: `http_${response.status}` };
+    }
     const result = exactResult(parsed);
     if (response.status === 200 && result) {
       // Compatibility with relays predating the explicit in_progress status.
       // Re-querying this exact ID is still safe: their ledger never starts a
       // second APNs request, and the Gateway retry schedule remains bounded.
-      if (result.status === "ambiguous" && result.reason === "provider_outcome_unknown") return "in_progress";
-      return result.status;
+      if (result.status === "ambiguous" && result.reason === "provider_outcome_unknown") return { status: "in_progress", reason: result.reason };
+      return result;
     }
     // The relay intentionally exposes one bounded error key. An unknown,
     // disabled, or mismatched grant is recoverable only by rotating the mobile
@@ -119,8 +113,37 @@ export class PushRelayClient {
       ? (parsed as Record<string, string>).error
       : undefined;
     if ((response.status === 401 && relayError === "invalid_signature")
-      || (response.status === 410 && relayError === "installation_unavailable")) return "invalid_grant";
-    return response.status === 429 || response.status >= 500 ? "retryable" : "ambiguous";
+      || (response.status === 410 && relayError === "installation_unavailable")) return { status: "invalid_grant", reason: relayError };
+    return response.status === 429 || response.status >= 500
+      ? { status: "retryable", reason: relayError ?? `http_${response.status}` }
+      : { status: "ambiguous", reason: relayError ?? `http_${response.status}` };
+  }
+
+  /** The notification categories this relay accepts. Decision 35: an older relay
+   * rejects unknown fields, so a category is sent only to a relay that advertises
+   * it. Not cached: the probe runs per categorized push, so a relay rollback is
+   * seen by the next push. Every failure means "none advertised"; it never throws. */
+  async notificationCategories(): Promise<ReadonlySet<string>> {
+    const none = new Set<string>();
+    if (!this.origin) return none;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CAPABILITIES_TIMEOUT_MS);
+    timeout.unref();
+    try {
+      const response = await this.fetcher(new URL("/v3/capabilities", this.origin).toString(), {
+        method: "GET", redirect: "error", signal: controller.signal,
+      });
+      const text = await boundedBody(response);
+      if (response.status !== 200) return none;
+      const value = JSON.parse(text) as unknown;
+      if (!value || typeof value !== "object" || Array.isArray(value)) return none;
+      const { version, notificationCategories } = value as Record<string, unknown>;
+      if (version !== 1 || !Array.isArray(notificationCategories)
+        || !notificationCategories.every((category) => typeof category === "string")) return none;
+      return new Set(notificationCategories as string[]);
+    } catch {
+      return none;
+    } finally { clearTimeout(timeout); }
   }
 
   async revoke(grantId: string, secret: string, requestId: string): Promise<"revoked" | "retryable"> {

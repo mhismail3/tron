@@ -1,6 +1,26 @@
 # Gateway events
 
-## Protocol v6 chat semantics
+## Protocol v7 chat semantics
+
+Session configuration uses the Gateway's required `configurationBlocker` field
+and sequenced `session.configuration` updates, not foreground phase alone.
+`null` means ready; `running`, `queued`, `settling`, `mutation`, `interaction`
+and `unavailable` keep model, thinking and context controls locked with an
+explanation. Readiness changes do not increment canonical revision, preserving
+context-window optimistic concurrency. The existing exact event cursor and
+snapshot/rebaseline admission reject stale readiness. An acknowledged Stop can
+still be settling, while independently running children do not block safe
+parent configuration. The originating model/runtime and installed subscription
+are rechecked in each actual send closure after transport waits; accepted
+outcomes remain receipt-owned. Model/thinking commands carry the original
+runtime and nullable model expectation to the Gateway mutation lane. Configuration
+success receipts carry the exact applied revision. While a choice is pending,
+Manage Session observes authoritative revision as well as its narrow semantic
+projection: confirmed intents retire at that revision even when a newer client
+has selected a different value. Before that point the pending display remains
+request-owned; unrelated or earlier acknowledgements cannot unlock it. Controls
+also require the existing synchronized-session command admission during reconnect.
+
 
 Session events are live invalidation hints; the authoritative snapshot and
 canonical Pi JSONL determine transcript order and lifecycle truth. Typed chat
@@ -16,7 +36,9 @@ category remain explicit text so color is never the only signal.
 Every compact command/context/tool/notification pill is payload-free: it shows the trusted
 producer when available, the command or semantic category, and lifecycle/status only.
 Arguments, notification bodies, context text, objectives, and arbitrary values live in the
-tappable detail sheet and may wrap there without expanding transcript rows.
+tappable detail sheet and may wrap there without expanding transcript rows. A command row a fork
+inherited from its origin shows the origin's settled lifecycle, with a "Settled in: Original session"
+metadata row in that sheet (`settledInOriginSession`).
 
 `custom_message` is model context regardless of whether it triggers a turn or is
 producer-visible. Producer-hidden messages remain hidden in ordinary chat.
@@ -105,7 +127,12 @@ admits and reduces mounted-session topics:
   Cached rows may show stale offline attention but never own it, while foreground and background
   profile event streams converge every dashboard; Gateway invalidates the catalog when it cannot
   broadcast a full summary rather than fabricating an unknown row. `session.listChanged` marks
-  the shared traversal dirty instead of cancel/restarting it. User-scoped 500-row pagination
+  the shared traversal dirty instead of cancel/restarting it. Home status is invalidated by these
+  two events: a `session.summary` for Home's current `sessionId`, or for the chapter it opens
+  (`openSessionId`, the sealed predecessor during a rollover), triggers one immediate
+  `home.status` read, and every `session.listChanged` does too, because a chapter rollover or
+  designation changes the Home projection without changing the row a summary names. Neither event
+  is a Home status payload; both only request the same fenced read the mounted surface runs. User-scoped 500-row pagination
   has named page/item/cursor bounds and publishes atomically. A traversal whose connection already published a catalog projection
   token re-reads it conditionally: the first page names that token and the Gateway answers `notModified` with no rows, so the
   retained rows, selection, and scroll stay untouched and the traversal still counts as authoritative. The token spans the whole
@@ -130,7 +157,7 @@ admits and reduces mounted-session topics:
   path allowed to replace a cursor or runtime baseline. The same snapshot carries the full
   bounded queue projection (at most 32 authoritative items, including total attachment count and optional photo/file counts)
   and queue revision; queue updates therefore replace the visible
-  queued-message cards atomically rather than applying per-row mobile deltas. Protocol v6 requires
+  queued-message cards atomically rather than applying per-row mobile deltas. Protocol v7 requires
   both rich fields; iOS admits Edit/Remove only for that authoritative pair. A mutation response
   never rewrites queue projection locally: clear,
   edit, reorder, and remove keep controls inert until a strictly newer sequenced queue revision
@@ -200,13 +227,18 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   persists synthesized envelope text. `automaticCompactionEnabled` reports runtime truth rather than a mobile inference.
   Transcript projection captures the authoritative snapshot and composer handoff
   as one immutable commit; pending/outgoing rows render only from installed
-  handoff state, while canonical reconciliation installs handoff `none`. A
+  handoff state, while canonical reconciliation installs handoff `none`.
+  Pending and queued input DTOs retain optional semantic metadata: explicit
+  `direction=hiddenInternal` is excluded at pending-handoff admission and the
+  displayed-queue projection, never from the authoritative pending/queue state.
+  This applies before canonical binding as well as after it; ordinary maintainer
+  prompts remain visible. A
   frame gate retains the previous complete commit until the replacement is ready;
 - provider, package, settings, trust, and custom-model mutation invalidations
   advance owner revisions across connected clients; each visible surface reloads
   its explicit global or project scope instead of sharing a wrong-scope payload;
 - authentication prompts drive the generic secure prompt sheet;
-- `session.extensionPresentation` v3 remains the leased transport for semantic updates and native select/confirm/input/editor sheets plus one bounded atomic form sheet. Closing an interaction sheet is local presentation intent, never a cancellation response: the pending Gateway interaction continues waiting, and a bounded device-local draft keyed by session/interaction/epoch/revision restores selections, text, Other activation, and form page across navigation or app restart. Successful response or authoritative retirement removes that draft. The mounted chat route waits for its first ready transcript frame before presenting a pending interaction and remains the sole sheet owner, preventing sheet coverage from cancelling session opening or creating presentation loops. The managed item-sheet identity carries the exact session, interaction ID, host epoch, and presentation revision, so a same-ID successor retires the old presentation token before replacement; accepted responses continue under the mutation owner while stale presentation callbacks are suppressed. Post-await effects use the shared token authority and fail closed when a coordinator is present without a token; only standalone sheets fall back to ambient activity. A dismissed pending Tron-owned or explicitly admitted compatibility `ask_user` form reopens through that route from its operation/owner-matched tool chip, while canonical completed tool-result details reconstruct the same questions and submitted answers read-only without retaining a second interaction mirror. Tron-owned `ask_user` uses the release source `tron:ask-user.v1`; the audited foreign source remains historical compatibility rendering only. Read-only statuses, widgets, and service activity create no ambient transcript or composer content and no Manage Session surface; retained string widgets, bounded read-only widget frames, and owner-attributed keyed statuses are reachable only through the single user-opened **Extension content** sheet, whose compact composer entry point appears only while presentable retained content exists, while discrete extension events remain notification pills. A retained status is presentable on its own, so state that outlives its widget (a paused goal clears its widget and keeps only its status) stays inspectable instead of disappearing. Interactive prompts and editor ownership are unchanged. In particular, there is no Pi Subagents composer pill or generic extension summary route. Normal canonical `subagent` calls remain ordinary transcript tool chips, while the process orb/native **Subagents** sheet is the sole above-composer progress surface;
+- `session.extensionPresentation` v3 remains the leased transport for semantic updates and native select/confirm/input/editor sheets plus one bounded atomic form sheet. Closing an interaction sheet is local presentation intent, never a cancellation response: the pending Gateway interaction continues waiting, and a bounded device-local draft keyed by session/interaction/epoch/revision restores selections, text, Other activation, and form page across navigation or app restart. Successful response or authoritative retirement removes that draft. The mounted chat route waits for its first ready transcript frame before presenting a pending interaction and remains the sole sheet owner, preventing sheet coverage from cancelling session opening or creating presentation loops. The managed item-sheet identity carries the exact session, interaction ID, host epoch, and presentation revision, so a same-ID successor retires the old presentation token before replacement; accepted responses continue under the mutation owner while stale presentation callbacks are suppressed. Post-await effects use the shared token authority and fail closed when a coordinator is present without a token; only standalone sheets fall back to ambient activity. A dismissed pending Tron-owned or explicitly admitted compatibility `ask_user` form reopens through that route from its operation/owner-matched tool chip, while canonical completed tool-result details reconstruct the same questions and submitted answers read-only without retaining a second interaction mirror. Tron-owned `ask_user` uses the release source `tron:ask-user.v1`; the audited foreign source remains historical compatibility rendering only. Read-only statuses, widgets, and service activity create no ambient transcript or composer content and no Manage Session surface; retained string widgets, bounded read-only widget frames, and owner-attributed keyed statuses are reachable only through the single user-opened **Activity** sheet alongside admitted native process rows. The compact composer control selects active subagents, presentable non-subagent content, then recent subagents. Widget/status `owner.kind` and frame `provenance.kind` carry the same Gateway-admitted provider classification; only `subagent` retained state is excluded from the generic list, with absent/unknown kinds remaining visible. Native consumers never parse package source strings. Discrete context messages remain inbound pills. A retained status is presentable on its own, so state that outlives its widget (a paused goal clears its widget and keeps only its status) stays inspectable instead of disappearing. Interactive prompts and editor ownership are unchanged. In particular, there is no Pi Subagents composer pill or generic extension summary route. Normal canonical `subagent` calls remain ordinary transcript tool chips, while the process orb/native Activity **Running subagents** section owns above-composer progress. Supervisor progress (`subagent_supervisor_request`, reason `progress_update`) and per-child notes (`subagent-incremental-child-notify`) render with the existing subagent compact pill and details. A receipt-bound subagent wake preserves canonical user-role input for the model and projects as `semantic.kind=prompt` with a `subagent` origin and hiddenInternal/hidden (no new semantic kind, so released protocol-7 clients decode it too), so it has no transcript row, pill or user bubble; the delivering subagent message alone shows triggered-turn details; classified subagent messages cannot fall through to Unknown source/Context received. Unknown future semantic kinds decode conservatively as unknown, and absent semantic metadata preserves ordinary prompt presentation;
 - the snapshot `processOverview` authority with its optional nonempty `processActivities` rows and compact `session.processActivity` events drive the current/recent projection only for admitted synchronous/asynchronous subagents; assistant commands remain ordinary transcript/tool activity. A delta carries an optional exact process upsert, bounded explicit removals, and one same-revision shallow overview. `SessionPresentationStore` applies that replacement atomically and resynchronizes instead of installing an overview around a stale or rejected row; it never rebuilds transcript projection or moves chat scroll state. Terminal lifecycle is latched; delayed full frames cannot resurrect or erase newer process evidence. The Gateway emits a replacement at the exact five-minute expiry even without another chat event. A mounted read-only sheet follows a replaced aggregate only when exactly one admitted row retains the same tool-call and root-run correlation; ambiguous replacements fail closed. The composer sheet reads mounted rows only, while `SessionProcessHistoryStore` loads canonical pages from `session.processHistory.list/get` for the exact presentation/history generation;
 - `session.processTranscript.changed` is a lease-scoped invalidation, not a parent session-cursor event. `GatewayProtocol` dispatches it before the generic `session.*` envelope path. A mounted `ReadOnlySubagentSessionStore` accepts only its exact lease and newer revision, refreshes the newest page through that same lease, and retains already loaded earlier pages when canonical overlap proves append-only continuity. `session.processTranscript.abort` is a confirmed, capability-gated mutation for an active viewer only: it carries the exact lease rather than trusting a child ID from iOS, and Gateway revalidates the bound parent/process/run plus file identity before using the parent runtime's ordinary settled abort for synchronous work or the trusted subagent controller's exact root-run/child-producer stop for asynchronous work. The open response advertises per-lease `canAbort`; synchronous leases additionally fence the mutation to the foreground operation ID captured at open. Branch replacement or an unbridgeable gap falls back to the new canonical tail rather than fabricating adjacency. `open/page/close` responses preserve page range, canonical boundary, unique ID, and generation checks; transient current tool/output remains outside canonical transcript rows;
 - producer-visible `custom_message` entries enter the ordered timeline as right-aligned inbound context, whether stored for a later model turn or triggering work immediately. Their compact row is **Producer · Context** when producer evidence exists, or simply **Context** when it does not, plus one status from Tron's finite lifecycle vocabulary (or **Received**); unknown/ad-hoc status strings are not promoted. It never includes custom type, message text, objective, or another payload value. Those values remain in the detail sheet. Gateway-authored context-delivery receipts preserve exact producer attribution and delivery mode after reconnect; unknown provenance stays neutral and is never guessed from custom type, text, or details. Producer-hidden custom messages remain absent from ordinary chat, while `custom`/`appendEntry` state never becomes a tool or message row;
@@ -373,7 +405,7 @@ Session subscription ownership is token-scoped end to end. The open response rem
 provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription
 credentials must be nonempty, printable UTF-8 tokens no larger than 200 bytes. Baseline plus its
 already-drained contiguous event suffix then publish in one MainActor turn. The fitted tail mounts immediately regardless of its display-bearing count; earlier-page reads begin only from the mounted presentation and cannot make the conversation unavailable. A stale or failed
-attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Protocol-v6
+attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Protocol-v7
 peers always provide explicit subscription ownership. If a reconnect installs a new runtime generation for the same canonical session,
 iOS clears context/tree/resource/command projections, invalidates their in-flight request generations,
 and advances all three public reload revisions before publishing the replacement. Secondary read successes

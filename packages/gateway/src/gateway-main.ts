@@ -1,7 +1,8 @@
+import { ManagedSubagents } from "./sessions/managed-subagents.js";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, renameSync, writeFileSync, rmSync } from "node:fs";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.js";
 import { GatewayError } from "./errors.js";
@@ -10,9 +11,14 @@ import { TrustService } from "./admin/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
-import { SettingsService } from "./admin/settings-service.js";
+import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
+import { SettingsRiskEvaluator } from "./admin/settings-risk.js";
+import { SettingsChangeRecord } from "./admin/settings-record.js";
+import { OutsideChanges } from "./admin/settings-outside.js";
+import { SettingsApprovals } from "./admin/settings-approvals.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
+import { ScopeToolCatalog } from "./admin/tool-catalog.js";
 import { HookResources } from "./admin/hook-resources.js";
 import { AuthBroker } from "./admin/auth-broker.js";
 import { MacKeychainMcpCredentialOwner, McpAdminService } from "./admin/mcp-admin-service.js";
@@ -23,6 +29,8 @@ import { logUnresolvedDrainOwners, RestartDrainProgress } from "./sessions/resta
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
+import { logHomeDiagnostic } from "./home/home-diagnostic.js";
+import { homeChapterObservationExcluded, homeWorkspaceDirectory } from "./home/home-owner.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
@@ -30,12 +38,14 @@ import { ResourceSampler, type ResourceRuntimeEntry } from "./transport/stall-di
 import { requestsCompetingForLoop } from "./transport/request-span.js";
 import { backgroundWork } from "./background-work.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
+import { assertNewModelChoice, OpenAIModelEligibility } from "./providers/openai-model-eligibility.js";
 import { applyJevModelPricing } from "./providers/jev-model-pricing.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
 import { shutdownStep } from "./lifecycle/shutdown-step.js";
+import { exitAfterShutdown } from "./lifecycle/exit-after-shutdown.js";
 import { STARTUP_LISTEN_BUDGET_MS, startupBudget, type StartupStepTiming } from "./lifecycle/startup-budget.js";
 import { configureAgentBinEnvironment, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 import { AutomationStore } from "./automations/automation-store.js";
@@ -49,6 +59,8 @@ import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
 import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConfig } from "./knowledge/knowledge-observation.js";
+import { createModelRuntimeSummarizer } from "./episodic/episodic-compactor.js";
+import { isVirtualModel } from "./providers/virtual-model.js";
 import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
 import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
 import { JevDecisionClient } from "./knowledge/jev-client.js";
@@ -75,7 +87,7 @@ const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 await assertDelegatedRootCutoverReady(config.tronHome);
 await ensureDelegatedArtifactRoot(delegatedRoot);
 // The installed provider receives its supported root before Pi loads any
-// extensions. No source or installed package is rewritten at startup.
+// extensions. Existing installed packages are never rewritten in place.
 delegatedProviderEnvironment(delegatedRoot);
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
 // Pi installs its private agent-bin projection while loading settings. Apply
@@ -97,10 +109,14 @@ process.env.PI_CODING_AGENT ??= "true";
 process.env.AI_AGENT ??= "pi";
 process.env.PI_SKIP_VERSION_CHECK ??= "1";
 
-const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"), {
+const gatewayLogPath = join(config.tronHome, "logs", "gateway.jsonl");
+const logger = new GatewayLogger(gatewayLogPath, {
   runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
 });
+// Activate this payload's exact offline closure before any Pi discovery. A
+// restart verifies/reuses the immutable root; damaged roots fail startup closed.
+const managedSubagents = ManagedSubagents.activateForStartup(config.tronHome, logger);
 {
   const identity = runtimeIdentity();
   logger.log(
@@ -135,19 +151,25 @@ let transport: GatewayServer;
 const devices = new DeviceStore(config.tronHome, config.machineId);
 await devices.initialize();
 startupCheckpoint("devices");
-const notifications = new NotificationService(
+const notifications: NotificationService = new NotificationService(
   new NotificationGrantStore(config.tronHome),
   new PushRelayClient(config.pushServiceOrigin),
   Date.now,
-  undefined,
   (payload) => transport?.broadcast("notification.inbox.changed", payload),
   () => logger.log("warning", "Session notification read state could not be persisted; unread state is retained.", {
     event: "notification.inbox.read_failed", source: "notifications",
   }),
+  ({ kind, outcome, relayReason }) => logger.log(
+    outcome === "failed" || outcome === "refused" ? "warning" : "info",
+    `Push notification ${outcome}`,
+    { event: `notification.push.${outcome.replaceAll("_", "-")}`, source: "notifications", kind, outcome, reason: relayReason },
+  ),
+  (sessionId) => sessions.homeOwner().chapterStateFor(sessionId).homeId !== undefined,
 );
 await notifications.initialize();
 startupCheckpoint("notifications");
 
+const openAIModelEligibility = new OpenAIModelEligibility();
 const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime.create({
   authPath: join(config.agentDir, "auth.json"),
   modelsPath: join(config.agentDir, "models.json"),
@@ -155,13 +177,28 @@ const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime
   refreshOnCreate: true,
   allowModelNetwork: false,
 })));
+openAIModelEligibility.attachRuntime(modelRuntime);
 startupCheckpoint("model-runtime");
 const globalSettingsManager = SettingsManager.create(homedir(), config.agentDir, { projectTrusted: false });
-const trust = new TrustService(config.agentDir);
+const trust = new TrustService(config.agentDir, { standaloneDirectories: [homeWorkspaceDirectory(config.tronHome)] });
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
-const settings = new SettingsService(config.agentDir, modelRuntime, false);
+const settingsModel = new SettingsModel({
+  agentDir: config.agentDir,
+  tronHome: config.tronHome,
+  trust,
+  modelRuntime,
+  homeMemoryModel: async () => (await sessions.homeOwner()?.memoryStatus())?.model,
+  toolCatalog: async (target) => target.kind === "session"
+    ? sessions.liveToolCatalog(target.sessionId)
+    : scopeToolCatalog.list(target.kind === "project" ? target.cwd : undefined),
+});
+const settingsRecord = new SettingsChangeRecord(config.tronHome);
+// Outside changes (docs/settings-model.md 5.6): every settings read compares the
+// Mac and Project stores with what Tron last observed; file events only prompt.
+const outsideSettings = new OutsideChanges(config.tronHome, config.agentDir, settingsRecord, settingsModel.observedReaders);
+settingsModel.observeOutside(outsideSettings);
 const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
@@ -206,13 +243,19 @@ const resourceSampler: ResourceSampler = new ResourceSampler({
 // must not hide a session whose automation run is already dispatched.
 let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | undefined;
 const sessions = new RuntimeRegistry({
+  workspaceUnavailable: cause => logger.log("warning", "Tron internal workspace is unavailable", {
+    event: "workspace.unavailable", source: "workspace", cause,
+  }),
   agentDir: config.agentDir,
+  gatewayModelRuntime: modelRuntime,
   tronHome: config.tronHome,
   resources: resourceSampler,
   delegatedArtifactRoot: delegatedRoot,
+  managedSubagents,
   mcpAuth: { openUrl: (operationId, url, sessionId, server) => auth.openMcpAuthorizationUrl(operationId, url, sessionId, server) },
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
+  openAIModelEligibility,
   trust,
   broadcast: (sessionId, topic, payload) => transport?.broadcastSession(sessionId, topic, payload),
   sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),
@@ -236,6 +279,55 @@ const sessions = new RuntimeRegistry({
     : logger.log("info", `Archived session returned to the dashboard on new work (${diagnostic.trigger})`, {
       event: "sessions.archive.auto-unarchived", source: "sessions", outcome: diagnostic.outcome, reason: diagnostic.trigger,
     }),
+  // Home's memory compactor runs on the Gateway's own ModelRuntime, exactly as
+  // Knowledge resolves the model for its calls; never on a session's runtime,
+  // whose lifetime is the session's. A virtual (routed) model cannot back it:
+  // routing is decided per request from the canonical projection (#412 Q4).
+  homeMemorySummarizer: (model) => {
+    const resolved = modelForConfig(modelRuntime, `${model.provider}/${model.id}`);
+    if (!resolved) return { refusal: "unavailable" as const };
+    if (isVirtualModel(resolved)) return { refusal: "virtual-model" as const };
+    return { summarizer: createModelRuntimeSummarizer(modelRuntime, resolved) };
+  },
+  homeMemoryDiagnostic: (record) => {
+    if (record.event === "home.memory-ingest") {
+      // A code, never the failure's own message: an episodic ingest failure can
+      // name the canonical session path.
+      logger.log("warning", "Home memory could not ingest committed entries", {
+        event: "home.memory-ingest", source: "home", reason: record.reason,
+      });
+      return;
+    }
+    logger.log(record.level, "Tron Home memory diagnostic", {
+      event: record.event, source: "home",
+      ...(record.reason === undefined ? {} : { reason: record.reason }),
+      ...(record.counts === undefined ? {} : { counts: record.counts }),
+    });
+  },
+  // Home is used deliberately, one turn at a time, so one line per activation is
+  // both affordable and the only place a turn's effective size and the readiness
+  // wait it took are visible. No message text, entry id or nonce is included.
+  homeRequestDiagnostic: (record) => {
+    if (record.event === "activation") {
+      logger.log("info", "Tron Home activation", {
+        event: "home.activation", source: "home",
+        counts: {
+          effectiveTokens: record.effectiveTokens,
+          contextWindow: record.contextWindow,
+          viewLines: record.viewLines,
+          viewBytes: record.viewBytes,
+          excludedMessages: record.excludedMessages,
+        },
+        durationMs: record.waitedMs,
+      });
+      return;
+    }
+    logger.log("warning", "Tron Home activation refused", {
+      event: "home.activation-refused", source: "home", reason: record.reason,
+      ...(record.detail.length > 200 ? { detail: `${record.detail.slice(0, 200)}…` } : { detail: record.detail }),
+      ...(record.effectiveTokens === undefined ? {} : { counts: { effectiveTokens: record.effectiveTokens, contextWindow: record.contextWindow ?? 0 } }),
+    });
+  },
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
   // Load and eviction are transitions at info: the byte budget's decisions have
   // to be attributable to one session from the log alone, and the reason has to
@@ -271,11 +363,26 @@ const sessions = new RuntimeRegistry({
     `Session compaction ${diagnostic.outcome}`,
     { event: "session.compaction.completed", source: "session", ...diagnostic },
   ),
+  stopSteeringDiagnostic: (diagnostic) => logger.log(
+    diagnostic.outcome === "failed" ? "warning" : "info",
+    `Stop continuation ${diagnostic.outcome}`,
+    { event: "session.stop-steering-continuation", source: "session", ...diagnostic },
+  ),
+  manualCompactionAdopted: (diagnostic) => logger.log(
+    "info",
+    "Queued manual compaction adopted by an active compaction",
+    { event: "session.compaction.manual-adopted", source: "session", ...diagnostic },
+  ),
   codemodeDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "completed" ? "info" : "warning",
     `Codemode execution ${diagnostic.outcome}`,
     { event: "codemode.execution.completed", source: "session", ...diagnostic },
   ),
+  homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
+  homeTaskDiagnostic: record => logger.log(record.event === "home.task.runaway-stop" || record.event === "home.task.detached-work"
+    || record.event === "home.task.producer-refused" || record.event === "home.task.store-refused"
+    || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
+    "Home task lifecycle", { source: "home", ...record }),
   machineId: config.machineId,
   notifications,
   browserLiveViews,
@@ -337,6 +444,8 @@ try {
   try { sessionSearchAllowance = await SessionSearchAllowanceLedger.open(join(config.tronHome, "gateway", "session-search-jev-allowance.sqlite")); }
   catch (error) { logger.log("warning", "Optional Jev allowance is unavailable; remote ranking disabled", { event: "session-search.jev-ledger-unavailable", source: "search", error }); }
   sessionSearch = new SessionSearchService(sessions, sessionSearchIndex, jevClient, sessionSearchAllowance);
+  // Home's session_search research tool reads the same owner, late-bound.
+  sessions.setSessionSearchService(sessionSearch);
 } catch (error) {
   sessionSearchIndex?.close();
   logger.log("warning", "Optional session search index is unavailable; chat remains available", { event: "session-search.index-unavailable", source: "search", error });
@@ -376,6 +485,9 @@ const knowledge = new KnowledgeService(
       `Prospective knowledge observation cuts were not retained (${dropped} cut(s); ${queued} queued); no durable coverage is claimed`,
       { event: code, source: "knowledge" },
     ),
+    // Tron Home's own chapters are never observed automatically; a fork (an
+    // ordinary session) is observed normally. See homeChapterObservationExcluded.
+    homeChapterObservationExcluded(() => sessions.homeOwner()),
   ),
   {
     connector: (action, signal) => knowledgeConnector.invoke(action, signal),
@@ -401,6 +513,14 @@ const knowledge = new KnowledgeService(
     );
   }),
   knowledgeTagging,
+  async modelReference => {
+    const separator = modelReference.indexOf("/");
+    if (separator <= 0 || separator === modelReference.length - 1) throw new GatewayError("invalid_request", "Knowledge model must identify a registered provider/model");
+    const provider = modelReference.slice(0, separator);
+    const id = modelReference.slice(separator + 1);
+    if (!modelRuntime.getModel(provider, id)) throw new GatewayError("invalid_request", "Knowledge model is not registered");
+    await assertNewModelChoice(modelRuntime, provider, id);
+  },
 );
 queueKnowledgeSummary = source => knowledge.queueIntakeSummary(source);
 sessions.setKnowledgeService(knowledge);
@@ -413,10 +533,13 @@ const packages = new PackageService(
   trust,
   (topic, payload) => transport?.broadcast(topic, payload),
   workRegistry,
+  managedSubagents,
+  outsideSettings,
 );
 // Hook listings load extensions for a scope without a session; the owner never
 // touches a runtime, so no session or global registration is involved.
-const hookResources = new HookResources(config.agentDir, trust, workRegistry);
+const hookResources = new HookResources(config.agentDir, trust, workRegistry, managedSubagents);
+const scopeToolCatalog = new ScopeToolCatalog(config.agentDir, trust, workRegistry, managedSubagents);
 const automationStore = new AutomationStore(config.tronHome, {
   changed: (automationId) => transport?.broadcast("automation.changed", {
     catalogRevision: automationStore.status().catalogRevision,
@@ -474,19 +597,21 @@ function recordShutdownStep(step: string, durationMs: number): void {
   });
 }
 
-async function shutdown(reason: string, exitCode = 0): Promise<void> {
+async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false): Promise<void> {
   if (stopping) return;
   stopping = true;
+  const stopDrainId = drainAcceptedWork ? sessions.administrativeDrainSnapshot().drainId : undefined;
   service.dispose();
+  outsideSettings.dispose();
   const stoppingAt = performance.now();
   // The last record of this process: the next process's gateway.started
   // follows after launchd and the launcher.
   const recordStopped = (code: number): void => logger.log(code === 0 ? "info" : "warning", `Gateway stopped (exit ${code}) after ${Math.round(performance.now() - stoppingAt)} ms of shutdown`, {
-    event: "gateway.stopped", source: "lifecycle", code: String(code), durationMs: performance.now() - stoppingAt,
+    event: "gateway.stopped", source: "lifecycle", code: String(code), pid: process.pid, durationMs: performance.now() - stoppingAt,
   });
   logger.log("info", `Stopping gateway (${reason})`, { event: "gateway.stopping", source: "lifecycle" });
-  const forced = setTimeout(() => { recordStopped(1); process.exit(1); }, 15_000);
-  forced.unref();
+  const forced = drainAcceptedWork ? undefined : setTimeout(() => { recordStopped(1); exitAfterShutdown(1, gatewayLogPath); }, 15_000);
+  forced?.unref();
   try {
     automations.beginDrain();
     workRegistry.beginDrain();
@@ -495,19 +620,25 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     // slice, and a slice already in flight settles on its own.
     backgroundWork.stop();
     await shutdownStep("transport-close", () => transport.close(), recordShutdownStep);
-    await shutdownStep("cancellation", async () => { await Promise.allSettled([
-      automations.requestShutdownCancellation(),
-      workRegistry.requestCancellation(),
-    ]); }, recordShutdownStep);
-    // Administrative restart already waited without a deadline. Signal/error
-    // shutdown gets only a short cleanup grace; failure cannot reopen admission.
-    let cleanupTimer!: NodeJS.Timeout;
-    const cleanupGrace = new Promise<void>((resolve) => {
-      cleanupTimer = setTimeout(resolve, 2_000);
-      cleanupTimer.unref();
-    });
-    await shutdownStep("work-settle", () => Promise.race([workRegistry.waitUntilSettled(), cleanupGrace]), recordShutdownStep);
-    clearTimeout(cleanupTimer);
+    if (!drainAcceptedWork) {
+      await shutdownStep("cancellation", async () => { await Promise.allSettled([
+        automations.requestShutdownCancellation(),
+        workRegistry.requestCancellation(),
+      ]); }, recordShutdownStep);
+    }
+    // Administrative restart and stop arrive here only after canonical drain
+    // completion; neither may trade accepted work for a cleanup deadline.
+    if (drainAcceptedWork) {
+      await shutdownStep("work-settle", () => workRegistry.waitUntilSettled(), recordShutdownStep);
+    } else {
+      let cleanupTimer!: NodeJS.Timeout;
+      const cleanupGrace = new Promise<void>((resolve) => {
+        cleanupTimer = setTimeout(resolve, 2_000);
+        cleanupTimer.unref();
+      });
+      await shutdownStep("work-settle", () => Promise.race([workRegistry.waitUntilSettled(), cleanupGrace]), recordShutdownStep);
+      clearTimeout(cleanupTimer);
+    }
     if (workRegistry.size > 0) {
       logger.log(
         "warning",
@@ -525,32 +656,76 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     await shutdownStep("sessions-dispose", () => sessions.dispose(), recordShutdownStep);
     await shutdownStep("command-receipts-dispose", () => receipts.dispose(), recordShutdownStep);
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
-    clearTimeout(forced);
+    if (forced) clearTimeout(forced);
+    if (exitCode === 0 && stopDrainId) {
+      // One atomic receipt survives transport retirement and log rotation. The
+      // accepted drain UUID plus Mac's captured PID/start identity exclude stale
+      // processes/attempts; this is completion, never permission to SIGKILL exit 0.
+      const path = join(config.tronHome, "gateway", "stop-completed.json");
+      const temporary = `${path}.${process.pid}.tmp`;
+      try {
+        writeFileSync(temporary, JSON.stringify({ version: 1, pid: process.pid, drainId: stopDrainId }), { mode: 0o600 });
+        renameSync(temporary, path);
+      } catch (error) {
+        try { rmSync(temporary, { force: true }); } catch {}
+        logger.log("error", "Could not publish intentional-stop completion; wrapper must report observation uncertainty", {
+          event: "gateway.stop-completion.failed", source: "lifecycle", error,
+        });
+      }
+    }
     recordStopped(exitCode);
-    process.exit(exitCode);
+    exitAfterShutdown(exitCode, gatewayLogPath);
   } catch (error) {
     logger.log("error", "Gateway shutdown failed", { event: "gateway.shutdown-failed", source: "lifecycle", error });
     await releaseRuntimeLock();
     recordStopped(1);
-    process.exit(1);
+    exitAfterShutdown(1, gatewayLogPath);
   }
 }
 
 const DRAIN_STALL_LIMIT_MS = 180_000; // Bounds accepted work that stops making drain progress.
-const DRAIN_STALL_CHECK_INTERVAL_MS = 1_000; // Checks progress without relying on work completion callbacks.
-const DRAIN_WAIT_LOG_INTERVAL_MS = 15_000; // Reports blockers periodically without filling the persistent log.
-let requestedRestart: Promise<void> | undefined;
+const DRAIN_WAIT_LOG_INTERVAL_MS = 15_000; // Reports blockers from the canonical drain loop without filling the persistent log.
+type AdministrativeExitMode = "restart" | "stop";
+interface AdministrativeExitOwner {
+  mode: AdministrativeExitMode;
+  task: Promise<void>;
+}
+let administrativeExitOwner: AdministrativeExitOwner | undefined;
+
 function requestRestart(restartNow = false): void {
-  if (requestedRestart) {
-    if (restartNow) {
+  requestAdministrativeExit("restart", restartNow);
+}
+
+function requestStop(): void {
+  requestAdministrativeExit("stop");
+}
+
+function requestAdministrativeExit(mode: AdministrativeExitMode, restartNow = false): void {
+  if (administrativeExitOwner) {
+    if (mode === "restart" && restartNow) {
+      const supersedesStop = administrativeExitOwner.mode === "stop";
+      administrativeExitOwner.mode = "restart";
       const snapshot = sessions.administrativeDrainSnapshot();
       logDrainBlockers(snapshot);
+      logger.log("warning", supersedesStop
+        ? "Gateway restart requested immediately during intentional stop"
+        : "Gateway restart requested immediately during drain", { event: "gateway.restart-drain.stalled", source: "lifecycle" });
       void shutdown("restart drain stalled", SUPERVISOR_RELAUNCH_EXIT_CODE);
     }
     return;
   }
+
+  const owner: AdministrativeExitOwner = { mode, task: Promise.resolve() };
+  administrativeExitOwner = owner;
+  owner.task = mode === "restart" ? runRestartDrain(restartNow) : runStopDrain();
+  void owner.task.finally(() => {
+    if (administrativeExitOwner === owner && !stopping) administrativeExitOwner = undefined;
+  }).catch(() => {});
+}
+
+async function runRestartDrain(restartNow: boolean): Promise<void> {
   logger.log("info", "Gateway restart scheduled after accepted agent runs settle", { event: "gateway.restart-drain", source: "lifecycle" });
-  requestedRestart = (async () => {
+  try {
     if (restartNow) {
       const snapshot = sessions.administrativeDrainSnapshot();
       logDrainBlockers(snapshot);
@@ -558,16 +733,12 @@ function requestRestart(restartNow = false): void {
       await shutdown("restart drain stalled", SUPERVISOR_RELAUNCH_EXIT_CODE);
       return;
     }
-    let stallTimer: NodeJS.Timeout | undefined;
-    let waitingLog: NodeJS.Timeout | undefined;
     const progress = new RestartDrainProgress();
-    const drainDecision = await new Promise<"idle" | ReturnType<RestartDrainProgress["evaluate"]>>((resolve, reject) => {
-      const check = () => {
-        const snapshot = sessions.administrativeDrainSnapshot();
-        const decision = progress.evaluate(snapshot, Date.now(), DRAIN_STALL_LIMIT_MS);
-        if (decision.outcome === "waiting") return;
-        clearInterval(stallTimer);
-        clearInterval(waitingLog);
+    let decision: ReturnType<RestartDrainProgress["evaluate"]> | undefined;
+    let lastWaitLogAt = Number.NEGATIVE_INFINITY;
+    const completed = await sessions.waitUntilIdle((snapshot) => {
+      decision = progress.evaluate(snapshot, Date.now(), DRAIN_STALL_LIMIT_MS);
+      if (decision.outcome === "stalled" || decision.outcome === "unresolved-owners") {
         if (decision.outcome === "stalled") {
           logDrainBlockers(snapshot);
           logger.log("warning", `Gateway restart drain stalled: category=${decision.blocker.category} method=${decision.blocker.method ?? "none"} ageMs=${decision.ageMs}`, {
@@ -580,34 +751,27 @@ function requestRestart(restartNow = false): void {
             });
           });
         }
-        resolve(decision);
-      };
-      stallTimer = setInterval(check, DRAIN_STALL_CHECK_INTERVAL_MS);
-      stallTimer.unref();
-      waitingLog = setInterval(() => logDrainBlockers(sessions.administrativeDrainSnapshot()), DRAIN_WAIT_LOG_INTERVAL_MS);
-      waitingLog.unref();
-      check();
-      // A drain failure must reach the restart-drain-failed path below; once a
-      // stall or unresolved-owner decision has settled this promise, it is ignored.
-      sessions.waitUntilIdle().then(() => resolve("idle"), reject);
-    });
-    if (stallTimer) clearInterval(stallTimer);
-    if (waitingLog) clearInterval(waitingLog);
-    if (drainDecision === "idle" || drainDecision.outcome === "completed" || drainDecision.outcome === "unresolved-owners") {
-      if (drainDecision === "idle" || drainDecision.outcome === "completed") {
-        logger.log("info", "Gateway restart drain completed", { event: "gateway.restart-drain.completed", source: "lifecycle" });
+        return false;
       }
+      const now = Date.now();
+      if (now - lastWaitLogAt >= DRAIN_WAIT_LOG_INTERVAL_MS) {
+        lastWaitLogAt = now;
+        logDrainBlockers(snapshot);
+      }
+      return true;
+    });
+    if (completed) {
+      logger.log("info", "Gateway restart drain completed", { event: "gateway.restart-drain.completed", source: "lifecycle" });
       await shutdown("requested restart", SUPERVISOR_RELAUNCH_EXIT_CODE);
       return;
     }
-    if (drainDecision.outcome === "stalled") {
-      await shutdown("restart drain stalled", SUPERVISOR_RELAUNCH_EXIT_CODE);
-      return;
+    if (decision?.outcome === "stalled" || decision?.outcome === "unresolved-owners") {
+      await shutdown(decision.outcome === "stalled" ? "restart drain stalled" : "restart drain has unresolved owners", SUPERVISOR_RELAUNCH_EXIT_CODE);
     }
-  })().catch((error) => {
+  } catch (error) {
     logger.log("error", "Gateway restart drain failed", { event: "gateway.restart-drain-failed", source: "lifecycle", error });
-    void shutdown("restart drain failed", 1);
-  });
+    await shutdown("restart drain failed", 1);
+  }
 }
 
 function logDrainBlockers(snapshot: ReturnType<typeof sessions.administrativeDrainSnapshot>): void {
@@ -620,6 +784,54 @@ function logDrainBlockers(snapshot: ReturnType<typeof sessions.administrativeDra
   });
 }
 
+async function runStopDrain(): Promise<void> {
+  logger.log("info", "Gateway stop scheduled after accepted work settles", { event: "gateway.stop-drain", source: "lifecycle" });
+  try {
+    await sessions.waitUntilIdle();
+    const finalSnapshot = sessions.administrativeDrainSnapshot();
+    if (finalSnapshot.phase === "complete" && finalSnapshot.blockerCount === 0) {
+      logger.log("info", "Gateway stop drain completed", { event: "gateway.stop-drain.completed", source: "lifecycle" });
+      await shutdown("requested stop", 0, true);
+      return;
+    }
+    sessions.failAdministrativeDrain();
+    logger.log("error", `Gateway stop refused: final drain phase=${finalSnapshot.phase} blockers=${finalSnapshot.blockerCount}`, {
+      event: "gateway.stop-drain.failed", source: "lifecycle",
+    });
+  } catch (error) {
+    logger.log("error", "Gateway stop drain failed; process remains available for recovery", {
+      event: "gateway.stop-drain.failed", source: "lifecycle", error,
+    });
+  }
+}
+
+// The one settings change path (docs/settings-model.md 5). Agents reach it
+// through the `settings` tool; the slots read it late-bound from the registry.
+const settingsRisk = new SettingsRiskEvaluator(jevClient);
+const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(config.tronHome), {
+  assessRisk: async (input, signal) => {
+    try { return await settingsRisk.assess(input, signal); }
+    catch (error) {
+      logger.log("warning", "Settings risk evaluation did not complete; deterministic tier retained", {
+        event: "settings.risk.failed", source: "settings", kind: input.key, reason: signal.aborted ? "timeout" : "unavailable",
+      });
+      throw error;
+    }
+  },
+  setTrust: async (project, decision) => trust.setAndApply(
+    project,
+    decision,
+    async (inspection) => sessions.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false),
+    async (inspection) => sessions.commitProjectReload(inspection.projectDir),
+  ),
+  configureHomeMemory: async (model) => {
+    const home = sessions.homeOwner();
+    if (!home) throw new GatewayError("unsupported", "Tron Home is not available");
+    await home.configureMemory({ model });
+  },
+}, config.agentDir);
+sessions.setSettings(settingsModel, settingsChanges);
+
 const service = new GatewayService({
   config,
   modelRuntime,
@@ -629,7 +841,8 @@ const service = new GatewayService({
   uploads,
   terminals: terminal,
   trust,
-  settings,
+  settingsModel,
+  settingsChanges,
   modelConfig,
   packages,
   hookResources,
@@ -640,6 +853,7 @@ const service = new GatewayService({
   // LaunchAgent/supervisor restarts unsuccessful exits. Administrative
   // restart drains accepted agent work before using the deliberate restart code.
   requestRestart,
+  requestStop,
   sessionDeleted: (sessionId) => transport?.revokeSessionTerminals(sessionId),
   broadcast: (topic, payload) => transport?.broadcast(topic, payload),
   notifications,
@@ -647,6 +861,7 @@ const service = new GatewayService({
   automations,
   knowledge,
   connections,
+  home: sessions.homeOwner(),
   mcpAdmin: new McpAdminService(
     config.agentDir,
     join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"),
@@ -655,6 +870,9 @@ const service = new GatewayService({
   ),
   ...(sessionSearch ? { sessionSearch } : {}),
 });
+outsideSettings.startWatching(error => logger.log("warning", "Outside settings comparison failed", {
+  event: "settings.outside.failed", source: "settings", error: error instanceof Error ? error.message : String(error),
+}));
 transport = new GatewayServer({
   host: config.host,
   port: config.port,
@@ -677,8 +895,8 @@ transport = new GatewayServer({
 });
 
 const supervised = process.env.TRON_GATEWAY_SUPERVISED === "1";
-process.once("SIGTERM", () => void shutdown("SIGTERM", handledSignalExitCode(supervised, requestedRestart !== undefined)));
-process.once("SIGINT", () => void shutdown("SIGINT", handledSignalExitCode(supervised, requestedRestart !== undefined)));
+process.once("SIGTERM", () => void shutdown("SIGTERM", handledSignalExitCode(supervised, administrativeExitOwner?.mode === "restart")));
+process.once("SIGINT", () => void shutdown("SIGINT", handledSignalExitCode(supervised, administrativeExitOwner?.mode === "restart")));
 process.on("uncaughtException", (error) => {
   logger.log("error", "Uncaught exception", { event: "process.uncaught-exception", source: "process", error });
   void shutdown("uncaught exception", 1);
@@ -760,6 +978,8 @@ await transport.listen(async () => {
 // Serving already; these records account for post-listen recovery work.
 await sessions.recoverCanonicalAttention();
 startupCheckpoint("attention-recovery");
+await sessions.recoverHomeTasks();
+startupCheckpoint("home-task-recovery");
 const maintainStorage = async (): Promise<void> => {
   try {
     const [status] = await Promise.all([

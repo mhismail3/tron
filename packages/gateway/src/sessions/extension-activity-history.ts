@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import type { ExtensionOwner, ExtensionRunActivity, ExtensionRunAttention, ExtensionRunChild, ExtensionRunLifecycleState, ExtensionToolOrigin } from "../protocol/types.js";
-/** This module must stay free of runtime imports: extension-activity-history.test.ts
- * loads it in a worker thread under `node --experimental-strip-types`, which does
- * not resolve the `.js` specifiers the rest of the Gateway uses. The bounded page
+/** This module must stay free of runtime imports: it is loaded in a worker thread
+ * under `node --experimental-strip-types`, which does not resolve the `.js`
+ * specifiers the rest of the Gateway uses. The bounded page
  * assembler shared with process history therefore lives here. */
 
 /** Reserved Pi custom-entry type. Custom entries are canonical JSONL facts but
@@ -58,6 +58,14 @@ function nonnegativeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
+/** Canonical captured owners are classified here once for every receipt reader.
+ * Historic package/build provenance is not a UI capability discriminator. */
+export function classifyCapturedExtensionOwner(owner: ExtensionOwner): ExtensionOwner & { kind: "subagent" | "extension" } {
+  const subagent = /^npm:pi-subagents(?:@[^\s/]+)?$/u.test(owner.source)
+    || /^tron:pi-subagents@[^\s/#]+#[a-f0-9]{128}$/u.test(owner.source);
+  return { ...owner, kind: owner.kind ?? (subagent ? "subagent" : "extension") };
+}
+
 function ownerValue(value: unknown): ExtensionOwner | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const candidate = value as Record<string, unknown>;
@@ -66,7 +74,10 @@ function ownerValue(value: unknown): ExtensionOwner | undefined {
   const source = bounded(candidate.source, 256);
   // Extension source is an opaque package identity, never a filesystem path.
   if (!id || !title || !source || /(?:[\\/]|^[A-Za-z]:|^file:)/u.test(source)) return undefined;
-  return { id, title, source };
+  if (candidate.kind !== undefined && candidate.kind !== "subagent" && candidate.kind !== "extension") return undefined;
+  return classifyCapturedExtensionOwner({ id, title, source,
+    ...(candidate.kind === "subagent" || candidate.kind === "extension" ? { kind: candidate.kind } : {}),
+  });
 }
 
 function terminalState(value: unknown): ExtensionActivityReceipt["state"] | undefined {
@@ -142,7 +153,7 @@ export function makeExtensionActivityReceipt(activity: ExtensionRunActivity, ses
   };
 }
 
-export function admitExtensionActivityReceipt(value: unknown, expectedSessionId?: string): ExtensionActivityReceipt | undefined {
+function admitExtensionActivityReceipt(value: unknown, expectedSessionId?: string): ExtensionActivityReceipt | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const candidate = value as Record<string, unknown>;
   const state = terminalState(candidate.state);
@@ -204,7 +215,7 @@ export function admitExtensionActivityReceipt(value: unknown, expectedSessionId?
     version: 1,
     activityId,
     sessionId,
-    ...(owner?.id ? { owner: { id: owner.id, title: owner.title!, source: owner.source! } } : {}),
+    ...(owner ? { owner } : {}),
     ...(owner ? {} : { source: source! }),
     toolCallId,
     ...(runId ? { runId } : {}),

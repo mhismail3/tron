@@ -148,21 +148,13 @@ private struct TronPresentationModifier: ViewModifier {
 /// Applying these preferences at the app root does not reliably bind the
 /// scroll view to navigation chrome across sheet presentation boundaries.
 private struct TronScrollEdgeChromeModifier: ViewModifier {
-    @Environment(\.tronTopBlurStyle) private var topBlurStyle
-
     func body(content: Content) -> some View {
         content
             // Keep both edges softly graduated. The hard top style produces
             // an opaque cutoff on physical iOS 27 hardware instead of Tron's
             // established translucent blur into navigation chrome.
             .scrollEdgeEffectStyle(.soft, for: .all)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
-            .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
-            .overlay(alignment: .top) {
-                if let topBlurStyle {
-                    TronTopBlurOverlay(style: topBlurStyle)
-                }
-            }
+            .tronTopBlurSurface()
     }
 }
 
@@ -296,8 +288,10 @@ extension View {
         ))
     }
 
-    func tronToolbarAction(accent: Color = .tronEmerald) -> some View {
-        foregroundStyle(accent)
+    /// A toolbar action takes `accent` when given, else its sheet's inherited
+    /// settings accent (the colour of its title), else emerald.
+    func tronToolbarAction(accent: Color? = nil) -> some View {
+        modifier(TronToolbarActionAccent(accent: accent))
     }
 
     func tronNavigationTitle(_ title: String, accent: Color = .tronEmerald) -> some View {
@@ -666,6 +660,34 @@ struct TronReadOnlyTextView: UIViewRepresentable {
 }
 
 // MARK: - Search and selection controls
+
+extension View {
+    /// The standard commit for a sheet that edits a draft: Save at the top left,
+    /// opposite the close button. Saving is never a row in the content.
+    func tronSaveToolbar(enabled: Bool = true, action: @escaping () -> Void) -> some View {
+        modifier(TronSaveToolbarModifier(enabled: enabled, action: action))
+    }
+}
+
+private struct TronSaveToolbarModifier: ViewModifier {
+    let enabled: Bool
+    let action: () -> Void
+    @Environment(\.tronSettingsVisualTheme) private var theme
+
+    func body(content: Content) -> some View {
+        content.toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(action: action) {
+                    Text("Save")
+                        .font(TronTypography.buttonSM)
+                        .foregroundStyle(enabled ? theme?.accent ?? .tronEmerald : .tronTextMuted)
+                }
+                .disabled(!enabled)
+                .accessibilityIdentifier("tron-sheet-save")
+            }
+        }
+    }
+}
 
 struct TronSearchBar: View {
     @Binding var text: String
@@ -1124,6 +1146,15 @@ struct TronConfirmationSheet: View {
     private var accent: Color { destructive ? .tronError : .tronEmerald }
 }
 
+private struct TronToolbarActionAccent: ViewModifier {
+    let accent: Color?
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    func body(content: Content) -> some View {
+        content.foregroundStyle(accent ?? settingsTheme?.accent ?? .tronEmerald)
+    }
+}
+
 struct TronToolbarTextLabel: View {
     let title: String
     let systemImage: String
@@ -1243,6 +1274,70 @@ enum TronSettingsGroupSurfaceStyle: Equatable, Sendable {
     case scrollOptimized
 }
 
+/// A small tinted label for provenance and state ("Mac", "Changed outside Tron").
+/// The one tag primitive: rows attach tags with `tronSettingsRowTags`.
+struct TronTagModel: Identifiable {
+    let label: String
+    let tint: Color
+    var accessibilityText: String? = nil
+    var id: String { label }
+}
+
+extension TronTagModel {
+    init(_ badge: SettingsBadge) {
+        label = badge.label
+        tint = Self.tint(forKind: badge.kind)
+        accessibilityText = badge.detail.map { "\(badge.label), \($0)" }
+    }
+
+    static func tint(forKind kind: String) -> Color {
+        switch kind {
+        case "layer": .tronEmerald
+        case "scope": .tronCyan
+        case "source": .tronPurple
+        case "authority": .tronBlue
+        case "state": .tronAmber
+        default: .tronTextSecondary
+        }
+    }
+}
+
+struct TronTag: View {
+    let model: TronTagModel
+    init(_ model: TronTagModel) { self.model = model }
+
+    var body: some View {
+        Text(model.label)
+            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+            .foregroundStyle(model.tint)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(model.tint.opacity(0.14)))
+            .accessibilityLabel(model.accessibilityText ?? model.label)
+    }
+}
+
+private struct TronSettingsRowTagsKey: EnvironmentKey {
+    static let defaultValue: [TronTagModel] = []
+}
+
+extension EnvironmentValues {
+    /// Tags for the nearest `TronSettingsRow`, which shows them beside its title
+    /// and clears them for its trailing control and anything that control presents.
+    var tronSettingsRowTags: [TronTagModel] {
+        get { self[TronSettingsRowTagsKey.self] }
+        set { self[TronSettingsRowTagsKey.self] = newValue }
+    }
+}
+
+extension View {
+    func tronSettingsRowTags(_ tags: [TronTagModel]) -> some View {
+        environment(\.tronSettingsRowTags, tags)
+    }
+}
+
 struct TronSettingsGroup<Content: View>: View {
     let title: String
     let detail: String?
@@ -1321,12 +1416,13 @@ struct TronSettingsRow<Trailing: View>: View {
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     @Environment(\.controlSize) private var controlSize
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.tronSettingsRowTags) private var tags
 
     init(
         icon: String?,
         title: String,
         subtitle: String? = nil,
-        subtitleLineLimit: Int? = nil,
+        subtitleLineLimit: Int? = 2,
         titleIsIdentifier: Bool = false,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
@@ -1367,7 +1463,7 @@ struct TronSettingsRow<Trailing: View>: View {
             let stacksAction = controlSize == .small && dynamicTypeSize.isAccessibilitySize
             let layout = stacksAction
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: TronSpacing.md))
-                : AnyLayout(HStackLayout(alignment: .center, spacing: TronSpacing.xl))
+                : AnyLayout(TronSettingsRowLayout(spacing: TronSpacing.xl))
             layout {
                 VStack(alignment: .leading, spacing: 3) {
                     if titleIsIdentifier && !title.contains(where: \.isWhitespace) {
@@ -1392,10 +1488,13 @@ struct TronSettingsRow<Trailing: View>: View {
                             .truncationMode(.tail)
                             .fixedSize(horizontal: false, vertical: subtitleLineLimit == nil)
                     }
+                    // Tags are a row's last content: left-aligned under its text.
+                    if !tags.isEmpty { tagList.padding(.top, 3) }
                 }
                 .padding(.vertical, labelsOwnInsets ? TronSpacing.xl : 0)
-                if !stacksAction { Spacer(minLength: TronSpacing.md) }
-                trailing
+                // One subview for the layout, however many views the caller passed.
+                HStack(spacing: TronSpacing.md) { trailing }
+                    .environment(\.tronSettingsRowTags, [])
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -1407,12 +1506,62 @@ struct TronSettingsRow<Trailing: View>: View {
     }
 }
 
+/// A settings row's labels and trailing control. The control keeps its natural
+/// width when both fit on one line, so the subtitle uses the rest of the row;
+/// only when they compete does the control cap at 45% and truncate.
+private struct TronSettingsRowLayout: Layout {
+    let spacing: CGFloat
+
+    private func widths(_ subviews: Subviews, in width: CGFloat) -> (labels: CGFloat, trailing: CGFloat) {
+        guard subviews.count == 2 else { return (width, 0) }
+        let trailingIdeal = subviews[1].sizeThatFits(.unspecified).width
+        guard trailingIdeal > 0.5 else { return (width, 0) }
+        let available = max(0, width - spacing)
+        let labelsIdeal = subviews[0].sizeThatFits(.unspecified).width
+        if labelsIdeal + trailingIdeal <= available {
+            // A flexible control (a field) may take the room the labels leave.
+            let room = available - labelsIdeal
+            let trailing = max(trailingIdeal, min(room, subviews[1].sizeThatFits(ProposedViewSize(width: room, height: nil)).width))
+            return (available - trailing, trailing)
+        }
+        let trailing = min(trailingIdeal, available * 0.45)
+        return (available - trailing, trailing)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? subviews.reduce(0) { $0 + $1.sizeThatFits(.unspecified).width } + spacing
+        let (labels, trailing) = widths(subviews, in: width)
+        let heights = [subviews.first?.sizeThatFits(ProposedViewSize(width: labels, height: nil)).height ?? 0,
+                       subviews.count == 2 ? subviews[1].sizeThatFits(ProposedViewSize(width: trailing, height: nil)).height : 0]
+        return CGSize(width: width, height: heights.max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let (labels, trailing) = widths(subviews, in: bounds.width)
+        subviews.first?.place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
+                              proposal: ProposedViewSize(width: labels, height: nil))
+        if subviews.count == 2 {
+            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing,
+                              proposal: ProposedViewSize(width: trailing, height: nil))
+        }
+    }
+}
+
+private extension TronSettingsRow {
+    var tagList: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) { ForEach(tags) { TronTag($0) } }
+            VStack(alignment: .leading, spacing: 4) { ForEach(tags) { TronTag($0) } }
+        }
+    }
+}
+
 extension TronSettingsRow where Trailing == EmptyView {
     init(
         icon: String?,
         title: String,
         subtitle: String? = nil,
-        subtitleLineLimit: Int? = nil,
+        subtitleLineLimit: Int? = 2,
         titleIsIdentifier: Bool = false,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
@@ -1959,5 +2108,23 @@ struct TronLoadingState: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)
+    }
+}
+
+/// A compact state label for a header or row: Home's state, a chapter's state,
+/// a task's lifecycle. The pill's text is its whole label.
+struct TronStatusPill: View {
+    let text: String
+    let accent: Color
+
+    var body: some View {
+        Text(text)
+            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+            .foregroundStyle(accent)
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(accent.opacity(0.16)))
+            .accessibilityLabel(text)
     }
 }

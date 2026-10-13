@@ -72,7 +72,7 @@ interface SearchDocument extends SearchIndexDocument {
    * describe it (`RuntimeRegistry.readSearchCut`). */
   runtimeGeneration?: string;
 }
-export interface SessionSearchEmbeddingClient {
+interface SessionSearchEmbeddingClient {
   qualify(signal?: AbortSignal): Promise<{ dimension: number; language: string; modelRevision: string }>;
   embed(text: string, language?: string, signal?: AbortSignal): Promise<{ vector: number[]; dimension: number; language: string; modelRevision: string }>;
 }
@@ -117,7 +117,6 @@ export class SessionSearchService {
   private semanticTail: Promise<void> = Promise.resolve();
   private semanticGeneration = 0;
   private semanticModel: SemanticGeneration | undefined;
-  private searchCutGeneration = 0;
   private readonly semanticAbort = new AbortController();
   private semanticBytes = 0;
   private semanticWork = 0;
@@ -136,7 +135,6 @@ export class SessionSearchService {
     this.semanticClient = semanticClient ?? (process.env.TRON_SEARCH_EMBEDDING_HELPER ? new NaturalLanguageEmbeddingClient(process.env.TRON_SEARCH_EMBEDDING_HELPER) : undefined);
     if (this.allowance) this.policy = this.allowance.readPolicy();
     this.sessions.setSearchInvalidator((sessionID, nextSessionID) => {
-      this.searchCutGeneration += 1;
       this.semanticGeneration += 1;
       // This runs inside another owner's summary publication, so it stays
       // cheap: no SQLite work and no scan of the whole vector map. The dirty
@@ -209,7 +207,6 @@ export class SessionSearchService {
     await this.initialize(signal);
     if (signal?.aborted) throw new GatewayError("cancelled", "Search cancelled", true);
     await this.refreshDirty(signal);
-    const publicationGeneration = this.searchCutGeneration;
     const candidates = this.index.candidates(query, Math.min(SEARCH_CANDIDATE_LIMIT, maxResults * 10));
     const docs = new Map<string, SearchDocument>();
     const results: SessionSearchResult[] = [];
@@ -313,7 +310,40 @@ export class SessionSearchService {
     }
     results.sort((left, right) => (right.jevScore ?? -1) - (left.jevScore ?? -1) || (right.semanticScore ?? -1) - (left.semanticScore ?? -1) || stableSearchResultOrder(left, right));
     results.splice(maxResults);
-    if (publicationGeneration !== this.searchCutGeneration) throw new GatewayError("conflict", "Canonical session changed during search; rerun search");
+    // Ranking may await a remote provider while any session continues to move.
+    // Re-cut only result-bearing sessions and publish lexical hits only when the
+    // exact passage still matches; unrelated publications cannot invalidate the
+    // response, and stale semantic scores are discarded rather than reused.
+    const currentDocuments = new Map<string, SearchDocument | undefined>();
+    const publishable: SessionSearchResult[] = [];
+    for (const result of results) {
+      let current = currentDocuments.get(result.sessionId);
+      if (!currentDocuments.has(result.sessionId)) {
+        current = await awaitWithAbort(this.loadDocument(result.sessionId), signal);
+        currentDocuments.set(result.sessionId, current);
+      }
+      const entry = current?.texts.get(result.entryId);
+      if (!current || !entry || entry.ordinal !== result.ordinal) continue;
+      if (result.semanticScore !== undefined) {
+        if (current.branchDigest !== result.anchorRevision.branchDigest
+          || current.fileIdentity !== result.anchorRevision.fileIdentity) continue;
+      } else if (!this.matches(entry.text, query)) continue;
+      result.archived = this.sessions.isArchived(result.sessionId);
+      result.title = current.title;
+      result.cwd = current.cwd;
+      result.updatedAt = current.updatedAt;
+      result.snippet = excerpt(entry.text, query);
+      result.anchorRevision = {
+        indexRevision: this.index.stats().indexRevision,
+        fileIdentity: current.fileIdentity,
+        branchDigest: current.branchDigest,
+        ...(current.leafEntryId ? { leafEntryId: current.leafEntryId } : {}),
+        entryOrdinal: entry.ordinal,
+        ...(current.forkBoundary ? { forkBoundary: current.forkBoundary } : {}),
+      };
+      publishable.push(result);
+    }
+    results.splice(0, results.length, ...publishable);
     const stats = this.index.stats();
     return {
       query, queryRevision: digest({ query, maxResults }), corpusRevision: this.corpusRevision, indexRevision: stats.indexRevision,

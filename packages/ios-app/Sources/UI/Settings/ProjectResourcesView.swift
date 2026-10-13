@@ -324,7 +324,8 @@ struct ProjectResourcesView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var loading = false
+    /// A surface starts loading: its empty state waits for the first read.
+    @State private var loading = true
     @State private var reloading = false
     @State private var loadGeneration = 0
     @State private var selected: ProjectResourceSelection?

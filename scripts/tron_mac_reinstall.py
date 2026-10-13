@@ -250,8 +250,10 @@ def copied_entry_matches(actual, expected):
     # Live source comparisons remain exact; retirement has its own root-only rule.
     def portable(entry):
         return {**entry, 'xattrs': {name: value for name, value in entry['xattrs'].items()
-                                  if name != 'com.apple.provenance'}}
-    return portable(actual) == portable(expected)
+                                  if name not in ('com.apple.provenance', 'com.apple.quarantine')}}
+    actual_quarantine = 'com.apple.quarantine' in actual['xattrs']
+    expected_quarantine = 'com.apple.quarantine' in expected['xattrs']
+    return actual_quarantine == expected_quarantine and portable(actual) == portable(expected)
 
 
 def copied_tree_matches(actual, expected):
@@ -267,11 +269,18 @@ def retired_channel_matches(actual, expected):
     # metadata remain exact. Keep the original source manifest unchanged.
     if actual is None or expected is None:
         return actual is expected
-    return actual.keys() == expected.keys() and all(
-        copied_entry_matches(actual[name], item)
-        if name == '.' and item['type'] == actual[name]['type'] == 'dir'
-        else actual[name] == item
-        for name, item in expected.items())
+    if actual.keys() != expected.keys():
+        return False
+    for name, item in expected.items():
+        current = actual[name]
+        if name == '.' and item['type'] == current['type'] == 'dir':
+            if not copied_entry_matches(current, item):
+                return False
+            if current['xattrs'].get('com.apple.quarantine') != item['xattrs'].get('com.apple.quarantine'):
+                return False
+        elif current != item:
+            return False
+    return True
 
 
 def sync_tree(root, manifest):
@@ -395,6 +404,13 @@ def command(argv, category, timeout=1200, env=None, accepted=(0,)):
         return output.read()
 
 
+def stopped_launchd_job(output):
+    """True only for a top-level job that reports no process at all."""
+    lines = output.decode(errors='replace').splitlines()
+    states = [line for line in lines if re.fullmatch(r'\tstate = .+', line)]
+    return states == ['\tstate = not running'] and not any(re.fullmatch(r'\tpid = \d+', line) for line in lines)
+
+
 class MacPlatform:
     def __init__(self, home, installed=Path('/Applications/Tron.app')):
         self.home, self.installed = home, installed
@@ -433,7 +449,14 @@ class MacPlatform:
             result = subprocess.run(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{label}'],
                                     capture_output=True, timeout=15)
             if result.returncode == 0:
-                raise Stop(f'service-loaded: {label}; finish retirement/Pause in the owning app')
+                # Quit stops the Stable Gateway and the native host but keeps
+                # their approved registrations (the Gateway's exit policy
+                # prevents relaunch; the host starts only on demand). Offline
+                # means no running process, so only these stopped Release
+                # jobs pass; any legacy or Debug owner still refuses.
+                if label in ('com.tron.server', 'com.tron.mac.native-host') and stopped_launchd_job(result.stdout):
+                    continue
+                raise Stop(f'service-loaded: {label}; choose Quit Tron in the menu bar and wait for it to finish')
             require(b'Could not find service' in result.stderr,
                     'launchd-probe: could not distinguish absent service from inspection failure')
         for port in (9847, 9848):
@@ -665,9 +688,16 @@ def _verify_post_components(operation, receipt):
         require(isinstance(selection, dict) and selection.get('phase') == 'selected'
                 and isinstance(selection.get('manifestDigest'), str),
                 'archive-post: invalid bundled selection evidence')
-        recorded = read_json(operation / 'stable-selection.json')
+        evidence_owner = operation
+        if 'operationId' in selection:
+            operation_id = selection['operationId']
+            require(isinstance(operation_id, str) and str(uuid.UUID(operation_id)) == operation_id,
+                    'archive-post: invalid bundled selection evidence owner')
+            evidence_owner = private_dir(operation.parent / operation_id)
+        recorded = read_json(evidence_owner / 'stable-selection.json')
         require(manifest_digest(recorded) == selection['manifestDigest'],
                 'archive-post: retired manifest digest mismatch')
+        retired = evidence_owner / 'retired-stable-payloads'
         require(exists(retired) and retired_channel_matches(tree_manifest(retired), recorded),
                 'archive-post: retired payload evidence differs')
         result['retired-stable-payloads'] = archive_fingerprint(retired)
@@ -863,7 +893,7 @@ class Reinstall:
             self.receipt['phase'] = phase
         write_json(self.operation / 'receipt.json', self.receipt)
 
-    def begin(self, app):
+    def begin(self, app, predecessor=None, bundled_selection=None):
         self.layout()
         require(app != self.platform.installed, 'app-path: prepared app must be separate from installed app')
         candidate = self.platform.validate_app(app)
@@ -877,6 +907,10 @@ class Reinstall:
                         'app': str(app), 'candidate': candidate, 'original': original,
                         'sourceRevision': revision,
                         'phase': 'awaiting-offline', 'components': {}, 'sourcePaths': {}}
+        if predecessor is not None:
+            self.receipt['predecessorOperationId'] = predecessor['id']
+        if bundled_selection is not None:
+            self.receipt['bundledSelection'] = bundled_selection
         self.save()
         write_json(self.store / 'active.json', {'schema': 1, 'id': identifier})
 
@@ -902,21 +936,27 @@ class Reinstall:
 
     def selection_evidence(self):
         selection = self.receipt.get('bundledSelection')
-        require(isinstance(selection, dict) and set(selection) == {'phase', 'manifestDigest'}
-                and selection['phase'] in ('retiring', 'selected'),
+        require(isinstance(selection, dict) and selection.get('phase') in ('retiring', 'selected')
+                and isinstance(selection.get('manifestDigest'), str),
                 'selection-journal: preserve the operation for review')
-        proof = read_json(self.operation / 'stable-selection.json')
+        owner = self.operation
+        if 'operationId' in selection:
+            operation_id = selection['operationId']
+            require(isinstance(operation_id, str) and str(uuid.UUID(operation_id)) == operation_id,
+                    'selection-journal: invalid evidence owner')
+            owner = private_dir(self.store / operation_id)
+        proof = read_json(owner / 'stable-selection.json')
         require(manifest_digest(proof) == selection['manifestDigest'],
                 'selection-journal: retired payload inventory changed')
-        return selection, proof
+        return selection, proof, owner
 
     def verify_bundled_selection(self, before_activation=True):
         if 'bundledSelection' not in self.receipt:
             return
-        selection, proof = self.selection_evidence()
+        selection, proof, owner = self.selection_evidence()
         require(selection['phase'] == 'selected',
                 'selection-incomplete: rerun --select-bundled-offline before the snapshot')
-        retired = self.operation / 'retired-stable-payloads'
+        retired = owner / 'retired-stable-payloads'
         require(retired_channel_matches(tree_manifest(retired) if exists(retired) else None, proof),
                 'selection-backup-changed: preserve the retired payload store for review')
         if before_activation:
@@ -955,7 +995,7 @@ class Reinstall:
             write_json(self.operation / 'stable-selection.json', proof)
             self.receipt['bundledSelection'] = {'phase': 'retiring', 'manifestDigest': manifest_digest(proof)}
             self.save()
-        selection, proof = self.selection_evidence()
+        selection, proof, _ = self.selection_evidence()
         if selection['phase'] == 'retiring':
             if exists(source):
                 require(proof is not None and not exists(retired) and tree_manifest(source) == proof,
@@ -996,6 +1036,55 @@ class Reinstall:
             backup = self.operation / 'backups' / name
             require(copied_tree_matches(tree_manifest(backup) if exists(backup) else None, expected),
                     f'backup-mismatch: {name}; preserve operation and repair backup before proceeding')
+
+    def restart(self):
+        previous = self.receipt
+        require(previous['phase'] != 'verified', 'restart-verified: use --finish')
+        installed = self.platform.validate_app(self.platform.installed, current_contract=False)
+        require(installed in (previous['original'], previous['candidate']),
+                'restart-installed-app: installed app is neither the recorded original nor candidate')
+        require(self.platform.validate_app(Path(previous['app'])) == previous['candidate'],
+                'artifact-changed: prepared app differs from recorded artifact')
+        selection = previous.get('bundledSelection')
+        carried_selection = None
+        if selection is not None:
+            require(selection.get('phase') == 'selected',
+                    'restart-incomplete-step: finish --select-bundled-offline first')
+            _, proof, owner = self.selection_evidence()
+            require(retired_channel_matches(tree_manifest(owner / 'retired-stable-payloads')
+                                            if exists(owner / 'retired-stable-payloads') else None, proof),
+                    'restart-selection-evidence: selected payload evidence is incomplete')
+            carried_selection = {**selection, 'operationId': owner.name}
+        components = previous['components']
+        if previous['phase'] == 'awaiting-offline':
+            require(not components, 'restart-incomplete-step: unexpected partial backup inventory')
+        elif previous['phase'] not in ('backing-up', 'awaiting-replacement', 'awaiting-resume'):
+            raise Stop('restart-incomplete-step: operation phase cannot be restarted')
+        # Copying is reversible: incomplete bytes stay as predecessor evidence,
+        # while the new operation takes a fresh inventory after restart.
+        self.begin(Path(previous['app']), predecessor=previous, bundled_selection=carried_selection)
+
+    def abandon(self):
+        """Archive a superseded active operation without touching its evidence or services.
+
+        Refused after an irreversible step (Stable-channel retirement, or a replacement
+        already recorded as awaiting-resume) unless the installed app is this operation's
+        candidate. The artifact path is not consulted: a superseded candidate may be gone.
+        """
+        require(self.receipt['phase'] != 'verified', 'abandon-verified: use --finish to archive a verified operation')
+        installed = self.platform.validate_app(self.platform.installed, current_contract=False)
+        require(installed in (self.receipt['original'], self.receipt['candidate']),
+                'abandon-installed-app: installed app is neither the recorded original nor candidate; preserve operation for review')
+        candidate_installed = installed == self.receipt['candidate']
+        irreversible = 'bundledSelection' in self.receipt or self.receipt['phase'] == 'awaiting-resume'
+        require(candidate_installed or not irreversible,
+                'abandon-irreversible: an irreversible step has passed; resume or roll back this operation instead')
+        # Recorded before archiving the pointer: an interrupted archive reruns with the same evidence.
+        self.receipt['abandonment'] = {'installedApp': 'candidate' if candidate_installed else 'original'}
+        self.save()
+        rename_exclusive(self.store / 'active.json', self.operation / 'abandoned-active.json')
+        print(f'Abandoned operation {self.operation.name} at phase {self.receipt["phase"]}. Its receipt, backups and retired '
+              'payloads are retained; no app or service changed. Begin the replacement with --app <Release.app>.')
 
     def backup(self):
         sources = self.sources()
@@ -1064,11 +1153,18 @@ class Reinstall:
         self.save('verified')
 
     def run(self, args):
-        actions = [args.status, args.verify, args.finish, getattr(args, 'select_bundled_offline', False)]
+        actions = [args.status, args.verify, args.finish, getattr(args, 'restart', False),
+                   getattr(args, 'select_bundled_offline', False), getattr(args, 'abandon', False)]
         actions.extend(getattr(args, name, False) for name in self.confirmation_options)
         require(sum(bool(value) for value in actions) <= 1,
                 'arguments: choose exactly one action or offline confirmation')
         with exclusive(self.store):
+            if getattr(args, 'abandon', False):
+                require(exists(self.store / 'active.json'), 'abandon-absent: no active maintenance operation')
+                self.load()
+                require(not args.app, 'arguments: --abandon cannot be combined with --app; begin the new operation afterwards')
+                self.abandon()
+                return
             if exists(self.store / 'active.json'):
                 self.load()
                 if args.app:
@@ -1079,6 +1175,11 @@ class Reinstall:
                 self.begin(safe_path(args.app))
             print(f'Operation: {self.operation}\nPhase: {self.receipt["phase"]}', flush=True)
             if args.status:
+                return
+            if getattr(args, 'restart', False):
+                require(not args.app, 'arguments: --restart cannot be combined with --app')
+                self.restart()
+                print('Restarted with a fresh inventory. Prior operation evidence retained; run --confirm-offline after stopping writers.')
                 return
             if getattr(args, 'select_bundled_offline', False):
                 self.select_bundled_offline()
@@ -1111,7 +1212,7 @@ class Reinstall:
     def offline_confirmation(self, args):
         if args.confirm_offline:
             return True
-        print('NEXT: In the old app, successfully Disable Helper for Update, Pause Tron, then quit.\n'
+        print('NEXT: In the old app, use Quit Tron and wait for its successful Gateway and native-helper retirement.\n'
               'Stop Debug, standalone clients, workers and package operations. Re-run with --confirm-offline.\n'
               'This flag attests to successful retirement and writer quiescence; process absence alone is insufficient.')
         return False
@@ -1126,10 +1227,10 @@ class Reinstall:
         self.before_activation(app_replaced=app_replaced)
         if app_replaced:
             self.save('awaiting-resume')
-            print('NEXT: Launch /Applications/Tron.app, choose Resume Tron, approve macOS prompts, then run with --verify.')
+            print('NEXT: Launch /Applications/Tron.app, approve any required Login Item prompts, then run with --verify.')
             return
         print(f'NEXT: In Finder replace /Applications/Tron.app with {self.receipt["app"]}.\n'
-              'Launch the replacement, choose Resume Tron and approve required prompts. Then re-run with --verify.\n'
+              'Launch the replacement and approve any required Login Item prompts. Then re-run with --verify.\n'
               f'Rollback app and verified data backups: {self.operation / "backups"}')
 
 
@@ -1143,6 +1244,9 @@ def parser(description=__doc__, confirmation_options=None):
     result.add_argument('--status', action='store_true', help='show the saved checkpoint')
     result.add_argument('--verify', action='store_true', help='verify user-installed and resumed app')
     result.add_argument('--finish', action='store_true', help='archive verified operation; retain all backups')
+    result.add_argument('--restart', action='store_true', help='start a fresh operation when no incomplete step or irreversible transition remains')
+    result.add_argument('--abandon', action='store_true',
+                        help='archive a superseded active operation before an irreversible step, or when its candidate is installed; keeps all evidence')
     result.add_argument('--recovery-verify', action='store_true',
                         help='read-only verify a registered completed recovery archive')
     result.add_argument('--recovery-relocate', action='store_true',
@@ -1164,7 +1268,7 @@ def main(workflow=Reinstall, arguments=None):
         if recovery_action:
             require(workflow is Reinstall, 'arguments: recovery commands belong to mac reinstall')
             require(not any((args.app, args.confirm_offline, args.select_bundled_offline,
-                             args.status, args.verify, args.finish)),
+                             args.status, args.verify, args.finish, args.abandon)),
                     'arguments: recovery action cannot be combined with reinstall options')
             require(args.operation_id is not None, 'arguments: recovery archive requires --operation-id')
             store = private_dir(home / '.tron-maintenance')

@@ -9,25 +9,12 @@ import { describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { awaitsWithin, HOOK_HANG_BOUND_MS } from "../../test-support/wait-for.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
-}
-
-async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(`Timed out: ${label}`)), 5_000);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 /** This peer models independently accepted native work, not a desktop executor.
@@ -188,7 +175,7 @@ describe.sequential("native-tool settlement qualification with the pinned runtim
         const model = faux.getModel();
         await slot.setModel(model.provider, model.id);
         prompting = slot.prompt("Run the private synthetic native fixture");
-        await expect(bounded(peer.started, "native action admission")).resolves.toBe(callId);
+        await expect(awaitsWithin(peer.started, "native action admission")).resolves.toBe(callId);
         expect(peer.starts).toBe(1);
         const operationId = slot.snapshot().operation!.id;
         await expect(slot.abort("agent", "stale-operation")).rejects.toMatchObject({ code: "conflict" });
@@ -196,14 +183,14 @@ describe.sequential("native-tool settlement qualification with the pinned runtim
 
         let stopSettled = false;
         stopping = slot.abort("agent", operationId).then(() => { stopSettled = true; });
-        await bounded(peer.cancelled, "native cancellation request");
+        await awaitsWithin(peer.cancelled, "native cancellation request");
         expect(peer.active).toBe(true);
         let drainSettled = false;
         draining = registry.waitUntilIdle().then(() => { drainSettled = true; });
         if (waiterOnly) {
           // This is the intentionally incorrect outcome the positive oracle
           // must distinguish. No actual native cleanup has been permitted yet.
-          await bounded(Promise.all([stopping, draining]), "bad-control early settlement");
+          await awaitsWithin(Promise.all([stopping, draining]), "bad-control early settlement");
           expect(peer.active).toBe(true);
           expect(stopSettled).toBe(true);
           expect(drainSettled).toBe(true);
@@ -215,7 +202,7 @@ describe.sequential("native-tool settlement qualification with the pinned runtim
           expect(registry.administrativeDrainSnapshot().blockerCount).toBeGreaterThan(0);
         }
         peer.finish();
-        await bounded(Promise.all([prompting, stopping, draining]), "joined terminal settlement");
+        await awaitsWithin(Promise.all([prompting, stopping, draining]), "joined terminal settlement");
         expect(peer.active).toBe(false);
         expect(peer.starts).toBe(1);
         expect(peer.cancellationCount).toBe(1);
@@ -235,8 +222,8 @@ describe.sequential("native-tool settlement qualification with the pinned runtim
         try {
           peer.finish();
           await peer.close();
-          await bounded(Promise.allSettled([prompting, stopping, draining].filter(Boolean)), "fixture waiter cleanup");
-          if (registry) await bounded(registry.dispose(), "fixture registry cleanup");
+          await awaitsWithin(Promise.allSettled([prompting, stopping, draining].filter(Boolean)), "fixture waiter cleanup", HOOK_HANG_BOUND_MS);
+          if (registry) await awaitsWithin(registry.dispose(), "fixture registry cleanup", HOOK_HANG_BOUND_MS);
           retired = true;
         } finally {
           if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

@@ -132,7 +132,7 @@ struct ChatFloatingDisplayHost: View {
             }
         }
         .coordinateSpace(name: FloatingWindowPanGesture.Space.bounds)
-        .animation(reduceMotion ? .linear(duration: 0.10) : .smooth(duration: 0.22), value: route?.id)
+        .animation(ChatMotion.floatingDisplayArrive(reduceMotion: reduceMotion), value: route?.id)
         .accessibilityHidden(route == nil)
     }
 }
@@ -183,11 +183,6 @@ private struct FloatingDisplayWindow: View {
             floatingPanel(size: size, safeRect: safeRect)
                 .frame(width: size.width, height: size.height)
                 .onDisappear { _ = retireDrag(size: size, safeRect: safeRect) }
-                #if HOSTED_TEST
-                .background(FloatingDisplayHostedProbe(move: { move($0) }, pan: {
-                    handlePan($0, size: size, safeRect: safeRect)
-                }))
-                #endif
                 .coordinateSpace(name: FloatingWindowPanGesture.Space.window)
                 .position(center)
                 .transition(reduceMotion ? .opacity : .scale(scale: 0.96).combined(with: .opacity))
@@ -284,7 +279,7 @@ private struct FloatingDisplayWindow: View {
         let current = DisplayFloatingLayoutPolicy.draggedCenter(
             globalLocation: drag.globalLocation, grabPoint: drag.grabPoint,
             container: container, panelSize: size, in: safeRect)
-        var transaction = Transaction(animation: .linear(duration: 0))
+        var transaction = Transaction(animation: ChatMotion.floatingDisplayInstall)
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             anchor = DisplayFloatingLayoutPolicy.anchor(for: current, in: safeRect, retaining: anchor)
@@ -302,7 +297,7 @@ private struct FloatingDisplayWindow: View {
             let next = Drag(grabPoint: grabPoint,
                             globalLocation: CGPoint(x: sample.location.x + container.minX,
                                                     y: sample.location.y + container.minY))
-            var transaction = Transaction(animation: .linear(duration: 0))
+            var transaction = Transaction(animation: ChatMotion.floatingDisplayInstall)
             transaction.disablesAnimations = true
             withTransaction(transaction) { drag = next }
         case .ended, .cancelled, .failed:
@@ -322,6 +317,6 @@ private struct FloatingDisplayWindow: View {
 
     private func move(_ destination: UnitPoint) {
         if reduceMotion { anchor = destination }
-        else { withAnimation(.smooth(duration: 0.28)) { anchor = destination } }
+        else { withAnimation(ChatMotion.floatingDisplayMove) { anchor = destination } }
     }
 }

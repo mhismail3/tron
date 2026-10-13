@@ -61,6 +61,8 @@ function valueAfter(args: string[], name: string): string | undefined {
 }
 
 export const DEFAULT_MAX_LIVE_RUNTIMES = 128;
+/** The upload bytes one prompt may carry in total; Home's source bound is derived from it. */
+export const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1_048_576;
 
 function parseRuntimeCapacity(raw: string | undefined): number {
   if (raw === undefined) return DEFAULT_MAX_LIVE_RUNTIMES;
@@ -179,7 +181,7 @@ export interface LanAddress {
 // Tailscale's IPv6 range (fd7a:115c:a1e0::/48) is inside the ULA range, so the
 // Tailscale test has to come first: binding it as a LAN address would advertise
 // the virtual interface as the home network path.
-export function isPrivateLanAddress(address: string): boolean {
+function isPrivateLanAddress(address: string): boolean {
   if (typeof address !== "string") return false;
   const family = isIP(address);
   if (family === 4) {
@@ -324,7 +326,7 @@ async function loadOrCreateStoredGatewayConfig(path: string): Promise<StoredGate
   }
 }
 
-export function machineGroupIdentityPaths(
+function machineGroupIdentityPaths(
   environment: NodeJS.ProcessEnv = process.env,
   userHome = homedir(),
 ): { readonly canonical: string; readonly legacy: string } {
@@ -442,7 +444,7 @@ export async function loadConfig(
     machineGroupID,
     machineName: next.machineName,
     maxFrameBytes: 1_048_576,
-    maxUploadBytes: 25 * 1_048_576,
+    maxUploadBytes: DEFAULT_MAX_UPLOAD_BYTES,
     terminalReplayBytes: 768 * 1_024,
     idleRuntimeMs: 10 * 60_000,
     maxConnections: 32,

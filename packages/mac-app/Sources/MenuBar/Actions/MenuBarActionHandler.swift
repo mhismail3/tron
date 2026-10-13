@@ -10,8 +10,6 @@ enum MenuBarAction: Equatable, Sendable {
     case showDebugPairingInfo
     case viewLogs
     case sendFeedback
-    case pauseServer
-    case resumeServer
     case restartServer
     case updateGateway
     case uninstall
@@ -44,10 +42,6 @@ final class MenuBarActionHandler {
             menuBarController?.showLogsWindow()
         case .sendFeedback:
             await sendFeedback()
-        case .pauseServer:
-            await pauseServer()
-        case .resumeServer:
-            await resumeServer()
         case .restartServer:
             await restartServer()
         case .updateGateway:
@@ -163,61 +157,6 @@ final class MenuBarActionHandler {
         if openLoginItems { LoginItemsSettingsOpener.open() }
         await MenuBarNotifier.post(title: title, body: message)
         await presentNonBlockingError(title: title, message: message)
-    }
-
-    private func pauseServer() async {
-        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Pause blocked") else { return }
-        applyBusy(.pausing)
-        let outcome = await setup.launchAgentManager.unload(label: setup.launchAgentLabel)
-        await refreshStatus()
-        switch outcome {
-        case .ok, .alreadyLoaded:
-            await MenuBarNotifier.post(title: "Tron paused", body: "Resume it from the Tron menu bar when needed.")
-        case .requiresApproval(let message):
-            LoginItemsSettingsOpener.open()
-            await MenuBarNotifier.post(title: "Pause blocked", body: message)
-            await presentNonBlockingError(title: "Pause blocked", message: message)
-        case .launchdRefused(let message), .unknown(let message):
-            await MenuBarNotifier.post(title: "Pause failed", body: message)
-            await presentNonBlockingError(title: "Pause failed", message: message)
-        case .binaryMissing(let path):
-            let message = "Binary missing: \(path)"
-            await MenuBarNotifier.post(title: "Pause failed", body: message)
-            await presentNonBlockingError(title: "Pause failed", message: message)
-        }
-    }
-
-    private func resumeServer() async {
-        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Resume blocked") else { return }
-        applyBusy(.resuming)
-        let outcome = await LaunchAgentLoader.ensureLoaded(
-            manager: setup.launchAgentManager,
-            plistPath: setup.launchAgentPlistPath,
-            label: setup.launchAgentLabel
-        )
-        switch outcome {
-        case .ok, .alreadyLoaded:
-            await finishServerStartAction(
-                successTitle: "Tron resumed",
-                successBody: "The menu bar status has been refreshed.",
-                failureTitle: "Resume failed"
-            )
-            return
-        case .requiresApproval(let message):
-            await refreshStatus()
-            LoginItemsSettingsOpener.open()
-            await MenuBarNotifier.post(title: "Resume blocked", body: message)
-            await presentNonBlockingError(title: "Resume blocked", message: message)
-        case .launchdRefused(let message), .unknown(let message):
-            await refreshStatus()
-            await MenuBarNotifier.post(title: "Resume failed", body: message)
-            await presentNonBlockingError(title: "Resume failed", message: message)
-        case .binaryMissing(let path):
-            await refreshStatus()
-            let message = "Binary missing: \(path)"
-            await MenuBarNotifier.post(title: "Resume failed", body: message)
-            await presentNonBlockingError(title: "Resume failed", message: message)
-        }
     }
 
     private func sendFeedback() async {

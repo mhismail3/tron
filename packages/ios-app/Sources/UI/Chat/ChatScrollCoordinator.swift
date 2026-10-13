@@ -32,7 +32,6 @@ enum ChatHistoryPageLoadResult: Equatable, Sendable {
 @Observable
 @MainActor
 final class ChatScrollCoordinator {
-    nonisolated static let liveGrowthAnimationDuration = 0.16
     private struct SemanticFrameSample: Equatable {
         let layoutEpoch: Int
         let revision: Int
@@ -518,7 +517,7 @@ final class ChatScrollCoordinator {
             publish(.offsetY(max(0, bottomOffset - reveal)), animation: .disabled, origin: .catchUp)
         } else {
             catchUpPhase = .final
-            publish(.tail, animation: reduceMotion ? .disabled : .smooth(duration: 0.30), origin: .catchUp)
+            publish(.tail, animation: ChatMotion.catchUpScroll(reduceMotion: reduceMotion), origin: .catchUp)
         }
         catchUpCommandToken = command?.token
     }
@@ -550,7 +549,7 @@ final class ChatScrollCoordinator {
     /// correction. Detach before applying an edge so incoming rows stay frozen.
     func requestOldestHistory(reduceMotion: Bool) {
         beginDirectInteraction(allowsBottomRubberBand: false)
-        publish(.oldestHistory, animation: reduceMotion ? .disabled : .smooth(duration: 0.3), origin: .oldestHistory)
+        publish(.oldestHistory, animation: ChatMotion.historyScroll(reduceMotion: reduceMotion), origin: .oldestHistory)
     }
 
     func requestHistoricalEntryScroll(semanticID: String, installed: InstalledChatTranscript?) {
@@ -767,7 +766,7 @@ final class ChatScrollCoordinator {
                           self.catchUpPhase == .staged, !self.isUserInteracting else { return }
                     self.catchUpTask = nil
                     self.catchUpPhase = .final
-                    self.publish(.tail, animation: .smooth(duration: 0.30), origin: .catchUp)
+                    self.publish(.tail, animation: ChatMotion.catchUpScroll(reduceMotion: false), origin: .catchUp)
                     self.catchUpCommandToken = self.command?.token
                 }
             } else if catchUpPhase == .final {
@@ -817,7 +816,7 @@ final class ChatScrollCoordinator {
             // Its installed identity and current viewport layout admit the jump;
             // frame evidence is needed only for relative offset restoration.
             cancelLayoutRestore()
-            publish(.row(renderedID), animation: .smooth(duration: 0.25), origin: .layout)
+            publish(.row(renderedID), animation: ChatMotion.semanticRowScroll, origin: .layout)
             return
         }
         guard let sample = semanticFrame(for: renderedID),

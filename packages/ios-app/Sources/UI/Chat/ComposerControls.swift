@@ -427,19 +427,6 @@ struct MultilineComposerTextView: UIViewRepresentable {
             view.setContentOffset(CGPoint(x: 0, y: y), animated: false)
         }
 
-        #if HOSTED_TEST
-        func hostedCaretIsVisible(in view: UITextView) -> Bool {
-            guard let selection = view.selectedTextRange else { return false }
-            let caret = view.caretRect(for: selection.end)
-            // TextKit can report the terminal caret fractionally beyond its
-            // rounded contentSize edge; one physical-point tolerance matches
-            // UIScrollView's own maximum-offset clamp.
-            let minimum = view.contentOffset.y + view.contentInset.top - 1
-            let maximum = view.contentOffset.y + view.bounds.height
-                - view.contentInset.bottom + 1
-            return caret.minY >= minimum && caret.maxY <= maximum
-        }
-        #endif
     }
 }
 
@@ -482,9 +469,11 @@ enum SessionContextProgressPolicy {
 
 /// Historical session-owned context indicator. It remains mounted at zero
 /// while the authoritative chat opens, then animates to the canonical value.
-/// Tapping it opens Manage Session; it owns no runtime state or mutation path.
+/// Tapping it opens the chat's management sheet (Manage Session, or Manage Home
+/// in a chat that claims the Home status); it owns no runtime state or mutation path.
 struct SessionContextProgressButton: View {
     let presentation: SessionContextProgressPresentation
+    let opensManageHome: Bool
     let onTap: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -529,11 +518,13 @@ struct SessionContextProgressButton: View {
         .disabled(!presentation.isEnabled)
         .opacity(presentation.isEnabled ? 1 : 0.56)
         .accessibilityIdentifier("session-context-button")
-        .accessibilityLabel("Manage Session")
+        .accessibilityLabel(opensManageHome ? "Manage Home" : "Manage Session")
         .accessibilityValue(accessibilityValue)
-        .accessibilityHint("Shows context usage, model selection, and session actions")
+        .accessibilityHint(opensManageHome
+            ? "Shows Home's state, context, memory and tasks"
+            : "Shows context usage, model selection, and session actions")
         .animation(
-            reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8),
+            reduceMotion ? nil : ChatMotion.composerControlSpring,
             value: fraction
         )
     }
@@ -616,8 +607,8 @@ struct ComposerTrailingButtonPressStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.78 : 1)
             .animation(
                 reduceMotion
-                    ? .easeOut(duration: 0.08)
-                    : .spring(response: 0.22, dampingFraction: 0.72),
+                    ? ChatMotion.composerTap
+                    : ChatMotion.composerModeSpring,
                 value: configuration.isPressed
             )
     }
@@ -664,7 +655,7 @@ struct ComposerTrailingButton: View {
                                 )
                         }
                     }
-                    .animation(reduceMotion ? nil : .smooth(duration: 0.18), value: isSending)
+                    .animation(ChatMotion.controlArrive(reduceMotion: reduceMotion), value: isSending)
                 }
             }
             .frame(
@@ -676,8 +667,8 @@ struct ComposerTrailingButton: View {
         .buttonStyle(ComposerTrailingButtonPressStyle())
         .disabled(isDisabled && mode == .send)
         .contentTransition(reduceMotion ? .opacity : .symbolEffect(.replace))
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: mode)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isDisabled)
+        .animation(ChatMotion.composerMode(reduceMotion: reduceMotion), value: mode)
+        .animation(ChatMotion.composerMode(reduceMotion: reduceMotion), value: isDisabled)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(accessibilityHint)
         .contextMenu {

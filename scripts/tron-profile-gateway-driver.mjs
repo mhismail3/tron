@@ -36,9 +36,19 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+/** The Chat-layer change that selects the profile model for one session, fenced
+ * to the runtime it opened (packages/gateway/docs/settings-model.md 5.2). */
+function profileModelChange(sessionId, session) {
+  return {
+    target: { kind: "session", sessionId },
+    fence: { runtimeGeneration: session.runtimeGeneration, model: session.model ?? null },
+    changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: { provider: "tron-profile", id: "profile-model" } }],
+  };
+}
+
 const PRESENTATION_LEASE_RENEWAL_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 30_000;
-const PROTOCOL_VERSION = 6;
+const PROTOCOL_VERSION = 8;
 // The phone's reconnect backoff (ReconnectDelayPolicy.standard): a failed
 // attempt is followed by 2 s x 1.7, capped at 15 s, with ±20% jitter.
 const PHONE_RETRY_INITIAL_SECONDS = 2;
@@ -1803,7 +1813,7 @@ async function multi() {
     };
     for (const { sessionId } of config.running) {
       const opened = await retrying(driver, "session.open", { sessionId });
-      await mutation(driver, "session.setModel", { sessionId, provider: "tron-profile", modelId: "profile-model" });
+      await mutation(driver, "settings.change", profileModelChange(sessionId, opened.session));
       started = now();
       await mutation(driver, "session.prompt", { sessionId, text: config.runPrompt });
       result.setupPromptMs.push(now() - started);
@@ -1894,7 +1904,7 @@ async function multi() {
         // other lane has stopped (biased low) and censored with an elapsed time
         // under the tail, not the tail's own length.
         if (now() < deadline) {
-          await mutation(driver, "session.setModel", { sessionId, provider: "tron-profile", modelId: "profile-model" });
+          await mutation(driver, "settings.change", profileModelChange(sessionId, opened.session));
           if (now() < deadline) {
             await timed("promptAdmission", () => mutation(driver, "session.prompt", { sessionId, text: config.coldPrompt }));
           }
@@ -2033,9 +2043,7 @@ async function main() {
       // from an extension (an availability refresh race), which the phone would
       // surface as a send failure. Select the profile model explicitly on every
       // iteration, before the window, so each measured workload is identical.
-      await actor.request("session.setModel", {
-        sessionId, provider: "tron-profile", modelId: "profile-model", commandId: randomUUID(),
-      });
+      await actor.request("settings.change", { ...profileModelChange(sessionId, opened.session), commandId: randomUUID() });
       await sleep(config.settleBeforeMs);
 
       for (const client of clients) client.beginWindow(label);

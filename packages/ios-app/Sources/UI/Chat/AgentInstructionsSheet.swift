@@ -107,6 +107,9 @@ enum AgentInstructionsPresentation {
         case "cwd":
             SectionCopy(title: "Working Directory", icon: "folder",
                         purpose: "The folder this session works in. Relative paths resolve against it.")
+        case "mcp_servers":
+            SectionCopy(title: "MCP Servers", icon: "server.rack",
+                        purpose: "MCP servers whose tools are reached through codemode or search, with a short description of each server.")
         case "tron":
             SectionCopy(title: "Tron Operating Context", icon: "iphone.and.arrow.forward",
                         purpose: "Added by Tron at the start of every turn: who the agent is, where it works, and Tron's safety rules. It reflects the current tools and workspace and is never saved in the session.")
@@ -479,7 +482,6 @@ private struct AgentInstructionsSectionSheet: View {
                 icon: "doc.text",
                 title: entry.name ?? "Instructions",
                 subtitle: [path, "\(entry.text.count.formatted()) characters"].compactMap { $0 }.joined(separator: " · "),
-                subtitleLineLimit: 2,
                 accent: AgentInstructionsPresentation.accent(entry.source)
             )
         }

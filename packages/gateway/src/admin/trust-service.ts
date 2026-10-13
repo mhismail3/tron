@@ -1,19 +1,35 @@
 import { realpath, stat } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import {
   hasTrustRequiringProjectResources,
   ProjectTrustStore,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
+import { projectRoot } from "../machine/workspace-inspection-service.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 
+/**
+ * Trust belongs to the Project root, not to the chat's cwd: the root's `.pi/`
+ * is the configuration trust gates, so a chat in a subdirectory reads, records
+ * and re-reads the decision of its root. `cwd` stays the canonical chat cwd.
+ */
 export interface TrustInspection {
   cwd: string;
+  projectDir: string;
   requiresDecision: boolean;
   savedDecision: boolean | null;
   defaultDecision: "ask" | "always" | "never";
   effectiveDecision: boolean | null;
+}
+
+export interface TrustServiceOptions {
+  /**
+   * Directories that are their own Project root even inside a Git work tree.
+   * Tron Home's neutral workspace is one: its explicit untrusted decision must
+   * never land on a repository that happens to enclose the Tron home.
+   */
+  standaloneDirectories?: readonly string[];
 }
 
 export interface PropagatedTrustDecision {
@@ -26,8 +42,20 @@ export class TrustService {
   private readonly store: ProjectTrustStore;
   private readonly mutationMutex = new AsyncMutex();
 
-  constructor(private readonly agentDir: string) {
+  constructor(private readonly agentDir: string, private readonly options: TrustServiceOptions = {}) {
     this.store = new ProjectTrustStore(agentDir);
+  }
+
+  /** The Project root, except that a root enclosing a standalone directory stops
+   * at the cwd; a repository inside the standalone directory keeps its own root. */
+  private async projectDirectory(cwd: string): Promise<string> {
+    const root = await projectRoot(cwd);
+    const within = (path: string, directory: string) => path === directory || path.startsWith(`${directory}${sep}`);
+    for (const directory of this.options.standaloneDirectories ?? []) {
+      const canonical = await realpath(directory).catch(() => resolve(directory));
+      if (within(cwd, canonical) && !within(root, canonical)) return cwd;
+    }
+    return root;
   }
 
   async canonicalDirectory(path: string): Promise<string> {
@@ -45,22 +73,25 @@ export class TrustService {
     return this.inspectUnlocked(path);
   }
 
-  private async inspectUnlocked(path: string): Promise<TrustInspection> {
+  /** `projectDir` pins the root a transition already addressed, so its apply,
+   * commit and rollback name one key even if Git's answer changes meanwhile. */
+  private async inspectUnlocked(path: string, knownProjectDir?: string): Promise<TrustInspection> {
     const cwd = await this.canonicalDirectory(path);
-    const requiresDecision = hasTrustRequiringProjectResources(cwd);
-    const savedDecision = this.store.get(cwd);
-    const settings = SettingsManager.create(cwd, this.agentDir, { projectTrusted: false });
+    const projectDir = knownProjectDir ?? await this.projectDirectory(cwd);
+    const requiresDecision = hasTrustRequiringProjectResources(cwd, projectDir);
+    const savedDecision = this.store.get(projectDir);
+    const settings = SettingsManager.create(projectDir, this.agentDir, { projectTrusted: false });
     const defaultDecision = settings.getDefaultProjectTrust();
     const effectiveDecision = savedDecision ?? (defaultDecision === "always" ? true : defaultDecision === "never" ? false : null);
-    return { cwd, requiresDecision, savedDecision, defaultDecision, effectiveDecision };
+    return { cwd, projectDir, requiresDecision, savedDecision, defaultDecision, effectiveDecision };
   }
 
-  async requireResolved(path: string): Promise<{ cwd: string; trusted: boolean }> {
+  async requireResolved(path: string): Promise<{ cwd: string; projectDir: string; trusted: boolean }> {
     const inspection = await this.inspectUnlocked(path);
     if (inspection.requiresDecision && inspection.effectiveDecision === null) {
       throw new GatewayError("trust_required", "Choose whether to trust this project before loading agent resources", false, inspection);
     }
-    return { cwd: inspection.cwd, trusted: inspection.effectiveDecision === true };
+    return { cwd: inspection.cwd, projectDir: inspection.projectDir, trusted: inspection.effectiveDecision === true };
   }
 
   /**
@@ -77,7 +108,7 @@ export class TrustService {
       }
       const target = await this.inspectUnlocked(targetPath);
       const shouldWrite = target.savedDecision === null && target.effectiveDecision === null;
-      if (shouldWrite) this.store.set(target.cwd, source.effectiveDecision === true);
+      if (shouldWrite) this.store.set(target.projectDir, source.effectiveDecision === true);
       let rolledBack = false;
       return {
         source,
@@ -87,8 +118,8 @@ export class TrustService {
           await this.mutationMutex.run(async () => {
             if (rolledBack) return;
             rolledBack = true;
-            if (this.store.get(target.cwd) === (source.effectiveDecision === true)) {
-              this.store.set(target.cwd, null);
+            if (this.store.get(target.projectDir) === (source.effectiveDecision === true)) {
+              this.store.set(target.projectDir, null);
             }
           });
         },
@@ -99,8 +130,9 @@ export class TrustService {
   async set(path: string, decision: boolean | null): Promise<TrustInspection> {
     return this.mutationMutex.run(async () => {
       const cwd = await this.canonicalDirectory(path);
-      this.store.set(cwd, decision);
-      return this.inspectUnlocked(cwd);
+      const projectDir = await this.projectDirectory(cwd);
+      this.store.set(projectDir, decision);
+      return this.inspectUnlocked(cwd, projectDir);
     });
   }
 
@@ -112,12 +144,12 @@ export class TrustService {
   ): Promise<TrustInspection> {
     return this.mutationMutex.run(async () => {
       const previous = await this.inspectUnlocked(path);
-      const previousEntry = this.store.getEntry(previous.cwd);
-      const previousLocalDecision = previousEntry?.path === previous.cwd
+      const previousEntry = this.store.getEntry(previous.projectDir);
+      const previousLocalDecision = previousEntry?.path === previous.projectDir
         ? previousEntry.decision
         : null;
-      const parent = dirname(previous.cwd);
-      const inheritedDecision = parent === previous.cwd ? null : this.store.get(parent);
+      const parent = dirname(previous.projectDir);
+      const inheritedDecision = parent === previous.projectDir ? null : this.store.get(parent);
       const proposedSavedDecision = decision ?? inheritedDecision;
       const proposed: TrustInspection = {
         ...previous,
@@ -130,14 +162,14 @@ export class TrustService {
       };
       try {
         await apply(proposed);
-        this.store.set(previous.cwd, decision);
-        const current = await this.inspectUnlocked(previous.cwd);
+        this.store.set(previous.projectDir, decision);
+        const current = await this.inspectUnlocked(previous.cwd, previous.projectDir);
         await commit(current);
         return current;
       } catch (failure) {
         try {
-          this.store.set(previous.cwd, previousLocalDecision);
-          const restored = await this.inspectUnlocked(previous.cwd);
+          this.store.set(previous.projectDir, previousLocalDecision);
+          const restored = await this.inspectUnlocked(previous.cwd, previous.projectDir);
           await apply(restored);
           await commit(restored);
         } catch (rollbackFailure) {

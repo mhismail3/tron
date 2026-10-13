@@ -21,6 +21,39 @@ final class SessionMutationService {
     private struct MutationResponse: Codable {
         let updated: Bool
     }
+    /// `settings.change`'s answer for one Chat-layer key: the applied change
+    /// and, for model, thinking and context window, the session revision.
+    private struct SettingsChangeResponse: Codable {
+        struct Change: Codable { let changeId: String; let revision: Int? }
+        let status: String
+        let changes: [Change]
+        var revision: Int {
+            get throws {
+                guard let revision = changes.first?.revision else {
+                    throw GatewayFailure(code: "invalid_response", message: "The settings change returned no session revision.", retryable: false, details: nil)
+                }
+                return revision
+            }
+        }
+    }
+
+    /// One Chat-layer change through the settings model's single change path
+    /// (gateway docs/settings-model.md 5.2), fenced to the runtime the client read.
+    private static func chatChange(
+        sessionID: String, commandID: String, key: String, op: String = "set", value: JSONValue?,
+        qualifiers: [String: JSONValue]? = nil, fence: [String: JSONValue]?
+    ) -> JSONValue {
+        var change: [String: JSONValue] = ["key": .string(key), "layer": .string("chat"), "op": .string(op)]
+        if let value { change["value"] = value }
+        if let qualifiers { change["qualifiers"] = .object(qualifiers) }
+        var params: [String: JSONValue] = [
+            "commandId": .string(commandID),
+            "target": .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
+            "changes": .array([.object(change)]),
+        ]
+        if let fence { params["fence"] = .object(fence) }
+        return .object(params)
+    }
 
     private let client: GatewayClient
     private let executor: ConfirmedMutationExecutor
@@ -96,6 +129,64 @@ final class SessionMutationService {
         )
         let response: Response = try await executor.perform(method: "session.prompt", commandID: commandID) {
             try await client.request("session.prompt", params, as: Response.self)
+        }
+        return response.operationId
+    }
+
+    /// Sends a composer submission through the logical route it was admitted
+    /// for. A Home submission never names a physical chapter: `home.prompt`
+    /// resolves the current one when the prompt is sent.
+    func submitComposer(
+        _ text: String,
+        route: ComposerSubmissionRoute,
+        sessionID: String,
+        uploadIDs: [String],
+        behavior: String?,
+        resourceInvocation: ComposerResourceInvocation?
+    ) async throws -> String {
+        switch route {
+        case .session:
+            try await prompt(
+                text,
+                sessionID: sessionID,
+                uploadIDs: uploadIDs,
+                behavior: behavior,
+                resourceInvocation: resourceInvocation
+            )
+        case .home:
+            try await homePrompt(
+                text,
+                uploadIDs: uploadIDs,
+                behavior: behavior,
+                resourceInvocation: resourceInvocation
+            )
+        }
+    }
+
+    private func homePrompt(
+        _ text: String,
+        uploadIDs: [String],
+        behavior: String?,
+        resourceInvocation: ComposerResourceInvocation?
+    ) async throws -> String {
+        struct Params: Codable {
+            let text: String
+            let uploadIds: [String]
+            let behavior: String?
+            let resourceInvocation: ComposerResourceInvocation?
+            let commandId: String
+        }
+        struct Response: Codable { let operationId: String }
+        let commandID = uuidSource.next().uuidString
+        let params = Params(
+            text: text,
+            uploadIds: uploadIDs,
+            behavior: behavior,
+            resourceInvocation: resourceInvocation,
+            commandId: commandID
+        )
+        let response: Response = try await executor.perform(method: "home.prompt", commandID: commandID) {
+            try await client.request("home.prompt", params, as: Response.self)
         }
         return response.operationId
     }
@@ -229,77 +320,69 @@ final class SessionMutationService {
         }
     }
 
-    func setModel(_ model: ModelRef, sessionID: String) async throws {
-        struct Params: Codable { let sessionId, provider, modelId, commandId: String }
+    @discardableResult
+    func setModel(_ model: ModelRef, sessionID: String, expectedRuntimeGeneration: String,
+                  expectedModel: ModelRef?, sendAdmission: @escaping @MainActor () -> Bool) async throws -> Int {
         let commandID = uuidSource.next().uuidString
-        let params = Params(
-            sessionId: sessionID,
-            provider: model.provider,
-            modelId: model.id,
-            commandId: commandID
+        let params = Self.chatChange(
+            sessionID: sessionID, commandID: commandID, key: "model.ref[role=chat]",
+            value: try JSONValue.encode(model),
+            fence: ["runtimeGeneration": .string(expectedRuntimeGeneration),
+                    "model": try expectedModel.map { try JSONValue.encode($0) } ?? .null]
         )
-        let _: MutationResponse = try await executor.perform(
-            method: "session.setModel",
-            commandID: commandID
-        ) {
-            try await client.request("session.setModel", params)
+        let response: SettingsChangeResponse = try await executor.perform(method: "settings.change", commandID: commandID, replayAdmission: sendAdmission) {
+            try Self.requireConfigurationSend(sendAdmission)
+            return try await client.request("settings.change", params)
         }
+        return try response.revision
     }
 
-    func setThinking(_ level: String, sessionID: String) async throws {
-        struct Params: Codable { let sessionId, level, commandId: String }
+    @discardableResult
+    func setThinking(_ level: String, sessionID: String, expectedRuntimeGeneration: String,
+                     expectedModel: ModelRef?, sendAdmission: @escaping @MainActor () -> Bool) async throws -> Int {
         let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, level: level, commandId: commandID)
-        let _: MutationResponse = try await executor.perform(
-            method: "session.setThinking",
-            commandID: commandID
-        ) {
-            try await client.request("session.setThinking", params)
+        let params = Self.chatChange(
+            sessionID: sessionID, commandID: commandID, key: "model.thinking[role=chat]", value: .string(level),
+            fence: ["runtimeGeneration": .string(expectedRuntimeGeneration),
+                    "model": try expectedModel.map { try JSONValue.encode($0) } ?? .null]
+        )
+        let response: SettingsChangeResponse = try await executor.perform(method: "settings.change", commandID: commandID, replayAdmission: sendAdmission) {
+            try Self.requireConfigurationSend(sendAdmission)
+            return try await client.request("settings.change", params)
+        }
+        return try response.revision
+    }
+
+    private static func requireConfigurationSend(_ admission: () -> Bool) throws {
+        guard admission() else {
+            throw GatewayFailure(code: "conflict", message: "Session changed or is still synchronizing. Your configuration change was not sent.", retryable: true, details: nil)
         }
     }
 
+    @discardableResult
     func setContextWindow(
         _ contextWindow: Int?,
         for model: ModelRef,
         sessionID: String,
         expectedRevision: Int,
-        expectedRuntimeGeneration: String
-    ) async throws {
-        struct Params: Encodable {
-            let sessionId, provider, modelId: String
-            let contextWindow: Int?
-            let expectedRevision: Int
-            let expectedRuntimeGeneration: String
-            let commandId: String
-            private enum CodingKeys: String, CodingKey { case sessionId, provider, modelId, contextWindow, expectedRevision, expectedRuntimeGeneration, commandId }
-            func encode(to encoder: Encoder) throws {
-                var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encode(sessionId, forKey: .sessionId)
-                try container.encode(provider, forKey: .provider)
-                try container.encode(modelId, forKey: .modelId)
-                try container.encode(expectedRevision, forKey: .expectedRevision)
-                try container.encode(expectedRuntimeGeneration, forKey: .expectedRuntimeGeneration)
-                if let contextWindow { try container.encode(contextWindow, forKey: .contextWindow) }
-                else { try container.encodeNil(forKey: .contextWindow) }
-                try container.encode(commandId, forKey: .commandId)
-            }
-        }
+        expectedRuntimeGeneration: String,
+        sendAdmission: @escaping @MainActor () -> Bool
+    ) async throws -> Int {
         let commandID = uuidSource.next().uuidString
-        let params = Params(
-            sessionId: sessionID,
-            provider: model.provider,
-            modelId: model.id,
-            contextWindow: contextWindow,
-            expectedRevision: expectedRevision,
-            expectedRuntimeGeneration: expectedRuntimeGeneration,
-            commandId: commandID
+        let params = Self.chatChange(
+            sessionID: sessionID, commandID: commandID, key: "model.contextWindow",
+            op: contextWindow == nil ? "unset" : "set", value: contextWindow.map { .number(Double($0)) },
+            qualifiers: ["model": .string("\(model.provider)/\(model.id)")],
+            fence: ["runtimeGeneration": .string(expectedRuntimeGeneration), "revision": .number(Double(expectedRevision))]
         )
-        let _: MutationResponse = try await executor.perform(
-            method: "session.setContextWindow",
-            commandID: commandID
+        let response: SettingsChangeResponse = try await executor.perform(
+            method: "settings.change",
+            commandID: commandID, replayAdmission: sendAdmission
         ) {
-            try await client.request("session.setContextWindow", params)
+            try Self.requireConfigurationSend(sendAdmission)
+            return try await client.request("settings.change", params)
         }
+        return try response.revision
     }
 
     func rename(_ sessionID: String, name: String) async throws {
@@ -329,14 +412,16 @@ final class SessionMutationService {
     }
 
     func setTools(_ tools: [String], sessionID: String) async throws {
-        struct Params: Codable { let sessionId: String; let tools: [String]; let commandId: String }
         let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, tools: tools, commandId: commandID)
-        let _: MutationResponse = try await executor.perform(
-            method: "session.setTools",
+        let params = Self.chatChange(
+            sessionID: sessionID, commandID: commandID, key: "tools.active",
+            value: .array(tools.map { .string($0) }), fence: nil
+        )
+        let _: SettingsChangeResponse = try await executor.perform(
+            method: "settings.change",
             commandID: commandID
         ) {
-            try await client.request("session.setTools", params)
+            try await client.request("settings.change", params)
         }
     }
 

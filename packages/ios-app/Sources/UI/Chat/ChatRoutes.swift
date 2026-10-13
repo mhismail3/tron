@@ -25,7 +25,6 @@ struct ChatForkNavigationOwner {
 /// confirmed fork route after the complete outer context-sheet dismissal.
 struct ChatRoutes: ViewModifier {
     let sessionID: String
-    let projectCWD: String?
     let initialHistoryEntryID: String?
     let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     @Binding var showContext: Bool
@@ -56,15 +55,27 @@ struct ChatRoutes: ViewModifier {
     @Binding var displaySheet: DisplayRoute?
     let onUseEditorRequest: (ComposerEditorRequest) -> Void
     let onKeepEditorRequest: (ComposerEditorRequest) -> Void
+    @Binding var homeSheet: HomeSheetRoute?
     @Environment(AppModel.self) private var model
     @State private var forkNavigation = ChatForkNavigationOwner()
 
     func body(content: Content) -> some View {
         content
+            .tronManagedSheet(item: $homeSheet, identity: { $0.id }, onDismiss: completeStagedNavigationAfterDismissal) { route in
+                HomeSheet(destination: route.destination, profileID: route.profileID, sessionID: route.sessionID,
+                          onOpenSession: { openedSessionID in
+                              // Read-only open of a chapter or worker chat: stage a profile-fenced
+                              // ordinary route, dismiss the sheet, navigate on its dismissal.
+                              guard let staged = try? model.navigationRouteForHomeSession(
+                                  profileID: route.profileID, sessionID: openedSessionID) else { return }
+                              forkNavigation.stage(staged)
+                              homeSheet = nil
+                          })
+            }
             .tronManagedSheet(
                 isPresented: $showContext,
                 identity: "chat.\(sessionID).context",
-                onDismiss: completeForkNavigationAfterContextDismissal
+                onDismiss: completeStagedNavigationAfterDismissal
             ) {
                 SessionContextSheet(sessionID: sessionID, initialHistoryEntryID: initialHistoryEntryID) { route in
                     forkNavigation.stage(route)
@@ -76,9 +87,6 @@ struct ChatRoutes: ViewModifier {
                 identity: "chat.\(sessionID).settings"
             ) {
                 SettingsView(
-                    scope: .project,
-                    projectSessionID: sessionID,
-                    projectCWD: projectCWD,
                     onImported: { route in
                         showSettings = false
                         onForkCreated(route)
@@ -183,7 +191,9 @@ struct ChatRoutes: ViewModifier {
             }
     }
 
-    private func completeForkNavigationAfterContextDismissal() {
+    /// Completes a navigation a covering sheet staged (a fork from the context
+    /// sheet, or a read-only chapter open from Manage Home) once that sheet is gone.
+    private func completeStagedNavigationAfterDismissal() {
         guard let route = forkNavigation.consume(),
               model.ownsNavigationRoute(route) else { return }
         onForkCreated(route)

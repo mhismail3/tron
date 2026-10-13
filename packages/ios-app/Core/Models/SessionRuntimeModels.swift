@@ -478,7 +478,7 @@ package struct CompactionConfiguration: Codable, Hashable, Sendable {
             && (effectiveThinkingLevel.map { levels.contains($0) } ?? (model == nil))
             && instructions.utf16.count <= 4_000
             && Set(source.keys) == Set(["enabled", "reserveTokens", "keepRecentTokens", "thinkingLevel", "instructions"])
-            && source.values.allSatisfy { ["global", "project", "default"].contains($0) }
+            && source.values.allSatisfy { ["chat", "global", "project", "default"].contains($0) }
     }
 }
 
@@ -540,6 +540,40 @@ package struct ComposerResourceInvocation: Codable, Equatable, Hashable, Sendabl
     }
 }
 
+/// Gateway-owned admission category. Null on the wire means ready; the key is
+/// required in protocol 7, so missing readiness cannot silently enable controls.
+package enum SessionConfigurationBlocker: String, Codable, Hashable, Sendable {
+    case ready, running, queued, settling, mutation, interaction, unavailable
+
+    package init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer()
+        if value.decodeNil() { self = .ready; return }
+        let raw = try value.decode(String.self)
+        guard let decoded = Self(rawValue: raw), decoded != .ready else {
+            throw DecodingError.dataCorruptedError(in: value, debugDescription: "Invalid configuration blocker")
+        }
+        self = decoded
+    }
+
+    package func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        if self == .ready { try value.encodeNil() }
+        else { try value.encode(rawValue) }
+    }
+
+    package var message: String? {
+        switch self {
+        case .ready: nil
+        case .running: "Stop the session before changing its configuration."
+        case .queued: "Clear or finish queued work before changing configuration."
+        case .settling: "Finishing the session. Configuration will be available shortly."
+        case .mutation: "Another session change is finishing."
+        case .interaction: "Complete the session’s pending interaction first."
+        case .unavailable: "Session configuration is temporarily unavailable."
+        }
+    }
+}
+
 package struct SessionSnapshot: Codable, Hashable, Sendable {
     /// Gateway's bounded authoritative queue capacity. Rich queue projections
     /// exceeding this limit are invalid and must not reach row rendering.
@@ -551,6 +585,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
     package var revision: Int
     package var eventSequence: Int
     package var phase: SessionPhase
+    package var configurationBlocker: SessionConfigurationBlocker
     /// Exact Gateway/Pi admission capability. Older compatible snapshots omit
     /// it and use the conservative running-phase fallback at presentation.
     package var acceptsQueuedPrompts: Bool? = nil
@@ -604,7 +639,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
 
     package init(
         sessionId: String, runtimeGeneration: String, revision: Int, eventSequence: Int, phase: SessionPhase,
-        acceptsQueuedPrompts: Bool? = nil, forkBoundary: TranscriptForkBoundary? = nil, name: String?,
+        configurationBlocker: SessionConfigurationBlocker = .ready, acceptsQueuedPrompts: Bool? = nil, forkBoundary: TranscriptForkBoundary? = nil, name: String?,
         cwd: String, parentSessionId: String?, model: ModelRef?, thinkingLevel: String,
         availableThinkingLevels: [String], contextUsage: ContextUsage?, stats: SessionStats,
         queueRevision: Int, queuedItems: [QueuedMessage], pendingPrompt: PendingPrompt? = nil,
@@ -624,6 +659,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         self.revision = revision
         self.eventSequence = eventSequence
         self.phase = phase
+        self.configurationBlocker = configurationBlocker
         self.acceptsQueuedPrompts = acceptsQueuedPrompts
         self.forkBoundary = forkBoundary
         self.name = name
@@ -691,11 +727,12 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
         package var attachments: [PromptAttachment]? = nil
         package var resourceInvocation: ComposerResourceInvocation? = nil
+        package var semantic: ChatSemanticMetadata? = nil
 
         package init(
             id: String, behavior: Behavior, text: String, attachmentCount: Int,
             photoCount: Int? = nil, fileAttachmentCount: Int? = nil, attachments: [PromptAttachment]? = nil,
-            resourceInvocation: ComposerResourceInvocation? = nil
+            resourceInvocation: ComposerResourceInvocation? = nil, semantic: ChatSemanticMetadata? = nil
         ) {
             self.id = id
             self.behavior = behavior
@@ -705,6 +742,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
             self.fileAttachmentCount = fileAttachmentCount
             self.attachments = attachments
             self.resourceInvocation = resourceInvocation
+            self.semantic = semantic
         }
     }
 
@@ -719,11 +757,13 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
         package var attachments: [PromptAttachment]? = nil
         package var resourceInvocation: ComposerResourceInvocation? = nil
+        package var semantic: ChatSemanticMetadata? = nil
 
         package init(
             id: String, createdAt: String?, behavior: QueuedMessage.Behavior?, text: String,
             attachmentCount: Int, photoCount: Int? = nil, fileAttachmentCount: Int? = nil,
-            attachments: [PromptAttachment]? = nil, resourceInvocation: ComposerResourceInvocation? = nil
+            attachments: [PromptAttachment]? = nil, resourceInvocation: ComposerResourceInvocation? = nil,
+            semantic: ChatSemanticMetadata? = nil
         ) {
             self.id = id
             self.createdAt = createdAt
@@ -734,10 +774,15 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
             self.fileAttachmentCount = fileAttachmentCount
             self.attachments = attachments
             self.resourceInvocation = resourceInvocation
+            self.semantic = semantic
         }
     }
 
-    package var displayedQueuedMessages: [QueuedMessage] { queuedItems }
+    /// Presentation is disposable; hidden inputs still belong to the authoritative
+    /// queue and count for admission/ordering just like any other queued input.
+    package var displayedQueuedMessages: [QueuedMessage] {
+        queuedItems.filter { $0.semantic?.direction != .hiddenInternal }
+    }
 }
 
 package enum SessionSnapshotTranscriptAdmissionPolicy {
@@ -818,11 +863,11 @@ package enum SessionSnapshotTranscriptAdmissionPolicy {
 
 package enum SessionSnapshotQueueAdmissionPolicy {
     package static func admit(_ snapshot: SessionSnapshot) -> Bool {
-        let displayed = snapshot.displayedQueuedMessages
-        guard displayed.count <= SessionSnapshot.maximumQueuedMessages else { return false }
-        let ids = displayed.map(\.id)
+        let queued = snapshot.queuedItems
+        guard queued.count <= SessionSnapshot.maximumQueuedMessages else { return false }
+        let ids = queued.map(\.id)
         guard ids.allSatisfy({ !$0.isEmpty }), Set(ids).count == ids.count else { return false }
-        guard displayed.allSatisfy({ message in
+        guard queued.allSatisfy({ message in
             admits(
                 message.resourceInvocation,
                 text: message.text,
@@ -856,6 +901,8 @@ package struct SessionContextPresentation: Hashable, Sendable {
     package let runtimeGeneration: String
     package let sessionID: String
     package let phase: SessionPhase
+    package let configurationBlocker: SessionConfigurationBlocker
+    package var configurationLockedReason: String? { configurationBlocker.message ?? (phase.isActive ? "Stop the session before changing its configuration." : nil) }
     package let operationKind: SessionOperationState.Kind?
     package let compactionQueued: Bool
     package let contextUsage: ContextUsage?
@@ -877,6 +924,7 @@ package struct SessionContextPresentation: Hashable, Sendable {
         runtimeGeneration = snapshot.runtimeGeneration
         sessionID = snapshot.sessionId
         phase = snapshot.phase
+        configurationBlocker = snapshot.configurationBlocker
         operationKind = snapshot.operation?.kind
         compactionQueued = snapshot.compactionQueued == true
         contextUsage = snapshot.contextUsage

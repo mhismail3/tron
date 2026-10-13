@@ -21,6 +21,10 @@ enum NativeHostRegistrationPolicy {
 /// ServiceManagement status is not generic native-quiescence evidence. Only the
 /// existing no-registration policy skips a join; missing/unknown metadata refuses
 /// the operation rather than probing or implicitly enabling a helper to proceed.
+enum NativeHostStartupPolicy {
+    static func shouldRestore(state: NativeHostServiceState) -> Bool { state == .enabled }
+}
+
 enum NativeHostRetirementPolicy {
     static func drain(status: SMAppService.Status, join: () async throws -> Void) async throws {
         switch status {
@@ -56,7 +60,7 @@ actor NativeHostCoordinator {
     static let shared = NativeHostCoordinator(operations: .live)
     private let operations: NativeHostOperations
     private var pending: (id: UUID, permission: Permission, task: Task<PermissionStatus, Never>)?
-    private enum Command { case enable, refresh, unregister }
+    private enum Command { case enable, refresh, unregister, retireForQuit }
     private var lifecycle: (id: UUID, kind: Command, task: Task<NativeHostServiceState, Error>)?
     init(operations: NativeHostOperations) { self.operations = operations }
 
@@ -68,6 +72,7 @@ actor NativeHostCoordinator {
     func enable() async throws -> NativeHostServiceState { try await perform(.enable) }
     func refresh() async throws -> NativeHostServiceState { try await perform(.refresh) }
     func unregister() async throws { _ = try await perform(.unregister) }
+    func retireForQuit() async throws { _ = try await perform(.retireForQuit) }
 
     private func perform(_ kind: Command) async throws -> NativeHostServiceState {
         if let lifecycle {
@@ -87,6 +92,8 @@ actor NativeHostCoordinator {
             case .unregister:
                 try await operations.drain()
                 try await operations.unregister()
+            case .retireForQuit:
+                try await operations.drain()
             }
             return await operations.state()
         }
@@ -152,11 +159,22 @@ private struct NativeHostPlatform: Sendable {
         ) {
             let connection = try connect()
             defer { connection.invalidate() }
-            let reply = NativeHostReply<Bool>()
-            guard let service = connection.service(onError: { reply.resolve(false) }) else { throw NativeHostError.retirementFailed }
-            service.prepareForServiceRetirement { reply.resolve($0) }
+            // nil is a received true confirmation; otherwise the exact reason it was not.
+            let reply = NativeHostReply<String?>()
+            guard let service = connection.service(onError: { error in
+                let error = error as NSError
+                reply.resolve("xpc-error \(error.domain) \(error.code)")
+            }) else { throw NativeHostError.retirementFailed }
+            service.prepareForServiceRetirement { reply.resolve($0 ? nil : "helper-reported-unjoined-capture") }
             // No timeout, forced kill, or cancellation can stand in for native join.
-            guard await reply.value() else { throw NativeHostError.retirementFailed }
+            if let failure = await reply.value() {
+                // An XPC error here (rather than an unjoined report) means the reply
+                // was lost or refused; the system log names any signature refusal.
+                TronLog.shared.record(.error, event: "native-host.retirement-unconfirmed", source: "native-host",
+                                      message: "Native helper retirement was not confirmed; no service change was made",
+                                      why: failure, outcome: "blocked")
+                throw NativeHostError.retirementFailed
+            }
         }
     }
 
@@ -170,7 +188,7 @@ private struct NativeHostPlatform: Sendable {
         }
         defer { timeout.cancel() }
         let values: [String: String] = await withTaskCancellationHandler {
-            guard !Task.isCancelled, let service = connection.service(onError: { reply.resolve([:]) }) else { return [:] }
+            guard !Task.isCancelled, let service = connection.service(onError: { _ in reply.resolve([:]) }) else { return [:] }
             service.probePermissions { reply.resolve($0) }
             return await reply.value()
         } onCancel: { reply.resolve([:]); connection.invalidate() }
@@ -186,7 +204,7 @@ private struct NativeHostPlatform: Sendable {
         defer { connection.invalidate() }
         let reply = NativeHostReply<(String, String)>()
         let failure = ("", PermissionStatus.probeUnavailable.rawValue)
-        guard let service = connection.service(onError: { reply.resolve(failure) }) else { return .probeUnavailable }
+        guard let service = connection.service(onError: { _ in reply.resolve(failure) }) else { return .probeUnavailable }
         service.requestPermission(native.rawValue, requestID: id.uuidString) { reply.resolve(($0, $1)) }
         // No UI timeout cancels an accepted native consent command.
         let value = await reply.value()
@@ -210,8 +228,8 @@ private final class NativeHostConnection: @unchecked Sendable {
     private let connection: NSXPCConnection
     init(_ connection: NSXPCConnection) { self.connection = connection }
     func invalidate() { connection.invalidate() }
-    func service(onError: @escaping @Sendable () -> Void) -> NativeHostPermissionService? {
-        connection.remoteObjectProxyWithErrorHandler { _ in onError() } as? NativeHostPermissionService
+    func service(onError: @escaping @Sendable (Error) -> Void) -> NativeHostPermissionService? {
+        connection.remoteObjectProxyWithErrorHandler { onError($0) } as? NativeHostPermissionService
     }
     deinit { connection.invalidate() }
 }

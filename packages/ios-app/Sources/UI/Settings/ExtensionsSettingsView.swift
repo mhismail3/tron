@@ -123,6 +123,12 @@ struct ExtensionsSettingsView: View {
                     modulesSection
                 }
 
+                // The schema's package settings for this scope (the npm command, and the
+                // packages list this sheet installs into), with where each comes from.
+                SettingsRendererView(target: projectCWD.map { SettingsTarget.project(cwd: $0).gatewayTarget } ?? SettingsTarget.global.gatewayTarget,
+                                     writeLayer: projectCWD == nil ? "mac" : "project", projectCWD: projectCWD,
+                                     presentation: .section("sources"), embedded: true)
+
                 if let inventory {
                     localThemesGroup(inventory)
                     if inventory.resources.objectValue?.isEmpty == false {
@@ -446,6 +452,7 @@ struct ExtensionsSettingsView: View {
                 source: package.source,
                 detail: [
                     package.scopeLabel,
+                    package.conflict != nil ? "Ignored" : nil,
                     package.filtered ? "Filtered" : nil,
                     updates.contains { $0.id == package.id } ? "Update available" : nil,
                 ].compactMap { $0 }.joined(separator: " · "),

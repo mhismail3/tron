@@ -1,6 +1,8 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
+import type { HomeHardBoundary } from "../home/home-diagnostic.js";
+import type { CommandReceiptRouteCategory } from "./command-receipts.js";
 
 /*
  * Level policy (owned by packages/gateway/docs/observability.md): error means
@@ -40,6 +42,8 @@ export interface LogRecord {
   /** Retired legacy connection instance IDs. */
   instanceIds?: readonly string[];
   commandId?: string;
+  /** Process identity for lifecycle records observed across supervisor boundaries. */
+  pid?: number;
   /** A named lifecycle step, such as a startup checkpoint. */
   step?: string;
   /** Sanitized transport request correlation; never a session or payload ID. */
@@ -48,7 +52,19 @@ export interface LogRecord {
   outcome?: string;
   code?: string;
   reason?: string;
+  /** Home chapter diagnostics: approved enums and non-negative safe counters. */
+  operation?: "configureMemory" | "pauseMemory" | "resumeMemory";
+  category?: "open" | CommandReceiptRouteCategory;
+  boundary?: HomeHardBoundary;
+  chapterOrdinal?: number;
+  crossingBytes?: number;
+  crossingEntries?: number;
+  settledBytes?: number;
+  settledEntries?: number;
   durationMs?: number;
+  acceptToCloseMs?: number;
+  bytesRead?: number;
+  transportEnd?: "reset" | "timeout" | "fin" | "none";
   /** The request span's compact stage breakdown, one bounded string. */
   stages?: string;
   /** The measured stage a request was in at one instant, e.g. the stage a
@@ -65,7 +81,11 @@ export interface LogRecord {
   helloMs?: number;
   /** The peer's Tailscale path at an inbound-silence episode (`connection.inbound-silent`). */
   peerPath?: string;
+  peerPathSource?: string;
   peerRelay?: string;
+  peerLastHandshake?: string;
+  peerRxBytes?: number;
+  peerTxBytes?: number;
   /** The listener a connection reached: `lan`, `tailscale` or `primary`
    * (`http.upgrade`). The phone names the two real legs it races the same way. */
   transport?: string;
@@ -74,12 +94,28 @@ export interface LogRecord {
   /** Named counters for one record (a reconcile's files and rows): the writer
    * bounds how many, their names and their values. */
   counts?: Record<string, number>;
+  /** Home task diagnostics: bounded hashes and approved tokens, never IDs or text. */
+  taskHash?: string;
+  operationHash?: string;
+  eventHash?: string;
+  referenceHash?: string;
+  spendReference?: string;
+  revision?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  elapsedMs?: number;
+  transition?: string;
+  state?: string;
+  action?: string;
+  disposition?: string;
+  cancelAndJoin?: string;
   error?: LogError;
 }
 
-export interface LogMetadata {
+export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "boundary" | "chapterOrdinal" | "crossingBytes" | "crossingEntries" | "settledBytes" | "settledEntries" | "pid"> {
   event?: string;
   source?: string;
+  kind?: string;
   sessionId?: string;
   connectionId?: string;
   peerClientId?: string;
@@ -94,7 +130,11 @@ export interface LogMetadata {
   outcome?: string;
   code?: string;
   reason?: string;
+  cause?: string;
   durationMs?: number;
+  acceptToCloseMs?: number;
+  bytesRead?: number;
+  transportEnd?: "reset" | "timeout" | "fin" | "none";
   /** `name=12ms×2/610KB;name=5ms`; the writer bounds it. */
   stages?: string;
   /** The measured stage a request was in at one instant, e.g. the stage a
@@ -112,14 +152,37 @@ export interface LogMetadata {
   handshakeMs?: number;
   helloMs?: number;
   peerPath?: string;
+  peerPathSource?: string;
   peerRelay?: string;
+  peerLastHandshake?: string;
+  peerRxBytes?: number;
+  peerTxBytes?: number;
   /** The listener a connection reached; the `transport` field of `http.upgrade`. */
   transport?: string;
   silentMs?: number;
   /** Named integer counters, e.g. `{ files: 12, added: 1 }`. */
   counts?: Readonly<Record<string, number>>;
+  taskHash?: string;
+  /** Null when no operation is bound; the writer omits it. */
+  operationHash?: string | null;
+  eventHash?: string;
+  referenceHash?: string;
+  spendReference?: string;
+  revision?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  elapsedMs?: number;
+  transition?: string;
+  state?: string;
+  action?: string;
+  disposition?: string;
+  cancelAndJoin?: string;
   /** Any thrown value; the writer bounds and redacts it. */
   error?: unknown;
+}
+
+function counterField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 /** One duration field: finite, non-negative, rounded, never NaN in a record. */
@@ -195,6 +258,12 @@ function boundedDiagnosticID(value: string): string {
   return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, MAX_FIELD_CHARS);
 }
 
+/** A hash or enum token a diagnostic names: escaped like an ID and short enough
+ * that it cannot carry a payload. */
+function boundedToken(value: unknown): string | undefined {
+  return typeof value === "string" ? boundedDiagnosticID(value).slice(0, 64) : undefined;
+}
+
 /** The stage breakdown keeps its `=`, `;`, `×` and `/` separators, so it is
  * bounded by bytes and redacted like a message, not diagnostic-ID-escaped. */
 function boundedStages(value: string): string {
@@ -250,10 +319,24 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
   const durationMs = durationField(value.durationMs);
   const unaccountedMs = durationField(value.unaccountedMs);
   const acceptToUpgradeMs = durationField(value.acceptToUpgradeMs);
+  const acceptToCloseMs = durationField(value.acceptToCloseMs);
+  const bytesRead = counterField(value.bytesRead);
+  const transportEnd = value.transportEnd;
   const authMs = durationField(value.authMs);
   const handshakeMs = durationField(value.handshakeMs);
   const helloMs = durationField(value.helloMs);
   const silentMs = durationField(value.silentMs);
+  const elapsedMs = durationField(value.elapsedMs);
+  const taskHash = boundedToken(value.taskHash);
+  const operationHash = boundedToken(value.operationHash);
+  const eventHash = boundedToken(value.eventHash);
+  const referenceHash = boundedToken(value.referenceHash);
+  const spendReference = boundedToken(value.spendReference);
+  const transition = boundedToken(value.transition);
+  const state = boundedToken(value.state);
+  const action = boundedToken(value.action);
+  const disposition = boundedToken(value.disposition);
+  const cancelAndJoin = boundedToken(value.cancelAndJoin);
   return {
     ...(typeof value.event === "string" ? { event: boundedMessage(value.event).slice(0, MAX_FIELD_CHARS) } : {}),
     ...(typeof value.source === "string" ? { source: boundedMessage(value.source).slice(0, 64) } : {}),
@@ -270,7 +353,17 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.method === "string" ? { method: boundedMessage(value.method).slice(0, MAX_FIELD_CHARS) } : {}),
     ...(typeof value.outcome === "string" ? { outcome: boundedMessage(value.outcome).slice(0, 64) } : {}),
     ...(typeof value.reason === "string" ? { reason: boundedDiagnosticID(value.reason).slice(0, 64) } : {}),
+    ...(value.operation === "configureMemory" || value.operation === "pauseMemory" || value.operation === "resumeMemory" ? { operation: value.operation } : {}),
+    ...(value.category === "open" || value.category === "fresh" || value.category === "replay" ? { category: value.category } : {}),
+    ...(value.boundary === "hard-bytes" || value.boundary === "hard-entries" ? { boundary: value.boundary } : {}),
+    ...(counterField(value.chapterOrdinal) !== undefined ? { chapterOrdinal: value.chapterOrdinal } : {}),
+    ...(counterField(value.crossingBytes) !== undefined ? { crossingBytes: value.crossingBytes } : {}),
+    ...(counterField(value.crossingEntries) !== undefined ? { crossingEntries: value.crossingEntries } : {}),
+    ...(counterField(value.settledBytes) !== undefined ? { settledBytes: value.settledBytes } : {}),
+    ...(counterField(value.settledEntries) !== undefined ? { settledEntries: value.settledEntries } : {}),
+    ...(typeof value.cause === "string" ? { cause: boundedDiagnosticID(value.cause).slice(0, 64) } : {}),
     ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
+    ...(Number.isSafeInteger(value.pid) && Number(value.pid) > 0 ? { pid: Number(value.pid) } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
     ...(typeof value.stages === "string" ? { stages: boundedStages(value.stages) } : {}),
     ...(typeof value.stage === "string" ? { stage: boundedDiagnosticID(value.stage).slice(0, 64) } : {}),
@@ -281,9 +374,30 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(handshakeMs !== undefined ? { handshakeMs } : {}),
     ...(helloMs !== undefined ? { helloMs } : {}),
     ...(typeof value.peerPath === "string" ? { peerPath: boundedDiagnosticID(value.peerPath).slice(0, 32) } : {}),
+    ...(typeof value.peerPathSource === "string" ? { peerPathSource: boundedDiagnosticID(value.peerPathSource).slice(0, 32) } : {}),
     ...(typeof value.peerRelay === "string" ? { peerRelay: boundedDiagnosticID(value.peerRelay).slice(0, 32) } : {}),
+    ...(typeof value.peerLastHandshake === "string" ? { peerLastHandshake: boundedDiagnosticID(value.peerLastHandshake).slice(0, 64) } : {}),
+    ...(typeof value.peerRxBytes === "number" && Number.isSafeInteger(value.peerRxBytes) && value.peerRxBytes >= 0 ? { peerRxBytes: value.peerRxBytes } : {}),
+    ...(typeof value.peerTxBytes === "number" && Number.isSafeInteger(value.peerTxBytes) && value.peerTxBytes >= 0 ? { peerTxBytes: value.peerTxBytes } : {}),
     ...(typeof value.transport === "string" ? { transport: boundedDiagnosticID(value.transport).slice(0, 32) } : {}),
+    ...(acceptToCloseMs !== undefined ? { acceptToCloseMs } : {}),
+    ...(bytesRead !== undefined ? { bytesRead } : {}),
+    ...(transportEnd === "reset" || transportEnd === "timeout" || transportEnd === "fin" || transportEnd === "none" ? { transportEnd } : {}),
     ...(silentMs !== undefined ? { silentMs } : {}),
+    ...(taskHash !== undefined ? { taskHash } : {}),
+    ...(operationHash !== undefined ? { operationHash } : {}),
+    ...(eventHash !== undefined ? { eventHash } : {}),
+    ...(referenceHash !== undefined ? { referenceHash } : {}),
+    ...(spendReference !== undefined ? { spendReference } : {}),
+    ...(counterField(value.revision) !== undefined ? { revision: value.revision } : {}),
+    ...(counterField(value.inputTokens) !== undefined ? { inputTokens: value.inputTokens } : {}),
+    ...(counterField(value.outputTokens) !== undefined ? { outputTokens: value.outputTokens } : {}),
+    ...(elapsedMs !== undefined ? { elapsedMs } : {}),
+    ...(transition !== undefined ? { transition } : {}),
+    ...(state !== undefined ? { state } : {}),
+    ...(action !== undefined ? { action } : {}),
+    ...(disposition !== undefined ? { disposition } : {}),
+    ...(cancelAndJoin !== undefined ? { cancelAndJoin } : {}),
     ...(value.counts ? { counts: boundedCounts(value.counts) } : {}),
     ...(error ? { error } : {}),
   };

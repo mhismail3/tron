@@ -41,13 +41,13 @@ export interface SessionSynchronizationByteBudget {
   release(bytes: number): void;
 }
 
-export const MAX_BUFFERED_SYNC_EVENTS = 1_024;
+const MAX_BUFFERED_SYNC_EVENTS = 1_024;
 /**
  * One synchronization quarantine may retain at most one default transport
  * frame. A larger burst resynchronizes from a fresh authoritative snapshot
  * instead of multiplying memory across concurrent session opens.
  */
-export const MAX_BUFFERED_SYNC_BYTES = 1_048_576;
+const MAX_BUFFERED_SYNC_BYTES = 1_048_576;
 
 function serializedEvent(event: BufferedSessionEvent): BufferedSessionEncoding | undefined {
   try {

@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 enum SettingsScope: String, Hashable, Sendable {
     case global
@@ -31,6 +32,38 @@ enum SettingsTarget: Hashable, Sendable {
         case .global: nil
         case let .project(cwd): cwd
         }
+    }
+}
+
+extension SettingsTarget {
+    /// The layer a write to this target lands in: Mac for global, Project for a project.
+    var writeLayer: String { scope == .global ? "mac" : "project" }
+
+    /// One chat's `settings.resolve`/`settings.change` target. Every surface names a
+    /// target the same way, so they share one snapshot.
+    static func sessionGatewayTarget(_ sessionID: String) -> JSONValue {
+        .object(["kind": .string("session"), "sessionId": .string(sessionID)])
+    }
+
+    /// The `target` of `settings.resolve` and `settings.change` (docs/settings-model.md 3.1).
+    var gatewayTarget: JSONValue {
+        switch self {
+        case .global: .object(["kind": .string("mac")])
+        case let .project(cwd): .object(["kind": .string("project"), "cwd": .string(cwd)])
+        }
+    }
+
+    /// One `settings.change` entry that sets, or with nil unsets, a schema key at
+    /// this target's own layer: Mac for global, Project for a project.
+    func keyChange(_ key: String, value: JSONValue?) -> JSONValue {
+        var change: [String: JSONValue] = ["key": .string(key), "layer": .string(writeLayer)]
+        if let value {
+            change["op"] = .string("set")
+            change["value"] = value
+        } else {
+            change["op"] = .string("unset")
+        }
+        return .object(change)
     }
 }
 
@@ -180,14 +213,6 @@ struct ScopedSettingsDraftStore<Draft: Equatable> {
         )
         return true
     }
-}
-
-struct AgentDefaultsLoadID: Hashable {
-    let settingsTarget: SettingsTarget?
-    let providerTarget: ProviderCatalogTarget
-    let settingsInvalidationGeneration: Int
-    let providerInvalidationGeneration: Int
-    let foregroundGeneration: Int
 }
 
 struct SettingsLoadID: Hashable {

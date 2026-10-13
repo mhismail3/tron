@@ -474,9 +474,7 @@ private struct ToolActivityChip: View {
             recordSample(target, token: token)
             return
         }
-        let animation: Animation = reduceMotion
-            ? .linear(duration: 0.10)
-            : .smooth(duration: 0.20)
+        let animation = ChatMotion.toolValueReplace(reduceMotion: reduceMotion)
         var transaction = Transaction(animation: animation)
         transaction.admitsChatToolChipAnimation = true
         // Admit the shallow state in the same MainActor turn as the latest

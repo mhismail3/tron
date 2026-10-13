@@ -91,6 +91,20 @@ struct ConnectionsSettingsView: View {
         )
     }
 
+    private func notificationPolicyBinding(_ keyPath: WritableKeyPath<PushNotificationPolicy, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { pushNotifications.notificationPolicy[keyPath: keyPath] },
+            set: { value in
+                var next = pushNotifications.notificationPolicy
+                next[keyPath: keyPath] = value
+                Task { @MainActor in
+                    do { try await pushNotifications.updateNotificationPolicy(next) }
+                    catch { model.presentError(error) }
+                }
+            }
+        )
+    }
+
     private var pushStatus: (icon: String, title: String, detail: String) {
         switch model.pushNotificationReadiness {
         case .ready:
@@ -188,6 +202,12 @@ struct ConnectionsSettingsView: View {
                             accent: .tronBlue
                         )
                         TronSettingsDivider(accent: .tronBlue)
+                        TronToggleRow(icon: "questionmark.bubble.fill", title: "Input needed", detail: "Time Sensitive alerts when Tron needs a response", accent: .tronBlue, isEnabled: model.connectionState == .connected && pushNotifications.readiness == .ready && !pushNotifications.isUpdatingNotificationPolicy, isOn: notificationPolicyBinding(\.inputNeeded))
+                        TronSettingsDivider(accent: .tronBlue)
+                        TronToggleRow(icon: "stop.circle.fill", title: "Finished", detail: "Alert when the session has no pending background work", accent: .tronBlue, isEnabled: model.connectionState == .connected && pushNotifications.readiness == .ready && !pushNotifications.isUpdatingNotificationPolicy, isOn: notificationPolicyBinding(\.finished))
+                        TronSettingsDivider(accent: .tronBlue)
+                        TronToggleRow(icon: "hourglass", title: "Waiting on background work", detail: "Alert once while delegated work is still running", accent: .tronBlue, isEnabled: model.connectionState == .connected && pushNotifications.readiness == .ready && !pushNotifications.isUpdatingNotificationPolicy, isOn: notificationPolicyBinding(\.waiting))
+                        TronSettingsDivider(accent: .tronBlue)
                         TronValueRow(
                             icon: "stethoscope",
                             title: "Registration stage",
@@ -235,9 +255,11 @@ struct ConnectionsSettingsView: View {
                     model.isAddingServer = true
                     showAddServer = true
                 } label: {
-                    TronToolbarTextLabel("Add Server", systemImage: "plus")
+                    Image(systemName: "plus")
+                        .font(TronTypography.buttonSM)
                 }
                 .tronToolbarAction()
+                .accessibilityLabel("Add Server")
                 .accessibilityHint("Opens the Connect a Mac pairing screen")
             }
         }
@@ -572,6 +594,15 @@ struct GatewayConnectionDetailView: View {
                             accent: statusColor
                         ) {
                             GatewayConnectionStatusBadge(state: status)
+                        }
+                        if let lastConnectedAt = model.dashboardLastConnectedAt(for: currentProfile.id) {
+                            TronSettingsDivider(accent: statusColor)
+                            TronValueRow(
+                                icon: "clock",
+                                title: "Last connected",
+                                detail: lastConnectedAt.formatted(date: .abbreviated, time: .shortened),
+                                accent: statusColor
+                            )
                         }
                         if let stopReason = profileStopReason {
                             TronSettingsDivider(accent: .tronError)
@@ -1072,8 +1103,8 @@ struct GatewayMaintenanceAction: Identifiable {
 }
 
 /// The server sheet's maintenance actions: the lifecycle actions share one
-/// accent in a two-column grid, and the irreversible pairing action stands alone
-/// below them in the error accent.
+/// accent in paired columns; a lone trailing action uses the full row width.
+/// The irreversible pairing action stands alone below them in the error accent.
 struct GatewayMaintenanceActions: View {
     let lifecycle: [GatewayMaintenanceAction]
     let destructive: GatewayMaintenanceAction
@@ -1088,7 +1119,6 @@ struct GatewayMaintenanceActions: View {
                     ForEach(row) { action in
                         button(action, accent: accent)
                     }
-                    if row.count == 1 { Spacer(minLength: 0) }
                 }
             }
             button(destructive, accent: .tronError)
@@ -1173,33 +1203,18 @@ struct GatewayServerInfoSheet: View {
     }
 }
 
-struct ImportSettingsView: View {
+/// Imports a session export into a new session in the default workspace.
+struct ImportSessionRow: View {
     @Environment(AppModel.self) private var model
     let onImported: (AppModel.SessionNavigationRoute) -> Void
     @State private var showSessionImporter = false
 
-    init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
-        self.onImported = onImported
-    }
-
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                TronSettingsGroup("Session file", detail: "Open a canonical Tron session export in a new session.") {
-                    Button { showSessionImporter = true } label: {
-                        TronSettingsRow(
-                            icon: "square.and.arrow.down",
-                            title: "Import Session",
-                            subtitle: "JSON, JSONL, or plain-text session export"
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(20)
+        Button { showSessionImporter = true } label: {
+            TronSettingsRow(icon: "square.and.arrow.down", title: "Import Session",
+                            subtitle: "JSON, JSONL, or plain-text session export", subtitleColor: .tronTextSecondary)
         }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle("Import")
+        .buttonStyle(.plain)
         .fileImporter(
             isPresented: $showSessionImporter,
             allowedContentTypes: [.json, .plainText, .data],

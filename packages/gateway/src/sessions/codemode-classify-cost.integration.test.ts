@@ -6,6 +6,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-work
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
@@ -13,14 +14,6 @@ afterEach(async () => {
   await Promise.all(registries.splice(0).map((registry) => registry.dispose().catch(() => {})));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("condition timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
 
 describe("codemode classifier usage projection", () => {
   it("counts TypeSafe classify usage once in the codemode card and session snapshot", async () => {
@@ -45,7 +38,7 @@ describe("codemode classifier usage projection", () => {
     await trust.set(cwd, true);
     const faux = fauxProvider({ provider: "tron-codemode-classify-cost", tokensPerSecond: 10_000 });
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("codemode", { code: `const model = await models.getModelOfType("classifier", "typesafe", "jev-latest"); const result = await models.classify(model, { state: { text: "classifier usage fixture" }, questions: { relevant: { type: "bool", instructions: "Is this relevant?" } } }); return JSON.stringify(result);` }, { id: "classify-parent" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("codemode", { code: `const model = await models.getModelOfType("classifier", "typesafe", "jev-latest"); const result = await models.classify(model, { state: { text: "classifier usage fixture" }, questions: { relevant: { type: "bool", instructions: "Is this relevant?", criteria: { true: "Relevant.", false: "Not relevant." } } } }); return JSON.stringify(result);` }, { id: "classify-parent" })], { stopReason: "toolUse" }),
       fauxAssistantMessage("classification complete"),
     ]);
     const modelRuntimeFactory = async () => {
@@ -83,10 +76,10 @@ describe("codemode classifier usage projection", () => {
     let live: ReturnType<typeof slot.snapshot>;
     try {
       const prompting = slot.prompt("classify once");
-      await waitUntil(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "classify-parent"));
+      await waitFor(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "classify-parent"), "the classifier parent tool");
       live = slot.snapshot();
       await prompting;
-      await waitUntil(() => !slot.isBusy);
+      await waitFor(() => !slot.isBusy, "the slot to go idle");
     } finally {
       globalThis.fetch = originalFetch;
     }

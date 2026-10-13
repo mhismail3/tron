@@ -29,9 +29,7 @@ enum LaunchAgentRegistrationPlan: Equatable, Sendable {
     }
 }
 
-/// Indirection over `SMAppService` and launchd diagnostics so service-control
-/// callers are testable without mutating Login Items.
-/// Mocks live in `Tests/Infrastructure/Fakes/MockLaunchAgentManager.swift`.
+/// Indirection over `SMAppService` and launchd diagnostics.
 protocol LaunchAgentManaging: Sendable {
     /// `SMAppService.agent(plistName:).register()` — registers the
     /// bundled LaunchAgent. Returns `.requiresApproval` when macOS is

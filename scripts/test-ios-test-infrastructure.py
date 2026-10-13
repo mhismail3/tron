@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -27,7 +28,15 @@ IDENTITY = ROOT / "scripts/ios-test-build-identity.py"
 RUNNER = ROOT / "scripts/tron-ios-test"
 PROFILER = ROOT / "scripts/tron-profile-ios"
 E2E = ROOT / "scripts/ios-gateway-e2e-test"
+XCTESTRUN_FIXTURE_KEYS = [
+    "TRON_E2E_CODE",
+    "TRON_E2E_PI_VERSION",
+    "TRON_E2E_PORT",
+    "TRON_E2E_PROXY_TOKEN",
+    "TRON_E2E_WORKSPACE",
+]
 DEVELOPMENT = ROOT / "scripts/tron-ios-simulator"
+NODE_VERSION = (ROOT / ".node-version").read_text().strip()
 XCODEGEN_VERSION = re.search(
     r"^TRON_CI_XCODEGEN_VERSION=(\S+)$", (ROOT / "config/ci-toolchain.env").read_text(), re.M,
 ).group(1)
@@ -465,6 +474,10 @@ if command in ('boot', 'shutdown', 'delete'):
             (Path(os.environ['FAKE_READER_VALUES']) / 'free-percent').write_text(consumed + '\\n')
     if command == 'shutdown' and os.environ.get('FAKE_DEVELOPMENT_ON_SHUTDOWN'):
         Path(os.environ['FAKE_DEVELOPMENT_ON_SHUTDOWN']).write_text(udid + '\\n')
+    if command == 'shutdown' and os.environ.get('FAKE_CLAIM_TARGET_ON_SHUTDOWN'):
+        marker_path = Path(os.environ['FAKE_CLAIM_TARGET_ON_SHUTDOWN'])
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        marker_path.write_text(json.dumps({'schema': 'tron.ios-test-simulator.v1', 'owner': 'tron-ios-test', 'udid': udid, 'name': 'late claim'}))
     found = False
     for runtime, devices in doc['devices'].items():
         for device in list(devices):
@@ -542,6 +555,133 @@ raise SystemExit(2)
             "name": name, "udid": udid, "state": state, "isAvailable": True,
             "deviceTypeIdentifier": TYPE_ID,
         }
+
+class UnownedSimulatorCleanupFixture(SimulatorHarness, unittest.TestCase):
+    """Exact-UUID cleanup refuses every ownership signal before deletion."""
+
+    def clean_command(self, udid: str = UDID_A, name: str = "Orphan Test Simulator") -> subprocess.CompletedProcess[str]:
+        environment = self.contained_environment(self.root)
+        environment.update({"TRON_IOS_XCRUN": str(self.fake_xcrun), "FAKE_SIMCTL_INVENTORY": str(self.inventory_path), "FAKE_SIMCTL_LOG": str(self.root / "simctl.log")})
+        environment.update(self.reader_environment())
+        if hasattr(self, "late_claim"):
+            environment["FAKE_CLAIM_TARGET_ON_SHUTDOWN"] = str(self.late_claim)
+        return subprocess.run(
+            [sys.executable, str(SIMULATOR), "delete-unowned", "--udid", udid, "--name", name,
+             "--discovery-root", str(self.root), "--default-state-dir", str(self.root),
+             "--development-state", str(self.development)],
+            env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    def test_deletes_only_exact_unowned_requested_simulator(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]
+        unrelated = self.device(UDID_B, name="Other Simulator", state="Booted")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target, unrelated]})
+        result = self.clean_command()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        devices = json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]
+        self.assertEqual([device["udid"] for device in devices], [UDID_B])
+        self.assertEqual(devices[0]["state"], "Booted")
+
+    def test_claim_appearing_during_shutdown_prevents_delete(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target]})
+        self.late_claim = self.root / "late-lane" / "simulator.json"
+        result = self.clean_command()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.late_claim.is_file())
+        devices = json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]
+        self.assertEqual(len(devices), 1)
+        self.assertEqual(devices[0]["state"], "Shutdown")
+
+    def test_exact_cleanup_leaves_an_unrelated_lane_lease_and_marker_untouched(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Shutdown")[1]
+        other = self.device(UDID_B, name="Tron iOS Tests (other)", state="Shutdown")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target, other]})
+        lane = self.root / "ios-test-other"
+        lane.mkdir()
+        marker = self.owned_marker(UDID_B, name="Tron iOS Tests (other)")
+        marker_path = lane / "simulator.json"
+        lease_path = lane / "lease.lock"
+        marker_path.write_text(json.dumps(marker))
+        lease_path.write_text("{}\n")
+        marker_before, lease_before = marker_path.read_bytes(), lease_path.read_bytes()
+        result = self.clean_command()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(marker_path.read_bytes(), marker_before)
+        self.assertEqual(lease_path.read_bytes(), lease_before)
+        self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [other])
+
+    def test_refuses_owned_live_development_and_malformed_targets(self) -> None:
+        cases = (("owned", "claimed by lane marker"), ("development", "Development"), ("malformed", "unreadable"))
+        for case, expected in cases:
+            with self.subTest(case=case):
+                target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]
+                self.write_inventory(devices={RUNTIME_ID: [target]})
+                lane = self.root / "ios-test-active"
+                shutil.rmtree(lane, ignore_errors=True)
+                self.development.unlink(missing_ok=True)
+                if case == "owned":
+                    lane.mkdir()
+                    (lane / "simulator.json").write_text(json.dumps(self.owned_marker(UDID_A)))
+                    (lane / "lease.lock").write_text("")
+                elif case == "development":
+                    self.development.write_text(UDID_A + "\n")
+                else:
+                    lane.mkdir()
+                    (lane / "simulator.json").write_text("not json")
+                (self.root / "simctl.log").unlink(missing_ok=True)
+                result = self.clean_command()
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn(expected, result.stderr)
+                self.assertTrue(any(device["udid"] == UDID_A for device in json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]))
+                calls = (self.root / "simctl.log").read_text().splitlines() if (self.root / "simctl.log").exists() else []
+                self.assertFalse(any(call.startswith(("shutdown ", "delete ")) for call in calls))
+
+    def test_exact_cleanup_accepts_empty_idle_unrelated_lane_lease(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Shutdown")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target]})
+        lane = self.root / "ios-test-idle"
+        lane.mkdir()
+        lease_path = lane / "lease.lock"
+        lease_path.write_text("")
+        before = lease_path.read_bytes()
+        result = self.clean_command()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(lease_path.read_bytes(), before)
+        self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [])
+
+    def test_refuses_nonempty_malformed_idle_lane_lease(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Shutdown")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target]})
+        lane = self.root / "ios-test-malformed"
+        lane.mkdir()
+        (lane / "lease.lock").write_text("not json\n")
+        result = self.clean_command()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("ambiguous lane lease", result.stderr)
+        self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [target])
+
+    def test_refuses_markerless_live_lane_lease(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target]})
+        lane = self.root / "ios-test-live"
+        lane.mkdir()
+        lease_path = lane / "lease.lock"
+        lease_path.write_text(json.dumps({
+            "pid": os.getpid(), "started_at_epoch_seconds": int(time.time()), "command": "fixture",
+        }))
+        result = self.clean_command()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("test lane is leased", result.stderr)
+        self.assertTrue(any(device["udid"] == UDID_A for device in json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]))
+
+    def test_requires_matching_uuid_and_name(self) -> None:
+        target = self.device(UDID_A, name="Orphan Test Simulator", state="Booted")[1]
+        self.write_inventory(devices={RUNTIME_ID: [target]})
+        self.assertNotEqual(self.clean_command(UDID_B).returncode, 0)
+        self.assertNotEqual(self.clean_command(name="different name").returncode, 0)
+        self.assertTrue(any(device["udid"] == UDID_A for device in json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]))
+
 
 class SimulatorFixture(SimulatorHarness, unittest.TestCase):
     """Exercise the simulator owner directly against a synthetic simctl."""
@@ -885,12 +1025,34 @@ class AdmissionFixture(SimulatorHarness, unittest.TestCase):
 class RunnerFixture(SyntheticReaders, unittest.TestCase):
     """Exercise the production runner with only synthetic xcode/simctl tools."""
 
+    def test_clean_unowned_routes_exact_identity_with_unrelated_empty_lane_lease(self) -> None:
+        lane = self.root / "ios-test-idle"
+        lane.mkdir()
+        lease = lane / "lease.lock"
+        lease.write_bytes(b"")
+        target = {
+            "name": "Orphan Test Simulator", "udid": UDID_A, "state": "Booted",
+            "isAvailable": True, "deviceTypeIdentifier": RUNNER_TYPE_ID,
+        }
+        document = json.loads(self.simulator_inventory.read_text())
+        document["devices"][RUNNER_RUNTIME_ID].append(target)
+        self.simulator_inventory.write_text(json.dumps(document))
+        result = self.invoke(
+            command="clean-unowned", extra_args=[UDID_A, "Orphan Test Simulator"],
+            discovery_root=self.root,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(UDID_A, [device["udid"] for device in json.loads(self.simulator_inventory.read_text())["devices"][RUNNER_RUNTIME_ID]])
+        self.assertEqual(self.simctl_calls("delete"), [f"delete {UDID_A}"])
+        self.assertEqual(lease.read_bytes(), b"")
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.install_readers(self.root)
+        self.checkout = self.create_fixture_checkout()
         self.xcrun = self.bin / "xcrun"
         self.synthetic_stub(self.xcrun, """import json, os, sys
 from pathlib import Path
@@ -991,9 +1153,41 @@ shutil.copytree(source, clone)
         finally:
             self.temporary.cleanup()
 
-    def source_identity(self, worktree: Path = ROOT) -> dict[str, object]:
+    def create_fixture_checkout(self) -> Path:
+        """A git repository holding copies of the runner's tool sources, and nothing else.
+
+        The runner stamps and verifies the identity of the checkout it runs from. The
+        real checkout's identity depends on what its developer left untracked or
+        ignored, and under this fixture's isolated HOME the developer's global
+        ignores no longer apply, so a fixture that reads the real checkout depends on
+        the machine it runs on. The fixture runs the tools from its own repository.
+        """
+        # Resolved: the identity owner records the real path, which macOS spells under /private.
+        checkout = self.root.resolve() / "checkout"
+        ignore = shutil.ignore_patterns("__pycache__")
+        shutil.copytree(ROOT / "scripts", checkout / "scripts", ignore=ignore)
+        shutil.copytree(ROOT / "config", checkout / "config", ignore=ignore)
+        shutil.copy2(ROOT / ".node-version", checkout / ".node-version")
+        shutil.copytree(ROOT / ".github/workflows", checkout / ".github/workflows", ignore=ignore)
+        # The project generator runs in this directory; a file keeps it in the commit (Git
+        # does not track empty directories).
+        (checkout / "packages/ios-app").mkdir(parents=True)
+        (checkout / "packages/ios-app/project.yml").write_text("name: TronMobile\n")
+        environment = self.contained_environment(self.root)
+        for arguments in (
+            ("init", "-q"),
+            ("config", "user.email", "tests@tron.invalid"),
+            ("config", "user.name", "Tron Tests"),
+            ("add", "--all"),
+            ("commit", "-q", "-m", "fixture checkout"),
+        ):
+            subprocess.run(["git", "-C", str(checkout), *arguments], env=environment, check=True,
+                           text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return checkout
+
+    def source_identity(self, worktree: Path | None = None) -> dict[str, object]:
         completed = subprocess.run(
-            [sys.executable, str(IDENTITY), "show", "--worktree", str(worktree)],
+            [sys.executable, str(IDENTITY), "show", "--worktree", str(worktree or self.checkout)],
             env=self.contained_environment(self.root),
             check=True, text=True, stdout=subprocess.PIPE,
         )
@@ -1001,7 +1195,7 @@ shutil.copytree(source, clone)
 
     def write_products_identity(self, value: dict[str, object] | None = None) -> None:
         subprocess.run(
-            [sys.executable, str(IDENTITY), "write", "--worktree", str(ROOT), "--derived-data", str(self.derived)],
+            [sys.executable, str(IDENTITY), "write", "--worktree", str(self.checkout), "--derived-data", str(self.derived)],
             env=self.contained_environment(self.root),
             check=True, text=True, input=json.dumps(value if value is not None else self.source_identity()),
             stdout=subprocess.DEVNULL,
@@ -1014,7 +1208,7 @@ shutil.copytree(source, clone)
         extra_args: list[str] | None = None,
         lane: str | None = None, discovery_root: Path | None = None,
         override: dict[str, str] | None = None,
-        runner_root: Path = ROOT,
+        runner_root: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         environment = self.contained_environment(self.root)
         environment.update(self.reader_environment())
@@ -1052,7 +1246,7 @@ shutil.copytree(source, clone)
             environment.pop("TRON_IOS_TEST_RESULTS_DIR", None)
             environment["HOME"] = str(home)
         return subprocess.run(
-            [str(runner_root / "scripts/tron-ios-test"), command, *(extra_args or [])],
+            [str((runner_root or self.checkout) / "scripts/tron-ios-test"), command, *(extra_args or [])],
             env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
@@ -1144,7 +1338,7 @@ shutil.copytree(source, clone)
             "FAKE_SUMMARY": '{"passedTests":3,"failedTests":0,"skippedTests":0,"totalTestCount":3}',
         })
         result = subprocess.run(
-            [str(ROOT / "scripts/ios-ci-test.sh")], env=environment,
+            [str(self.checkout / "scripts/ios-ci-test.sh")], env=environment,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1154,6 +1348,14 @@ shutil.copytree(source, clone)
         self.assertEqual(value["run"].get("phase"), "complete", value)
         self.assertEqual(value["test_summary"].get("passedTests"), 3, value)
         self.assertEqual(sorted(value["processes"]), ["build", "test"], value)
+
+    def test_summary_validation_reconciles_expected_failures(self) -> None:
+        result = self.invoke(summary='{"passedTests":2,"failedTests":0,"skippedTests":1,"expectedFailures":3,"totalTestCount":6}')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = self.invoke(summary='{"passedTests":2,"failedTests":0,"skippedTests":1,"expectedFailures":3,"totalTestCount":7}')
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+        result = self.invoke(summary='{"passedTests":0,"failedTests":0,"skippedTests":0,"expectedFailures":1,"totalTestCount":1}')
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
 
     def test_summary_validation_requires_real_passing_count(self) -> None:
         result = self.invoke()
@@ -1194,7 +1396,7 @@ shutil.copytree(source, clone)
         self.assertEqual(result.returncode, 74, result.stderr)
         self.assertIn("refusing to run", result.stderr)
         self.assertIn("/private/tmp/tron-foreign", result.stderr)
-        self.assertIn(str(ROOT), result.stderr)
+        self.assertIn(str(self.checkout), result.stderr)
 
     def test_run_refuses_products_from_a_changed_source_state(self) -> None:
         build = self.source_identity()
@@ -1216,7 +1418,7 @@ shutil.copytree(source, clone)
 
     def primary_products(self) -> Path:
         common_dir = subprocess.run(
-            ["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            ["git", "-C", str(self.checkout), "rev-parse", "--path-format=absolute", "--git-common-dir"],
             env=self.contained_environment(self.root), check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip()
         primary = Path(common_dir).parent
@@ -1229,7 +1431,7 @@ shutil.copytree(source, clone)
     def add_runner_worktree(self) -> Path:
         runner_root = self.root / "runner-worktree"
         subprocess.run(
-            ["git", "-C", str(ROOT), "worktree", "add", "--detach", str(runner_root), "HEAD"],
+            ["git", "-C", str(self.checkout), "worktree", "add", "--detach", str(runner_root), "HEAD"],
             env=self.contained_environment(self.root), check=True, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
@@ -1244,7 +1446,7 @@ shutil.copytree(source, clone)
 
     def remove_runner_worktree(self, runner_root: Path) -> None:
         subprocess.run(
-            ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(runner_root)],
+            ["git", "-C", str(self.checkout), "worktree", "remove", "--force", str(runner_root)],
             env=self.contained_environment(self.root), check=True, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
@@ -1315,12 +1517,12 @@ shutil.copytree(source, clone)
         self.assertEqual(result.returncode, 0, result.stderr)
         stamp = json.loads((self.derived / "build-identity.json").read_text())
         self.assertEqual(stamp["schema"], "tron.ios-test-build-identity.v1")
-        self.assertEqual(stamp["worktree"], str(ROOT))
+        self.assertEqual(stamp["worktree"], str(self.checkout))
         self.assertEqual(stamp, self.source_identity())
         metadata = self.latest_metadata()
         self.assertEqual(metadata["source"], stamp)
         self.assertEqual(metadata["source"]["revision"], subprocess.run(
-            ["git", "-C", str(ROOT), "rev-parse", "HEAD"], env=self.contained_environment(self.root),
+            ["git", "-C", str(self.checkout), "rev-parse", "HEAD"], env=self.contained_environment(self.root),
             check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip())
         self.assertIsInstance(metadata["source"]["dirty"], bool)
@@ -1355,13 +1557,13 @@ shutil.copytree(source, clone)
         result = self.invoke(command="status", home=home)
         self.assertEqual(result.returncode, 0, result.stderr)
         key = subprocess.run(
-            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(ROOT)],
+            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(self.checkout)],
             env=self.contained_environment(self.root),
             check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip()
         expected = home / "Library/Developer/Tron/ios/test-derived-data" / key
         self.assertIn(f"Test products directory: {expected}", result.stdout)
-        self.assertIn(f"Worktree: {ROOT}", result.stdout)
+        self.assertIn(f"Worktree: {self.checkout}", result.stdout)
 
     def test_clean_removes_only_this_worktrees_products(self) -> None:
         sibling = self.derived.parent / "sibling-products"
@@ -1378,7 +1580,7 @@ shutil.copytree(source, clone)
         Failure modes: a passing run, a run whose tests fail, and a run killed by
         its own process deadline could each leave the booted simulator behind.
         """
-        owner = ["--only-testing", "TronMobileTests/StubTests"]
+        owner = ["--only-testing", "TronMobileUITests/StubTests"]
         outcomes = (
             ("success", {}, 0),
             ("test failure", {"xcode_status": 7}, 65),
@@ -1402,7 +1604,7 @@ shutil.copytree(source, clone)
     def test_the_runner_keeps_the_admission_exit_and_boots_nothing(self) -> None:
         """Failure modes 1 and 2: exit 73 survives, and nothing was booted."""
         self.reader_value("free-percent", "5")
-        result = self.invoke(extra_args=["--only-testing", "TronMobileTests/StubTests"])
+        result = self.invoke(extra_args=["--only-testing", "TronMobileUITests/StubTests"])
         self.assertEqual(result.returncode, 73, result.stderr)
         self.assertIn("refusing to boot Tron iOS Tests", result.stderr)
         self.assertIn("lane default", result.stderr)
@@ -1416,7 +1618,7 @@ shutil.copytree(source, clone)
         asked to keep; a later run in the lane could boot a second simulator
         instead of reusing it; and a release could be skipped afterwards.
         """
-        owner = ["--only-testing", "TronMobileTests/StubTests"]
+        owner = ["--only-testing", "TronMobileUITests/StubTests"]
         first = self.invoke(extra_args=["--keep-booted", *owner])
         self.assertEqual(first.returncode, 0, first.stderr)
         udid = self.owned_udid()
@@ -1445,7 +1647,7 @@ shutil.copytree(source, clone)
         })
         self.simulator_inventory.write_text(json.dumps(document))
 
-        result = self.invoke(extra_args=["--only-testing", "TronMobileTests/StubTests"])
+        result = self.invoke(extra_args=["--only-testing", "TronMobileUITests/StubTests"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("shut down Tron iOS Tests (lane b)", result.stdout)
         self.assertEqual(self.device_entry("BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")["state"], "Shutdown")
@@ -1474,12 +1676,12 @@ shutil.copytree(source, clone)
         self.simulator_inventory.write_text(json.dumps(document))
 
         started = time.time()
-        owner = ["--only-testing", "TronMobileTests/StubTests"]
+        owner = ["--only-testing", "TronMobileUITests/StubTests"]
         result = self.invoke(lane="alpha", extra_args=owner)
         self.assertEqual(result.returncode, 0, result.stderr)
         lane = self.root / "ios-test-alpha"
         marker = json.loads((lane / "simulator.json").read_text())
-        self.assertEqual(marker["worktree"], str(ROOT))
+        self.assertEqual(marker["worktree"], str(self.checkout))
         self.assertGreaterEqual(marker["last_used_epoch_seconds"], int(started))
         self.assertLessEqual(marker["last_used_epoch_seconds"], int(time.time()) + 1)
         self.assertEqual(marker["name"], "Tron iOS Tests (alpha)")
@@ -1515,7 +1717,7 @@ shutil.copytree(source, clone)
     # so this case guards the outcome, not how the check compares paths.
     def test_a_lane_named_on_the_command_line_is_the_lane_that_provisions(self) -> None:
         """Failure mode 1: the holder's command keeps the lane it was given."""
-        owner = ["--only-testing", "TronMobileTests/StubTests"]
+        owner = ["--only-testing", "TronMobileUITests/StubTests"]
         # The default lane lives under this fixture's HOME; nothing may appear
         # there for a command that named another lane.
         default_state = self.root / "home/.tron/internal/ios-test"
@@ -1547,7 +1749,7 @@ shutil.copytree(source, clone)
         for spelling in spellings:
             with self.subTest(spelling=spelling):
                 result = self.invoke(
-                    extra_args=["--only-testing", "TronMobileTests/StubTests"],
+                    extra_args=["--only-testing", "TronMobileUITests/StubTests"],
                     override={"TRON_IOS_TEST_STATE_DIR": spelling},
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -1558,7 +1760,7 @@ shutil.copytree(source, clone)
         """Failure mode 2: a command never runs on a lane its lease does not hold."""
         other = self.root / "ios-test-other/lease.lock"
         result = self.invoke(
-            extra_args=["--only-testing", "TronMobileTests/StubTests"],
+            extra_args=["--only-testing", "TronMobileUITests/StubTests"],
             override={"TRON_IOS_TEST_LOCK_HELD": "1", "TRON_IOS_TEST_LEASE_LOCK": str(other)},
         )
         self.assertEqual(result.returncode, 74, result.stderr)
@@ -1624,8 +1826,11 @@ class BuildIdentityFixture(ContainedFixture, unittest.TestCase):
         self.temporary.cleanup()
 
     def git(self, *arguments: str) -> str:
+        return self.git_in(self.worktree, *arguments)
+
+    def git_in(self, repository: Path, *arguments: str) -> str:
         return subprocess.run(
-            ["git", "-C", str(self.worktree), *arguments],
+            ["git", "-C", str(repository), *arguments],
             env=self.contained_environment(self.root),
             check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip()
@@ -1692,6 +1897,40 @@ class BuildIdentityFixture(ContainedFixture, unittest.TestCase):
         with_untracked = self.identity()
         self.assertTrue(with_untracked["dirty"])
         added.write_text("let added = 2\n")
+        self.assertNotEqual(self.identity()["source_fingerprint"], with_untracked["source_fingerprint"])
+
+    def test_a_nested_checkout_under_the_worktree_is_identified_by_its_own_state(self) -> None:
+        """Failure modes this case targets, written before the code:
+
+        1. Git lists an untracked nested repository as one `dir/` entry, so the
+           identity read crashes on it, as it did under the ignored build root.
+        2. The identity omits the nested checkout's commit, so a dependency moved
+           to another revision keeps products that were built from the old one.
+        3. The identity omits the nested checkout's own uncommitted or untracked
+           content, so an edited dependency keeps stale products.
+        """
+        nested = self.worktree / "build/SourcePackages/checkouts/Dependency"
+        nested.mkdir(parents=True)
+        self.git_in(nested, "init", "-q")
+        self.git_in(nested, "config", "user.email", "tests@tron.invalid")
+        self.git_in(nested, "config", "user.name", "Tron Tests")
+        (nested / "Dependency.swift").write_text("let dependency = 1\n")
+        self.git_in(nested, "add", "Dependency.swift")
+        self.git_in(nested, "commit", "-q", "-m", "initial")
+
+        first = self.identity()
+        self.assertTrue(first["dirty"])
+        self.assertEqual(first, self.identity())
+
+        (nested / "Dependency.swift").write_text("let dependency = 2\n")
+        self.git_in(nested, "commit", "-q", "-am", "second")
+        moved = self.identity()
+        self.assertNotEqual(moved["source_fingerprint"], first["source_fingerprint"])
+
+        (nested / "Scratch.swift").write_text("let scratch = 1\n")
+        with_untracked = self.identity()
+        self.assertNotEqual(with_untracked["source_fingerprint"], moved["source_fingerprint"])
+        (nested / "Scratch.swift").write_text("let scratch = 2\n")
         self.assertNotEqual(self.identity()["source_fingerprint"], with_untracked["source_fingerprint"])
 
     def test_verify_refuses_missing_or_foreign_identity(self) -> None:
@@ -1841,8 +2080,25 @@ arguments = sys.argv[1:]
 if arguments[:2] == ['xcresulttool', 'get']:
     if arguments[2:4] == ['test-results', 'tests'] and os.environ.get('FAKE_TESTS_RESULT'):
         print(Path(os.environ['FAKE_TESTS_RESULT']).read_text()); raise SystemExit(0)
-    # The runner's summary of a focused run: one executed, passing test.
-    print('{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}'); raise SystemExit(0)
+    # The runner's summary of a focused run: one executed, passing test, unless
+    # a case asks for a different one (for example a skipped journey).
+    print(os.environ.get('FAKE_SUMMARY') or '{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}'); raise SystemExit(0)
+if arguments[:2] == ['xcresulttool', 'export']:
+    # The attachments export of a result bundle, in the shape `xcresulttool export
+    # attachments --schema` declares: a manifest of tests, each naming its exported
+    # files. `FAKE_PHONE_LIVENESS_RECORDS` stands for the case's attached records.
+    output = Path(arguments[arguments.index('--output-path') + 1])
+    output.mkdir(parents=True, exist_ok=True)
+    attachments = []
+    records = os.environ.get('FAKE_PHONE_LIVENESS_RECORDS')
+    if records is not None:
+        (output / 'attachment-1.txt').write_text(records)
+        attachments.append({'exportedFileName': 'attachment-1.txt',
+                            'suggestedHumanReadableName': 'phone-liveness-records_0_FAKE.txt',
+                            'isAssociatedWithFailure': False, 'configurationName': 'Test',
+                            'deviceName': 'fake', 'deviceId': 'fake'})
+    (output / 'manifest.json').write_text(json.dumps([{'testIdentifier': 'fake', 'attachments': attachments}]))
+    raise SystemExit(0)
 assert arguments[0] == 'simctl', arguments
 arguments = arguments[1:]
 log = os.environ.get('FAKE_SIMCTL_LOG')
@@ -1875,6 +2131,8 @@ if command == 'create':
 if command == 'bootstatus':
     raise SystemExit(0)
 if command == 'terminate':
+    raise SystemExit(0)
+if command == 'uninstall':
     raise SystemExit(0)
 if command == 'get_app_container':
     print('no such app container', file=sys.stderr); raise SystemExit(2)
@@ -2376,7 +2634,7 @@ class SweepFixture(OwnedLaneFixture):
         )
         self.wait_for(started)
         command = subprocess.run(
-            [str(RUNNER), "run", "--only-testing", "TronMobileTests/StubTests"],
+            [str(RUNNER), "run", "--only-testing", "TronMobileUITests/StubTests"],
             env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
         )
         _, stderr = sweep.communicate(timeout=30)
@@ -3172,31 +3430,61 @@ class LifecycleHarness(LaneHarness):
 
         `FAKE_BUILD_GATE` (a path) holds the build open until the file exists,
         so a case can kill the command that owns the lane while it is still
-        building.
+        building. `FAKE_XCODEBUILD_LOG` records every invocation as JSON, with
+        the build's scheme/test plan and each target's patched fixture
+        environment, so a case can prove which target the harness patched.
         """
         self.synthetic_stub(self.bin / "xcodebuild", FIXTURE_GATE_SOURCE + '''
+import json, plistlib
 arguments = sys.argv[1:]
 if arguments[:1] == ["-version"]:
     print("Xcode 26.6"); raise SystemExit(0)
+log = os.environ.get("FAKE_XCODEBUILD_LOG")
+def record(value):
+    if log:
+        with open(log, "a", encoding="utf-8") as handle: handle.write(json.dumps(value) + "\\n")
+def xctestrun_targets(path):
+    document = plistlib.loads(Path(path).read_bytes())
+    return {target["BlueprintName"]: sorted(target.get("EnvironmentVariables", {}))
+            for configuration in document["TestConfigurations"]
+            for target in configuration["TestTargets"]}
 if "build-for-testing" in arguments:
     derived = Path(arguments[arguments.index("-derivedDataPath") + 1])
     products = derived / "Build/Products"
     products.mkdir(parents=True, exist_ok=True)
-    (products / "Tron Development_UnitTests_iOS.xctestrun").write_text("xctestrun\\n")
+    scheme = arguments[arguments.index("-scheme") + 1]
+    test_plan = arguments[arguments.index("-testPlan") + 1]
+    # Xcode's real shape: a hosted XCTest target omits IsUITestBundle (#497).
+    targets = [{"BlueprintName": "TronMobileE2ETests"}]
+    if scheme == "Tron UI Validation":
+        targets.append({"BlueprintName": "TronMobileUITests", "IsUITestBundle": True})
+    record({"action": "build", "scheme": scheme, "test_plan": test_plan})
+    with (products / (scheme + "_" + test_plan + "_iOS.xctestrun")).open("wb") as handle:
+        plistlib.dump({"TestConfigurations": [{"IsEnabled": True, "TestTargets": targets}]}, handle)
+    # The built hosted product, so a command that resets the lane's app state can
+    # read the bundle identifier it must remove.
+    app_plist = products / "Test-iphonesimulator/TronMobile.app/Info.plist"
+    app_plist.parent.mkdir(parents=True, exist_ok=True)
+    with app_plist.open("wb") as handle:
+        plistlib.dump({"CFBundleIdentifier": "com.tron.mobile.testhost"}, handle)
     if os.environ.get("FAKE_BUILD_GATE"):
         wait_for_fixture_gate(Path(os.environ["FAKE_BUILD_GATE"]))
 if "test-without-building" in arguments and "-resultBundlePath" in arguments:
     calls = os.environ.get("FAKE_XCODEBUILD_CALLS")
+    test_filter = next((value.split(":", 1)[1] for value in arguments if value.startswith("-only-testing:")), "unknown")
     if calls:
-        test_filter = next((value.split(":", 1)[1] for value in arguments if value.startswith("-only-testing:")), "unknown")
         with open(calls, "a", encoding="utf-8") as handle: handle.write(test_filter + "\\n")
+    record({"action": "run", "test_filter": test_filter,
+            "targets": xctestrun_targets(arguments[arguments.index("-xctestrun") + 1]) if "-xctestrun" in arguments else None})
     invocation = Path(calls).read_text().splitlines() if calls and Path(calls).exists() else []
     failure = int(os.environ.get("FAKE_XCODEBUILD_FIRST_TEST_EXIT") or 0)
     if failure and len(invocation) == 1:
         if os.environ.get("FAKE_XCODEBUILD_FIRST_TEST_BUNDLE") == "1":
             Path(arguments[arguments.index("-resultBundlePath") + 1]).mkdir(parents=True, exist_ok=True)
         raise SystemExit(failure)
-    Path(arguments[arguments.index("-resultBundlePath") + 1]).mkdir(parents=True, exist_ok=True)
+    bundle = Path(arguments[arguments.index("-resultBundlePath") + 1])
+    bundle.mkdir(parents=True, exist_ok=True)
+    (bundle / "Info.plist").write_text("fixture result bundle\\n")
 ''')
 
 
@@ -3349,6 +3637,57 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         iterating its children, suppressing optional failure details.
     16. Shared-link ping/pong counts increment both at FIFO admission and actual
         forwarding, so reported frames do not match the observed event timeline.
+
+    W-53 (issue #424): the real-UI lane reuses the same fixture, lane and lease.
+
+    17. `run-ui` patches the hosted E2E target (or no target at all), so the UI
+        runner never receives the fixture environment, every journey skips for a
+        missing fixture, and the cross-layer receipt is green.
+    18. `run-ui` runs something other than the journeys it owns, or loses the
+        `--only-testing` selection when the lease holder starts it again.
+    19. A journey's evidence directory omits the result bundle, the Gateway's
+        runtime log, the proxy's link statistics or the XCTest summary, or names
+        a digest that does not match the bytes it claims to describe, or reports
+        a status that is not the run's final one.
+    20. The journey that backgrounds the app leaves no record of a retired
+        connection and a new one in the Gateway's own log, or a journey that
+        never connects is reported as having reconnected.
+    21. `run-ui` leaves the lane's simulator booted, leaves the Gateway fixture it
+        failed with running, or leaves the hosted app paired for the E2E lane
+        that shares this worktree's app.
+
+    #445: the fixture and its fault proxy are not the parent Gateway's children.
+
+    22. A shell spawned by the Stable or Debug Gateway carries that Gateway's
+        environment, and the harness passes it to the fixture Gateway, which
+        then runs with a foreign `TRON_GATEWAY_*` value (runtime epoch, channel,
+        supervision, payload identity) or a foreign `PI_*` store path.
+    23. The fault proxy inherits the same environment and hands its own `PATH`
+        to the Gateway it restarts privately, so a leak survives the restart.
+    24. The harness takes the fixture's Node from the caller's `PATH`, where a
+        Gateway-spawned shell finds the parent's bundled runtime. That runtime
+        has the pinned version and a sibling npm, so a version check accepts it,
+        and its Team ID cannot dlopen the ad hoc-signed node-pty prebuild.
+    25. The incompatible Node is only discovered when node-pty fails inside the
+        fixture (`Failed to load native module`, which hides the dlopen cause),
+        so the toolchain failure is attributed to the fixture and no signal
+        names the real error.
+    26. A fault proxy that exits during startup is reported only as a generic
+        message, without its process status or the tail of its stderr.
+
+    #706: a fixture Gateway is recognized by its own command line, and a start that
+    fails that proof must not leave the process it spawned running.
+
+    27. The fixture Gateway and fault proxy rewrite their process title to their
+        command line, which the OS keeps within the process's original argv. A
+        checkout at a long path overflows it, `ps` shows a truncated command, and a
+        ready fixture is refused as not owned.
+    28. A start that fails its owned-command proof, or never becomes ready, leaves
+        the Gateway it spawned running: the harness refuses to signal a PID it cannot
+        prove, and the start never retires the child it spawned itself.
+    29. A boundary case that fails keeps no Gateway-side ping timeline or phone
+        liveness records, so a possibly_sent cannot be read as a stalled Gateway
+        or a stalled phone from its results directory.
     """
 
     def setUp(self) -> None:
@@ -3376,60 +3715,175 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         These actual-runner regressions stop before XCTest. Their only fixture
         contract is the enrollment/health and proxy-ready signals consumed while
         setting up a fresh case, so a clean checkout need not build production
-        Gateway artifacts merely to test runner failure propagation.
+        Gateway artifacts merely to test runner failure propagation. The one bin
+        directory also carries `npm`, which the harness requires beside `node`
+        before it installs the fixture Gateway.
+
+        The wrapper is that complete pinned toolchain (`TRON_NODE_BIN` with a
+        sibling `npm`) and carries its real Node, its sources, its records and its
+        knobs itself: a fixture process starts under the harness's minimal
+        environment (#445) and never sees this process's variables.
         """
-        real_node = shutil.which("node", path=environment["PATH"])
-        self.assertIsNotNone(real_node, "the pinned Node runtime is required by the E2E runner")
+        real_node = self.pinned_host_node(environment)
         binary = self.root / "fixture-node"
         binary.mkdir(exist_ok=True)
+        gateway_source = binary / "fixture-gateway.cjs"
+        gateway_source.write_text(f'''const fs = require("node:fs");
+const http = require("node:http");
+const logs = `${{process.env.TRON_DATA_DIR}}/logs`;
+fs.mkdirSync(logs, {{ recursive: true }});
+fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "gateway.started" }}) + "\\n");
+// The Gateway's own record of the device connections a journey left behind, in the
+// order the real Gateway writes them: each connection opens and closes under its
+// own id, so a backgrounded journey's retire-then-reconnect is visible as a close
+// before a different connection's open. The counts come from the case's knob file
+// because a fixture process inherits no case environment (#445).
+const knob = "{self.fixture_knob("connection-counts")}";
+const connections = (fs.existsSync(knob) ? fs.readFileSync(knob, "utf8") : "2 1").trim().split(/\\s+/).map(Number);
+for (let index = 0; index < Math.max(connections[0], connections[1]); index++) {{
+  const connectionId = `fixture-connection-${{index + 1}}`;
+  if (index < connections[0]) {{
+    fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "connection.opened", connectionId }}) + "\\n");
+  }}
+  if (index < connections[1]) {{
+    fs.appendFileSync(`${{logs}}/gateway.jsonl`, JSON.stringify({{ event: "connection.closed", connectionId }}) + "\\n");
+  }}
+}}
+const enrollment = `${{process.env.TRON_DATA_DIR}}/gateway/enrollment.json`;
+fs.writeFileSync(enrollment, JSON.stringify({{ code: "fixture-pairing-code" }}), {{ mode: 0o600 }});
+const server = http.createServer((request, response) => {{
+  response.writeHead(request.url === "/health" ? 200 : 404);
+  response.end();
+}});
+server.listen(Number(process.env.TRON_GATEWAY_PORT), "127.0.0.1");
+process.once("SIGTERM", () => server.close(() => process.exit(0)));
+process.once("SIGINT", () => server.close(() => process.exit(0)));
+''')
+        proxy_source = binary / "fixture-proxy.cjs"
+        proxy_source.write_text(f'''const fs = require("node:fs");
+const http = require("node:http");
+const controlFailure = "{self.fixture_knob("proxy-control-failure")}";
+const startupFailure = "{self.fixture_knob("proxy-startup-failure")}";
+if (fs.existsSync(startupFailure) && fs.readFileSync(startupFailure, "utf8").trim() === "1") {{
+  console.error("fixture proxy startup failure evidence");
+  process.exit(42);
+}}
+const server = http.createServer((request, response) => {{
+  if (request.url === "/_fixture/control") {{
+    // The harness reads the owned proxy's link statistics as journey evidence.
+    if (fs.existsSync(controlFailure) && fs.readFileSync(controlFailure, "utf8").trim() === "1") {{
+      response.writeHead(500); response.end(); return;
+    }}
+    response.writeHead(200, {{ "content-type": "application/json" }});
+    response.end(JSON.stringify({{ schedule: "unshaped", clientHeartbeatTimeline: [{{ connection: 1, sequence: 1, enqueuedAt: "2026-10-09T00:00:00.000Z", gatewayPongMs: 4 }}] }}));
+    return;
+  }}
+  response.writeHead(404); response.end();
+}});
+server.listen(0, "127.0.0.1", () => {{
+  fs.writeFileSync(process.env.TRON_E2E_PROXY_READY, JSON.stringify({{ port: server.address().port, pid: process.pid }}), {{ mode: 0o600 }});
+}});
+process.once("SIGTERM", () => server.close(() => process.exit(0)));
+process.once("SIGINT", () => server.close(() => process.exit(0)));
+''')
+        record = binary / "record"
+        record.mkdir(exist_ok=True)
         node = binary / "node"
-        node.write_text("""#!/usr/bin/env bash
+        node.write_text(f'''#!/usr/bin/env bash
 set -euo pipefail
-case "${1:-}" in
+case "${{1:-}}" in
   */packages/gateway/dist/index.js)
-    export FAKE_E2E_NODE_ENTRY="$1"
-    exec "$FAKE_E2E_REAL_NODE" -e "$FAKE_E2E_GATEWAY_SOURCE"
+    /usr/bin/env >"{record}/gateway.env"
+    echo "$$" >"{record}/gateway.pid"
+    # The command line the process runs as is the owned command the harness checks for
+    # (argv, not a title rewrite, so no path length can truncate it). A case may name
+    # another command line through its knob, to exercise a refused start.
+    argv0="node $1"
+    if [[ -f "{self.fixture_knob("gateway-argv0")}" ]]; then argv0="$(<"{self.fixture_knob("gateway-argv0")}")"; fi
+    exec -a "$argv0" "{real_node}" "{gateway_source}"
     ;;
   */ios-gateway-fault-proxy.mjs)
-    export FAKE_E2E_NODE_ENTRY="$1"
-    exec "$FAKE_E2E_REAL_NODE" -e "$FAKE_E2E_PROXY_SOURCE"
+    /usr/bin/env >"{record}/proxy.env"
+    exec -a "node $1" "{real_node}" "{proxy_source}"
     ;;
   */packages/gateway/*|*/ios-gateway-*.mjs|*.js|*.mjs|*.cjs)
     echo "unexpected Node fixture command: $*" >&2
     exit 70
     ;;
 esac
-exec "$FAKE_E2E_REAL_NODE" "$@"
-""")
+exec "{real_node}" "$@"
+''')
         node.chmod(0o755)
+        # `npm` only has to satisfy the harness's same-bin-directory check and
+        # the fixture install it performs; no case builds production Gateway
+        # artifacts, and the checks under test stop before that build's output.
+        npm = binary / "npm"
+        npm.write_text("#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n")
+        npm.chmod(0o755)
         result = dict(environment)
         result["PATH"] = f"{binary}:{environment['PATH']}"
-        result.update({
-            "FAKE_E2E_REAL_NODE": str(real_node),
-            "FAKE_E2E_GATEWAY_SOURCE": '''const fs = require("node:fs");
-const http = require("node:http");
-process.title = `node ${process.env.FAKE_E2E_NODE_ENTRY}`;
-const enrollment = `${process.env.TRON_DATA_DIR}/gateway/enrollment.json`;
-fs.writeFileSync(enrollment, JSON.stringify({ code: "fixture-pairing-code" }), { mode: 0o600 });
-const server = http.createServer((request, response) => {
-  response.writeHead(request.url === "/health" ? 200 : 404);
-  response.end();
-});
-server.listen(Number(process.env.TRON_GATEWAY_PORT), "127.0.0.1");
-process.once("SIGTERM", () => server.close(() => process.exit(0)));
-process.once("SIGINT", () => server.close(() => process.exit(0)));
-''',
-            "FAKE_E2E_PROXY_SOURCE": '''const fs = require("node:fs");
-const http = require("node:http");
-process.title = `node ${process.env.FAKE_E2E_NODE_ENTRY}`;
-const server = http.createServer((request, response) => { response.writeHead(404); response.end(); });
-server.listen(0, "127.0.0.1", () => {
-  fs.writeFileSync(process.env.TRON_E2E_PROXY_READY, JSON.stringify({ port: server.address().port, pid: process.pid }), { mode: 0o600 });
-});
-process.once("SIGTERM", () => server.close(() => process.exit(0)));
-process.once("SIGINT", () => server.close(() => process.exit(0)));
-''',
-        })
+        result["TRON_NODE_BIN"] = str(node)
+        return result
+
+    def fixture_knob(self, name: str) -> Path:
+        """A file a fake fixture process reads its own configuration from.
+
+        A fixture process starts under the harness's minimal environment (#445),
+        so a case that steers the synthetic Gateway or proxy writes this knob
+        before the harness starts it instead of exporting a variable.
+        """
+        path = self.root / "fixture-node/knobs" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def fixture_environment_record(self, environment: dict[str, str], name: str) -> dict[str, str]:
+        """The environment one fixture process was handed, as `readiness_node_environment` records it."""
+        path = Path(environment["TRON_NODE_BIN"]).parent / "record" / name
+        self.assertTrue(path.is_file(), f"the fixture Node wrapper recorded no {name}")
+        assignments = {}
+        for line in path.read_text().splitlines():
+            variable, _, value = line.partition("=")
+            if variable:
+                assignments[variable] = value
+        return assignments
+
+    def pinned_host_node(self, environment: dict[str, str]) -> str:
+        """The real Node the synthetic fixture toolchain forwards to.
+
+        A test process started from a Gateway-spawned shell has that Gateway's
+        bundled runtime first on `PATH`: the very runtime #445 keeps out of a
+        fixture, and one that cannot load this checkout's node-pty prebuild. So
+        prefer the candidates the harness itself prefers, and use the first PATH
+        entry only on a machine that has neither (hosted CI's setup-node).
+        """
+        candidates = [
+            Path(os.environ.get("NVM_DIR", Path.home() / ".nvm")) / f"versions/node/v{NODE_VERSION}/bin/node",
+            Path("/opt/homebrew/bin/node"),
+            Path("/usr/local/bin/node"),
+        ]
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            if subprocess.run(
+                [str(candidate), "--version"], env=environment,
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            ).stdout.strip() == f"v{NODE_VERSION}":
+                return str(candidate)
+        found = shutil.which("node", path=environment["PATH"])
+        self.assertIsNotNone(found, "the pinned Node runtime is required by the E2E runner")
+        return found
+
+    def nvm_pinned_environment(self, environment: dict[str, str]) -> dict[str, str]:
+        """The fixture toolchain selected the way a machine without TRON_NODE_BIN
+        selects it: the pinned Node in nvm's own layout, and no TRON_NODE_BIN.
+        """
+        result = self.readiness_node_environment(environment)
+        wrapper = Path(result.pop("TRON_NODE_BIN"))
+        pinned = self.root / f"nvm/versions/node/v{NODE_VERSION}/bin"
+        pinned.mkdir(parents=True)
+        for name in ("node", "npm"):
+            (pinned / name).symlink_to(wrapper.parent / name)
+        result["NVM_DIR"] = str(self.root / "nvm")
         return result
 
     def default_roots_environment(self) -> dict[str, str]:
@@ -3445,7 +3899,30 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", other / "scripts", ignore=ignore)
         shutil.copytree(ROOT / "config", other / "config", ignore=ignore)
+        shutil.copy2(ROOT / ".node-version", other / ".node-version")
         return other
+
+    def long_worktree(self) -> Path:
+        """A checkout of the harness at a path longer than a fixture process's argv.
+
+        Failure mode 27: the path is the one input that differs between a fixture
+        that starts and one that is refused, so this makes it long on purpose. Only
+        what `prepare` reads is copied: the scripts, the pinned toolchain files and
+        the Gateway's manifests, not the Gateway or its dependencies.
+        """
+        worktree = self.root / ("long-" + "w" * 120) / ("tree-" + "x" * 120)
+        ignore = shutil.ignore_patterns("__pycache__")
+        shutil.copytree(ROOT / "scripts", worktree / "scripts", ignore=ignore)
+        shutil.copytree(ROOT / "config", worktree / "config", ignore=ignore)
+        shutil.copytree(ROOT / ".github/workflows", worktree / ".github/workflows")
+        shutil.copy2(ROOT / ".node-version", worktree / ".node-version")
+        (worktree / "packages/mac-app/scripts").mkdir(parents=True)
+        for name in ("bundle-gateway.sh", "package-dmg.sh", "verify-gateway-payload.sh"):
+            shutil.copy2(ROOT / "packages/mac-app/scripts" / name, worktree / "packages/mac-app/scripts" / name)
+        (worktree / "packages/gateway").mkdir(parents=True)
+        for name in ("package.json", "package-lock.json"):
+            shutil.copy2(ROOT / "packages/gateway" / name, worktree / "packages/gateway" / name)
+        return worktree
 
     def reported(self, output: str, label: str) -> Path:
         """The one path `status` reports under `label`."""
@@ -3483,7 +3960,7 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
         products = derived / "Build/Products"
         products.mkdir(parents=True)
         (derived / ".tron-ios-e2e-owned").write_text("tron.ios-e2e-derived.v1\n")
-        (products / "Tron Development_UnitTests_iOS.xctestrun").write_text("xctestrun\n")
+        (products / "Tron Development_GatewayE2E_iOS.xctestrun").write_text("xctestrun\n")
         if identity is not None:
             (derived / "build-identity.json").write_text(json.dumps(identity))
         return derived
@@ -3491,12 +3968,13 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
     def runnable_products(self, worktree: Path = ROOT) -> Path:
         """One valid test target for exercising the actual E2E run path."""
         derived = self.built_products(self.source_identity(worktree))
-        xctestrun = derived / "Build/Products/Tron Development_UnitTests_iOS.xctestrun"
+        xctestrun = derived / "Build/Products/Tron Development_GatewayE2E_iOS.xctestrun"
         with xctestrun.open("wb") as handle:
             plistlib.dump({
                 "TestConfigurations": [{
                     "IsEnabled": True,
-                    "TestTargets": [{"BlueprintName": "TronMobileTests", "IsUITestBundle": False}],
+                    # Xcode's real shape: a hosted XCTest target omits IsUITestBundle (#497).
+                    "TestTargets": [{"BlueprintName": "TronMobileE2ETests"}],
                 }],
             }, handle)
         return derived
@@ -3505,6 +3983,297 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
         state = self.root / "e2e-state"
         for name in ("state.env", "gateway.pid", "proxy.pid", "gateway.log", "tron", "home"):
             self.assertFalse((state / name).exists(), f"run renewed {name} before refusing its products")
+
+    def ui_environment(self, **extra: str) -> dict[str, str]:
+        """The fixture plus the xcodebuild record every real-UI case reads.
+
+        The synthetic `node`/`npm`/Gateway carry the fixture contract the UI lane
+        consumes: the enrollment code, a canonical Gateway runtime log and a
+        fault proxy that answers the evidence read. No journey runs, and the
+        production Gateway is never built.
+        """
+        environment = self.readiness_node_environment(dict(self.environment))
+        environment.update({
+            "FAKE_XCODEBUILD_CALLS": str(self.root / "ui-calls.txt"),
+            "FAKE_XCODEBUILD_LOG": str(self.root / "ui-xcodebuild.jsonl"),
+        })
+        # A fixture process inherits no case environment (#445): the two knobs its
+        # fakes read become the files the generated sources read.
+        for variable, knob in (("FAKE_E2E_GATEWAY_CONNECTIONS", "connection-counts"),
+                               ("FAKE_E2E_PROXY_CONTROL_FAILURE", "proxy-control-failure"),
+                               ("FAKE_E2E_PROXY_STARTUP_FAILURE", "proxy-startup-failure")):
+            if variable in extra:
+                self.fixture_knob(knob).write_text(extra.pop(variable) + "\n")
+        environment.update(extra)
+        return environment
+
+    def xcodebuild_invocations(self, environment: dict[str, str]) -> list[dict[str, Any]]:
+        path = Path(environment["FAKE_XCODEBUILD_LOG"])
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def journey_evidence(self, output: str) -> list[Path]:
+        """The evidence directory each journey of a `run-ui` line reported."""
+        return [
+            Path(line.rsplit("evidence: ", 1)[1])
+            for line in output.splitlines()
+            if line.startswith("Real-UI journey ")
+        ]
+
+    def owned_ui_journeys(self) -> list[str]:
+        return [
+            "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
+            "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs",
+        ]
+
+    def hosted_app_resets(self) -> list[str]:
+        """The simctl calls that reset the lane's hosted app state."""
+        try:
+            lines = self.log_path.read_text().splitlines()
+        except FileNotFoundError:
+            return []
+        return [line for line in lines if line.startswith("uninstall ")]
+
+    def test_proxy_startup_failure_reports_process_status_and_stderr_tail(self) -> None:
+        """Failure mode 26: proxy startup failure retains its actionable cause."""
+        environment = self.ui_environment(FAKE_E2E_PROXY_STARTUP_FAILURE="1")
+        result = self.e2e("prepare", environment=environment)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("owned fault proxy exited (exit code 42)", result.stderr)
+        self.assertIn("fixture proxy startup failure evidence", result.stderr)
+
+    def test_a_gateway_started_from_a_long_worktree_path_is_recognized_as_owned(self) -> None:
+        """Failure mode 27: a ready fixture Gateway at a long path is still this command's."""
+        harness = self.long_worktree() / "scripts/ios-gateway-e2e-test"
+        environment = self.readiness_node_environment(dict(self.environment))
+        try:
+            result = self.e2e("prepare", harness=harness, environment=environment)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            status = self.e2e("status", harness=harness, environment=environment)
+            self.assertIn("Gateway: running", status.stdout)
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+
+    def test_a_start_that_fails_the_owned_command_proof_retires_its_gateway(self) -> None:
+        """Failure mode 28: the Gateway a refused start spawned is not left running.
+
+        The fixture Gateway records its own pid, and the knob makes its command line
+        something other than the owned one, so the start's proof fails on that process.
+        """
+        environment = self.readiness_node_environment(dict(self.environment))
+        self.fixture_knob("gateway-argv0").write_text("not-the-owned-gateway\n")
+        record = Path(environment["TRON_NODE_BIN"]).parent / "record/gateway.pid"
+        try:
+            result = self.e2e("prepare", environment=environment)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("does not match its owned command", result.stderr)
+            pid = int(record.read_text())
+            self.assertFalse(self.process_alive(pid), f"the refused start left Gateway pid {pid} running")
+        finally:
+            # Nothing this case starts may outlive it, whatever the start did.
+            self.e2e("stop", environment=environment)
+            if record.exists():
+                self.kill_if_alive(int(record.read_text()))
+
+    def kill_if_alive(self, pid: int) -> None:
+        if self.process_alive(pid):
+            os.kill(pid, signal.SIGKILL)
+
+    def process_alive(self, pid: int) -> bool:
+        """Whether `pid` is running; a zombie has ended, its parent has not yet reaped it."""
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return subprocess.run(
+            ["ps", "-p", str(pid), "-o", "stat="], env=self.contained_environment(self.root),
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        ).stdout.strip() not in ("", "Z")
+
+    def test_run_ui_builds_the_ui_plan_and_patches_the_ui_target(self) -> None:
+        """Failure modes 17 and 18: the UI runner, not the hosted E2E runner,
+        receives the fixture environment, and the command runs its own journeys."""
+        environment = self.ui_environment()
+        result = self.e2e("run-ui", environment=environment)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        invocations = self.xcodebuild_invocations(environment)
+        self.assertEqual(
+            [entry for entry in invocations if entry["action"] == "build"],
+            [{"action": "build", "scheme": "Tron UI Validation", "test_plan": "UIValidation"}],
+        )
+        runs = [entry for entry in invocations if entry["action"] == "run"]
+        self.assertEqual([entry["test_filter"] for entry in runs], self.owned_ui_journeys())
+        for entry in runs:
+            self.assertEqual(entry["targets"].get("TronMobileUITests"), XCTESTRUN_FIXTURE_KEYS)
+            self.assertEqual(entry["targets"].get("TronMobileE2ETests"), [], "the E2E target must carry no fixture environment")
+
+    def test_run_ui_leaves_one_complete_evidence_bundle_per_journey(self) -> None:
+        """Failure mode 19: every journey leaves the xcresult, the Gateway log,
+        the proxy link statistics, the XCTest summary, the final status and the
+        source revision, with digests that match the bytes on disk."""
+        environment = self.ui_environment()
+        result = self.e2e("run-ui", environment=environment)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        directories = self.journey_evidence(result.stdout)
+        self.assertEqual(len(directories), 2, result.stdout)
+        expected_artifacts = ["Journeys.xcresult", "gateway.jsonl", "proxy-link-stats.json", "summary.json"]
+        source = self.source_identity()
+        for directory, journey in zip(directories, self.owned_ui_journeys()):
+            with self.subTest(journey=journey):
+                for name in (*expected_artifacts, "report.json", "report.sha256"):
+                    self.assertTrue((directory / name).exists(), f"missing {name} in {directory}")
+                report = json.loads((directory / "report.json").read_text())
+                self.assertEqual(report["journey"], journey)
+                self.assertEqual(report["journey_status"], 0)
+                self.assertTrue(report["evidence_complete"])
+                self.assertEqual(report["source"]["revision"], source["revision"])
+                self.assertEqual(report["source"]["dirty"], bool(source["dirty"]))
+                self.assertEqual(
+                    report["gateway_connections"],
+                    {"opened": 2, "closed": 1, "retired_before_reconnect": True},
+                )
+                self.assertEqual(report["source"]["source_fingerprint"], source["source_fingerprint"])
+                artifacts = {artifact["path"]: artifact for artifact in report["artifacts"]}
+                self.assertEqual(sorted(artifacts), sorted(expected_artifacts))
+                for name, artifact in artifacts.items():
+                    self.assertRegex(artifact["sha256"], r"^[0-9a-f]{64}$")
+                    self.assertIn(artifact["kind"], ("file-sha256", "tree-sha256"))
+                for name in ("gateway.jsonl", "proxy-link-stats.json", "summary.json"):
+                    self.assertEqual(
+                        artifacts[name]["sha256"],
+                        hashlib.sha256((directory / name).read_bytes()).hexdigest(),
+                        f"the report's digest for {name} must describe the bytes it names",
+                    )
+                bundle = directory / "Journeys.xcresult"
+                tree = hashlib.sha256()
+                for path in sorted((item for item in bundle.rglob("*") if item.is_file()),
+                                   key=lambda item: item.relative_to(bundle).as_posix()):
+                    tree.update(path.relative_to(bundle).as_posix().encode() + b"\0"
+                                + hashlib.sha256(path.read_bytes()).hexdigest().encode() + b"\n")
+                self.assertEqual(artifacts["Journeys.xcresult"]["sha256"], tree.hexdigest())
+                self.assertEqual(
+                    (directory / "report.sha256").read_text().split()[0],
+                    hashlib.sha256((directory / "report.json").read_bytes()).hexdigest(),
+                )
+
+    def test_run_ui_fails_when_a_journey_artifact_cannot_be_captured(self) -> None:
+        """Failure mode 19: a journey whose evidence is incomplete cannot pass.
+
+        The proxy refuses the harness's link-statistics read. The journey's own
+        XCTest run passed, so the report must carry the overridden final status
+        and mark the evidence incomplete, and the command must fail."""
+        journey = self.owned_ui_journeys()[0]
+        environment = self.ui_environment(FAKE_E2E_PROXY_CONTROL_FAILURE="1")
+        result = self.e2e("run-ui", "--only-testing", journey, environment=environment)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("cannot read the fixture fault proxy's link statistics", result.stderr)
+        directories = self.journey_evidence(result.stdout)
+        self.assertEqual(len(directories), 1, result.stdout)
+        report = json.loads((directories[0] / "report.json").read_text())
+        self.assertEqual(report["journey_status"], 1, "the report must carry the final status")
+        self.assertFalse(report["evidence_complete"])
+        missing = [artifact["path"] for artifact in report["artifacts"] if artifact["kind"] == "missing"]
+        self.assertEqual(missing, ["proxy-link-stats.json"])
+        self.assertTrue((directories[0] / "Journeys.xcresult").is_dir())
+
+    def test_run_ui_refuses_a_journey_that_never_connected(self) -> None:
+        """Failure mode 20: the journey that backgrounds the app must leave the
+        Gateway's own record of its connections."""
+        journey = self.owned_ui_journeys()[0]
+        environment = self.ui_environment(FAKE_E2E_GATEWAY_CONNECTIONS="1 0")
+        result = self.e2e("run-ui", "--only-testing", journey, environment=environment)
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+        self.assertIn("must leave at least 2", result.stderr)
+        directories = self.journey_evidence(result.stdout)
+        self.assertEqual(len(directories), 1, result.stdout)
+        report = json.loads((directories[0] / "report.json").read_text())
+        self.assertEqual(report["journey_status"], 65)
+        self.assertEqual(report["gateway_connections"]["opened"], 1)
+
+    def test_run_ui_refuses_a_journey_whose_socket_was_never_retired(self) -> None:
+        """Failure mode 20: connections that never retire are not a background
+        reconnect, however many of them opened."""
+        journey = self.owned_ui_journeys()[0]
+        environment = self.ui_environment(FAKE_E2E_GATEWAY_CONNECTIONS="2 0")
+        result = self.e2e("run-ui", "--only-testing", journey, environment=environment)
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+        self.assertIn("no close before a different open", result.stderr)
+        directories = self.journey_evidence(result.stdout)
+        report = json.loads((directories[0] / "report.json").read_text())
+        self.assertEqual(report["gateway_connections"]["opened"], 2)
+        self.assertFalse(report["gateway_connections"]["retired_before_reconnect"])
+
+    def test_run_ui_releases_its_lane_and_leaves_current_products(self) -> None:
+        """Failure mode 21: the lane is released when the command ends, the
+        fixture it renewed is stopped on success too, the products it built belong
+        to this worktree's current source state, and the hosted app it paired is
+        returned to its unpaired launch state."""
+        environment = self.ui_environment()
+        result = self.e2e("run-ui", environment=environment)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        marker = json.loads((self.state / "simulator.json").read_text())
+        self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+        status = self.e2e("status", environment=environment)
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertIn("Gateway: stopped", status.stdout, "a passing run-ui must not leave its fixture running")
+        self.assertIn("Fault proxy: stopped", status.stdout)
+        products = [line for line in status.stdout.splitlines() if line.startswith("UI test products: ")]
+        self.assertEqual(len(products), 1, status.stdout)
+        self.assertIn("built from this worktree's current source state", products[0])
+        self.assertEqual(
+            self.hosted_app_resets(),
+            [f"uninstall {marker['udid']} com.tron.mobile.testhost"],
+            "the command must return the lane's hosted app to its unpaired state",
+        )
+
+    def test_run_ui_refuses_a_skipped_journey_and_keeps_its_evidence(self) -> None:
+        """Failure mode 17: a journey that cannot reach its fixture skips, which
+        is not a passing cross-layer receipt. The selected journey still leaves
+        the evidence a reviewer needs, and a failed run still returns the lane's
+        hosted app to its unpaired state and stops its fixture (failure mode 21)."""
+        journey = self.owned_ui_journeys()[0]
+        environment = self.ui_environment(
+            FAKE_SUMMARY=json.dumps({"passedTests": 0, "failedTests": 0, "skippedTests": 1, "totalTestCount": 1}),
+        )
+        result = self.e2e("run-ui", "--only-testing", journey, environment=environment)
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+        self.assertIn("skipped, missing, or failed", result.stderr)
+        self.assertEqual(
+            [entry["test_filter"] for entry in self.xcodebuild_invocations(environment) if entry["action"] == "run"],
+            [journey],
+            "the selected journey must survive the lease holder's re-exec",
+        )
+        directories = self.journey_evidence(result.stdout)
+        self.assertEqual(len(directories), 1, result.stdout)
+        report = json.loads((directories[0] / "report.json").read_text())
+        self.assertEqual(report["journey_status"], 65)
+        self.assertEqual(report["journey"], journey)
+        marker = json.loads((self.state / "simulator.json").read_text())
+        self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+        status = self.e2e("status", environment=environment)
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertIn("Gateway: stopped", status.stdout)
+        self.assertIn("Fault proxy: stopped", status.stdout)
+        self.assertEqual(len(self.hosted_app_resets()), 1, "a failed run must still reset the hosted app")
+
+    def test_only_testing_refuses_a_selector_run_ui_does_not_own(self) -> None:
+        """The journeys are `run-ui`'s alone — a selector for anything else, a
+        missing owner, or a selector on another command is refused before
+        anything is leased, built or renewed."""
+        class_owner = "TronMobileUITests/RealGatewayPairAndChatUITests"
+        unsupported = self.e2e("run-ui", "--only-testing", class_owner, environment=self.environment)
+        self.assertEqual(unsupported.returncode, 1, unsupported.stdout + unsupported.stderr)
+        self.assertIn(f"{class_owner} is not a real-UI journey this command owns", unsupported.stderr)
+        foreign = self.e2e("run-ui", "--only-testing", "TronMobileUITests/TronSmokeUITests/testSomething", environment=self.environment)
+        self.assertEqual(foreign.returncode, 1, foreign.stdout + foreign.stderr)
+        self.assertIn("is not a real-UI journey this command owns", foreign.stderr)
+        refused = self.e2e("run", "--only-testing", self.owned_ui_journeys()[0], environment=self.environment)
+        self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+        self.assertIn("--only-testing applies to run-ui", refused.stderr)
+        missing = self.e2e("run-ui", "--only-testing", environment=self.environment)
+        self.assertEqual(missing.returncode, 1, missing.stdout + missing.stderr)
+        self.assertIn("--only-testing requires an owner", missing.stderr)
+        self.assertFalse((self.state / "simulator.json").exists(), "a refused selection must not lease or boot a lane")
+        self.assert_no_fixture_renewed()
 
     def test_each_worktree_owns_its_default_fixture_and_products(self) -> None:
         """Failure modes 7 and 8: default roots follow the worktree; overrides win."""
@@ -3577,9 +4346,19 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
         gateway.mkdir(parents=True)
         for name in ("package.json", "package-lock.json"):
             shutil.copy2(ROOT / "packages/gateway" / name, gateway / name)
+        # The canonical Node pin is part of a checkout: the harness resolves the
+        # fixture's Node from it.
+        shutil.copy2(ROOT / ".node-version", worktree / ".node-version")
+        # Installed dependencies are not source: the checkout ignores them the
+        # way the repository does, so a case can install a node-pty tree without
+        # changing this worktree's build identity.
+        (worktree / ".gitignore").write_text("node_modules/\n")
 
         subprocess.run(["git", "init", "--quiet"], cwd=worktree, env=self.environment, check=True)
-        subprocess.run(["git", "add", "scripts", "config", "packages/gateway"], cwd=worktree, env=self.environment, check=True)
+        subprocess.run(
+            ["git", "add", ".gitignore", ".node-version", "scripts", "config", "packages/gateway"],
+            cwd=worktree, env=self.environment, check=True,
+        )
         subprocess.run([
             "git", "-c", "user.name=E2E fixture", "-c", "user.email=e2e-fixture@invalid",
             "commit", "--quiet", "-m", "runner fixture",
@@ -3640,7 +4419,7 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
             self.assertIn("Fault proxy: stopped", status.stdout)
             lane_states = [device["state"] for devices in self.inventory().get("devices", {}).values() for device in devices]
             self.assertEqual(lane_states, ["Shutdown"])
-            self.assertTrue((derived / "Build/Products/Tron Development_UnitTests_iOS.xctestrun").is_file())
+            self.assertTrue((derived / "Build/Products/Tron Development_GatewayE2E_iOS.xctestrun").is_file())
         finally:
             self.e2e("stop", harness=harness, environment=environment)
 
@@ -3660,11 +4439,41 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
             result = self.e2e("run", harness=harness, environment=environment, timeout=120)
             self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
             self.assertEqual(calls.read_text().splitlines(), [
-                "TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
+                "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
             ])
             latest = self.root / "e2e-state/results/latest"
             self.assertTrue(latest.is_symlink())
             self.assertFalse((latest / "FocusedE2E.xcresult").exists())
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+
+    def test_a_failed_case_keeps_the_proxy_timeline_and_phone_liveness_records(self) -> None:
+        """Failure mode 29: a failed case keeps the fault proxy's ping timeline and
+        the phone's liveness records in its results directory, so a possibly_sent
+        or pong_timeout reads as a stalled Gateway or a stalled phone from one place."""
+        worktree = self.clean_runner_checkout()
+        harness = worktree / "scripts/ios-gateway-e2e-test"
+        self.runnable_products(worktree)
+        records = json.dumps({
+            "clientId": "phone", "stage": "liveness", "outcome": "failure",
+            "timestamp": "2026-10-09T00:00:08.000Z", "durationMilliseconds": 8000, "reason": "ping_timeout",
+        })
+        environment = self.readiness_node_environment(self.environment)
+        environment.update({
+            "FAKE_XCODEBUILD_CALLS": str(self.root / "failed-case-calls.txt"),
+            "FAKE_XCODEBUILD_FIRST_TEST_EXIT": "37",
+            "FAKE_XCODEBUILD_FIRST_TEST_BUNDLE": "1",
+            "FAKE_PHONE_LIVENESS_RECORDS": records + "\n",
+        })
+        try:
+            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            latest = self.root / "e2e-state/results/latest"
+            self.assertTrue((latest / "FocusedE2E.xcresult").is_dir())
+            self.assertTrue((latest / "gateway.jsonl").is_file())
+            link_stats = json.loads((latest / "proxy-link-stats.json").read_text())
+            self.assertEqual(link_stats["clientHeartbeatTimeline"][0]["connection"], 1)
+            self.assertEqual((latest / "phone-liveness-records.jsonl").read_text(), records + "\n")
         finally:
             self.e2e("stop", harness=harness, environment=environment)
 
@@ -3689,10 +4498,137 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
             self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
             self.assertIn("failure: nested assertion detail", result.stdout)
             self.assertEqual(calls.read_text().splitlines(), [
-                "TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
+                "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
             ])
         finally:
             self.e2e("stop", harness=harness, environment=environment)
+
+    def test_fixture_gateway_and_fault_proxy_never_inherit_the_callers_gateway_environment(self) -> None:
+        """Failure modes 22 and 23: the parent Gateway's environment stops at the harness."""
+        worktree = self.clean_runner_checkout()
+        harness = worktree / "scripts/ios-gateway-e2e-test"
+        self.runnable_products(worktree)
+        environment = self.readiness_node_environment(self.environment)
+        environment.update({
+            "TRON_GATEWAY_RUNTIME_EPOCH": "stable-epoch-sentinel",
+            "TRON_GATEWAY_CHANNEL": "stable",
+            "TRON_GATEWAY_SUPERVISED": "1",
+            "TRON_GATEWAY_PAYLOAD_ROOT": "/Users/someone/.tron/gateway/payloads/stable",
+            "PI_SESSION_ID": "stable-session-sentinel",
+        })
+
+        try:
+            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+
+        for name in ("gateway.env", "proxy.env"):
+            recorded = self.fixture_environment_record(environment, name)
+            for inherited in ("TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_CHANNEL", "TRON_GATEWAY_SUPERVISED",
+                              "TRON_GATEWAY_PAYLOAD_ROOT", "PI_SESSION_ID"):
+                self.assertNotIn(inherited, recorded, f"{name} inherited {inherited} from the caller")
+        # The fixture's own binding survives the scrub, on both processes: it is
+        # what the Gateway needs to own its home, state, agent directory and
+        # listener, and what the proxy uses to restart it privately. Its `PATH` is
+        # the resolved Node directory plus the system directories and nothing else
+        # - not this shell's, and not this shell's PATH appended to it.
+        gateway = self.fixture_environment_record(environment, "gateway.env")
+        fixture_root = self.root / "e2e-state"
+        fixture_path = f"{Path(environment['TRON_NODE_BIN']).parent}:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
+        self.assertEqual(gateway.get("PATH"), fixture_path)
+        self.assertEqual(gateway.get("TRON_GATEWAY_HOST"), "127.0.0.1")
+        self.assertEqual(gateway.get("TRON_GATEWAY_LAN_ENDPOINT"), "off")
+        self.assertEqual(gateway.get("TRON_MACHINE_GROUP_ID"), "tron-ios-e2e")
+        self.assertRegex(gateway.get("TRON_GATEWAY_PORT", ""), r"^[1-9][0-9]*$")
+        self.assertEqual(os.path.realpath(gateway["TRON_DATA_DIR"]), os.path.realpath(fixture_root / "tron"))
+        self.assertEqual(os.path.realpath(gateway["HOME"]), os.path.realpath(fixture_root / "home"))
+        self.assertEqual(os.path.realpath(gateway["PI_CODING_AGENT_DIR"]), os.path.realpath(fixture_root / "agent"))
+        self.assertTrue(gateway["PI_SUBAGENTS_TEMP_ROOT"].startswith(str(gateway["HOME"])))
+        # The fixture never needs the user's SSH agent either.
+        self.assertNotIn("SSH_AUTH_SOCK", gateway)
+        proxy = self.fixture_environment_record(environment, "proxy.env")
+        self.assertEqual(proxy.get("PATH"), fixture_path)
+        self.assertEqual(proxy.get("TRON_E2E_GATEWAY_ENTRY"), str(worktree / "packages/gateway/dist/index.js"))
+
+    def test_the_first_node_on_the_callers_path_never_runs_the_fixture(self) -> None:
+        """Failure mode 24: an inherited `PATH` cannot choose the fixture's Node.
+
+        The wrapper below is the parent Gateway's bundled runtime in miniature:
+        it answers the repository's pinned version and owns a sibling npm, so a
+        version check alone would accept it, and it cannot run the fixture. The
+        fixture's own Node is the pinned Node in nvm's layout, which is how a
+        machine without `TRON_NODE_BIN` reaches it, so only a resolver that
+        prefers the caller's `PATH` over the pinned toolchain would use it.
+        """
+        worktree = self.clean_runner_checkout()
+        harness = worktree / "scripts/ios-gateway-e2e-test"
+        self.runnable_products(worktree)
+        environment = self.nvm_pinned_environment(self.environment)
+        bundled = self.root / "bundled-runtime"
+        bundled.mkdir()
+        invoked = self.root / "bundled-runtime-invocations"
+        for name, body in (("node", f'''#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >>"{invoked}"
+if [[ "${{1:-}}" == "--version" ]]; then echo "v{NODE_VERSION}"; exit 0; fi
+echo "Failed to load native module: pty.node, checked: build/Release, build/Debug, prebuilds/darwin-arm64" >&2
+exit 1
+'''), ("npm", "#!/bin/sh\nexit 0\n")):
+            (bundled / name).write_text(body)
+            (bundled / name).chmod(0o755)
+        environment["PATH"] = f"{bundled}:{environment['PATH']}"
+
+        try:
+            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            if invoked.exists():
+                self.fail("the fixture ran under the first node on the caller's PATH: " + invoked.read_text())
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+
+    def test_a_node_that_cannot_load_the_gateways_native_modules_is_refused_by_name(self) -> None:
+        """Failure mode 25: the toolchain failure is named before the fixture starts.
+
+        The Gateway's Node must load the installed node-pty prebuild. The prebuild
+        here is not a native module, so the load fails the way the bundled
+        runtime's Team ID fails it; the harness must report the loader's own error
+        and start nothing.
+        """
+        worktree = self.clean_runner_checkout()
+        harness = worktree / "scripts/ios-gateway-e2e-test"
+        self.runnable_products(worktree)
+        prebuild = worktree / "packages/gateway/node_modules/node-pty/build/Release/pty.node"
+        prebuild.parent.mkdir(parents=True)
+        prebuild.write_text("not a native module\n")
+        environment = self.readiness_node_environment(self.environment)
+        # The platform's own loader text (`dlopen` on macOS, `invalid ELF header`
+        # on Linux), produced by the same Node and the same file.
+        loader = subprocess.run(
+            [environment["TRON_NODE_BIN"], "-e",
+             "try { require(process.argv[1]); } catch (error) { process.stdout.write(String(error.message)); }",
+             str(prebuild)],
+            env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.assertTrue(
+            loader.stdout.strip(),
+            f"the fixture Node reported no loader error for {prebuild}: {loader.stderr}",
+        )
+
+        try:
+            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn("cannot load the Gateway's node-pty native module", result.stderr)
+            self.assertIn(environment["TRON_NODE_BIN"], result.stderr)
+            self.assertIn(str(prebuild), result.stderr)
+            self.assertIn(loader.stdout.strip(), result.stderr, "the loader's own error is not what the harness reported")
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+        self.assertFalse((self.root / "e2e-state/gateway.pid").exists(), "the refused run started a fixture")
+        self.assertFalse(
+            (Path(environment["TRON_NODE_BIN"]).parent / "record/gateway.env").exists(),
+            "the refusal still started the fixture Gateway",
+        )
 
     def test_run_refuses_products_not_built_from_this_worktree(self) -> None:
         """Failure mode 10: every unproven product set is refused before the
@@ -3785,7 +4721,7 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
         )
         try:
-            products = self.root / "e2e-derived/Build/Products/Tron Development_UnitTests_iOS.xctestrun"
+            products = self.root / "e2e-derived/Build/Products/Tron Development_GatewayE2E_iOS.xctestrun"
             deadline = time.monotonic() + 30
             while not products.exists() and time.monotonic() < deadline and command.poll() is None:
                 time.sleep(0.05)
@@ -3895,7 +4831,7 @@ class InheritedLeaseFixture(LifecycleHarness, unittest.TestCase):
         """Failure modes 1 and 2: one refusal, 74, before any simulator is touched."""
         other = self.discovery_root / "ios-test-other/lease.lock"
         commands = (
-            (RUNNER, ("run", "--only-testing", "TronMobileTests/StubTests")),
+            (RUNNER, ("run", "--only-testing", "TronMobileUITests/StubTests")),
             (E2E, ("build",)),
             (E2E, ("clean",)),
             (PROFILER, ("--scenario", "control", "--no-build")),
@@ -3933,7 +4869,7 @@ class InheritedLeaseFixture(LifecycleHarness, unittest.TestCase):
             "TRON_IOS_TEST_LOCK_HELD": "1", "TRON_IOS_TEST_LEASE_LOCK": str(other),
         }
         for index, (tool, arguments) in enumerate((
-            (RUNNER, ("run", "--only-testing", "TronMobileTests/StubTests")),
+            (RUNNER, ("run", "--only-testing", "TronMobileUITests/StubTests")),
             (E2E, ("build",)),
             (E2E, ("clean",)),
             (PROFILER, ("--scenario", "control", "--no-build")),
@@ -4346,7 +5282,7 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
         )
 
     def focused_run(self, worktree: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
-        return self.tool(worktree, "tron-ios-test", "run", *arguments, "--only-testing", "TronMobileTests/StubTests")
+        return self.tool(worktree, "tron-ios-test", "run", *arguments, "--only-testing", "TronMobileUITests/StubTests")
 
     def completed_run(self, result: subprocess.CompletedProcess[str]) -> Path:
         """The run directory a successful runner command announced."""
@@ -4507,7 +5443,7 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
         # The default lane, created - and so attributed - by a worktree deleted below.
         default_run = self.tool(gone, "tron-ios-test", "run", "--lane", "default",
-                                "--only-testing", "TronMobileTests/StubTests")
+                                "--only-testing", "TronMobileUITests/StubTests")
         self.assertEqual(default_run.returncode, 0, default_run.stderr)
         default_lane = self.lane_root / "ios-test"
         self.assertEqual(self.lane_marker(default_lane)["worktree"], os.path.realpath(gone))

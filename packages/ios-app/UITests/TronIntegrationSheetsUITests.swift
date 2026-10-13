@@ -6,6 +6,19 @@ import XCTest
 /// - a failed X credit read leaves an error line in the list;
 /// - a setup-required instance is incorrectly repeated under Available.
 final class TronIntegrationSheetsUITests: XCTestCase {
+    @MainActor
+    func testOllamaUnlimitedAccessibilityAndTypeSizes() {
+        for (size, largeType) in [("default", false), ("large", true)] {
+            let app = launch(scenario: "ollama-detail", largeType: largeType)
+            defer { app.terminate() }
+            app.buttons["Details for Ollama"].tap()
+            let cardLabel = "Unlimited. Local models run on this Mac with no account usage limits."
+            let card = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", cardLabel)).firstMatch
+            XCTAssertTrue(card.waitForExistence(timeout: 5), app.debugDescription)
+            keepScreenshot(app, name: "583-ollama-\(size)")
+        }
+    }
+
     /// Replacing the foreground transport must not destroy an unsubmitted form.
     @MainActor
     func testXSetupDraftSurvivesBackgroundReconnect() {
@@ -216,6 +229,11 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         openXSetupThroughDashboardSettings(app)
         app.textFields.element(boundBy: 0).tap(); app.textFields.element(boundBy: 0).typeText("fixture-public-client")
         app.textFields.element(boundBy: 1).tap(); app.textFields.element(boundBy: 1).typeText("https://example.test/callback")
+        // The presentation's own identity is the stable handle on the form. A teardown samples
+        // the destination after the switch that retires the form, so that sample cannot name
+        // the destination the form appeared for (#442).
+        let setupViewID = xSetupStateID(app)
+        XCTAssertFalse(setupViewID.isEmpty, presentationTrace(app))
         app.buttons["Authorize X"].tap()
         XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), app.debugDescription)
@@ -228,9 +246,17 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         waitForExpectations(timeout: 15)
         XCTAssertFalse(app.staticTexts["Set up X"].exists, "A replacement Gateway must not inherit the old PKCE form")
         let trace = presentationTrace(app)
-        XCTAssertTrue(trace.contains("integrations.destination old=integration-fixture:g0 new=integration-fixture:g1 setupOpen=true"), trace)
         XCTAssertTrue(trace.contains("integrations.destination old=integration-fixture:g1 new=replacement-integration-fixture:g1 setupOpen=false"), trace)
-        XCTAssertTrue(trace.contains("xsetup.disappear dest=integration-fixture:g1"), trace)
+        XCTAssertTrue(trace.contains("xsetup.appear dest=integration-fixture:g0 view=\(setupViewID)"), trace)
+        let events = trace.split(separator: "|").map(String.init)
+        // The form that appeared for the original destination is the one that disappears, and
+        // it disappears with the transition that retires it. The last disappearance of that
+        // view is the retirement, so an earlier one for any reason cannot satisfy the order.
+        guard let retiring = events.firstIndex(of: "integrations.destination old=integration-fixture:g0 new=integration-fixture:g1 setupOpen=true"),
+              let disappearing = events.lastIndex(where: { $0.hasPrefix("xsetup.disappear ") && $0.hasSuffix(" view=\(setupViewID)") }) else {
+            return XCTFail("The trace must record the destination transition that retires the form and the disappearance of the form that appeared for it: \(trace)")
+        }
+        XCTAssertGreaterThan(disappearing, retiring, "The form retires with the transition that retires it, never before it: \(trace)")
         XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), app.debugDescription)
         XCTAssertTrue(xSetupLogContains(app, "xsetup.destination-retired"), productionXLogs(app))
         XCTAssertTrue(xSetupLogContains(app, "reason=destination-changed"), productionXLogs(app))
@@ -613,11 +639,14 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     }
 
     @MainActor
-    private func launch(scenario: String = "default", dark: Bool = false) -> XCUIApplication {
+    private func launch(scenario: String = "default", dark: Bool = false, largeType: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-integrations-fixture", "-integrations-scenario", scenario,
                                "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         if dark { app.launchArguments += ["-ui-dark-mode"] }
+        if largeType {
+            app.launchArguments += ["-fixture-large-type", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
         app.launch()
         return app
     }
@@ -633,13 +662,79 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     }
 
     @MainActor
+    func testEstablishedSocketLossThenOpenTimeoutsBecomeUnreachable() {
+        continueAfterFailure = false
+        let app = launch(scenario: "connection-loss-unreachable")
+        defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Connected")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Mac unreachable")).firstMatch.waitForExistence(timeout: 30), app.debugDescription)
+        keepScreenshot(app, name: "established-loss-unreachable-simulator")
+    }
+
+    @MainActor
+    func testOpenedTransportFailureDoesNotClaimMacUnreachable() {
+        let app = launch(scenario: "connection-opened-failure")
+        defer { app.terminate() }
+        let count = app.staticTexts["failed-socket-count"]
+        let twoAttempts = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "failed sockets 2"), object: count)
+        XCTAssertEqual(XCTWaiter.wait(for: [twoAttempts], timeout: 10), .completed)
+        let reconnecting = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Connection status: Reconnecting")).firstMatch
+        XCTAssertTrue(reconnecting.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Mac unreachable")).firstMatch.exists)
+        app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Retry Connection")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Connection status: Connected")).firstMatch.waitForExistence(timeout: 10))
+        keepScreenshot(app, name: "opened-transport-recovered-simulator")
+    }
+
+    @MainActor
+    func testSecondaryRecoverySurvivesBackgroundAndResetsOnlyOnRetryOrSuccess() {
+        continueAfterFailure = false
+        let app = launch(scenario: "connection-secondary")
+        defer { app.terminate() }
+        let state = app.staticTexts["secondary-state"]
+        func waitLabel(_ element: XCUIElement, _ value: String, timeout: TimeInterval = 10) {
+            let predicate = NSPredicate(format: "label == %@", value)
+            XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed, app.debugDescription)
+        }
+        waitLabel(state, "connected")
+        let primary = app.staticTexts["primary-state"].label
+        let lastConnected = app.staticTexts["secondary-last-connected"].label
+        XCTAssertTrue(lastConnected.hasPrefix("last connected "))
+        app.buttons["Lose secondary"].tap()
+        waitLabel(state, "offline")
+        waitLabel(app.staticTexts["secondary-delay"], "wait 300.0")
+        XCTAssertEqual(app.staticTexts["secondary-last-connected"].label, lastConnected)
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        waitLabel(state, "offline")
+        let waits = app.staticTexts["secondary-waits"]
+        func waitFirstDelay(_ value: String) {
+            let predicate = NSPredicate(format: "label BEGINSWITH %@", value)
+            XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: waits)], timeout: 5) == .completed, app.debugDescription)
+        }
+        waitFirstDelay("300.0,")
+        XCTAssertEqual(app.staticTexts["secondary-last-connected"].label, lastConnected)
+        XCTAssertEqual(app.staticTexts["primary-state"].label, primary)
+        app.buttons["Retry secondary"].tap()
+        waitFirstDelay("2.0,")
+        app.buttons["Restore secondary"].tap()
+        // Automatic success, without another Retry, must reset the next outage.
+        waitLabel(state, "connected")
+        XCTAssertEqual(app.staticTexts["primary-state"].label, primary)
+        XCTAssertNotEqual(app.staticTexts["secondary-last-connected"].label, lastConnected)
+        app.buttons["Lose secondary"].tap()
+        waitFirstDelay("2.0,")
+        keepScreenshot(app, name: "secondary-recovery-reset-simulator")
+    }
+
+    @MainActor
     private func assertRetryRecovers(scenario: String) {
         continueAfterFailure = false
         do {
             let app = launch(scenario: scenario)
             defer { app.terminate() }
             let state = scenario == "connection-unreachable" ? "Mac unreachable" : "Reconnecting"
-            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", state)).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", state)).firstMatch.waitForExistence(timeout: 30), app.debugDescription)
             let retry = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Retry Connection")).firstMatch
             XCTAssertTrue(retry.waitForExistence(timeout: 3), app.debugDescription)
             keepScreenshot(app, name: "\(scenario)-retry-available")

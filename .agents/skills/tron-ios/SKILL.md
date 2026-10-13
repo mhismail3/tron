@@ -12,12 +12,12 @@ distributed Beta product.
 | Work | Scheme | Configuration | Route / identity |
 |---|---|---|---|
 | Simulator app iteration | Tron Development | Development | beta route, `com.tron.mobile.beta` |
-| Unit tests | Tron Development or Tron Device | Test | `HOSTED_TEST`, isolated test host |
+| Real-Gateway E2E | Tron Development | Test | `scripts/ios-gateway-e2e-test`, `TronMobileE2ETests`, real Gateway fixture |
 | Physical development device | Tron Device | LocalDevice | optimized development, production-sandbox, `com.tron.mobile` |
-| Device performance tests | Tron Device Performance | DevicePerformance | hosted test, production-sandbox |
+| Performance measurement | Tron Device Performance | DevicePerformance | `TronMobileProfiling`, production-sandbox, never a validation gate |
 | Scenario profiling (agents) | `scripts/tron-profile ios` (Tron Device Performance) | DevicePerformance | optimized hosted test on the owned test simulator, shared lease |
 | Manual release archive | Tron Release | Release | production; archive/analyze/profile only |
-| UI validation | Tron UI Validation | Test (run and test actions) | `HOSTED_TEST` app, Test UI host |
+| UI validation (the only `tron-ios-test` product) | Tron UI Validation | Test (run and test actions) | `HOSTED_TEST` app, `TronMobileUITests` |
 
 `LocalDevice` is the optimized normal-use configuration: Swift `-O` whole-module
 compilation, normal Clang optimization, testability disabled, and
@@ -46,8 +46,9 @@ scripts/tron-ios-simulator start
 scripts/tron-ios-simulator status
 scripts/tron-ios-simulator stop
 scripts/tron-ios-test build
-scripts/tron-ios-test run --only-testing TronMobileTests/<Suite>
-scripts/tron-ios-test checkpoint
+scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>
+scripts/tron-ios-test run                 # the smoke set
+scripts/tron-ios-test checkpoint         # build, then the smoke set
 scripts/tron-ios-test status --all
 scripts/tron-ios-test lanes
 scripts/tron-ios-test lane-remove <name>
@@ -67,6 +68,18 @@ scripts/tron-ios-device status
 scripts/tron-ios-device stop
 ```
 
+When the user asks for a build on their phone and it is not reachable by
+`devicectl` (away from the Mac), commit, then run
+`scripts/tron-ios-device share --title "<what this build is>" --notes "<what
+changed, what to test>"` and post its `Install page:` link in the chat (a
+`notify` with the link is fine). It publishes the same validated `Tron Device` +
+`LocalDevice` artifact to the tailnet-only share host on this Mac; see
+[Over-the-air development install](../../../packages/ios-app/docs/development.md#over-the-air-development-install).
+Share only when the user asks. If the share host is not reachable, ask the user
+before running `scripts/tron-ios-device share-host enable`; never change other
+Tailscale serve ports or enable Funnel. Never upload builds to a third-party
+host.
+
 For an explicitly source-built Debug Gateway on 9848, use
 `TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device install`; this
 still verifies the source and iOS artifact contract but does not claim Stable is
@@ -84,7 +97,9 @@ repository-managed XcodeGen. If the tool is absent, install it with
 Use `scripts/validate-ios-artifact.py` on signed products and
 `packages/ios-app/scripts/verify-archive-privacy.sh` for a manually-created
 archive. Never install Release or DevicePerformance through the ordinary helper.
-Do not archive, upload, deploy, or erase app/Keychain data.
+Do not archive, upload, deploy, or erase app/Keychain data; the one exception
+is publishing a user-requested development `share` to this Mac's tailnet-only
+share host above.
 
 To measure an iOS change, agents run `scripts/tron-profile ios --self-test`,
 then the relevant `--scenario`, before and after, and judge with
@@ -143,7 +158,7 @@ reclaim simulators yourself.
   and disk, booted devices no lane owns, the remembered Development simulator,
   and `Simulator.app`. Run it before a final response. `lanes` lists lanes
   alone, `lane-remove NAME` reclaims one lane with its simulator and state, and
-  `clean` reclaims this lane's simulator, its runs and this worktree's products;
+  `clean` reclaims this lane's simulator, its runs and this worktree's products; exact unowned-simulator removal requires `scripts/tron-ios-test clean-unowned UUID NAME` and refuses Development, lane-owned, malformed or ambiguous ownership; it reads other lane leases without locking them and repeats the same ownership scan after shutdown before deletion;
   the shared results root is never removed wholesale.
 - The remembered Development simulator (`scripts/tron-ios-simulator`) is only
   ever shut down by its own `stop`; no test tool deletes it. The simulators the
@@ -175,6 +190,7 @@ reclaim simulators yourself.
   naming the holder) with raw `xcodebuild`, `simctl` or `devicectl`; wait for
   the holder's command to finish.
 - Never install a production Release artifact through the ordinary device
-  helper or automate signing, archive delivery, upload, or deployment.
+  helper or automate signing, archive delivery, upload, or deployment. The
+  user-requested development `share` is not a release path.
 - Never modify `.codex/environments/environment.toml`; old names may appear only
   there and in the bounded compatibility branch above.

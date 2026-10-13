@@ -15,3 +15,24 @@ export function isGatewayTimestamp(value: string): boolean {
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   return day >= 1 && day <= daysInMonth && Number.isFinite(Date.parse(value));
 }
+
+/**
+ * One instant as the local date and time of the machine reading it, always with
+ * the offset that makes it unambiguous: `2026-01-02 15:04:05 -07:00`. Tron Home's
+ * `date` tool shows a message's time this way. `undefined` for a value that is
+ * not an instant, so a caller reports that it cannot answer instead of inventing
+ * a time.
+ */
+export function localTimestampText(instant: string): string | undefined {
+  const at = new Date(instant);
+  if (!Number.isFinite(at.getTime())) return undefined;
+  const pad = (part: number): string => String(part).padStart(2, "0");
+  // getTimezoneOffset() is minutes *behind* UTC, at the instant itself (so a
+  // historic instant keeps the offset that was in force then).
+  const offset = -at.getTimezoneOffset();
+  const sign = offset < 0 ? "-" : "+";
+  const minutes = Math.abs(offset);
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
+    + ` ${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`
+    + ` ${sign}${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+}

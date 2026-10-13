@@ -1,4 +1,17 @@
 {
   "schema": 1,
-  "rollbackVersion": "0.87.1"
+  "rollbackVersion": "0.99.1",
+  "knownOneWayDeltas": [
+    {
+      "store": "mcp-auth",
+      "from": "0.99.1",
+      "to": "1.0.4",
+      "reason": "Pi 1.0.0 keys MCP OAuth credentials by server name and URL; rollback to 0.99.1 requires sign-in again.",
+      "rollbackState": "needs-auth",
+      "credentialKey": {
+        "from": "{url}",
+        "to": "{namespace}|{url}"
+      }
+    }
+  ]
 }

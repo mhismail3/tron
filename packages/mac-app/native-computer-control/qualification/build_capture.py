@@ -53,7 +53,7 @@ def digest(path):
 def source_inventory(root):
     """Only actual package inputs; generated/cache trees never enter the build."""
     entries = {}
-    for item in [root / "Package.swift", root / "Sources", root / "Tests", root / "qualification"]:
+    for item in [root / "Package.swift", root / "Sources", root / "qualification"]:
         if not item.exists() and not item.is_symlink():
             continue
         paths = [item] + (sorted(item.rglob("*")) if item.is_dir() and not item.is_symlink() else [])

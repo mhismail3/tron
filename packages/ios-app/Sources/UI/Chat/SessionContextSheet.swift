@@ -31,13 +31,6 @@ enum SessionCompactionControlPolicy {
         return phase == .idle || phase == .interrupted
     }
 
-    static func automaticStatus(_ enabled: Bool?) -> String {
-        switch enabled {
-        case true: "Enabled"
-        case false: "Disabled"
-        case nil: "Unavailable"
-        }
-    }
 }
 
 enum SessionContextUsageRefreshPresentation: Equatable {
@@ -86,9 +79,10 @@ enum SessionModelSelectionPresentation {
     static func reconciledPending(
         pending: SessionPendingModelSelection?,
         authoritative: ModelRef?,
-        runtimeGeneration: String?
+        runtimeGeneration: String?,
+        revision: Int?
     ) -> SessionPendingModelSelection? {
-        pending?.reconciled(authoritative: authoritative, runtimeGeneration: runtimeGeneration)
+        pending?.reconciled(authoritative: authoritative, runtimeGeneration: runtimeGeneration, revision: revision)
     }
 
     static func modelName(_ selection: ModelRef?, catalog: [ModelSummary]) -> String {
@@ -187,11 +181,7 @@ struct SessionContextSheet: View {
     @State private var capturedNoticeScope: InAppNoticeScope?
     @State private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
     @State private var presentation: SessionContextPresentation?
-    @State private var pendingModelSelection: SessionPendingModelSelection?
-    @State private var pendingContextWindow: SessionPendingSetting<Int?>?
-    @State private var pendingThinking: SessionPendingSetting<String>?
     @State private var sliderPresentation = ConfigurationSliderPresentation()
-    @State private var settingContextWindow = false
     @State private var forkNavigation = ChatForkNavigationOwner()
 
     init(sessionID: String, initialHistoryEntryID: String? = nil, onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void) {
@@ -225,7 +215,9 @@ struct SessionContextSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                // Bounded cards own nested sheets. Keep their presenters mounted
+                // while a child covers this scrolled, medium-detent surface.
+                VStack(alignment: .leading, spacing: 18) {
                     if let snapshot = displayedPresentation {
                         if model.connectionState == .connected,
                            let target = model.presentationTarget(for: sessionID),
@@ -239,9 +231,13 @@ struct SessionContextSheet: View {
                                 Task { _ = await model.retryConversationSynchronization(target: target) }
                             }
                         }
+                        // Manage Session is this chat's live state and its few direct
+                        // controls. Settings (the gear) owns every scope's settings.
                         SessionContextUsageCard(snapshot: snapshot)
-                        modelSummaryCard(snapshot)
+                            .settingsApprovals(.session(sessionID))
+                        modelConfigurationCard(snapshot)
                         sessionSection(snapshot)
+                        settingsSection(snapshot)
                         exportSection
                     } else {
                         TronLoadingState(label: "Loading session…")
@@ -256,14 +252,10 @@ struct SessionContextSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
-                    Button { destination = .terminal } label: {
-                        Image(systemName: "terminal")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                    SessionTerminalToolbarButton(enabled: displayedPresentation != nil,
+                                                 identifier: "manage-session-terminal") {
+                        destination = .terminal
                     }
-                    .disabled(displayedPresentation == nil)
-                    .accessibilityLabel("Terminal")
-                    .accessibilityIdentifier("manage-session-terminal")
                     Button {
                         name = displayedPresentation?.name ?? ""
                         showRename = true
@@ -442,7 +434,6 @@ struct SessionContextSheet: View {
             : (compacting || snapshot.phase == .compacting) ? "In progress" : "")
     }
 
-    private var configurationRowAccent: Color { .tronPurple }
     private var sessionRowAccent: Color { .tronSessionTeal }
     private var exportRowAccent: Color { .tronSlate }
 
@@ -467,160 +458,31 @@ struct SessionContextSheet: View {
         ) { destination = .processHistory }
     }
 
-    private func modelSelection(_ snapshot: SessionContextPresentation) -> Binding<ModelRef?> {
-        Binding(
-            get: {
-                SessionModelSelectionPresentation.displayed(pending: pendingModelSelection, authoritative: snapshot.model)
-            },
-            set: { selection in
-                guard let selection,
-                      selection != SessionModelSelectionPresentation.displayed(
-                        pending: pendingModelSelection, authoritative: snapshot.model
-                      ),
-                      let current = model.sessionContextPresentation(for: sessionID),
-                      current.runtimeGeneration == snapshot.runtimeGeneration,
-                      current.model == snapshot.model else { return }
-                let pending = SessionPendingModelSelection(selection, snapshot: current)
-                pendingModelSelection = pending
-                pendingContextWindow = nil
-                pendingThinking = nil
-                Task {
-                    do {
-                        guard let admitted = model.sessionContextPresentation(for: sessionID),
-                              pending.admitted(in: admitted) != nil else {
-                            pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
-                            return
-                        }
-                        try await model.setModel(selection, sessionID: sessionID)
-                        pendingModelSelection = pendingModelSelection?.confirming(pending.id)
-                        if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
-                    } catch is CancellationError {
-                        return
-                    } catch {
-                        pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
-                        surfaceActionError(error)
-                    }
-                }
-            }
-        )
-    }
-
-    private func modelSummaryCard(_ snapshot: SessionContextPresentation) -> some View {
-        let thinkingScope = SessionThinkingEditScope(snapshot)
-        let displayedThinking = pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel
-        let selection = modelSelection(snapshot)
-        let catalog = model.providerCatalog(for: .session(id: sessionID))?.models ?? []
-        return SessionModelSummaryCard(
-            selection: selection,
-            catalog: catalog,
-            // The Gateway rejects model changes during session work.
-            selectionLockedReason: snapshot.phase.isActive
-                ? "The model can change once this session is idle." : nil,
-            automaticCompactionEnabled: snapshot.automaticCompactionEnabled
-        ) {
-            TronThinkingSelectionRow(
-                selection: Binding(
-                    get: { displayedThinking },
-                    set: { level in
-                        guard level != displayedThinking, pendingModelSelection == nil,
-                              presentationActivity.allowsPresentationPublication,
-                              let current = model.sessionContextPresentation(for: sessionID),
-                              thinkingScope.admits(level, in: current),
-                              (pendingThinking?.admitted(in: current)?.value ?? current.thinkingLevel) == displayedThinking else { return }
-                        let pending = SessionPendingSetting(level, snapshot: snapshot)
-                        pendingThinking = pending
-                        Task {
-                            do {
-                                // The task may start after a runtime/model replacement.
-                                guard let current = model.sessionContextPresentation(for: sessionID),
-                                      thinkingScope.admits(level, in: current), pendingModelSelection == nil else {
-                                    pendingThinking = pendingThinking?.rejecting(pending.id)
-                                    return
-                                }
-                                try await model.setThinking(level, sessionID: sessionID)
-                                pendingThinking = pendingThinking?.confirming(pending.id)
-                                if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
-                            } catch {
-                                pendingThinking = pendingThinking?.rejecting(pending.id)
-                                surfaceActionError(error)
-                            }
-                        }
-                    }
-                ),
-                levels: snapshot.availableThinkingLevels,
-                accent: configurationRowAccent
+    private func modelConfigurationCard(_ snapshot: SessionContextPresentation) -> some View {
+        SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot, onError: { surfaceActionError($0) }) {
+            // Compaction is this chat's one context control: the policy toggle
+            // through the shared settings path, then the manual action.
+            manualCompactionRow(snapshot)
+            SettingsRendererView(
+                target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: "chat", ownedLayers: ["chat"],
+                projectCWD: snapshot.cwd, presentation: .keys(["context.compaction.enabled"]), dividerBeforeKeys: true
             )
-            .id(thinkingScope)
-            .disabled(snapshot.phase.isActive || pendingModelSelection != nil)
-            if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
-               let policy = snapshot.contextWindowPolicy {
-                let pendingWindow = pendingContextWindow?.admitted(in: snapshot)
-                TronSettingsDivider(accent: configurationRowAccent)
-                ContextWindowSelectionRow(
-                    selection: Binding(
-                        get: { pendingWindow.map(\.value) ?? policy.override },
-                        set: { value in
-                            // Bind the request to the model shown when the
-                            // control was rendered. A late tap after a model
-                            // switch must never mutate the replacement model.
-                            guard !settingContextWindow, pendingModelSelection == nil,
-                                  let current = model.sessionContextPresentation(for: sessionID),
-                                  !current.phase.isActive,
-                                  current.runtimeGeneration == snapshot.runtimeGeneration,
-                                  current.contextWindowPolicy?.model == policy.model else { return }
-                            let pending = SessionPendingSetting(value, snapshot: snapshot)
-                            pendingContextWindow = pending
-                            settingContextWindow = true
-                            Task {
-                                defer { settingContextWindow = false }
-                                do {
-                                    guard let admission = model.authoritativeSnapshot(for: sessionID),
-                                          admission.runtimeGeneration == snapshot.runtimeGeneration,
-                                          admission.contextWindowPolicy?.model == policy.model else { return }
-                                    try await model.setContextWindow(value, for: policy.model, sessionID: sessionID, expectedRevision: admission.revision, expectedRuntimeGeneration: admission.runtimeGeneration)
-                                    pendingContextWindow = pendingContextWindow?.confirming(pending.id)
-                                    if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
-                                } catch {
-                                    pendingContextWindow = pendingContextWindow?.rejecting(pending.id)
-                                    surfaceActionError(error)
-                                }
-                            }
-                        }
-                    ),
-                    limits: ContextWindowLimits(
-                        minimum: policy.minimum,
-                        maximum: policy.maximum,
-                        default: policy.default,
-                        longContextThreshold: nil
-                    ),
-                    inheritedValue: policy.default,
-                    effectiveValue: pendingWindow.map { $0.value ?? policy.default } ?? policy.effective,
-                    resetLabel: "Use configured default",
-                    warning: policy.warning,
-                    source: pendingWindow == nil ? policy.source : "pending",
-                    accent: configurationRowAccent
-                )
-                .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey)")
-                .disabled(snapshot.phase.isActive || settingContextWindow || pendingModelSelection != nil)
-            }
-        } compactAction: {
-            compactButton(snapshot)
         }
     }
 
     private func reconcilePresentation(_ value: SessionContextPresentation?) {
         if presentation != value { presentation = value }
-        pendingModelSelection = SessionModelSelectionPresentation.reconciledPending(
-            pending: pendingModelSelection,
-            authoritative: value?.model,
-            runtimeGeneration: value?.runtimeGeneration
-        )
-        pendingContextWindow = pendingContextWindow?.reconciled(
-            authoritative: value?.contextWindowPolicy?.override, snapshot: value
-        )
-        pendingThinking = pendingThinking?.reconciled(
-            authoritative: value?.thinkingLevel ?? "", snapshot: value
-        )
+    }
+
+    private func manualCompactionRow(_ snapshot: SessionContextPresentation) -> some View {
+        TronSettingsRow(
+            icon: "rectangle.compress.vertical",
+            title: "Compact conversation",
+            subtitle: "Summarize older context now",
+            accent: .tronPurple
+        ) {
+            compactButton(snapshot)
+        }
     }
 
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
@@ -632,26 +494,14 @@ struct SessionContextSheet: View {
                 }
                 gitRow
                 divider()
-                manageRow(
-                    icon: "doc.text.magnifyingglass",
-                    title: "Agent Instructions",
-                    subtitle: "Read the complete assembled instructions",
-                    accent: sessionRowAccent
-                ) { destination = .agentInstructions }
+                manageRow(icon: "doc.text.magnifyingglass", title: "Agent Instructions",
+                          subtitle: "The complete assembled instructions", accent: sessionRowAccent) { destination = .agentInstructions }
                 divider()
-                manageRow(
-                    icon: "wrench.and.screwdriver",
-                    title: "Available Tools",
-                    subtitle: "Turn tools on or off for this chat",
-                    accent: sessionRowAccent
-                ) { destination = .tools }
+                manageRow(icon: "wrench.and.screwdriver", title: "Available Tools",
+                          subtitle: "Loaded tools and this chat's active selection", accent: sessionRowAccent) { destination = .tools }
                 divider()
-                manageRow(
-                    icon: "shippingbox",
-                    title: "Project Resources",
-                    subtitle: "Skills, subagents, prompts, and commands",
-                    accent: sessionRowAccent
-                ) { destination = .projectResources }
+                manageRow(icon: "shippingbox", title: "Project Resources",
+                          subtitle: "Loaded skills, subagents, prompts, and commands", accent: sessionRowAccent) { destination = .projectResources }
                 divider()
                 manageRow(
                     icon: "point.3.connected.trianglepath.dotted",
@@ -670,6 +520,28 @@ struct SessionContextSheet: View {
                         accent: sessionRowAccent
                     )
                 }
+            }
+        }
+    }
+
+    /// The project's and this chat's settings, in Settings' own accent.
+    private func settingsSection(_ snapshot: SessionContextPresentation) -> some View {
+        TronGlassCard(accent: .tronEmerald) {
+            VStack(spacing: 0) {
+                if let profileID = model.selectedGatewayProfileID(), !snapshot.cwd.isEmpty {
+                    ProjectSettingsLink(cwd: snapshot.cwd, profileID: profileID)
+                    TronSettingsDivider(accent: .tronEmerald)
+                }
+                TronProgressiveSheetLink(accessibilityLabel: "Chat Settings", identity: "session.\(sessionID).chat-settings",
+                                         accent: .tronEmerald) {
+                    ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd,
+                                     changesScope: .session(sessionID, projectCWD: snapshot.cwd), onOpenSession: onForkCreated)
+                        .tronNavigationTitle("Chat Settings")
+                } label: {
+                    TronSettingsRow(icon: "slider.horizontal.3", title: "Chat Settings",
+                                    subtitle: "Every setting this chat uses", accent: .tronEmerald)
+                }
+                .accessibilityIdentifier("chat-settings-link")
             }
         }
     }

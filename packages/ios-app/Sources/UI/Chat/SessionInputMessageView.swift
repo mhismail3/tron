@@ -193,7 +193,8 @@ struct InboundContextMessagePresentation: Equatable {
     let detailsTitle: String
 
     init(origin: ChatOrigin?, customType: String?, details: JSONValue?) {
-        if let status = Self.subagentStatus(customType: customType, details: details) {
+        if let status = Self.subagentStatus(customType: customType, details: details)
+            ?? (origin?.kind == .subagent ? "Update" : nil) {
             title = "Subagent"
             self.status = status
             tone = .subagent
@@ -227,6 +228,8 @@ struct InboundContextMessagePresentation: Equatable {
             // A wake subscription is a category of subagent message, not proof
             // that the referenced execution completed successfully.
             return "Wait Update"
+        case "subagent-incremental-child-notify":
+            return "Child Update"
         case "subagent-notify":
             // This emitter omits structured status and can report successful,
             // failed, paused, or grouped results. Never infer success from prose.
@@ -290,10 +293,63 @@ struct InboundProducerMessageView: View {
     }
 }
 
+/// A read-only view of the known report envelope, never a rewrite of canonical
+/// context. Unknown versions/shapes and prose remain verbatim and inspectable.
+private struct InboundHomeReport {
+    private struct Report: Decodable {
+        let version: Int
+        let taskId: String
+        let operationId: String
+        let resultId: String
+        let outcome: String
+        let text: String
+        let evidence: [String]
+    }
+    let text: String
+    let outcome: String
+    let envelope: JSONValue
+
+    init?(item: TranscriptItem) {
+        guard item.customType == "tron.home-task-result.v1" else { return nil }
+        let payload: JSONValue?
+        if let report = item.details?.objectValue?["report"] {
+            payload = report
+        } else {
+            let source = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            // The released delivery format has one header followed by one complete
+            // JSON report. Never search arbitrary prose for a convenient JSON fragment.
+            let json: String
+            if source.hasPrefix("Home task "), let newline = source.firstIndex(of: "\n") {
+                json = String(source[source.index(after: newline)...])
+            } else { json = source }
+            payload = try? JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+        }
+        guard let payload, let data = try? JSONEncoder().encode(payload),
+              let report = try? JSONDecoder().decode(Report.self, from: data),
+              report.version == 1, !report.taskId.isEmpty, !report.operationId.isEmpty,
+              !report.resultId.isEmpty, !report.text.isEmpty,
+              ["progress", "needs-input", "final"].contains(report.outcome) else { return nil }
+        text = report.text
+        // A final report is not a claim that the task succeeded.
+        outcome = report.outcome == "final" ? "Final report" : report.outcome == "needs-input" ? "Needs input" : "Progress"
+        envelope = payload
+    }
+}
+
 private struct InboundContextDetailsSheet: View {
     let item: TranscriptItem
+    var technical = false
     @Environment(\.dismiss) private var dismiss
     @State private var detent: PresentationDetent = .medium
+    @State private var showingTechnicalDetails = false
+
+    private let report: InboundHomeReport?
+
+    init(item: TranscriptItem, technical: Bool = false) {
+        self.item = item
+        self.technical = technical
+        report = InboundHomeReport(item: item)
+    }
 
     private var presentation: InboundContextMessagePresentation {
         InboundContextMessagePresentation(origin: item.semantic?.origin, customType: item.customType, details: item.details)
@@ -306,7 +362,7 @@ private struct InboundContextDetailsSheet: View {
     }
 
     private var messageText: String {
-        let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = report?.text ?? item.text
         return text.isEmpty ? "No text content" : text
     }
 
@@ -343,36 +399,55 @@ private struct InboundContextDetailsSheet: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
-                    messageSection
-                    if let goalMetadata {
+                    if !technical {
+                        if let report {
+                            ToolStaticChip(icon: "doc.text", text: report.outcome, accent: accent)
+                        }
+                        messageSection
+                    } else {
+                        if let goalMetadata {
+                            TronTechnicalMetadataSection(
+                                title: "Goal",
+                                items: goalMetadata,
+                                accent: accent
+                            )
+                        }
                         TronTechnicalMetadataSection(
-                            title: "Goal",
-                            items: goalMetadata,
+                            title: "Origin",
+                            items: originMetadata,
                             accent: accent
                         )
-                    }
-                    TronTechnicalMetadataSection(
-                        title: "Origin",
-                        items: originMetadata,
-                        accent: accent
-                    )
-                    TronTechnicalMetadataSection(
-                        title: "Canonical identity",
-                        items: canonicalMetadata,
-                        accent: .tronSlate
-                    )
-                    if let details = item.details {
+                        TronTechnicalMetadataSection(
+                            title: "Canonical identity",
+                            items: canonicalMetadata,
+                            accent: .tronSlate
+                        )
+                        if let report, let fields = report.envelope.objectValue {
+                            TronTechnicalMetadataSection(title: "Report", items: fields.keys.sorted().compactMap { key in
+                                guard key != "text", let value = fields[key],
+                                      let text = value.stringValue ?? value.intValue.map(String.init) else { return nil }
+                                return .init(title: ComposerResourceNameFormatter.friendly(key), value: text, icon: "doc.text")
+                            }, accent: accent)
+                            if let evidence = fields["evidence"]?.arrayValue, !evidence.isEmpty {
+                                TronTechnicalMetadataSection(title: "Evidence", items: evidence.enumerated().compactMap { index, value in
+                                    value.stringValue.map { .init(title: "\(index + 1)", value: $0, icon: "doc.text.magnifyingglass") }
+                                }, accent: accent)
+                            }
+                            payloadSection("Report envelope", value: report.envelope, sheetTitle: "Report envelope")
+                        }
+                        if let details = item.details {
+                            payloadSection(
+                                "Context details",
+                                value: details,
+                                sheetTitle: "Context details"
+                            )
+                        }
                         payloadSection(
-                            "Context details",
-                            value: details,
-                            sheetTitle: "Context details"
+                            "Content payload",
+                            value: contentPayload,
+                            sheetTitle: "Content payload"
                         )
                     }
-                    payloadSection(
-                        "Content payload",
-                        value: contentPayload,
-                        sheetTitle: "Content payload"
-                    )
                 }
                 .padding(18)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -383,8 +458,15 @@ private struct InboundContextDetailsSheet: View {
             .tronScrollEdgeChrome()
             .tronToolDetailNavigationChrome()
             .toolbar {
+                if !technical {
+                    ToolbarItem(placement: .topBarLeading) {
+                        TronSheetInfoButton(accessibilityLabel: "Technical details", accent: accent) {
+                            showingTechnicalDetails = true
+                        }
+                    }
+                }
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: presentation.detailsTitle, accent: accent)
+                    TronSheetTitle(title: technical ? "Technical details" : presentation.detailsTitle, accent: accent)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
@@ -395,6 +477,9 @@ private struct InboundContextDetailsSheet: View {
                     .accessibilityLabel("Done")
                 }
             }
+        }
+        .tronManagedSheet(isPresented: $showingTechnicalDetails, identity: "chat.inbound-context.info.\(item.id)") {
+            InboundContextDetailsSheet(item: item, technical: true)
         }
         .tronTopBlur(.toolDetail)
         .presentationDetents([.medium, .large], selection: $detent)

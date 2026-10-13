@@ -34,7 +34,7 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 /** Inspect the JPEG's own SOF, not CDP viewport metadata (which can describe the
  * unscaled viewport). ImageIO remains the final decoder/admission on iOS. */
-export function admitBrowserJPEG(data: Buffer): CapturedBrowserFrame | undefined {
+function admitBrowserJPEG(data: Buffer): CapturedBrowserFrame | undefined {
   if (data.length < 12 || data.length > MAXIMUM_FRAME_BYTES
     || data.readUInt16BE(0) !== 0xffd8 || data.readUInt16BE(data.length - 2) !== 0xffd9) return;
   let offset = 2;

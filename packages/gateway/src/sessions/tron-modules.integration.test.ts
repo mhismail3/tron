@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,15 +17,21 @@ function inlineModuleNames(resources: Record<string, any>): string[] {
 describe.sequential("RuntimeSlot Tron module registration", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
+  const roots: string[] = [];
 
   afterEach(async () => {
-    await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
-    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    try {
+      await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
+    } finally {
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+      await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+    }
   });
 
   it("registers only defined Tron modules, in definition order", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-module-registration-"));
+    roots.push(root);
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
@@ -54,6 +60,7 @@ describe.sequential("RuntimeSlot Tron module registration", () => {
     const positions = registered.map((name) => definitionNames.indexOf(name));
     expect(positions).toEqual([...positions].sort((left, right) => left - right));
     expect(registered).toEqual(expect.arrayContaining([
+      "tron-invocation-settlement",
       "tron-context-window",
       "tron-compaction-policy",
       "tron-core",

@@ -56,6 +56,9 @@ final class TronProjectTrustUITests: XCTestCase {
     func testMatchingSingleBlockSettlesWithoutAnotherCommand() {
         let app = launch(scenario: "ordered")
         defer { app.terminate() }
+        // The decision names the Project root it is recorded for, not only the chat's folder.
+        XCTAssertTrue(app.staticTexts["Applies to project root"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["/fixture"].exists, app.debugDescription)
         app.buttons["Do Not Load Project Resources"].tap()
         XCTAssertTrue(app.staticTexts["Resources blocked"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(counts(app, contain: "canonical:false"))
@@ -105,6 +108,71 @@ final class TronProjectTrustUITests: XCTestCase {
         assertBlockedWithoutLateTrust(app, screenshot: "358-trust-replacement-mac-colliding-cwd")
         assertOriginalCommands(app, count: 1)
         XCTAssertTrue(counts(app, id: "fixture.trust-replacement", contain: "sets:0 commands:0 repeats:0"))
+    }
+
+    /// Permissions › Floors (settings-model.md 5.4): lowering a floor is an approve-tier
+    /// change that waits for the maintainer's confirm; raising it applies at once.
+    @MainActor
+    func testPermissionFloorsLowerNeedsConfirmAndRaiseApplies() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-project-trust-fixture", "-project-trust-scenario", "floors"]
+        app.launch()
+        defer { app.terminate() }
+        // The fixture mounts the Permissions section sheet, where an approval level is a row.
+        let row = app.descendants(matching: .any)["settings-row-permissions.floor_direction_widen_key_permissions.projectTrust"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(counts(app, contain: "floor:approve previews:0 applies:0"), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Project trust: loosening"].exists
+                      && row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Built-in")).firstMatch.exists, app.debugDescription)
+
+        // Lowering: the dry run carries confirm text, and nothing is applied until confirmed.
+        choose(app, row: row, option: "Quiet")
+        let confirm = app.buttons["Change setting"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(counts(app, contain: "floor:approve previews:1 applies:0"), app.debugDescription)
+        keepScreenshot(app, name: "758-permission-floor-lower-confirm")
+        // Native confirmation may adapt to a popover with outside dismissal.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(counts(app, contain: "floor:approve previews:1 applies:0"), "Cancelling must not lower the floor")
+        choose(app, row: row, option: "Quiet")
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        XCTAssertTrue(counts(app, contain: "floor:quiet previews:2 applies:1"), app.debugDescription)
+        XCTAssertTrue(waitForValue(row.buttons.firstMatch, "Quiet"), app.debugDescription)
+        // The override is now the Mac layer's, named in the row's source line.
+        XCTAssertTrue(row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mac")).firstMatch
+            .waitForExistence(timeout: 5), app.debugDescription)
+
+        // Raising: the dry run needs no confirm, so the choice applies directly.
+        choose(app, row: row, option: "Approve")
+        XCTAssertTrue(counts(app, contain: "floor:approve previews:3 applies:2"), app.debugDescription)
+        XCTAssertFalse(app.buttons["Change setting"].firstMatch.exists)
+        XCTAssertTrue(waitForValue(row.buttons.firstMatch, "Approve"), app.debugDescription)
+        keepScreenshot(app, name: "758-permission-floor-raise-applied")
+    }
+
+    @MainActor
+    private func choose(_ app: XCUIApplication, row: XCUIElement, option: String) {
+        let control = row.buttons.firstMatch.buttons.firstMatch
+        XCTAssertTrue(control.waitForExistence(timeout: 5), app.debugDescription)
+        control.tap()
+        let slider = app.descendants(matching: .any)["settings-choice-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), app.debugDescription)
+        // Tiers are an ordered choice in the real schema, sharing the same
+        // drawn rail as thinking. Assert the label, not merely a coordinate.
+        slider.coordinate(withNormalizedOffset: CGVector(dx: option == "Quiet" ? 0.1 : 0.9, dy: 0.5)).tap()
+        XCTAssertTrue(waitForValue(slider, option), app.debugDescription)
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80))).tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 5), app.debugDescription)
+    }
+
+    @MainActor
+    private func waitForValue(_ element: XCUIElement, _ expected: String) -> Bool {
+        let condition = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expected), object: element)
+        return XCTWaiter.wait(for: [condition], timeout: 10) == .completed
     }
 
     @MainActor

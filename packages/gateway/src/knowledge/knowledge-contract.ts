@@ -50,6 +50,8 @@ export interface KnowledgeProvenance {
   sessionId?: string;
   branchId?: string;
   invocationId?: string;
+  /** Why this revision was written, when its writer records one (Home's profile changes do). Bounded text; ledger metadata, never evidence. */
+  reason?: string;
   evidence: KnowledgeEvidenceRef[];
 }
 
@@ -292,6 +294,12 @@ export interface NoteContent {
   freshness?: "current" | "aging" | "stale" | "unknown";
   privacyScope?: "private" | "shared";
   usageConstraint?: string;
+  /** Note labels that name an owner's role for the note, such as Home's `home-profile`
+   * and `kind-*` labels. Not the source tag vocabulary: a note's labels are free, bounded by
+   * `NOTE_TAG_PATTERN` and `NOTE_TAGS_MAX`, and an owner alone decides what they mean. */
+  tags?: string[];
+  /** Set on a note that has left active use. Its earlier revisions stay in the ledger. */
+  retired?: true;
 }
 
 export interface KnowledgeRecordBase {
@@ -1112,6 +1120,8 @@ export type KnowledgeAction =
 const ID = /^[A-Za-z0-9._:-]{1,200}$/;
 const REVISION = /^[0-9a-f-]{16,80}$/;
 const HASH = /^[a-f0-9]{64}$/;
+const NOTE_TAG_PATTERN = /^[a-z][a-z0-9-]{0,47}$/;
+const NOTE_TAGS_MAX = 8;
 
 export function assertKnowledgeId(value: unknown, label = "knowledge id"): asserts value is string {
   if (typeof value !== "string" || !ID.test(value) || value === "." || value === "..") throw new Error(`Invalid ${label}`);
@@ -1187,6 +1197,7 @@ export function validateKnowledgeRecord(value: unknown): KnowledgeRecord {
   const provenance = item.provenance as Record<string, unknown>;
   if (!provenance || typeof provenance !== "object" || Array.isArray(provenance)) throw new Error("Invalid provenance");
   if (!["user", "agent", "connector", "import", "system"].includes(provenance.actor as string)) throw new Error("Invalid provenance actor");
+  if (provenance.reason !== undefined) boundedString(provenance.reason, "provenance reason", 2_000);
   if (!Array.isArray(provenance.evidence)) throw new Error("Invalid provenance evidence");
   provenance.evidence.forEach(assertEvidence);
   if (!Array.isArray(item.relations)) throw new Error("Invalid relations");
@@ -1364,6 +1375,11 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
     if (content.body !== undefined && (typeof content.body !== "string" || content.body.length > 100_000)) throw new Error("Invalid note body");
     if (content.contraryEvidence !== undefined) { if (!Array.isArray(content.contraryEvidence) || content.contraryEvidence.length > 100) throw new Error("Invalid contrary evidence"); content.contraryEvidence.forEach(assertEvidence); }
     if (content.freshness !== undefined && !["current", "aging", "stale", "unknown"].includes(content.freshness as string)) throw new Error("Invalid note freshness");
+    if (content.tags !== undefined) {
+      if (!Array.isArray(content.tags) || content.tags.length > NOTE_TAGS_MAX) throw new Error("Invalid note tags");
+      if (new Set(content.tags).size !== content.tags.length || !content.tags.every(tag => typeof tag === "string" && NOTE_TAG_PATTERN.test(tag))) throw new Error("Invalid note tags");
+    }
+    if (content.retired !== undefined && content.retired !== true) throw new Error("Invalid note retirement");
     if (content.privacyScope !== undefined && !["private", "shared"].includes(content.privacyScope as string)) throw new Error("Invalid note privacy scope");
     if (content.usageConstraint !== undefined) boundedString(content.usageConstraint, "note usage constraint", 20_000);
     if (content.fields !== undefined) {

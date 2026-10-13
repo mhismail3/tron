@@ -167,9 +167,16 @@ package struct PackageSummary: Codable, Hashable, Identifiable, Sendable {
     /// that predates the field still decodes its listing; the detail sheet then
     /// shows no Provides groups rather than an empty one.
     package var provides: PackageProvides? = nil
+    package var conflict: PackageConflict? = nil
     package var id: String { "\(scope.rawValue):\(source)" }
     /// The scope word the installed row and its detail sheet both show.
     package var scopeLabel: String { scope == .project ? "Project" : "Global" }
+}
+
+/// Gateway-owned exclusion state; unknown codes retain their display message.
+package struct PackageConflict: Codable, Hashable, Sendable {
+    package let code: String
+    package let message: String
 }
 
 /// The names one installed package provides, by kind. `packages.list` carries

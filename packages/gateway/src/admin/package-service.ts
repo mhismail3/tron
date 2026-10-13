@@ -1,3 +1,4 @@
+import { managedProviderSettingsView, type ManagedSubagents } from "../sessions/managed-subagents.js";
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
@@ -11,6 +12,7 @@ import type { JsonValue } from "../protocol/types.js";
 import type { TrustService } from "./trust-service.js";
 import { loadPackageProvides, type InstalledPackage } from "./package-provides.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { instanceId, type OutsideChanges, type PlannedWrite } from "./settings-outside.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 interface PackageUpdateProjection {
@@ -41,7 +43,7 @@ function validateUnique<T>(values: T[], identity: (value: T) => string, label: s
   }
 }
 
-export function validatePackageInventory(packages: InstalledPackage[], resources: ResolvedPaths): void {
+function validatePackageInventory(packages: InstalledPackage[], resources: ResolvedPaths): void {
   if (packages.length > MAXIMUM_PACKAGES) throw new GatewayError("conflict", "Package inventory exceeds its item limit");
   validateUnique(packages, (value) => `${value.scope}:${value.source}`, "Package inventory");
   for (const value of packages) {
@@ -69,7 +71,7 @@ export function validatePackageInventory(packages: InstalledPackage[], resources
   }
 }
 
-export function validatePackageUpdates(updates: PackageUpdateProjection[]): void {
+function validatePackageUpdates(updates: PackageUpdateProjection[]): void {
   if (updates.length > MAXIMUM_PACKAGE_UPDATES) throw new GatewayError("conflict", "Package updates exceed their item limit");
   validateUnique(updates, (value) => `${value.scope}:${value.source}`, "Package updates");
   for (const value of updates) {
@@ -90,20 +92,30 @@ export class PackageService {
     private readonly trust: TrustService,
     private readonly broadcast: (topic: string, payload: JsonValue) => void,
     private readonly workRegistry?: GatewayWorkRegistry,
+    private readonly managedSubagents?: ManagedSubagents,
+    /** Package entries are written by this owner, not the settings change path;
+     * bracketing them keeps them from reading as outside changes (settings-model.md 5.6). */
+    private readonly outside?: OutsideChanges,
   ) {}
 
-  private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<{ manager: DefaultPackageManager; settings: SettingsManager }> {
+  private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<{
+    manager: DefaultPackageManager; settings: SettingsManager; project: { cwd: string; projectDir: string };
+  }> {
     const trust = requireProjectTrust
       ? await this.trust.requireResolved(cwdInput)
-      : await this.trust.inspect(cwdInput).then((inspection) => ({ cwd: inspection.cwd, trusted: inspection.effectiveDecision === true }));
-    const settings = SettingsManager.create(trust.cwd, this.agentDir, { projectTrusted: trust.trusted });
+      : await this.trust.inspect(cwdInput).then((inspection) => ({ cwd: inspection.cwd, projectDir: inspection.projectDir, trusted: inspection.effectiveDecision === true }));
+    const settings = SettingsManager.create(trust.projectDir, this.agentDir, { projectTrusted: trust.trusted });
     // The SDK deliberately exposes load failures through drainErrors rather than
     // throwing from getters. Never let a malformed settings file look like an
     // empty package inventory or authorize a mutation against that false view.
     if (settings.drainErrors().length > 0) {
       throw new GatewayError("conflict", "Canonical package settings could not be loaded");
     }
-    return { manager: new DefaultPackageManager({ cwd: trust.cwd, agentDir: this.agentDir, settingsManager: settings }), settings };
+    return {
+      manager: new DefaultPackageManager({ cwd: trust.cwd, projectDir: trust.projectDir, agentDir: this.agentDir, settingsManager: settings }),
+      settings,
+      project: { cwd: trust.cwd, projectDir: trust.projectDir },
+    };
   }
 
   private async flushSettings(settings: SettingsManager): Promise<void> {
@@ -154,14 +166,18 @@ export class PackageService {
 
   async list(cwd: string): Promise<unknown> {
     return this.trackAdministrative(() => this.mutex.run(async () => {
-      const { manager, settings } = await this.manager(cwd, false);
+      const { manager, settings, project } = await this.manager(cwd, false);
       const packages = manager.listConfiguredPackages();
-      const resources = await manager.resolve(async () => "skip");
+      const resolver = this.managedSubagents
+        ? new DefaultPackageManager({ cwd: project.cwd, projectDir: project.projectDir, agentDir: this.agentDir, settingsManager: managedProviderSettingsView(settings) })
+        : manager;
+      const resources = await resolver.resolve(async () => "skip");
       validatePackageInventory(packages, resources);
       // `provides` is additive and fails soft inside its own loader (extension
       // tools/commands and subagent attribution), so it cannot fail this read.
       const provides = await loadPackageProvides({
         agentDir: this.agentDir,
+        ...(this.managedSubagents ? { managedSubagents: this.managedSubagents } : {}),
         trust: this.trust,
         cwd,
         settingsManager: settings,
@@ -170,7 +186,7 @@ export class PackageService {
       });
       return {
         packages: provides.entries,
-        resources,
+        resources: provides.resources,
         ...(provides.diagnostic !== undefined ? { providesDiagnostic: provides.diagnostic } : {}),
       };
     }));
@@ -202,6 +218,10 @@ export class PackageService {
           this.broadcast("packages.progress", { operationId, event } as unknown as JsonValue);
         });
         const { settings } = managed;
+        const writes: PlannedWrite[] = [{ store: local ? { kind: "project", root: managed.project.projectDir } : { kind: "mac" },
+          instance: instanceId("sources.packages", {}), changeId: operationId, value: undefined }];
+        await this.outside?.begin(writes);
+        try {
         if (action === "install") {
           if (source === undefined) throw new GatewayError("invalid_request", "Package source is required");
           await this.validateInstallSource(source, cwd);
@@ -225,6 +245,10 @@ export class PackageService {
           this.ensureConfiguredSource(manager, source, local);
           mutationAdmitted = true;
           await manager.install(source, { local });
+        }
+        } finally {
+          // Unrecorded writes are adopted as observed, never as outside changes.
+          await this.outside?.end(writes, new Map());
         }
         this.broadcast("packages.completed", { operationId, success: true });
       } catch (error) {

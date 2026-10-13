@@ -84,7 +84,7 @@ private struct CommandLifecycleDetailsSheet: View {
         return value.isEmpty ? "No arguments" : value
     }
     private var metadata: [TronTechnicalMetadataItem] {
-        [
+        var items: [TronTechnicalMetadataItem] = [
             .init(title: "Command", value: "/\(name)", icon: "command"),
             .init(
                 title: "Lifecycle",
@@ -94,6 +94,10 @@ private struct CommandLifecycleDetailsSheet: View {
             .init(title: "Source", value: origin, icon: "shippingbox"),
             .init(title: "Origin", value: item.semantic?.origin.kind.rawValue ?? "unknown", icon: "externaldrive"),
         ]
+        if item.semantic?.settledInOriginSession == true {
+            items.append(.init(title: "Settled in", value: "Original session", icon: "arrow.uturn.backward"))
+        }
+        return items
     }
     private var identity: [TronTechnicalMetadataItem] {
         [

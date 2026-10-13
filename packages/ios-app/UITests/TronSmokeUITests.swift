@@ -5,6 +5,2367 @@ import XCTest
 
 final class TronSmokeUITests: XCTestCase {
     @MainActor
+    func testHomeTaskListStopSteerAndRedelivery() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-tasks")
+        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
+        // A row names the task and its project; spend and unavailable copy never appear in a row.
+        XCTAssertTrue(app.staticTexts["Settings model: continue epic #758"].exists)
+        XCTAssertTrue(app.staticTexts["tron"].exists)
+        XCTAssertFalse(app.staticTexts["Spend unavailable"].exists)
+        keepScreenshot(named: "home-task-list")
+        app.buttons["home-task-active"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["home-task-detail"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["12 input · 3 output tokens"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Unpriced"].exists, "Task spend shows token counts only; the Gateway reports no cost")
+        app.textFields["home-task-steer"].tap(); app.textFields["home-task-steer"].typeText("Use the exact task")
+        app.buttons["home-task-steer-send"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+        XCTAssertTrue(app.buttons["home-task-stop"].waitForExistence(timeout: 5)); app.buttons["home-task-stop"].tap()
+        XCTAssertTrue(app.staticTexts["Stopped"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "home-task-stopped")
+        app.buttons["home-sheet-done-task"].tap()
+        XCTAssertTrue(app.buttons["home-task-terminal"].waitForExistence(timeout: 5)); app.buttons["home-task-terminal"].tap()
+        XCTAssertTrue(app.staticTexts["Finished · Final"].waitForExistence(timeout: 5))
+        app.buttons["home-task-redeliver"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:3", timeout: 5))
+        keepScreenshot(named: "home-task-redelivered")
+    }
+
+    /// The task detail's worker row opens the worker's own chat, read-only to Home
+    /// (an ordinary session), and never through a Home route.
+    @MainActor
+    func testHomeTaskDetailOpensWorkerChat() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-tasks")
+        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
+        app.buttons["home-task-active"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["home-task-detail"].waitForExistence(timeout: 5))
+        // The live subagent run is part of the worker's detail, not the row.
+        XCTAssertTrue(app.staticTexts["1 live subagent run"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "home-task-detail")
+        tapManageRow(app, "home-task-open-worker")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-opened-session"], containing: "opened-session:worker-session", timeout: 10))
+        XCTAssertFalse(app.buttons["Manage Home"].exists, "The worker chat is an ordinary session and must not claim Home")
+    }
+
+    @MainActor
+    func testHomeTaskPermissionsRevokeDecideAndReconfirm() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-permissions")
+        XCTAssertTrue(app.buttons["Reconfirm permissions"].waitForExistence(timeout: 5)); app.buttons["Reconfirm permissions"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+        revokeHomePermission(app, "Revoke scope scope-one")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:2", timeout: 5))
+        revokeHomePermission(app, "Revoke grant grant-one")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:3", timeout: 5))
+        app.buttons["Review request request-approve"].tap()
+        XCTAssertTrue(app.staticTexts["/trusted/project"].waitForExistence(timeout: 5))
+        chooseHomeGrantExpiry(app)
+        app.buttons["Approve request"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:4", timeout: 5))
+        app.buttons["home-sheet-done-grant"].tap()
+        XCTAssertTrue(app.buttons["Review request request-deny"].waitForExistence(timeout: 5)); app.buttons["Review request request-deny"].tap()
+        chooseHomeGrantExpiry(app)
+        app.buttons["Deny request"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:5", timeout: 5))
+        keepScreenshot(named: "home-task-permission-denied")
+    }
+
+    /// Revoking is destructive: a cancelled confirmation changes nothing, and only the
+    /// confirmed revoke reaches the Gateway.
+    @MainActor
+    func testHomePermissionRevokeRequiresConfirmation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-permissions")
+        XCTAssertTrue(app.staticTexts["All trusted projects"].waitForExistence(timeout: 5))
+        app.buttons["Revoke scope scope-one"].tap()
+        XCTAssertTrue(app.buttons["confirmation-cancel"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "home-permission-revoke-confirmation")
+        app.buttons["confirmation-cancel"].tap()
+        XCTAssertTrue(app.staticTexts["fixture.home-control-count"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:0"), "A cancelled revoke must not reach the Gateway")
+        app.buttons["Revoke scope scope-one"].tap()
+        confirmHomeAction(app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+    }
+
+    /// A delayed socket response must not shrink the scroll viewport (and its
+    /// edge material) to the loading row's intrinsic width. Exercise the real
+    /// managed parent/child sheet stack, not a replica of its layout.
+    @MainActor
+    func testHomeSheetLoadingSurfaceRemainsFullWidth() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-presentation-loading"]
+            if appearance == "dark" { app.launchArguments.append("-home-dark") }
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            let ring = app.buttons["session-context-button"]
+            XCTAssertTrue(waitForLabel(ring, containing: "Manage Home", timeout: 10))
+            XCTAssertTrue(waitForEnabled(ring, timeout: 10))
+            ring.tap()
+            let done = app.buttons["home-sheet-done-manage"]
+            XCTAssertTrue(done.waitForExistence(timeout: 5))
+            let mediumY = done.frame.midY
+            XCTAssertGreaterThan(mediumY, app.windows.firstMatch.frame.height * 0.4)
+            assertHomeLoadingSurface(app, name: "\(appearance)-manage-medium")
+            XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 10))
+            XCTAssertEqual(done.frame.midY, mediumY, accuracy: 2, "Loading must not move sheet chrome")
+            keepScreenshot(named: "sheet-\(appearance)-manage-loaded")
+            tapManageRow(app, "home-manage-tasks")
+            let taskDone = app.buttons["home-sheet-done-tasks"]
+            XCTAssertTrue(taskDone.waitForExistence(timeout: 5))
+            assertHomeLoadingSurface(app, name: "\(appearance)-tasks-medium")
+            let title = app.staticTexts["Tasks"].firstMatch
+            title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
+                thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                taskDone.frame.midY < mediumY - 100
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 3), .completed)
+            assertHomeLoadingSurface(app, name: "\(appearance)-tasks-large")
+            XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 10))
+            keepScreenshot(named: "sheet-\(appearance)-tasks-loaded-large")
+            taskDone.tap()
+            XCTAssertTrue(done.waitForExistence(timeout: 5))
+            done.tap()
+            XCTAssertTrue(ring.waitForExistence(timeout: 5))
+            ring.tap()
+            XCTAssertTrue(done.waitForExistence(timeout: 5))
+            assertHomeLoadingSurface(app, name: "\(appearance)-manage-reopened")
+            app.staticTexts["Manage Home"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+            let manageExpanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                done.frame.midY < mediumY - 100
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [manageExpanded], timeout: 3), .completed)
+            assertHomeLoadingSurface(app, name: "\(appearance)-manage-large")
+            done.tap()
+            XCTAssertTrue(ring.waitForExistence(timeout: 5))
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testNestedHomeTasksErrorRetriesWithoutMovingChrome() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-tasks-error"]
+            if appearance == "dark" { app.launchArguments.append("-home-dark") }
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            tapManageRow(app, "home-manage-tasks")
+            XCTAssertTrue(app.buttons["Reload"].waitForExistence(timeout: 5))
+            let done = app.buttons["home-sheet-done-tasks"]
+            let y = done.frame.midY
+            keepScreenshot(named: "sheet-\(appearance)-tasks-error")
+            assertManagedSheetSurface(app, title: "Tasks", name: "\(appearance)-tasks-error")
+            app.buttons["Reload"].tap()
+            XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
+            XCTAssertEqual(done.frame.midY, y, accuracy: 2)
+            keepScreenshot(named: "sheet-\(appearance)-tasks-retried")
+            done.tap()
+            XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 5))
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    private func assertHomeLoadingSurface(_ app: XCUIApplication, name: String) {
+        let loading = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Loading Home…")).firstMatch
+        XCTAssertTrue(loading.waitForExistence(timeout: 3))
+        keepScreenshot(named: "sheet-\(name)-loading")
+        assertManagedSheetSurface(app, title: app.staticTexts["Tasks"].exists ? "Tasks" : "Manage Home", name: name)
+        XCTAssertLessThan(loading.frame.height, 40, "The short loading label must not wrap at normal Dynamic Type")
+    }
+
+    @MainActor
+    private func assertManagedSheetSurface(_ app: XCUIApplication, title: String, name: String) {
+        let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done"))
+        XCTAssertEqual(done.allElementsBoundByIndex.filter(\.isHittable).count, 1,
+                       "The active managed sheet owns one actionable dismissal control")
+        let scroll = app.scrollViews.firstMatch
+        XCTAssertGreaterThan(scroll.frame.width, app.windows.firstMatch.frame.width * 0.9,
+                             "The sheet viewport and its edge material must not inherit the loading row's intrinsic width")
+        // Accessibility reports the full ScrollView even when its overlay is
+        // intrinsically narrow. Compare the actual material above the title,
+        // away from text, controls and rounded corners; no device-specific golden.
+        let title = app.staticTexts[title].firstMatch
+        let screenshot = XCUIScreen.main.screenshot().image
+        let y = title.frame.minY - 12
+        let width = app.windows.firstMatch.frame.width
+        let center = sheetPixel(screenshot, point: CGPoint(x: width * 0.5, y: y), windowWidth: width)
+        for x in [0.25, 0.75] {
+            let side = sheetPixel(screenshot, point: CGPoint(x: width * x, y: y), windowWidth: width)
+            XCTAssertLessThan(zip(center, side).map { abs($0 - $1) }.max() ?? 1, 0.035,
+                              "The edge material must cover the full sheet, not an opaque central column (\(name))")
+        }
+    }
+
+    private func sheetPixel(_ image: UIImage, point: CGPoint, windowWidth: CGFloat) -> [Double] {
+        guard let source = image.cgImage else { XCTFail("Missing screenshot pixels"); return [] }
+        let scale = CGFloat(source.width) / windowWidth
+        let area = CGRect(x: point.x * scale - 4, y: point.y * scale - 4, width: 9, height: 9)
+        guard let crop = source.cropping(to: area) else { XCTFail("Missing material sample"); return [] }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return pixel.prefix(3).map { Double($0) / 255 }
+    }
+
+    @MainActor
+    func testHomeSheetsLoadingEmptyBlockedErrorAndReload() {
+        continueAfterFailure = false
+        for state in ["loading", "empty", "error", "blocked"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+            if state == "blocked" { app.launchArguments.append("-home-phase-blocked") } else { app.launchArguments.append("-home-browser-\(state)") }
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            if state == "blocked" {
+                // A memory problem is the status pill plus the Memory row's subtitle.
+                XCTAssertTrue(waitForLabel(app.descendants(matching: .any)["home-manage-state"], containing: "Memory blocked", timeout: 5))
+                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "source-unavailable")).firstMatch.waitForExistence(timeout: 5))
+                keepScreenshot(named: "home-sheet-blocked")
+                app.terminate()
+                continue
+            }
+            tapManageRow(app, "home-manage-memory-browser")
+            if state == "loading" {
+                XCTAssertTrue(app.descendants(matching: .any)["home-sheet-loading"].waitForExistence(timeout: 2))
+                keepScreenshot(named: "home-memory-loading")
+                XCTAssertTrue(app.staticTexts["Asked to move garden planning to Thursday reviews"].waitForExistence(timeout: 10))
+            } else if state == "empty" {
+                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "No memory yet")).firstMatch.waitForExistence(timeout: 5))
+            } else {
+                XCTAssertTrue(app.buttons["Reload"].waitForExistence(timeout: 5))
+                keepScreenshot(named: "home-memory-error")
+                app.buttons["Reload"].tap()
+                XCTAssertTrue(app.staticTexts["Asked to move garden planning to Thursday reviews"].waitForExistence(timeout: 5))
+            }
+            keepScreenshot(named: "home-sheet-\(state)")
+            app.terminate()
+        }
+        let empty = XCUIApplication()
+        empty.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-context-empty"]
+        empty.launch()
+        defer { empty.terminate() }
+        XCTAssertTrue(empty.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        empty.buttons["home-pinned-row"].tap()
+        openManageHome(empty)
+        tapManageRow(empty, "home-manage-context")
+        XCTAssertTrue(empty.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "No activation context yet")).firstMatch.waitForExistence(timeout: 5))
+        keepScreenshot(named: "home-context-empty")
+    }
+
+    /// The Home Context sheet explains where the next request's context goes: one stacked
+    /// bar of the window with a meaning per section, and no entry IDs or byte counts.
+    @MainActor
+    func testHomeContextShowsBreakdownWithoutRawIdentifiers() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-context")
+        XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.descendants(matching: .any)["home-context-bar"].exists)
+        for label in ["Instructions", "About you", "Memory", "This chapter", "Task results", "Your message"] {
+            XCTAssertTrue(app.staticTexts[label].exists, label)
+        }
+        XCTAssertTrue(app.descendants(matching: .any)["home-context-section-memory"].label.contains("260 summaries"))
+        XCTAssertFalse(app.staticTexts["activation-entry"].exists, "Context must not show an entry ID")
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", " bytes")).firstMatch.exists, "Context must not show byte counts")
+        keepScreenshot(named: "home-context-populated")
+    }
+
+    /// Opening a memory row shows its detail; its exact evidence opens from one standard row.
+    @MainActor
+    func testHomeMemoryRowDetailOpensExactEvidence() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-memory-browser")
+        let row = app.descendants(matching: .any)["home-memory-row-0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Asked to move garden planning to Thursday reviews"].exists)
+        // The secondary line names the chapter the entry belongs to, never its IDs.
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "chapter 1")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["source-session · source-entry"].exists, "Memory rows show no raw evidence identifiers")
+        keepScreenshot(named: "home-memory-rows")
+        row.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["home-memory-detail"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Asked to move garden planning to Thursday reviews"].exists)
+        keepScreenshot(named: "home-memory-detail")
+        tapManageRow(app, "home-memory-exact-evidence")
+        XCTAssertTrue(app.descendants(matching: .any)["home-evidence-text"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Canonical original, not the memory projection"].exists)
+        keepScreenshot(named: "home-exact-evidence")
+        app.buttons["home-sheet-done-evidence"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["home-memory-detail"].waitForExistence(timeout: 5))
+        app.buttons["home-sheet-done-memory-item"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["home-memory-row-0"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Next memory page"].exists)
+        app.buttons["Next memory page"].tap()
+        XCTAssertTrue(app.staticTexts["Wants the Thursday summary emailed"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "home-memory-next-page")
+    }
+
+    /// The sealed chapter opens its transcript; the active chapter, the current chat, does
+    /// not. Browsing a chapter's memory filters the memory list to that chapter.
+    @MainActor
+    func testHomeChaptersSealedOpensTranscriptActiveBrowsesMemory() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-chapters")
+        XCTAssertTrue(app.buttons["home-chapter-2"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["home-chapter-1"].exists)
+        keepScreenshot(named: "home-chapters-sheet")
+        app.buttons["home-chapter-2"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["home-chapter-detail"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "user messages")).firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["home-chapter-open-transcript"].exists, "The active chapter is the current chat and has no transcript row")
+        keepScreenshot(named: "home-chapter-active-detail")
+        tapManageRow(app, "home-chapter-browse-memory")
+        XCTAssertTrue(app.staticTexts["Scheduled the garden review for Thursday at 10:00."].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Asked to move garden planning to Thursday reviews"].exists, "Browsing a chapter shows only that chapter's memory")
+        keepScreenshot(named: "home-chapter-memory-filtered")
+        app.buttons["home-sheet-done-memory"].tap()
+        app.buttons["home-sheet-done-chapter"].tap()
+        XCTAssertTrue(app.buttons["home-chapter-1"].waitForExistence(timeout: 5))
+        app.buttons["home-chapter-1"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["home-chapter-detail"].waitForExistence(timeout: 5), app.debugDescription)
+        tapManageRow(app, "home-chapter-open-transcript")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-opened-session"], containing: "opened-session:home-chapter-sealed", timeout: 10))
+        XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Session", timeout: 10), "A read-only chapter chat must not claim Home")
+        keepScreenshot(named: "home-chapter-read-only")
+    }
+
+    /// The main sheet's rows and bottom container, with no Stop row and no Home state row:
+    /// the state is the stats card's pill.
+    @MainActor
+    func testManageHomeMainSheetStructure() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        let state = app.descendants(matching: .any)["home-manage-state"]
+        XCTAssertEqual(state.label, "Ready")
+        XCTAssertTrue(app.descendants(matching: .any)["session-usage-summary"].exists, "The stats card comes from the Home chat's session")
+        XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].exists)
+        XCTAssertTrue(app.buttons["Memory model"].firstMatch.waitForExistence(timeout: 5), "The memory model row is on Manage Home\n\(app.debugDescription)")
+        XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
+        XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
+        for row in ["home-manage-context", "home-manage-memory-browser", "home-manage-chapters", "home-manage-tasks", "home-manage-permissions"] {
+            XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
+        }
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-pause"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-disable"].exists)
+        XCTAssertFalse(app.staticTexts["Stop response"].exists, "Stop is the composer's control, not a Manage Home row")
+        XCTAssertFalse(app.descendants(matching: .any)["home-manage-stop"].exists)
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Home · ")).firstMatch.exists, "The state is a pill, not a row")
+        keepScreenshot(named: "manage-home-sheet")
+    }
+
+    @MainActor
+    func testHomeModelPickerAcknowledgementAndFailureStayInPopup() {
+        continueAfterFailure = false
+        for failure in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-model-picker"]
+            if failure { app.launchArguments.append("-home-model-failure") }
+            app.launch(); defer { app.terminate() }
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            app.buttons["Switch Model"].tap()
+            let haiku = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Claude Haiku 5.5")).firstMatch
+            XCTAssertTrue(haiku.waitForExistence(timeout: 5))
+            haiku.tap()
+            wait(for: [expectation(for: NSPredicate(format: "value == %@", "Applying configuration"), evaluatedWith: haiku)], timeout: 2)
+            if failure {
+                let failureNotice = app.descendants(matching: .any)["in-app-notice-card"]
+                XCTAssertTrue(failureNotice.waitForExistence(timeout: 10))
+                XCTAssertTrue(failureNotice.label.contains("Model choice refused; try again."))
+                XCTAssertTrue(failureNotice.isHittable, "The failure must be visible above the popup")
+                keepScreenshot(named: "home-model-failure-in-popup")
+                XCTAssertTrue(haiku.isEnabled)
+                haiku.tap()
+            }
+            wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: haiku)], timeout: 10)
+            XCTAssertTrue(app.staticTexts["Models"].exists)
+            keepScreenshot(named: "home-model-confirmed-open-\(failure ? "retry" : "success")")
+            app.buttons["Done"].tap()
+            XCTAssertTrue(app.staticTexts["Manage Home"].exists)
+            XCTAssertEqual(app.buttons["thinking-level-control"].value as? String, "Off")
+            app.buttons["home-sheet-done-manage"].tap()
+            XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
+            XCTAssertEqual(app.buttons["session-context-button"].label, "Manage Home")
+            app.terminate()
+        }
+    }
+
+    /// Every Manage Home sub-sheet opens at the medium detent, as the Manage Session
+    /// sub-sheets do: its frame stays well short of the full window.
+    @MainActor
+    func testManageHomeSubSheetsOpenAtMedium() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        let windowHeight = app.windows.firstMatch.frame.height
+        for (row, done) in [("home-manage-context", "home-sheet-done-context"), ("home-manage-memory-browser", "home-sheet-done-memory"),
+                            ("home-manage-chapters", "home-sheet-done-chapters"), ("home-manage-tasks", "home-sheet-done-tasks"),
+                            ("home-manage-permissions", "home-sheet-done-permissions")] {
+            tapManageRow(app, row)
+            let doneButton = app.buttons[done]
+            XCTAssertTrue(doneButton.waitForExistence(timeout: 5), row)
+            XCTAssertLessThan(doneButton.frame.minY, windowHeight * 0.6, "\(row) must open at the medium detent")
+            doneButton.tap()
+            XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5), row)
+        }
+    }
+
+    /// Light and dark captures of the sheets the coordinator reviews: the main sheet at
+    /// medium and large, and each sub-sheet in its own state.
+    @MainActor
+    func testManageHomeSheetCaptureMatrix() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+            if appearance == "dark" { app.launchArguments.append("-home-dark") }
+            app.launch()
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            keepScreenshot(named: "home-\(appearance)-manage-medium")
+            let title = app.staticTexts["Manage Home"].firstMatch
+            title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+            XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "home-\(appearance)-manage-large")
+            tapManageRow(app, "home-manage-context")
+            XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "home-\(appearance)-context")
+            app.buttons["home-sheet-done-context"].tap()
+            tapManageRow(app, "home-manage-memory-browser")
+            XCTAssertTrue(app.staticTexts["Asked to move garden planning to Thursday reviews"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "home-\(appearance)-memory")
+            app.descendants(matching: .any)["home-memory-row-0"].tap()
+            XCTAssertTrue(app.descendants(matching: .any)["home-memory-detail"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "home-\(appearance)-memory-detail")
+            tapManageRow(app, "home-memory-exact-evidence")
+            XCTAssertTrue(app.descendants(matching: .any)["home-evidence-text"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "home-\(appearance)-exact-evidence")
+            app.buttons["home-sheet-done-evidence"].tap()
+            app.buttons["home-sheet-done-memory-item"].tap()
+            app.buttons["home-sheet-done-memory"].tap()
+            tapManageRow(app, "home-manage-chapters")
+            XCTAssertTrue(app.buttons["home-chapter-2"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "home-\(appearance)-chapters")
+            app.buttons["home-chapter-1"].tap()
+            XCTAssertTrue(app.descendants(matching: .any)["home-chapter-detail"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "home-\(appearance)-chapter-detail")
+            app.buttons["home-sheet-done-chapter"].tap()
+            app.buttons["home-sheet-done-chapters"].tap()
+            tapManageRow(app, "home-manage-tasks")
+            XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "home-\(appearance)-tasks")
+            app.buttons["home-task-active"].tap()
+            XCTAssertTrue(app.descendants(matching: .any)["home-task-detail"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "home-\(appearance)-task-detail")
+            app.buttons["home-sheet-done-task"].tap()
+            app.buttons["home-sheet-done-tasks"].tap()
+            tapManageRow(app, "home-manage-permissions")
+            XCTAssertTrue(app.buttons["Reconfirm permissions"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "home-\(appearance)-permissions")
+            // The main sheet scrolled to its bottom container: pause or resume, and disable.
+            app.buttons["home-sheet-done-permissions"].tap()
+            XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5))
+            app.swipeUp()
+            XCTAssertTrue(app.descendants(matching: .any)["home-manage-disable"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "home-\(appearance)-manage-bottom")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testHomeCrossSurfaceProofMatrix() {
+        continueAfterFailure = false
+        let sheets: [(row: String, doneID: String, content: String, name: String)] = [
+            ("home-manage-context", "context", "home-context-breakdown", "context"),
+            ("home-manage-memory-browser", "memory", "Asked to move garden planning to Thursday reviews", "memory-browser"),
+            ("home-manage-chapters", "chapters", "home-chapter-2", "chapters"),
+            ("home-manage-tasks", "tasks", "home-task-active", "tasks"),
+            ("home-manage-permissions", "permissions", "Reconfirm permissions", "permissions"),
+        ]
+        for appearance in ["light", "dark"] {
+            for type in ["normal", "accessibility"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-phase-paused"]
+                if appearance == "dark" { app.launchArguments.append("-home-dark") }
+                if type == "accessibility" { app.launchArguments.append("-home-accessibility-type") }
+                app.launch()
+                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+                app.buttons["home-pinned-row"].tap()
+                XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 10))
+                XCTAssertTrue(app.textViews.firstMatch.isHittable)
+                openManageHome(app)
+                let state = app.descendants(matching: .any)["home-manage-state"]
+                XCTAssertTrue(state.label.contains("Paused"), state.label)
+                XCTAssertTrue(app.descendants(matching: .any)["home-manage-resume"].exists)
+                XCTAssertFalse(app.descendants(matching: .any)["home-manage-stop"].exists)
+                keepScreenshot(named: "manage-home-\(appearance)-\(type)")
+                for sheet in sheets {
+                    tapManageRow(app, sheet.row)
+                    XCTAssertTrue(app.descendants(matching: .any)[sheet.content].waitForExistence(timeout: 5), app.debugDescription)
+                    keepScreenshot(named: "proof-\(appearance)-\(type)-\(sheet.name)")
+                    app.buttons["home-sheet-done-\(sheet.doneID)"].tap()
+                    XCTAssertTrue(state.waitForExistence(timeout: 5), app.debugDescription)
+                }
+                app.terminate()
+            }
+        }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-reconnect-after-task-list"]
+        app.launch()
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        // The main sheet reads the task list for its Tasks subtitle, then the Tasks sheet
+        // reads it again: two reads before the reconnect.
+        let reads = app.staticTexts["fixture.home-task-list-reads"]
+        XCTAssertTrue(waitForLabel(reads, containing: "task-list-reads:1", timeout: 10))
+        tapManageRow(app, "home-manage-tasks")
+        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5), app.debugDescription)
+        // The fixture reconnects once after the first read; the mounted sheet must re-read.
+        XCTAssertTrue(waitForLabel(reads, containing: "task-list-reads:3", timeout: 10), "Mounted sheet did not re-read after reconnect")
+        XCTAssertTrue(app.buttons["home-task-active"].exists)
+        keepScreenshot(named: "proof-reconnected-tasks")
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 3))
+        app.activate()
+        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitForLabel(reads, containing: "task-list-reads:4", timeout: 10), "Foreground did not start a fresh tasks read")
+        keepScreenshot(named: "proof-background-foreground-tasks")
+        app.buttons["home-sheet-done-tasks"].tap()
+        app.terminate()
+    }
+
+    /// Profile memory selection uses the shared catalog and settings receipt.
+    /// Reopening reads the canonical value; dismissal must not repeat a write.
+    @MainActor
+    func testHomeMemoryModelRowSelectsPhysicalModel() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-phase-unconfigured", "-home-sheet-delayed-status"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        revealHomeSetting(app, "Memory model")
+        app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+        // The shared model picker lists only what the Gateway serves for the key.
+        let choice = modelPickerRow(app, "Memory Model B")
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(modelPickerRow(app, "Virtual model").exists)
+        choice.tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "fixture/memory-b", timeout: 5))
+        let modelRow = app.buttons["Memory model"].firstMatch
+        XCTAssertTrue(modelRow.waitForExistence(timeout: 5))
+        let converged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Memory Model B"), object: modelRow)
+        XCTAssertEqual(XCTWaiter.wait(for: [converged], timeout: 8), .completed)
+        keepScreenshot(named: "home-memory-model-configured")
+        app.buttons["home-sheet-done-manage"].tap()
+        openManageHome(app)
+        revealHomeSetting(app, "Memory model")
+        XCTAssertEqual(app.buttons["Memory model"].firstMatch.value as? String, "Memory Model B")
+        app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+        XCTAssertTrue(modelPickerRow(app, "Memory Model A").waitForExistence(timeout: 5))
+        app.buttons["Done"].firstMatch.tap()
+        app.buttons["home-sheet-done-manage"].tap()
+        XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"),
+                      "Catalog dismissal must not repeat the accepted selection")
+    }
+
+    @MainActor
+    func testHomeSettingsRefusalAndEmptyCatalogAndBrowserCapability() {
+        continueAfterFailure = false
+        for state in ["empty-models", "configure-refused", "browser-unsupported"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-\(state)"]
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            if state == "browser-unsupported" {
+                XCTAssertFalse(app.descendants(matching: .any)["home-manage-memory-browser"].exists)
+                XCTAssertTrue(app.descendants(matching: .any)["home-manage-context"].exists)
+            }
+            if state == "empty-models" {
+                revealHomeSetting(app, "Memory model")
+                app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+                XCTAssertTrue(app.staticTexts["No Models"].waitForExistence(timeout: 5), app.debugDescription)
+                XCTAssertFalse(modelPickerRow(app, "Memory Model B").exists)
+            } else if state == "configure-refused" {
+                revealHomeSetting(app, "Memory model")
+                app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+                let choice = modelPickerRow(app, "Memory Model B")
+                XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
+                choice.tap()
+                XCTAssertTrue(app.staticTexts["Memory configuration refused"].waitForExistence(timeout: 5))
+                XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "none", timeout: 3))
+            }
+            keepScreenshot(named: "home-settings-\(state)")
+            app.terminate()
+        }
+    }
+
+    /// Stop is the composer's control: it stops the accepted activation through the
+    /// same canonical operation, while Pause never does.
+    @MainActor
+    func testManageHomeStatesAndStopOwner() {
+        for (phase, label) in [("ready", "Ready"), ("active", "Working"), ("paused", "Paused"),
+                               ("blocked", "Memory blocked"), ("unconfigured", "Memory setup needed"),
+                               ("rollover-pending", "Recovery needed")] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-phase-\(phase)"]
+            app.launch()
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            let state = app.descendants(matching: .any)["home-manage-state"]
+            XCTAssertTrue(state.label.contains(label), state.label)
+            keepScreenshot(named: "manage-home-\(phase)")
+            if phase == "active" {
+                tapManageRow(app, "home-manage-pause")
+                // Pause leaves the accepted response running: the phase, not the memory, owns the pill.
+                XCTAssertTrue(waitForLabel(state, containing: "Working", timeout: 5))
+                app.buttons["home-sheet-done-manage"].tap()
+                XCTAssertTrue(app.buttons["Stop Tron"].waitForExistence(timeout: 5), "The composer owns Stop")
+                app.buttons["Stop Tron"].tap()
+                XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-abort-count"], containing: "abort-count:1", timeout: 5))
+                openManageHome(app)
+                XCTAssertTrue(waitForLabel(app.descendants(matching: .any)["home-manage-state"], containing: "Paused", timeout: 8))
+            }
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testManageHomeUnresolvedDisableRetainsCompletionControl() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-control-unresolved"]
+        app.launch()
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-disable")
+        confirmHomeAction(app)
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-check-completion"].waitForExistence(timeout: 8),
+                      "An unresolved disable must offer only the completion check")
+        app.buttons["home-sheet-done-manage"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].exists)
+        // Authoritative disable does not resolve an unknown command receipt: the
+        // ring still manages Home, and the fresh read shows Disabled.
+        openManageHome(app)
+        XCTAssertTrue(waitForLabel(app.descendants(matching: .any)["home-manage-state"], containing: "Disabled", timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-check-completion"].exists)
+        keepScreenshot(named: "manage-home-unresolved-disable")
+        app.terminate()
+    }
+
+    @MainActor
+    func testManageHomePauseResumeDisableKeepsChat() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        let row = app.buttons["home-pinned-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10))
+        openManageHome(app)
+        let state = app.descendants(matching: .any)["home-manage-state"]
+        tapManageRow(app, "home-manage-pause")
+        XCTAssertTrue(waitForLabel(state, containing: "Paused", timeout: 5))
+        keepScreenshot(named: "manage-home-paused")
+        tapManageRow(app, "home-manage-resume")
+        XCTAssertTrue(waitForLabel(state, containing: "Ready", timeout: 5))
+        // Disable is destructive: a cancelled confirmation keeps Home enabled.
+        tapManageRow(app, "home-manage-disable")
+        XCTAssertTrue(app.buttons["confirmation-cancel"].waitForExistence(timeout: 5))
+        app.buttons["confirmation-cancel"].tap()
+        XCTAssertTrue(waitForLabel(state, containing: "Ready", timeout: 3))
+        tapManageRow(app, "home-manage-disable")
+        confirmHomeAction(app)
+        XCTAssertTrue(waitForLabel(state, containing: "Disabled", timeout: 5))
+        app.buttons["home-sheet-done-manage"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].exists)
+        // Confirmed disable returns the ring to Manage Session.
+        XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Session", timeout: 8))
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["Manage Home"].exists)
+        app.terminate()
+    }
+
+    /// Home's role title ignores a generated canonical session name. The leading
+    /// toolbar action opens the existing terminal route, never a Home-specific shell.
+    @MainActor
+    func testHomeTitleAndManageTerminalUseCanonicalRoute() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["home-pinned-row"].label.contains("Home"))
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.navigationBars.staticTexts["Home fixture chat"].exists)
+        keepScreenshot(named: "home-canonical-title")
+        openManageHome(app)
+        let terminal = app.buttons["manage-home-terminal"]
+        let done = app.buttons["home-sheet-done-manage"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        XCTAssertTrue(terminal.isEnabled)
+        XCTAssertLessThan(terminal.frame.midX, app.frame.width / 2)
+        XCTAssertEqual(terminal.frame.midY, done.frame.midY, accuracy: 8)
+        XCTAssertGreaterThan(done.frame.minY, app.frame.height * 0.4, "Manage Home still opens at medium")
+        keepScreenshot(named: "manage-home-leading-terminal")
+        terminal.tap()
+        XCTAssertTrue(app.staticTexts["Terminal unavailable"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Fixture terminal unavailable for home-session"].exists,
+                      "The standard TerminalSheet must request terminal.list for the exact Home session")
+        keepScreenshot(named: "home-terminal-established-unavailable-state")
+    }
+
+    @MainActor
+    func testManageHomeTerminalRespectsUnavailableCapability() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-terminal-unsupported"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        let terminal = app.buttons["manage-home-terminal"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
+        XCTAssertFalse(terminal.isEnabled)
+        keepScreenshot(named: "manage-home-terminal-unsupported")
+    }
+
+    /// Manage Home opens at medium, drags to large, and lists every Home entry. Its
+    /// child sheets keep their own lifetime and return to it; a sealed chapter opens
+    /// read-only and never claims the Home status.
+    @MainActor
+    func testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+        let homeControlCount = app.staticTexts["fixture.home-control-count"]
+        XCTAssertTrue(homeControlCount.waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
+        // Home retains its direct Settings gear; ordinary chats use Manage Session.
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.navigationBars.buttons["Manage Home"].exists)
+        gear.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
+        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Home Settings must not apply controls")
+        keepScreenshot(named: "home-gear-settings-sheet")
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5), app.debugDescription)
+        // Its context ring opens Manage Home at the medium detent, like Manage Session.
+        openManageHome(app)
+        let state = app.descendants(matching: .any)["home-manage-state"]
+        XCTAssertTrue(state.label.contains("Ready"), state.label)
+        let done = app.buttons["home-sheet-done-manage"]
+        let windowHeight = app.windows.firstMatch.frame.height
+        let mediumTop = done.frame.minY
+        XCTAssertGreaterThan(mediumTop, windowHeight * 0.40, "Manage Home must open at its medium detent")
+        keepScreenshot(named: "manage-home-medium")
+        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Manage Home must not apply controls")
+        // It drags to large from the sheet title.
+        let title = app.staticTexts["Manage Home"].firstMatch
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < mediumTop - 100 }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed, "Manage Home must drag to its large detent")
+        keepScreenshot(named: "manage-home-large")
+        XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-chapters"].exists)
+        for row in ["home-manage-context", "home-manage-memory-browser", "home-manage-tasks",
+                    "home-manage-permissions", "home-manage-pause", "home-manage-disable"] {
+            XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
+        }
+        // A child surface keeps its own sheet lifetime above Manage Home and returns to it.
+        tapManageRow(app, "home-manage-memory-browser")
+        XCTAssertTrue(app.staticTexts["Asked to move garden planning to Thursday reviews"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["home-sheet-done-memory"].tap()
+        XCTAssertTrue(state.waitForExistence(timeout: 5), app.debugDescription)
+        // The Chapters child sheet shows the whole ledger (#740): state, dates and
+        // size against the limits; a sealed chapter opens read-only and never
+        // claims the Home status.
+        tapManageRow(app, "home-manage-chapters")
+        XCTAssertTrue(app.buttons["home-chapter-2"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["home-chapter-1"].exists)
+        keepScreenshot(named: "home-chapters-sheet")
+        app.buttons["home-chapter-1"].tap()
+        tapManageRow(app, "home-chapter-open-transcript")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-opened-session"], containing: "opened-session:home-chapter-sealed", timeout: 10))
+        XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Session", timeout: 10), "A read-only chapter chat must not claim Home")
+        XCTAssertFalse(app.buttons["Manage Home"].exists)
+        keepScreenshot(named: "home-chapter-read-only")
+        // Opening a chapter replaced the single chat route, so Back returns to the
+        // dashboard; an ordinary chat's gear opens Settings, as Home's does.
+        app.buttons["Back"].tap()
+        let ordinary = app.buttons["session-row-home-shell-fixture:ordinary-session"]
+        XCTAssertTrue(ordinary.waitForExistence(timeout: 10), app.debugDescription)
+        ordinary.tap()
+        XCTAssertTrue(app.staticTexts["Ordinary session chat"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Manage Home"].exists)
+        let ordinaryGear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(ordinaryGear.waitForExistence(timeout: 5), app.debugDescription)
+        ordinaryGear.tap()
+        XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
+        XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening ordinary-chat Settings must not apply Home controls")
+        keepScreenshot(named: "ordinary-chat-settings-sheet")
+    }
+
+    @MainActor
+    private func confirmHomeAction(_ app: XCUIApplication) {
+        let confirm = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "confirmation-primary")).firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
+        confirm.tap()
+    }
+
+    @MainActor
+    private func revokeHomePermission(_ app: XCUIApplication, _ label: String) {
+        let revoke = app.buttons[label]
+        if !revoke.isHittable { app.swipeUp() }
+        XCTAssertTrue(revoke.waitForExistence(timeout: 5), app.debugDescription)
+        revoke.tap()
+        confirmHomeAction(app)
+    }
+
+    @MainActor
+    func testHomeTaskEmptyAndRecoveryFence() {
+        continueAfterFailure = false
+        for state in ["tasks-empty", "task-fenced"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-\(state)"]
+            app.launch()
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            tapManageRow(app, "home-manage-tasks")
+            if state == "tasks-empty" {
+                XCTAssertTrue(app.staticTexts["No tasks"].waitForExistence(timeout: 5))
+                keepScreenshot(named: "home-tasks-empty")
+                app.buttons["home-sheet-done-tasks"].tap()
+                tapManageRow(app, "home-manage-permissions")
+                XCTAssertTrue(app.staticTexts["Home task namespace refused: not-initialized"].waitForExistence(timeout: 5))
+                XCTAssertFalse(app.buttons["Reconfirm permissions"].exists)
+            } else {
+                XCTAssertTrue(app.staticTexts["Task recovery needed"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.staticTexts["unsafe-state"].exists)
+                XCTAssertFalse(app.buttons["home-task-active"].exists)
+                keepScreenshot(named: "home-task-recovery-fenced")
+            }
+            app.terminate()
+        }
+    }
+
+    /// The row stays routable while the successor is reserved: it opens the sealed
+    /// predecessor, the send goes through the logical Home route, and the chat
+    /// follows Home to the chapter it names once that send materializes it.
+    @MainActor
+    func testHomeRolloverPendingRoutesSendAndFollowsSuccessor() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-rollover"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        XCTAssertTrue(waitForLabel(app.descendants(matching: .any)["home-manage-state"], containing: "Recovery needed", timeout: 10))
+        app.buttons["home-sheet-done-manage"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-opened-session"], containing: "opened-session:home-session", timeout: 10))
+        let composer = app.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 10))
+        composer.tap(); composer.typeText("After rollover")
+        let send = app.buttons["Send message"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: send)], timeout: 5), .completed)
+        send.tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-prompt-route"], containing: "prompt-route:home.prompt", timeout: 10))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-opened-session"], containing: "opened-session:home-successor", timeout: 20))
+        XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Home", timeout: 10), "The successor chat did not claim the Home status")
+        keepScreenshot(named: "home-rollover-followed")
+    }
+
+    @MainActor
+    private func chooseHomeGrantExpiry(_ app: XCUIApplication) {
+        let picker = app.descendants(matching: .any)["home-grant-expiry"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 3), app.debugDescription)
+        picker.buttons.firstMatch.tap()
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date())!
+        let formatter = DateFormatter(); formatter.dateFormat = "EEEE, MMMM d"
+        let day = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", formatter.string(from: tomorrow))).firstMatch
+        XCTAssertTrue(day.waitForExistence(timeout: 3), app.debugDescription)
+        day.tap()
+        // Dismiss the native compact DatePicker popover without touching a control.
+        app.buttons["PopoverDismissRegion"].tap()
+    }
+
+    @MainActor
+    func testManageHomeRejectsStaleRouteAction() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-stale-route"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        // Mounting Manage Home installs the retained action; the stale invocation
+        // after the profile switch must be refused by the sheet's identity fences.
+        openManageHome(app)
+        app.buttons["home-sheet-done-manage"].tap()
+        XCTAssertTrue(app.buttons["fixture.invoke-stale-home-action"].waitForExistence(timeout: 5))
+        app.buttons["fixture.invoke-stale-home-action"].tap()
+        XCTAssertTrue(app.staticTexts["fixture.stale-action-finished"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 3))
+        XCTAssertTrue(app.staticTexts["fixture.home-diagnostics"].label.contains("competing-profile"))
+        keepScreenshot(named: "manage-home-stale-route-refused")
+    }
+
+    @MainActor
+    func testManageHomeAcceptedControlContinuesInBackground() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-control-delayed"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-pause")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 3))
+        XCTAssertTrue(app.staticTexts["fixture.home-command-state"].label.contains("running"))
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 3))
+        // The fixture resolves after six seconds, while presentation is retired.
+        Thread.sleep(forTimeInterval: 7)
+        app.activate()
+        let state = app.descendants(matching: .any)["home-manage-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 10), app.debugDescription)
+        if app.descendants(matching: .any)["home-manage-check-completion"].waitForExistence(timeout: 2) {
+            app.descendants(matching: .any)["home-manage-check-completion"].tap()
+        }
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-command-state"], containing: "idle", timeout: 5))
+        XCTAssertTrue(waitForLabel(state, containing: "Paused", timeout: 8))
+        XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"))
+        keepScreenshot(named: "manage-home-background-accepted-paused")
+        app.buttons["home-sheet-done-manage"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
+    }
+
+    /// Manage Home's pending settings changes (settings-model.md 5.5): each row
+    /// is decided by its own digest-bound Approve or Decline, and a decided row leaves.
+    @MainActor
+    func testManageHomeSettingsApprovalsApproveAndDecline() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-settings-approvals"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        let header = app.descendants(matching: .any)["settings-approvals-header"]
+        XCTAssertTrue(header.waitForExistence(timeout: 5), app.debugDescription)
+        let approveRow = app.descendants(matching: .any)["settings-approval-settings-request-approve"]
+        let declineRow = app.descendants(matching: .any)["settings-approval-settings-request-decline"]
+        XCTAssertTrue(approveRow.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(declineRow.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["settings-approval-settings-request-chat"].exists,
+                       "A chat agent's request belongs to that chat's Manage Session, not Manage Home")
+        // The exact change, who asked and the confirm text, all Gateway text.
+        for text in ["Not set → Trusted", "Asked by Home", "Asked by Home task nightly-sync", "/work/other", "Trusting a project lets its files run"] {
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.waitForExistence(timeout: 5), text)
+        }
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Expires in")).firstMatch.exists, "The expiry reads as a relative time")
+        keepScreenshot(named: "home-settings-approvals-pending")
+
+        tapScrolling(app.buttons["settings-approval-approve-settings-request-approve"], in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-decisions"], containing: "approved:settings-request-approve", timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+        XCTAssertTrue(approveRow.waitForNonExistence(timeout: 5))
+
+        tapScrolling(app.buttons["settings-approval-decline-settings-request-decline"], in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-decisions"], containing: "declined:settings-request-decline", timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:2", timeout: 5))
+        XCTAssertTrue(header.waitForNonExistence(timeout: 5), "No pending Home change leaves the approvals section empty")
+        keepScreenshot(named: "home-settings-approvals-decided")
+    }
+
+    /// Scrolls the sheet until the control is hittable, then taps it.
+    @MainActor
+    private func tapScrolling(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<4 where !element.isHittable { app.swipeUp() }
+        element.tap()
+    }
+
+    /// A Home sheet belongs to the profile that opened it: once the selected profile
+    /// changes, the sheet is dismissed rather than left presenting another Mac's Home.
+    @MainActor
+    func testHomeSheetDismissesWhenProfileSwitches() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-switch-profile-after-task-list"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-tasks")
+        XCTAssertTrue(app.buttons["home-sheet-done-tasks"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5), app.debugDescription)
+        // Reloading is the sheet's second read; the fixture then selects another profile through
+        // the production switch, which must release the chat and the sheet it presents.
+        app.buttons["Reload tasks"].tap()
+        XCTAssertTrue(app.buttons["home-sheet-done-tasks"].waitForNonExistence(timeout: 10),
+                      "A profile switch left the Home sheet presented for the previous profile")
+    }
+
+    @MainActor
+    func testManageHomeBackgroundReconnectAndUnresolvedCompletion() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-control-unresolved"]
+        app.launch()
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-pause")
+        let state = app.descendants(matching: .any)["home-manage-state"]
+        // The unresolved command is the Memory row's subtitle; the state pill keeps the Home phase.
+        let memoryRow = app.descendants(matching: .any)["home-manage-memory-browser"]
+        XCTAssertTrue(waitForLabel(memoryRow, containing: "unresolved", timeout: 8))
+        keepScreenshot(named: "manage-home-unresolved")
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(state.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitForLabel(memoryRow, containing: "unresolved", timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["home-manage-pause"].exists)
+        tapManageRow(app, "home-manage-check-completion")
+        // The first check finds the receipt still pending and must not claim completion.
+        XCTAssertTrue(waitForLabel(memoryRow, containing: "unresolved", timeout: 5))
+        tapManageRow(app, "home-manage-check-completion")
+        XCTAssertTrue(waitForLabel(state, containing: "Paused", timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+        keepScreenshot(named: "manage-home-reconnected-paused")
+        app.terminate()
+    }
+
+    private func waitForLabel(_ element: XCUIElement, containing text: String, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate(format: "label CONTAINS %@", text)
+        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
+    }
+
+    /// Opens Manage Home from the composer's context ring (#748, #799). The ring
+    /// names the sheet it opens, so its "Manage Home" label is the claim; the
+    /// sheet's state row is the readiness signal.
+    @MainActor
+    private func openManageHome(_ app: XCUIApplication) {
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(ring.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitForLabel(ring, containing: "Manage Home", timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitForEnabled(ring, timeout: 10), app.debugDescription)
+        ring.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    @MainActor
+    private func tapManageRow(_ app: XCUIApplication, _ id: String) {
+        let row = app.descendants(matching: .any)[id]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        row.tap()
+    }
+
+    /// A running Home change is shown on the row as an update: the row is not a
+    /// set-up or a completion check while the designation is still in flight.
+    @MainActor
+    func testHomePinnedRowNamesRunningDesignationAsUpdate() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-undesignated", "-home-control-delayed"]
+        app.launch()
+        defer { app.terminate() }
+        let row = app.buttons["home-pinned-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        XCTAssertTrue(waitForLabel(row, containing: "Updating Home", timeout: 3), row.label)
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 15), app.debugDescription)
+    }
+
+    @MainActor
+    func testHomePinnedRowCapabilityDesignationAndExactProfileRoute() {
+        continueAfterFailure = false
+        // Capability-off baseline: no pinned row or Manage Home ring; the ordinary session opens unchanged.
+        let unsupported = XCUIApplication()
+        unsupported.launchArguments = ["-tron-home-dashboard-fixture", "-home-capability-absent"]
+        unsupported.launch()
+        XCTAssertFalse(unsupported.buttons["home-pinned-row"].exists)
+        let ordinary = unsupported.buttons["session-row-home-shell-fixture:ordinary-session"]
+        XCTAssertTrue(ordinary.waitForExistence(timeout: 10), unsupported.debugDescription)
+        ordinary.tap()
+        XCTAssertTrue(unsupported.staticTexts["Ordinary session chat"].waitForExistence(timeout: 10))
+        XCTAssertFalse(unsupported.buttons["Manage Home"].exists)
+        keepScreenshot(named: "proof-capability-off-ordinary-chat")
+        unsupported.terminate()
+
+        let ready = XCUIApplication()
+        ready.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        ready.launch()
+        let home = ready.buttons["home-pinned-row"]
+        XCTAssertTrue(home.waitForExistence(timeout: 10))
+        home.tap()
+        XCTAssertTrue(ready.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10))
+        XCTAssertTrue(ready.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
+        ready.terminate()
+
+        for state in ["undesignated", "disabled", "missing-session"] {
+            let setup = XCUIApplication()
+            setup.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-\(state)"]
+            setup.launch()
+            let designate = setup.buttons["home-pinned-row"]
+            XCTAssertTrue(designate.waitForExistence(timeout: 10), state)
+            designate.tap()
+            XCTAssertTrue(setup.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), state)
+            XCTAssertTrue(setup.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
+            setup.terminate()
+        }
+    }
+
+    @MainActor
+    func testHomeRowRetainsStatusAcrossRepeatedBackNavigation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-navigation-refresh"]
+        app.launch()
+        defer { app.terminate() }
+        let home = app.buttons["home-pinned-row"]
+        XCTAssertTrue(waitForLabel(home, containing: "Ready", timeout: 10), app.debugDescription)
+        for (index, session) in ["ordinary", "home", "ordinary", "home"].enumerated() {
+            let row = session == "home" ? home : app.buttons["session-row-home-shell-fixture:ordinary-session"]
+            row.tap()
+            XCTAssertTrue(app.navigationBars.staticTexts[session == "home" ? "Home" : "Ordinary session chat"].waitForExistence(timeout: 10))
+            app.buttons["Back"].tap()
+            // Sample the native row repeatedly while the Gateway response is held.
+            // Waiting for Ready here would hide precisely the reported flicker.
+            for frame in 0..<3 {
+                keepScreenshot(named: "853-simulator-return-\(index)-frame-\(frame)")
+                XCTAssertTrue(home.exists, "Home disappeared on return \(index), frame \(frame)")
+                XCTAssertTrue(home.label.contains("Ready"), "Retained status replaced: \(home.label)")
+                XCTAssertTrue(home.isEnabled)
+            }
+        }
+    }
+
+    @MainActor
+    func testHomeChatStatusPollingResumesAfterCoveredManageHomeSheet() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture"]
+        app.launch()
+        let home = app.buttons["home-pinned-row"]
+        XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
+        home.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["fixture.home-diagnostics"].label.contains("home-shell-fixture"))
+        let count = app.staticTexts["fixture.home-status-count"]
+        XCTAssertTrue(count.waitForExistence(timeout: 5))
+        let statusCount = { Int(count.label.split(separator: ":").last ?? "0") ?? 0 }
+        // The Home chat's context ring opens Manage Home (#725, #799); its one status
+        // read must settle inside the baseline window below, and it never polls.
+        openManageHome(app)
+        XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 5))
+        // Let a read admitted before cover settle, then require a quiet interval
+        // longer than the five-second fallback while the managed sheet is open.
+        Thread.sleep(forTimeInterval: 1)
+        let coveredBaseline = statusCount()
+        Thread.sleep(forTimeInterval: 5.5)
+        XCTAssertEqual(statusCount(), coveredBaseline, "Home status reads continued while Manage Home covered the chat")
+        app.buttons["home-sheet-done-manage"].tap()
+        let increased = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            statusCount() > coveredBaseline
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [increased], timeout: 7), .completed)
+        app.terminate()
+    }
+
+    // Failure modes (#748, #799): the Home chat's composer context ring opens the ordinary
+    // Manage Session sheet, whose controls Home refuses; or the fix routes an ordinary
+    // chat's ring away from Manage Session.
+    @MainActor
+    func testComposerContextRingOpensManageHomeInHomeAndManageSessionElsewhere() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
+        // The ring's claim proves the Home status is routed before the ring is judged.
+        XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Home", timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.buttons["Settings"].exists)
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(ring.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitForEnabled(ring, timeout: 10), app.debugDescription)
+        ring.tap()
+        XCTAssertFalse(app.staticTexts["Manage Session"].waitForExistence(timeout: 2), "The Home chat's ring opened Manage Session")
+        let state = app.descendants(matching: .any)["home-manage-state"]
+        XCTAssertTrue(state.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "home-ring-manage-home")
+        app.buttons["home-sheet-done-manage"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
+        // VoiceOver names the ring by what it opens.
+        XCTAssertEqual(ring.label, "Manage Home")
+
+        // An ordinary chat's ring keeps opening Manage Session.
+        app.buttons["Back"].tap()
+        let ordinary = app.buttons["session-row-home-shell-fixture:ordinary-session"]
+        XCTAssertTrue(ordinary.waitForExistence(timeout: 10), app.debugDescription)
+        ordinary.tap()
+        XCTAssertTrue(app.staticTexts["Ordinary session chat"].waitForExistence(timeout: 10))
+        let ordinaryRing = app.buttons["session-context-button"]
+        XCTAssertTrue(ordinaryRing.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitForEnabled(ordinaryRing, timeout: 10), app.debugDescription)
+        XCTAssertEqual(ordinaryRing.label, "Manage Session")
+        ordinaryRing.tap()
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 5), app.debugDescription)
+        let manageSessionDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(manageSessionDone.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertGreaterThan(manageSessionDone.frame.minY, app.windows.firstMatch.frame.height * 0.40, "Manage Session opens at medium (the detent Manage Home matches)")
+        XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
+        keepScreenshot(named: "ordinary-ring-manage-session")
+        manageSessionDone.tap()
+        // The gear opens Settings (this Mac and iPhone) in every chat; the ring is the chat's own.
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 5), "The ordinary gear must name and open Settings")
+        gear.tap()
+        XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
+        keepScreenshot(named: "ordinary-gear-settings")
+        app.buttons["settings-done"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Ordinary session chat"].waitForExistence(timeout: 5))
+        app.buttons["Back"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5),
+                      "Opening and dismissing management sheets must not apply Home controls")
+    }
+
+    /// Opening an inherited context window must not create a Chat override.
+    /// Exercise the actual Manage Home card and shared anchored editor, not a duplicate control fixture.
+    @MainActor
+    func testManageHomeContextWindowOpenDismissDoesNotWrite() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitForLabel(ring, containing: "Manage Home", timeout: 10))
+        ring.tap()
+        let control = app.buttons["context-window-control"]
+        reveal(control, in: app)
+        XCTAssertTrue(control.isHittable, app.debugDescription)
+        let inherited = control.value as? String
+        keepScreenshot(named: "manage-home-context-window-row")
+        control.tap()
+        let slider = app.descendants(matching: .any)["context-window-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "manage-home-context-window-editor")
+        // Tap the overlay's backdrop inside the sheet, not the status bar outside its host.
+        let state = app.descendants(matching: .any)["home-manage-state"]
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: state.frame.midX, dy: state.frame.midY)).tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 5), "Dismiss must retire the editor")
+        XCTAssertTrue(control.waitForExistence(timeout: 5))
+        XCTAssertEqual(control.value as? String, inherited)
+        app.buttons["home-sheet-done-manage"].tap()
+        app.buttons["Back"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5),
+                      "Opening and dismissing an inherited value must not call settings.change")
+    }
+
+    /// A model row in the shared ModelPicker, named by the model's display name.
+    /// A collapsed provider section is opened first, as a user would.
+    private func modelPickerRow(_ app: XCUIApplication, _ name: String) -> XCUIElement {
+        let collapsed = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@ AND value == %@", " models", "collapsed")).firstMatch
+        if collapsed.waitForExistence(timeout: 3) { collapsed.tap() }
+        return app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+    }
+
+    /// Reveals a Home setting's control: the memory model is a row on Manage Home;
+    /// any other key is in Home Settings, on its section's sheet. Returns how many
+    /// sheets it opened (the caller closes them before Manage Home).
+    @MainActor
+    @discardableResult
+    private func revealHomeSetting(_ app: XCUIApplication, _ label: String, section: String = "model") -> Int {
+        let title = app.staticTexts["Manage Home"].firstMatch
+        if app.buttons["home-sheet-done-manage"].frame.minY > app.windows.firstMatch.frame.height * 0.4 {
+            title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
+                thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+        }
+        let controls = app.buttons.matching(NSPredicate(format: "label == %@", label))
+        var opened = 0
+        if !controls.firstMatch.waitForExistence(timeout: 3) {
+            let settings = app.buttons["home-manage-settings"]
+            reveal(settings, in: app)
+            settings.tap()
+            let link = app.buttons["settings-section-\(section)-open"]
+            XCTAssertTrue(link.waitForExistence(timeout: 5), app.debugDescription)
+            reveal(link, in: app)
+            link.tap()
+            XCTAssertTrue(app.descendants(matching: .any)["settings-section-\(section)-detail"].waitForExistence(timeout: 5),
+                          app.debugDescription)
+            opened = 2
+        }
+        for _ in 0..<8 where !controls.allElementsBoundByIndex.contains(where: \.isHittable) { app.swipeUp() }
+        XCTAssertTrue(controls.allElementsBoundByIndex.contains(where: \.isHittable), app.debugDescription)
+        return opened
+    }
+
+    @MainActor
+    func testManageHomeProfileSettingChangeReopenAndCancel() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        var opened = revealHomeSetting(app, "Worker thinking")
+        app.buttons.matching(NSPredicate(format: "label == %@", "Worker thinking")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+        XCTAssertTrue(app.buttons["settings-option-Low"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["settings-option-Low"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
+        for _ in 0..<opened { closeTopSheet(app) }
+        app.buttons["home-sheet-done-manage"].tap()
+        openManageHome(app)
+        opened = revealHomeSetting(app, "Worker thinking")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == %@ AND value == %@", "Worker thinking", "Low")).firstMatch
+            .waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "manage-home-profile-worker-thinking")
+        app.buttons.matching(NSPredicate(format: "label == %@", "Worker thinking")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+        XCTAssertTrue(app.buttons["settings-option-Medium"].waitForExistence(timeout: 5))
+        closeTopSheet(app) // the choice picker, without choosing
+        for _ in 0..<opened { closeTopSheet(app) }
+        app.buttons["home-sheet-done-manage"].tap()
+        XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"), "Dismissing a choice must not change Profile")
+    }
+
+    private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate(format: "isEnabled == true")
+        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
+    }
+
+    // Home is never an ordinary session row: while it is Working, its pinned row
+    // is the only Home entry in the dashboard (#756).
+    @MainActor
+    func testHomeIsNotAnOrdinarySessionRowWhileWorking() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-phase-active"]
+        app.launch()
+        defer { app.terminate() }
+        let pinned = app.buttons["home-pinned-row"]
+        XCTAssertTrue(pinned.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(pinned.label.contains("Working"), pinned.label)
+        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:ordinary-session"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.buttons["session-row-home-shell-fixture:home-session"].exists, "Home must not be an ordinary session row")
+    }
+
+    @MainActor
+    func testBlockedHomeRowDoesNotClaimReadiness() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-phase-blocked"]
+        app.launch()
+        let row = app.buttons["home-pinned-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.label.contains("Blocked"), row.label)
+        XCTAssertFalse(row.label.contains("Ready"), row.label)
+        app.terminate()
+    }
+
+    @MainActor
+    func testHomePinnedRowLightDarkAndAccessibilityCaptures() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            for type in ["normal", "accessibility"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+                if appearance == "dark" { app.launchArguments.append("-home-dark") }
+                if type == "accessibility" { app.launchArguments.append("-home-accessibility-type") }
+                app.launch()
+                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+                XCTAssertTrue(app.buttons["session-row-home-shell-fixture:ordinary-session"].exists)
+                keepScreenshot(named: "home-pinned-\(appearance)-\(type)")
+                app.terminate()
+            }
+        }
+    }
+
+    // Failure modes: an unexplained disabled control; pending work mistaken for
+    // a lock; browsing/dismissal blocked; receipt settlement leaving controls stuck.
+    @MainActor
+    func testConfigurationFeedbackExplainsLockAndPendingWithoutBlockingBrowsing() {
+        configurationFeedbackJourney(appearance: "light")
+    }
+
+    @MainActor
+    func testConfigurationFeedbackExplainsLockAndPendingWithoutBlockingBrowsingInDark() {
+        configurationFeedbackJourney(appearance: "dark")
+    }
+
+    /// A running chat's Manage Session stays locked while the Gateway rebaselines
+    /// it: the lock and the disabled Thinking control never blink.
+    @MainActor
+    func testRunningConfigurationLockHoldsAcrossRebaselines() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Manage running session"].waitForExistence(timeout: 5))
+        app.buttons["Manage running session"].tap()
+        let thinking = app.buttons["thinking-level-control"]
+        let lock = app.buttons["Why configuration is unavailable"]
+        XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
+        var samples: [String] = []
+        for _ in 0..<30 {
+            samples.append("\(lock.exists ? "L" : "-")\(thinking.exists ? (thinking.isEnabled ? "E" : "D") : "?")")
+        }
+        XCTAssertEqual(Set(samples), ["LD"], "Lock/Thinking across rebaselines: \(samples.joined(separator: " "))")
+    }
+
+    @MainActor
+    private func configurationFeedbackJourney(appearance: String) {
+        continueAfterFailure = false
+        // Keyboard/search animation monitoring belongs to one XCTest automation
+        // session. Each appearance gets its own case, not a second launch under
+        // the first launch's animation observer (which can wait 60s per action).
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        let thinking = app.buttons["thinking-level-control"]
+        XCTAssertTrue(thinking.waitForExistence(timeout: 5))
+        XCTAssertFalse(thinking.isEnabled)
+        keepScreenshot(named: "configuration-lock-\(appearance)")
+        let explanation = app.buttons["Why configuration is unavailable"]
+        XCTAssertTrue(explanation.waitForExistence(timeout: 3), "A disabled control needs a touch-accessible explanation")
+        explanation.tap()
+        XCTAssertTrue(app.staticTexts["Finishing the session. Configuration will be available shortly."].waitForExistence(timeout: 3))
+        keepScreenshot(named: "configuration-lock-explanation-\(appearance)")
+        app.buttons["Done"].tap()
+        app.buttons["Release terminal settlement"].tap()
+        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+        thinking.tap()
+        let slider = app.descendants(matching: .any)["thinking-level-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 3))
+        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        app.buttons["Done"].tap()
+        wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
+        let switchModel = app.buttons["Switch Model"]
+        XCTAssertTrue(switchModel.isEnabled, "Pending configuration must not block model browsing")
+        XCTAssertEqual(switchModel.value as? String, "Applying configuration")
+        keepScreenshot(named: "configuration-applying-\(appearance)")
+        // Semantic lookup finds the enabled control, but XCTest reports this
+        // post-dismissal activation point as not hittable. Use its observed
+        // center; the assertions below still require real pending-state browsing.
+        switchModel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let selected = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout: 3))
+        XCTAssertFalse(selected.isEnabled)
+        XCTAssertEqual(selected.value as? String, "Applying configuration")
+        keepScreenshot(named: "models-applying-\(appearance)")
+        app.buttons["Search models"].tap()
+        let search = app.textFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 3))
+        if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
+        search.typeText("Alternative")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch.waitForExistence(timeout: 3))
+        app.buttons["Close search"].tap()
+        app.buttons["Done"].tap()
+        app.buttons["Complete superseded thinking"].tap()
+        XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
+        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+        XCTAssertEqual(thinking.value as? String, "Off")
+        XCTAssertFalse(app.buttons["Why configuration is unavailable"].exists)
+    }
+
+    /// Real native taps through the production nested sheet, with receipt and
+    /// snapshot order controlled independently at the Gateway socket boundary.
+    @MainActor
+    func testModelAcknowledgementResolvesWithoutDismissingPicker() {
+        continueAfterFailure = false
+        for order in ["snapshot-first", "receipt-first", "superseded"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-session-configuration-fixture", "-model-ack-\(order)"]
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+            app.buttons["Stop session"].tap()
+            app.buttons["Release terminal settlement"].tap()
+            app.buttons["Switch Model"].tap()
+            let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch
+            let original = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
+            XCTAssertTrue(alternative.waitForExistence(timeout: 5))
+            alternative.tap()
+            wait(for: [expectation(for: NSPredicate(format: "value == %@", "Applying configuration"), evaluatedWith: alternative)], timeout: 2)
+            XCTAssertFalse(original.isEnabled, "Rapid replacement choices are refused while one intent owns the receipt")
+            XCTAssertFalse(alternative.isEnabled)
+            keepScreenshot(named: "model-\(order)-pending-open")
+            let confirmed = order == "superseded" ? original : alternative
+            wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: confirmed)], timeout: 10)
+            XCTAssertTrue(app.staticTexts["Models"].exists, "Acknowledgement must not dismiss the picker")
+            keepScreenshot(named: "model-\(order)-confirmed-open")
+            confirmed.tap() // Reselect is a no-op, not another mutation.
+            XCTAssertEqual(confirmed.value as? String, "Selected")
+            app.buttons["Done"].tap()
+            XCTAssertTrue(app.staticTexts["Model requests: 1"].waitForExistence(timeout: 3))
+            app.buttons["Switch Model"].tap()
+            XCTAssertEqual(confirmed.value as? String, "Selected", "Reopening derives the acknowledged authoritative model")
+            if order != "superseded" {
+                original.tap()
+                wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: original)], timeout: 10)
+                XCTAssertTrue(app.staticTexts["Models"].exists, "A second distinct choice remains usable in this presentation")
+            }
+            app.buttons["Done"].tap()
+            XCTAssertTrue(app.staticTexts[order == "superseded" ? "Model requests: 1" : "Model requests: 2"].waitForExistence(timeout: 3))
+            XCTAssertEqual(app.buttons["thinking-level-control"].value as? String, "Off")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testModelFailureRecoversAndDismissedPendingSelectionReconciles() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-model-ack-failure"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        app.buttons["Release terminal settlement"].tap()
+        app.buttons["Switch Model"].tap()
+        let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch
+        let original = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
+        XCTAssertTrue(alternative.waitForExistence(timeout: 5))
+        alternative.tap()
+        let failureNotice = app.descendants(matching: .any)["in-app-notice-card"]
+        XCTAssertTrue(failureNotice.waitForExistence(timeout: 10))
+        XCTAssertTrue(failureNotice.label.contains("Model choice refused; try again."))
+        XCTAssertTrue(failureNotice.isHittable)
+        keepScreenshot(named: "model-failure-visible-in-picker")
+        XCTAssertTrue(app.staticTexts["Models"].exists)
+        XCTAssertEqual(original.value as? String, "Selected")
+        XCTAssertTrue(alternative.isEnabled)
+        alternative.tap()
+        wait(for: [expectation(for: NSPredicate(format: "value == %@", "Applying configuration"), evaluatedWith: alternative)], timeout: 2)
+        app.buttons["Done"].tap() // Accepted mutation survives picker dismissal.
+        app.buttons["Switch Model"].tap()
+        wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: alternative)], timeout: 10)
+        keepScreenshot(named: "model-retry-confirmed-after-reopen")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Model requests: 2"].waitForExistence(timeout: 3))
+    }
+
+    @MainActor
+    func testSupersededThinkingReceiptReleasesMountedConfiguration() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        app.buttons["Release terminal settlement"].tap()
+        let thinking = app.buttons["thinking-level-control"]
+        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+        thinking.tap()
+        let slider = app.descendants(matching: .any)["thinking-level-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 3))
+        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        app.buttons["Done"].tap()
+        wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
+        app.buttons["Complete superseded thinking"].tap()
+        XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
+        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+        XCTAssertTrue(thinking.value as? String == "Off")
+        thinking.tap()
+        XCTAssertTrue(slider.waitForExistence(timeout: 3), "Another edit must work without reopening Manage Session")
+        keepScreenshot(named: "superseded-thinking-receipt-ready")
+    }
+
+    @MainActor
+    func testPostStopConfigurationWaitsForSettlementThenEnablesWithoutReopening() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        let thinking = app.buttons["thinking-level-control"]
+        XCTAssertTrue(thinking.waitForExistence(timeout: 5))
+        XCTAssertFalse(thinking.isEnabled, "Foreground Stop alone must not make settling configuration editable")
+        let explanation = app.buttons["Why configuration is unavailable"]
+        XCTAssertTrue(explanation.exists)
+        explanation.tap()
+        XCTAssertTrue(app.staticTexts["Finishing the session. Configuration will be available shortly."].waitForExistence(timeout: 3))
+        keepScreenshot(named: "post-stop-configuration-settling")
+        app.buttons["Done"].tap()
+        app.buttons["Release terminal settlement"].tap()
+        let enabled = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)
+        wait(for: [enabled], timeout: 5)
+        thinking.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["thinking-level-slider"].waitForExistence(timeout: 3))
+        keepScreenshot(named: "post-stop-configuration-ready")
+    }
+
+    /// The real Manage Session route, not the renderer-only fixture: reset is
+    /// fenced to this chat, and reopening shows the authoritative new snapshot.
+    @MainActor
+    func testManageSessionUsesCurrentDefault() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        XCTAssertTrue(app.buttons["Release terminal settlement"].waitForExistence(timeout: 5))
+        app.buttons["Release terminal settlement"].tap()
+        let source = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "From default at start: High (Mac)")).firstMatch
+        // Manage Session › Chat Settings › Model › Thinking: the key's own sheet holds its reset.
+        openChatThinking(app)
+        let reset = app.buttons["settings-row-model.thinking_role_chat_-useCurrentDefault"]
+        tapScrolling(reset, in: app)
+        XCTAssertTrue(source.waitForExistence(timeout: 5), app.debugDescription)
+        closeTopSheet(app) // Thinking
+        XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
+        for _ in 0..<2 { closeTopSheet(app) } // Model, Chat Settings
+        XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Do not repeat generic policy in the model card")
+        // Automatic compaction is Manage Session's row beside the manual compaction action.
+        let compaction = app.switches.matching(NSPredicate(format: "label == %@", "Automatic compaction"))
+        XCTAssertTrue(compaction.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(compaction.count, 1)
+        XCTAssertTrue(app.buttons["manage-session-compact"].exists, "Manual compaction remains a Context action")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
+        openChatThinking(app)
+        XCTAssertTrue(source.waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    /// From Manage Session, opens Chat Settings › Model, then the Thinking key's own sheet.
+    @MainActor
+    private func openChatThinking(_ app: XCUIApplication) {
+        tapScrolling(app.buttons["chat-settings-link"], in: app)
+        tapScrolling(app.buttons["settings-section-model-open"], in: app)
+        tapScrolling(app.buttons["settings-row-model.thinking_role_chat_-open"], in: app)
+    }
+
+    /// Manage Session, Chat Settings and a key's sheet in light and dark at the
+    /// largest accessibility type size: every row stays reachable (#766).
+    @MainActor
+    func testManageSessionSectionsAtAccessibilityTypeInLightAndDark() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance,
+                                   "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+            app.launch()
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+            app.buttons["Stop session"].tap()
+            XCTAssertTrue(app.buttons["chat-settings-link"].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertFalse(app.buttons["Show all"].exists, "Manage Session never expands settings in place")
+            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-primary")
+            let compaction = app.switches["Automatic compaction"]
+            reveal(compaction, in: app)
+            XCTAssertTrue(compaction.isHittable, "The automatic compaction row must stay reachable at XXXL")
+            for _ in 0..<12 where !app.buttons["chat-settings-link"].isHittable { app.swipeUp() }
+            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-context")
+            openChatThinking(app)
+            let reset = app.buttons["settings-row-model.thinking_role_chat_-useCurrentDefault"]
+            XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
+            scrollTo(reset, in: app)
+            XCTAssertTrue(reset.isHittable, "The Thinking sheet's reset must stay reachable at XXXL")
+            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-model-sheet")
+            app.terminate()
+        }
+    }
+
+    /// Manage Session's pending change for this chat: a decline is recorded by the
+    /// Gateway, and the chat's approvals section then renders nothing.
+    @MainActor
+    func testManageSessionSettingsApprovalDecline() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-session-settings-approvals"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        let row = app.descendants(matching: .any)["settings-approval-settings-session-request"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["settings-approval-settings-other-request"].exists,
+                       "Another chat's request does not show in this chat's Manage Session")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "read, bash → read, bash, fetch_page")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Asked by A chat's agent")).firstMatch.exists)
+        keepScreenshot(named: "session-settings-approval-pending")
+
+        tapScrolling(app.buttons["settings-approval-decline-settings-session-request"], in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "declined:settings-session-request", timeout: 5))
+        XCTAssertTrue(row.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["settings-approvals-header"].waitForNonExistence(timeout: 5))
+        keepScreenshot(named: "session-settings-approval-declined")
+    }
+
+    /// A settings-approval push action opens this chat's Manage Session with one
+    /// confirmation over its row. The push alone decides nothing; the dialog's button does.
+    @MainActor
+    func testSettingsApprovalPushApproveConfirmsTheRow() {
+        assertSettingsApprovalPushConfirms(
+            pushFlag: "-session-settings-approval-push-approve",
+            confirmButton: "Approve change",
+            outcome: "approved",
+            screenshot: "settings-approval-push-approve-confirm"
+        )
+    }
+
+    @MainActor
+    func testSettingsApprovalPushDeclineConfirmsTheRow() {
+        assertSettingsApprovalPushConfirms(
+            pushFlag: "-session-settings-approval-push-decline",
+            confirmButton: "Decline change",
+            outcome: "declined",
+            screenshot: "settings-approval-push-decline-confirm"
+        )
+    }
+
+    @MainActor
+    private func assertSettingsApprovalPushConfirms(
+        pushFlag: String,
+        confirmButton: String,
+        outcome: String,
+        screenshot: String
+    ) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-session-settings-approvals", pushFlag]
+        app.launch()
+        defer { app.terminate() }
+        let decisions = app.staticTexts["fixture.session-settings-decisions"]
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        XCTAssertTrue(app.buttons[confirmButton].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "read, bash → read, bash, fetch_page")).firstMatch.exists,
+                      app.debugDescription)
+        XCTAssertTrue(waitForLabel(decisions, containing: "decisions:none", timeout: 5), "The push must not decide anything")
+        keepScreenshot(named: screenshot)
+
+        app.buttons[confirmButton].tap()
+        XCTAssertTrue(waitForLabel(decisions, containing: "\(outcome):settings-session-request", timeout: 5))
+        XCTAssertFalse(decisions.label.contains("settings-other-request"),
+                       "Another chat's request is never decided from this chat's push")
+        XCTAssertTrue(app.descendants(matching: .any)["settings-approvals-header"].waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testSettingsChangesOpensRequestingChatOnItsOwningMac() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
+        app.launch(); defer { app.terminate() }
+        let more = app.buttons["settings-changes-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        more.tap()
+        let row = app.buttons["settings-change-fixture-change"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        tapScrolling(app.buttons["Open requesting chat"], in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-route"],
+                                  containing: "owned:true:fixture-chat", timeout: 5))
+    }
+
+    @MainActor
+    func testSettingsChangesOpensOwningHomeTask() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-settings-history"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        openManageHome(app)
+        tapManageRow(app, "home-manage-settings")
+        tapScrolling(app.buttons["Changes"].firstMatch, in: app)
+        let row = app.buttons["settings-change-worker-setting"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        tapScrolling(app.buttons["Open task"], in: app)
+        XCTAssertTrue(app.buttons["home-sheet-done-task"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Settings model: continue epic #758"].waitForExistence(timeout: 5),
+                      "Open the audit actor's exact canonical task, not the task list")
+    }
+
+    @MainActor
+    func testSettingsChangesScopeFiltersAndApprovalReceipts() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-session", "-settings-changes-scope", "-settings-changes-approvals"]
+        app.launch(); defer { app.terminate() }
+        let approve = app.buttons["Approve"].firstMatch
+        XCTAssertTrue(approve.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(approve, in: app)
+        app.buttons["Approve change"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:1 approved:1", timeout: 5))
+        let decline = app.buttons["Decline"].firstMatch
+        tapScrolling(decline, in: app)
+        app.buttons["Decline change"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:2 approved:1", timeout: 5))
+        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        XCTAssertTrue(app.buttons["settings-change-project-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
+        // Filters are their own sheet: each is one choice row with a picker.
+        chooseChangesFilter(app, row: "settings-changes-actor", option: "Everyone")
+        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
+        chooseChangesFilter(app, row: "settings-changes-status", option: "Failed")
+        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-fixture-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-project-change"].exists)
+        keepScreenshot(named: "758-changes-scoped-filter-intersection")
+    }
+
+    /// Opens Changes' Filters sheet, picks `option` on one filter row, and returns to the feed.
+    @MainActor
+    private func chooseChangesFilter(_ app: XCUIApplication, row: String, option: String) {
+        let filters = app.buttons["settings-changes-filters"]
+        XCTAssertTrue(filters.waitForExistence(timeout: 5), app.debugDescription)
+        filters.tap()
+        let control = app.descendants(matching: .any)[row].buttons.firstMatch
+        XCTAssertTrue(control.waitForExistence(timeout: 5), app.debugDescription)
+        control.tap()
+        let choice = app.buttons["settings-option-\(option)"]
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
+        choice.tap()
+        XCTAssertTrue(choice.waitForNonExistence(timeout: 5), app.debugDescription)
+        closeTopSheet(app) // Filters
+    }
+
+    @MainActor
+    func testSettingsChangesLastLookUsesPreviousVisit() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
+        app.launch(); defer { app.terminate() }
+        let more = app.buttons["settings-changes-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        tapScrolling(more, in: app)
+        XCTAssertTrue(app.buttons["settings-change-fixture-change"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Since you last looked"].exists)
+        keepScreenshot(named: "758-changes-since-last-visit")
+    }
+
+    @MainActor
+    func testSettingsChangesUndoRefusalRetainsCurrentDiff() {
+        continueAfterFailure = false
+        for outcomeFailure in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-undo-refused"]
+            if outcomeFailure { app.launchArguments.append("-settings-undo-outcome-refused") }
+            app.launch(); defer { app.terminate() }
+            let more = app.buttons["settings-changes-load-more"]
+            XCTAssertTrue(more.waitForExistence(timeout: 5))
+            tapScrolling(more, in: app)
+            let entry = app.buttons["settings-change-fixture-change"]
+            XCTAssertTrue(entry.waitForExistence(timeout: 5))
+            tapScrolling(entry, in: app)
+            tapScrolling(app.buttons["Undo"], in: app)
+            app.buttons["Undo change"].tap()
+            XCTAssertTrue(app.staticTexts["Current value"].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(app.staticTexts["8 retries"].exists)
+            XCTAssertTrue(app.staticTexts["Value when applied"].exists)
+            XCTAssertTrue(app.staticTexts["6 retries"].exists)
+            XCTAssertEqual(app.staticTexts["fixture.settings-changes-undos"].label, "undos:1")
+            keepScreenshot(named: "758-changes-undo-current-diff-\(outcomeFailure ? "outcome" : "rpc")")
+        }
+    }
+
+    /// A redacted entry never recorded its values, so its detail offers no Undo (#769).
+    @MainActor
+    func testSettingsChangesRedactedEntryIsNotUndoable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-redacted"]
+        app.launch()
+        defer { app.terminate() }
+        let more = app.buttons["settings-changes-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10), app.debugDescription)
+        tapScrolling(more, in: app)
+        let entry = app.buttons["settings-change-fixture-change"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(entry, in: app)
+        XCTAssertTrue(app.staticTexts["Not undoable"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(showsText("Hidden", in: app))
+        XCTAssertFalse(app.buttons["Undo"].exists, "A redacted change must not offer Undo")
+        XCTAssertEqual(app.staticTexts["fixture.settings-changes-undos"].label, "undos:0")
+        keepScreenshot(named: "769-changes-redacted-not-undoable")
+    }
+
+    @MainActor
+    func testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
+        app.launch()
+        defer { app.terminate() }
+
+        let more = app.buttons["settings-changes-load-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10), app.debugDescription)
+        more.tap()
+        let row = app.buttons["settings-change-fixture-change"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "An empty history page with a cursor is not EOF: \(app.debugDescription)")
+        XCTAssertTrue(showsText("6 retries", in: app))
+        row.tap()
+        XCTAssertTrue(showsText("Key history", in: app))
+        XCTAssertTrue(showsText("Risk evaluation", in: app))
+        XCTAssertTrue(showsText("The deterministic floor is sufficient.", in: app))
+        let undo = app.buttons["Undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
+        undo.tap()
+        app.buttons["Undo change"].tap()
+        XCTAssertTrue(app.staticTexts["fixture.settings-changes-undos"].waitForExistence(timeout: 5))
+        XCTAssertTrue(showsText("undos:1", in: app), "Undo was issued exactly once through settings.undo")
+    }
+
+    /// The generic renderer over a fixture schema (settings-model.md F1, 7.5): a new
+    /// section, subgroup, key and badge kind render from served data alone; an
+    /// unknown control is read-only; the Gateway refuses an invalid value inline
+    /// and nothing applies; a model without thinking offers no thinking options.
+    @MainActor
+    func testSettingsRendererRetiresCoveredPreviewWithoutWritingOrLockingRows() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-held-preview"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        // The fixture mounts the Context sheet itself, under its own cover control.
+        XCTAssertTrue(any["settings-section-context-detail"].waitForExistence(timeout: 10), app.debugDescription)
+        let toggle = any["settings-row-context.images.block"].switches.firstMatch
+        tapScrolling(toggle, in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-held"], containing: "held:1", timeout: 5))
+        app.buttons["Cover renderer"].tap()
+        app.buttons["Release preview"].tap()
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
+        XCTAssertTrue(toggle.isEnabled, "Retiring a disposable preview must release its busy state")
+        tapScrolling(toggle, in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        keepScreenshot(named: "758-retired-preview-rejoined")
+    }
+
+    @MainActor
+    func testSettingsRendererRendersAFixtureSchema() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        let applied = app.staticTexts["fixture.settings-renderer-applied"]
+        let thinking = app.staticTexts["fixture.settings-renderer-thinking-options"]
+        XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10), app.debugDescription)
+        // Settings: one row per section, every key on its section's sheet.
+        XCTAssertFalse(any["settings-row-model.ref"].exists, "Keys live on section sheets")
+        XCTAssertFalse(app.buttons["Show all"].exists, "Settings never expands in place")
+        XCTAssertTrue(app.buttons["settings-section-lab-open"].exists, "A section the app never heard of renders from its served title")
+        keepScreenshot(named: "settings-renderer-primary")
+
+        openRendererSection(app, "run")
+        XCTAssertTrue(any["settings-row-run.transport"].exists)
+        XCTAssertTrue(showsText("How many times a failed request is retried", in: app), "Section rows carry source and help")
+        keepScreenshot(named: "settings-renderer-run-sheet")
+        closeTopSheet(app)
+
+        // An invalid value: the Gateway's dry run refuses it under the row; nothing applies.
+        openRendererSection(app, "lab")
+        let invalid = any["settings-row-lab.invalidValue"]
+        scrollTo(invalid, in: app)
+        let field = invalid.textFields.firstMatch
+        tapScrolling(field, in: app)
+        field.tap()
+        field.typeText("rejected\n")
+        XCTAssertTrue(any["settings-row-lab.invalidValue-error"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fixture value rejected")).firstMatch.exists)
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2))
+        keepScreenshot(named: "settings-renderer-invalid")
+        // The new subgroup, the unknown badge, the unknown control and the read-only secret.
+        XCTAssertTrue(showsText("Experiments", in: app), "A subgroup the app never heard of")
+        XCTAssertTrue(showsText("New", in: app), "An unknown badge kind shows its label as source text")
+        scrollTo(any["settings-row-lab.palette"], in: app)
+        XCTAssertTrue(showsText("Teal", in: app), "An unknown control shows its display read-only")
+        scrollTo(any["settings-row-lab.secretToken"], in: app)
+        XCTAssertTrue(showsText("Update Tron to edit", in: app))
+        keepScreenshot(named: "settings-renderer-lab-sheet")
+        closeTopSheet(app)
+
+        // The row's trailing value opens the catalog picker.
+        openRendererSection(app, "model")
+        let modelCatalogRow = any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch
+        tapScrolling(modelCatalogRow, in: app)
+        let lite = any["settings-option-Fixture Lite"]
+        XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "settings-renderer-catalog")
+        XCTAssertTrue(app.images["Selected"].exists, "The catalog marks the current value like the existing pickers")
+        closeTopSheet(app)
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2), "Opening and dismissing the catalog must not write settings")
+        tapScrolling(modelCatalogRow, in: app)
+        XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
+        lite.tap()
+        // Switching to a model without thinking: the options are asked for again, and there are none.
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
+        XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:0", timeout: 5))
+        XCTAssertTrue(any["settings-row-model.thinking"].descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "Off")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    /// Opens one section's sheet from Settings.
+    @MainActor
+    private func openRendererSection(_ app: XCUIApplication, _ id: String) {
+        tapScrolling(app.buttons["settings-section-\(id)-open"], in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["settings-section-\(id)-detail"].waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    /// Dismisses the frontmost sheet by its own Done; covered sheets' Done
+    /// buttons are not hittable.
+    @MainActor
+    private func closeTopSheet(_ app: XCUIApplication) {
+        let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.last { $0.isHittable }
+        XCTAssertNotNil(done, app.debugDescription)
+        done?.tap()
+    }
+
+    /// Source actions are renderer primitives, not per-key code. The fixture
+    /// socket receives one unset via the existing dry-run/receipt path; unknown
+    /// actions stay display-only rather than dispatching arbitrary operations.
+    @MainActor
+    func testSettingsRendererUsesCurrentDefaultSourceAction() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-source-actions"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["settings-row-model.ref-useCurrentDefault"].exists, "Source actions live on the key's own sheet")
+        openRendererSection(app, "model")
+        // A key with a source action previews its value and opens a sheet holding the control and the action.
+        tapScrolling(app.buttons["settings-row-model.ref-open"], in: app)
+        let reset = app.buttons["settings-row-model.ref-useCurrentDefault"]
+        XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.buttons["Unsupported action"].exists)
+        keepScreenshot(named: "settings-current-default-before")
+        tapScrolling(reset, in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "value == %@", "Fixture Lite")).firstMatch
+            .waitForExistence(timeout: 5), "The reset value reads back on the key's row")
+        XCTAssertTrue(showsText("Future source", in: app), "Unknown actions do not hide their value or source")
+        keepScreenshot(named: "settings-current-default-after")
+    }
+
+    /// A served catalog remains complete beyond its first page, and browsing it
+    /// never changes the setting.
+    @MainActor
+    func testSettingsRendererCatalogPagesWithoutWriting() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        openRendererSection(app, "model")
+        tapScrolling(any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(any["settings-option-Fixture Pro"].waitForExistence(timeout: 5))
+        XCTAssertFalse(any["settings-option-Fixture Page Two"].exists)
+        let more = app.buttons["settings-catalog-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5), "A served nextCursor must make the rest of the catalog reachable")
+        more.tap()
+        XCTAssertTrue(any["settings-option-Fixture Page Two"].waitForExistence(timeout: 5))
+        XCTAssertFalse(more.exists, "The final page retires its cursor")
+        keepScreenshot(named: "settings-catalog-second-page")
+        closeTopSheet(app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:0", timeout: 5))
+    }
+
+    /// The same native anchored choice editor works for schema-only choices,
+    /// without thinking-specific labels or a second slider presentation owner.
+    @MainActor
+    func testSettingsRendererOrderedChoiceUsesSharedSlider() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        openRendererSection(app, "model")
+        let row = any["settings-row-model.thinking"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-ordered-choice-row")
+        tapScrolling(row.buttons.firstMatch.buttons.firstMatch, in: app)
+        let slider = any["settings-choice-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "An ordered choice reuses the native anchored slider, not a menu")
+        keepScreenshot(named: "settings-renderer-ordered-choice-expanded")
+        slider.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
+        // The editor's modal ScrollView becomes firstMatch while it is open.
+        // Dismiss on the host backdrop below the observed slider, not inside that panel.
+        let outside = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80)))
+        outside.tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        // The row itself reads back the chosen value.
+        XCTAssertTrue(row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value == %@", "Off", "Off"))
+            .firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    /// A schema number uses the same anchored slider interaction and saves its
+    /// bounded numeric value through the fixture Gateway.
+    @MainActor
+    func testSettingsRendererNumberUsesSharedSlider() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        openRendererSection(app, "run")
+        let row = any["settings-row-run.retry.maxRetries"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-number-row")
+        tapScrolling(row.buttons.firstMatch.buttons.firstMatch, in: app)
+        let slider = any["settings-number-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5), "A schema number uses the shared bounded slider")
+        keepScreenshot(named: "settings-renderer-number-expanded")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:0", timeout: 2),
+                      "Opening the editor must not write an override")
+        slider.coordinate(withNormalizedOffset: CGVector(dx: 1.0, dy: 0.5)).tap()
+        let outside = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80)))
+        outside.tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        let numberButton = any["settings-row-run.retry.maxRetries"].buttons.matching(identifier: "settings-number-control").firstMatch
+        XCTAssertEqual(numberButton.value as? String, "10 retries",
+                       "The served dynamic range wins over the static 0–100 declaration")
+        keepScreenshot(named: "settings-renderer-number-persisted")
+        // The advanced key is in the same sheet's Advanced group.
+        let future = any["settings-row-run.futureNumber"]
+        scrollTo(future, in: app)
+        XCTAssertTrue(future.staticTexts["Future numeric value"].exists)
+        XCTAssertFalse(future.buttons["settings-number-control"].exists,
+                       "An out-of-representation range must stay visible read-only, never trap")
+        keepScreenshot(named: "settings-renderer-number-unsupported")
+    }
+
+    /// Write-only replacement and ordered-list operations cross the real client
+    /// socket; reopening reads the stored result rather than the editor's draft.
+    @MainActor
+    func testSettingsRendererSecretAndListEditors() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        openRendererSection(app, "lab")
+        let password = any["settings-row-lab.password"]
+        reveal(password, in: app)
+        tapScrolling(password.buttons.firstMatch.buttons.firstMatch, in: app)
+        let field = app.secureTextFields["New value"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-secret-empty")
+        field.tap()
+        field.typeText("fixture-replacement")
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        XCTAssertFalse(showsText("fixture-replacement", in: app), "A submitted secret never appears in the row")
+        tapScrolling(password.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "New value", "Reopening never pre-fills a secret")
+        closeTopSheet(app)
+
+        let paths = any["settings-row-lab.paths"]
+        tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(app.buttons["Remove alpha"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "settings-renderer-list-before-edit")
+        // Direct row actions work at any sheet depth (#877).
+        app.buttons["Remove alpha"].tap()
+        app.textFields["Value"].tap()
+        app.textFields["Value"].typeText("gamma")
+        app.buttons["Add"].tap()
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:2", timeout: 5))
+        XCTAssertTrue(paths.buttons.matching(NSPredicate(format: "value == %@", "beta, gamma")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertTrue(app.buttons["Remove gamma"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Remove alpha"].exists)
+        keepScreenshot(named: "settings-renderer-list-persisted")
+        closeTopSheet(app)
+
+        // A numeric map uses only field names and bounds served by this unknown
+        // fixture schema. Saving preserves untouched fields; Done never writes.
+        let weights = any["settings-row-lab.weights"]
+        tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
+        // The canonical settings row combines its label for accessibility;
+        // target that semantic row's field rather than a nonexistent field label.
+        let blue = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Blue weight")).textFields.firstMatch
+        let red = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Red weight")).textFields.firstMatch
+        XCTAssertTrue(blue.waitForExistence(timeout: 5), app.debugDescription)
+        blue.tap(); blue.typeText("101\n")
+        XCTAssertFalse(app.buttons["Save"].isEnabled, "The served range must constrain representation")
+        // The value is trailing-aligned: tap its end so deletes remove it.
+        blue.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+        blue.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3) + "9\n")
+        XCTAssertTrue(app.buttons["Save"].isEnabled)
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:3", timeout: 5))
+        tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertEqual(red.value as? String, "2")
+        XCTAssertEqual(blue.value as? String, "9")
+        blue.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+        blue.typeText(XCUIKeyboardKey.delete.rawValue + "7\n")
+        closeTopSheet(app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:3", timeout: 5))
+        tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
+        XCTAssertEqual(blue.value as? String, "9", "Dismissed draft must not replace the saved numeric map")
+        keepScreenshot(named: "settings-renderer-number-map")
+    }
+
+    /// The renderer in dark mode at the largest accessibility text size.
+    @MainActor
+    func testSettingsRendererDarkLargeType() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-dark",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10), app.debugDescription)
+        keepScreenshot(named: "settings-renderer-dark-xxxl-primary")
+        openRendererSection(app, "run")
+        scrollTo(any["settings-row-run.retry.maxRetries"], in: app)
+        XCTAssertTrue(any["settings-row-run.retry.maxRetries"].isHittable, "Section rows stay reachable at XXXL")
+        let transport = any["settings-row-run.transport"]
+        XCTAssertTrue(transport.waitForExistence(timeout: 5), app.debugDescription)
+        scrollTo(transport, in: app)
+        keepScreenshot(named: "settings-renderer-dark-xxxl-run-sheet")
+    }
+
+    /// Any element whose label contains the text: a settings row combines its labels.
+    @MainActor
+    private func showsText(_ text: String, in app: XCUIApplication) -> Bool {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
+    }
+
+    /// Scrolls a lazy list down until the element is built and hittable.
+    @MainActor
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
+        for _ in 0..<16 where !(element.exists && element.isHittable) { app.swipeUp() }
+    }
+
+    /// Scrolls until the element is hittable.
+    @MainActor
+    private func scrollTo(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<10 where !element.isHittable { app.swipeUp() }
+    }
+
+    @MainActor
     func testIntegrationDestinationsHaveOneDoneButtonThroughSettings() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -13,7 +2374,7 @@ final class TronSmokeUITests: XCTestCase {
             app.launch()
             let destination = app.buttons[title]
             XCTAssertTrue(destination.waitForExistence(timeout: 5))
-            for _ in 0..<3 where !destination.isHittable { app.swipeUp() }
+            for _ in 0..<8 where !destination.isHittable { app.swipeUp() }
             XCTAssertTrue(destination.isHittable)
             destination.tap()
             let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done"))
@@ -22,25 +2383,36 @@ final class TronSmokeUITests: XCTestCase {
                            "Only the progressive settings shell owns dismissal")
             keepScreenshot(named: "settings-\(title)-single-done-light")
             done.allElementsBoundByIndex.first(where: \.isHittable)?.tap()
-            XCTAssertTrue(app.buttons["Agent Defaults"].waitForExistence(timeout: 3))
+            XCTAssertTrue(app.buttons[title].waitForExistence(timeout: 3))
             app.terminate()
         }
     }
 
     @MainActor
-    func testAgentDefaultsThinkingSliderOpensAfterDefaultsConsolidation() {
+    func testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-agent-defaults-fixture"]
+        app.launchArguments = ["-tron-mac-settings-fixture"]
         app.launch()
         defer { app.terminate() }
-        let control = app.buttons.matching(identifier: "thinking-level-control")
-            .matching(NSPredicate(format: "label == %@", "Thinking")).firstMatch
-        XCTAssertTrue(control.waitForExistence(timeout: 5))
-        XCTAssertTrue(control.isEnabled)
-        control.tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "thinking-level-slider").firstMatch.waitForExistence(timeout: 3))
-        keepScreenshot(named: "agent-defaults-thinking-editor-fixture")
+        // Settings is one row per section; Thinking is on the Model sheet.
+        tapScrolling(app.buttons["settings-section-model-open"], in: app)
+        let thinking = app.descendants(matching: .any)["settings-row-model.thinking"]
+        XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(thinking.buttons.firstMatch.buttons.firstMatch, in: app)
+        let slider = app.descendants(matching: .any)["settings-choice-slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 3))
+        keepScreenshot(named: "mac-settings-schema-thinking")
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80))).tap()
+        XCTAssertTrue(slider.waitForNonExistence(timeout: 3))
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
+        XCTAssertFalse(app.buttons["Settings Scope"].exists)
+        closeTopSheet(app) // Model
+        for _ in 0..<12 where !app.staticTexts["This iPhone"].isHittable { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["This iPhone"].exists)
+        XCTAssertTrue(app.staticTexts["Stored on this iPhone. Never changes what the agent does."].exists)
+        keepScreenshot(named: "mac-settings-this-iphone")
     }
 
     @MainActor

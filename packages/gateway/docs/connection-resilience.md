@@ -63,12 +63,14 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   ten-second wakeup grid the energy plan fixed, and any inbound frame that
   reaches the app after a ping was sent is proof of liveness for that ping:
   messages, pongs and any other data all answer it. A probe's pong returns on
-  the downlink, behind whatever data the Gateway has already queued for the
+  the downlink, behind the bytes the Gateway has already written toward the
   phone, so a pong can miss its eight-second deadline on a link that is carrying
-  data. Such a probe retires the epoch only when nothing arrived after it was
-  sent, and the next grid tick re-arms the wait. Only a fully delivered frame
-  counts as that proof, so a frame whose last byte arrives later than that
-  deadline (about 1 MiB on a path below 1 Mbit/s) leaves a busy link with no
+  data. The Gateway writes a pong ahead of frames still waiting in its outbound
+  queue (`server-pong-backlog.integration.test.ts`), so that wait is bounded by
+  bytes in flight, not by the backlog. Such a probe retires the epoch only when
+  nothing arrived after it was sent, and the next grid tick re-arms the wait.
+  Only a fully delivered frame counts as that proof, so a frame whose last byte
+  arrives later than that deadline (about 1 MiB on a path below 1 Mbit/s) leaves a busy link with no
   proof at all and the epoch is still retired as `pong_timeout`. Dead-link
   detection stays within 18 seconds of the last inbound frame: no grid tick is
   later than 10 seconds after it and the deadline is 8 seconds after the tick.
@@ -76,7 +78,6 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   `outcome=excused` in the phone's connection log, so a run that shows no
   `pong_timeout` retirement can still tell an excused probe from a probe that
   never missed its deadline.
-  `GatewayClientTransportTests` pins each case on a manual clock.
 - **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
   node ceiling for local and mobile clients. Transcript pages reserve 24,000
   nodes and snapshots 30,000; dense detail is compacted without editing canonical
@@ -233,8 +234,7 @@ keeps today's uncompressed frames.
   compressed connection, bounded by the 32-socket cap.
 - **Measured (2026-09-27, Apple silicon Mac, host load about 10):** the real
   `GatewayServer` broadcasting to one paired client. Repository TypeScript,
-  Swift and Markdown filled the recorded snapshot-burst fixture's transcript
-  text (`packages/ios-app/Tests/Fixtures/gateway-real-burst.json.zlib`). Nine
+  Swift and Markdown filled a recorded snapshot-burst transcript. Nine
   600 KB `session.snapshot` frames went from 5,465,624 to 1,132,866 wire bytes
   (20.7%). 223 cumulative `session.progress` frames up to 24 KiB went from
   3,038,448 to 39,157 (1.3%). 200 small responses and summaries went from 51,199
@@ -497,9 +497,7 @@ integration suites protect ordering and accepted-command ownership. iOS recovery
 and dashboard owner tests cover attempt exhaustion, explicit retry and entry
 replacement without silently resetting the budget.
 
-`projection.test.ts` covers dense browser detail and tiny-content-part aggregates,
-including normalized response envelopes. `server-frame.test.ts` and capacity
-integration tests cover exact node limits, read-local fallback, both client roles,
+Capacity integration tests (`server-capacity.integration.test.ts`) cover exact node limits, read-local fallback, both client roles,
 and rejected-open subscription cleanup. The shared JSON-limit fixture is checked
 against both producer and native constants; the native transport regression drives
 an actual over-node-budget frame through decoding, diagnostic capture and strict
@@ -536,7 +534,12 @@ rekey, fork, delete) apply the row at the same boundary that commits the change.
 A recursive `fs.watch` on the sessions root treats each event as a hint and
 re-reads that path once per `CATALOG_EVENT_DEBOUNCE_MS` (250 ms) quiet spell,
 capped at `CATALOG_EVENT_MAX_WAIT_MS` (1 s) so a writer that never goes quiet
-still reaches its row. Pending per-path timers are capped at
+still reaches its row. An event naming a folder re-reads the transcripts under
+it; a folder that disappears while it is being walked (an `rm -rf` still in
+progress under the named folder) is absence, so only its published rows are
+re-read and dropped rather than starting a whole-folder pass. Only a folder
+that cannot be read (including one replaced by a file), or holds more transcripts than one event can name, falls
+back to that pass. Pending per-path timers are capped at
 `CATALOG_EVENT_PENDING_PATH_LIMIT` (256); a burst beyond that bound clears the
 individual hints and runs one whole-folder reconcile. Events arriving during
 that overflow pass use the unnamed-event debounce (250 ms quiet spell, capped at

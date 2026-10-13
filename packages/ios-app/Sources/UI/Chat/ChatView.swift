@@ -10,6 +10,9 @@ struct ChatView: View {
     private let initialModel: ModelRef?
     private let initialHistoryEntryID: String?
     private let initialSearchResult: SessionSearchResult?
+    /// The Home conversation's logical route: sends go through `home.prompt`,
+    /// and Manage Home belongs to this chat whichever chapter it opens.
+    private let isHomeRoute: Bool
     private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     private let displayFrameScheduler: DisplayFrameScheduler
     private let performanceSignposts: any PerformanceSignposting
@@ -61,6 +64,7 @@ struct ChatView: View {
     /// reconciliation callbacks. They share this identity so physical evidence
     /// is rebased exactly once for the replacement tree.
     @State private var viewportActivation = 0
+    @State private var homeSheet: HomeSheetRoute?
 
     #if HOSTED_TEST
     init(
@@ -69,6 +73,7 @@ struct ChatView: View {
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
         initialSearchResult: SessionSearchResult? = nil,
+        isHomeRoute: Bool = false,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         hostedProbe: ChatHostedProbe? = nil,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
@@ -80,6 +85,7 @@ struct ChatView: View {
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
         self.initialSearchResult = initialSearchResult
+        self.isHomeRoute = isHomeRoute
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
         self.hostedProbe = hostedProbe
@@ -105,6 +111,7 @@ struct ChatView: View {
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
         initialSearchResult: SessionSearchResult? = nil,
+        isHomeRoute: Bool = false,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
@@ -115,6 +122,7 @@ struct ChatView: View {
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
         self.initialSearchResult = initialSearchResult
+        self.isHomeRoute = isHomeRoute
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
         self.displayFrameScheduler = displayFrameScheduler
@@ -179,7 +187,6 @@ struct ChatView: View {
         }
         .modifier(ChatRoutes(
             sessionID: sessionID,
-            projectCWD: model.sessionContextPresentation(for: sessionID)?.cwd,
             initialHistoryEntryID: initialHistoryEntryID,
             onForkCreated: onForkCreated,
             showContext: $sessionPresentation.showContext,
@@ -214,7 +221,8 @@ struct ChatView: View {
             onKeepEditorRequest: { request in
                 guard let target = presentationTarget else { return }
                 model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
-            }
+            },
+            homeSheet: $homeSheet
         ))
         .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in
@@ -250,6 +258,15 @@ struct ChatView: View {
             admitPendingFloatingDisplay()
         }
         .task(id: "search-anchor:\(sessionID):\(initialHistoryEntryID ?? "")") { await navigateToInitialSearchResult() }
+        .onChange(of: model.stagedSettingsDecision?.id, initial: true) { _, _ in openManageForStagedSettingsDecision() }
+    }
+
+    /// A settings-approval push action opens this chat's Manage sheet; the approvals
+    /// section consumes the staging, so this only opens the sheet and never decides.
+    private func openManageForStagedSettingsDecision() {
+        guard model.freshStagedSettingsDecision()?.sessionID == sessionID,
+              homeSheet == nil, !sessionPresentation.showContext else { return }
+        if !presentManageHome() { sessionPresentation.showContext = true }
     }
 
     private var completedDisplayPresentations: [DisplayProjection] {
@@ -419,10 +436,6 @@ struct ChatView: View {
         let commands = ownsCatalog
             ? identity.commands.filter { identity.supportsSkillPrompt || $0.source != .skill }
             : []
-        #if HOSTED_TEST
-        hostedProbe?.recordComposerCatalogBuild()
-        defer { hostedProbe?.composerCatalogDidFinish?(commands) }
-        #endif
         let build = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             let catalog = ComposerResourceCatalog(commands: commands)
@@ -439,15 +452,9 @@ struct ChatView: View {
         } catch {
             return
         }
-        #if HOSTED_TEST
-        await hostedProbe?.composerCatalogWillInstall?(catalog)
-        #endif
         guard !Task.isCancelled, activity == composerCatalogActivity, scenePhase == .active,
               identity == composerResourceCatalogIdentity else { return }
         installedComposerResourceCatalog = (identity, catalog)
-        #if HOSTED_TEST
-        hostedProbe?.recordComposerCatalogInstall(catalog)
-        #endif
         if ownsCatalog, let composerScope {
             model.composerDrafts.reconcileSelectedResource(for: composerScope, commands: commands)
         }
@@ -1235,7 +1242,13 @@ struct ChatView: View {
             orientation: transcriptOrientation,
             scrollPosition: $transcriptScrollPosition,
             earlierRow: { installed in earlierMessagesChip(installed: installed) },
-            openingSurface: { openingSurface },
+            openingSurface: {
+                Group {
+                    // A retained transcript reports recovery in the
+                    // navigation chrome instead (`retainedRecoveryStatus`).
+                    if !hasRetainedTranscript { openingPhaseSurface }
+                }
+            },
             onEditQueuedMessage: { sessionPresentation.queuedMessageEditor = .init(id: $0) },
             onClearQueuedMessages: { Task { await clearQueuedMessages() } },
             onMoveQueuedMessage: { id, offset in
@@ -1762,20 +1775,7 @@ struct ChatView: View {
             }
             return .none
         }
-        guard let pending = snapshot.pendingPrompt,
-              !hasCanonicalPendingPrompt(pending, in: snapshot) else { return .none }
-        return .pending(ChatPendingPromptPresentation(
-            snapshot: pending,
-            isCompacting: snapshot.phase == .compacting
-                || snapshot.operation?.kind == .compaction
-        ))
-    }
-
-    private func hasCanonicalPendingPrompt(
-        _ pending: SessionSnapshot.PendingPrompt,
-        in snapshot: SessionSnapshot
-    ) -> Bool {
-        ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: snapshot.transcript)
+        return ChatTranscriptHandoffCommit.pending(in: snapshot)
     }
 
     private var submissionPending: Bool {
@@ -1800,7 +1800,7 @@ struct ChatView: View {
         switch sessionPresentation.open.phase {
         case .revealing, .presenting, .presented, .ready:
             true
-        case .opening, .positioning, .failed:
+        case .waitingForConnection, .opening, .positioning, .failed:
             false
         }
     }
@@ -1814,7 +1814,7 @@ struct ChatView: View {
     }
 
     private var transcriptRevealAnimation: Animation {
-        reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.26)
+        ChatMotion.transcriptViewReveal(reduceMotion: reduceMotion)
     }
 
     private var admitsScrollGeometryCallbacks: Bool {
@@ -1827,15 +1827,58 @@ struct ChatView: View {
     }
 
     private var admitsNativeScrollCallbacks: Bool {
-        guard presentationActivity.allowsViewportObservation else { return false }
-        #if HOSTED_TEST
-        return hostedProbe?.admitsNativeScrollCallbacks != false
-        #else
-        return true
-        #endif
+        presentationActivity.allowsViewportObservation
     }
 
-    @ViewBuilder private var openingSurface: some View {
+    /// Display continuity belongs to the same-session snapshot, not to the
+    /// disposable subscription that is replaced while reconnecting.
+    private var hasRetainedTranscript: Bool {
+        guard let installed = transcriptPresentation.installed,
+              installed.tag.sessionID == sessionID,
+              model.authoritativeSnapshot(for: sessionID)?.sessionId == sessionID,
+              composerScope.map({ $0.profileID == model.profiles.selected?.id }) ?? true else { return false }
+        return true
+    }
+
+    /// Persistent recovery for a retained same-session transcript. It is route
+    /// chrome in the title's place, never a control floating over readable rows.
+    /// A missing transport is shown only once the app's recovery episode says
+    /// it outlived the grace: every foreground reconnects after background
+    /// retirement, and that expected replacement is not an outage (#878).
+    /// Gateway and synchronization failures stay visible until resolved.
+    private var retainedRecoveryStatus: ChatRetainedRecoveryStatus? {
+        guard hasRetainedTranscript else { return nil }
+        if !model.admitsSessionPresentationOpen {
+            // A rejected credential stops automatic recovery: it is a failure
+            // to explain at once, not a reconnect to wait out.
+            if model.connectionState == .unauthorized {
+                return .unavailable("The Mac no longer accepts this iPhone. Pair again in Settings.")
+            }
+            return model.isConnectionRecoveryVisible ? .waitingForConnection : nil
+        }
+        if model.hasFailedConversationSynchronization(sessionID: sessionID) {
+            return .unavailable("The conversation could not catch up. Retry to reconnect the live view.")
+        }
+        if case .failed(let message) = sessionPresentation.open.phase { return .unavailable(message) }
+        return nil
+    }
+
+    /// One Retry for every recovery treatment. A missing transport retries the
+    /// selected Mac's connection; the opening resumes on its connected callback.
+    @MainActor
+    private func retryRecovery() async {
+        if !model.admitsSessionPresentationOpen {
+            if let profile = model.profiles.selected { model.retryGatewayConnection(for: profile) }
+            await beginOpeningPresentation(retryingFailure: true)
+        } else if model.hasFailedConversationSynchronization(sessionID: sessionID),
+                  let target = model.presentationTarget(for: sessionID) {
+            _ = await model.retryConversationSynchronization(target: target)
+        } else {
+            await beginOpeningPresentation(retryingFailure: true)
+        }
+    }
+
+    @ViewBuilder private var openingPhaseSurface: some View {
         switch sessionPresentation.open.phase {
         case .opening, .positioning, .revealing, .presenting:
             ZStack {
@@ -1854,31 +1897,41 @@ struct ChatView: View {
             .allowsHitTesting(false)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Opening conversation")
-        case .failed(let message):
-            VStack(spacing: 12) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(Color.tronError)
-                Text("Conversation unavailable")
-                    .font(TronTypography.body)
-                Text(message)
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .multilineTextAlignment(.center)
-                Button("Retry") { Task { await beginOpeningPresentation(retryingFailure: true) } }
-                    .buttonStyle(.plain)
-                    .chatTranscriptPill()
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.tronBackground)
             .transition(.opacity.animation(
-                ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(
-                    reduceMotion: reduceMotion
-                )
+                ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)
             ))
+        case .waitingForConnection:
+            openingEmptyUnavailableSurface(
+                title: "Waiting for connection",
+                message: "This conversation will open when the Mac reconnects."
+            )
+        case .failed(let message):
+            openingEmptyUnavailableSurface(title: "Conversation unavailable", message: message)
         case .presented, .ready:
             EmptyView()
         }
+    }
+
+    private func openingEmptyUnavailableSurface(title: String, message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.tronError)
+            Text(title)
+                .font(TronTypography.body)
+            Text(message)
+                .font(TronTypography.bodySM)
+                .foregroundStyle(Color.tronTextSecondary)
+                .multilineTextAlignment(.center)
+            Button("Retry") { Task { await retryRecovery() } }
+                .buttonStyle(.plain)
+                .chatTranscriptPill()
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.tronBackground)
+        .transition(.opacity.animation(
+            ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)
+        ))
     }
 
     @MainActor
@@ -1911,6 +1964,14 @@ struct ChatView: View {
 
     @MainActor
     private func beginOpeningPresentation(retryingFailure: Bool = false) async {
+        // An absent transport admits neither an opening lease nor its deadline.
+        // Cancellation for that absence must not become an endless spinner.
+        guard model.admitsSessionPresentationOpen else {
+            if sessionPresentation.open.phase != .ready {
+                sessionPresentation.open.waitForConnection(sessionID: sessionID, epoch: sessionPresentation.open.epoch)
+            }
+            return
+        }
         if let active = sessionPresentation.activeOpeningTaskLease {
             await active.task.value
             _ = sessionPresentation.finishOpeningTask(active.generation)
@@ -1990,6 +2051,7 @@ struct ChatView: View {
 
     @MainActor
     private func performOpeningPresentation() async {
+        let openingConnectionID = model.gatewayConnectionID
         sessionPresentation.permitsExtensionInteractionPresentation = false
         // Retiring/restarting presentation authority cancels any local page
         // admission; late model/scroll completions are token-gated.
@@ -2003,7 +2065,6 @@ struct ChatView: View {
             )
         }
         #if HOSTED_TEST
-        if let hostedProbe { installHostedControls(probe: hostedProbe) }
         defer { hostedProbe?.recordReadyFrameCompletion() }
         #endif
         performanceTracker.discardScroll()
@@ -2216,7 +2277,9 @@ struct ChatView: View {
             openedGeneration = nil
         } catch {
             let result = PerformanceResult.forFailure(error)
-            let retainCommittedPresentation = result == .cancelled
+            let transportRetired = !model.admitsSessionPresentationOpen
+                || openingConnectionID != model.gatewayConnectionID
+            let retainCommittedPresentation = result == .cancelled || transportRetired
             if let generation = openedGeneration {
                 await retireOpeningGeneration(
                     generation,
@@ -2224,6 +2287,10 @@ struct ChatView: View {
                 )
             }
             performanceSignposts.end(interval, result: result, metrics: .none)
+            if transportRetired {
+                sessionPresentation.open.waitForConnection(sessionID: sessionID, epoch: epoch)
+                return
+            }
             if result == .cancelled { return }
             model.chatInteractionTrace.opening(
                 .failed,
@@ -2277,99 +2344,6 @@ struct ChatView: View {
         sessionPresentation.modelPresentationGeneration = nil
         if !retainsReaderCut { transcriptPresentation.reset() }
     }
-
-    #if HOSTED_TEST
-    @MainActor
-    private func installHostedControls(probe: ChatHostedProbe) {
-        probe.composerPickerEntries = {
-            presentedComposerResourcePicker == nil ? [] : composerResourceResults
-        }
-        probe.composerResourceSelection = { selectComposerResource($0) }
-        probe.composerResourcePickerPresentation = { destination in
-            if let destination { requestAttachmentPresentation(destination) }
-            else { dismissComposerResourcePicker() }
-        }
-        probe.installScrollControls(
-            geometry: { previous, current, viewport in
-                if viewport {
-                    scrollCoordinator.viewportChanged(previous: previous, current: current)
-                } else {
-                    scrollCoordinator.geometryChanged(previous: previous, current: current)
-                }
-            },
-            phase: { old, new, geometry in
-                scrollCoordinator.scrollPhaseChanged(from: old, to: new, finalGeometry: geometry)
-            },
-            native: { owned in
-                scrollCoordinator.scrollPositionChanged(isPositionedByUser: owned)
-            },
-            catchUp: { reduceMotion in
-                scrollCoordinator.requestCatchUp(reduceMotion: reduceMotion)
-            },
-            semanticResponse: {
-                scrollCoordinator.semanticResponseArrived()
-            },
-            submitPrompt: {
-                send()
-            },
-            presentDisplay: { sessionPresentation.presentDisplay($0) },
-            frame: {
-                try await displayFrameScheduler.nextFrame()
-            },
-            state: {
-                ChatHostedScrollState(
-                    isDetached: scrollCoordinator.userScrolledAway,
-                    hasUnread: scrollCoordinator.hasUnreadContent
-                )
-            },
-            prepend: {
-                guard !isLoadingEarlierMessages,
-                      scrollCoordinator.canRequestHistoryPage,
-                      let generation = sessionPresentation.modelPresentationGeneration,
-                      let operationToken = sessionPresentation.earlierMessagesOperation.begin() else { return false }
-                let anchor = transcriptPresentation.installed
-                    .flatMap { installed in
-                        installed.tag == transcriptProjectionSource
-                            ? scrollCoordinator.semanticAnchor(in: installed.timeline)
-                            : nil
-                    }
-                return scrollCoordinator.beginHistoryPageLoad(
-                    anchor: anchor,
-                    load: { admittedAnchor in
-                        do { try await probe.waitForPrependPageRelease() }
-                        catch { return .failed }
-                        // The hosted boundary owns no Gateway transport. Model
-                        // exact canonical installation; semantic restoration is
-                        // emitted only when the coordinator admitted its anchor.
-                        guard sessionPresentation.modelPresentationGeneration == generation else {
-                            return .failed
-                        }
-                        guard let admittedAnchor,
-                              let current = transcriptPresentation.installed,
-                              current.tag == transcriptProjectionSource,
-                              let renderedID = current.timeline
-                                .renderedIDBySemanticID[admittedAnchor.semanticID] else {
-                            return .installed(nil)
-                        }
-                        let installedLayout = scrollCoordinator.beginInstalledLayoutEpoch()
-                        return .installed(ChatPrependPage(
-                            renderedAnchorID: renderedID,
-                            installedLayout: installedLayout
-                        ))
-                    },
-                    completion: { result in
-                        probe.recordPrependCompletion(result)
-                        self.settleEarlierMessagesOperation(operationToken)
-                        self.intakeLatestTranscriptProjectionIfNeeded()
-                    }
-                )
-            },
-            cancelPresentation: {
-                scrollCoordinator.cancel()
-            }
-        )
-    }
-    #endif
 
     @MainActor
     private func beginOpeningReveal(epoch: Int) -> Bool {
@@ -2590,7 +2564,7 @@ struct ChatView: View {
                 transaction.disablesAnimations = true
                 withTransaction(transaction, update)
             } else {
-                withAnimation(.smooth(duration: duration), update)
+                withAnimation(ChatMotion.smooth(duration: duration), update)
             }
         }
         #if HOSTED_TEST
@@ -2721,6 +2695,7 @@ struct ChatView: View {
             isEditable: ChatComposerPolicy.isTextEditable(isTranscriptReady: isTranscriptReady),
             keyboardAppearance: colorScheme == .dark ? .dark : .light,
             contextProgress: contextProgressPresentation,
+            contextOpensManageHome: manageHomeContext != nil,
             trailingMode: composerTrailingMode,
             isSending: sending,
             submissionPending: submissionPending,
@@ -2746,20 +2721,12 @@ struct ChatView: View {
             },
             onSelectResource: selectComposerResource,
             onDismissResourcePicker: dismissComposerResourcePicker,
-            onShowContext: { sessionPresentation.showContext = true },
-            onSend: { behavior in send(behavior: behavior) },
-            onAbort: {
-                // Command identity is canonical authority, not delayed render state.
-                let operation = selectedAuthoritativeSnapshot?.operation
-                let kind = ChatComposerPolicy.abortKind(operation: operation)
-                Task {
-                    await model.abort(
-                        sessionID: sessionID,
-                        kind: kind,
-                        operationID: operation?.id
-                    )
-                }
+            onShowContext: {
+                // Manage Home replaces Manage Session for Home, whose controls it refuses (#748).
+                if !presentManageHome() { sessionPresentation.showContext = true }
             },
+            onSend: { behavior in send(behavior: behavior) },
+            onAbort: abortCurrentOperation,
             onSelectAttachmentDestination: requestAttachmentPresentation,
             onPasteImages: importPastedImages,
             onCatchUp: catchUpToTail,
@@ -2767,6 +2734,14 @@ struct ChatView: View {
             onComposerHeightSettled: composerHeightSettled
         )
         .environment(\.chatOwnsStatusBar, true)
+    }
+
+    private func abortCurrentOperation() {
+        // Both Home's menu and the composer stop the current authoritative
+        // operation, never an ID captured by a delayed render or Home status.
+        let operation = selectedAuthoritativeSnapshot?.operation
+        let kind = ChatComposerPolicy.abortKind(operation: operation)
+        Task { await model.abort(sessionID: sessionID, kind: kind, operationID: operation?.id) }
     }
 
     private var composerTrailingMode: ComposerTrailingMode? {
@@ -2798,7 +2773,8 @@ struct ChatView: View {
     }
 
     private var chatTitle: String {
-        selectedAuthoritativeSnapshot?.name
+        if isHomeRoute { return "Home" }
+        return selectedAuthoritativeSnapshot?.name
             ?? model.sessions.first { $0.id == sessionID }?.title
             ?? "Session"
     }
@@ -2813,14 +2789,28 @@ struct ChatView: View {
             .accessibilityLabel("Back")
         }
         ToolbarItem(placement: .principal) {
-            Text(chatTitle)
-                .font(TronTypography.headline)
-                .foregroundStyle(Color.tronEmerald)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(width: titleWidth)
-                .clipped()
-                .accessibilityLabel(chatTitle)
+            // Recovery takes the title's place, as messaging apps show
+            // "Connecting" there. The title view keeps one fixed size in both
+            // states: a changed title-view size relays out the bar and its
+            // safe area, which moves an anchored transcript reader (#878).
+            ZStack {
+                if let status = retainedRecoveryStatus {
+                    ChatRecoveryStatusLine(status: status) { Task { await retryRecovery() } }
+                        .transition(.opacity)
+                } else {
+                    Text(chatTitle)
+                        .font(TronTypography.headline)
+                        .foregroundStyle(Color.tronEmerald)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(width: titleWidth)
+                        .clipped()
+                        .accessibilityLabel(chatTitle)
+                        .transition(.opacity)
+                }
+            }
+            .frame(width: titleWidth, height: ChatToolbarTitleLayout.height)
+            .animation(ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion), value: retainedRecoveryStatus)
         }
         if model.isShowingHistoricalTranscript {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -2841,6 +2831,8 @@ struct ChatView: View {
             }
         }
         ToolbarItem(placement: .primaryAction) {
+            // Two surfaces: the context ring opens Manage Session/Home (this chat,
+            // its settings and project); the gear opens Settings (this Mac and iPhone).
             Button { sessionPresentation.showSettings = true } label: {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
@@ -2848,6 +2840,27 @@ struct ChatView: View {
             }
             .accessibilityLabel("Settings")
         }
+    }
+
+    /// Opens Manage Home when this chat claims the Home status. The composer's
+    /// context ring is its one caller; false leaves the ring's Manage Session sheet.
+    private func presentManageHome() -> Bool {
+        guard let (profileID, _) = manageHomeContext else { return false }
+        homeSheet = HomeSheetRoute(profileID: profileID, sessionID: sessionID, destination: .manage)
+        return true
+    }
+
+    /// The Home status this chat's route claims, with the profile that owns its
+    /// mutations. Decides what the composer's context ring opens; nil keeps
+    /// Manage Session. Home's state, controls and Stop live in Manage Home (#740).
+    private var manageHomeContext: (profileID: String, status: HomeStatusDTO)? {
+        guard let profileID = composerScope?.profileID,
+              profileID == model.profiles.selected?.id,
+              model.homeStatus.capabilityEnabled,
+              let status = model.homeStatus.status,
+              HomeChatRouteKey.forChat(sessionID: sessionID, isHome: isHomeRoute).matches(status),
+              status.enabled || model.homeMutations.ownsUnresolvedCommand(profileID: profileID) else { return nil }
+        return (profileID, status)
     }
 
     private var pendingInteractionScopes: [ExtensionInteractionScope] {
@@ -3393,6 +3406,7 @@ struct ChatView: View {
                     target: target,
                     behavior: behavior,
                     resourceInvocation: resourceInvocation,
+                    route: isHomeRoute ? .home : .session,
                     canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
                     queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? [],
                     runtimeGeneration: selectedAuthoritativeSnapshot?.runtimeGeneration
@@ -3614,6 +3628,15 @@ struct ChatView: View {
         }
     }
 
+    /// PhotosPicker can deliver a library photo as HEIC; upload only formats
+    /// every model provider accepts (#407).
+    private static func providerAcceptedPhoto(_ data: Data, type: UTType?) -> (Data, String)? {
+        if let type, ProviderImageFormat.isAccepted(type), let mimeType = type.preferredMIMEType {
+            return (data, mimeType)
+        }
+        return ProviderImageFormat.jpeg(from: data).map { ($0, "image/jpeg") }
+    }
+
     private func importPhotos(_ values: [PhotosPickerItem], target: SessionPresentationIdentity) async {
         guard !values.isEmpty, presentationTarget == target else { return }
         var candidates: [ComposerAttachmentUploadCandidate] = []
@@ -3622,7 +3645,10 @@ struct ChatView: View {
         for item in values.prefix(ChatAttachmentImportPolicy.maximumPhotoSelection) {
             guard !Task.isCancelled, presentationTarget == target else { return }
             do {
-                guard let data = try await item.loadTransferable(type: Data.self) else {
+                guard let loaded = try await item.loadTransferable(type: Data.self),
+                      let (data, mimeType) = Self.providerAcceptedPhoto(
+                          loaded, type: item.supportedContentTypes.first
+                      ) else {
                     model.presentComposerActionError(
                         "The selected photo could not be prepared.",
                         target: target
@@ -3640,7 +3666,6 @@ struct ChatView: View {
                     break
                 }
                 candidateBytes = nextBytes
-                let mimeType = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
                 let filename = "photo.\(UTType(mimeType: mimeType)?.preferredFilenameExtension ?? "jpg")"
                 candidates.append(.init(name: filename, mimeType: mimeType, data: data))
             } catch is CancellationError {
@@ -3674,5 +3699,80 @@ struct ChatView: View {
             catch is CancellationError { return }
             catch { model.presentComposerActionError(error, target: target) }
         }
+    }
+}
+
+/// Why a retained transcript is not live. `ChatView.retainedRecoveryStatus`
+/// is its only producer; transient app notices never own this state.
+enum ChatRetainedRecoveryStatus: Equatable {
+    case waitingForConnection
+    case unavailable(String)
+
+    var title: String {
+        switch self {
+        case .waitingForConnection: "Waiting for connection"
+        case .unavailable: "Conversation unavailable"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .waitingForConnection: "This conversation will resume when the Mac reconnects."
+        case .unavailable(let message): message
+        }
+    }
+
+    var tone: ChatNotificationTone {
+        switch self {
+        case .waitingForConnection: .warning
+        case .unavailable: .error
+        }
+    }
+}
+
+/// A one-line recovery capsule in the chat title's place in the navigation
+/// chrome. The whole capsule is the Retry control, so its touch target is the
+/// visible glass rather than one small word. Liquid Glass matches the bar's own
+/// back and settings controls and keeps the line legible over the scrolled
+/// transcript. VoiceOver reads the reason, its full explanation, then Retry.
+struct ChatRecoveryStatusLine: View {
+    let status: ChatRetainedRecoveryStatus
+    let retry: () -> Void
+
+    var body: some View {
+        Button(action: retry) {
+            HStack(spacing: 6) {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .imageScale(.small)
+                    Text(status.title)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .foregroundStyle(status.tone.primaryColor)
+                Text("Retry")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.tronEmerald)
+                    .fixedSize()
+            }
+            .font(TronTypography.bodySM)
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        // Like the system bar items beside it, the fixed-height bar stops
+        // growing at the largest standard size; the large content viewer and
+        // the VoiceOver value carry the reason beyond it.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .accessibilityShowsLargeContentViewer {
+            Label(status.title, systemImage: "exclamationmark.triangle.fill")
+        }
+        .accessibilityLabel(status.title)
+        .accessibilityValue(status.message)
+        .accessibilityHint("Retries the connection")
+        .accessibilityIdentifier("chat-recovery-status")
     }
 }

@@ -4,6 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
 VERIFY="$SCRIPT_DIR/bundle-gateway.sh"
 RESOURCES_DIR="$SCRIPT_DIR/../Sources/Resources"
 PAYLOAD_DIR="$RESOURCES_DIR/Gateway"

@@ -1,5 +1,8 @@
 import SwiftUI
 import TronMobileCore
+#if HOSTED_TEST
+import UIKit
+#endif
 
 /// Value-driven composer presentation. Draft, route, transport, and canonical
 /// ownership remain outside this view and enter only through bindings/intents.
@@ -26,6 +29,8 @@ struct ChatComposerView: View {
     let isEditable: Bool
     let keyboardAppearance: UIKeyboardAppearance
     let contextProgress: SessionContextProgressPresentation
+    /// The ring opens Manage Home in a chat that claims the Home status (#748).
+    let contextOpensManageHome: Bool
     let trailingMode: ComposerTrailingMode?
     let isSending: Bool
     let submissionPending: Bool
@@ -92,20 +97,10 @@ struct ChatComposerView: View {
                         if showsCatchUp { catchUpButton }
                     }
                 }
-                .animation(
-                    reduceMotion
-                        ? .easeOut(duration: 0.12)
-                        : .spring(response: 0.32, dampingFraction: 0.82),
-                    value: showsCatchUp
-                )
+                .animation(ChatMotion.composerStructuralResize(reduceMotion: reduceMotion), value: showsCatchUp)
                 // Visibility and glyph changes animate at the shared layout
                 // owner so the input bar participates in the glass morph too.
-                .animation(
-                    reduceMotion
-                        ? .easeOut(duration: 0.12)
-                        : .spring(response: 0.32, dampingFraction: 0.82),
-                    value: activityKind
-                )
+                .animation(ChatMotion.composerStructuralResize(reduceMotion: reduceMotion), value: activityKind)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
@@ -114,19 +109,19 @@ struct ChatComposerView: View {
             // removed child surfaces inside the already-installed space.
             .animation(
                 submissionTransitionID == nil
-                    ? ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion)
+                    ? ChatMotion.attachmentArrive(reduceMotion: reduceMotion)
                     : nil,
                 value: pendingAttachments.map(\.id)
             )
             .animation(
                 submissionTransitionID == nil
-                    ? ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion)
+                    ? ChatMotion.composerSurfaceResize(reduceMotion: reduceMotion)
                     : nil,
                 value: selectedResource?.id
             )
             .animation(
                 submissionTransitionID == nil
-                    ? ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion)
+                    ? ChatMotion.composerSurfaceResize(reduceMotion: reduceMotion)
                     : nil,
                 value: resourcePicker?.kind
             )
@@ -144,13 +139,9 @@ struct ChatComposerView: View {
             locallyExpiredRecentExpiry = expiryText
         }
         .background(alignment: .bottom) {
-            ChatBottomActivityBlur(
-                isActive: showsAmbientWorkingBlur,
-                keyboardVisible: keyboardVisible
-            )
-            .offset(y: ChatBottomActivityBlurLayout.translation(keyboardVisible: keyboardVisible))
-            .ignoresSafeArea(edges: .bottom)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: keyboardVisible)
+            ChatBottomActivityBlur(isActive: showsAmbientWorkingBlur)
+                .offset(y: ChatBottomActivityBlurLayout.translation)
+                .ignoresSafeArea(edges: .bottom)
         }
     }
 
@@ -239,9 +230,7 @@ struct ChatComposerView: View {
             attachmentButton
             ZStack(alignment: .leading) {
                 if text.isEmpty && !isFocused {
-                    Text("Type here")
-                        .font(TronTypography.input)
-                        .foregroundStyle(Color.tronEmerald)
+                    ComposerPlaceholder()
                         .opacity(isTranscriptReady ? 1 : 0.38)
                         .padding(.leading, 2)
                         .padding(.vertical, 10)
@@ -267,7 +256,7 @@ struct ChatComposerView: View {
             }
             .frame(minHeight: 40)
 
-            SessionContextProgressButton(presentation: contextProgress, onTap: onShowContext)
+            SessionContextProgressButton(presentation: contextProgress, opensManageHome: contextOpensManageHome, onTap: onShowContext)
 
             if let trailingMode {
                 ComposerTrailingButton(
@@ -287,9 +276,7 @@ struct ChatComposerView: View {
             }
         }
         .animation(
-            reduceMotion
-                ? .easeOut(duration: 0.12)
-                : .spring(response: 0.32, dampingFraction: 0.82),
+            ChatMotion.composerStructuralResize(reduceMotion: reduceMotion),
             value: trailingMode
         )
         .frame(maxWidth: .infinity, minHeight: 40)
@@ -421,7 +408,7 @@ struct ChatPendingAttachmentStrip: View {
         }
 
         if reduceMotion {
-            withAnimation(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true)) {
+            withAnimation(ChatMotion.attachmentArrive(reduceMotion: true)) {
                 presentedAttachments = target
             }
             return
@@ -439,7 +426,7 @@ struct ChatPendingAttachmentStrip: View {
             current: presentedAttachments.map(\.id),
             target: target.map(\.id)
         )
-        let animation = ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: false)
+        let animation = ChatMotion.attachmentArrive(reduceMotion: false)
         withAnimation(animation) {
             presentedAttachments.removeAll { !targetIDs.contains($0.id) }
             if insertionIDs.isEmpty {
@@ -474,5 +461,44 @@ struct ChatPendingAttachmentStrip: View {
             withAnimation(animation) { presentedAttachments = target }
             reconciliationTask = nil
         }
+    }
+}
+
+/// The empty, unfocused composer's prompt. It exists only while visible, so
+/// its state is recreated each time it reappears (after a send or clearing the
+/// draft): each appearance picks one random line and keeps it until hidden.
+private struct ComposerPlaceholder: View {
+    @State private var line = ComposerPlaceholder.lines.randomElement() ?? "Ask anything"
+
+    /// Keep lines short enough for one line beside the composer's buttons.
+    static let lines = [
+        "Ask anything",
+        "Begin",
+        "Ask, and let it go",
+        "The task is the way",
+        "One thing at a time",
+        "What is in your control?",
+        "Start where you are",
+        "Say it plainly",
+        "What matters now?",
+        "Less, but better",
+        "Name the next step",
+        "Begin with the end",
+        "Patience. Then ask.",
+        "The rest can wait",
+        "Ask well",
+        "What needs doing?",
+        "Small steps, steady work",
+        "Clear mind, clear ask",
+        "Do the next right thing",
+        "Here, now",
+    ]
+
+    var body: some View {
+        Text(line)
+            .font(TronTypography.input)
+            // Typed text is full emerald; the prompt reads as a dimmer hint.
+            .foregroundStyle(Color.tronEmerald.opacity(0.55))
+            .lineLimit(1)
     }
 }

@@ -60,8 +60,8 @@ const MANIFEST_KEYS = [
 ];
 const PAYLOAD_PI_CLI = "app/node_modules/.bin/pi";
 const PAYLOAD_PI_ALIAS_TARGET = "../../app/node_modules/.bin/pi";
-const PROTOCOL_VERSION = 6;
-const MIN_PROTOCOL_VERSION = 6;
+const PROTOCOL_VERSION = 8;
+const MIN_PROTOCOL_VERSION = 8;
 export const PINNED_XCODEGEN_VERSION = "2.45.3";
 export const PINNED_NPM_VERSION = "10.9.4";
 export const PINNED_NPM_TREE_SHA256 = "adc24b0737566f66bc2ce18251f0bb8168c9cc9177c20fa3379cf129d6091cff";
@@ -207,6 +207,7 @@ async function validateRuntimeNodeAlias(root, architecture) {
 
 async function npmRuntimeTreeDigest(root) {
   const records = [];
+  const reads = [];
   async function visit(directory, relativeDirectory) {
     const entries = await readdir(directory, { withFileTypes: true });
     entries.sort((left, right) => Buffer.from(left.name).compare(Buffer.from(right.name)));
@@ -216,11 +217,20 @@ async function npmRuntimeTreeDigest(root) {
       const path = join(directory, entry.name);
       if (entry.isSymbolicLink()) throw new Error(`npm runtime contains a symlink: ${relative}`);
       if (entry.isDirectory()) await visit(path, relative);
-      else if (entry.isFile()) records.push({ path: `file:${relative}`, data: await readFile(path) });
-      else throw new Error(`npm runtime contains an unsupported entry: ${relative}`);
+      else if (entry.isFile()) {
+        const record = { path: `file:${relative}`, data: undefined };
+        records.push(record);
+        reads.push({ record, path });
+      } else throw new Error(`npm runtime contains an unsupported entry: ${relative}`);
     }
   }
   await visit(root, "");
+  // The records are sorted below, so bounded parallel reads do not change the digest.
+  for (let start = 0; start < reads.length; start += PAYLOAD_FINGERPRINT_READ_CONCURRENCY) {
+    await Promise.all(reads.slice(start, start + PAYLOAD_FINGERPRINT_READ_CONCURRENCY).map(async ({ record, path }) => {
+      record.data = await readFile(path);
+    }));
+  }
   records.sort((left, right) => Buffer.from(left.path).compare(Buffer.from(right.path)));
   const hash = createHash("sha256");
   for (const record of records) {
@@ -355,6 +365,12 @@ async function regularFiles(root, prefix) {
 /** Must remain byte-for-byte compatible with hash-gateway-payload.sh. */
 export async function payloadFingerprint(root) {
   await completePayload(root);
+  return payloadTreeFingerprint(root);
+}
+
+// Callers must run completePayload on this root first. validatePayload already
+// does, so it must not pay for the npm runtime digest a second time.
+async function payloadTreeFingerprint(root) {
   const files = [
     ...(await regularFiles(root, "app")),
     ...(await regularFiles(root, "runtime")),
@@ -595,7 +611,7 @@ export async function validatePayload(root, expected = {}, checkFingerprint = tr
   const manifest = payloadManifest(document.value, expected);
   await validatePayloadPushConfiguration(root, manifest.channel);
   if (checkFingerprint) {
-    const actual = await payloadFingerprint(root);
+    const actual = await payloadTreeFingerprint(root);
     if (actual !== manifest.payloadFingerprint) throw new Error("payload fingerprint does not match staged files");
   }
   return manifest;
@@ -666,6 +682,7 @@ async function readUpdateConfig(paths) {
   const sourceRoot = await noSymlinkDirectory(value.sourceRoot, [
     "packages/gateway/package.json", "packages/gateway/package-lock.json",
     "packages/gateway/scripts/ensure-node-pty-helper.mjs", "scripts/gateway-payload-deploy.mjs",
+    "scripts/gateway-install-inputs.mjs",
   ]);
   const artifactRoot = value.artifactRoot === undefined ? undefined : await noSymlinkDirectory(value.artifactRoot);
   return { ...value, sourceRoot, ...(artifactRoot === undefined ? {} : { artifactRoot }) };
@@ -786,43 +803,66 @@ export async function restoreSelectionStateAndClearAttempt(paths, state) {
   });
 }
 
-async function makeMutable(root) {
-  const visit = async (path) => {
-    const info = await lstat(path);
-    // Cleanup never follows links. Admission validates live payload links;
-    // malformed failed staging trees must still be removable without
-    // traversing a target outside the store.
-    if (info.isSymbolicLink()) return;
-    if (info.isDirectory()) {
-      await chmod(path, 0o755);
-      for (const entry of await readdir(path, { withFileTypes: true })) await visit(join(path, entry.name));
-    } else if (info.isFile()) {
-      await chmod(path, (info.mode & 0o111) !== 0 ? 0o755 : 0o644);
-    } else throw new Error("payload contains unsupported entry");
-  };
+// Walks the payload without following links. Directories are listed parents
+// first (root included); openDirectory runs before each one is read. Unsupported
+// entries are refused before the caller changes any mode.
+async function payloadTreeEntries(root, openDirectory, onSymlink) {
   const rootInfo = await lstat(root);
   if (rootInfo.isSymbolicLink()) throw new Error("payload root must not be a symlink");
+  if (!rootInfo.isDirectory()) throw new Error("payload root is not a directory");
+  const files = [];
+  const directories = [];
+  const visit = async (directory) => {
+    directories.push(directory);
+    await openDirectory(directory);
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isSymbolicLink()) await onSymlink(path);
+      else if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile()) files.push(path);
+      else throw new Error("payload contains unsupported entry");
+    }
+  };
   await visit(root);
+  return { files, directories };
 }
 
-async function makeImmutable(root) {
-  const payloadRoot = await realpath(root);
-  const visit = async (path) => {
+// Regular files keep their executable bit: 0755/0644 unsealed, 0555/0444 sealed.
+// Batches bound the concurrent lstat/chmod pairs so a ~9k-entry payload does not
+// pay one serial await per entry.
+async function forEachPayloadFile(paths, operation) {
+  for (let start = 0; start < paths.length; start += PAYLOAD_FINGERPRINT_READ_CONCURRENCY) {
+    await Promise.all(paths.slice(start, start + PAYLOAD_FINGERPRINT_READ_CONCURRENCY).map(operation));
+  }
+}
+
+export async function makeMutable(root) {
+  // Cleanup never follows links. Admission validates live payload links;
+  // malformed failed staging trees must still be removable without
+  // traversing a target outside the store.
+  const { files } = await payloadTreeEntries(root, (directory) => chmod(directory, 0o755), () => {});
+  await forEachPayloadFile(files, async (path) => {
     const info = await lstat(path);
-    if (info.isSymbolicLink()) {
-      await validatePayloadSymlink(payloadRoot, path, relative(payloadRoot, path));
-      return;
-    }
-    if (info.isDirectory()) {
-      for (const entry of await readdir(path, { withFileTypes: true })) await visit(join(path, entry.name));
-      await chmod(path, 0o555);
-    } else if (info.isFile()) {
-      await chmod(path, (info.mode & 0o111) !== 0 ? 0o555 : 0o444);
-    } else throw new Error("payload contains unsupported entry");
-  };
-  const rootInfo = await lstat(root);
-  if (rootInfo.isSymbolicLink()) throw new Error("payload root must not be a symlink");
-  await visit(root);
+    await chmod(path, (info.mode & 0o111) !== 0 ? 0o755 : 0o644);
+  });
+}
+
+export async function makeImmutable(root) {
+  const payloadRoot = await realpath(root);
+  // Every link is validated before any mode changes, so a refused payload is not
+  // left partially sealed.
+  const { files, directories } = await payloadTreeEntries(
+    root,
+    async () => {},
+    (path) => validatePayloadSymlink(payloadRoot, path, relative(payloadRoot, path)),
+  );
+  await forEachPayloadFile(files, async (path) => {
+    const info = await lstat(path);
+    await chmod(path, (info.mode & 0o111) !== 0 ? 0o555 : 0o444);
+  });
+  // Directories are sealed last, deepest first, so every entry is still reachable
+  // while the walk changes modes.
+  for (const directory of directories.reverse()) await chmod(directory, 0o555);
 }
 
 // Moves a validated staging tree into versions/ as a sealed version. macOS 15
@@ -1077,9 +1117,9 @@ export function createDeployTimeline(home, commandId, { operation = "update", no
       phaseStartedAt = now();
       if (states.terminal.has(state)) timeline.finish(state, error);
     },
-    mark(event, message) {
+    mark(event, message, level = "info", fields = {}) {
       if (finished) return;
-      appendDeployRecord(home, "info", event, message, { commandId, durationMs: since(phaseStartedAt) });
+      appendDeployRecord(home, level, event, message, { commandId, durationMs: since(phaseStartedAt), ...fields });
     },
     finish(state, error) {
       if (finished) return;
@@ -1262,6 +1302,52 @@ async function copyTrustedSourceScripts(sourceRoot, candidateRoot) {
     await cp(source, destination, { force: true, errorOnExist: false });
     const copied = await lstat(destination);
     if (!copied.isFile() || copied.isSymbolicLink()) throw new Error(`trusted source script copy is unsafe: ${destination}`);
+  }
+}
+
+/** Stage the source revision's delegated-provider pin, its scripts and exactly the
+ * artifacts both pin selections name, replacing whatever the base payload carried.
+ * Packaging (`stage-gateway-app.sh`) stages the same set; a source update must not
+ * claim a revision while running an older provider (#718). Artifact bytes are
+ * bound by the pin's own digests, checked here before anything is published. */
+async function stageSourceProvider(sourceRoot, candidateRoot) {
+  const gatewayRoot = join(sourceRoot, "packages", "gateway");
+  const appRoot = join(candidateRoot, "app");
+  const pinBytes = await readFile(join(gatewayRoot, "pi-subagents-pin.json"));
+  const pin = JSON.parse(pinBytes.toString("utf8"));
+  if (!pin || typeof pin !== "object" || Array.isArray(pin)) throw new Error("source pi-subagents pin is malformed");
+  const records = [];
+  for (const selection of [pin, pin.previous]) {
+    if (!selection) continue;
+    for (const [record, algorithm] of [
+      [selection.sourceArchive ?? (selection.path ? { path: selection.path, sha512: selection.sha512 } : undefined), selection.sourceArchive ? "sha256" : "sha512"],
+      [selection.lockfile, "sha256"], [selection.closure, "sha512"],
+    ]) {
+      if (!record) continue;
+      const parts = typeof record.path === "string" ? record.path.split("/") : [];
+      if (parts.length !== 2 || parts[0] !== "artifacts" || !validComponent(parts[1], 255) || typeof record[algorithm] !== "string") {
+        throw new Error("source pi-subagents artifact record must name artifacts/<file> with its digest");
+      }
+      records.push({ relative: record.path, digest: record[algorithm], algorithm });
+    }
+  }
+  await rm(join(appRoot, "artifacts"), { recursive: true, force: true });
+  if (records.length > 0) await mkdir(join(appRoot, "artifacts"), { recursive: true });
+  for (const { relative, digest, algorithm } of records) {
+    const source = join(gatewayRoot, relative);
+    const info = await lstat(source).catch(() => undefined);
+    if (!info?.isFile() || info.isSymbolicLink()) throw new Error(`source pi-subagents artifact is missing or unsafe: ${relative}`);
+    const bytes = await readFile(source);
+    if (createHash(algorithm).update(bytes).digest("hex") !== digest) throw new Error(`source pi-subagents artifact digest mismatch: ${relative}`);
+    await writeFile(join(appRoot, relative), bytes);
+  }
+  await writeFile(join(appRoot, "pi-subagents-pin.json"), pinBytes);
+  await mkdir(join(appRoot, "scripts"), { recursive: true });
+  for (const name of ["check-pi-subagents.mjs", "install-pi-subagents.mjs"]) {
+    const source = join(gatewayRoot, "scripts", name);
+    const info = await lstat(source).catch(() => undefined);
+    if (!info?.isFile() || info.isSymbolicLink()) throw new Error(`trusted provider script is missing or unsafe: ${source}`);
+    await cp(source, join(appRoot, "scripts", name), { force: true, errorOnExist: false });
   }
 }
 
@@ -1505,10 +1591,86 @@ export async function cleanupPayloadVersions(paths, maximum = MAX_RETAINED_VERSI
   return withStoreLock(paths, () => cleanupPayloadVersionsUnlocked(paths, maximum));
 }
 
-export async function stagePayload({ home, channel, source, version, sourceRevision, markCandidate = true }) {
+// Signed Node enforces library validation. Its native npm artifacts share the
+// installed snapshot's lifetime and authority, including spawned executables.
+// Detect contents, not addon names, so new native packages cannot bypass staging.
+async function isMachO(path) {
+  const handle = await open(path, "r");
+  try {
+    const header = Buffer.alloc(4);
+    const { bytesRead } = await handle.read(header, 0, header.length, 0);
+    if (bytesRead !== header.length) return false;
+    switch (header.readUInt32BE()) {
+      case 0xfeedface: case 0xcefaedfe: // 32-bit, both byte orders
+      case 0xfeedfacf: case 0xcffaedfe: // 64-bit, both byte orders
+      case 0xcafebabe: case 0xbebafeca: // universal
+      case 0xcafebabf: case 0xbfbafeca: // universal 64-bit
+        return true;
+      default: return false;
+    }
+  } finally { await handle.close(); }
+}
+
+async function adoptInstalledNativeFiles(candidateRoot, installedRoot) {
+  const refuse = (reason) => new Error(`Debug native payload ${reason}; rebuild and install a signed app before staging`);
+  const nativeFiles = [];
+  const modulesRoot = await realpath(join(candidateRoot, "app/node_modules"));
+  for (const entry of await regularFiles(candidateRoot, "app/node_modules")) {
+    if (!await isMachO(join(candidateRoot, entry.path))) continue;
+    if (entry.target !== undefined) {
+      // Aliases retain their target text, but cannot reach worktree native bytes
+      // outside the npm inventory. Internal regular targets are replaced below.
+      const target = await realpath(join(candidateRoot, entry.path));
+      if (!under(modulesRoot, target)) throw refuse(`native alias leaves npm tree: ${entry.path}`);
+    } else nativeFiles.push(entry.path);
+  }
+  if (nativeFiles.length === 0) return;
+  const readPackages = async (root) => {
+    try {
+      const lock = JSON.parse(await readBoundedRegular(join(root, "app/package-lock.json"), MAX_PACKAGE_LOCK_BYTES));
+      lockRootPackage(lock);
+      return lock.packages;
+    } catch { throw refuse("package lock is malformed"); }
+  };
+  const candidatePackages = await readPackages(candidateRoot);
+  const installedPackages = await readPackages(installedRoot);
+  for (const path of nativeFiles) {
+    // The nearest node_modules owns nested dependencies; scopes are part of the
+    // exact package-lock key, not a separate package or a name-only lookup.
+    const parts = path.slice("app/".length).split("/");
+    const start = parts.lastIndexOf("node_modules") + 1;
+    const packageKey = parts.slice(0, start + (parts[start]?.startsWith("@") ? 2 : 1)).join("/");
+    const candidate = candidatePackages[packageKey];
+    const installed = installedPackages[packageKey];
+    for (const field of ["version", "integrity"]) {
+      if (typeof candidate?.[field] !== "string" || candidate[field].length === 0
+        || candidate[field] !== installed?.[field]) throw refuse(`package identity differs: ${packageKey} (${field})`);
+    }
+    const installedPath = join(installedRoot, path);
+    const info = await lstat(installedPath).catch((error) => {
+      if (error?.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (!info?.isFile() || info.isSymbolicLink() || !await isMachO(installedPath)) {
+      throw refuse(`installed Mach-O file is missing or substituted: ${path}`);
+    }
+    await writeFile(join(candidateRoot, path), await readFile(installedPath));
+    await chmod(join(candidateRoot, path), info.mode & 0o777);
+  }
+}
+
+export async function stagePayload({ home, channel, source, version, sourceRevision, runtimeSource, markCandidate = true }) {
   const paths = store(home, channel);
   const sourceRoot = resolve(source);
   const sourceManifest = await validatePayload(sourceRoot, {}, true);
+  let runtimeSourceRoot;
+  let runtimeSourceManifest;
+  if (runtimeSource !== undefined) {
+    if (channel !== "dev") throw new Error("an installed runtime source is only valid for dev staging");
+    runtimeSourceRoot = resolve(runtimeSource);
+    runtimeSourceManifest = await validatePayload(runtimeSourceRoot, {}, true);
+  }
+  const useInstalledRuntime = runtimeSourceManifest?.nodeVersion === sourceManifest.nodeVersion;
   const targetVersion = version ?? sourceManifest.version;
   if (!validComponent(targetVersion, 128)) throw new Error("invalid payload version");
   const target = join(paths.versionsRoot, targetVersion);
@@ -1530,21 +1692,57 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
       await cleanupPayloadVersionsUnlocked(paths);
       return result;
     };
-    try {
-      await access(target);
-      const existing = await validatePayload(target, { channel, version: targetVersion }, true);
-      if (existing.payloadFingerprint === sourceManifest.payloadFingerprint) return markCandidateResult({ root: target, manifest: existing, reused: true });
-      throw new Error(`version ${targetVersion} already exists with a different payload`);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+    if (!useInstalledRuntime) {
+      try {
+        await access(target);
+        const existing = await validatePayload(target, { channel, version: targetVersion }, true);
+        if (existing.payloadFingerprint === sourceManifest.payloadFingerprint) return markCandidateResult({ root: target, manifest: existing, reused: true });
+        throw new Error(`version ${targetVersion} already exists with a different payload`);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
     }
+    const runtimeSnapshot = useInstalledRuntime
+      ? join(paths.versionsRoot, `.staging-runtime-${process.pid}-${randomUUID()}`)
+      : undefined;
+    if (runtimeSnapshot) {
+      await copyValidatedPayloadBase({ root: runtimeSourceRoot, manifest: runtimeSourceManifest }, runtimeSnapshot);
+    }
+    const runtimeSnapshotRoot = runtimeSnapshot ?? runtimeSourceRoot;
     const temporary = join(paths.versionsRoot, `.staging-${targetVersion}-${process.pid}-${randomUUID()}`);
-    await rm(temporary, { recursive: true, force: true });
     try {
+      const runtimeSourceFingerprint = useInstalledRuntime
+        ? await payloadSubtreeFingerprint(runtimeSnapshotRoot, "runtime")
+        : undefined;
+      await rm(temporary, { recursive: true, force: true });
       await copyPayloadTree(sourceRoot, temporary);
       await makeMutable(temporary);
-      const stagedFingerprint = await payloadFingerprint(temporary);
-      if (stagedFingerprint !== sourceManifest.payloadFingerprint) throw new Error("staged payload fingerprint changed during copy");
+      const copiedFingerprint = await payloadFingerprint(temporary);
+      if (copiedFingerprint !== sourceManifest.payloadFingerprint) throw new Error("staged payload changed during copy");
+      let stagedFingerprint = copiedFingerprint;
+      if (useInstalledRuntime) {
+        await rm(join(temporary, "runtime"), { recursive: true, force: true });
+        await copyPayloadTree(join(runtimeSnapshotRoot, "runtime"), join(temporary, "runtime"));
+        const copiedRuntimeFingerprint = await payloadSubtreeFingerprint(temporary, "runtime");
+        if (copiedRuntimeFingerprint !== runtimeSourceFingerprint) throw new Error("installed runtime changed during dev staging");
+        await adoptInstalledNativeFiles(temporary, runtimeSnapshotRoot);
+        stagedFingerprint = await payloadFingerprint(temporary);
+      }
+      if (useInstalledRuntime) {
+        const existingInfo = await lstat(target).catch((error) => {
+          if (error?.code === "ENOENT") return undefined;
+          throw error;
+        });
+        if (existingInfo) {
+          const existing = await validatePayload(target, { channel, version: targetVersion }, true);
+          if (existing.payloadFingerprint === stagedFingerprint) {
+            await makeMutable(temporary);
+            await rm(temporary, { recursive: true, force: true });
+            return markCandidateResult({ root: target, manifest: existing, reused: true });
+          }
+          throw new Error(`version ${targetVersion} already exists with a different payload`);
+        }
+      }
       const manifest = {
         ...sourceManifest,
         channel,
@@ -1555,13 +1753,20 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
       };
       payloadManifest(manifest, { channel, version: targetVersion });
       await atomicJson(join(temporary, "manifest.json"), manifest);
-      await validatePayload(temporary, { channel, version: targetVersion, payloadFingerprint: stagedFingerprint }, true);
+      // manifest.json is outside the fingerprinted app/ and runtime/ trees, so the
+      // fingerprint computed above still describes the tree being published.
+      await validatePayload(temporary, { channel, version: targetVersion, payloadFingerprint: stagedFingerprint }, false);
       await publishImmutablePayload(temporary, target);
       return markCandidateResult({ root: target, manifest, reused: false });
     } catch (error) {
       await makeMutable(temporary).catch(() => {});
       await rm(temporary, { recursive: true, force: true });
       throw error;
+    } finally {
+      if (runtimeSnapshot) {
+        await makeMutable(runtimeSnapshot).catch(() => {});
+        await rm(runtimeSnapshot, { recursive: true, force: true });
+      }
     }
   });
 }
@@ -1757,8 +1962,11 @@ export async function waitForReplacement({
   throw error;
 }
 
-export async function waitForDrainedReplacement({ oldProcess, replacement, expected, oldEpoch, relaunchLimitMs = RELAUNCH_LIMIT_MS, startupLimitMs = STARTUP_LIMIT_MS, onDrainComplete }) {
-  await waitForDrainCompletion(oldProcess, replacement.readExactProcess, replacement.sleep);
+export async function waitForDrainedReplacement({ oldProcess, replacement, expected, oldEpoch, relaunchLimitMs = RELAUNCH_LIMIT_MS, startupLimitMs = STARTUP_LIMIT_MS, onDrainComplete, onExitStalled }) {
+  await waitForDrainCompletion(oldProcess, replacement.readExactProcess, replacement.sleep, {
+    readListener: replacement.readListener,
+    onExitStalled,
+  });
   onDrainComplete?.();
   return waitForReplacement({
     oldProcess,
@@ -1890,17 +2098,54 @@ export async function captureLocalListenerProcess(port, runCommand = runBounded)
  * listener, and port state are never transition evidence after capture: the
  * candidate startup deadline begins only after the exact old PID/start pair is
  * gone or replaced. */
+// The old Gateway keeps its port while it drains accepted work, for as long as
+// that takes, and closes it only when its shutdown begins. The rest of its
+// shutdown is disposal and its own exit, so a process still alive this long
+// after releasing the port is stuck inside its exit (#729), and launchd cannot
+// relaunch until it is gone. The Gateway's exit watcher normally ends it within
+// seconds; this bound also covers an old Gateway that predates that watcher.
+export const DRAIN_EXIT_STALL_LIMIT_MS = 30_000;
+
 export async function waitForDrainCompletion(
   oldProcess,
   readExactProcess,
   sleep = (milliseconds) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds)),
+  {
+    readListener,
+    stallLimitMs = DRAIN_EXIT_STALL_LIMIT_MS,
+    now = () => performance.now(),
+    onExitStalled,
+    killProcess = (pid) => process.kill(pid, "SIGKILL"),
+  } = {},
 ) {
   if (!oldProcess || !Number.isSafeInteger(oldProcess.pid) || oldProcess.pid < 1 || !oldProcess.startIdentity) {
     throw new Error("old Gateway listener process identity is unavailable");
   }
+  let releasedAt;
+  let killed = false;
   while (true) {
     const current = await readExactProcess(oldProcess.pid);
-    if (!current || current.pid !== oldProcess.pid || current.startIdentity !== oldProcess.startIdentity) return current;
+    if (!sameProcess(current, oldProcess)) return current;
+    if (readListener && !killed) {
+      let listener;
+      let listenerKnown = true;
+      try { listener = await readListener(); } catch { listenerKnown = false; }
+      if (!listenerKnown || sameProcess(listener, oldProcess)) {
+        releasedAt = undefined;
+      } else {
+        releasedAt ??= now();
+        const releasedForMs = now() - releasedAt;
+        if (releasedForMs >= stallLimitMs) {
+          // Re-read the exact identity immediately before signalling: a PID
+          // that exited and was reused is never ours to kill.
+          const exact = await readExactProcess(oldProcess.pid);
+          if (!sameProcess(exact, oldProcess)) return exact;
+          onExitStalled?.({ pid: oldProcess.pid, releasedForMs: Math.round(releasedForMs) });
+          try { killProcess(oldProcess.pid); } catch { /* exited between the read and the signal */ }
+          killed = true;
+        }
+      }
+    }
     await sleep(500);
   }
 }
@@ -2093,6 +2338,12 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
           oldProcessGone = true;
           paths.timeline?.mark("deploy.old-process-exited", "Previous Gateway process exited after draining");
         },
+        onExitStalled: ({ pid, releasedForMs }) => paths.timeline?.mark(
+          "deploy.old-process-stalled",
+          `Previous Gateway pid ${pid} was still alive ${releasedForMs} ms after releasing its listener; killing that exact process`,
+          "warning",
+          { pid, releasedForMs },
+        ),
       });
       // /health admits warmup only; authenticated system.info is the promotion proof.
       const confirmed = requireAuthenticatedRuntimeInfo(
@@ -2306,15 +2557,26 @@ export async function resolveSourcePayloadBase(paths, config, environment = proc
 }
 
 export async function copyValidatedPayloadBase(base, destination, copyPayload = copyPayloadTree) {
-  await copyPayload(base.root, destination);
-  // Fallback roots may be operator-prepared mutable projections. Verify the
-  // copied snapshot against the exact manifest observed during admission before
-  // making or replacing any candidate files.
-  await validatePayload(destination, {
-    channel: base.manifest.channel,
-    version: base.manifest.version,
-    payloadFingerprint: base.manifest.payloadFingerprint,
-  }, true);
+  try {
+    await lstat(destination);
+    throw new Error(`payload copy destination already exists: ${destination}`);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  try {
+    await copyPayload(base.root, destination);
+    // Mutable source roots must match the exact manifest observed at admission
+    // before any copied bytes can become a runtime or candidate payload.
+    await validatePayload(destination, {
+      channel: base.manifest.channel,
+      version: base.manifest.version,
+      payloadFingerprint: base.manifest.payloadFingerprint,
+    }, true);
+  } catch (error) {
+    await makeMutable(destination).catch(() => {});
+    await rm(destination, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 async function stageConfiguredArtifact(paths, config, requestedVersion) {
@@ -2347,14 +2609,26 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
   const compilerOutput = await mkdtemp(join(tmpdir(), "tron-gateway-source-build-"));
   try {
     let source;
+    let sourceRevision;
+    let sourceInputFingerprint;
     await withGatewaySourceBuildLock(config.sourceRoot, async () => {
-      // Capture dependency authority while bundle-gateway.sh cannot replace
-      // source node_modules, then hold that same lock through compilation.
+      // Bind the actual compiler/copy inputs, not just HEAD: development
+      // checkouts may be dirty, but their staged output must not claim to match
+      // the clean revision after those edits are reverted.
+      sourceRevision = await gitRevision(config.sourceRoot);
+      const installVerifierPath = join(config.sourceRoot, "scripts", "gateway-install-inputs.mjs");
+      const { gatewayBuildInputFingerprint, verifyGatewayInstallInputs } = await import(pathToFileURL(installVerifierPath).href);
+      sourceInputFingerprint = await gatewayBuildInputFingerprint(config.sourceRoot);
       source = await captureReusableSourcePackage(active.root, gatewayRoot);
+      await verifyGatewayInstallInputs(gatewayRoot);
       await runCommand(process.execPath, [
         join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"),
         "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput,
       ], { cwd: gatewayRoot, timeoutMs });
+      if (await gitRevision(config.sourceRoot) !== sourceRevision
+        || await gatewayBuildInputFingerprint(config.sourceRoot) !== sourceInputFingerprint) {
+        throw new Error("Gateway source inputs changed during rebuild; retry from the current checkout");
+      }
     });
     // Source updates inherit the exact validated product configuration from
     // the selected immutable payload. The source checkout and environment are
@@ -2378,17 +2652,30 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
         await cp(compilerOutput, join(temporary, "app", "dist"), { recursive: true, errorOnExist: true, force: false });
         await writeFile(join(temporary, "app", "package.json"), source.packageBytes);
         await writeFile(join(temporary, "app", "package-lock.json"), source.lockBytes);
+        // The patched pi-coding-agent declaration explains this exact lock, which a
+        // source update cannot change; refresh it so its metadata is the revision's.
+        const patchDeclaration = await readFile(join(gatewayRoot, "pi-coding-agent-patch.json")).catch((error) => {
+          if (error?.code === "ENOENT") return undefined;
+          throw error;
+        });
+        if (patchDeclaration) await writeFile(join(temporary, "app", "pi-coding-agent-patch.json"), patchDeclaration);
         if (await validatePayloadPushConfiguration(temporary, paths.channel) !== activePushConfiguration) {
           throw new Error("source update changed the active product PushService.xcconfig");
         }
         // The updater and helper are part of the trusted source revision, not
         // stale files inherited from whichever payload happened to be active.
         await copyTrustedSourceScripts(config.sourceRoot, temporary);
+        await stageSourceProvider(config.sourceRoot, temporary);
+        if (await gitRevision(config.sourceRoot) !== sourceRevision) {
+          throw new Error("Gateway source revision changed during rebuild; retry from the current checkout");
+        }
+        const { writeGatewayBuildInputReceipt } = await import(pathToFileURL(join(config.sourceRoot, "scripts", "gateway-install-inputs.mjs")).href);
+        await writeGatewayBuildInputReceipt(config.sourceRoot, join(temporary, "app"), sourceRevision, sourceInputFingerprint);
         const fingerprint = await payloadFingerprint(temporary);
         const manifest = {
           ...active.manifest,
           schema: SCHEMA, kind: KIND, channel: paths.channel, version,
-          gatewayVersion: source.sourcePackage.version, sourceRevision: await gitRevision(config.sourceRoot),
+          gatewayVersion: source.sourcePackage.version, sourceRevision,
           runtimeEpoch: randomUUID(), payloadFingerprint: fingerprint,
         };
         payloadManifest(manifest, { channel: paths.channel, version });
@@ -2591,7 +2878,20 @@ async function applyPayloadInternal(value, paths) {
     await writeProgress(paths, "building", value.commandId);
     let built;
     try {
-      built = await buildSourcePayload({ paths, config, candidateVersion: value.candidateVersion });
+      // The configured checkout is already executable trusted build input.
+      // Use its current builder now, not the copy inside yesterday's payload;
+      // this installed helper still owns promotion, readiness and rollback.
+      const scriptsRoot = await noSymlinkDirectory(join(config.sourceRoot, "scripts"));
+      const sourceUpdaterPath = join(scriptsRoot, "gateway-payload-deploy.mjs");
+      const sourceUpdater = await import(pathToFileURL(sourceUpdaterPath).href);
+      if (typeof sourceUpdater.buildSourcePayload !== "function") {
+        throw new Error("trusted source updater does not export buildSourcePayload");
+      }
+      paths.timeline?.mark("deploy.source-builder", "Building with the trusted checkout updater", "info", {
+        builderSha256: createHash("sha256").update(await readFile(sourceUpdaterPath)).digest("hex"),
+      });
+      built = await sourceUpdater.buildSourcePayload({ paths, config, candidateVersion: value.candidateVersion });
+      payloadManifest(built?.manifest, { channel: value.channel, version: value.candidateVersion });
     } catch (error) {
       await writeProgress(paths, "failure", value.commandId, error?.message ?? error).catch(() => {});
       throw error;
@@ -2698,6 +2998,12 @@ async function rollback({ paths, host, port, token, timeoutMs, commandId, replac
         relaunchLimitMs: timeoutMs,
         startupLimitMs: STARTUP_LIMIT_MS,
         onDrainComplete: () => { oldProcessGone = true; },
+        onExitStalled: ({ pid, releasedForMs }) => paths.timeline?.mark(
+          "deploy.old-process-stalled",
+          `Previous Gateway pid ${pid} was still alive ${releasedForMs} ms after releasing its listener; killing that exact process`,
+          "warning",
+          { pid, releasedForMs },
+        ),
       });
       await writeState(paths, {
         state: "rolled-back", channel: paths.channel, version: target.version,
@@ -2762,7 +3068,10 @@ async function main() {
   }
   if (command === "stage") {
     const source = argument("--source") ?? resolve(dirname(fileURLToPath(import.meta.url)), "../packages/mac-app/Sources/Resources/Gateway");
-    const result = await stagePayload({ home, channel, source, version: argument("--version"), sourceRevision: argument("--source-revision") });
+    const result = await stagePayload({
+      home, channel, source, version: argument("--version"), sourceRevision: argument("--source-revision"),
+      runtimeSource: argument("--runtime-source"),
+    });
     console.log(JSON.stringify({ command, channel, home, ...result }));
     return;
   }

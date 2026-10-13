@@ -11,6 +11,7 @@ struct NewSessionSheet: View {
     @State private var useDefaultWorkspace = true
     @State private var selectedModel: ModelRef?
     @State private var configuredModel: ModelRef?
+    @State private var configuredSource: SettingsBadge?
     /// Explicit model intent, retained across configuration re-runs. See
     /// `NewSessionModelChoice`.
     @State private var modelChoice = NewSessionModelChoice()
@@ -20,6 +21,7 @@ struct NewSessionSheet: View {
     @State private var sourceControlScope: NewSessionModelScope?
     @State private var configurationRequestID = UUID()
     @State private var creationNotice: String?
+    @State private var configurationNotice: String?
     @State private var gitInspection: GitInspection?
     @State private var gitInspectionFailed = false
     @State private var showBrowser = false
@@ -44,8 +46,8 @@ struct NewSessionSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
-                    if let creationNotice {
-                        Text(creationNotice).font(TronTypography.bodySM)
+                    if let notice = creationNotice ?? configurationNotice {
+                        Text(notice).font(TronTypography.bodySM)
                             .accessibilityIdentifier("new-session-created-elsewhere")
                     }
                     if !quickSelections.isEmpty {
@@ -81,6 +83,11 @@ struct NewSessionSheet: View {
                         accent: .tronEmerald
                     ) { showBrowser = true }
 
+                    if !workspace.isEmpty, let profileID = activeProfileID {
+                        ProjectSettingsLink(cwd: workspace, profileID: profileID)
+                            .tronGlassSurface(accent: .tronEmerald)
+                    }
+
                     setupCard(
                         icon: "arrow.triangle.branch",
                         title: "Source Control",
@@ -94,7 +101,8 @@ struct NewSessionSheet: View {
                         title: "Model",
                         value: selectedModel?.displayName ?? "Default",
                         caption: selectedModel?.displayDescription ?? "Use the current agent default.",
-                        accent: .tronPurple
+                        accent: .tronPurple,
+                        badge: configuredScope != nil && selectedModel == configuredModel ? configuredSource : nil
                     ) { showModels = true }
 
                     if needsTrust {
@@ -102,7 +110,9 @@ struct NewSessionSheet: View {
                             icon: "checkmark.shield",
                             title: "Project Trust",
                             value: "Untrusted",
-                            caption: "This session will open without project resources unless you trust this project.",
+                            caption: NewSessionTrustPolicy.sharedProjectRoot(trustInspection).map {
+                                "This session will open without project resources unless you trust its project root, \(URL(fileURLWithPath: $0).lastPathComponent)."
+                            } ?? "This session will open without project resources unless you trust this project.",
                             accent: .tronAmber
                         ) { confirmingTrust = true }
                         .accessibilityHint("Opens a confirmation to trust project resources")
@@ -136,7 +146,8 @@ struct NewSessionSheet: View {
             .tronManagedSheet(isPresented: $confirmingTrust, identity: "new-session.project-trust") {
                 TronConfirmationSheet(
                     title: "Trust this project?",
-                    message: "Trusting allows project-local settings, extensions, skills, prompts, packages, and system prompt files to load and execute with your Mac user authority. Trust is not a sandbox. If you cancel, this session will open without project resources.",
+                    message: "Trusting allows project-local settings, extensions, skills, prompts, packages, and system prompt files to load and execute with your Mac user authority. Trust is not a sandbox. If you cancel, this session will open without project resources."
+                        + (NewSessionTrustPolicy.sharedProjectRoot(trustInspection).map { " The decision applies to the whole project at \($0)." } ?? ""),
                     confirmTitle: "Trust",
                     centersTitle: true,
                     alwaysUsesToolbarActions: true,
@@ -287,6 +298,7 @@ struct NewSessionSheet: View {
                 let requestedWorkspace = workspace
                 let requestID = UUID()
                 configurationRequestID = requestID
+                configurationNotice = nil
                 let readIdentity = model.knowledgePresentationIdentity
                 // A revision-only re-run (profile revision, trust invalidation, or
                 // presentation activity) re-derives the scope default but must not
@@ -298,10 +310,10 @@ struct NewSessionSheet: View {
                     sourceControlScope = modelScope
                 }
                 selectedModel = modelChoice.retain(in: modelScope)
-                let settingsTarget = requestedWorkspace.isEmpty
-                    ? SettingsTarget.global
-                    : .project(cwd: requestedWorkspace)
-                async let settingsReady = model.refreshSettings(target: settingsTarget)
+                let settingsTarget: JSONValue = requestedWorkspace.isEmpty
+                    ? .object(["kind": .string("mac")])
+                    : .object(["kind": .string("project"), "cwd": .string(requestedWorkspace)])
+                async let settingsResponse = model.resolveSettingsForRenderer(target: settingsTarget, keys: ["model.ref[role=chat]"])
                 let trustReady: Bool
                 if requestedWorkspace.isEmpty {
                     trustReady = true
@@ -328,15 +340,26 @@ struct NewSessionSheet: View {
                 guard admitsConfigurationRequest(requestID, readIdentity: readIdentity, profileID: profileID, cwd: requestedWorkspace) else { return }
                 gitInspection = inspectedGit
                 gitInspectionFailed = gitFailed
-                let loadedSettings = await settingsReady
+                let loadedSettings: SettingsResolution
+                do { loadedSettings = try await settingsResponse }
+                catch {
+                    guard admitsConfigurationRequest(requestID, readIdentity: readIdentity, profileID: profileID, cwd: requestedWorkspace) else { return }
+                    configurationNotice = error.localizedDescription
+                    return
+                }
                 guard admitsConfigurationRequest(requestID, readIdentity: readIdentity, profileID: profileID, cwd: requestedWorkspace),
                       configurationOwner.admit(
                         profileID: profileID,
                         workspace: requestedWorkspace,
-                        settingsReady: loadedSettings,
+                        settingsReady: true,
                         trustReady: trustReady
                       ) else { return }
-                configuredModel = model.configuredDefaultModel(for: settingsTarget)
+                let defaultModel = loadedSettings.keys.first { $0.key == "model.ref[role=chat]" }
+                if let value = defaultModel?.value?.objectValue,
+                   let provider = value["provider"]?.stringValue, let id = value["id"]?.stringValue {
+                    configuredModel = ModelRef(provider: provider, id: id)
+                } else { configuredModel = nil }
+                configuredSource = defaultModel?.badges.first { $0.kind == "layer" }
                 configuredScope = modelScope
                 selectedModel = modelChoice.effective(
                     configured: configuredModel,
@@ -353,6 +376,7 @@ struct NewSessionSheet: View {
         value: String,
         caption: String,
         accent: Color,
+        badge: SettingsBadge? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -371,6 +395,7 @@ struct NewSessionSheet: View {
                         .truncationMode(.middle)
                 }
                 .foregroundStyle(accent)
+                if let badge { TronTag(TronTagModel(badge)) }
                 HStack(alignment: .top, spacing: 8) {
                     Color.clear.frame(width: 16, height: 1)
                     Text(caption)

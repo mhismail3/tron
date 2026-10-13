@@ -4,11 +4,13 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shutil
 import signal
 import stat
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -40,7 +42,7 @@ class Settings:
     primary: Path
     root: Path
     remote: str
-    base: str
+    base: str  # every claim lands into the configured base
     regenerable: List[str]  # git glob pathspecs
     releases: List[dict]
     started: Path  # the worktree (or checkout) cleanup was started from
@@ -103,6 +105,38 @@ def _scope(tree: Worktree, settings: Settings) -> Optional[str]:
     return None
 
 
+def _issue_state(gh: Gh, number: int) -> str:
+    """OPEN or CLOSED for the issue a claim branch is for; a missing issue fails the call."""
+    return json.loads(gh.run("issue", "view", str(number), "--json", "state"))["state"]
+
+
+def _claim_commit(tree: Worktree, settings: Settings, number: int) -> Tuple[Optional[str], Optional[str]]:
+    """(the claim commit the head is, why the branch is more than the single claim `start` made)."""
+    base_ref = f"{settings.remote}/{settings.base}"
+    # The base branch moving on is not a change to the branch: a claim commit made
+    # against an older remote base tip is still the only commit beyond this ref.
+    counted = _git(tree.path, "rev-list", "--count", f"{base_ref}..{tree.head}", check=False)
+    if counted.returncode != 0:
+        return None, f"cannot compare it with {base_ref}: {counted.stderr.strip() or 'git failed'}"
+    beyond = counted.stdout.strip() or "0"
+    if beyond != "1":
+        return None, f"{beyond} commits lie beyond {base_ref}, not only its claim commit"
+    # The same trailers `start` writes and the dashboard reads.
+    if claims.claim_commit(tree.path, base_ref, tree.head, number) is None:
+        return None, f"its one commit beyond {base_ref} carries no claim marker for #{number}"
+    # `start` commits the base tree itself. Work amended or squashed into that
+    # commit keeps its message and trailers, so the content decides: one parent,
+    # and the tree of that parent unchanged.
+    parents = _git(tree.path, "rev-list", "--parents", "--max-count=1", tree.head).stdout.split()
+    if len(parents) != 2:
+        return None, f"its claim commit has {max(len(parents) - 1, 0)} parents, not one"
+    head_tree = _git(tree.path, "rev-parse", f"{tree.head}^{{tree}}").stdout.strip()
+    parent_tree = _git(tree.path, "rev-parse", f"{tree.head}^1^{{tree}}").stdout.strip()
+    if head_tree != parent_tree:
+        return None, "its claim commit carries changes"
+    return tree.head, None
+
+
 def _merged_head(gh: Gh, branch: str, head: str, base: str) -> Tuple[Optional[str], Optional[str]]:
     """(the pull request that merged exactly `head`, None) or (None, why none did)."""
     pulls = land.merged_pulls(gh, branch)
@@ -115,6 +149,41 @@ def _merged_head(gh: Gh, branch: str, head: str, base: str) -> Tuple[Optional[st
         return None, f"merged {merged}, not at the local head {head[:12]}"
     others = [f"#{p['number']} into {p['baseRefName']}" for p in pulls if p["baseRefName"] != base]
     return None, "no pull request from it is merged into " + base + (f" (merged {', '.join(others)})" if others else "")
+
+
+_GLOB_PIECES = {"**/": "(?:.*/)?", "**": ".*", "*": "[^/]*", "?": "[^/]"}
+
+
+def _glob_regex(glob: str) -> str:
+    """The regular expression of a `cleanup.regenerableIgnored` glob, with Git's pathspec-glob meaning.
+
+    Only `*`, `?`, `**/` and `**` are used there: `*` and `?` stay within one path segment,
+    and `**` crosses segments (README.md, `cleanup`).
+    """
+    return "".join(_GLOB_PIECES.get(token, re.escape(token)) for token in re.split(r"(\*\*/|\*\*|\*|\?)", glob))
+
+
+def _regenerable(globs: List[str]) -> re.Pattern:
+    return re.compile("|".join(f"(?:{_glob_regex(glob)})" for glob in globs))
+
+
+def _nested_checkout_problem(checkout: Path) -> Optional[str]:
+    """Why a nested checkout that a regenerable glob matches is still local data, or None when it is re-fetchable.
+
+    Its files are not listed with the parent's ignored files, so they are read here: uncommitted,
+    untracked or ignored content, or a commit that no remote-tracking ref contains, keeps it.
+    """
+    status = _git(checkout, "status", "--porcelain", "--ignored", "--untracked-files=all", check=False)
+    if status.returncode != 0:
+        return f"cannot read its status: {status.stderr.strip() or 'git failed'}"
+    if status.stdout.strip():
+        return "uncommitted, untracked or ignored files"
+    unpushed = _git(checkout, "rev-list", "--count", "--all", "--not", "--remotes", check=False)
+    if unpushed.returncode != 0:
+        return f"cannot compare it with its remotes: {unpushed.stderr.strip() or 'git failed'}"
+    if unpushed.stdout.strip() != "0":
+        return f"{unpushed.stdout.strip()} commits on no remote-tracking branch"
+    return None
 
 
 def _local_blockers(tree: Worktree, settings: Settings) -> List[str]:
@@ -130,10 +199,20 @@ def _local_blockers(tree: Worktree, settings: Settings) -> List[str]:
     if dirty:
         reasons.append(f"{len(dirty)} uncommitted or untracked: " + _shown([line[3:] for line in dirty]))
     # Every ignored file by name, not --directory: that folds an untracked directory holding only
-    # ignored files into one `dir/` entry, hiding what is in it. Git prunes the regenerable globs.
-    excluded = [f":(exclude,glob){glob}" for glob in settings.regenerable]
-    kept = sorted(p for p in _git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "-z", "--",
-                                  ".", *excluded).stdout.split("\0") if p)
+    # ignored files into one `dir/` entry, hiding what is in it. The globs are matched here, not by a
+    # pathspec: under --ignored Git does not apply a glob exclude to a directory entry, so a nested
+    # checkout (listed as `dir/`) would never match `**/build/**`.
+    ignored = sorted(p for p in _git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+                     .stdout.split("\0") if p)
+    regenerable = _regenerable(settings.regenerable)
+    kept = []
+    for entry in ignored:
+        if not regenerable.fullmatch(entry.rstrip("/")):
+            kept.append(entry)
+        elif entry.endswith("/"):
+            problem = _nested_checkout_problem(path / entry)
+            if problem:
+                kept.append(f"{entry} ({problem})")
     if kept:
         reasons.append(f"{len(kept)} ignored and not regenerable: " + _shown(kept))
     return reasons
@@ -179,10 +258,39 @@ def _process_blockers(path: Path, settings: Settings) -> List[str]:
     return [f"working directory of {_shown(inside)}"] if inside else []
 
 
-def _blockers(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[str], List[str]]:
-    """(the pull request that merged the head, every reason the worktree must stay)."""
+@dataclass
+class Done:
+    """A head proven done: how the removal line reports it, and whether a claim, not a pull request, proved it."""
+
+    proof: str
+    claim_only: bool
+
+
+def _done(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[Done], List[str]]:
+    """(how the head is provably done, why it is not) — a merged pull request, or a spent claim."""
+    # `_scope` admits only claim branches, so the issue number is known here.
+    number = claims.claimed_issue(tree.branch)
     pull, why = _merged_head(gh, tree.branch, tree.head, settings.base)
-    return pull, ([why] if why else []) + _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
+    if pull:
+        return Done(f"{pull} merged", False), []
+    reasons = [why] if why else []
+    claim_commit, why_not = _claim_commit(tree, settings, number)
+    if claim_commit is None:
+        reasons.append(why_not)
+    else:
+        # An evidence-only task produces no pull request: its closed issue with a
+        # branch that is nothing but the claim commit proves the claim is spent.
+        state = _issue_state(gh, number)
+        if state == "CLOSED":
+            return Done(f"#{number} closed, only its claim commit", True), []
+        reasons.append(f"#{number} is {state}")
+    return None, reasons
+
+
+def _blockers(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[Done], List[str]]:
+    """(how the worktree is provably done, every reason it must stay)."""
+    done, reasons = _done(gh, tree, settings)
+    return done, reasons + _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
 
 
 # ------------------------------------------------------------------ removal
@@ -260,16 +368,47 @@ def _open_directories(path: Path) -> Optional[str]:
     return None
 
 
-def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:
+def _remove(gh: Gh, tree: Worktree, settings: Settings, done: Done) -> Tuple[bool, str]:
     """Release, recheck, then remove the worktree, the local branch and the remote branch."""
     for entry in settings.releases:
         failure = _release(tree.path, entry)
         if failure:
             return False, f"release command {failure}"
-    # The release commands take time; everything local is proven again right before removing.
+    # The release commands take time; everything local is proven again right before removing,
+    # and so is that no open claim started from the branch meanwhile.
     reasons = _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
+    if done.claim_only:
+        # A merged pull request cannot unmerge; an issue a claim proved spent can reopen.
+        number = claims.claimed_issue(tree.branch)
+        state = _issue_state(gh, number)
+        if state != "CLOSED":
+            reasons.append(f"#{number} is {state}")
     if reasons:
         return False, "; ".join(reasons)
+    # Retain the exact merged-head gate evidence in the common Git directory
+    # before removing the linked worktree's private Git metadata.
+    retained_logs = ""
+    if not done.claim_only:
+        common = Path(_git(settings.primary, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
+        source = Path(_git(tree.path, "rev-parse", "--path-format=absolute", "--git-dir").stdout.strip()) / "work" / "logs" / tree.head[:12]
+        destination = common / "work" / "logs" / tree.head[:12]
+        if source.is_dir():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists():
+                retained_logs = f"; gate logs kept at {destination} (already present)"
+            else:
+                shutil.move(str(source), str(destination))
+                retained_logs = f"; gate logs retained at {destination}"
+        # Keep at most 30 days of completed evidence, without following links.
+        log_root = common / "work" / "logs"
+        cutoff = time.time() - 30 * 24 * 60 * 60
+        if log_root.is_dir():
+            for entry in log_root.iterdir():
+                try:
+                    if entry.is_dir() and not entry.is_symlink() and entry.stat().st_mtime < cutoff:
+                        shutil.rmtree(entry)
+                except OSError:
+                    pass
     # Only now that everything left is proven committed or regenerable.
     unopened = _open_directories(tree.path)
     if unopened:
@@ -277,7 +416,7 @@ def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:
     removed = _git(settings.primary, "worktree", "remove", str(tree.path), check=False)
     if removed.returncode != 0:
         return False, f"git worktree remove refused: {removed.stderr.strip()}"
-    # Only at the merged head: a branch moved since the check keeps its commits.
+    # Only at the head that proved it done: a branch moved since the check keeps its commits.
     deleted = _git(settings.primary, "update-ref", "-d", f"refs/heads/{tree.branch}", tree.head, check=False)
     if deleted.returncode == 0:
         local = "deleted" + _drop_branch_settings(settings.primary, tree.branch)
@@ -288,7 +427,7 @@ def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:
     except land.LandError as error:
         return False, (f"worktree removed, local branch {local}; {settings.remote}/{tree.branch} was left: {error}. "
                        f"Delete it only if it is still at {tree.head[:12]}")
-    return True, f"local branch {local}; {settings.remote}/{tree.branch} {remote}"
+    return True, f"local branch {local}; {settings.remote}/{tree.branch} {remote}{retained_logs}"
 
 
 # ---------------------------------------------------------------------- run
@@ -328,8 +467,9 @@ def run(gh: Gh, cwd: Path, config: dict, all_worktrees: bool, dry_run: bool) -> 
     os.chdir(primary)
     # Under --all, one worktree's error (a failed gh call, a git failure) keeps that worktree
     # and the rest are still decided; for the current worktree alone it fails the command.
-    errors = (CleanupError, GhError, land.LandError, json.JSONDecodeError, OSError) if all_worktrees else ()
-    blocked = failed = done = 0
+    errors = (CleanupError, GhError, claims.ClaimError, land.LandError, json.JSONDecodeError,
+              OSError) if all_worktrees else ()
+    blocked = failed = removed = 0
     for tree in candidates:
         label = name(tree)
         reason = _scope(tree, settings)
@@ -338,36 +478,36 @@ def run(gh: Gh, cwd: Path, config: dict, all_worktrees: bool, dry_run: bool) -> 
             blocked += 1
             continue
         try:
-            pull, reasons = _blockers(gh, tree, settings)
+            done, reasons = _blockers(gh, tree, settings)
         except errors as error:
-            pull, reasons = None, [f"cannot decide: {error}"]
+            done, reasons = None, [f"cannot decide: {error}"]
         if reasons:
             print(f"kept:     {label} ({tree.branch}): " + "; ".join(reasons))
             blocked += 1
             continue
         if dry_run:
             releases = ", ".join(entry["name"] for entry in settings.releases) or "none"
-            print(f"would remove: {label} ({tree.branch} at {tree.head[:12]}, {pull} merged); "
+            print(f"would remove: {label} ({tree.branch} at {tree.head[:12]}, {done.proof}); "
                   f"release commands: {releases}")
-            done += 1
+            removed += 1
             continue
         try:
-            ok, detail = _remove(tree, settings)
+            ok, detail = _remove(gh, tree, settings, done)
         except errors as error:
             ok, detail = False, f"error: {error}"
         if ok:
-            print(f"removed:  {label} ({tree.branch} at {tree.head[:12]}, {pull} merged); {detail}")
-            done += 1
+            print(f"removed:  {label} ({tree.branch} at {tree.head[:12]}, {done.proof}); {detail}")
+            removed += 1
         else:
             print(f"stopped:  {label} ({tree.branch}): {detail}")
             failed += 1
 
     if all_worktrees:
         root = os.path.relpath(settings.root, shown)
-        print(f"{'would remove' if dry_run else 'removed'} {done}, kept {blocked}, stopped {failed} under {root}; "
+        print(f"{'would remove' if dry_run else 'removed'} {removed}, kept {blocked}, stopped {failed} under {root}; "
               f"{len(outside)} worktree{'s' if len(outside) != 1 else ''} outside {root} left to the "
               "housekeeping procedure")
         return 1 if failed else 0
-    if done and not dry_run:
+    if removed and not dry_run:
         print(f"cd {primary}")
-    return 0 if done else 1
+    return 0 if removed else 1

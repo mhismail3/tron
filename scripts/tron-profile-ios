@@ -769,7 +769,7 @@ class Profiler:
                  "-scheme", SCHEME, "-configuration", CONFIGURATION, "-destination", self.destination(),
                  "-derivedDataPath", str(self.derived_data), "-resultBundlePath", str(result_bundle),
                  "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never",
-                 f"-only-testing:TronMobileTests/{test}"],
+                 f"-only-testing:TronMobileProfiling/{test}"],
                 environment,
             )
         finally:
@@ -812,7 +812,7 @@ class Profiler:
             "window_seconds": window,
             "configuration": CONFIGURATION,
             "scheme": SCHEME,
-            "test": f"TronMobileTests/{test}",
+            "test": f"TronMobileProfiling/{test}",
             "simulator": {"device_type": self.device_type, "runtime": self.runtime},
             "xcode": run(["xcodebuild", "-version"], capture_output=True).stdout.strip().replace("\n", " "),
             "products": str(self.derived_data),

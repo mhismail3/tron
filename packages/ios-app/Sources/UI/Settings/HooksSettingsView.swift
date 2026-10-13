@@ -138,14 +138,15 @@ struct HooksSettingsView: View {
     let projectCWD: String?
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var scope: SettingsScope = .global
+    private var scope: SettingsScope { projectCWD == nil ? .global : .project }
     @State private var mode: HookViewMode = .byEvent
     @State private var showUnregisteredEvents = false
     @State private var selected: HookExtensionRecord?
     @State private var selectedEvent: HookEventRecord?
     @State private var projection: JSONValue?
     @State private var loadError: String?
-    @State private var loading = false
+    /// A surface starts loading: its empty state waits for the first read.
+    @State private var loading = true
     @State private var refreshGeneration = 0
     @State private var trust: ProjectTrustSummary?
 
@@ -159,7 +160,6 @@ struct HooksSettingsView: View {
         let foregroundGeneration: Int
     }
 
-    private var allowsProjectScope: Bool { projectCWD != nil }
     private var trustTarget: TrustTarget? { projectCWD.flatMap(TrustTarget.init(cwd:)) }
 
     private var loadID: HooksLoadID {
@@ -188,7 +188,7 @@ struct HooksSettingsView: View {
         )
         return ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
-                scopeGroup
+                TronSettingsCaption(scopeExplanation)
                 if HooksProjectTrustNote.isRequired(projectCWD: projectCWD, trust: trust) {
                     untrustedProjectRow
                 }
@@ -254,18 +254,6 @@ struct HooksSettingsView: View {
         }
         .tronManagedSheet(item: $selectedEvent, identity: { "settings.hook-event.\($0.id)" }) { event in
             HookEventDetailView(event: event, accent: .tronSessionTeal)
-        }
-    }
-
-    private var scopeGroup: some View {
-        TronSettingsGroup("Scope", detail: scopeExplanation, accent: .tronSessionTeal) {
-            SettingsScopeRow(
-                icon: "scope",
-                title: "Hooks Scope",
-                scope: scope,
-                allowsProjectScope: allowsProjectScope,
-                accent: .tronSessionTeal
-            ) { selectScope($0) }
         }
     }
 
@@ -371,7 +359,6 @@ struct HooksSettingsView: View {
                             subtitle: record.handlers.isEmpty
                                 ? "No registered handlers · tool/command registration only"
                                 : "\(record.handlerCount) registered handler\(record.handlerCount == 1 ? "" : "s") · \(record.eventCount) event\(record.eventCount == 1 ? "" : "s")",
-                            subtitleLineLimit: 2,
                             accent: .tronSessionTeal
                         ) {
                             ComposerResourceBadges(hookProvenance: record.provenance, accent: .tronSessionTeal)
@@ -404,7 +391,6 @@ struct HooksSettingsView: View {
                             subtitle: event.providers.isEmpty
                                 ? "No registered handlers · supported event"
                                 : "\(event.handlerCount) handler\(event.handlerCount == 1 ? "" : "s") · \(event.providers.count) provider\(event.providers.count == 1 ? "" : "s")",
-                            subtitleLineLimit: 2,
                             accent: event.descriptor.isSupported ? .tronSessionTeal : .tronAmber
                         )
                     }
@@ -442,11 +428,6 @@ struct HooksSettingsView: View {
         content.extensionRows.first { $0.record.id == record.id }?.label ?? record.friendlyName
     }
 
-    private func selectScope(_ newScope: SettingsScope) {
-        guard newScope != scope, newScope == .global || allowsProjectScope else { return }
-        scope = newScope
-    }
-
     private func refreshHooks(_ request: HooksLoadID) async {
         guard hooksReadIsCurrent(request) else { return }
         guard let list = HooksListRequest.make(
@@ -456,6 +437,7 @@ struct HooksSettingsView: View {
         ) else {
             projection = nil
             loadError = nil
+            loading = false
             return
         }
         loading = projection == nil

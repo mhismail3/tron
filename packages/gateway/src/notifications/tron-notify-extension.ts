@@ -6,7 +6,7 @@ export interface TronNotificationEnqueue {
   (input: {
     sessionId: string;
     sourceId: string;
-    kind: "explicit" | "agent_finished";
+    kind: "explicit" | "agent_finished" | "waiting";
     message: string;
     title?: string;
     route?: { sessionId: string; machineId: string };
@@ -36,17 +36,24 @@ export async function notifyTronAgentTerminal(input: {
   observed: boolean;
   suppressAutomatic: (input: { sessionId: string; sourceId: string; kind: "agent_finished" }) => Promise<"suppressed">;
   enqueue: TronNotificationEnqueue;
+  pendingBackgroundWork?: number;
+  waitingEpisode?: boolean;
 }): Promise<void> {
   if (!input.machineId) return;
-  const identity = { sessionId: input.sessionId, sourceId: input.sourceId, kind: "agent_finished" as const };
+  const waiting = (input.pendingBackgroundWork ?? 0) > 0;
+  const kind = waiting ? "waiting" as const : "agent_finished" as const;
+  const identity = { sessionId: input.sessionId, sourceId: input.sourceId, kind };
   if (input.observed) {
-    await input.suppressAutomatic(identity);
+    await input.suppressAutomatic({ ...identity, kind: "agent_finished" });
     return;
   }
+  if (waiting && input.waitingEpisode) return;
   await input.enqueue({
     ...identity,
     title: input.sessionTitle,
-    message: terminalMessages[input.outcome],
+    message: waiting
+      ? `The agent is waiting on ${input.pendingBackgroundWork} background ${input.pendingBackgroundWork === 1 ? "task" : "tasks"}.`
+      : terminalMessages[input.outcome],
     route: { sessionId: input.sessionId, machineId: input.machineId },
   });
 }
@@ -63,6 +70,8 @@ export function createTronNotifyExtension(input: {
   return (pi) => {
     pi.registerTool({
       name: "notify",
+      // docs/settings-model.md 5.4: declares it reads no open-world content.
+      annotations: { openWorldHint: false },
       label: "Notify",
       description: "Queue a bounded notification to the user's notification-enabled Tron iPhones. Routing and delivery are controlled by Tron.",
       promptSnippet: "Send a notification to the user's Tron iPhones when useful.",

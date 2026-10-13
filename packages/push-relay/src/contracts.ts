@@ -55,9 +55,15 @@ interface AssertionRegistration extends RegistrationFields {
 
 export type InstallationRegistration = AttestationRegistration | AssertionRegistration;
 
+export const NOTIFICATION_CATEGORIES = ["settings-approval"] as const;
+export type NotificationCategory = typeof NOTIFICATION_CATEGORIES[number];
+
 export interface NotificationRequest {
   version: 1;
   kind: "agent_alert";
+  notificationKind: "ask" | "explicit" | "agent_finished" | "waiting";
+  interruptionLevel?: "time-sensitive";
+  category?: NotificationCategory;
   requestId: string;
   message: string;
   title?: string;
@@ -125,6 +131,7 @@ export interface LedgerRow extends Record<string, SqlStorageValue> {
 export const CHALLENGE_PATH = "/v3/attestation/challenge";
 export const INSTALLATIONS_PATH = "/v3/installations";
 export const NOTIFICATIONS_PATH = "/v3/notifications";
+export const CAPABILITIES_PATH = "/v3/capabilities";
 export const GRANT_PATH_PREFIX = "/v3/grants/";
 export const MAX_BODY_BYTES = 16 * 1024;
 export const MAX_MESSAGE_BYTES = 512;

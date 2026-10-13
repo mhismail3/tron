@@ -115,15 +115,20 @@ final class AppModel {
         /// Full search evidence is retained through route replacement so the
         /// anchor RPC can validate branch/file identity before paging.
         let initialSearchResult: SessionSearchResult?
+        /// The Home conversation's logical route. Its `sessionID` is the physical
+        /// chapter it currently opens; sends go through `home.prompt`, and the
+        /// route follows Home to the chapter Home names next.
+        let isHome: Bool
         fileprivate let gatewayProfileID: String?
         fileprivate let gatewayLifecycleGeneration: Int?
         var id: String {
             let base = gatewayProfileID.map { "\($0):\(sessionID)" } ?? sessionID
+            let home = isHome ? "home" : nil
             let history = initialHistoryEntryID.map { "history:\($0)" }
             let evidence = initialSearchResult.map { result in
                 "search:\(result.anchorRevision.indexRevision):\(result.anchorRevision.fileIdentity):\(result.anchorRevision.branchDigest):\(result.anchorRevision.entryOrdinal)"
             }
-            return [base, history, evidence].compactMap { $0 }.joined(separator: ":")
+            return [base, home, history, evidence].compactMap { $0 }.joined(separator: ":")
         }
 
         init(
@@ -132,6 +137,7 @@ final class AppModel {
             initialModel: ModelRef? = nil,
             initialHistoryEntryID: String? = nil,
             initialSearchResult: SessionSearchResult? = nil,
+            isHome: Bool = false,
             gatewayProfileID: String? = nil,
             gatewayLifecycleGeneration: Int? = nil
         ) {
@@ -140,12 +146,13 @@ final class AppModel {
             self.initialModel = initialModel
             self.initialHistoryEntryID = initialHistoryEntryID
             self.initialSearchResult = initialSearchResult
+            self.isHome = isHome
             self.gatewayProfileID = gatewayProfileID
             self.gatewayLifecycleGeneration = gatewayLifecycleGeneration
         }
 
         func withEditorText(_ text: String?) -> SessionNavigationRoute {
-            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, initialHistoryEntryID: initialHistoryEntryID, initialSearchResult: initialSearchResult, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
+            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, initialHistoryEntryID: initialHistoryEntryID, initialSearchResult: initialSearchResult, isHome: isHome, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
         }
 
         func withInitialModel(_ model: ModelRef?) -> SessionNavigationRoute {
@@ -155,6 +162,7 @@ final class AppModel {
                 initialModel: model,
                 initialHistoryEntryID: initialHistoryEntryID,
                 initialSearchResult: initialSearchResult,
+                isHome: isHome,
                 gatewayProfileID: gatewayProfileID,
                 gatewayLifecycleGeneration: gatewayLifecycleGeneration
             )
@@ -164,6 +172,15 @@ final class AppModel {
     struct PushNavigationRequest: Identifiable, Equatable {
         let id: Int
         let tap: PushNotificationTap
+    }
+
+    /// One settings-approval push action carried across navigation to the chat's
+    /// Manage sheet, where the approvals section stages it as a confirmation.
+    struct StagedSettingsDecision: Equatable, Sendable {
+        let id: Int
+        let sessionID: String
+        let decision: SettingsApprovalPushDecision
+        let stagedAt: Date
     }
 
     typealias SessionPresentationTarget = SessionPresentationIdentity
@@ -237,7 +254,8 @@ final class AppModel {
     /// unresolved. The UI must not infer "unpaired" from the temporary default.
     var hasResolvedLaunchState: Bool { lifecycle.hasResolvedLaunchState }
     var gatewayInfo: GatewayInfo? { lifecycle.gatewayInfo }
-    private var gatewayConnectionID: Int? { lifecycle.connectionID }
+    /// Disposable transport identity for presentation attempts; never command authority.
+    var gatewayConnectionID: Int? { lifecycle.connectionID }
     private var sessionCatalog = SessionCatalogCoordinator()
     private let dashboardConnections: DashboardGatewayConnectionPool
     private let sessionSearch = SessionSearchCoordinator()
@@ -246,6 +264,10 @@ final class AppModel {
     private var sessionSearchPolicyMutationTails: [String: (id: UUID, task: Task<SessionSearchPolicy, Error>)] = [:]
     private var sessionSearchPolicyLoadedConnections: [String: String] = [:]
     let automationCatalog: AutomationCatalogCoordinator
+    /// Focused-profile, disposable Home status; never a mirror of Home storage.
+    let homeStatus = HomeStatusPresentationOwner()
+    /// Owns idempotent Home designation receipts independently of dashboard reads.
+    let homeMutations: HomeMutationCoordinator
     /// Typed access to Gateway-owned Knowledge; no records are persisted here.
     let knowledge: KnowledgeRPCClient
     /// The Library's bounded first-page projection and its preview images. Both
@@ -288,13 +310,21 @@ final class AppModel {
     var packageInvalidationGeneration: Int { packageConfiguration.invalidationGeneration }
     var customModelInvalidationGeneration: Int { customModelConfiguration.invalidationGeneration }
     var trustRevision: Int { settingsTrust.trustRevision }
+    var settingsApprovalsRevision: Int { settingsTrust.approvalsRevision }
     var pairedDevices: [PairedDevice] = []
     // Invalidates surface-owned device reads without blocking control-event intake.
     var deviceCatalogRevision = 0
+    /// Invalidates the MCP server surface when an `mcp.json` changes, from Tron or outside it.
+    var mcpConfigurationRevision = 0
     let notificationInbox: NotificationInboxCoordinator
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
     private(set) var pushNavigationRequest: PushNavigationRequest?
+    /// Exists only to carry one push action across navigation. A stale one must
+    /// never surprise a later manual visit, so it is honored only while fresh.
+    private(set) var stagedSettingsDecision: StagedSettingsDecision?
+    static let stagedSettingsDecisionLifetime: TimeInterval = 120
+    private var stagedSettingsDecisionSequence = 0
     /// Lease-scoped invalidation for a mounted read-only subagent transcript.
     /// This does not participate in the parent session event cursor.
     private var processTranscriptInvalidationSinks: [UUID: (ProcessTranscriptChanged) -> Void] = [:]
@@ -474,6 +504,10 @@ final class AppModel {
     private var catalogDeferredFollowUpKey: SessionCatalogLoadKey?
     private var sceneAllowsCatalogRefresh = true
     private var cacheCheckpointTask: Task<Void, Never>?
+    /// The save drain that is writing checkpoints now, exposed for callers that
+    /// must await it before delivering the next summary. It exposes the existing
+    /// drain with no new behavior.
+    var inFlightCacheCheckpoint: Task<Void, Never>? { cacheCheckpointTask }
     private var cacheCheckpointTaskGeneration = 0
     /// Present only while a trailing summary checkpoint waits for its window
     /// and no save is draining; `startCacheCheckpointDrain` retires it.
@@ -486,6 +520,9 @@ final class AppModel {
     private var recoveryDisplayProfileID: String?
     private var recoveryDisplayTask: Task<Void, Never>?
     private var recoveryDisplayNoticeEpisode: Int?
+#if HOSTED_TEST
+    var hostedDisplayArtifactFile: (@Sendable (String, String, String, Int, Int64) async throws -> URL)?
+#endif
     private var optionalReconnectRefreshTask: Task<Void, Never>?
     private var mountedOptionalRefreshTask: Task<Void, Never>?
     private var mountedOptionalRefreshLifecycleGeneration: Int?
@@ -554,6 +591,12 @@ final class AppModel {
             clock: clock,
             performanceSignposts: appLogSignposts
         )
+        let homeMutations = HomeMutationCoordinator(
+            client: client,
+            lifecycle: lifecycle,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
         let sessionMutations = SessionMutationService(
             client: client,
             executor: mutationExecutor,
@@ -610,9 +653,10 @@ final class AppModel {
             },
             attachmentFileAccess: composerAttachmentFileAccess,
             draftStore: composerDraftStore,
-            send: composerSend ?? { text, sessionID, uploadIDs, behavior, resourceInvocation in
-                try await sessionMutations.prompt(
+            send: composerSend ?? { text, sessionID, uploadIDs, behavior, resourceInvocation, route in
+                try await sessionMutations.submitComposer(
                     text,
+                    route: route,
                     sessionID: sessionID,
                     uploadIDs: uploadIDs,
                     behavior: behavior,
@@ -725,6 +769,7 @@ final class AppModel {
         self.knowledgeLibraryCache = knowledgeLibraryCache
         self.knowledgePreviews = knowledgePreviews
         self.integrations = integrations
+        self.homeMutations = homeMutations
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
         self.sessionImports = SessionImportCoordinator(
@@ -775,7 +820,6 @@ final class AppModel {
         #endif
         lifecycle.delegate = self
         sessionPresentation.delegate = self
-        settingsTrust.delegate = self
         providerAuth.delegate = self
         packageConfiguration.delegate = self
         customModelConfiguration.delegate = self
@@ -825,7 +869,12 @@ final class AppModel {
         maximumBytes: Int,
         expectedBytes: Int64
     ) async throws -> URL {
-        try await client.displayArtifactFile(
+#if HOSTED_TEST
+        if let hostedDisplayArtifactFile {
+            return try await hostedDisplayArtifactFile(id, sessionID, profileID, maximumBytes, expectedBytes)
+        }
+#endif
+        return try await client.displayArtifactFile(
             id: id,
             sessionID: sessionID,
             profileID: profileID,
@@ -863,9 +912,6 @@ final class AppModel {
     var selectedSessionID: String? { sessionPresentation.selectedSessionID }
     var selectedSnapshot: SessionSnapshot? { sessionPresentation.snapshot }
 
-    func selectHostedCompatibilitySession(_ sessionID: String?) {
-        sessionPresentation.installCompatibilitySelection(sessionID)
-    }
 
     func installHostedSecondaryProjection(
         context: JSONValue?,
@@ -885,9 +931,6 @@ final class AppModel {
         sessionPresentation.installHostedSnapshotWithoutPresentation(snapshot)
     }
 
-    func replaceHostedAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
-        sessionPresentation.replaceHostedSnapshot(snapshot)
-    }
 
     func invalidateHostedPendingPresentation() {
         sessionPresentation.invalidateHostedPendingPresentation()
@@ -930,23 +973,7 @@ final class AppModel {
         try await lifecycle.connectHosted(profile: profile, token: token)
     }
 
-    func beginHostedReconciliationAggregate() {
-        guard let admission = lifecycle.admission else { return }
-        lifecycleBeginReconciliationAggregate(admission: admission)
-    }
 
-    func completeHostedReconciliationAggregate(succeeded: Bool) {
-        guard let admission = reconciliationAggregateAdmission else { return }
-        lifecycleCompleteReconciliationAggregate(admission: admission, succeeded: succeeded)
-    }
-
-    func installHostedSettings(_ value: JSONValue?, for target: SettingsTarget) {
-        settingsTrust.installHostedSettings(value, for: target)
-    }
-
-    func setHostedSettingsInvalidationGeneration(_ generation: Int) {
-        settingsTrust.setHostedInvalidationGenerations(settings: generation)
-    }
 
     func installHostedProviderCatalog(_ catalog: ProviderCatalog?, for target: ProviderCatalogTarget) {
         providerAuth.installHostedCatalog(catalog, for: target)
@@ -956,35 +983,11 @@ final class AppModel {
         providerAuth.installHostedRecentModels(models)
     }
 
-    func setHostedProviderInvalidationGeneration(_ generation: Int) {
-        providerAuth.setHostedInvalidationGeneration(generation)
-    }
 
-    func installHostedPackageInventory(
-        _ inventory: PackageInventory?,
-        for target: PackageConfigurationTarget
-    ) {
-        packageConfiguration.installHostedInventory(inventory, for: target)
-    }
 
-    func setHostedPackageInvalidationGeneration(_ generation: Int) {
-        packageConfiguration.setHostedInvalidationGeneration(generation)
-    }
 
-    func installHostedCustomModels(_ value: JSONValue?, for target: CustomModelTarget) {
-        customModelConfiguration.installHostedModels(value, for: target)
-    }
 
-    func setHostedCustomModelInvalidationGeneration(_ generation: Int) {
-        customModelConfiguration.setHostedInvalidationGeneration(generation)
-    }
 
-    func installHostedProviderAuthOperation(
-        _ operationID: String,
-        target: ProviderCatalogTarget = .global
-    ) {
-        providerAuth.installHostedAuthOperation(operationID, target: target)
-    }
     #endif
 
     func presentationGeneration(for sessionID: String) -> Int? {
@@ -1101,6 +1104,13 @@ final class AppModel {
             && lifecycle.admission?.connectionID != nil
     }
 
+    /// Whether the selected Mac's missing transport has outlived the recovery
+    /// grace. The app-scoped recovery episode is the one owner of that decision;
+    /// a mounted chat reads it rather than raw admission, so the reconnect every
+    /// foreground performs after background retirement is not shown as an
+    /// outage (#878).
+    var isConnectionRecoveryVisible: Bool { recoveryDisplayNoticeEpisode != nil }
+
     func sessionStructureRevision(for sessionID: String) -> Int {
         sessionPresentation.structureRevision(for: sessionID)
     }
@@ -1123,14 +1133,6 @@ final class AppModel {
 
     func sessionPresentationIdentity(for sessionID: String) -> SessionPresentationIdentity? {
         sessionPresentation.presentationTarget(for: sessionID)
-    }
-
-    func settings(for target: SettingsTarget) -> JSONValue? {
-        settingsTrust.settings(for: target)
-    }
-
-    func configuredDefaultModel(for target: SettingsTarget) -> ModelRef? {
-        settingsTrust.configuredDefaultModel(for: target)
     }
 
     func providerCatalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
@@ -1367,10 +1369,15 @@ final class AppModel {
         return await sessionPresentation.loadHistoricalLater(sessionID: sessionID, presentationGeneration: generation)
     }
 
-    /// Why this profile is stopped, for the device detail's Status group. The
-    /// selected profile's stop is the lifecycle's own `.offline` reason; a
-    /// background profile's stop lives on its pool entry, which the pool
-    /// publishes here (F-3).
+    /// Last authenticated success of a secondary profile, never a guessed last-seen time.
+    func dashboardLastConnectedAt(for profileID: String) -> Date? {
+        _ = profileRevision
+        guard profiles.profiles.contains(where: { $0.id == profileID }) else { return nil }
+        if profiles.selected?.id == profileID { return nil }
+        return dashboardConnections.lastConnectedAt(for: profileID)
+    }
+
+    /// A selected profile's stop belongs to its lifecycle; a secondary stop belongs to its pool.
     func dashboardConnectionStopReason(for profileID: String) -> String? {
         _ = profileRevision
         guard let profile = profiles.profiles.first(where: { $0.id == profileID }) else { return nil }
@@ -1690,7 +1697,9 @@ final class AppModel {
                 role: .warning,
                 priority: .high,
                 title: lifecycle.noPathPresentation?.label ?? "Gateway connection unavailable",
-                message: "Your conversation and draft are retained. Retry Connection and Logs are available in Settings.",
+                // App-scoped recovery may appear during a first open, before
+                // this route ever received a transcript. Do not promise retention.
+                message: "Retry Connection and Logs are available in Settings.",
                 lifetime: .automatic(.seconds(8))
             )
         )
@@ -1871,6 +1880,7 @@ final class AppModel {
     @discardableResult
     func enteredBackground() -> Task<Void, Never> {
         recordSceneTransition(to: .background, flush: true)
+        homeStatus.suspendForBackground()
         sceneAllowsCatalogRefresh = false
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
@@ -1890,6 +1900,9 @@ final class AppModel {
         sessionCatalog.markDisconnected()
         let draftCheckpoint = composerDrafts.checkpointDrafts()
         lifecycle.enteredBackground()
+        // A backgrounded scene is not an outage, and a grace that elapsed while
+        // suspended must not surface the instant the scene returns.
+        finishRecoveryDisplayEpisode()
         // Intervals still open when the scene retires end as `backgrounded`, not
         // as the failure their eventual cancellation would otherwise report.
         performanceSignposts.endOpenIntervalsAtBackground()
@@ -2009,8 +2022,10 @@ final class AppModel {
         setGatewayEnabled(false, profile: profile)
     }
 
-    /// Disposable per-Gateway projections retire with the Gateway itself.
+    /// Disposable per-Gateway projections retire with the Gateway itself, and so
+    /// does the profile's pending Home receipt: its Gateway can no longer be checked.
     private func forgetProfileCaches(_ profileID: String) async {
+        homeMutations.forgetProfile(profileID)
         await composerDrafts.removeProfile(profileID).value
         await cache.remove(profileID: profileID)
         await knowledgeLibraryCache.remove(profileID: profileID)
@@ -2052,18 +2067,6 @@ final class AppModel {
 
     func restoreMountedPresentationAfterReconnect() async -> Bool {
         await sessionPresentation.reconnectMountedPresentation()
-    }
-
-    func refreshAll(
-        settingsTarget: SettingsTarget = .global,
-        providerTarget: ProviderCatalogTarget = .global
-    ) async {
-        _ = await refreshSessions()
-        guard !Task.isCancelled else { return }
-        async let providerLoad: Bool = refreshProviders(target: providerTarget)
-        async let settingLoad: Bool = refreshSettings(target: settingsTarget)
-        async let deviceLoad: Void = refreshDevices()
-        _ = await (providerLoad, settingLoad, deviceLoad)
     }
 
     @discardableResult
@@ -3187,8 +3190,36 @@ final class AppModel {
 
     func requestPushNavigation(_ tap: PushNotificationTap) {
         guard tap.sessionID != nil, tap.machineID != nil else { return }
+        stageSettingsDecision(from: tap)
         pushNavigationSequence &+= 1
         pushNavigationRequest = PushNavigationRequest(id: pushNavigationSequence, tap: tap)
+    }
+
+    /// A newer plain tap replaces an older action, so any tap without a settings
+    /// decision clears the staging.
+    func stageSettingsDecision(from tap: PushNotificationTap) {
+        guard let decision = tap.settingsDecision, let sessionID = tap.sessionID else {
+            stagedSettingsDecision = nil
+            return
+        }
+        stagedSettingsDecisionSequence &+= 1
+        stagedSettingsDecision = StagedSettingsDecision(
+            id: stagedSettingsDecisionSequence,
+            sessionID: sessionID,
+            decision: decision,
+            stagedAt: .now
+        )
+    }
+
+    func freshStagedSettingsDecision(now: Date = .now) -> StagedSettingsDecision? {
+        guard let staged = stagedSettingsDecision,
+              now.timeIntervalSince(staged.stagedAt) < Self.stagedSettingsDecisionLifetime else { return nil }
+        return staged
+    }
+
+    func consumeStagedSettingsDecision(_ id: Int) {
+        guard stagedSettingsDecision?.id == id else { return }
+        stagedSettingsDecision = nil
     }
 
     func refreshNotificationInbox() async {
@@ -3689,6 +3720,7 @@ final class AppModel {
     }
 
     private func invalidateSessionConnectionOwnership() {
+        homeStatus.connectionRetired()
         cancelAllExtensionEditorSynchronization()
         // Transcript media is profile/lifecycle-owned HTTP state. A disposable
         // WebSocket epoch handoff must not cancel an open preview or evict its
@@ -3713,6 +3745,7 @@ final class AppModel {
         target: SessionPresentationTarget,
         behavior: String? = nil,
         resourceInvocation: ComposerResourceInvocation? = nil,
+        route: ComposerSubmissionRoute = .session,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
         runtimeGeneration: String? = nil
@@ -3735,6 +3768,7 @@ final class AppModel {
             target: target,
             behavior: behavior,
             resourceInvocation: resourceInvocation,
+            route: route,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages,
             runtimeGeneration: runtimeGeneration
@@ -3826,19 +3860,50 @@ final class AppModel {
         )
     }
 
-    func setModel(_ model: ModelRef, sessionID: String) async throws {
-        try await sessionMutations.setModel(model, sessionID: sessionID)
+    @discardableResult
+    func setModel(_ model: ModelRef, sessionID: String) async throws -> Int {
+        let snapshot = try configurationSnapshot(sessionID)
+        return try await sessionMutations.setModel(model, sessionID: sessionID,
+            expectedRuntimeGeneration: snapshot.runtimeGeneration, expectedModel: snapshot.model) { [weak self] in
+                self?.admitsConfigurationSend(snapshot) == true
+            }
     }
 
-    func setThinking(_ level: String, sessionID: String) async throws {
-        try await sessionMutations.setThinking(level, sessionID: sessionID)
+    @discardableResult
+    func setThinking(_ level: String, sessionID: String) async throws -> Int {
+        let snapshot = try configurationSnapshot(sessionID)
+        return try await sessionMutations.setThinking(level, sessionID: sessionID,
+            expectedRuntimeGeneration: snapshot.runtimeGeneration, expectedModel: snapshot.model) { [weak self] in
+                self?.admitsConfigurationSend(snapshot) == true
+            }
     }
 
-    func setContextWindow(_ contextWindow: Int?, for model: ModelRef, sessionID: String, expectedRevision: Int, expectedRuntimeGeneration: String) async throws {
+    @discardableResult
+    func setContextWindow(_ contextWindow: Int?, for model: ModelRef, sessionID: String, expectedRevision: Int, expectedRuntimeGeneration: String) async throws -> Int {
         guard gatewayInfo?.capabilities.contains("context-window.v1") == true else {
             throw GatewayFailure(code: "unsupported", message: "This Gateway does not support context window controls.", retryable: false, details: nil)
         }
-        try await sessionMutations.setContextWindow(contextWindow, for: model, sessionID: sessionID, expectedRevision: expectedRevision, expectedRuntimeGeneration: expectedRuntimeGeneration)
+        let snapshot = try configurationSnapshot(sessionID)
+        guard snapshot.runtimeGeneration == expectedRuntimeGeneration, snapshot.model == model else {
+            throw GatewayFailure(code: "conflict", message: "Session model changed. Refresh configuration.", retryable: true, details: nil)
+        }
+        return try await sessionMutations.setContextWindow(contextWindow, for: model, sessionID: sessionID, expectedRevision: expectedRevision, expectedRuntimeGeneration: expectedRuntimeGeneration) { [weak self] in
+            self?.admitsConfigurationSend(snapshot) == true
+        }
+    }
+
+    private func configurationSnapshot(_ sessionID: String) throws -> SessionSnapshot {
+        guard let snapshot = authoritativeSnapshot(for: sessionID), admitsConfigurationSend(snapshot) else {
+            throw GatewayFailure(code: "busy", message: "Wait for the session to finish synchronizing or settling before changing configuration.", retryable: true, details: nil)
+        }
+        return snapshot
+    }
+
+    private func admitsConfigurationSend(_ original: SessionSnapshot) -> Bool {
+        guard sessionPresentation.hasInstalledSubscription(for: original.sessionId),
+              let current = authoritativeSnapshot(for: original.sessionId) else { return false }
+        return current.runtimeGeneration == original.runtimeGeneration && current.model == original.model
+            && current.configurationBlocker == .ready && !current.phase.isActive
     }
 
     func renameSession(_ sessionID: String, name: String) async throws {
@@ -4265,15 +4330,6 @@ final class AppModel {
         try await providerAuth.logout(providerID: providerID, target: target)
     }
 
-    @discardableResult
-    func refreshSettings(target: SettingsTarget) async -> Bool {
-        await settingsTrust.refreshSettings(target: target)
-    }
-
-    func updateSettings(_ patch: JSONValue, target: SettingsTarget, sessionID: String? = nil) async throws {
-        try await settingsTrust.updateSettings(patch, target: target, sessionID: sessionID)
-    }
-
     func mutateMCPAdmin(_ method: String, parameters: [String: JSONValue]) async throws -> JSONValue {
         let allowed = ["mcp.add", "mcp.remove", "mcp.update", "mcp.logout", "mcp.token.set", "mcp.auth.start", "mcp.auth.cancel"]
         guard allowed.contains(method) else {
@@ -4293,6 +4349,96 @@ final class AppModel {
 
     func setTrust(target: TrustTarget, decision: Bool?) async throws -> JSONValue {
         try await settingsTrust.setTrust(target: target, decision: decision)
+    }
+
+    func settingsApprovals(scope: SettingsApprovalScope) async throws -> [SettingsApprovalRequest] {
+        try await settingsTrust.pendingApprovals().filter(scope.includes)
+    }
+
+    func allSettingsApprovals() async throws -> [SettingsApprovalRequest] {
+        try await settingsTrust.pendingApprovals()
+    }
+
+    func settingsHistory(cursor: String?, actor: String?, layer: String?, section: String?, key: String?, status: String?) async throws -> SettingsChangeHistoryPage {
+        try await settingsTrust.settingsHistory(cursor: cursor, actor: actor, layer: layer, section: section, key: key, status: status)
+    }
+
+    func applySettingsChangeAgain(_ changeID: String) async throws {
+        try await settingsTrust.applySettingsChangeAgain(changeID)
+    }
+
+    func undoSettingsChange(_ entry: SettingsChangeHistoryEntry) async throws {
+        let target: JSONValue = .object(["kind": .string(entry.target.kind),
+            "sessionId": entry.target.sessionId.map(JSONValue.string) ?? .null])
+        let snapshot = entry.layer == "chat" ? try rendererConfigurationSnapshot(target) : nil
+        try await settingsTrust.undoSettingsChange(entry.changeId, fence: rendererConfigurationFence(snapshot)) { [weak self] in
+            guard let snapshot else { return true }
+            return self?.admitsConfigurationSend(snapshot) == true
+        }
+    }
+
+    /// Approves or declines one pending change. A change to a chat's own Chat
+    /// layer applies under the runtime this app last read for that chat, as the
+    /// chat's own controls do; without a read the Gateway refuses it.
+    func decideSettingsApproval(_ request: SettingsApprovalRequest, approved: Bool) async throws {
+        var fence: JSONValue?
+        if approved, request.target.kind == "session", request.changes.contains(where: { $0.layer == "chat" }),
+           let sessionID = request.target.sessionId, let snapshot = authoritativeSnapshot(for: sessionID) {
+            fence = .object([
+                "runtimeGeneration": .string(snapshot.runtimeGeneration),
+                "model": try snapshot.model.map { try JSONValue.encode($0) } ?? .null,
+            ])
+        }
+        try await settingsTrust.decideApproval(request, approved: approved, fence: fence)
+    }
+
+    /// The generic settings renderer's reads and writes, for any target (settings-model.md 7.5).
+    func resolveSettingsForRenderer(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
+        try await settingsTrust.resolveForRenderer(target: target, keys: keys)
+    }
+
+    /// The shared snapshot every settings surface for `target` reads.
+    func settingsSnapshot(for target: JSONValue) -> SettingsSnapshot? { settingsTrust.snapshots[target] }
+
+    var settingsFreshness: SettingsFreshness {
+        SettingsFreshness(invalidation: settingsTrust.settingsInvalidationGeneration, foreground: foregroundReconciliationGeneration)
+    }
+
+    func refreshSettingsSnapshot(for target: JSONValue) async throws {
+        try await settingsTrust.refreshSnapshot(target: target, freshness: settingsFreshness)
+    }
+
+    /// A settings change this app made: every surface's snapshot is stale.
+    func noteSettingsChanged() { settingsTrust.noteSettingsChanged() }
+
+    func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, cursor: String? = nil) async throws -> SettingsOptionsResponse {
+        try await settingsTrust.settingsOptions(target: target, key: key, qualifiers: qualifiers, cursor: cursor)
+    }
+
+    func previewSettingsChange(target: JSONValue, change: JSONValue) async throws -> SettingsChangeResult {
+        let snapshot = try rendererConfigurationSnapshot(target)
+        return try await settingsTrust.previewChange(target: target, change: change, fence: rendererConfigurationFence(snapshot))
+    }
+
+    func changeSetting(target: JSONValue, change: JSONValue) async throws {
+        let snapshot = try rendererConfigurationSnapshot(target)
+        try await settingsTrust.change(target: target, change: change, fence: rendererConfigurationFence(snapshot)) { [weak self] in
+            guard let snapshot else { return true }
+            return self?.admitsConfigurationSend(snapshot) == true
+        }
+    }
+
+    private func rendererConfigurationSnapshot(_ target: JSONValue) throws -> SessionSnapshot? {
+        guard target.objectValue?["kind"]?.stringValue == "session",
+              let sessionID = target.objectValue?["sessionId"]?.stringValue else { return nil }
+        return try configurationSnapshot(sessionID)
+    }
+
+    private func rendererConfigurationFence(_ snapshot: SessionSnapshot?) throws -> JSONValue? {
+        guard let snapshot else { return nil }
+        return .object(["runtimeGeneration": .string(snapshot.runtimeGeneration),
+                        "model": try snapshot.model.map(JSONValue.encode) ?? .null,
+                        "revision": .number(Double(snapshot.revision))])
     }
 
     func packageInventory(for target: PackageConfigurationTarget) -> PackageInventory? {
@@ -4645,6 +4791,269 @@ final class AppModel {
         try await terminal.terminate(id, intent: intent)
     }
 
+    /// The visible Home owner registers only authenticated focused-Gateway
+    /// status reads. This is disposable presentation work, never a mutation.
+    func mountHomeStatus(surfaceToken: PresentationSurfaceToken, activityCoordinator: PresentationActivityCoordinator) {
+        installHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator, cadence: .mounted)
+    }
+
+    /// A chat takes the status surface from the covered dashboard. A known status
+    /// decides by the route's key alone, so a chat the status does not present
+    /// never reads. Before any status is known, the chat's probe decides by its
+    /// first published read (see `HomeStatusPresentationOwner.Cadence`). Returns
+    /// whether the chat now owns the status surface.
+    func mountHomeStatusForChat(
+        surfaceToken: PresentationSurfaceToken,
+        activityCoordinator: PresentationActivityCoordinator,
+        route: HomeChatRouteKey
+    ) -> Bool {
+        if let status = homeStatus.status {
+            guard route.matches(status) else { return false }
+            mountHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator)
+            return true
+        }
+        guard lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true else { return false }
+        installHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator, cadence: .connectionOnly(route))
+        return true
+    }
+
+    private func installHomeStatus(
+        surfaceToken: PresentationSurfaceToken,
+        activityCoordinator: PresentationActivityCoordinator,
+        cadence: HomeStatusPresentationOwner.Cadence
+    ) {
+        // The read belongs to the surface, not to a selected profile: a dashboard
+        // mounted before pairing reads Home as soon as pairing configures it.
+        homeStatus.mountSurface(token: surfaceToken, coordinator: activityCoordinator, cadence: cadence) { [weak self] fence in
+            guard let self,
+                  self.lifecycle.selectedProfileID == fence.profileID,
+                  let admission = self.lifecycle.admission,
+                  let currentConnectionID = admission.connectionID,
+                  String(currentConnectionID) == fence.connectionID,
+                  self.lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true,
+                  self.lifecycle.admits(admission) else { throw CancellationError() }
+            let value = try await self.lifecycle.client.requestValue(
+                "home.status", JSONValue.object([:]),
+                expectedConnection: GatewayConnectionAdmission(connectionID: currentConnectionID)
+            )
+            guard self.lifecycle.selectedProfileID == fence.profileID,
+                  self.lifecycle.admits(admission),
+                  String(currentConnectionID) == fence.connectionID else { throw CancellationError() }
+            return try HomeStatusDTO.decode(value)
+        }
+        guard let profileID = lifecycle.selectedProfileID else { return }
+        let connectionID = lifecycle.admission?.connectionID.map(String.init)
+        let capable = lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true
+        homeStatus.configure(profileID: profileID, connectionID: connectionID, capabilityEnabled: capable)
+    }
+
+    /// Sheet reads share lifecycle authority, but not the covered chat's status
+    /// cadence. Each managed sheet owns and retires its bounded page.
+    func homeSheetReadIdentity(profileID: String, surfaceToken: PresentationSurfaceToken?) -> HomeSheetReadIdentity? {
+        guard let surfaceToken, lifecycle.selectedProfileID == profileID,
+              let admission = lifecycle.admission, lifecycle.admits(admission),
+              let connectionID = admission.connectionID,
+              lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true else { return nil }
+        return HomeSheetReadIdentity(profileID: profileID, connectionID: connectionID,
+                                     lifecycleGeneration: lifecycle.currentLifecycleGeneration, surfaceToken: surfaceToken)
+    }
+
+    func readHomeSheet(_ query: HomeSheetReadQuery, identity: HomeSheetReadIdentity, isCurrent: @escaping @MainActor () -> Bool) async throws -> HomeSheetContent {
+        guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
+              !Task.isCancelled, isCurrent() else { throw CancellationError() }
+        // Every request is fenced by the same identity and sheet currency before it is
+        // sent and again before its answer is published.
+        func read(_ method: String, _ params: JSONValue = .object([:])) async throws -> JSONValue {
+            guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
+                  !Task.isCancelled, isCurrent() else { throw CancellationError() }
+            let value = try await lifecycle.client.requestValue(method, params,
+                expectedConnection: GatewayConnectionAdmission(connectionID: identity.connectionID))
+            guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
+                  !Task.isCancelled, isCurrent() else { throw CancellationError() }
+            return value
+        }
+        // Each task sheet consumes status first, so a recovery refusal remains
+        // visible without attempting a fenced task/authorization read.
+        func readTaskStatus() async throws -> HomeStatusDTO {
+            try HomeStatusDTO.decode(try await read("home.status"))
+        }
+        func requireMemoryBrowser() throws {
+            guard lifecycle.gatewayInfo?.capabilities.contains("home-memory-browser.v1") == true else {
+                throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the memory browser.", retryable: false, details: nil)
+            }
+        }
+        func optionalRead<Value>(_ value: () async throws -> Value) async throws -> Value? {
+            do { return try await value() }
+            catch is CancellationError { throw CancellationError() }
+            catch { return nil }
+        }
+        func chapterListCapable() -> Bool {
+            lifecycle.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
+        }
+        func readChapterList() async throws -> HomeChapterListDTO {
+            try HomeChapterListDTO.decode(try await read("home.chapterList"))
+        }
+        switch query {
+        case .manage:
+            let status = try HomeStatusDTO.decode(try await read("home.status"))
+            let context = try HomeContextDTO.decode(try await read("home.context"))
+            let chapters = chapterListCapable() ? try await readChapterList() : nil
+            // A refused task or permission read leaves its row "Unavailable"; the sheet still loads.
+            var tasks: HomeTaskPageDTO?
+            var permissions: HomeTaskPermissionsDTO?
+            if status.admitsTaskReads {
+                tasks = try await optionalRead {
+                    try HomeTaskPageDTO.decode(try await read("home.taskList", .object(["limit": .number(20)])))
+                }
+                permissions = try await optionalRead {
+                    try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions"))
+                }
+            }
+            return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks, permissions: permissions))
+        case .context:
+            return .context(try HomeContextDTO.decode(try await read("home.context")))
+        case .tasks(let cursor):
+            let status = try await readTaskStatus()
+            var params: [String: JSONValue] = ["limit": .number(20)]
+            if let cursor { params["cursor"] = .string(cursor) }
+            return .tasks(status.admitsTaskReads ? try HomeTaskPageDTO.decode(try await read("home.taskList", .object(params))) : nil, status)
+        case .task(let id):
+            let status = try await readTaskStatus()
+            return .task(status.admitsTaskReads ? try HomeTaskDTO.decode(try await read("home.taskStatus", .object(["taskId": .string(id)])), taskID: id) : nil, status)
+        case .permissions:
+            let status = try await readTaskStatus()
+            return .permissions(status.admitsTaskReads ? try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions")) : nil, status)
+        case .chapters:
+            guard chapterListCapable() else {
+                throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the chapter list.", retryable: false, details: nil)
+            }
+            return .chapters(try await readChapterList())
+        case .memory(let sessionID, let continuation):
+            try requireMemoryBrowser()
+            var values: [String: JSONValue] = ["limit": .number(20)]
+            if let continuation { values["cursor"] = .string(continuation.cursor) }
+            if let sessionID { values["sessionId"] = .string(sessionID) }
+            let page = try HomeMemoryPageDTO.decode(try await read("home.memory.page", .object(values)), continuation: continuation)
+            // Each row names its chapter by ordinal; the list supplies the mapping.
+            var ordinals: [String: Int] = [:]
+            if chapterListCapable() {
+                for chapter in try await readChapterList().chapters { ordinals[chapter.sessionId] = chapter.ordinal }
+            }
+            return .memory(page, chapterOrdinals: ordinals)
+        case .evidence(let source, let offset):
+            try requireMemoryBrowser()
+            let params = JSONValue.object(["evidence": try JSONValue.encode(source), "offset": .number(Double(offset))])
+            return .evidence(try HomeMemoryEvidencePageDTO.decode(try await read("home.memory.evidence", params), evidence: source, offset: offset))
+        }
+    }
+
+    func unmountHomeStatus(surfaceToken: PresentationSurfaceToken) {
+        homeStatus.retireSurface(surfaceToken)
+    }
+
+    /// A profile-fenced ordinary route to one Home chapter or its worker chat, opened
+    /// from Manage Home: sealed chapters refuse mutation at the Gateway, and an
+    /// ordinary chat on a Home chapter neither claims the Home status nor sends
+    /// through `home.prompt`. A stale tap can never switch profiles.
+    func navigationRouteForHomeSession(profileID: String, sessionID: String) throws -> SessionNavigationRoute {
+        guard lifecycle.selectedProfileID == profileID,
+              connectionState == .connected,
+              !sessionID.isEmpty else { throw CancellationError() }
+        return SessionNavigationRoute(
+            sessionID: sessionID,
+            editorText: nil,
+            gatewayProfileID: profileID,
+            gatewayLifecycleGeneration: lifecycle.currentLifecycleGeneration
+        )
+    }
+
+    /// Forms a profile-qualified route only from the current authenticated Home
+    /// projection; it never switches profiles based on a stale row tap.
+    func navigationRouteForHome(profileID: String, status: HomeStatusDTO) throws -> SessionNavigationRoute {
+        guard lifecycle.selectedProfileID == profileID,
+              connectionState == .connected,
+              gatewayInfo?.capabilities.contains("home.v1") == true,
+              homeStatus.capabilityEnabled,
+              homeStatus.status == status,
+              case .open(let sessionID) = HomePinnedRowPolicy.action(for: status) else {
+            throw CancellationError()
+        }
+        return SessionNavigationRoute(
+            sessionID: sessionID,
+            editorText: nil,
+            isHome: true,
+            gatewayProfileID: profileID,
+            gatewayLifecycleGeneration: lifecycle.currentLifecycleGeneration
+        )
+    }
+
+    /// The Home route's next chapter, or nil when the route already opens the
+    /// chapter Home names. The route's unsent text moves with it to that chapter's
+    /// draft (see `ComposerDraftCoordinator.carryDraft`).
+    func followedHomeRoute(
+        from route: SessionNavigationRoute,
+        profileID: String,
+        status: HomeStatusDTO
+    ) throws -> SessionNavigationRoute? {
+        let next = try navigationRouteForHome(profileID: profileID, status: status)
+        guard next.sessionID != route.sessionID else { return nil }
+        composerDrafts.carryDraft(
+            from: ComposerDraftScope(profileID: profileID, sessionID: route.sessionID),
+            to: ComposerDraftScope(profileID: profileID, sessionID: next.sessionID)
+        )
+        return next
+    }
+
+    /// Home control effects belong to the receipt owner, not the mounted read.
+    /// A fresh projection is requested only after accepted terminal completion.
+    func performHomeControl(_ command: HomeMutationCoordinator.Command, authority: HomeMutationCoordinator.Authority) async throws {
+        guard command != .designate else { throw CancellationError() }
+        _ = try await homeMutations.perform(command, authority: authority)
+        await homeStatus.refreshMounted()
+    }
+
+    func checkHomeControlCompletion(authority: HomeMutationCoordinator.Authority) async throws {
+        _ = try await refreshingHomeStatusIfNotApplied {
+            try await homeMutations.checkCompletion(authority: authority)
+        }
+        await homeStatus.refreshMounted()
+    }
+
+    /// A receipt that proves a Home change was not applied leaves the projection
+    /// the user is looking at stale; reload it before reporting that outcome.
+    private func refreshingHomeStatusIfNotApplied<Value>(
+        _ operation: () async throws -> Value
+    ) async throws -> Value {
+        do { return try await operation() }
+        catch let failure as GatewayFailure where failure.code == HomeMutationCoordinator.notAppliedCode {
+            await homeStatus.refreshMounted()
+            throw failure
+        }
+    }
+
+    /// Designates Home through the mutation receipt owner, then requires a fresh
+    /// mounted `home.status` projection before exposing its session route.
+    func designateHomeAndRefreshStatus(authority: HomeMutationCoordinator.Authority) async throws -> HomeStatusDTO {
+        let designation = try await refreshingHomeStatusIfNotApplied {
+            try await homeMutations.designate(authority: authority)
+        }
+        await homeStatus.refreshMounted()
+        guard let status = homeStatus.status,
+              status.enabled,
+              status.sessionPresent,
+              status.homeId == designation.homeId,
+              status.sessionId == designation.sessionId,
+              status.generation == designation.generation else {
+            throw GatewayFailure(
+                code: "disconnected",
+                message: "Home was designated, but its current session is not available yet.",
+                retryable: true,
+                details: nil
+            )
+        }
+        return status
+    }
+
     func handle(_ event: GatewayEvent) async {
         await handle(event, connectionID: nil)
     }
@@ -4753,6 +5162,9 @@ final class AppModel {
         case "transport.resyncRequired":
             sessionPresentation.scheduleResynchronization(sessionID: event.sessionId)
         case "session.summary":
+            if let sessionID = event.sessionId {
+                Task { @MainActor [weak self] in await self?.homeStatus.invalidateMounted(sessionID: sessionID) }
+            }
             guard case .sessionSummary(let update) = event.preparation else {
                 // A malformed or newer summary must not silently leave a row's
                 // icon stale. The authoritative catalog is the recovery path;
@@ -4762,6 +5174,7 @@ final class AppModel {
             }
             apply(update)
         case "session.listChanged":
+            Task { @MainActor [weak self] in await self?.homeStatus.invalidateMounted() }
             scheduleSessionListRefresh()
         case "auth.prompt":
             providerAuth.handlePrompt(event.payload)
@@ -4773,6 +5186,8 @@ final class AppModel {
             settingsTrust.noteSettingsChanged()
         case "trust.changed":
             settingsTrust.noteTrustChanged()
+        case "settings.approvalsChanged":
+            settingsTrust.noteApprovalsChanged()
         case "providers.changed":
             providerAuth.noteProvidersChanged()
         case "packages.changed":
@@ -4795,6 +5210,8 @@ final class AppModel {
             }
         case "devices.changed":
             deviceCatalogRevision &+= 1
+        case "mcp.changed":
+            mcpConfigurationRevision &+= 1
         case "automation.changed":
             guard case .automationChanged = event.preparation else { return }
             automationCatalog.invalidate()
@@ -5275,6 +5692,10 @@ extension AppModel: SessionPresentationStoreDelegate {
         composerDrafts.failOperation(operationID, target: target)
     }
 
+    func hasFailedConversationSynchronization(sessionID: String) -> Bool {
+        sessionPresentation.hasFailedSynchronization(for: sessionID)
+    }
+
     func retryConversationSynchronization(target: SessionPresentationIdentity) async -> Bool {
         guard connectionState == .connected, sessionPresentation.mountedTarget == target else { return false }
         return await sessionPresentation.retryMountedSynchronization(target: target)
@@ -5318,12 +5739,6 @@ extension AppModel: SessionPresentationStoreDelegate {
     }
 }
 
-extension AppModel: SettingsTrustCoordinatorDelegate {
-    func settingsTrustCoordinatorSurface(_ error: Error) {
-        surface(error)
-    }
-}
-
 extension AppModel: ProviderAuthCoordinatorDelegate {
     func providerAuthCoordinatorSurface(_ error: Error) {
         surface(error)
@@ -5353,7 +5768,12 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     }
 
     func lifecycleRecordDiagnostic(event: String, message: String) {
-        if event == "reconnect.failure" || event == "reconnect.exhausted" || event == "reconnect.stopped" {
+        // Every scheduled reconnect starts the grace, including the one each
+        // foreground performs after background retirement (which emits no
+        // transport loss of its own): a replacement that outlives the grace is
+        // shown on one schedule, and a fast one never is (#878).
+        if event == "reconnect.scheduled" || event == "reconnect.failure"
+            || event == "reconnect.exhausted" || event == "reconnect.stopped" {
             beginRecoveryDisplayEpisodeIfNeeded()
         }
         let recordedEvents = ["reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "reconnect.parked", "reconnect.parked-resume", "reconnect.skipped", "path.changed", "detail.tap", "detail.preparation"]
@@ -5377,6 +5797,17 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     func lifecycleInvalidateSessionConnectionOwnership() {
         diagnosticsAreReady = false
         invalidateSessionConnectionOwnership()
+    }
+
+    func lifecycleRefreshHomeStatus(admission: GatewayLifecycleCoordinator.Admission) {
+        guard admitsLifecycle(admission),
+              let profileID = lifecycle.selectedProfileID,
+              let connectionID = admission.connectionID else { return }
+        homeStatus.configure(
+            profileID: profileID,
+            connectionID: String(connectionID),
+            capabilityEnabled: gatewayInfo?.capabilities.contains("home.v1") == true
+        )
     }
 
     func lifecycleBeginReconciliationAggregate(
@@ -5409,6 +5840,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard !Task.isCancelled, admitsLifecycle(admission) else { return }
+        lifecycleRefreshHomeStatus(admission: admission)
         adoptConnectedGatewayIdentity()
         // No revision is bumped for the advertisement: nothing presents it yet,
         // and the profile's dial endpoint did not change.
@@ -5468,9 +5900,8 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
             guard !Task.isCancelled, self.admitsLifecycle(admission),
                   activeConnectionID == admission.connectionID else { return }
             async let providerLoad = self.refreshProviders(target: .global)
-            async let settingLoad = self.refreshSettings(target: .global)
             async let deviceLoad = self.refreshDevices()
-            _ = await (providerLoad, settingLoad, deviceLoad)
+            _ = await (providerLoad, deviceLoad)
         }
     }
 
@@ -5526,6 +5957,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
     func lifecycleRetireProjection(final: Bool) async {
         diagnosticsAreReady = false
+        // Revoke connection-bound owners before this transition can suspend or fail.
+        invalidateSessionConnectionOwnership()
+        homeStatus.profileRetired()
         optionalReconnectRefreshTask?.cancel()
         optionalReconnectRefreshTask = nil
         mountedOptionalRefreshTask?.cancel()
@@ -5549,7 +5983,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         dashboardConnections.retire(endedBy: .stopped)
         notificationInbox.cancelRefreshes()
         await dashboardConnections.waitForRetirement()
-        invalidateSessionConnectionOwnership()
         chatMedia.removeAll()
         clearGatewayProjection()
 

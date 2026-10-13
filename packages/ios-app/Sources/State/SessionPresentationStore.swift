@@ -533,6 +533,16 @@ final class SessionPresentationStore {
         clearSecondaryProjection()
     }
 
+    /// Project the synchronization owner's finite failure latch; the view must
+    /// not infer failure from an absent subscription or a transient notice.
+    func hasFailedSynchronization(for sessionID: String) -> Bool {
+        guard let target = mountedTarget,
+              target.sessionID == sessionID,
+              let recovery = automaticSynchronization else { return false }
+        return recovery.failed && recovery.target == target
+            && recovery.connectionGeneration == connectionGeneration
+    }
+
     func hasInstalledSubscription(for sessionID: String) -> Bool {
         guard let target = mountedTarget else { return false }
         if let recovery = automaticSynchronization,
@@ -2969,6 +2979,11 @@ final class SessionPresentationStore {
             case .resynchronize(let sessionID):
                 if !synchronization.markRetryRequired(sessionID: sessionID) { return sessionID }
             }
+        case "session.configuration":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot),
+                  case .configuration(let blocker)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
+            snapshot.configurationBlocker = blocker
+            advance(&snapshot, envelope)
         case "session.progress":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
                   case .progress(let item)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
@@ -3356,26 +3371,6 @@ final class SessionPresentationStore {
     static let sessionCatchUpNotice = "Live session view is catching up; the run continues on your Mac."
 
     #if HOSTED_TEST
-    func installHostedPresentationTargets(
-        target: SessionPresentationIdentity?,
-        pending: SessionPresentationIdentity?
-    ) {
-        self.target = target
-        pendingTarget = pending
-    }
-
-    func emitHostedNoticeForTesting() {
-        delegate?.sessionPresentationStorePostNotice(
-            "hosted",
-            replacing: nil,
-            role: .info,
-            scope: noticeScope
-        )
-    }
-
-    func mountHostedPresentationForTesting(_ target: SessionPresentationIdentity) {
-        mount(target)
-    }
 
     func installHostedSecondaryProjection(
         context: JSONValue?,
@@ -3389,21 +3384,6 @@ final class SessionPresentationStore {
         self.resources = resources
         self.resourceTarget = mountedTarget
         self.resourcesError = nil
-    }
-
-    func installCompatibilitySelection(_ sessionID: String?) {
-        guard let sessionID else {
-            target = nil
-            pendingTarget = nil
-            isAuthoritative = false
-            clearSecondaryProjection()
-            return
-        }
-        nextPresentationGeneration &+= 1
-        target = SessionPresentationIdentity(sessionID: sessionID, generation: nextPresentationGeneration)
-        pendingTarget = nil
-        isAuthoritative = snapshot?.sessionId == sessionID
-        clearSecondaryProjection()
     }
 
     func installHostedSnapshotWithoutPresentation(_ snapshot: SessionSnapshot) {
@@ -3423,49 +3403,6 @@ final class SessionPresentationStore {
         subscribedSessionID = snapshot.sessionId
         subscriptionToken = token
         subscriptionTarget = target
-    }
-
-    func replaceHostedSubscriptionToken(_ token: String) {
-        guard subscribedSessionID != nil else { return }
-        subscriptionToken = token
-    }
-
-    func installHostedLoadedHistory(
-        visible: SessionSnapshot,
-        authoritativeTail: SessionSnapshot
-    ) {
-        guard target?.sessionID == visible.sessionId,
-              visible.sessionId == authoritativeTail.sessionId else { return }
-        let tailStart = authoritativeTail.transcriptStart ?? 0
-        let prefixCount = visible.transcript.count - authoritativeTail.transcript.count
-        guard prefixCount >= 0,
-              visible.transcript.suffix(authoritativeTail.transcript.count).map(\.id) == authoritativeTail.transcript.map(\.id),
-              visible.transcriptStart == authoritativeTail.transcriptStart.map({ $0 - prefixCount }),
-              prefixCount == max(0, tailStart - (visible.transcriptStart ?? tailStart)),
-              let coverage = coverage(for: authoritativeTail, prefix: Array(visible.transcript.prefix(prefixCount))) else { return }
-        snapshot = authoritativeTail
-        mountedTranscriptWindow = MountedTranscriptWindow(
-            coverage: coverage,
-            prefixItems: Array(visible.transcript.prefix(prefixCount))
-        )
-        advanceChatProjection(canonical: true)
-    }
-
-    func replaceHostedSnapshot(_ snapshot: SessionSnapshot) {
-        guard target?.sessionID == snapshot.sessionId else { return }
-        let canonicalChanged = self.snapshot.map {
-            $0.runtimeGeneration != snapshot.runtimeGeneration
-                || $0.transcriptStart != snapshot.transcriptStart
-                || $0.transcriptTotal != snapshot.transcriptTotal
-                || $0.transcript != snapshot.transcript
-        } ?? true
-        mountedTranscriptWindow = reconcilePrefix(
-            mountedTranscriptWindow,
-            from: self.snapshot,
-            into: snapshot
-        )
-        self.snapshot = snapshot
-        advanceChatProjection(canonical: canonicalChanged)
     }
 
     func invalidateHostedPendingPresentation() {

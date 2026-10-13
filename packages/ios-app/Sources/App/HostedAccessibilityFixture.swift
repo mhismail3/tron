@@ -43,7 +43,9 @@ struct HostedAccessibilityFixtureView: View {
                     case .maintenance:
                         NavigationStack {
                             GatewayMaintenanceActions(
-                                lifecycle: ["Rebuild from Source", "Roll Back", "Restart", "Disable"].map { title in
+                                lifecycle: (ProcessInfo.processInfo.arguments.contains("-fixture-lone-maintenance")
+                                    ? ["Rebuild from Source", "Restart", "Disable"]
+                                    : ["Rebuild from Source", "Roll Back", "Restart", "Disable"]).map { title in
                                     GatewayMaintenanceAction(id: title, title: title) {}
                                 },
                                 destructive: GatewayMaintenanceAction(id: "forget", title: "Forget Server") {}
@@ -82,7 +84,7 @@ struct HostedAccessibilityFixtureView: View {
     }
 
     private static let info = GatewayInfo(
-        gatewayVersion: "1", piVersion: "2", protocolVersion: 6, minProtocolVersion: 6,
+        gatewayVersion: "1", piVersion: "2", protocolVersion: 8, minProtocolVersion: 8,
         machineId: "machine", machineName: "Mac", capabilities: ["gateway-update.v1", "restart-supervised.v1"],
         sourceRevision: "source-revision", runtimeEpoch: "runtime-epoch"
     )
@@ -126,9 +128,8 @@ private final class HostedAccessibilityFixtureState {
             scrollOwner = scroll
             scrollOrigin = scroll.contentOffset
         }
-        // This route samples exact rendered geometry, not command animation.
-        // DashboardChromeTests independently drives and verifies animated return
-        // outside injected touches and accessibility-client focus adjustments.
+        // This route samples exact rendered geometry, not command animation, and
+        // does not drive animated return: the offset is set without animation.
         scroll.setContentOffset(CGPoint(x: scrollOrigin.x, y: scrollOrigin.y + CGFloat(offset)), animated: false)
     }
 

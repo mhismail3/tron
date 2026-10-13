@@ -3,7 +3,11 @@
  * Validate the locked Pi SDK cohort without contacting a registry.
  * package.json is the version authority; package-lock.json remains npm's
  * authoritative resolved graph (including pi-coding-agent's shrinkwrap).
+ * pi-coding-agent-patch.json, when present, is the sole owner of a Tron-built
+ * pi-coding-agent tarball that replaces the registry package at the same
+ * version; every other family package still resolves from the registry.
  */
+import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,11 +39,86 @@ const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 const PACKAGE_LOCK_MAX_BYTES = 16 * 1024 * 1024;
 const BASELINE_MAX_BYTES = 4 * 1024;
 export const BASELINE_FILE = "pi-sdk-baseline.json";
+export const PATCH_PIN_FILE = "pi-coding-agent-patch.json";
+const PATCHED_PACKAGE = "@earendil-works/pi-coding-agent";
+const PATCH_PIN_MAX_BYTES = 8 * 1024;
+const ARTIFACT_MAX_BYTES = 16 * 1024 * 1024;
+/** Kept apart from artifacts/, which source updates rewrite to the pi-subagents pin set. */
+const THIRD_PARTY_DIRECTORY = "third_party/pi-coding-agent";
 export function validSha512Integrity(value) {
   if (typeof value !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/u.test(value)) return false;
   const encoded = value.slice("sha512-".length);
   const digest = Buffer.from(encoded, "base64");
   return digest.length === 64 && digest.toString("base64") === encoded;
+}
+
+export function sha512Integrity(path) {
+  return `sha512-${createHash("sha512").update(readFileSync(path)).digest("base64")}`;
+}
+
+export function sha256File(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function isObject(value) { return value !== null && typeof value === "object" && !Array.isArray(value); }
+function hasExactKeys(value, keys) {
+  return isObject(value) && Object.keys(value).length === keys.length && keys.every((key) => key in value);
+}
+function confinedPath(value, directory) {
+  return typeof value === "string" && value.startsWith(`${directory}/`) && !isAbsolute(value)
+    && !value.split("/").some((part) => part === ".." || part === "." || part === "");
+}
+
+function boundedRegularFile(path, maximum) {
+  try {
+    const info = lstatSync(path);
+    return info.isFile() && !info.isSymbolicLink() && info.size <= maximum;
+  } catch { return false; }
+}
+
+/**
+ * Read the patched pi-coding-agent declaration. Absent means the registry
+ * package is used. `requireSources` also checks the patch and license, which
+ * exist in the source tree but are not staged into a runtime payload.
+ */
+export function readPiCodingAgentPatch(gatewayDir, { requireSources = false } = {}) {
+  const root = resolve(gatewayDir);
+  const path = join(root, PATCH_PIN_FILE);
+  if (!existsSync(path)) return { present: false, value: undefined, issues: [] };
+  const issues = [];
+  const value = readJson(path, PATCH_PIN_FILE, issues, PATCH_PIN_MAX_BYTES);
+  if (!value) return { present: true, value: undefined, issues };
+  const shaped = hasExactKeys(value, ["schemaVersion", "package", "version", "artifact", "patch", "license", "upstream", "modelData", "toolchain", "removeWhen"])
+    && value.schemaVersion === 1 && value.package === PATCHED_PACKAGE
+    && typeof value.version === "string" && EXACT_VERSION.test(value.version)
+    && hasExactKeys(value.artifact, ["path", "integrity"]) && confinedPath(value.artifact.path, THIRD_PARTY_DIRECTORY)
+    && value.artifact.path.endsWith(".tgz") && validSha512Integrity(value.artifact.integrity)
+    && hasExactKeys(value.patch, ["path", "sha256"]) && confinedPath(value.patch.path, THIRD_PARTY_DIRECTORY)
+    && /^[0-9a-f]{64}$/u.test(value.patch.sha256)
+    && hasExactKeys(value.license, ["path", "spdx"]) && confinedPath(value.license.path, THIRD_PARTY_DIRECTORY) && value.license.spdx === "MIT"
+    && hasExactKeys(value.upstream, ["repository", "tag", "tagCommit", "registryIntegrity", "proposalCommit", "proposalBase"])
+    && /^https:\/\/github\.com\/[^/]+\/[^/]+\.git$/u.test(value.upstream.repository)
+    && value.upstream.tag === `v${value.version}`
+    && [value.upstream.tagCommit, value.upstream.proposalCommit, value.upstream.proposalBase].every((commit) => /^[0-9a-f]{40}$/u.test(commit))
+    && validSha512Integrity(value.upstream.registryIntegrity) && value.upstream.registryIntegrity !== value.artifact.integrity
+    && hasExactKeys(value.modelData, ["package", "version", "integrity"]) && value.modelData.package === "@earendil-works/pi-ai"
+    && value.modelData.version === value.version && validSha512Integrity(value.modelData.integrity)
+    && hasExactKeys(value.toolchain, ["node", "npm"]) && EXACT_VERSION.test(value.toolchain.node) && EXACT_VERSION.test(value.toolchain.npm)
+    && typeof value.removeWhen === "string" && value.removeWhen.trim().length > 0;
+  if (!shaped) {
+    addIssue(issues, `${PATCH_PIN_FILE} must be schemaVersion 1 for ${PATCHED_PACKAGE} with exact artifact/patch/license/upstream/modelData/toolchain records and a removeWhen condition`);
+    return { present: true, value: undefined, issues };
+  }
+  const artifact = join(root, value.artifact.path);
+  if (!boundedRegularFile(artifact, ARTIFACT_MAX_BYTES)) addIssue(issues, `${value.artifact.path} is missing or not a bounded regular file`);
+  else if (sha512Integrity(artifact) !== value.artifact.integrity) addIssue(issues, `${value.artifact.path} does not match its declared integrity`);
+  if (requireSources) {
+    const patch = join(root, value.patch.path);
+    if (!boundedRegularFile(patch, ARTIFACT_MAX_BYTES)) addIssue(issues, `${value.patch.path} is missing`);
+    else if (sha256File(patch) !== value.patch.sha256) addIssue(issues, `${value.patch.path} does not match its declared sha256`);
+    if (!boundedRegularFile(join(root, value.license.path), PATCH_PIN_MAX_BYTES)) addIssue(issues, `${value.license.path} is missing`);
+  }
+  return { present: true, value: issues.length === 0 ? value : undefined, issues };
 }
 
 function packageNameFromLockPath(path) {
@@ -171,6 +250,49 @@ function validateInstalled(root, lockPackages, version, issues) {
   }
 }
 
+const KNOWN_DELTA_KEYS = ["store", "from", "to", "reason", "rollbackState", "credentialKey"];
+const CREDENTIAL_KEY_KEYS = ["from", "to"];
+const KNOWN_DELTA_PLACEHOLDERS = ["{namespace}", "{url}"];
+/**
+ * The stores and rollback states the sequential rollback matrix can act on. An
+ * entry naming anything else would validate but never match, so it is rejected
+ * instead of sitting in the file looking authoritative.
+ */
+export const KNOWN_DELTA_STORES = Object.freeze(["mcp-auth"]);
+export const KNOWN_DELTA_ROLLBACK_STATES = Object.freeze(["needs-auth"]);
+
+function isCredentialKeyTemplate(value) {
+  if (typeof value !== "string" || value.trim().length === 0) return false;
+  const withoutPlaceholders = KNOWN_DELTA_PLACEHOLDERS.reduce((text, placeholder) => text.split(placeholder).join(""), value);
+  return !withoutPlaceholders.includes("{") && !withoutPlaceholders.includes("}");
+}
+
+/**
+ * A `knownOneWayDeltas` entry accepts exactly one store's documented re-keying
+ * for exactly one version range. It names the store, the range, the credential
+ * key transform (`{namespace}` and `{url}` placeholders) and the rollback
+ * state that transform is allowed to leave behind, so the matrix can keep
+ * asserting every other runtime, step and state.
+ */
+function validateKnownOneWayDeltas(entries, issues) {
+  for (const entry of entries) {
+    const keys = entry && typeof entry === "object" && !Array.isArray(entry) ? Object.keys(entry) : [];
+    const credentialKeyKeys = entry?.credentialKey && typeof entry.credentialKey === "object" && !Array.isArray(entry.credentialKey)
+      ? Object.keys(entry.credentialKey) : [];
+    const coherent = keys.length === KNOWN_DELTA_KEYS.length && KNOWN_DELTA_KEYS.every((key) => keys.includes(key))
+      && typeof entry.store === "string" && KNOWN_DELTA_STORES.includes(entry.store)
+      && typeof entry.from === "string" && EXACT_VERSION.test(entry.from)
+      && typeof entry.to === "string" && EXACT_VERSION.test(entry.to)
+      && typeof entry.reason === "string" && entry.reason.trim().length > 0
+      && typeof entry.rollbackState === "string" && KNOWN_DELTA_ROLLBACK_STATES.includes(entry.rollbackState)
+      && credentialKeyKeys.length === CREDENTIAL_KEY_KEYS.length && CREDENTIAL_KEY_KEYS.every((key) => credentialKeyKeys.includes(key))
+      && isCredentialKeyTemplate(entry.credentialKey?.from) && isCredentialKeyTemplate(entry.credentialKey?.to);
+    if (!coherent) {
+      addIssue(issues, `${BASELINE_FILE} knownOneWayDeltas entries must be exactly {store, from, to, reason, rollbackState, credentialKey: {from, to}} with a known store (${KNOWN_DELTA_STORES.join(", ")}), exact versions, a reason, a known rollback state (${KNOWN_DELTA_ROLLBACK_STATES.join(", ")}) and key templates using only ${KNOWN_DELTA_PLACEHOLDERS.join("/")}`);
+    }
+  }
+}
+
 /**
  * Validate the Pi family in a Gateway package directory.
  * Returns a stable report and never performs network or filesystem mutation.
@@ -179,12 +301,21 @@ export function readPiSdkBaseline(gatewayDir) {
   const issues = [];
   const path = join(resolve(gatewayDir), BASELINE_FILE);
   const value = readJson(path, BASELINE_FILE, issues, BASELINE_MAX_BYTES);
-  if (!value || Object.keys(value).length !== 2 || value.schema !== 1
+  const keys = value && typeof value === "object" ? Object.keys(value) : [];
+  const shaped = keys.length === 2 || (keys.length === 3 && keys.includes("knownOneWayDeltas"));
+  if (!value || !shaped || value.schema !== 1
     || typeof value.rollbackVersion !== "string" || !EXACT_VERSION.test(value.rollbackVersion)) {
-    addIssue(issues, `${BASELINE_FILE} must contain exactly schema 1 and an exact rollbackVersion`);
+    addIssue(issues, `${BASELINE_FILE} must contain exactly schema 1, an exact rollbackVersion, and at most the knownOneWayDeltas list`);
     return { value: undefined, issues };
   }
-  return { value, issues };
+  if (value.knownOneWayDeltas !== undefined) {
+    if (!Array.isArray(value.knownOneWayDeltas)) {
+      addIssue(issues, `${BASELINE_FILE} knownOneWayDeltas must be a list`);
+    } else {
+      validateKnownOneWayDeltas(value.knownOneWayDeltas, issues);
+    }
+  }
+  return { value: issues.length > 0 ? undefined : value, issues };
 }
 
 export function validatePiSdk({ gatewayDir = resolve(dirname(fileURLToPath(import.meta.url)), ".."), checkInstalled = true, requireBaseline = true } = {}) {
@@ -196,23 +327,29 @@ export function validatePiSdk({ gatewayDir = resolve(dirname(fileURLToPath(impor
   const lockJson = readJson(join(root, "package-lock.json"), "package-lock.json", issues, PACKAGE_LOCK_MAX_BYTES);
   if (!packageJson || !lockJson) return { ok: false, version: undefined, issues };
 
-  const directVersions = DIRECT_PI_PACKAGES.map((name) => packageJson.dependencies?.[name]);
-  if (directVersions.some((value) => typeof value !== "string" || !EXACT_VERSION.test(value))) {
-    for (const [index, name] of DIRECT_PI_PACKAGES.entries()) {
-      const value = directVersions[index];
-      if (typeof value !== "string" || !EXACT_VERSION.test(value)) addIssue(issues, `${name} must be an exact semver dependency (found ${value ?? "missing"})`);
-    }
+  const patch = readPiCodingAgentPatch(root, { requireSources: requireBaseline });
+  issues.push(...patch.issues);
+  if (patch.present && !patch.value) return { ok: false, version: undefined, issues };
+  const directSpecs = DIRECT_PI_PACKAGES.map((name) => packageJson.dependencies?.[name]);
+  const version = patch.value?.version ?? directSpecs[0];
+  if (typeof version !== "string" || !EXACT_VERSION.test(version)) {
+    addIssue(issues, `${DIRECT_PI_PACKAGES[0]} must be an exact semver dependency (found ${version ?? "missing"})`);
+    return { ok: false, version, issues };
   }
-  const version = directVersions[0];
-  if (typeof version !== "string" || !EXACT_VERSION.test(version)) return { ok: false, version, issues };
+  // The patched package is the one direct dependency that names its declared
+  // tarball; its lock entry must carry exactly that tarball's integrity.
+  const patchedSpec = patch.value ? `file:${patch.value.artifact.path}` : undefined;
+  const expectedSpec = (name) => (patchedSpec && name === PATCHED_PACKAGE ? patchedSpec : version);
   for (const [index, name] of DIRECT_PI_PACKAGES.entries()) {
-    if (directVersions[index] !== version) addIssue(issues, `${name} is ${directVersions[index] ?? "missing"}, expected cohort ${version}`);
+    if (directSpecs[index] !== expectedSpec(name)) {
+      addIssue(issues, `${name} is ${directSpecs[index] ?? "missing"}, expected ${expectedSpec(name)}${!patchedSpec && name === PATCHED_PACKAGE && directSpecs[index]?.startsWith("file:") ? ` (no ${PATCH_PIN_FILE} declares a patched tarball)` : ""}`);
+    }
   }
 
   const rootLock = lockJson.packages?.[""];
   if (!rootLock || typeof rootLock !== "object") addIssue(issues, "package-lock.json is missing its root package entry");
   for (const name of DIRECT_PI_PACKAGES) {
-    if (rootLock?.dependencies?.[name] !== version) addIssue(issues, `package-lock root dependency ${name} is ${rootLock?.dependencies?.[name] ?? "missing"}, expected ${version}`);
+    if (rootLock?.dependencies?.[name] !== expectedSpec(name)) addIssue(issues, `package-lock root dependency ${name} is ${rootLock?.dependencies?.[name] ?? "missing"}, expected ${expectedSpec(name)}`);
   }
   const lockPackages = Object.entries(lockJson.packages ?? {}).filter(([path]) => packageNameFromLockPath(path));
   const seen = new Set();
@@ -226,6 +363,12 @@ export function validatePiSdk({ gatewayDir = resolve(dirname(fileURLToPath(impor
     seen.add(name);
     if (!entry || typeof entry !== "object") { addIssue(issues, `${path} has no package metadata`); continue; }
     if (entry.version !== version) addIssue(issues, `${path} resolves ${entry.version ?? "missing"}, expected cohort ${version}`);
+    if (patchedSpec && path === `node_modules/${PATCHED_PACKAGE}`) {
+      if (entry.resolved !== patchedSpec || entry.integrity !== patch.value.artifact.integrity) {
+        addIssue(issues, `${path} must resolve ${patchedSpec} with integrity ${patch.value.artifact.integrity}`);
+      }
+      continue;
+    }
     if (entry.resolved !== expectedTarball(name, version)) addIssue(issues, `${path} must use canonical registry tarball ${expectedTarball(name, version)}`);
     if (entry.integrity !== undefined && !validSha512Integrity(entry.integrity)) {
       addIssue(issues, `${path} has invalid npm integrity metadata`);
@@ -246,13 +389,14 @@ export function validatePiSdk({ gatewayDir = resolve(dirname(fileURLToPath(impor
     version,
     rollbackVersion: baseline.value?.rollbackVersion,
     packages: [...seen].sort(),
+    patched: patch.value ? { artifact: patch.value.artifact.path, integrity: patch.value.artifact.integrity } : undefined,
     installedChecked: checkInstalled && existsSync(join(root, "node_modules")),
     issues,
   };
 }
 
 export function formatPiSdkReport(report) {
-  if (report.ok) return `Pi SDK cohort ${report.version} is coherent (${report.packages.length} resolved entries${report.installedChecked ? ", installed tree checked" : ""})`;
+  if (report.ok) return `Pi SDK cohort ${report.version} is coherent (${report.packages.length} resolved entries${report.patched ? `, pi-coding-agent from ${report.patched.artifact}` : ""}${report.installedChecked ? ", installed tree checked" : ""})`;
   return ["Pi SDK coherence check failed:", ...report.issues.map((issue) => `- ${issue}`)].join("\n");
 }
 

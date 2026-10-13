@@ -10,7 +10,7 @@ import type {
   ExtensionToolOrigin,
 } from "../protocol/types.js";
 
-const MAX_CHILDREN = 32;
+export const MAX_EXTENSION_RUN_CHILDREN = 32;
 const MAX_CHILDREN_TOTAL = 64;
 const MAX_DEPTH = 3;
 const MAX_TEXT_BYTES = 2_048;
@@ -207,7 +207,7 @@ function validLifecycleProjection(value: unknown): value is ExtensionLifecyclePr
   if (!source || [...Object.keys(source)].some((key) => !["version", "runId", "toolCallId", "sessionId", "generatedAt", "caps", "omitted", "root"].includes(key))) return false;
   if (source.version !== 1 || !boundedProjectionString(source.runId, 256, true, 256)
     || (source.toolCallId !== undefined && !boundedProjectionString(source.toolCallId, 256, true, 256))
-    || (source.sessionId !== undefined && !boundedProjectionString(source.sessionId, 256, true, 256))
+    || (source.sessionId !== undefined && !boundedProjectionString(source.sessionId, 4_096, true, 4_096))
     || !Number.isSafeInteger(source.generatedAt) || (source.generatedAt as number) < 0 || !caps || !omitted || !root
     || !validProjectionNode(root, 0, source.runId as string, true)) return false;
   const capValues = [caps.maxRuns, caps.maxChildrenPerNode, caps.maxDepth, caps.maxStringLength, caps.maxSerializedBytes];
@@ -703,7 +703,7 @@ function child(
     ? source.children
     : Array.isArray(source.steps) ? source.steps : [];
   const nested = nestedValues
-    .slice(0, MAX_CHILDREN)
+    .slice(0, MAX_EXTENSION_RUN_CHILDREN)
     .map((item, nestedIndex) => child(item, nestedIndex, fallbackStatus, depth + 1, budget, identityStrategy))
     .filter((item): item is ExtensionRunChild => Boolean(item));
   const childLifecycle = extensionLifecycleState(progress?.state ?? progress?.status ?? source.state ?? source.status,
@@ -793,7 +793,7 @@ export function usesForegroundSubagentChildIdentity(
   const progress = Array.isArray(details.progress) ? details.progress : [];
   const results = Array.isArray(details.results) ? details.results : [];
   const candidates = progress.length > 0 ? progress : results;
-  if (candidates.length === 0 || candidates.length > MAX_CHILDREN) return false;
+  if (candidates.length === 0 || candidates.length > MAX_EXTENSION_RUN_CHILDREN) return false;
   const explicitIndexes: Array<number | undefined> = [];
   for (const candidate of candidates) {
     const source = record(candidate);
@@ -821,7 +821,7 @@ export function hasForegroundSubagentRunActivity(value: unknown): boolean {
   const progress = Array.isArray(details.progress) ? details.progress : [];
   const results = Array.isArray(details.results) ? details.results : [];
   const candidates = progress.length > 0 ? progress : results;
-  if (candidates.length === 0 || candidates.length > MAX_CHILDREN) return false;
+  if (candidates.length === 0 || candidates.length > MAX_EXTENSION_RUN_CHILDREN) return false;
   const indexes = new Set<number>();
   return candidates.every((candidate) => {
     const source = record(candidate);
@@ -945,7 +945,7 @@ export function projectExtensionRunActivity(
   const completedAt = activityStatus === "running" ? undefined : base.completedAt ?? previous?.completedAt;
   const childBudget = { remaining: MAX_CHILDREN_TOTAL };
   const children = candidates
-    .slice(0, MAX_CHILDREN)
+    .slice(0, MAX_EXTENSION_RUN_CHILDREN)
     .map((item, index) => child(item, index, activityStatus, 0, childBudget, base.childIdentityStrategy ?? "declared"))
     .filter((item): item is ExtensionRunChild => Boolean(item));
   const firstProgress = candidates.length > 0 ? progressRecord(candidates[0]) : undefined;

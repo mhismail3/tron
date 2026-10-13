@@ -622,7 +622,7 @@ private struct ThinkingBlock: View {
         .animation(
             reduceMotion || !hasMeasuredTrace
                 ? nil
-                : .smooth(duration: ChatScrollCoordinator.liveGrowthAnimationDuration),
+                : ChatMotion.streamingResize,
             value: animatedTraceMotion
         )
         .clipped()

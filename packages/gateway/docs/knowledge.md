@@ -14,7 +14,14 @@ state/knowledge/
   objects/<sha256>                      # immutable raw content-addressed bytes
 ```
 
-The workspace-owned `gateway/workspace-state/initialized.json` also records
+A first mutation publishes that namespace atomically: it is built in a temporary
+sibling directory under `state/` — integrity marker, state manifest and catalog
+included — and renamed into place, and the workspace-owned evidence is recorded
+only after the rename. Reads project state without the store mutex, so a
+namespace visible before its own evidence were would be indistinguishable from a
+damaged corpus; an initialization that fails while building it publishes
+nothing, and the next deliberate mutation initializes the namespace again. The
+workspace-owned `gateway/workspace-state/initialized.json` also records
 initialization. Deleting an established namespace, manifest, or active catalog
 reports unavailable/lost state rather than creating an empty corpus.
 
@@ -329,24 +336,6 @@ There is no dual-write/fallback store and no automatic downgrade. A preparation
 failure leaves Knowledge visibly unavailable without disabling unrelated chat;
 after an uncertain publication, the manifest still decides which catalog is active.
 
-`knowledge-catalog.test.ts` covers preserving a legacy corpus and receipt replay,
-missing-revision retry, rescue of a 16,000-cut legacy state above four MiB,
-atomic group rollback, missing/symlinked catalogs, evidence-heavy byte/node
-paging, and public pagination/search across multiple pages with deleted anchors.
-`knowledge-catalog.scale.test.ts` retains the 10,005-record, over-four-MiB
-fixture; it checks exact body-read counts, full-history continuation,
-late-corpus search/recall, scoped recovery, and actual SQLite date-index plans.
-`knowledge-take-freshness.scale.test.ts` exercises source list/search/recall and
-row projection over 12,600 catalog heads and 440 sources, with latency budgets
-and the same bounded row/body separation. On the focused scale run, measured
-latencies were 5 ms row listing, 216 ms row search, 109 ms full-record listing,
-173 ms full-record search, and 162 ms recall (one run, host-dependent).
-The default Raindrop pagination test crosses the real 50-item provider page
-boundary with 51 items; the more expensive all-incomplete-head recovery case is
-in `raindrop-intake-multipage.scale.test.ts`. Run both exact scale regressions
-at release checkpoints with `npm run test:scale`. Default small fixtures do not
-prove the 10,000-record/four-MiB or repeated incomplete-head scale thresholds.
-
 Missing state in an established namespace is invalid and is never treated as
 an empty corpus. Missing or malformed/newer state, unsafe ancestors, and
 corrupt record/object files remain visible as failures rather than being
@@ -410,7 +399,9 @@ grant so an older Gateway cannot silently ignore the choice. Existing model,
 limits, selections, and exclusions remain intact when scope changes.
 
 The same eligibility predicate gates inference admission and serialized
-publication. Explicit session/project exclusions always override global scope.
+publication. The Gateway also excludes Tron Home's own chapters through the
+observer's exclusion predicate, `homeChapterObservationExcluded`
+([home.md](home.md#the-learned-profile)). Explicit session/project exclusions always override global scope.
 `setScopeExclusion()` also fences session, branch, or project input before model
 inference, not merely publication. A rejected pending admission cannot start a
 model request. These fences apply even if a late worker generated a new record
@@ -435,6 +426,20 @@ qualified evidence and a pinned `knowledge.read` continuation (`id`,
 complete record is never available only through tool details. Observation
 defaults to disabled and the store never chooses a provider or model silently. Connector DTOs are operation shapes implemented by the installed connector
 extension. Connection setup owns the selected account, its Raindrop collection-role mapping, and opaque `credentialRef` (`connector:<provider>:<account>`); only the Mac Keychain adapter resolves it. Raindrop collection routes are edited through the connection's revision-fenced setup/policy command, not duplicated in connector progress state.
+The Mac Keychain credential adapter accepts nonempty printable ASCII tokens
+(`0x20`–`0x7E`) on write. Apple's `find-generic-password -w` hex-encodes values
+containing non-printable bytes without a marker, so Unicode/control-character
+secrets cannot round-trip unambiguously and are rejected before starting a child.
+Writes send one exactly quoted `add-generic-password` command to `security -i`
+through stdin, never secret process arguments; the entire escaped UTF-8 command
+must fit below the CLI's 4096-byte input-buffer limit. Reads preserve token
+whitespace, removing only the CLI's output newline. Production uses the default
+Keychain target. `connector-credentials.integration.test.ts` injects a private temporary
+keychain path for every credential command, creates/unlocks it without user
+interaction or search-list changes, and deletes it in `finally`. Construction
+under Vitest or `NODE_ENV=test` without that path refuses before any Keychain
+operation. See [verification diagnostics](observability.md#test-and-verification-environment-preflight).
+
 Once `ConnectionOwner` is active, connector actions require an exact
 `connectionId` and Knowledge persists provider progress under that instance
 key, without copying the generic account envelope. Tokens never enter
@@ -495,9 +500,6 @@ OpenAI API and subscription transports. Knowledge therefore uses the strict
 extractor, not provider-specific overrides or permissive repair. The retained
 `knowledge.model-failed` shape diagnostic identifies rejected replies without
 retaining source/model text; each field occurs once in the failure reason.
-Regression checks: `knowledge-model-output.test.ts` exercises the synthetic Luna
-leading-prose shape and rejection cases; `knowledge-observation.test.ts` checks
-publication through the durable observation owner.
 
 Prospective source retention is bounded by 64 cuts, 100,000 entries, and a
 conservative 32 MiB retained-data budget including the currently processed cut.
@@ -625,7 +627,22 @@ not evidence.
 validity, explicit confirmation, privacy scope, freshness, corrections,
 supersession, and preserved contrary evidence. Personal/research scope remains
 the sharing authority; `privacyScope` is descriptive metadata, not a second
-sharing system. Source assessment uses persisted editable
+sharing system.
+
+Note labels, retirement and revision reasons (#731). A note may carry `tags`: at
+most eight labels, each matching `^[a-z][a-z0-9-]{0,47}$` and unique within the note.
+They are owner metadata, not the source tag vocabulary: the vocabulary does not
+validate them, and an owner alone gives them meaning. Tron Home's learned profile uses
+`home-profile` plus one `kind-<kind>` label ([home.md](home.md#the-learned-profile)).
+`retired: true` marks a note that has left active use; its earlier revisions stay in
+the ledger. An update or correction that omits `tags` or `retired` keeps the current
+revision's values, because native typed drafts do not model them; naming `tags`
+replaces them. `provenance.reason` (at most 2,000 characters) records why a revision
+was written. It is ledger metadata, never evidence. All three fields are optional
+under schema v1, so no schema bump is needed. A Gateway that predates them ignores
+them when it reads a note, but it does not carry them forward when it writes the same
+note, and downgrade is unsupported, so keep the Gateway at this build once a profile
+exists. Source assessment uses persisted editable
 `KnowledgeConfig.currentInterests`; neither assessor accepts an unpersisted
 interest list. The assessed source's evidence and configuration are revalidated
 before its derivative is committed. Capture is durable even when an adapter
@@ -737,14 +754,6 @@ validation. Browser state is never used to enumerate or sync private bookmarks;
 there is no cookie store, background sync, automatic browser login, or remote
 mutation. Never send known protected content to a public mirror without approval.
 
-Focused regressions: `x-public-post.test.ts` covers identity, URL isolation,
-malformed/mismatched/truncated responses, fallback, partial content, cancellation,
-and safe transport; `source-capture.test.ts` covers final-URI redirect reconciliation
-across aliases/scopes and partial targets, conflicting canonical records, repeat and
-concurrent publication semantics, and envelope preservation. `x-public-capture.test.ts`
-covers raw evidence, opt-in, canonical URL identity deduplication, retry envelope
-preservation, linked-source relations and origin bounds, bounded linked-target
-failures, GitHub UI partial coverage, command-id bounds, and actual agent routing.
 Browser login, private history coverage, Article/thread completeness, and provider
 availability are live validation requirements, not conclusions from fixture tests.
 New Gateway tool behavior requires a manual maintainer update; agents never

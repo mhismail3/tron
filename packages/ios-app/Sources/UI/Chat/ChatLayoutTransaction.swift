@@ -29,11 +29,11 @@ struct ChatLayoutClock: Equatable, Sendable {
             // Submission geometry must be monotonic. A spring can overshoot the
             // composer inset and produce a visible down/up correction.
             return Self(
-                duration: ChatContentTransitionPolicy.transcriptEntranceDuration,
+                duration: ChatMotion.transcriptRevealDuration,
                 curve: .smooth
             )
         }
-        return Self(duration: 0.34, curve: .smooth)
+        return Self(duration: ChatMotion.layoutSmoothDuration, curve: .smooth)
     }
 
     var animation: Animation? {
@@ -41,20 +41,12 @@ struct ChatLayoutClock: Equatable, Sendable {
         case .instant:
             nil
         case .smooth:
-            .smooth(duration: duration)
+            ChatMotion.smooth(duration: duration)
         case let .keyboard(rawValue):
-            switch UIView.AnimationCurve(rawValue: rawValue) ?? .easeInOut {
-            case .easeInOut:
-                .easeInOut(duration: duration)
-            case .easeIn:
-                .easeIn(duration: duration)
-            case .easeOut:
-                .easeOut(duration: duration)
-            case .linear:
-                .linear(duration: duration)
-            @unknown default:
-                .easeInOut(duration: duration)
-            }
+            ChatMotion.keyboardCurve(
+                UIView.AnimationCurve(rawValue: rawValue) ?? .easeInOut,
+                duration: duration
+            )
         }
     }
 }

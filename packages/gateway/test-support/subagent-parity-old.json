@@ -1,0 +1,1698 @@
+{
+  "schemaVersion": 2,
+  "checkpoints": {
+    "single-running": {
+      "processes": [
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:0>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "running",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>"
+          },
+          "visibility": "active",
+          "startedAt": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTruncated": false,
+          "toolCallId": "single-launch",
+          "runId": "<single-launch:run>",
+          "childSessionRef": "<uuid>"
+        }
+      ],
+      "nativeCounts": {
+        "active": 1,
+        "recent": 0,
+        "problem": 0
+      },
+      "activities": [
+        {
+          "toolCallId": "single-launch",
+          "runId": "<single-launch:run>",
+          "children": [
+            {
+              "id": "step:0",
+              "producerId": "step:0",
+              "label": "parity-worker",
+              "task": "[prompt redacted]",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            }
+          ]
+        }
+      ],
+      "transcript": {
+        "prompt": [
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "boundary",
+            "lifecycle": "completed",
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "stored",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<uuid>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Launch the single child"
+              }
+            ],
+            "details": null
+          }
+        ]
+      },
+      "retained": [
+        {
+          "type": "widget",
+          "key": "subagent-async",
+          "source": "npm:pi-subagents@0.59.0",
+          "title": "Pi Subagents",
+          "kind": null,
+          "privateSubagent": true,
+          "nativeVisibility": "hidden",
+          "contents": null
+        }
+      ],
+      "surfaces": [
+        {
+          "id": "widget:c3ViYWdlbnQtZmxlZXQtc3RhdHVz",
+          "kind": "widget",
+          "placement": "belowEditor",
+          "lifecycle": "retained",
+          "revision": "<revision>",
+          "focused": false,
+          "inputMode": "none",
+          "frame": null,
+          "provenance": {
+            "source": "npm:pi-subagents@0.59.0"
+          },
+          "privateSubagent": true,
+          "nativeVisibility": "hidden"
+        }
+      ],
+      "inputs": {
+        "pending": null,
+        "queued": [],
+        "displayedPending": null,
+        "displayedQueued": []
+      },
+      "deliveries": {}
+    },
+    "single-completed": {
+      "processes": [
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:0>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "completed",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>",
+            "terminalAt": "<time>",
+            "recentUntil": "<time>"
+          },
+          "visibility": "recent",
+          "startedAt": "<time>",
+          "durationMs": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTail": "PARITY_CHILD_COMPLETE",
+          "outputTruncated": false,
+          "turnCount": 1,
+          "toolCallId": "single-launch",
+          "runId": "<single-launch:run>",
+          "childSessionRef": "<uuid>"
+        }
+      ],
+      "nativeCounts": {
+        "active": 0,
+        "recent": 1,
+        "problem": 0
+      },
+      "activities": [
+        {
+          "toolCallId": "single-launch",
+          "runId": "<single-launch:run>",
+          "children": [
+            {
+              "id": "step:0",
+              "producerId": "step:0",
+              "label": "parity-worker",
+              "task": "[prompt redacted]",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            }
+          ]
+        }
+      ],
+      "transcript": {
+        "prompt": [
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "boundary",
+            "lifecycle": "completed",
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "stored",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<uuid>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Launch the single child"
+              }
+            ],
+            "details": null
+          }
+        ]
+      },
+      "retained": [
+        {
+          "type": "widget",
+          "key": "subagent-async",
+          "source": "npm:pi-subagents@0.59.0",
+          "title": "Pi Subagents",
+          "kind": null,
+          "privateSubagent": true,
+          "nativeVisibility": "hidden",
+          "contents": null
+        }
+      ],
+      "surfaces": [],
+      "inputs": {
+        "pending": null,
+        "queued": [],
+        "displayedPending": null,
+        "displayedQueued": []
+      },
+      "deliveries": {
+        "subagent-notify": [
+          {
+            "display": false,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ]
+      }
+    },
+    "workflow-running": {
+      "processes": [
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:0>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "completed",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>",
+            "terminalAt": "<time>",
+            "recentUntil": "<time>"
+          },
+          "visibility": "recent",
+          "startedAt": "<time>",
+          "durationMs": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTail": "PARITY_CHILD_COMPLETE",
+          "outputTruncated": false,
+          "turnCount": 1,
+          "toolCallId": "single-launch",
+          "runId": "<single-launch:run>",
+          "childSessionRef": "<uuid>"
+        },
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:1>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "running",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>"
+          },
+          "visibility": "active",
+          "startedAt": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTruncated": false,
+          "toolCount": 0,
+          "toolCallId": "workflow-launch",
+          "runId": "<workflow-launch:run>",
+          "childSessionRef": "<uuid>"
+        },
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:2>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "running",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>"
+          },
+          "visibility": "active",
+          "startedAt": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTruncated": false,
+          "toolCount": 0,
+          "toolCallId": "workflow-launch",
+          "runId": "<workflow-launch:run>",
+          "childSessionRef": "<uuid>"
+        },
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:3>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "running",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>"
+          },
+          "visibility": "active",
+          "startedAt": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTruncated": false,
+          "toolCount": 0,
+          "toolCallId": "workflow-launch",
+          "runId": "<workflow-launch:run>",
+          "childSessionRef": "<uuid>"
+        }
+      ],
+      "nativeCounts": {
+        "active": 3,
+        "recent": 1,
+        "problem": 0
+      },
+      "activities": [
+        {
+          "toolCallId": "workflow-launch",
+          "runId": "<workflow-launch:run>",
+          "children": [
+            {
+              "id": "fail",
+              "producerId": "fail",
+              "label": "parity-worker",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            },
+            {
+              "id": "question",
+              "producerId": "question",
+              "label": "parity-worker",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            },
+            {
+              "id": "success",
+              "producerId": "success",
+              "label": "parity-worker",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            }
+          ]
+        },
+        {
+          "toolCallId": "single-launch",
+          "runId": "<single-launch:run>",
+          "children": [
+            {
+              "id": "step:0",
+              "producerId": "step:0",
+              "label": "parity-worker",
+              "task": "[prompt redacted]",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            }
+          ]
+        }
+      ],
+      "transcript": {
+        "prompt": [
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "boundary",
+            "lifecycle": "completed",
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "stored",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<uuid>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Launch the single child"
+              }
+            ],
+            "details": null
+          },
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "boundary",
+            "lifecycle": "completed",
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "stored",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<uuid>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Launch the three-child workflow"
+              }
+            ],
+            "details": null
+          }
+        ]
+      },
+      "retained": [
+        {
+          "type": "widget",
+          "key": "subagent-async",
+          "source": "npm:pi-subagents@0.59.0",
+          "title": "Pi Subagents",
+          "kind": null,
+          "privateSubagent": true,
+          "nativeVisibility": "hidden",
+          "contents": null
+        }
+      ],
+      "surfaces": [
+        {
+          "id": "widget:c3ViYWdlbnQtZmxlZXQtc3RhdHVz",
+          "kind": "widget",
+          "placement": "belowEditor",
+          "lifecycle": "retained",
+          "revision": "<revision>",
+          "focused": false,
+          "inputMode": "none",
+          "frame": null,
+          "provenance": {
+            "source": "npm:pi-subagents@0.59.0"
+          },
+          "privateSubagent": true,
+          "nativeVisibility": "hidden"
+        }
+      ],
+      "inputs": {
+        "pending": null,
+        "queued": [],
+        "displayedPending": null,
+        "displayedQueued": []
+      },
+      "deliveries": {
+        "subagent-notify": [
+          {
+            "display": false,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ]
+      }
+    },
+    "workflow-question": {
+      "processes": [
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:0>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "completed",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>",
+            "terminalAt": "<time>",
+            "recentUntil": "<time>"
+          },
+          "visibility": "recent",
+          "startedAt": "<time>",
+          "durationMs": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTail": "PARITY_CHILD_COMPLETE",
+          "outputTruncated": false,
+          "turnCount": 1,
+          "toolCallId": "single-launch",
+          "runId": "<single-launch:run>",
+          "childSessionRef": "<uuid>"
+        },
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:1>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "failed",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>",
+            "terminalAt": "<time>",
+            "recentUntil": "<time>"
+          },
+          "visibility": "recent",
+          "startedAt": "<time>",
+          "durationMs": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTruncated": false,
+          "toolCount": 0,
+          "turnCount": 1,
+          "toolCallId": "workflow-launch",
+          "runId": "<workflow-launch:run>",
+          "childSessionRef": "<uuid>"
+        },
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:2>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "running",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>"
+          },
+          "visibility": "active",
+          "startedAt": "<time>",
+          "title": "parity-worker",
+          "currentTool": "contact_supervisor",
+          "model": "child",
+          "outputTruncated": false,
+          "toolCount": 2,
+          "turnCount": 1,
+          "toolCallId": "workflow-launch",
+          "runId": "<workflow-launch:run>",
+          "childSessionRef": "<uuid>"
+        },
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:3>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "running",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>"
+          },
+          "visibility": "active",
+          "startedAt": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTruncated": false,
+          "toolCount": 0,
+          "toolCallId": "workflow-launch",
+          "runId": "<workflow-launch:run>",
+          "childSessionRef": "<uuid>"
+        }
+      ],
+      "nativeCounts": {
+        "active": 2,
+        "recent": 2,
+        "problem": 1
+      },
+      "activities": [
+        {
+          "toolCallId": "workflow-launch",
+          "runId": "<workflow-launch:run>",
+          "children": [
+            {
+              "id": "fail",
+              "producerId": "fail",
+              "label": "parity-worker",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            },
+            {
+              "id": "question",
+              "producerId": "question",
+              "label": "parity-worker",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            },
+            {
+              "id": "success",
+              "producerId": "success",
+              "label": "parity-worker",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            }
+          ]
+        },
+        {
+          "toolCallId": "single-launch",
+          "runId": "<single-launch:run>",
+          "children": [
+            {
+              "id": "step:0",
+              "producerId": "step:0",
+              "label": "parity-worker",
+              "task": "[prompt redacted]",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            }
+          ]
+        }
+      ],
+      "transcript": {
+        "prompt": [
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "boundary",
+            "lifecycle": "completed",
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "stored",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<uuid>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Launch the single child"
+              }
+            ],
+            "details": null
+          },
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "boundary",
+            "lifecycle": "completed",
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "stored",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<uuid>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Launch the three-child workflow"
+              }
+            ],
+            "details": null
+          }
+        ],
+        "need_decision": [
+          {
+            "category": "need_decision",
+            "origin": "extension",
+            "title": "Pi Subagents",
+            "classification": "message",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "receipt",
+            "lifecycle": null,
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "triggeredTurn",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<entry>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Subagent needs a supervisor decision.\nRun: <workflow-launch:child:question>\nAgent: parity-worker\nChild index: 0\nChild intercom target: subagent-parity-worker-<workflow-launch:child:question>-1\n\nPARITY_QUESTION: proceed?\n\nReply with: subagent_supervisor({ action: \"reply\", replyTo: \"<uuid>\", message: \"...\" })"
+              }
+            ],
+            "details": {
+              "id": "<uuid>",
+              "reason": "need_decision",
+              "expectsReply": true,
+              "runId": "<workflow-launch:child:question>",
+              "agent": "parity-worker",
+              "childIndex": 0
+            }
+          }
+        ],
+        "progress_update": [
+          {
+            "category": "progress_update",
+            "origin": "extension",
+            "title": "Pi Subagents",
+            "classification": "message",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "receipt",
+            "lifecycle": null,
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "triggeredTurn",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<entry>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Subagent progress update.\nRun: <workflow-launch:child:question>\nAgent: parity-worker\nChild index: 0\nChild intercom target: subagent-parity-worker-<workflow-launch:child:question>-1\n\nPARITY_PROGRESS"
+              }
+            ],
+            "details": {
+              "id": "<uuid>",
+              "reason": "progress_update",
+              "expectsReply": false,
+              "runId": "<workflow-launch:child:question>",
+              "agent": "parity-worker",
+              "childIndex": 0
+            }
+          }
+        ]
+      },
+      "retained": [
+        {
+          "type": "widget",
+          "key": "subagent-async",
+          "source": "npm:pi-subagents@0.59.0",
+          "title": "Pi Subagents",
+          "kind": null,
+          "privateSubagent": true,
+          "nativeVisibility": "hidden",
+          "contents": null
+        }
+      ],
+      "surfaces": [
+        {
+          "id": "widget:c3ViYWdlbnQtZmxlZXQtc3RhdHVz",
+          "kind": "widget",
+          "placement": "belowEditor",
+          "lifecycle": "retained",
+          "revision": "<revision>",
+          "focused": false,
+          "inputMode": "none",
+          "frame": null,
+          "provenance": {
+            "source": "npm:pi-subagents@0.59.0"
+          },
+          "privateSubagent": true,
+          "nativeVisibility": "hidden"
+        }
+      ],
+      "inputs": {
+        "pending": null,
+        "queued": [],
+        "displayedPending": null,
+        "displayedQueued": []
+      },
+      "deliveries": {
+        "subagent-notify": [
+          {
+            "display": false,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ],
+        "need_decision": [
+          {
+            "display": true,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ],
+        "progress_update": [
+          {
+            "display": true,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ]
+      }
+    },
+    "workflow-completed": {
+      "processes": [
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:0>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "completed",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>",
+            "terminalAt": "<time>",
+            "recentUntil": "<time>"
+          },
+          "visibility": "recent",
+          "startedAt": "<time>",
+          "durationMs": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTail": "PARITY_CHILD_COMPLETE",
+          "outputTruncated": false,
+          "turnCount": 1,
+          "toolCallId": "single-launch",
+          "runId": "<single-launch:run>",
+          "childSessionRef": "<uuid>"
+        },
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:1>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "failed",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>",
+            "terminalAt": "<time>",
+            "recentUntil": "<time>"
+          },
+          "visibility": "recent",
+          "startedAt": "<time>",
+          "durationMs": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTruncated": false,
+          "toolCount": 0,
+          "turnCount": 1,
+          "toolCallId": "workflow-launch",
+          "runId": "<workflow-launch:run>",
+          "childSessionRef": "<uuid>"
+        },
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:2>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "completed",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>",
+            "terminalAt": "<time>",
+            "recentUntil": "<time>"
+          },
+          "visibility": "recent",
+          "startedAt": "<time>",
+          "durationMs": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTail": "PARITY_CHILD_COMPLETE",
+          "outputTruncated": false,
+          "toolCount": 2,
+          "turnCount": 2,
+          "toolCallId": "workflow-launch",
+          "runId": "<workflow-launch:run>",
+          "childSessionRef": "<uuid>"
+        },
+        {
+          "version": 1,
+          "processId": "process:subagent:<row:3>",
+          "kind": "subagent",
+          "executionMode": "asynchronous",
+          "source": "delegatedAgent",
+          "lifecycle": {
+            "version": 1,
+            "state": "completed",
+            "attention": "none",
+            "sequence": "<revision>",
+            "observedAt": "<time>",
+            "producerUpdatedAt": "<time>",
+            "terminalAt": "<time>",
+            "recentUntil": "<time>"
+          },
+          "visibility": "recent",
+          "startedAt": "<time>",
+          "durationMs": "<time>",
+          "title": "parity-worker",
+          "model": "child",
+          "outputTail": "PARITY_CHILD_COMPLETE",
+          "outputTruncated": false,
+          "toolCount": 0,
+          "turnCount": 1,
+          "toolCallId": "workflow-launch",
+          "runId": "<workflow-launch:run>",
+          "childSessionRef": "<uuid>"
+        }
+      ],
+      "nativeCounts": {
+        "active": 0,
+        "recent": 4,
+        "problem": 1
+      },
+      "activities": [
+        {
+          "toolCallId": "workflow-launch",
+          "runId": "<workflow-launch:run>",
+          "children": [
+            {
+              "id": "fail",
+              "producerId": "fail",
+              "label": "parity-worker",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            },
+            {
+              "id": "question",
+              "producerId": "question",
+              "label": "parity-worker",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            },
+            {
+              "id": "success",
+              "producerId": "success",
+              "label": "parity-worker",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            }
+          ]
+        },
+        {
+          "toolCallId": "single-launch",
+          "runId": "<single-launch:run>",
+          "children": [
+            {
+              "id": "step:0",
+              "producerId": "step:0",
+              "label": "parity-worker",
+              "task": "[prompt redacted]",
+              "childSessionRef": "<uuid>",
+              "sessionOwnerId": "<session-owner>"
+            }
+          ]
+        }
+      ],
+      "transcript": {
+        "prompt": [
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "boundary",
+            "lifecycle": "completed",
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "stored",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<uuid>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Launch the single child"
+              }
+            ],
+            "details": null
+          },
+          {
+            "category": "prompt",
+            "origin": "user",
+            "title": null,
+            "classification": "resourcePrompt",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "boundary",
+            "lifecycle": "completed",
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "stored",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<uuid>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Launch the three-child workflow"
+              }
+            ],
+            "details": null
+          }
+        ],
+        "need_decision": [
+          {
+            "category": "need_decision",
+            "origin": "extension",
+            "title": "Pi Subagents",
+            "classification": "message",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "receipt",
+            "lifecycle": null,
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "triggeredTurn",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<entry>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Subagent needs a supervisor decision.\nRun: <workflow-launch:child:question>\nAgent: parity-worker\nChild index: 0\nChild intercom target: subagent-parity-worker-<workflow-launch:child:question>-1\n\nPARITY_QUESTION: proceed?\n\nReply with: subagent_supervisor({ action: \"reply\", replyTo: \"<uuid>\", message: \"...\" })"
+              }
+            ],
+            "details": {
+              "id": "<uuid>",
+              "reason": "need_decision",
+              "expectsReply": true,
+              "runId": "<workflow-launch:child:question>",
+              "agent": "parity-worker",
+              "childIndex": 0
+            }
+          }
+        ],
+        "progress_update": [
+          {
+            "category": "progress_update",
+            "origin": "extension",
+            "title": "Pi Subagents",
+            "classification": "message",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "receipt",
+            "lifecycle": null,
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "triggeredTurn",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<entry>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Subagent progress update.\nRun: <workflow-launch:child:question>\nAgent: parity-worker\nChild index: 0\nChild intercom target: subagent-parity-worker-<workflow-launch:child:question>-1\n\nPARITY_PROGRESS"
+              }
+            ],
+            "details": {
+              "id": "<uuid>",
+              "reason": "progress_update",
+              "expectsReply": false,
+              "runId": "<workflow-launch:child:question>",
+              "agent": "parity-worker",
+              "childIndex": 0
+            }
+          }
+        ],
+        "subagent-notify": [
+          {
+            "category": "subagent-notify",
+            "origin": "extension",
+            "title": "Pi Subagents",
+            "classification": "message",
+            "direction": "inboundContext",
+            "contextEffect": "modelInput",
+            "confidence": "receipt",
+            "lifecycle": null,
+            "resourceInvocation": null,
+            "submittedText": null,
+            "delivery": "triggeredTurn",
+            "visibility": "visible",
+            "content": [
+              {
+                "id": "<entry>:0",
+                "ordinal": 0,
+                "type": "text",
+                "text": "Background task failed: **workflow**\n\nError: Workflow barrier failure\n    at workflow-script.js:2:242\n    at async MessagePort.<anonymous> ([worker eval]:885:15)\n\nChild outputs:\n- key=fail run=<workflow-launch:child:fail> status=failed\n  Saved output: unavailable\n  Preview: unavailable (no safe inline output)\n- key=question run=<workflow-launch:child:question> status=completed\n  Saved output: unavailable\n  Preview:\n    | PARITY_CHILD_COMPLETE\n- key=success run=<workflow-launch:child:success> status=completed\n  Saved output: unavailable\n  Preview:\n    | PARITY_CHILD_COMPLETE\n\nWorkflow run: <workflow-launch:run>\nChild runs: fail=<workflow-launch:child:fail> (failed), question=<workflow-launch:child:question> (completed), success=<workflow-launch:child:success> (completed)"
+              }
+            ],
+            "details": null
+          }
+        ]
+      },
+      "retained": [
+        {
+          "type": "widget",
+          "key": "subagent-async",
+          "source": "npm:pi-subagents@0.59.0",
+          "title": "Pi Subagents",
+          "kind": null,
+          "privateSubagent": true,
+          "nativeVisibility": "hidden",
+          "contents": null
+        }
+      ],
+      "surfaces": [],
+      "inputs": {
+        "pending": null,
+        "queued": [],
+        "displayedPending": null,
+        "displayedQueued": []
+      },
+      "deliveries": {
+        "subagent-notify": [
+          {
+            "display": false,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          },
+          {
+            "display": true,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ],
+        "need_decision": [
+          {
+            "display": true,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ],
+        "progress_update": [
+          {
+            "display": true,
+            "delivery": "triggeredTurn",
+            "source": "npm:pi-subagents@0.59.0",
+            "title": "Pi Subagents"
+          }
+        ]
+      }
+    }
+  },
+  "settings": {
+    "healthy": {
+      "skills": [
+        {
+          "name": "council-mode",
+          "description": "Run a bounded supervisor-mediated advisor council. Use when the user asks for council mode, asks to convene advisors, debate a decision, cross-examine recommendations, or run /council.",
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/skills/council-mode/SKILL.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external",
+          "disableModelInvocation": false
+        },
+        {
+          "name": "pi-subagents",
+          "description": "Delegate work to builtin or custom subagents with single-agent, parallel, scripted-chaining, async, forked-context, and coordinated workflows. Use for advisory review, implementation handoffs, and multi-step tasks where a single agent should stay in control while other agents contribute context, planning, or execution.",
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/skills/pi-subagents/SKILL.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external",
+          "disableModelInvocation": false
+        }
+      ],
+      "prompts": [
+        {
+          "name": "council",
+          "description": "Run a bounded supervisor-mediated council of advisors and write a decision memo",
+          "argumentHint": "<question> [--advisors name,name] [--max-passes 2|3] [--scope ...] [--non-goals ...]",
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/council.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "gather-context-and-clarify",
+          "description": "Use subagents to gather context, then ask clarifying questions",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/gather-context-and-clarify.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "parallel-cleanup",
+          "description": "Parallel cleanup review",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-cleanup.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "parallel-research",
+          "description": "Parallel subagents research",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-research.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "parallel-review",
+          "description": "Parallel subagents review",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-review.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "review-loop",
+          "description": "Review/fix loop until clean",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/review-loop.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        }
+      ],
+      "skillDiagnostics": [],
+      "promptDiagnostics": [],
+      "subagents": {
+        "claude-code-writer": {
+          "name": "claude-code-writer",
+          "description": "Explicit file-writing Claude Code CLI mode; requires local authentication and trusted user settings/hooks",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "claude-code": {
+          "name": "claude-code",
+          "description": "Read-only Claude Code CLI analysis; requires local authentication and trusted user settings/hooks",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "codex-exec-writer": {
+          "name": "codex-exec-writer",
+          "description": "Explicit workspace-writing one-shot execution through the installed Codex CLI",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "codex-exec": {
+          "name": "codex-exec",
+          "description": "Read-only one-shot analysis through the installed Codex CLI",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "cursor-agent-writer": {
+          "name": "cursor-agent-writer",
+          "description": "Explicit workspace-writing one-shot execution through the installed Cursor CLI",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "cursor-agent": {
+          "name": "cursor-agent",
+          "description": "Read-only one-shot analysis through the installed Cursor CLI",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "delegate": {
+          "name": "delegate",
+          "description": "Lightweight subagent that inherits the parent model with no default reads",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "oracle": {
+          "name": "oracle",
+          "description": "High-context decision-consistency oracle that protects inherited state and prevents drift",
+          "thinking": "high",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "researcher": {
+          "name": "researcher",
+          "description": "Autonomous web researcher — searches, evaluates, and synthesizes a focused research brief",
+          "thinking": "medium",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "reviewer": {
+          "name": "reviewer",
+          "description": "Versatile review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation",
+          "thinking": "high",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "scout": {
+          "name": "scout",
+          "description": "Fast codebase recon that returns compressed context for handoff",
+          "thinking": "low",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "worker": {
+          "name": "worker",
+          "description": "Implementation agent for normal tasks and approved oracle handoffs",
+          "thinking": "high",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "parity-worker": {
+          "name": "parity-worker",
+          "description": "Read-only parity child",
+          "model": "parity-child/child",
+          "source": "project",
+          "distribution": "local"
+        }
+      },
+      "subagentDiagnostics": null
+    },
+    "invalid": {
+      "skills": [
+        {
+          "name": "council-mode",
+          "description": "Run a bounded supervisor-mediated advisor council. Use when the user asks for council mode, asks to convene advisors, debate a decision, cross-examine recommendations, or run /council.",
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/skills/council-mode/SKILL.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external",
+          "disableModelInvocation": false
+        },
+        {
+          "name": "pi-subagents",
+          "description": "Delegate work to builtin or custom subagents with single-agent, parallel, scripted-chaining, async, forked-context, and coordinated workflows. Use for advisory review, implementation handoffs, and multi-step tasks where a single agent should stay in control while other agents contribute context, planning, or execution.",
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/skills/pi-subagents/SKILL.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external",
+          "disableModelInvocation": false
+        }
+      ],
+      "prompts": [
+        {
+          "name": "council",
+          "description": "Run a bounded supervisor-mediated council of advisors and write a decision memo",
+          "argumentHint": "<question> [--advisors name,name] [--max-passes 2|3] [--scope ...] [--non-goals ...]",
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/council.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "gather-context-and-clarify",
+          "description": "Use subagents to gather context, then ask clarifying questions",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/gather-context-and-clarify.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "parallel-cleanup",
+          "description": "Parallel cleanup review",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-cleanup.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "parallel-research",
+          "description": "Parallel subagents research",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-research.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "parallel-review",
+          "description": "Parallel subagents review",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-review.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "review-loop",
+          "description": "Review/fix loop until clean",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/review-loop.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        }
+      ],
+      "skillDiagnostics": [],
+      "promptDiagnostics": [],
+      "subagents": {
+        "claude-code-writer": {
+          "name": "claude-code-writer",
+          "description": "Explicit file-writing Claude Code CLI mode; requires local authentication and trusted user settings/hooks",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "claude-code": {
+          "name": "claude-code",
+          "description": "Read-only Claude Code CLI analysis; requires local authentication and trusted user settings/hooks",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "codex-exec-writer": {
+          "name": "codex-exec-writer",
+          "description": "Explicit workspace-writing one-shot execution through the installed Codex CLI",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "codex-exec": {
+          "name": "codex-exec",
+          "description": "Read-only one-shot analysis through the installed Codex CLI",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "cursor-agent-writer": {
+          "name": "cursor-agent-writer",
+          "description": "Explicit workspace-writing one-shot execution through the installed Cursor CLI",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "cursor-agent": {
+          "name": "cursor-agent",
+          "description": "Read-only one-shot analysis through the installed Cursor CLI",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "delegate": {
+          "name": "delegate",
+          "description": "Lightweight subagent that inherits the parent model with no default reads",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "oracle": {
+          "name": "oracle",
+          "description": "High-context decision-consistency oracle that protects inherited state and prevents drift",
+          "thinking": "high",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "researcher": {
+          "name": "researcher",
+          "description": "Autonomous web researcher — searches, evaluates, and synthesizes a focused research brief",
+          "thinking": "medium",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "reviewer": {
+          "name": "reviewer",
+          "description": "Versatile review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation",
+          "thinking": "high",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "scout": {
+          "name": "scout",
+          "description": "Fast codebase recon that returns compressed context for handoff",
+          "thinking": "low",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "worker": {
+          "name": "worker",
+          "description": "Implementation agent for normal tasks and approved oracle handoffs",
+          "thinking": "high",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "parity-invalid": {
+          "name": "parity-invalid",
+          "description": "Invalid parity definition",
+          "source": "project",
+          "distribution": "local"
+        },
+        "parity-worker": {
+          "name": "parity-worker",
+          "description": "Read-only parity child",
+          "model": "parity-child/child",
+          "source": "project",
+          "distribution": "local"
+        }
+      },
+      "subagentDiagnostics": null
+    },
+    "repaired": {
+      "skills": [
+        {
+          "name": "council-mode",
+          "description": "Run a bounded supervisor-mediated advisor council. Use when the user asks for council mode, asks to convene advisors, debate a decision, cross-examine recommendations, or run /council.",
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/skills/council-mode/SKILL.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external",
+          "disableModelInvocation": false
+        },
+        {
+          "name": "pi-subagents",
+          "description": "Delegate work to builtin or custom subagents with single-agent, parallel, scripted-chaining, async, forked-context, and coordinated workflows. Use for advisory review, implementation handoffs, and multi-step tasks where a single agent should stay in control while other agents contribute context, planning, or execution.",
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/skills/pi-subagents/SKILL.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external",
+          "disableModelInvocation": false
+        }
+      ],
+      "prompts": [
+        {
+          "name": "council",
+          "description": "Run a bounded supervisor-mediated council of advisors and write a decision memo",
+          "argumentHint": "<question> [--advisors name,name] [--max-passes 2|3] [--scope ...] [--non-goals ...]",
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/council.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "gather-context-and-clarify",
+          "description": "Use subagents to gather context, then ask clarifying questions",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/gather-context-and-clarify.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "parallel-cleanup",
+          "description": "Parallel cleanup review",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-cleanup.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "parallel-research",
+          "description": "Parallel subagents research",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-research.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "parallel-review",
+          "description": "Parallel subagents review",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/parallel-review.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        },
+        {
+          "name": "review-loop",
+          "description": "Review/fix loop until clean",
+          "argumentHint": null,
+          "path": "<fixture>/agent/npm/node_modules/pi-subagents/prompts/review-loop.md",
+          "scope": "user",
+          "source": "npm:pi-subagents@0.59.0",
+          "distribution": "external"
+        }
+      ],
+      "skillDiagnostics": [],
+      "promptDiagnostics": [],
+      "subagents": {
+        "claude-code-writer": {
+          "name": "claude-code-writer",
+          "description": "Explicit file-writing Claude Code CLI mode; requires local authentication and trusted user settings/hooks",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "claude-code": {
+          "name": "claude-code",
+          "description": "Read-only Claude Code CLI analysis; requires local authentication and trusted user settings/hooks",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "codex-exec-writer": {
+          "name": "codex-exec-writer",
+          "description": "Explicit workspace-writing one-shot execution through the installed Codex CLI",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "codex-exec": {
+          "name": "codex-exec",
+          "description": "Read-only one-shot analysis through the installed Codex CLI",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "cursor-agent-writer": {
+          "name": "cursor-agent-writer",
+          "description": "Explicit workspace-writing one-shot execution through the installed Cursor CLI",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "cursor-agent": {
+          "name": "cursor-agent",
+          "description": "Read-only one-shot analysis through the installed Cursor CLI",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "delegate": {
+          "name": "delegate",
+          "description": "Lightweight subagent that inherits the parent model with no default reads",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "oracle": {
+          "name": "oracle",
+          "description": "High-context decision-consistency oracle that protects inherited state and prevents drift",
+          "thinking": "high",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "researcher": {
+          "name": "researcher",
+          "description": "Autonomous web researcher — searches, evaluates, and synthesizes a focused research brief",
+          "thinking": "medium",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "reviewer": {
+          "name": "reviewer",
+          "description": "Versatile review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation",
+          "thinking": "high",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "scout": {
+          "name": "scout",
+          "description": "Fast codebase recon that returns compressed context for handoff",
+          "thinking": "low",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "worker": {
+          "name": "worker",
+          "description": "Implementation agent for normal tasks and approved oracle handoffs",
+          "thinking": "high",
+          "source": "builtin",
+          "distribution": "external"
+        },
+        "parity-worker": {
+          "name": "parity-worker",
+          "description": "Read-only parity child",
+          "model": "parity-child/child",
+          "source": "project",
+          "distribution": "local"
+        }
+      },
+      "subagentDiagnostics": null
+    }
+  },
+  "packages": [
+    {
+      "source": "npm:pi-subagents@0.59.0",
+      "skills": [
+        "council-mode",
+        "pi-subagents"
+      ],
+      "prompts": [
+        "council",
+        "gather-context-and-clarify",
+        "parallel-cleanup",
+        "parallel-research",
+        "parallel-review",
+        "review-loop"
+      ]
+    }
+  ],
+  "inputPresentation": {
+    "pending": null,
+    "queued": [
+      {
+        "id": "<input>",
+        "behavior": "steer",
+        "text": "Queued maintainer input",
+        "attachmentCount": 0
+      }
+    ]
+  }
+}

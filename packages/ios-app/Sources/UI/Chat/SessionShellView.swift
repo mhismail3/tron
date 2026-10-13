@@ -71,6 +71,7 @@ struct SessionShellProfileRouteOwner {
 struct SessionShellView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.tronPresentationActivityCoordinator) private var presentationActivityCoordinator
     @State private var dashboardMode: DashboardMode = .sessions
     @State private var dashboardHeader = DashboardHeaderState()
     @State private var showNewSession = false
@@ -78,6 +79,7 @@ struct SessionShellView: View {
     @State private var knowledgeDraftIdentity: KnowledgePresentationIdentity?
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
+    @State private var projectSettings: ProjectSettingsRoute?
     @State private var search = ""
     @State private var contentSearchSessionIDs: Set<String> = []
     @State private var searchResults: [SessionSearchResult] = []
@@ -109,6 +111,8 @@ struct SessionShellView: View {
     @State private var dashboardPresentation = DashboardPresentationSnapshot()
     @State private var dashboardPresentationIsActive = false
     @State private var dashboardReconcileTask: Task<Void, Never>?
+    @State private var homeStatusSurfaceToken: PresentationSurfaceToken?
+    @State private var mountedHomeChatRouteID: String?
 
     init() {
         let appSettings = AppLocalBehaviorSettings.shared
@@ -119,15 +123,43 @@ struct SessionShellView: View {
     }
 
     var body: some View {
-        TronPresentationSurface(id: "dashboard") {
+        TronPresentationSurface(
+            id: "dashboard",
+            onMount: { token in
+                homeStatusSurfaceToken = token
+                if let presentationActivityCoordinator {
+                    model.mountHomeStatus(surfaceToken: token, activityCoordinator: presentationActivityCoordinator)
+                }
+            },
+            onRetire: { token in
+                model.unmountHomeStatus(surfaceToken: token)
+                if homeStatusSurfaceToken == token { homeStatusSurfaceToken = nil }
+            }
+        ) {
             TronPresentationActivityReader { activity in
                 dashboardSurface(activity: activity)
+                    .onChange(of: activity.allowsPresentationPublication) { _, _ in
+                        if let homeStatusSurfaceToken {
+                            model.homeStatus.presentationActivityChanged(for: homeStatusSurfaceToken)
+                        }
+                    }
             }
         }
     }
 
+    /// A Home conversation follows the chapter Home now names. Replacing the
+    /// route remounts the chat on that session, under the same logical route.
+    private func followHomeRoute() {
+        guard let route = presentedSession, route.isHome,
+              let profileID = model.profiles.selected?.id,
+              let status = model.homeStatus.status,
+              let next = try? model.followedHomeRoute(from: route, profileID: profileID, status: status) else { return }
+        present(next)
+    }
+
     private func dashboardSurface(activity: PresentationSurfaceActivity) -> some View {
         dashboardNavigation
+            .onChange(of: model.homeStatus.status) { _, _ in followHomeRoute() }
             .tronManagedSheet(
                 isPresented: $showNewSession,
                 identity: "dashboard.new-session"
@@ -150,6 +182,9 @@ struct SessionShellView: View {
                     present(route)
                 })
                 .presentationDragIndicator(.hidden)
+            }
+            .tronManagedSheet(item: $projectSettings, identity: { "dashboard.project-settings.\($0.id)" }) { route in
+                ProjectSettingsSheet(route: route)
             }
             .tronManagedSheet(
                 isPresented: $showingSearchOptions,
@@ -247,6 +282,12 @@ struct SessionShellView: View {
                 dashboardReconcileTask = nil
                 rankingPolicyTask?.cancel()
                 rankingPolicyTask = nil
+            }
+            // Settings opens with this Mac's sections already read: warm the shared
+            // snapshot once a Gateway is connected (and again when it goes stale).
+            .task(id: model.connectionState == .connected ? model.settingsFreshness : nil) {
+                guard model.connectionState == .connected else { return }
+                try? await model.refreshSettingsSnapshot(for: SettingsTarget.global.gatewayTarget)
             }
             .task(id: model.actionablePushNavigationRequest?.id) {
                 guard let request = model.actionablePushNavigationRequest else { return }
@@ -409,15 +450,23 @@ struct SessionShellView: View {
         .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
         .navigationDestination(item: $presentedSession) { route in
-            ChatView(
-                sessionID: route.sessionID,
-                initialEditorText: route.editorText,
-                initialModel: route.initialModel,
-                initialHistoryEntryID: route.initialHistoryEntryID,
-                initialSearchResult: route.initialSearchResult,
-                onForkCreated: present,
-                performanceSignposts: model.performanceSignposts
-            )
+            TronPresentationActivityReader { activity in
+                ChatView(
+                    sessionID: route.sessionID,
+                    initialEditorText: route.editorText,
+                    initialModel: route.initialModel,
+                    initialHistoryEntryID: route.initialHistoryEntryID,
+                    initialSearchResult: route.initialSearchResult,
+                    isHomeRoute: route.isHome,
+                    onForkCreated: present,
+                    performanceSignposts: model.performanceSignposts
+                )
+                .onChange(of: activity.allowsPresentationPublication) { _, _ in
+                    guard mountedHomeChatRouteID == route.id,
+                          let token = mountedSessionRouteToken else { return }
+                    model.homeStatus.presentationActivityChanged(for: token)
+                }
+            }
             .toolbar(.visible, for: .navigationBar)
             .id(route.id)
             .tronPresentationSurface(
@@ -425,9 +474,28 @@ struct SessionShellView: View {
                 onMount: { token in
                     guard presentedSession?.id == route.id else { return }
                     mountedSessionRouteToken = token
+                    guard let profileID = model.profiles.selected?.id,
+                          route.isHome || route.id == "\(profileID):\(route.sessionID)",
+                          let presentationActivityCoordinator,
+                          model.mountHomeStatusForChat(
+                              surfaceToken: token,
+                              activityCoordinator: presentationActivityCoordinator,
+                              route: HomeChatRouteKey.forChat(sessionID: route.sessionID, isHome: route.isHome)
+                          ) else { return }
+                    mountedHomeChatRouteID = route.id
                 },
                 onRetire: { token in
                     if mountedSessionRouteToken == token { mountedSessionRouteToken = nil }
+                    if mountedHomeChatRouteID == route.id {
+                        mountedHomeChatRouteID = nil
+                        model.unmountHomeStatus(surfaceToken: token)
+                        if let homeStatusSurfaceToken, let presentationActivityCoordinator {
+                            model.mountHomeStatus(
+                                surfaceToken: homeStatusSurfaceToken,
+                                activityCoordinator: presentationActivityCoordinator
+                            )
+                        }
+                    }
                     completeRouteReplacement(afterRetiring: route.id, token: token)
                 }
             )
@@ -571,6 +639,7 @@ struct SessionShellView: View {
         routeReplacementOwner.invalidate()
         showNewSession = false
         showSettings = false
+        projectSettings = nil
         showingServerFilter = false
         if showingSearch { dismissDashboardSearch() }
 
@@ -621,6 +690,8 @@ struct SessionShellView: View {
                 requestID: request.id,
                 pendingRequestID: model.pushNavigationRequest?.id
             ) else { return }
+            // A failed navigation never reaches the chat, so its staged action must not outlive it.
+            if let staged = model.stagedSettingsDecision { model.consumeStagedSettingsDecision(staged.id) }
             model.consumePushNavigation(request.id)
             model.presentError(error)
         }
@@ -867,6 +938,11 @@ struct SessionShellView: View {
         // reads that scroll owner's geometry.
         return ScrollViewReader { proxy in
             List {
+                if model.homeStatus.capabilityEnabled {
+                    Section {
+                        homePinnedButton
+                    }
+                }
                 sessionSections(
                     filtered,
                     onRevealArchivedRows: { proxy.revealArchivedSection(reduceMotion: reduceMotion) }
@@ -1016,6 +1092,79 @@ struct SessionShellView: View {
             .listRowInsets(SessionDashboardLayout.headerInsets)
     }
 
+    private var homePinnedButton: some View {
+        Button {
+            guard openingSessionID == nil,
+                  let profileID = model.profiles.selected?.id else { return }
+            openingSessionID = "home:\(profileID)"
+            let navigationIntent = navigationOwner.begin()
+            let presentationToken = homeStatusSurfaceToken
+            guard let authority = try? model.homeMutations.authority(profileID: profileID) else {
+                openingSessionID = nil
+                return
+            }
+            let ownsUnresolvedCommand = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
+            let action = HomePinnedRowPolicy.action(
+                for: model.homeStatus.status,
+                hasUnresolvedCommand: ownsUnresolvedCommand
+            )
+            Task {
+                defer { openingSessionID = nil }
+                do {
+                    let status: HomeStatusDTO
+                    switch action {
+                    case .open:
+                        guard let currentStatus = model.homeStatus.status else { return }
+                        status = currentStatus
+                    case .checkReceipt:
+                        try await model.checkHomeControlCompletion(authority: authority)
+                        return
+                    case .designate:
+                        status = try await model.designateHomeAndRefreshStatus(authority: authority)
+                    case .unavailable:
+                        return
+                    }
+                    let route = try model.navigationRouteForHome(profileID: profileID, status: status)
+                    guard navigationOwner.admit(navigationIntent),
+                          model.profiles.selected?.id == profileID,
+                          model.ownsNavigationRoute(route) else { return }
+                    present(route)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard navigationOwner.admit(navigationIntent),
+                          model.profiles.selected?.id == profileID,
+                          presentationToken != nil,
+                          homeStatusSurfaceToken == presentationToken else { return }
+                    model.presentError(error)
+                }
+            }
+        } label: {
+            HomePinnedRow(
+                status: model.homeStatus.status,
+                isChanging: model.homeMutations.isRunning(profileID: model.profiles.selected?.id ?? ""),
+                hasUnresolvedCommand: model.homeMutations.ownsUnresolvedCommand(
+                    profileID: model.profiles.selected?.id ?? ""
+                ),
+                isStatusUnavailable: model.homeStatus.isStatusUnavailable
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(
+            HomePinnedRowPolicy.action(
+                for: model.homeStatus.status,
+                hasUnresolvedCommand: model.profiles.selected.map {
+                    model.homeMutations.ownsUnresolvedCommand(profileID: $0.id)
+                } ?? false
+            ) == .unavailable || model.homeMutations.isRunning(profileID: model.profiles.selected?.id ?? "")
+        )
+        .accessibilityIdentifier("home-pinned-row")
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(SessionDashboardLayout.rowInsets)
+        .transition(.opacity)
+    }
+
     private func sessionButton(_ session: SessionSummary, showsContext: Bool = false) -> some View {
         return Button {
             guard openingSessionID == nil else { return }
@@ -1109,6 +1258,13 @@ struct SessionShellView: View {
         .buttonStyle(.plain)
         .textCase(nil)
         .listRowInsets(SessionDashboardLayout.headerInsets)
+        .contextMenu {
+            if !group.path.isEmpty, let profileID = group.profileID ?? model.selectedGatewayProfileID() {
+                Button("Project Settings", systemImage: "folder.badge.gearshape") {
+                    projectSettings = ProjectSettingsRoute(cwd: group.path, profileID: profileID)
+                }
+            }
+        }
         .accessibilityLabel(group.name)
         .accessibilityValue(isExpanded ? "expanded" : "collapsed")
         .accessibilityHint(isExpanded ? "Double tap to hide sessions" : "Double tap to show sessions")

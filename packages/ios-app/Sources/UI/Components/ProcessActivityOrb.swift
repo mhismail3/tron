@@ -338,8 +338,6 @@ struct ProcessActivityOrbModeWeights: Equatable, Sendable {
 }
 
 enum ProcessActivityOrbModeTransitionPolicy {
-    static let duration: TimeInterval = 0.34
-
     static func weights(thinkingBlend: Double) -> ProcessActivityOrbModeWeights {
         let thinking = min(1, max(0, thinkingBlend))
         return ProcessActivityOrbModeWeights(solving: 1 - thinking, thinking: thinking)
@@ -377,12 +375,7 @@ struct ProcessActivityOrb: View {
                 accent: accent
             )
         }
-        .animation(
-            reduceMotion
-                ? .easeOut(duration: 0.12)
-                : .smooth(duration: ProcessActivityOrbModeTransitionPolicy.duration),
-            value: mode
-        )
+        .animation(ChatMotion.processOrbMode(reduceMotion: reduceMotion), value: mode)
         .frame(width: size, height: size)
         .accessibilityHidden(true)
     }

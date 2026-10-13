@@ -56,6 +56,7 @@ final class ConfirmedMutationExecutor {
         method: String,
         commandID: String,
         replayAdmission: @escaping @MainActor () -> Bool = { true },
+        replayMissingReceipt: Bool = true,
         send: () async throws -> JSONValue
     ) async throws -> JSONValue {
         guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
@@ -65,12 +66,12 @@ final class ConfirmedMutationExecutor {
             until: clock.now() + ConfirmedMutationConnectionPolicy.initialConnectionDeadline,
             admission: admission
         ) else {
-            throw GatewayFailure(
+            throw GatewayDefinitelyNotSentError(failure: GatewayFailure(
                 code: "disconnected",
                 message: "The Mac gateway is still reconnecting. Your change was not sent.",
                 retryable: true,
                 details: nil
-            )
+            ))
         }
 
         var retriedBeforeTransmission = false
@@ -172,6 +173,13 @@ final class ConfirmedMutationExecutor {
                                     lastFailure: lastFailure
                                 )
                             }
+                            guard replayMissingReceipt else {
+                                throw Self.uncertainMutationOutcome(
+                                    method: method,
+                                    commandID: commandID,
+                                    lastFailure: GatewayFailure(code: "receipt_missing", message: "The original command has no receipt. Do not submit a replacement.", retryable: false, details: nil)
+                                )
+                            }
                             guard replayAdmission() else {
                                 result = .cancelled
                                 throw CancellationError()
@@ -221,9 +229,17 @@ final class ConfirmedMutationExecutor {
         }
     }
 
+    /// The admitted Gateway's answer about a dispatched command's receipt.
+    enum ReceiptResolution: Equatable {
+        case completed(JSONValue)
+        /// Definitive only for the admitted Gateway: the command has no receipt there.
+        case missing
+    }
+
     /// Explicit reconciliation of an already dispatched command. This path
     /// only queries its receipt; missing/pending never authorizes a new send.
-    func resolveValue(method: String, commandID: String) async throws -> JSONValue {
+    /// Pending and transport failures stay uncertain (`outcome_unknown`).
+    func resolveReceipt(method: String, commandID: String) async throws -> ReceiptResolution {
         let unavailable = GatewayFailure(code: "disconnected", message: "Reconnect to the original Mac to check this command.", retryable: true, details: nil)
         guard let admission = lifecycle.generationAdmission,
               await lifecycle.waitForConnected(until: clock.now() + ConfirmedMutationConnectionPolicy.initialConnectionDeadline, admission: admission),
@@ -233,17 +249,43 @@ final class ConfirmedMutationExecutor {
         do {
             let status: CommandStatusResponse = try await client.request("command.status", CommandStatusParams(method: method, commandId: commandID))
             try lifecycle.require(statusAdmission)
-            guard status.status == "completed", let result = status.result else {
+            switch status.status {
+            case "completed":
+                guard let result = status.result else {
+                    throw Self.uncertainMutationOutcome(method: method, commandID: commandID,
+                        lastFailure: Self.noCompletedReceipt)
+                }
+                return .completed(result)
+            case "missing":
+                return .missing
+            default:
                 throw Self.uncertainMutationOutcome(method: method, commandID: commandID,
-                    lastFailure: GatewayFailure(code: "receipt_unavailable", message: "The original command has no completed receipt. Do not submit a replacement.", retryable: false, details: nil))
+                    lastFailure: Self.noCompletedReceipt)
             }
-            return result
         } catch let failure as GatewayPossiblySentError {
             throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: failure.failure)
         } catch is CancellationError {
             throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: unavailable)
         }
     }
+
+    /// Callers whose contract is "completed value or uncertain outcome" keep the
+    /// missing receipt uncertain; only a Home change may treat `.missing` as final.
+    func resolveValue(method: String, commandID: String) async throws -> JSONValue {
+        switch try await resolveReceipt(method: method, commandID: commandID) {
+        case .completed(let value): return value
+        case .missing:
+            throw Self.uncertainMutationOutcome(method: method, commandID: commandID,
+                lastFailure: Self.noCompletedReceipt)
+        }
+    }
+
+    private static let noCompletedReceipt = GatewayFailure(
+        code: "receipt_unavailable",
+        message: "The original command has no completed receipt. Do not submit a replacement.",
+        retryable: false,
+        details: nil
+    )
 
     static func admitsReplay(taskIsCancelled: Bool) -> Bool {
         !taskIsCancelled

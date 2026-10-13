@@ -13,4 +13,12 @@ enum ApplicationTermination {
             }
         }
     }
+
+    static func replyToPendingTermination(shouldTerminate: Bool) {
+        RunLoop.main.perform(inModes: [.common]) {
+            MainActor.assumeIsolated {
+                NSApp.reply(toApplicationShouldTerminate: shouldTerminate)
+            }
+        }
+    }
 }

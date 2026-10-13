@@ -4,7 +4,8 @@ import type { ResourceInvocation } from "../protocol/types.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { canonicalResourceName } from "../sessions/resource-invocation.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
-import type { AutomationOperationTerminal } from "../sessions/runtime-slot.js";
+import { OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
+import type { OwnedOperationTerminal } from "../sessions/runtime-slot.js";
 import {
   AutomationAdmissionError,
   type AutomationExecutionHandle,
@@ -14,7 +15,7 @@ import {
 } from "./automation-scheduler.js";
 import type { AutomationRecord, AutomationRun } from "./types.js";
 
-function terminalResult(terminal: AutomationOperationTerminal): AutomationExecutionResult {
+function terminalResult(terminal: OwnedOperationTerminal): AutomationExecutionResult {
   if (terminal.lifecycle === "completed") {
     return {
       state: "succeeded",
@@ -42,12 +43,16 @@ function promptText(text: string, resource: ResourceInvocation | undefined): str
 }
 
 export class GatewayAutomationExecutor implements AutomationExecutor {
+  private readonly dispatch: OwnedSessionDispatch;
+
   constructor(
     private readonly sessions: RuntimeRegistry,
     private readonly workRegistry: GatewayWorkRegistry,
     private readonly notifications: NotificationService | undefined,
     private readonly machineId: string | undefined,
-  ) {}
+  ) {
+    this.dispatch = new OwnedSessionDispatch(sessions);
+  }
 
   async start(record: AutomationRecord, run: AutomationRun, signal?: AbortSignal): Promise<AutomationExecutionHandle> {
     signal?.throwIfAborted();
@@ -79,7 +84,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
         slot = leased.slot;
         releaseLease = leased.release;
       } else {
-        const leased = await this.sessions.acquireAutomationLease(sessionId);
+        const leased = await this.dispatch.lease(sessionId);
         slot = leased.slot;
         releaseLease = leased.release;
       }
@@ -133,7 +138,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
       });
       let terminalObserved = false;
       let observedResult: AutomationExecutionResult | undefined;
-      const onTerminal = async (terminal: AutomationOperationTerminal): Promise<void> => {
+      const onTerminal = async (terminal: OwnedOperationTerminal): Promise<void> => {
         if (terminalObserved) return;
         terminalObserved = true;
         work.transition("automation-terminal-persistence");
@@ -145,7 +150,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
       const cancelAdmission = () => { void slot.abort("agent", operationId).catch(() => {}); };
       signal?.addEventListener("abort", cancelAdmission, { once: true });
       try {
-        admission = await slot.prompt(
+        admission = await this.dispatch.admit(slot,
           promptText(run.actionSnapshot.text, resource),
           [],
           undefined,
@@ -171,8 +176,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
             completion: Promise.resolve(observedResult),
             cancel: async () => {},
             acknowledgeTerminal: async () => {
-              await this.sessions.clearAutomationMarker(sessionId, operationId);
-              releaseLease?.();
+              await this.dispatch.acknowledge(sessionId, operationId, { slot, release: releaseLease! });
               work.settle();
             },
           };
@@ -199,8 +203,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
           }
         },
         acknowledgeTerminal: async () => {
-          await this.sessions.clearAutomationMarker(sessionId, operationId);
-          releaseLease?.();
+          await this.dispatch.acknowledge(sessionId, operationId, { slot, release: releaseLease! });
           work.settle();
         },
       };
@@ -233,7 +236,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
 
   async recover(record: AutomationRecord, run: AutomationRun): Promise<AutomationRecoveryResult> {
     if (!run.operationId) return { state: "outcomeUnknown", reason: "operation-identity-missing" };
-    const evidence = await this.sessions.automationRecoveryEvidence(run.executionSessionId, run.operationId);
+    const evidence = await this.dispatch.recoveryEvidence(run.executionSessionId, run.operationId);
     const invocation = evidence.invocation;
     const marker = evidence.marker;
     if (marker?.assistantCompletionId) {
@@ -282,6 +285,6 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
   }
 
   async acknowledgeRecovery(record: AutomationRecord, run: AutomationRun): Promise<void> {
-    if (run.operationId) await this.sessions.clearAutomationMarker(run.executionSessionId, run.operationId);
+    if (run.operationId) await this.dispatch.clearRecoveryMarker(run.executionSessionId, run.operationId);
   }
 }

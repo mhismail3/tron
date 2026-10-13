@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "corpus-mcp": {
+      "command": "«corpus-node»",
+      "args": [
+        "«corpus-fixture»",
+        "stdio",
+        "«corpus-root»/mcp-state.json"
+      ],
+      "exposure": "direct"
+    },
+    "corpus-oauth": {
+      "url": "«corpus-mcp-url»",
+      "exposure": "deferred"
+    }
+  }
+}

@@ -109,6 +109,9 @@ struct PackageDetailSheet: View {
                     header
                     // The diagnostic explains missing kinds before the reader
                     // infers that the package contributes none of them.
+                    if let conflict = package.conflict {
+                        TronSettingsNotice(message: conflict.message)
+                    }
                     if let providesDiagnostic {
                         TronSettingsNotice(message: providesDiagnostic)
                     }

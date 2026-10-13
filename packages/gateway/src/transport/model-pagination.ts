@@ -6,8 +6,8 @@ export interface CatalogPage<T> {
   nextCursor?: string;
 }
 
-export const MODEL_CATALOG_MAX_ITEMS = 25_000;
-export const MODEL_CATALOG_MAX_ENCODED_BYTES = 16 * 1_048_576;
+const MODEL_CATALOG_MAX_ITEMS = 25_000;
+const MODEL_CATALOG_MAX_ENCODED_BYTES = 16 * 1_048_576;
 export const MODEL_CATALOG_PAGE_ENCODED_BYTES = 800_000;
 const MODEL_CATALOG_LEASE_TTL_MS = 30_000;
 const MODEL_CATALOG_LEASES_PER_OWNER = 4;
@@ -112,11 +112,6 @@ export class ModelCatalogPager {
   }
 }
 
-/** Stateless helper retained for focused policy tests and non-runtime callers. */
-export function pageCatalog<T>(items: readonly T[], rawCursor: unknown, rawLimit: unknown): CatalogPage<T> {
-  const limit = catalogPageLimit(rawLimit);
-  return pagePreparedCatalog(prepareCatalog(items), rawCursor, limit);
-}
 
 function prepareCatalog<T>(items: readonly T[]): PreparedCatalog<T> {
   if (items.length > MODEL_CATALOG_MAX_ITEMS) {

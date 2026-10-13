@@ -58,7 +58,7 @@ export const CATALOG_PERSIST_MAX_WAIT_MS = 60_000;
  * writer whose bursts each outlast the quiet spell costs one read per burst, so
  * about four a second per path. */
 export const CATALOG_EVENT_DEBOUNCE_MS = 250;
-export const CATALOG_EVENT_MAX_WAIT_MS = 1_000;
+const CATALOG_EVENT_MAX_WAIT_MS = 1_000;
 
 /** A directory event names the folder, not the transcripts inside it, so the
  * folder's own `.jsonl` files are re-read. A folder holding more transcripts
@@ -68,7 +68,7 @@ export const CATALOG_EVENT_DIRECTORY_LIMIT = 64;
 
 /** Keep arbitrary watcher paths bounded; beyond this, a whole-catalog cut is
  * cheaper and safer than retaining another timer per transient filename. */
-export const CATALOG_EVENT_PENDING_PATH_LIMIT = 256;
+const CATALOG_EVENT_PENDING_PATH_LIMIT = 256;
 
 /** The backstop for every change the watcher cannot see: an event the platform
  * coalesced, dropped or reported while the watcher was restarting is repaired
@@ -162,7 +162,7 @@ export interface SessionCatalogScan {
  * unreadable root). A platform overflow is not reported
  * separately — `fs.watch` does not surface it — so dropped events are the
  * periodic reconciliation's job rather than this path's. */
-export type SessionCatalogWatcherResetReason = "error" | "unavailable";
+type SessionCatalogWatcherResetReason = "error" | "unavailable";
 
 /** One row the watcher changed for a single file, for `catalog.changed`. A
  * Gateway-owned change is not reported: it is attributable to the commit that
@@ -193,7 +193,7 @@ export interface SessionCatalogWatchRequest {
   onReset(reason: SessionCatalogWatcherResetReason): void;
 }
 
-export interface SessionCatalogWatchHandle {
+interface SessionCatalogWatchHandle {
   close(): void;
 }
 
@@ -650,8 +650,21 @@ export class SessionCatalog {
     while (frontier.length > 0) {
       const nextFrontier: string[] = [];
       for (const candidate of frontier) {
-        const entries = await readdir(candidate, { withFileTypes: true }).catch(() => undefined);
-        if (entries === undefined) return undefined;
+        let entries;
+        try {
+          entries = await readdir(candidate, { withFileTypes: true });
+        } catch (error) {
+          // A folder removed after it was listed (an `rm -rf` still in progress
+          // under a folder the platform named) is absence, not an unreadable
+          // folder: only the rows published at or under it can be affected, so
+          // they are re-read and dropped like any other absent path (#406).
+          const code = (error as NodeJS.ErrnoException).code;
+          // A folder replaced by a file (ENOTDIR) keeps the whole-folder pass, which
+          // drops its rows; refreshPath treats only ENOENT as missing.
+          if (code !== "ENOENT") return undefined;
+          transcripts.push(...this.indexedBeneath(candidate));
+          continue;
+        }
         for (const entry of entries) {
           const path = join(candidate, entry.name);
           if (entry.isDirectory()) {

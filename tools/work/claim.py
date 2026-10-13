@@ -10,6 +10,7 @@ from typing import List, Optional
 
 ISSUE_TRAILER = "Work-Claim-Issue"
 SESSION_TRAILER = "Work-Claim-Session"
+BASE_TRAILER = "Work-Claim-Base"
 _MAX_SLUG_WORDS = 5
 # `<type>/<issue>-<slug>`; group 1 is the issue number.
 _CLAIM_BRANCH = re.compile(r"^[a-z0-9._-]+/([0-9]+)-")
@@ -51,17 +52,13 @@ def branch_type(labels: List[str], rules: dict) -> str:
 
 
 def ineligibility(issue: dict, rules: dict) -> List[str]:
-    """Reasons the issue cannot be claimed; empty when it can."""
+    """Reasons the issue cannot be claimed; empty when it can. Any open, unclaimed, non-epic issue may be claimed."""
     reasons: List[str] = []
     if issue["state"] != "OPEN":
         reasons.append("issue is closed")
     excluded = sorted(set(issue["labels"]) & set(rules["excludeLabels"]))
     if excluded:
         reasons.append("issue is labeled " + ", ".join(excluded) + "; claim one of its tasks instead")
-    if issue["status"] is None:
-        reasons.append("issue is not in the tracking Project")
-    elif issue["status"] != rules["readyStatus"]:
-        reasons.append(f"Project status is {issue['status']!r}, not {rules['readyStatus']!r}")
     if issue["open_blockers"]:
         reasons.append("blocked by open issue(s): " + ", ".join(f"#{n}" for n in issue["open_blockers"]))
     return reasons
@@ -73,7 +70,7 @@ def is_active(state: str, labels: List[str], status: Optional[str], rules: dict)
             and not set(labels) & set(rules["excludeLabels"]))
 
 
-def claim_comment(session: str, branch: str, worktree: str, base: str) -> str:
+def claim_comment(session: str, branch: str, worktree: str, base: str, base_sha: str) -> str:
     # The repository may be public: only paths relative to the checkout's
     # parent directory are published.
     if worktree.startswith(("/", "~")) or re.match(r"^[A-Za-z]:", worktree):
@@ -83,7 +80,7 @@ def claim_comment(session: str, branch: str, worktree: str, base: str) -> str:
         f"Claimed by session `{session}`.\n\n"
         f"- Branch: `{branch}`\n"
         f"- Worktree: `{worktree}`\n"
-        f"- Base: `{base[:12]}`\n"
+        f"- Base: `{base}` at `{base_sha}`\n"
     )
 
 
@@ -102,6 +99,15 @@ class Claim:
     branch: str
     sha: str
     session: Optional[str]  # None when the branch has no claim commit
+    base: Optional[str] = None
+    base_sha: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ClaimCommit:
+    session: str
+    base: Optional[str] = None
+    base_sha: Optional[str] = None
 
 
 @dataclass
@@ -120,46 +126,64 @@ def _remote_heads(repo: Path, remote: str) -> dict:
     return heads
 
 
-def claim_session(repo: Path, base_ref: str, head: str, number: int) -> Optional[str]:
-    """The session named by the claim commit of `number` in `base_ref..head`, if any."""
-    # Branch-only commits, oldest first; the first carrying this issue's
-    # trailer is the claim. Merges from the base branch add only base commits.
-    trailers = f"%(trailers:key={ISSUE_TRAILER},key={SESSION_TRAILER},valueonly,separator=%x00)"
-    log = _git(repo, "log", "--reverse", f"--format={trailers}%x1e", f"{base_ref}..{head}").stdout
+def claim_commit(repo: Path, range_base: str, head: str, number: int) -> Optional[ClaimCommit]:
+    """Newest owner plus the immutable creation base on the first-parent path."""
+    keys = ",".join(f"key={key}" for key in (ISSUE_TRAILER, SESSION_TRAILER, BASE_TRAILER))
+    log = _git(repo, "log", "--first-parent", f"--format=%P%x1f%(trailers:{keys},separator=%x00)%x1e",
+               f"{range_base}..{head}").stdout
+    session = None
     for record in log.split("\x1e"):
-        values = [v.strip() for v in record.strip().split("\x00") if v.strip()]
-        if len(values) == 2 and values[0] == str(number):
-            return values[1]
-    return None
+        parents, separator, trailers = record.strip().partition("\x1f")
+        if not separator:
+            continue
+        fields = {}
+        for trailer in trailers.split("\x00"):
+            key, _, value = trailer.partition(":")
+            if value.strip():
+                fields.setdefault(key.strip(), value.strip())
+        if fields.get(ISSUE_TRAILER) != str(number) or not fields.get(SESSION_TRAILER):
+            continue
+        session = session or fields[SESSION_TRAILER]
+        # Handoff changes the owner, not the creation base. Its receipt remains
+        # on the same first-parent chain; no second mutable copy is needed.
+        if fields.get(BASE_TRAILER) and len(parents.split()) == 1:
+            return ClaimCommit(session, fields[BASE_TRAILER], parents.strip())
+    return ClaimCommit(session) if session else None
 
 
-def _read_claims(repo: Path, remote: str, base: str, heads: dict) -> List[Claim]:
+def _read_claims(repo: Path, remote: str, default_base: str, heads: dict) -> List[Claim]:
     if not heads:
         return []
     refspecs = [f"+refs/heads/{b}:refs/remotes/{remote}/{b}" for b in heads]
-    _git(repo, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}", *refspecs)
-    return [Claim(b, heads[b], claim_session(repo, f"{remote}/{base}", f"{remote}/{b}", claimed_issue(b)))
-            for b in sorted(heads)]
+    _git(repo, "fetch", "-q", "--no-tags", remote,
+         f"+refs/heads/{default_base}:refs/remotes/{remote}/{default_base}", *refspecs)
+    claims = []
+    for b in sorted(heads):
+        found = claim_commit(repo, f"{remote}/{default_base}", f"{remote}/{b}", claimed_issue(b))
+        claims.append(Claim(b, heads[b], found.session if found else None,
+                            found.base if found else None, found.base_sha if found else None))
+    return claims
 
 
-def existing_claims(repo: Path, remote: str, base: str, number: int) -> List[Claim]:
+def existing_claims(repo: Path, remote: str, default_base: str, number: int) -> List[Claim]:
     """Every remote branch for the issue, with its owner, sorted by name."""
     heads = {b: s for b, s in _remote_heads(repo, remote).items() if claimed_issue(b) == number}
-    return _read_claims(repo, remote, base, heads)
+    return _read_claims(repo, remote, default_base, heads)
 
 
-def all_claims(repo: Path, remote: str, base: str) -> List[Claim]:
+def all_claims(repo: Path, remote: str, default_base: str) -> List[Claim]:
     """Every claim-style remote branch of every issue, with its owner, sorted by name."""
     heads = {b: s for b, s in _remote_heads(repo, remote).items() if claimed_issue(b) is not None}
-    return _read_claims(repo, remote, base, heads)
+    return _read_claims(repo, remote, default_base, heads)
 
 
 def create_claim(repo: Path, remote: str, base: str, branch: str, number: int, session: str) -> ClaimResult:
+    """Claim `number` as `branch`, starting from the fetched tip of `base` and recording it."""
     _git(repo, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}")
     base_sha = _git(repo, "rev-parse", f"{remote}/{base}").stdout.strip()
     message = (
         f"chore: claim #{number}\n\n"
-        f"{ISSUE_TRAILER}: {number}\n{SESSION_TRAILER}: {session}\n"
+        f"{ISSUE_TRAILER}: {number}\n{SESSION_TRAILER}: {session}\n{BASE_TRAILER}: {base}\n"
     )
     tree = _git(repo, "rev-parse", f"{base_sha}^{{tree}}").stdout.strip()
     sha = _git(repo, "commit-tree", tree, "-p", base_sha, "-m", message).stdout.strip()
@@ -172,13 +196,13 @@ def create_claim(repo: Path, remote: str, base: str, branch: str, number: int, s
     return ClaimResult(won=pushed.returncode == 0, sha=sha, base=base_sha)
 
 
-def resolve_race(repo: Path, remote: str, base: str, number: int, session: str) -> bool:
+def resolve_race(repo: Path, remote: str, default_base: str, number: int, session: str) -> bool:
     """After claiming, keep the claim only if it is the issue's smallest branch name.
 
     Every claimant applies the same rule, so exactly one survives; a loser
     deletes only its own ref, and only at the commit it pushed.
     """
-    claims = existing_claims(repo, remote, base, number)
+    claims = existing_claims(repo, remote, default_base, number)
     if not claims:
         raise ClaimError(f"no branch exists for #{number} after claiming")
     if claims[0].session == session:

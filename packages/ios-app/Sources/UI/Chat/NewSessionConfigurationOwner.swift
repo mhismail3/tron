@@ -24,6 +24,14 @@ struct NewSessionConfigurationReadID: Hashable {
 }
 
 enum NewSessionTrustPolicy {
+    /// The Project root a trust decision is recorded for, when it is not the
+    /// workspace itself (a chat in a subdirectory of a Git worktree).
+    static func sharedProjectRoot(_ inspection: JSONValue?) -> String? {
+        guard let value = inspection?.objectValue, let root = value["projectDir"]?.stringValue,
+              root != value["cwd"]?.stringValue else { return nil }
+        return root
+    }
+
     static func requiresDecision(_ inspection: JSONValue?) -> Bool {
         guard let value = inspection?.objectValue else { return false }
         return value["requiresDecision"]?.boolValue == true

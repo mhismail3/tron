@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UploadStore } from "../machine/upload-store.js";
 import { GatewayServer } from "./server.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
 const servers: GatewayServer[] = [];
@@ -18,8 +19,6 @@ afterEach(async () => {
 });
 
 class ObservableUploadStore extends UploadStore {
-  private completion: (() => void) | undefined;
-  private completed = new Promise<void>((resolve) => { this.completion = resolve; });
   private firstChunk: (() => void) | undefined;
   private firstChunkObserved = new Promise<void>((resolve) => { this.firstChunk = resolve; });
 
@@ -36,20 +35,11 @@ class ObservableUploadStore extends UploadStore {
         yield chunk;
       }
     };
-    try {
-      return await super.saveStream(name, mimeType, observe(this), declaredBytes);
-    } finally {
-      this.completion?.();
-      this.completion = undefined;
-    }
+    return super.saveStream(name, mimeType, observe(this), declaredBytes);
   }
 
   waitForFirstChunk(): Promise<void> {
     return this.firstChunkObserved;
-  }
-
-  waitForCompletion(): Promise<void> {
-    return this.completed;
   }
 }
 
@@ -287,8 +277,13 @@ describe("Gateway upload HTTP streaming", () => {
       outgoing.write("1234", () => outgoing.destroy());
     }, failedID);
     await expect(interrupted).rejects.toBeDefined();
-    await uploads.waitForCompletion();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The failed-upload record is written once the body stream's own staging
+    // cleanup has finished, so waiting for the record also proves the partial
+    // file is gone; no fixed pause can prove either on a busy host.
+    await waitFor(
+      () => loggerRecords.some(({ metadata }) => metadata.event === "http.upload" && metadata.requestID === failedID),
+      "the failed upload record",
+    );
     expect(await readdir(join(home, "gateway", "upload-bodies"))).toEqual([]);
     const failedRecords = loggerRecords.filter(({ metadata }) => metadata.event === "http.upload");
     expect(failedRecords).toHaveLength(1);

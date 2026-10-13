@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, rename } from "node:fs/promises";
+import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { GatewayError } from "../errors.js";
@@ -14,7 +14,7 @@ import {
   type KnowledgeListResponse, type KnowledgeObjectRef, type KnowledgePreviewBatchRequest,
   type KnowledgePreviewBatchResponse, type KnowledgeRecallRequest,
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
-  type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
+  type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit, type NoteContent,
   type KnowledgeSourceRow, type KnowledgeSourceRowListResponse, type KnowledgeSourceRowSearchResponse, type KnowledgeSourceTakeRequest, type SourceFreshness,
   type SourceAdmission, type SourceContent,
   type KnowledgeCurationItem, type KnowledgeCurationOperation, type KnowledgeCurationStored,
@@ -185,6 +185,16 @@ function mergeSourceAttribution(existing: KnowledgeRecord & { kind: "source" }, 
   return { kind: "source", id: existing.id, createdAt: existing.createdAt, scope: existing.scope, provenance: existing.provenance, relations: existing.relations, ...(existing.temporal ? { temporal: existing.temporal } : {}), content: { ...existing.content, ...(origins.length ? { origins } : {}), ...(annotations.length ? { annotations } : {}) } };
 }
 function invalid(message: string): GatewayError { return new GatewayError("invalid_request", message); }
+/** A note's labels and retirement are owner state that a native client's typed draft
+ * does not model. An edit that omits them keeps the current revision's, so a confirmation
+ * or edit cannot silently remove a note from the owner's role; an edit that names them
+ * replaces them. */
+function carryNoteMarks(current: KnowledgeRecord, content: NoteContent): NoteContent {
+  if (current.kind !== "note") return content;
+  const tags = content.tags ?? current.content.tags;
+  const retired = content.retired ?? current.content.retired;
+  return { ...content, ...(tags ? { tags } : {}), ...(retired ? { retired } : {}) };
+}
 function requestHash(operation: string, request: unknown): string { return createHash("sha256").update(operation).update("\0").update(JSON.stringify(request)).digest("hex"); }
 function now(): string { return new Date().toISOString(); }
 function revisionId(): string { return randomUUID(); }
@@ -648,7 +658,12 @@ export class KnowledgeStore {
       if (!(error instanceof KnowledgeStoreError) || !error.message.includes("unavailable")) throw error;
       present = false;
       fresh = !(await this.workspace.featureInitialized("knowledge"));
-      if (create) { await safeDirectory(root, true); present = true; }
+      if (create) {
+        // A namespace that was initialized once and is gone now is lost state,
+        // never permission to create an empty corpus in its place.
+        if (!fresh) throw new KnowledgeStoreError("invalid", "Initialized knowledge state is missing");
+        return await this.initializeNamespace(stateRoot, root);
+      }
     }
     const paths = { root, state: join(root, "state.json"), objects: join(root, "objects"), records: join(root, "records"), present, fresh };
     if (!present) return paths;
@@ -656,13 +671,37 @@ export class KnowledgeStore {
     const markerRead = await readSecureJson<unknown>(marker, 128);
     if (!markerRead.present) {
       if (!create) throw new KnowledgeStoreError("invalid", "Knowledge namespace exists without initialization evidence");
-      // A namespace created by this owner is marked before its first state commit.
+      // Only a namespace this owner never published (foreign or damaged) reaches
+      // here: initialization publishes the marker with the whole namespace, so a
+      // writer that can already see a state manifest restores its evidence.
       await safeDirectory(paths.objects, true); await safeDirectory(paths.records, true);
       await durableAtomicWriteJson(marker, { version: 1 }, 0o600);
       await this.workspace.markFeatureInitialized("knowledge");
     } else if (JSON.stringify(markerRead.value) !== JSON.stringify({ version: 1 })) throw new KnowledgeStoreError("invalid", "Invalid knowledge initialization record");
     await safeDirectory(paths.objects, false); await safeDirectory(paths.records, false);
     return { ...paths, fresh };
+  }
+
+  /** Publish one fresh namespace atomically: build it beside its final name and
+   * rename it into place. Reads project state without the store mutex, so a
+   * namespace that became visible before its own evidence did is
+   * indistinguishable from a damaged corpus, and `paths(false)` refuses exactly
+   * that. Nothing is published until the whole namespace is durable, so a failure
+   * while building it leaves no namespace and the next deliberate mutation can
+   * initialize one. */
+  private async initializeNamespace(stateRoot: string, root: string): Promise<StorePaths> {
+    const staging = `${root}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+    const staged: StorePaths = { root: staging, state: join(staging, "state.json"), objects: join(staging, "objects"), records: join(staging, "records"), present: true, fresh: true };
+    try {
+      await safeDirectory(staged.objects, true); await safeDirectory(staged.records, true);
+      await durableAtomicWriteJson(join(staging, "initialized.json"), { version: 1 }, 0o600);
+      await this.createCatalog(staged, emptyState());
+      await rename(staging, root);
+    } catch (error) { await rm(staging, { recursive: true, force: true }).catch(() => {}); throw error; }
+    const stateDirectory = await open(stateRoot, "r");
+    try { await syncDurably(stateDirectory); } finally { await stateDirectory.close(); }
+    await this.workspace.markFeatureInitialized("knowledge");
+    return { root, state: join(root, "state.json"), objects: join(root, "objects"), records: join(root, "records"), present: true, fresh: true };
   }
   private async load(paths: StorePaths, writable: boolean): Promise<{ state: KnowledgeState; present: boolean }> {
     let read;
@@ -1115,14 +1154,21 @@ export class KnowledgeStore {
       state.records.set(key, head);
     }
   }
-  async configure(commandId: string, config: KnowledgeConfig): Promise<KnowledgeConfig> {
+  async configure(commandId: string, config: KnowledgeConfig, admitModel?: (model: string) => Promise<void>): Promise<KnowledgeConfig> {
     try { validateKnowledgeConfig(config); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid knowledge config"); }
-    return this.mutate("knowledge.config", commandId, config, async state => { if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale"); if (JSON.stringify(config.tagVocabulary) !== JSON.stringify(state.config.tagVocabulary)) throw invalid("Tag taxonomy changes require the typed knowledge.tags.configure operation"); const next = structuredClone(config); next.tagVocabulary = structuredClone(state.config.tagVocabulary); next.revision += 1; state.config = next; return next; });
+    return this.mutate("knowledge.config", commandId, config, async state => {
+      if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale");
+      if (JSON.stringify(config.tagVocabulary) !== JSON.stringify(state.config.tagVocabulary)) throw invalid("Tag taxonomy changes require the typed knowledge.tags.configure operation");
+      if (config.observation.model && config.observation.model !== state.config.observation.model) await admitModel?.(config.observation.model);
+      if (config.knowledgeModel?.model && config.knowledgeModel.model !== state.config.knowledgeModel?.model) await admitModel?.(config.knowledgeModel.model);
+      const next = structuredClone(config); next.tagVocabulary = structuredClone(state.config.tagVocabulary); next.revision += 1; state.config = next; return next;
+    });
   }
-  async setKnowledgeModel(commandId: string, expectedConfigRevision: number, model?: string): Promise<KnowledgeConfig> {
+  async setKnowledgeModel(commandId: string, expectedConfigRevision: number, model?: string, admitModel?: (model: string) => Promise<void>): Promise<KnowledgeConfig> {
     if (!Number.isSafeInteger(expectedConfigRevision) || expectedConfigRevision < 0 || (model !== undefined && (typeof model !== "string" || model.length === 0 || model.length > 200))) throw invalid("Knowledge model requires an exact config revision and a bounded provider/model string");
     return this.mutate("knowledge.config", commandId, { expectedConfigRevision, knowledgeModel: model ?? null }, async state => {
       if (state.config.revision !== expectedConfigRevision) throw conflict(`Knowledge configuration revision is stale; current revision is ${state.config.revision}`);
+      if (model && model !== state.config.knowledgeModel?.model) await admitModel?.(model);
       const { knowledgeModel: _previous, ...withoutKnowledgeModel } = state.config;
       const next = { ...withoutKnowledgeModel, ...(model ? { knowledgeModel: { model, maxInputChars: state.config.knowledgeModel?.maxInputChars ?? 48_000, maxOutputChars: state.config.knowledgeModel?.maxOutputChars ?? 8_000 } } : {}), revision: state.config.revision + 1 };
       validateKnowledgeConfig(next);
@@ -1744,7 +1790,7 @@ export class KnowledgeStore {
     }, undefined, signal);
   }
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record)); }
-  async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
+  async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, content: carryNoteMarks(current, request.record.content), id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
   private assertSourceDecisionAuthority(current: KnowledgeRecord & { kind: "source" }, next: KnowledgeRecordDraft & { kind: "source" }, producer: string | undefined): void {
     if (!isConnectorProducer(producer)) return;
     if (next.scope !== current.scope && current.content.scopeProducer && isDecisionProducer(current.content.scopeProducer)) throw decisionAuthorityRefusal("scope", current.revisionId);
@@ -1958,7 +2004,7 @@ export class KnowledgeStore {
       return this.putRecord(state, paths, record, existing?.revisionId);
     });
   }
-  async correct(commandId: string, recordId: string, expectedRevision: string, replacement: KnowledgeRecordDraft, relation: KnowledgeRecord["relations"][number]): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.correction", commandId, { recordId, expectedRevision, replacement, relation }, async (state, paths) => { const current = await this.currentRecord(state, paths, recordId); if (!current || current.revisionId !== expectedRevision) throw conflict("Knowledge record revision is stale"); if (relation.recordId !== recordId || relation.revisionId !== expectedRevision || (relation.type !== "corrects" && relation.type !== "supersedes")) throw invalid("Correction relation must identify the replaced revision"); const next = { ...replacement, id: recordId, createdAt: current.createdAt, relations: [...replacement.relations, relation] }; if (current.kind === "source" && next.kind === "source") this.assertSourceDecisionAuthority(current, next, next.provenance.actor); return this.putRecord(state, paths, next, expectedRevision); }); }
+  async correct(commandId: string, recordId: string, expectedRevision: string, replacement: KnowledgeRecordDraft, relation: KnowledgeRecord["relations"][number]): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.correction", commandId, { recordId, expectedRevision, replacement, relation }, async (state, paths) => { const current = await this.currentRecord(state, paths, recordId); if (!current || current.revisionId !== expectedRevision) throw conflict("Knowledge record revision is stale"); if (relation.recordId !== recordId || relation.revisionId !== expectedRevision || (relation.type !== "corrects" && relation.type !== "supersedes")) throw invalid("Correction relation must identify the replaced revision"); const next = { ...replacement, id: recordId, createdAt: current.createdAt, relations: [...replacement.relations, relation] }; const marked = next.kind === "note" ? { ...next, content: carryNoteMarks(current, next.content) } : next; if (current.kind === "source" && next.kind === "source") this.assertSourceDecisionAuthority(current, next, next.provenance.actor); return this.putRecord(state, paths, marked, expectedRevision); }); }
   async setScopeExclusion(commandId: string, scope: { sessionId?: string; branchId?: string; projectId?: string }, excluded: boolean, reason?: string): Promise<{ excluded: boolean; stateRevision: number }> {
     if (!scope.sessionId && !scope.projectId) throw invalid("Scope exclusion requires a session or project"); return this.mutate("knowledge.scope-exclusion", commandId, { scope, excluded, reason }, async state => { const key = scope.sessionId ? (scope.branchId ? `branch:${scope.sessionId}:${scope.branchId}` : `session:${scope.sessionId}`) : `project:${scope.projectId}`; state.scopeExclusions.set(key, { ...scope, excluded, ...(reason === undefined ? {} : { reason }), updatedAt: now() }); return { excluded, stateRevision: state.stateRevision + 1 }; });
   }

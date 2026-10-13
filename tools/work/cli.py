@@ -13,10 +13,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bootstrap  # noqa: E402
 import claim  # noqa: E402
 import cleanup  # noqa: E402
+import comments  # noqa: E402
 import dashboard  # noqa: E402
-import issues  # noqa: E402
 import land  # noqa: E402
+import handoff  # noqa: E402
 import start  # noqa: E402
+import tracking  # noqa: E402
 import verify  # noqa: E402
 import warm  # noqa: E402
 from gh import Gh, GhError  # noqa: E402
@@ -38,25 +40,74 @@ def main(argv: list) -> int:
     begin = commands.add_parser("start", help="claim an issue and create its branch and worktree")
     begin.add_argument("issue", type=int, help="issue number")
     begin.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
-    check = commands.add_parser("verify", help="run the checks the branch diff requires and write a receipt")
-    check.add_argument("--post", action="store_true",
-                       help="publish the receipt: evidence comment, private logs, commit status")
+    begin.add_argument("--integration", action="store_true", help="explicitly claim an epic as an integration branch")
+    begin.add_argument("--base", metavar="REMOTE-BRANCH", help="start from this branch on the configured remote")
+    transfer = commands.add_parser("handoff", help="transfer a claim after authoritative owner settlement proof")
+    transfer.add_argument("issue", type=int)
+    transfer.add_argument("--session", help="new owner session (default: WORK_SESSION_ID, PI_SESSION_ID)")
+    transfer.add_argument("--reason", required=True, help="concise reason recorded in the public audit comment")
+    transfer.add_argument("--force-maintainer", action="store_true", help="override unknown owner state after exact interactive confirmation (including missing legacy owner)")
+    recovery = commands.add_parser("recover", help="publish an exact settled-owner descendant candidate as unverified work")
+    recovery.add_argument("issue", type=int)
+    recovery.add_argument("--expected-local", required=True, help="full unpublished candidate commit ID")
+    recovery.add_argument("--expected-remote", required=True, help="full remote ancestor commit ID")
+    recovery.add_argument("--reason", required=True, help="concise public recovery audit reason")
+    check = commands.add_parser("verify", help="run the local checks the branch diff requires")
+    check.add_argument("--tests", action="append", default=[], metavar="COMMAND",
+                       help="integration or E2E command to run from the repository root; repeat for each")
     board = commands.add_parser("dashboard", help="read-only view of all work, fetched live")
     board.add_argument("--html", type=Path, help="write a self-contained HTML dashboard to this path")
     board.add_argument("--json", type=Path, help="write the dashboard model as JSON to this path")
-    corpus = commands.add_parser("issues", help="print every open issue as a bounded JSON corpus for related-issue checks")
-    corpus.add_argument("--closed", action="store_true", help="also include recently updated closed issues")
-    corpus.add_argument("--closed-limit", type=int, default=200, metavar="N",
-                        help=f"closed issues to include with --closed (default 200, max {issues.CLOSED_LIMIT_MAX})")
-    landing = commands.add_parser("land", help="update, verify, open the pull request, wait for checks, merge")
-    landing.add_argument("--title", help="pull request title (default: '<type>: <issue title>' or the current one)")
-    landing.add_argument("--summary-file", type=Path, help="Markdown for the Summary section (required to open)")
-    landing.add_argument("--needs-user-validation", metavar="TEXT",
-                        help="exact maintainer-only action and check; the issue stays open as Needs you")
-    landing.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
-    stewardship = commands.add_parser("steward", help="report open claim pull requests; --land one whose owner is gone")
-    stewardship.add_argument("--land", type=int, metavar="ISSUE",
-                         help="merge this issue's pull request if its head is verified, green and up to date")
+    comment = commands.add_parser("comment", help="post a privacy-checked public issue comment")
+    comment.add_argument("issue", type=int, help="positive issue number")
+    comment.add_argument("--body-file", required=True, type=Path, help="Markdown file to post; payloads are not logged")
+    issue = commands.add_parser("issue", help="issue filing, classification and relationship mutations")
+    issue_commands = issue.add_subparsers(dest="issue_command", required=True)
+    create_issue = issue_commands.add_parser("create", help="file a task or epic")
+    create_issue.add_argument("--title", required=True)
+    create_issue.add_argument("--body-file", required=True, type=Path)
+    create_issue.add_argument("--type", choices=("task", "epic"), default="task")
+    create_issue.add_argument("--kind", help="declared kind label (optional)")
+    create_issue.add_argument("--visibility", help="declared visibility label (optional)")
+    create_issue.add_argument("--area", action="append", help="declared area label; repeat for each (optional)")
+    labels_issue = issue_commands.add_parser("labels", help="add/remove only labels declared by the repository")
+    labels_issue.add_argument("issue", type=int)
+    labels_issue.add_argument("--add", action="append", default=[])
+    labels_issue.add_argument("--remove", action="append", default=[])
+    close_issue = issue_commands.add_parser("close", help="comment, close and set Status Done")
+    close_issue.add_argument("issue", type=int)
+    close_issue.add_argument("--reason", required=True, choices=("completed", "not_planned"))
+    close_issue.add_argument("--comment-file", required=True, type=Path, help="Markdown closing comment; not logged")
+    reopen_issue = issue_commands.add_parser("reopen", help="post the stated reason, reopen and restore Status")
+    reopen_issue.add_argument("issue", type=int)
+    reopen_issue.add_argument("--comment-file", required=True, type=Path,
+                              help="Markdown reason for reopening (required, posted publicly); not logged")
+    parent_issue = issue_commands.add_parser("parent", help="link a task under an epic")
+    parent_issue.add_argument("issue", type=int)
+    parent_issue.add_argument("--epic", required=True, type=int)
+    parent_issue.add_argument("--replace-parent", action="store_true",
+                              help="move the task from its current epic to this one")
+    blocker_issue = issue_commands.add_parser("block", help="add a native blocked-by relationship")
+    blocker_issue.add_argument("issue", type=int)
+    blocker_issue.add_argument("--blocked-by", required=True, type=int)
+    project = commands.add_parser("project", help="work-Project membership and classification")
+    project_commands = project.add_subparsers(dest="project_command", required=True)
+    project_add = project_commands.add_parser("add", help="add an issue to the configured work Project")
+    project_add.add_argument("issue", type=int)
+    project_set = project_commands.add_parser("set", help="assign a Status and/or Priority")
+    project_set.add_argument("issue", type=int)
+    project_set.add_argument("--status", choices=("Proposed", "Ready", "Blocked"))
+    project_set.add_argument("--priority", choices=("P0", "P1", "P2", "P3"))
+    landing = commands.add_parser("land", help="merge the base in, verify, push, squash-merge, close the issue")
+    landing.add_argument("--summary-file", required=True, type=Path,
+                         help="Markdown; becomes the pull request body verbatim")
+    landing.add_argument("--title", help="pull request title (default: '<type>: <branch slug>'; kept when a PR exists)")
+    landing.add_argument("--tests", action="append", default=[], metavar="COMMAND",
+                         help="integration or E2E command to run on the merged tree; repeat for each")
+    landing.add_argument("--ready", action="store_true",
+                         help="mark a draft pull request ready for review, after verify and publication, before the merge")
+    landing.add_argument("--dry-run", action="store_true",
+                         help="verify the merged tree, then stop before any push or GitHub write")
     tidy = commands.add_parser("cleanup", help="remove this task worktree and its branches once its PR merged")
     tidy.add_argument("--all", action="store_true", help="every worktree under the worktree root; list the rest")
     tidy.add_argument("--dry-run", action="store_true", help="report the decisions and change nothing")
@@ -69,27 +120,55 @@ def main(argv: list) -> int:
         if args.command == "bootstrap":
             return bootstrap.run(Gh(root), root, config, args.apply, args.report)
         if args.command == "start":
-            return start.run(Gh(root), Path.cwd(), config, args.issue, args.session)
+            return start.run(Gh(root), Path.cwd(), config, args.issue, args.session,
+                             args.integration, args.base)
+        if args.command == "handoff":
+            return handoff.run(Gh(root), Path.cwd(), config, args.issue, args.session, args.force_maintainer, args.reason)
+        if args.command == "recover":
+            return handoff.recover(Gh(root), Path.cwd(), config, args.issue, args.expected_local, args.expected_remote, args.reason)
         if args.command == "verify":
-            receipt = verify.verify(root, config)
-            print(f"receipt:  {verify.receipt_path(root, receipt['head'])}")
-            print(f"result:   {'passed' if receipt['passed'] else 'FAILED'} for {receipt['head']}")
-            if args.post:
-                print(f"posted:   {verify.post(Gh(root), root, config, receipt)}")
-            return 0 if receipt["passed"] else 1
+            base_ref = f"{config['claim']['remote']}/{config['claim']['baseBranch']}"
+            return 0 if verify.verify(root, config, args.tests, base_ref) else 1
         if args.command == "dashboard":
             return dashboard.run(Gh(root), Path.cwd(), config, args.html, args.json)
-        if args.command == "issues":
-            return issues.run(Gh(root), config, args.closed_limit if args.closed else 0)
+        if args.command == "comment":
+            return comments.post(Gh(root), root, config, args.issue, args.body_file)
+        if args.command == "issue":
+            gh = Gh(root)
+            if args.issue_command == "create":
+                tracking.create_issue(gh, root, config, args.title, args.body_file,
+                                      args.type, args.kind, args.visibility, args.area)
+                return 0
+            if args.issue_command == "labels":
+                tracking.set_labels(gh, config, args.issue, args.add, args.remove)
+                return 0
+            if args.issue_command == "close":
+                tracking.close_issue(gh, root, config, args.issue, args.reason, args.comment_file)
+                return 0
+            if args.issue_command == "reopen":
+                tracking.reopen_issue(gh, root, config, args.issue, args.comment_file)
+                return 0
+            if args.issue_command == "parent":
+                tracking.add_parent(gh, root, config, args.issue, args.epic, args.replace_parent)
+                return 0
+            if args.issue_command == "block":
+                tracking.add_blocker(gh, root, config, args.issue, args.blocked_by)
+                return 0
+        if args.command == "project":
+            gh = Gh(root)
+            if args.project_command == "add":
+                tracking.add_project_item(gh, root, config, args.issue)
+                return 0
+            if args.project_command == "set":
+                tracking.set_project_fields(gh, root, config, args.issue, args.status, args.priority)
+                return 0
         if args.command == "land":
-            return land.land(Gh(root), root, config, args.session, args.title, args.summary_file,
-                             args.needs_user_validation)
-        if args.command == "steward":
-            return land.steward(Gh(root), root, config, args.land)
+            return land.land(Gh(root), root, config, args.title, args.summary_file, args.tests, args.dry_run, args.ready)
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
-    except (GhError, bootstrap.BootstrapError, claim.ClaimError, verify.VerifyError, dashboard.DashboardError, issues.IssuesError,
-            land.LandError, warm.WarmError, cleanup.CleanupError, FileNotFoundError, json.JSONDecodeError) as error:
+    except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, verify.VerifyError, dashboard.DashboardError,
+            land.LandError, warm.WarmError, cleanup.CleanupError, tracking.TrackingError, FileNotFoundError,
+            json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1
     return 64

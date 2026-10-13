@@ -63,16 +63,15 @@ struct SessionWorkspaceSummaryRow: View {
     }
 }
 
-/// Value-only composition. SessionContextSheet keeps mutation admission,
-/// pending selection, compaction progress, and failure presentation ownership.
-struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
+/// Value-only composition. SessionModelConfigurationCard keeps mutation admission,
+/// pending selection, and failure presentation ownership; each sheet supplies its
+/// own footer row (Manage Session: automatic compaction; Manage Home: memory model).
+struct SessionModelSummaryCard<Controls: View, Footer: View>: View {
     @Binding var selection: ModelRef?
     let catalog: [ModelSummary]
-    /// Shown in the picker, which then declines picks the Gateway would reject.
-    var selectionLockedReason: String? = nil
-    let automaticCompactionEnabled: Bool?
+    var selectionAvailability: ModelSelectionAvailability = .ready
     @ViewBuilder let controls: () -> Controls
-    @ViewBuilder let compactAction: () -> CompactAction
+    @ViewBuilder let footer: () -> Footer
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -94,35 +93,34 @@ struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                TronProgressiveSheetLink(
-                    accessibilityLabel: "Switch Model",
-                    accent: .tronPurple,
-                    detents: .contentFit
-                ) {
-                    ModelPicker(
-                        selection: $selection,
-                        models: catalog.filter(\.available),
-                        selectionLockedReason: selectionLockedReason
-                    )
-                        .tronNavigationTitle("Models", accent: .tronPurple)
-                        .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)
-                        .controlSize(.regular)
-                } label: {
-                    TronInlineActionLabel("Switch Model")
+                HStack(spacing: 4) {
+                    if case .blocked(let reason) = selectionAvailability {
+                        ModelSelectionLockInfoLink(reason: reason)
+                    }
+                    TronProgressiveSheetLink(
+                        accessibilityLabel: "Switch Model",
+                        accent: .tronPurple,
+                        detents: .contentFit
+                    ) {
+                        ModelPicker(
+                            selection: $selection,
+                            models: catalog.filter(\.available),
+                            selectionAvailability: selectionAvailability
+                        )
+                            .tronNavigationTitle("Models", accent: .tronPurple)
+                            .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)
+                            .controlSize(.regular)
+                    } label: {
+                        TronInlineActionLabel("Switch Model", isWorking: selectionAvailability.isApplying)
+                    }
+                    .accessibilityValue(selectionAvailability.accessibilityValue)
                 }
             }
             .padding(14)
             TronSettingsDivider(accent: .tronPurple)
             controls()
             TronSettingsDivider(accent: .tronPurple)
-            TronSettingsRow(
-                icon: "rectangle.compress.vertical",
-                title: "Automatic Compaction",
-                subtitle: SessionCompactionControlPolicy.automaticStatus(automaticCompactionEnabled),
-                accent: .tronPurple
-            ) {
-                compactAction()
-            }
+            footer()
         }
         .controlSize(.small)
         .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.14)
@@ -137,9 +135,17 @@ struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
     }
 }
 
-struct SessionContextUsageCard: View {
+/// The stats card both Manage Session and Manage Home show. Only Manage Home
+/// supplies an accessory (its state pill), placed on a header row above the usage.
+struct SessionContextUsageCard<Accessory: View>: View {
     let snapshot: SessionContextPresentation
+    let accessory: Accessory?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    init(snapshot: SessionContextPresentation, accessory: Accessory?) {
+        self.snapshot = snapshot
+        self.accessory = accessory
+    }
 
     var body: some View {
         let usage = SessionContextUsagePresentation(snapshot.contextUsage)
@@ -155,6 +161,12 @@ struct SessionContextUsageCard: View {
         ]
 
         VStack(alignment: .leading, spacing: 9) {
+            if let accessory {
+                HStack(spacing: 0) {
+                    accessory
+                    Spacer(minLength: 0)
+                }
+            }
             switch usage {
             case .available(let used, let window, let percent):
                 let headline = "\(max(0, window - used).formatted(.number.notation(.compactName))) tokens left"
@@ -233,5 +245,11 @@ struct SessionContextUsageCard: View {
         .frame(maxWidth: .infinity, minHeight: 42)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(label): \(value)")
+    }
+}
+
+extension SessionContextUsageCard where Accessory == EmptyView {
+    init(snapshot: SessionContextPresentation) {
+        self.init(snapshot: snapshot, accessory: nil)
     }
 }

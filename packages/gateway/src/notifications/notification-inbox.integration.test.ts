@@ -6,6 +6,7 @@ import { NotificationGrantStore, notificationHash, type NotificationInboxEntry }
 import { NotificationService, type NotificationInboxChanged, type NotificationInboxItem } from "./notification-service.js";
 import type { PushRelayClient } from "./relay-client.js";
 import { GatewayService, type ClientContext } from "../transport/gateway-service.js";
+import { waitFor } from "../../test-support/wait-for.js";
 
 /**
  * Failure modes this case owns against the real RPC handlers and one real
@@ -87,12 +88,12 @@ async function fixture() {
     store,
     { available: false, relayOrigin: "https://push.example.test" } as PushRelayClient,
     Date.now,
-    undefined,
     (payload) => broadcasts.push(payload),
   );
   const service = new GatewayService({
     config: { tronHome: root },
     notifications,
+    sessions: { isAdministrativeDrainStarted: false },
     devices: { hasDevice: async () => false, revoke: async () => false },
     receipts: { execute: async (_identity: string, _method: string, _command: string, operation: () => Promise<unknown>) => operation() },
   } as never);
@@ -163,7 +164,7 @@ describe("notification inbox RPCs over a real credential document", () => {
       .rejects.toMatchObject({ code: "invalid_request" });
 
     // The coalesced broadcast carries the committed state, not an empty payload.
-    await vi.waitFor(() => expect(broadcasts.at(-1)).toMatchObject({ unreadCount: 0 }));
+    await waitFor(() => broadcasts.at(-1)?.unreadCount === 0, "the coalesced read-all broadcast");
     const lastBroadcast = broadcasts.at(-1)!;
     expect(lastBroadcast.revision).toEqual(expect.any(String));
     expect(lastBroadcast.revision).toBe(final.revision);

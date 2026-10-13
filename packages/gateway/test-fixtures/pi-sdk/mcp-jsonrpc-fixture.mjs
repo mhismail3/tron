@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFileSync, watch } from "node:fs";
 import readline from "node:readline";
 
-const [transport, statePath, pidPath, childPidPath] = process.argv.slice(2);
+const [transport, statePath, pidPath, childPidPath, startupDelayArgument, readyPath] = process.argv.slice(2);
 const state = () => JSON.parse(readFileSync(statePath, "utf8"));
 if (pidPath && transport === "stdio") await import("node:fs/promises").then(({ writeFile }) => writeFile(pidPath, String(process.pid)));
 if (childPidPath) {
@@ -10,6 +10,8 @@ if (childPidPath) {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 60_000);"], { stdio: "ignore" });
   await import("node:fs/promises").then(({ writeFile }) => writeFile(childPidPath, String(child.pid)));
 }
+if (startupDelayArgument) await new Promise(resolve => setTimeout(resolve, Number(startupDelayArgument)));
+if (readyPath) await import("node:fs/promises").then(({ writeFile }) => writeFile(readyPath, "ready"));
 
 function dispatch(message) {
   const params = message.params ?? {};
@@ -56,9 +58,14 @@ if (transport === "stdio") {
     reply.writeHead(200, { "content-type": "application/json", "mcp-session-id": "fixture-session", "mcp-protocol-version": "2025-03-26" });
     reply.end(JSON.stringify(result));
   });
-  server.listen(Number(process.env.MCP_FIXTURE_PORT ?? 0), "127.0.0.1", () => {
+  server.listen(Number(process.env.MCP_FIXTURE_PORT ?? 0), "127.0.0.1", async () => {
     const address = server.address();
-    import("node:fs/promises").then(({ writeFile }) => writeFile(pidPath, String(address.port)));
+    // Published by rename: the port file exists only once it holds the port.
+    // A plain write is visible empty first, and a reader polling for the file
+    // then read port 0 under load (#406).
+    const { rename, writeFile } = await import("node:fs/promises");
+    await writeFile(`${pidPath}.tmp`, String(address.port));
+    await rename(`${pidPath}.tmp`, pidPath);
   });
   process.on("SIGTERM", () => server.close(() => process.exit(0)));
 } else {

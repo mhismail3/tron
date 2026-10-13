@@ -90,7 +90,7 @@ package enum GatewayDiagnosticTopicAdmission {
         "system.stopping", "notification.inbox.changed", "auth.prompt", "auth.event",
         "auth.completed", "automation.changed", "knowledge.changed", "knowledge.curation.job", "settings.changed", "trust.changed",
         "providers.changed", "packages.changed", "packages.progress", "packages.completed",
-        "models.customChanged", "models.recentChanged", "models.catalogChanged", "devices.changed", "terminal.output", "terminal.exit"
+        "models.customChanged", "models.recentChanged", "models.catalogChanged", "mcp.changed", "devices.changed", "terminal.output", "terminal.exit"
     ]
 
     package static func admit(_ topic: String) -> String {
@@ -495,8 +495,9 @@ package enum GatewayResponseDecoding {
 
 package actor GatewayClient {
     #if HOSTED_TEST
-    // A run-local gate exercises the real actor-hop race without production hooks.
+    // Run-local gates exercise actor-hop races without production hooks.
     @TaskLocal static var hostedEventAdmissionGate: (@Sendable () async -> (@Sendable (GatewayEventAdmission) -> Void))?
+    @TaskLocal static var hostedQueuedSendGate: (@Sendable () async -> Void)?
     #endif
 
     private struct PendingRequest {
@@ -2006,7 +2007,10 @@ package actor GatewayClient {
         connection = epoch
     }
 
-    private func claimSend(id: String, epochID: Int) -> Bool {
+    private func claimSend(id: String, epochID: Int) async -> Bool {
+        #if HOSTED_TEST
+        await Self.hostedQueuedSendGate?()
+        #endif
         guard var epoch = connection, epoch.id == epochID,
               var request = epoch.pending[id], request.transmission == .queued else { return false }
         request.transmission = .sending

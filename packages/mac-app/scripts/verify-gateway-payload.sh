@@ -74,6 +74,8 @@ for required_file in \
     "$PAYLOAD_DIR/app/PushService.xcconfig" \
     "$PAYLOAD_DIR/app/scripts/ensure-node-pty-helper.mjs" \
     "$PAYLOAD_DIR/app/scripts/gateway-payload-deploy.mjs" \
+    "$PAYLOAD_DIR/app/pi-subagents-pin.json" \
+    "$PAYLOAD_DIR/app/scripts/check-pi-subagents.mjs" "$PAYLOAD_DIR/app/scripts/install-pi-subagents.mjs" \
     "$PAYLOAD_DIR/runtime/node-arm64" "$PAYLOAD_DIR/runtime/node-x64" \
     "$PAYLOAD_DIR/runtime/npm-arm64/bin/npm-cli.js" "$PAYLOAD_DIR/runtime/npm-x64/bin/npm-cli.js" \
     "$PAYLOAD_DIR/runtime/xcodegen/bin/xcodegen" \
@@ -155,6 +157,13 @@ validate_pi_alias() {
 }
 validate_pi_alias arm64
 validate_pi_alias x64
+
+# Use the trusted source checker against payload-owned inputs. Do not execute a
+# staged checker before the launcher has established the complete fingerprint.
+HOST_ARCH="$(uname -m)"
+[[ "$HOST_ARCH" == arm64 ]] || HOST_ARCH=x64
+"$PAYLOAD_DIR/runtime/node-$HOST_ARCH" "$REPO_ROOT/packages/gateway/scripts/check-pi-subagents.mjs" --root "$PAYLOAD_DIR/app" ||
+    fail "managed provider pin or immutable inputs are invalid"
 
 # The helper must remain unsigned until Xcode's signing phases. This keeps the
 # deterministic pre-signing byte comparison meaningful and makes signing the

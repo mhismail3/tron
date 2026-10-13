@@ -418,8 +418,7 @@ final class ProviderAuthCoordinator {
 
     func preferredAvailableModel(for target: ProviderCatalogTarget) -> ModelRef? {
         let available = catalog(for: target)?.models.filter(\.available) ?? []
-        return available.first(where: { $0.provider == "openai-codex" && $0.id == "gpt-5.6-sol" })?.ref
-            ?? available.first?.ref
+        return available.first?.ref
     }
 
     @discardableResult
@@ -1210,38 +1209,5 @@ final class ProviderAuthCoordinator {
         recentModels = RecentModelCatalogPolicy.admit(models)
     }
 
-    func setHostedInvalidationGeneration(_ generation: Int) {
-        invalidationGeneration = generation
-    }
-
-    func hostedTarget(for operationID: String) -> ProviderCatalogTarget? {
-        targetByAuthOperation[operationID]
-    }
-
-    func installHostedAuthOperation(
-        _ operationID: String,
-        target: ProviderCatalogTarget,
-        providerID: String = "provider",
-        authType: String = "oauth",
-        active: Bool = true
-    ) {
-        targetByAuthOperation[operationID] = target
-        providerByAuthOperation[operationID] = providerID
-        authTypeByAuthOperation[operationID] = authType
-        guard active else { return }
-        authBeginGeneration &+= 1
-        authPresentationGeneration &+= 1
-        activeAuthOperationID = operationID
-        prompt = nil
-        event = nil
-    }
-
-    var hostedHasPromptInputDraft: Bool { promptInputDraft != nil }
-    var hostedActiveAuthOperationID: String? { activeAuthOperationID }
-    var hostedPendingCancellationOperationIDs: [String] { pendingCancellationOperationIDs }
-    var hostedQuarantinedOperationCount: Int { quarantinedPresentationByOperation.count }
-    var hostedQuarantinedOperationIDs: [String] { quarantinedOperationOrder }
-    var hostedQuarantinedElementCount: Int { quarantinedElementCount }
-    var hostedQuarantinedByteCount: Int { quarantinedByteCount }
     #endif
 }

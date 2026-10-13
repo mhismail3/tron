@@ -372,6 +372,9 @@ def adopt_pinned_node() -> None:
     for bin_dir in _node_candidates(version):
         if _node_admitted(bin_dir, version):
             os.environ["PATH"] = os.pathsep.join([str(bin_dir), os.environ.get("PATH", "")])
+            # npm ci under this Node may run node-gyp's Python inside the pinned
+            # npm tree; bytecode written there changes its digest (#638).
+            os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
             log(f"using Node {version} from {bin_dir}")
             return
     raise ProfileFailure(

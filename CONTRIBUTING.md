@@ -24,8 +24,8 @@ agent execution, session state, inbox, badge, or reminder policy.
 
 ## Change requirements
 
-1. Ship implementation, owning documentation, and the tests required by the
-   [testing policy](AGENTS.md#testing-policy) together.
+1. Ship implementation, owning documentation, and the integration or E2E tests
+   that prove it together ([testing policy](AGENTS.md#testing-policy)).
 2. Fix root causes and preserve canonical runtime ownership; do not create a
    second model/session/settings schema unless the mobile protocol requires a
    bounded projection.
@@ -46,15 +46,46 @@ agent execution, session state, inbox, badge, or reminder policy.
    is the version authority; do not merge independent Pi package updates. Use
    `cd packages/gateway && npm run update:pi-sdk -- <exact-version>` from a
    clean manifest/lockfile, then run `npm run check:pi-sdk` and
-   `npm run test:pi-sdk-scripts` and `npm run test:pi-sdk-rollback`. The
-   `pi-sdk-baseline.json` file records only the prior runtime used by the
-   sequential rollback probe; `package.json` remains the current-version
-   authority. The updater performs online metadata preflight, uses the npm
+   `npm run test:pi-sdk-rollback`. While `pi-coding-agent-patch.json` declares
+   the Tron-patched `pi-coding-agent`, the updater refuses: rebuild the patch for
+   the target release or delete it once upstream ships the API (Gateway README,
+   "Tron-patched `pi-coding-agent`"). The
+   `pi-sdk-baseline.json` file records the prior runtime used by the sequential
+   rollback probe, and any one-way rollback delta the maintainer has accepted for
+   that version range under `knownOneWayDeltas`; `package.json` remains the
+   current-version authority. The updater performs online metadata preflight, uses the npm
    paired with the repository-pinned Node runtime, runs normal repository
-   lifecycle scripts with `--engine-strict`, and restores only its owned manifests plus
+   lifecycle scripts with `--engine-strict` and disables Python bytecode writes
+   during npm installs. Tests that require the pinned runtime use its verified
+   `.ci-tools` cache, not a mutable developer Node installation. The updater
+   restores only its owned manifests plus
    the disposable installed tree with `npm ci` if anything fails. No deployment or
    Gateway lifecycle command is part of dependency maintenance.
-9. Stop on any meaningful Pi behavior delta. Event ordering, canonical JSONL,
+9. `pi-subagents` updates are one atomic Tron-owned provider change, not a
+   user-managed npm dependency. `packages/gateway/pi-subagents-pin.json` binds
+   the exact fork/upstream commits, source archive, lockfile, and bundled closure.
+   From a clean pin/artifact/package state use `cd packages/gateway && npm run
+   update:pi-subagents -- --fork-repo <path-or-url> <full-fork-commit>`, then run
+   `npm run check:pi-subagents` and `npm run test:pi-subagents-scripts`.
+   `fork.repository` is null until the public fork URL exists; only the updater
+   needs the explicit source. Once recorded, that URL is the default and an
+   override must match it. Checks and installs remain self-contained/offline.
+   The updater reads git objects, never the fork working tree; it preflights
+   the pinned upstream release/tag and fork ancestry, reports latest upstream
+   without selecting it, and packs/builds using the pinned Node/npm. Publication
+   retains current as previous, and failure restores only invocation-owned
+   files. Prior artifacts and install roots stay untouched for rollback. Do not
+   install through the user package updater, edit a user's package manifest, or
+   deploy/restart a Gateway as dependency maintenance. Conflicting user-installed
+   providers are refused rather than replaced or run alongside Tron. Every
+   Gateway startup installs/verifies its selected payload's closure offline before
+   discovery, reusing a valid immutable root and refusing damage. Debug activation
+   uses `scripts/tron dev start`; inspect status first and coordinate any other
+   worktree's running candidate. Stable installation happens only when the
+   maintainer updates/promotes the reviewed Stable payload (or follows the Mac
+   Release reinstall runbook); agents never install into Stable. This is payload
+   activation, not part of the dependency updater.
+10. Stop on any meaningful Pi behavior delta. Event ordering, canonical JSONL,
    compaction/retries, extension UI, projections, settings/auth/models,
    packaging, or user-visible UI/UX changes must be compared with the approved
    baseline and explicitly decided; never accept a changed behavior merely
@@ -73,8 +104,7 @@ need no parallel scan-root list. Ignored generated output is skipped only when
 untracked; tracked files remain in scope. Only the guard's own needle definitions
 are exempt. Pre-commit `--staged` checks changed index blobs, not later working-tree
 edits. `--stdin` applies the same needles to text about to be published, such as
-the evidence `scripts/tron work verify --post` writes to GitHub, and exits 1 on
-a finding. Install that hook once per clone with `scripts/install-hooks.sh`, run from
+pull request bodies and issue comments, and exits 1 on a finding. Install that hook once per clone with `scripts/install-hooks.sh`, run from
 the main checkout or any linked worktree; Git's hooks directory is shared, so one
 install guards every worktree. The hook runs `personal-info-guard.sh --staged`
 and the Gateway build for staged gateway TypeScript. Run
@@ -88,6 +118,9 @@ regex implementations.
 ### Toolchain
 
 Node is pinned exactly by `.node-version`; CI and Mac packaging read that file.
+`scripts/tron` sets `PYTHONDONTWRITEBYTECODE=1` so native npm builds never write
+`__pycache__` into the pinned npm tree, which the digest in
+`config/ci-toolchain.env` rejects (#638).
 Use `scripts/verify-ci-toolchain.sh node` to verify the current executable and
 reject duplicated version mirrors. Install native project generation with
 `scripts/install-ci-tools.sh xcodegen`; both `scripts/tron ios generate` and
@@ -169,9 +202,19 @@ maintainer may run `scripts/tron dev handoff --tailscale`; it performs authentic
 pre/post identity checks and copies the exact payload into Stable as an inactive
 candidate only after pre/post authenticated identity proof. Stable is always a
 known commit: handoff refuses the selected candidate unless its runtime epoch's
-source record says it was built from a clean tree. A dirty candidate and one
-whose dirtiness is unknown (no record, or a record written before dirtiness was
-recorded) both fail closed; commit any changes, run `scripts/tron dev restart`,
+source record says it was built from a clean tree. It also refuses a changed
+Node version or runtime contents. When the installed app's validated runtime has
+the candidate's Node version, Debug staging uses that exact signed runtime and
+its native npm artifacts. Every Mach-O file in the candidate's `app/node_modules`
+(including spawned executables) is replaced with the installed copy only when
+its owning package's lockfile version and integrity match exactly. Changed or
+missing identities, missing installed native files, and native aliases outside
+the npm tree refuse staging with `rebuild and install a signed app`; staging
+never re-signs addons or relaxes library validation. A different Node version
+keeps the official candidate runtime and handoff refuses with the manual
+signed-app instruction. A dirty candidate and one whose dirtiness is
+unknown (no record, or a record written before dirtiness was recorded) both fail
+closed; commit any changes, run `scripts/tron dev restart`,
 and hand off the resulting clean candidate. The copy pins the admitted version
 and fingerprint under the Debug payload lock, so a Debug apply or rollback that
 changes the selection after admission is refused rather than copied. Promotion still
@@ -186,7 +229,7 @@ iteration proceeds on `9848`.
 
 ```bash
 scripts/tron-ios-test build
-scripts/tron-ios-test run --only-testing TronMobileTests/<OwningSuite>
+scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>
 python3 scripts/test-ios-test-infrastructure.py
 ```
 
@@ -211,7 +254,7 @@ scripts/tron mac generate
 The TronMac build and test commands are in the
 [Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests).
 CI only compiles the Mac app and test sources, unsigned. Run the app-hosted
-`TronMacTests` locally, because they need the team's signing certificate.
+`TronMacIntegrationTests` locally, because they need the team's signing certificate.
 
 The Release app packages only `Tron Agent.app` under the stable
 `com.tron.server` label. Developer tooling reuses that installed signed launcher
@@ -233,8 +276,8 @@ to implementation-level detail.
 
 ## Commits and releases
 
-Every change reaches `main` as one squash-merged pull request for one issue,
-through `scripts/tron work land` ([AGENTS.md work tracking](AGENTS.md#work-tracking)).
+Every change reaches `main` through `scripts/tron work land`, which verifies the
+merged tree and squash-merges it ([AGENTS.md work tracking](AGENTS.md#work-tracking)).
 Keep commits reviewable and avoid generated build output. Xcode projects may be
 regenerated from `project.yml`; staged Mac gateway payloads and Node runtimes are
 ignored. CI does not publish production artifacts. TestFlight/App Store delivery,

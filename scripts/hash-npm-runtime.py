@@ -3,7 +3,9 @@
 
 The Node archive is the provenance authority; this digest only authenticates
 that the staged npm tree still matches the archive extraction. Symlinks and
-special files are rejected rather than followed.
+special files are rejected rather than followed. Interpreter caches (__pycache__,
+*.pyc) are deliberately hashed too: a planted .pyc would run as code, and the
+launchers prevent such caches with PYTHONDONTWRITEBYTECODE (#638).
 """
 import hashlib
 import os

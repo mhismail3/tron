@@ -56,6 +56,8 @@ export function createTronScheduleExtension(input: {
   return (pi) => {
     pi.registerTool({
       name: "schedule",
+      // docs/settings-model.md 5.4: declares it reads no open-world content.
+      annotations: { openWorldHint: false },
       label: "Schedule",
       description: "Create and manage durable Gateway-owned automations for this Tron session. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session or create a new session in its workspace per run.",
       promptSnippet: "Create and manage durable schedules and reminders for the current Tron session",

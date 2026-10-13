@@ -91,13 +91,6 @@ actor ComposerDraftStore {
         self.hostedBlocksLoads = hostedBlocksLoads
     }
 
-    var hostedLoadWaiterCount: Int { hostedLoadWaiters.count }
-
-    func hostedReleaseLoads() {
-        let waiters = hostedLoadWaiters
-        hostedLoadWaiters.removeAll()
-        waiters.forEach { $0.resume() }
-    }
     #endif
 
     func load(_ scope: ComposerDraftScope) async -> Value? {

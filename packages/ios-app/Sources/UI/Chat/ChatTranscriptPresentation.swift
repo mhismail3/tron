@@ -610,6 +610,18 @@ enum ChatTranscriptHandoffCommit: Hashable, Sendable {
         attachments: [PendingAttachment]
     )
 
+    /// Apply the canonical hidden-input rule before creating a user-position
+    /// handoff. Renderers only receive admitted pending presentations.
+    static func pending(in snapshot: SessionSnapshot) -> Self {
+        guard let pending = snapshot.pendingPrompt,
+              pending.semantic?.direction != .hiddenInternal,
+              !ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: snapshot.transcript) else { return .none }
+        return .pending(ChatPendingPromptPresentation(
+            snapshot: pending,
+            isCompacting: snapshot.phase == .compacting || snapshot.operation?.kind == .compaction
+        ))
+    }
+
     var outgoingAttachments: [PendingAttachment] {
         guard case .outgoing(_, let attachments) = self else { return [] }
         return attachments
@@ -719,6 +731,7 @@ struct ChatPhysicalTailEvidence: Equatable, Sendable {
 }
 
 enum ChatOpenPresentationPhase: Equatable {
+    case waitingForConnection
     case opening
     case positioning
     /// The physical positioning lift is resolving behind the opaque opening
@@ -777,6 +790,11 @@ struct ChatOpenPresentationState: Equatable {
         guard sessionID == self.sessionID, epoch == self.epoch, phase == .presented else { return false }
         phase = .ready
         return true
+    }
+
+    mutating func waitForConnection(sessionID: String, epoch: Int) {
+        guard sessionID == self.sessionID, epoch == self.epoch else { return }
+        phase = .waitingForConnection
     }
 
     mutating func fail(sessionID: String, epoch: Int, message: String) -> Bool {
@@ -2215,6 +2233,9 @@ enum ChatToolbarTitleLayout {
     static let horizontalControlReservation: CGFloat = 152
     static let minimumWidth: CGFloat = 80
     static let maximumWidth: CGFloat = 360
+    /// One title-view height for the title and the recovery capsule that
+    /// replaces it, so swapping them never relays out the bar (#878).
+    static let height: CGFloat = 32
 
     static func width(containerWidth: CGFloat) -> CGFloat {
         min(maximumWidth, max(minimumWidth, containerWidth - horizontalControlReservation))

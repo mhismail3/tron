@@ -45,11 +45,13 @@ async function initializeAndSeed(): Promise<void> {
   });
 }
 
-async function signedNotification(input?: { requestId?: string; message?: string }): Promise<RequestInit> {
+async function signedNotification(input?: { requestId?: string; message?: string; notificationKind?: "ask" | "explicit" | "agent_finished" | "waiting"; category?: string }): Promise<RequestInit> {
   const requestId = input?.requestId ?? "request-identifier-0001";
   const body = JSON.stringify({
     version: 1,
     kind: "agent_alert",
+    notificationKind: input?.notificationKind ?? "agent_finished",
+    ...(input?.category !== undefined ? { category: input.category } : {}),
     requestId,
     message: input?.message ?? "Tron needs your input.",
     expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
@@ -501,7 +503,7 @@ describe("v3 Worker boundary", () => {
     await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
       const now = Math.floor(Date.now() / 1000);
       state.storage.sql.exec(
-        "INSERT INTO installation_limits (installation_id, hourly_window, hourly_count, daily_window, daily_count, updated_at) VALUES (?, ?, 50, ?, 50, ?)",
+        "INSERT INTO installation_limits (installation_id, hourly_window, hourly_count, daily_window, daily_count, updated_at) VALUES (?, ?, 120, ?, 1000, ?)",
         testGrant.installationId, Math.floor(now / 3600) * 3600, Math.floor(now / 86400) * 86400, now,
       );
     });
@@ -512,11 +514,27 @@ describe("v3 Worker boundary", () => {
     expect(providerFetch).not.toHaveBeenCalled();
   });
 
+  test("exempts input-needed and explicit requests from the daily device backstop", async () => {
+    await initializeAndSeed();
+    await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
+      const now = Math.floor(Date.now() / 1000);
+      state.storage.sql.exec("UPDATE grants SET daily_window = ?, daily_count = 1000 WHERE grant_id = ?", Math.floor(now / 86400) * 86400, testGrant.grantId);
+      state.storage.sql.exec("INSERT INTO installation_limits (installation_id, hourly_window, hourly_count, daily_window, daily_count, updated_at) VALUES (?, ?, 0, ?, 1000, ?)", testGrant.installationId, Math.floor(now / 3600) * 3600, Math.floor(now / 86400) * 86400, now);
+    });
+    const providerFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const asks = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({ requestId: "ask-exempt-notification-01", notificationKind: "ask" }));
+    const explicit = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({ requestId: "explicit-exempt-notification1", notificationKind: "explicit" }));
+    expect((await asks.json() as { status: string }).status).toBe("accepted_by_apns");
+    expect((await explicit.json() as { status: string }).status).toBe("accepted_by_apns");
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+  });
+
   test.each(["hourly", "daily"] as const)("serializes concurrent %s grant quota admission", async (window) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-05T12:00:00Z"));
     await initializeAndSeed();
-    const limit = window === "hourly" ? 30 : 200;
+    const limit = window === "hourly" ? 120 : 1_000;
     await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
       state.storage.sql.exec(
         `UPDATE grants SET ${window}_count = ? WHERE grant_id = ?`,
@@ -610,12 +628,12 @@ describe("v3 Worker boundary", () => {
     await initializeAndSeed();
     await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
       const now = Math.floor(Date.now() / 1000);
-      state.storage.sql.exec("UPDATE grants SET hourly_window = ?, hourly_count = 30 WHERE grant_id = ?", Math.floor(now / 3600) * 3600, testGrant.grantId);
+      state.storage.sql.exec("UPDATE grants SET hourly_window = ?, hourly_count = 120 WHERE grant_id = ?", Math.floor(now / 3600) * 3600, testGrant.grantId);
     });
     const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", providerFetch);
     const limited = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({ requestId: "quota-request-00000001" }));
-    expect(await limited.json()).toMatchObject({ status: "rate_limited", reason: "rate_limited" });
+    expect(await limited.json()).toMatchObject({ status: "rate_limited", reason: "hourly_limit" });
     expect(providerFetch).not.toHaveBeenCalled();
 
     const path = `https://push.test/v3/grants/${testGrant.grantId}`;
@@ -625,6 +643,51 @@ describe("v3 Worker boundary", () => {
       state.storage.sql.exec<{ enabled: number }>("SELECT enabled FROM grants WHERE grant_id = ?", testGrant.grantId).one().enabled,
     );
     expect(enabled).toBe(0);
+  });
+
+  test("advertises its notification categories", async () => {
+    const response = await SELF.fetch("https://push.test/v3/capabilities");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ version: 1, notificationCategories: ["settings-approval"] });
+    expect((await SELF.fetch("https://push.test/v3/capabilities", { method: "POST", body: "{}" })).status).toBe(405);
+  });
+
+  test("maps the settings-approval category to aps.category on a waiting alert", async () => {
+    await initializeAndSeed();
+    const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200, headers: { "apns-id": "provider-id" } }));
+    vi.stubGlobal("fetch", providerFetch);
+    const categorized = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({
+      requestId: "categorized-request-0001", notificationKind: "waiting", category: "settings-approval",
+    }));
+    expect(await categorized.json()).toEqual({ status: "accepted_by_apns", apnsId: "provider-id" });
+    const plain = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({
+      requestId: "uncategorized-request-0001", notificationKind: "waiting",
+    }));
+    expect((await plain.json() as { status: string }).status).toBe("accepted_by_apns");
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    const categorizedPayload = JSON.parse((providerFetch.mock.calls[0][1] as RequestInit).body as string) as { aps: Record<string, unknown> };
+    const plainPayload = JSON.parse((providerFetch.mock.calls[1][1] as RequestInit).body as string) as { aps: Record<string, unknown> };
+    expect(categorizedPayload.aps.category).toBe("settings-approval");
+    expect(plainPayload.aps).not.toHaveProperty("category");
+  });
+
+  test("rejects any other category, and the category on any other kind, before contacting APNs", async () => {
+    await initializeAndSeed();
+    const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const otherCategory = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({
+      requestId: "other-category-request-01", notificationKind: "waiting", category: "other",
+    }));
+    expect(otherCategory.status).toBe(400);
+    expect(await otherCategory.json()).toEqual({ error: "invalid_request" });
+    const otherKind = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({
+      requestId: "explicit-category-request1", notificationKind: "explicit", category: "settings-approval",
+    }));
+    expect(otherKind.status).toBe(400);
+    expect(await otherKind.json()).toEqual({ error: "invalid_request" });
+    expect(providerFetch).not.toHaveBeenCalled();
   });
 
   test("fails closed when App Attest proof is malformed", async () => {

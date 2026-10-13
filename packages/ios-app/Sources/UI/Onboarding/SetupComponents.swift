@@ -430,26 +430,12 @@ struct ProviderConfigurationSheet: View {
             if provider.isLocalOnly {
                 // Local models have no account, so this status is authoritative
                 // without a Gateway usage capability or a provider.usage read.
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "infinity")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(Color.tronEmerald)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Unlimited")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronTextPrimary)
-                        Text("Local models run on this Mac with no account usage limits.")
-                            .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 8)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 14)
-                .accessibilityElement(children: .combine)
+                TronSettingsRow(
+                    icon: "infinity",
+                    title: "Unlimited",
+                    subtitle: "Local models run on this Mac with no account usage limits.",
+                    accent: .tronEmerald
+                )
                 .accessibilityLabel("Unlimited. Local models run on this Mac with no account usage limits.")
             } else if model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) != true {
                 TronSettingsCaption("Account usage is unavailable on this Gateway. Connection details remain available.")
@@ -871,9 +857,8 @@ enum ModelPickerLayout {
 struct ModelPicker: View {
     @Binding var selection: ModelRef?
     let models: [ModelSummary]
-    /// Non-nil while the owner cannot accept a model change (the Gateway
-    /// rejects it during session work); cards and rows show but do not select.
-    var selectionLockedReason: String? = nil
+    /// The session owner supplies admission/receipt state; browsing stays live.
+    var selectionAvailability: ModelSelectionAvailability = .ready
     @State private var search = ""
     @State private var showingSearch = false
     @State private var closingSearch = false
@@ -899,14 +884,9 @@ struct ModelPicker: View {
         let sections = self.sections
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 8) {
-                if !sections.recent.isEmpty || !sections.latest.isEmpty || selectionLockedReason != nil {
-                    // One measured block: the sheet opens exactly this tall.
+                if !sections.recent.isEmpty || !sections.latest.isEmpty {
+                    // Availability changes only control chrome, never rail fit.
                     VStack(alignment: .leading, spacing: 8) {
-                        if let selectionLockedReason {
-                            Label(selectionLockedReason, systemImage: "lock.fill")
-                                .font(TronTypography.secondaryDescription)
-                                .foregroundStyle(Color.tronTextSecondary)
-                        }
                         if !sections.recent.isEmpty {
                             sectionTitle("Recent")
                             cardRail(sections.recent)
@@ -965,7 +945,10 @@ struct ModelPicker: View {
         .preference(key: TronSheetFitHeightKey.self, value: fitHeight)
         .tronScrollEdgeChrome()
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItemGroup(placement: .topBarLeading) {
+                if case .blocked(let reason) = selectionAvailability {
+                    ModelSelectionLockInfoLink(reason: reason)
+                }
                 if !showingSearch {
                     Button { beginSearch() } label: {
                         Image(systemName: "magnifyingglass")
@@ -1046,14 +1029,18 @@ struct ModelPicker: View {
             accent: accent,
             cornerRadius: 16,
             isSelected: { $0.ref == selection },
-            isEnabled: selectionLockedReason == nil,
+            isEnabled: selectionAvailability.canSelect,
             accessibilityLabel: ModelRailCard.accessibilityLabel,
-            accessibilityValue: { $0.ref == selection ? "Selected" : "" },
+            accessibilityValue: { model in
+                if model.ref == selection && selectionAvailability.isApplying { return "Applying configuration" }
+                return model.ref == selection ? "Selected" : ""
+            },
             action: { select($0.ref) }
         ) { model in
             ModelRailCard(
                 model: model,
-                selectionAccent: model.ref == selection ? rowAccent(isSelected: true) : nil
+                selectionAccent: model.ref == selection ? rowAccent(isSelected: true) : nil,
+                isApplying: model.ref == selection && selectionAvailability.isApplying
             )
             #if HOSTED_TEST
             .modifier(ModelPickerHostedActionModifier(
@@ -1101,60 +1088,12 @@ struct ModelPicker: View {
     private func row(_ model: ModelSummary) -> some View {
         let summary = ModelCardFacts.rowSummary(model)
         let identity = model.pickerIdentity
-        return Button { select(model.ref) } label: {
-            HStack(spacing: 12) {
-                Image(systemName: selection == model.ref ? "checkmark.circle.fill" : "cpu")
-                    .foregroundStyle(
-                        settingsTheme?.accent
-                            ?? (selection == model.ref ? Color.tronEmerald : Color.tronSlate)
-                    )
-                    .frame(width: 22)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(model.displayName)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronTextPrimary)
-                        if model.virtual == true {
-                            Text("Virtual route")
-                                .font(TronTypography.secondaryDescription)
-                                .foregroundStyle(Color.tronTextSecondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.tronCyan.opacity(0.12), in: Capsule())
-                        }
-                    }
-                    // One line each keeps rows a uniform height, so the lazy
-                    // stack's estimates for unbuilt rows stay right and the
-                    // scroll position does not jump when scrolling back.
-                    if let summary {
-                        Text(summary)
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .lineLimit(1)
-                    }
-                    Text(identity)
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer(minLength: 8)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .tronScrollSurface(
-            accent: rowAccent(isSelected: selection == model.ref),
-            cornerRadius: 14,
-            tintOpacity: selection == model.ref ? 0.18 : 0.08
+        return TronCatalogOptionRow(
+            title: model.displayName, summary: summary, detail: identity,
+            badge: model.virtual == true ? "Virtual route" : nil,
+            isSelected: selection == model.ref, isApplying: selectionAvailability.isApplying,
+            isEnabled: selectionAvailability.canSelect, action: { select(model.ref) }
         )
-        .disabled(selectionLockedReason != nil)
-        .accessibilityLabel([model.displayName, summary, identity]
-            .compactMap { $0 }.joined(separator: ", "))
-        .accessibilityValue(selection == model.ref ? "Selected" : "")
         #if HOSTED_TEST
         .modifier(ModelPickerHostedActionModifier(
             id: "picker.row.\(model.provider)/\(model.id)",
@@ -1179,7 +1118,7 @@ struct ModelPicker: View {
     }
 
     private func select(_ ref: ModelRef) {
-        guard selectionLockedReason == nil else { return }
+        guard selectionAvailability.canSelect else { return }
         selection = ref
     }
 

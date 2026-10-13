@@ -931,30 +931,12 @@ final class ChatMediaLoader {
     }
 
     #if HOSTED_TEST
-    func hostedWaitForThumbnailFlightCount(_ count: Int) async {
-        if thumbnailFlights.count >= count { return }
-        await withCheckedContinuation { hostedThumbnailFlightWaiters.append((count, $0)) }
-    }
 
     func hostedWaitForPreviewAdmissionCount(_ count: Int) async {
         if hostedPreviewAdmissionCount >= count { return }
         await withCheckedContinuation { hostedPreviewAdmissionWaiters.append((count, $0)) }
     }
 
-    func hostedWaitForPreviewLeaseCount(_ count: Int) async {
-        if (previewFlight?.requests.count ?? 0) >= count { return }
-        await withCheckedContinuation { hostedPreviewLeaseWaiters.append((count, $0)) }
-    }
-
-    func hostedWaitForFilePreviewFlight() async {
-        if previewFlight?.kind == .file { return }
-        await withCheckedContinuation { hostedFilePreviewWaiters.append($0) }
-    }
-
-    func hostedWaitForInlineArtifactFlightCount(_ count: Int) async {
-        if inlineArtifactFlights.count >= count { return }
-        await withCheckedContinuation { hostedInlineArtifactFlightWaiters.append((count, $0)) }
-    }
     #endif
 
     private func hostedNotifyMediaCounts() {

@@ -1,35 +1,27 @@
 {
-  "configurations" : [
+  "configurations": [
     {
-      "id" : "A49FF3B9-7BDA-45CA-8C72-77CBE6766FAF",
-      "name" : "Default",
-      "options" : {
-      }
+      "id": "A49FF3B9-7BDA-45CA-8C72-77CBE6766FAF",
+      "name": "Default",
+      "options": {}
     }
   ],
-  "defaultOptions" : {
-    "diagnosticCollectionPolicy" : "Never",
-    "targetForVariableExpansion" : {
-      "containerPath" : "container:TronMobile.xcodeproj",
-      "identifier" : "5CE10CFB51EA2F88B755A197",
-      "name" : "TronMobile"
+  "defaultOptions": {
+    "diagnosticCollectionPolicy": "Never",
+    "targetForVariableExpansion": {
+      "containerPath": "container:TronMobile.xcodeproj",
+      "identifier": "5CE10CFB51EA2F88B755A197",
+      "name": "TronMobile"
     }
   },
-  "testTargets" : [
+  "testTargets": [
     {
-      "target" : {
-        "containerPath" : "container:TronMobile.xcodeproj",
-        "identifier" : "2423FA22FBA724E77DCB5381",
-        "name" : "TronMobileTests"
-      }
-    },
-    {
-      "target" : {
-        "containerPath" : "container:TronMobile.xcodeproj",
-        "identifier" : "6C84D08D5E56B9C22DF122FB",
-        "name" : "TronMobileUITests"
+      "target": {
+        "containerPath": "container:TronMobile.xcodeproj",
+        "identifier": "6C84D08D5E56B9C22DF122FB",
+        "name": "TronMobileUITests"
       }
     }
   ],
-  "version" : 1
+  "version": 1
 }

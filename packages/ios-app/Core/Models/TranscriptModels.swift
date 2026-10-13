@@ -232,7 +232,12 @@ package enum ChatDirection: String, Codable, Sendable { case inboundContext, age
 package enum ChatContextEffect: String, Codable, Sendable { case none, modelInput, hiddenModelInput, toolResult }
 package enum ChatDelivery: String, Codable, Sendable { case stored, nextTurn, steer, followUp, triggeredTurn, continuedTurn, beforeAgentStart, toolResult, unknown }
 package enum ChatOriginKind: String, Codable, Sendable { case user, subagent, `extension`, process, gateway, assistant, unknown }
-package enum ChatSemanticKind: String, Codable, Sendable { case prompt, resourcePrompt, command, message, tool, status, state, unknown }
+package enum ChatSemanticKind: String, Codable, Sendable {
+    case prompt, resourcePrompt, command, message, tool, status, state, unknown
+    package init(from decoder: Decoder) throws {
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+}
 package enum ChatSemanticVisibility: String, Codable, Sendable { case visible, hidden }
 
 package enum ChatOriginConfidence: String, Codable, Sendable { case boundary, receipt, adapter, unknown }
@@ -285,10 +290,13 @@ package struct ChatSemanticMetadata: Codable, Hashable, Sendable {
     package let lifecycle: InvocationLifecycle?
     package let resourceInvocation: ComposerResourceInvocation?
     package let submittedText: String?
+    /// Present only on a command row a fork inherited, whose lifecycle settled in its origin session.
+    package let settledInOriginSession: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case version, direction, contextEffect, delivery, visibility, kind, origin,
-             invocationId, operationId, sequence, lifecycle, resourceInvocation, submittedText
+             invocationId, operationId, sequence, lifecycle, resourceInvocation, submittedText,
+             settledInOriginSession
     }
 
     package init(
@@ -304,12 +312,14 @@ package struct ChatSemanticMetadata: Codable, Hashable, Sendable {
         sequence: Int,
         lifecycle: InvocationLifecycle? = nil,
         resourceInvocation: ComposerResourceInvocation? = nil,
-        submittedText: String? = nil
+        submittedText: String? = nil,
+        settledInOriginSession: Bool? = nil
     ) {
         self.version = version; self.direction = direction; self.contextEffect = contextEffect
         self.delivery = delivery; self.visibility = visibility; self.kind = kind; self.origin = origin
         self.invocationId = invocationId; self.operationId = operationId; self.sequence = sequence
         self.lifecycle = lifecycle; self.resourceInvocation = resourceInvocation; self.submittedText = submittedText
+        self.settledInOriginSession = settledInOriginSession
     }
 
     package init(from decoder: Decoder) throws {
@@ -327,6 +337,7 @@ package struct ChatSemanticMetadata: Codable, Hashable, Sendable {
         lifecycle = try values.decodeIfPresent(InvocationLifecycle.self, forKey: .lifecycle)
         resourceInvocation = try values.decodeIfPresent(ComposerResourceInvocation.self, forKey: .resourceInvocation)
         submittedText = try values.decodeIfPresent(String.self, forKey: .submittedText)
+        settledInOriginSession = try values.decodeIfPresent(Bool.self, forKey: .settledInOriginSession)
         guard version == 1, sequence >= 0,
               submittedText.map({ $0.utf8.count <= 192 * 1_024 }) ?? true,
               invocationId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,

@@ -13,10 +13,11 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePath
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import urlencode, quote
 
 import claim as claims
 import start
-from gh import Gh
+from gh import Gh, GhError
 
 # Workflow rule: a claim with no push or comment for this long is flagged.
 STALE_AFTER = timedelta(hours=48)
@@ -78,16 +79,13 @@ query($owner: String!, $name: String!, $labels: [String!], $cursor: String) {
 """.replace("__ISSUE__", _ISSUE_FIELDS)
 
 _PULLS = """
-query($owner: String!, $name: String!, $verify: String!, $cursor: String) {
+query($owner: String!, $name: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequests(states: OPEN, first: 100, after: $cursor) {
       pageInfo { hasNextPage endCursor }
       nodes {
         number title url isDraft headRefName isCrossRepository
         comments(last: 1) { nodes { createdAt } }
-        commits(last: 1) {
-          nodes { commit { oid statusCheckRollup { state } status { context(name: $verify) { state } } } }
-        }
       }
     }
   }
@@ -127,6 +125,53 @@ def _issue_states(gh: Gh, owner: str, name: str, numbers: List[int]) -> Dict[int
     return states
 
 
+def _ci_evidence(gh: Gh, repository: str, config: dict) -> List[dict]:
+    """The latest main-push CI run, read live; never persist a second failure registry.
+
+    API failures are not green: an unavailable run is reported as unavailable.
+    """
+    board = config["dashboard"]
+    workflow = board.get("ciWorkflow")
+    names = board.get("ciJobs", [])
+    if not workflow or not names:
+        return []
+    branch = config["claim"]["baseBranch"]
+    row = {"scope": branch, "branch": branch, "sha": None, "url": None, "state": "missing", "jobs": {}}
+    try:
+        path = f"repos/{repository}/actions/workflows/{quote(workflow, safe='')}/runs?{urlencode({'branch': branch, 'event': 'push', 'per_page': 1})}"
+        candidates = gh.rest("GET", path)["workflow_runs"]
+        candidate = candidates[0] if candidates else None
+        if candidate and (candidate["head_branch"] != branch or candidate["event"] != "push"
+                          or candidate["head_repository"]["full_name"] != repository):
+            candidate = None
+        if candidate:
+            row.update(sha=candidate["head_sha"], url=candidate["html_url"],
+                       state=candidate["conclusion"] if candidate["status"] == "completed" else "pending")
+            run_id = int(candidate["id"])
+            jobs = []
+            # Job lists are paginated, bounded to 1,000. Incomplete evidence is unavailable,
+            # never a silently healthy subset.
+            for page in range(1, 11):
+                response = gh.rest("GET", f"repos/{repository}/actions/runs/{run_id}/jobs?filter=latest&per_page=100&page={page}")
+                jobs.extend(response["jobs"])
+                if len(jobs) >= response["total_count"]:
+                    break
+            else:
+                raise DashboardError("Actions job list exceeds 1,000 jobs")
+            by_name = {job["name"]: job for job in jobs}
+            for name in names:
+                job = by_name.get(name)
+                state = (job["conclusion"] or "unknown") if job and job["status"] == "completed" else "pending"
+                if not job:
+                    state = "pending" if row["state"] == "pending" else "missing"
+                row["jobs"][name] = {"state": state, "url": job["html_url"] if job else None}
+    except (GhError, DashboardError, KeyError, TypeError, ValueError):
+        # Do not expose raw CLI diagnostics (which may hold local paths).
+        row["state"] = "unavailable"
+        row["jobs"] = {}
+    return [row]
+
+
 def fetch_github(gh: Gh, owner: str, name: str, config: dict, claim_numbers: Iterable[int]) -> dict:
     """GitHub's side of the snapshot; claim_numbers are the issues named by every claim-style branch."""
     board, rules = config["dashboard"], config["claim"]
@@ -142,12 +187,11 @@ def fetch_github(gh: Gh, owner: str, name: str, config: dict, claim_numbers: Ite
         _ITEMS, project=project, cursor=cursor, status=rules["statusField"],
         priority=board["priorityField"], rank=board["rankField"],
     )["node"]["items"])
-    labels = board["needsYouLabels"] + [board["regressionLabel"]]
     labeled = _pages(lambda cursor: gh.graphql(
-        _LABELED, owner=owner, name=name, labels=labels, cursor=cursor,
+        _LABELED, owner=owner, name=name, labels=[board["regressionLabel"]], cursor=cursor,
     )["repository"]["issues"])
     pulls = _pages(lambda cursor: gh.graphql(
-        _PULLS, owner=owner, name=name, verify=board["verifyContext"], cursor=cursor,
+        _PULLS, owner=owner, name=name, cursor=cursor,
     )["repository"]["pullRequests"])
 
     known = {i["number"] for i in labeled}
@@ -161,6 +205,7 @@ def fetch_github(gh: Gh, owner: str, name: str, config: dict, claim_numbers: Ite
         "project_items": items,
         "labeled_issues": labeled,
         "pull_requests": pulls,
+        "ci": _ci_evidence(gh, repository, config),
         "issue_states": _issue_states(gh, owner, name, unknown) if unknown else {},
     }
 
@@ -209,16 +254,11 @@ def _ref(issue: dict) -> dict:
 
 
 def _pull(node: dict) -> dict:
-    commits = node["commits"]["nodes"]
-    commit = commits[-1]["commit"] if commits else {}
-    verify = ((commit.get("status") or {}).get("context") or {}).get("state")
     return {
         "number": node["number"],
         "title": node["title"],
         "url": node["url"],
         "draft": node["isDraft"],
-        "checks": (commit.get("statusCheckRollup") or {}).get("state"),
-        "verify": verify,
         "last_comment": _last_comment(node),
     }
 
@@ -308,15 +348,6 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
     def claimable(issue: dict) -> bool:
         return not excluded & set(issue["labels"])
 
-    needs_you = []
-    for issue in open_issues:
-        reasons = sorted(set(issue["labels"]) & set(board["needsYouLabels"]))
-        if issue["status"] == board["needsYouStatus"]:
-            reasons.append(f"Status {issue['status']}")
-        if reasons:
-            needs_you.append({**_ref(issue), "reasons": reasons})
-    needs_you.sort(key=lambda e: (priority_index(issues[e["number"]]), e["number"]))
-
     epics = [
         {**_ref(i), "rank": i["rank"], "completed": i["sub_issues"]["completed"], "total": i["sub_issues"]["total"]}
         for i in open_issues if board["epicLabel"] in i["labels"]
@@ -375,7 +406,6 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
         if len(owned) > 1:
             disagreements.append({**base, "kind": "multiple-claims",
                                   "detail": "claim branches " + ", ".join(c["branch"] for c in owned)})
-    # Needs you is not active: merged work awaiting validation has no branch.
     for row in in_progress:
         if row["branch"] is None:
             disagreements.append({**{k: row[k] for k in ("number", "title", "url")},
@@ -391,7 +421,6 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
         "generated_at": _stamp(now),
         "repository": repository,
         "project": config["project"]["title"],
-        "needs_you": needs_you,
         "epics": epics,
         "in_progress": in_progress,
         "ready": ready,
@@ -403,6 +432,7 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
         "orphans": {"worktrees": orphan_worktrees, "branches": orphan_branches},
         "regressions": [_ref(i) for i in open_issues if board["regressionLabel"] in i["labels"]],
         "classification": classification,
+        "ci": snapshot.get("ci", []),
         "work": work,
         "priority_order": priority_order,
         "recent_days": board["recentDays"],
@@ -437,7 +467,7 @@ def _vocabulary(config: dict) -> dict:
 
 def _status_order(config: dict) -> List[str]:
     rules, board = config["claim"], config["dashboard"]
-    first = [board["needsYouStatus"], *rules["activeStatuses"], rules["readyStatus"], board["blockedStatus"]]
+    first = [*rules["activeStatuses"], rules["readyStatus"], board["blockedStatus"]]
     status_field = next(f for f in config["project"]["fields"] if f["name"] == rules["statusField"])
     rest = [o["name"] for o in status_field["options"] if o["name"] not in first]
     return first + rest
@@ -485,7 +515,7 @@ def _work(issues: Dict[int, dict], vocabulary: dict, config: dict, ready: List[d
 
 
 def _classification(open_issues: List[dict], vocabulary: dict, config: dict) -> List[dict]:
-    """Missing, repeated or undeclared kind/visibility labels, and committed ideas (failure mode 44)."""
+    """Repeated or undeclared kind/visibility labels, and committed ideas. Labels are optional, so absence is not a problem."""
     board, rules = config["dashboard"], config["claim"]
     committed = {rules["readyStatus"], *rules["claimedStatuses"]}
     problems = []
@@ -500,9 +530,7 @@ def _classification(open_issues: List[dict], vocabulary: dict, config: dict) -> 
             undeclared = [label for label in present if label not in declared]
             if undeclared:
                 found.append("undeclared " + ", ".join(undeclared))
-            if not present:
-                found.append(f"no {noun} label")
-            elif len(present) > 1:
+            if len(present) > 1:
                 found.append(f"{len(present)} {noun} labels: " + ", ".join(present))
         if board["ideaLabel"] in issue["labels"] and issue["status"] in committed:
             found.append(f"{board['ideaLabel']} while {issue['status']}")
@@ -525,6 +553,17 @@ def _absence(number: int, state: str) -> str:
 # ---------------------------------------------------------------- rendering
 
 
+def _ci_alert(row: dict) -> bool:
+    return row["state"] not in {"success", "skipped"} or any(
+        job["state"] not in {"success", "skipped"} for job in row["jobs"].values())
+
+
+def _ci_text(row: dict) -> str:
+    jobs = ", ".join(f"{name}={job['state']}" for name, job in row["jobs"].items())
+    return (f"{row['scope']} {row['branch']} {(row['sha'] or 'unknown')[:12]}: {row['state']}"
+            + (f" ({jobs})" if jobs else "") + (f" {row['url']}" if row["url"] else ""))
+
+
 def render_text(model: dict) -> str:
     cap = model["soft_cap"]
     lines = [f"{model['repository']} - Project {model['project']!r} - {model['generated_at']}"]
@@ -533,12 +572,10 @@ def render_text(model: dict) -> str:
         lines.append(f"{title} ({len(rows)})")
         lines.extend("  " + row for row in rows)
 
-    section("Needs you", [f"#{e['number']} {e['title']} [{', '.join(e['reasons'])}]" for e in model["needs_you"]])
     section("Epics", [f"#{e['number']} {e['title']} {e['completed']}/{e['total']}" for e in model["epics"]])
     section(f"In progress, soft cap {cap['cap']}" + (" EXCEEDED" if cap["over"] else ""), [
         f"#{r['number']} {r['status']} {r['branch'] or '(no claim branch)'} session {r['session'] or '?'} "
-        f"{_idle(r['idle_hours'])}" + (f" PR #{r['pr']['number']} checks {r['pr']['checks'] or '-'} "
-                                        f"verify {r['pr']['verify'] or '-'}" if r["pr"] else "")
+        f"{_idle(r['idle_hours'])}" + (f" PR #{r['pr']['number']}" if r["pr"] else "")
         + (" STALE" if r["stale"] else "")
         for r in model["in_progress"]
     ])
@@ -551,6 +588,7 @@ def render_text(model: dict) -> str:
     section("Orphans", [f"worktree {o['path']}: {o['reason']}" for o in orphans["worktrees"]]
             + [f"branch {o['branch']}: {o['reason']}" for o in orphans["branches"]])
     section("Regressions", [f"#{e['number']} {e['title']}" for e in model["regressions"]])
+    section("CI (latest main push)", [_ci_text(row) for row in model["ci"]])
     section("Classification", [f"#{p['number']} {p['problem']}" for p in model["classification"]])
     if model["ignored_items"]:
         lines.append(f"Ignored {model['ignored_items']} Project item(s) without an issue of this repository")
@@ -700,11 +738,6 @@ def _idle(hours: Optional[float]) -> str:
     return f"{int(hours // 24)}d ago"
 
 
-def _check(label: str, state: Optional[str]) -> str:
-    css = {"SUCCESS": "ok", "FAILURE": "bad", "ERROR": "bad", "PENDING": "warn", "EXPECTED": "warn"}.get(state or "", "")
-    return _tag(f"{label} {(state or 'none').lower()}", css)
-
-
 def _priority(name: Optional[str], order: List[str]) -> str:
     if not name:
         return ""
@@ -717,11 +750,6 @@ def _kind_mark(vocabulary: dict, token: Optional[str]) -> str:
     style = f' style="--k:#{kind["color"]}"' if kind and kind["color"] else ""
     title = _e(kind["label"]) if kind else "unclassified"
     return f'<span class="k" title="{title}"{style}></span>'
-
-
-def _needs_you(model: dict) -> str:
-    rows = [f'<li class="alert">{_line(e, *[_tag(r, "warn") for r in e["reasons"]])}</li>' for e in model["needs_you"]]
-    return _section("needs-you", "Needs you", _rows(rows, "Nothing needs you"), str(len(rows)))
 
 
 def _health(model: dict) -> str:
@@ -738,6 +766,8 @@ def _health(model: dict) -> str:
          + [f'<li class="flag">{_line(None, _tag(o["reason"]), head="<code>" + _e(o["branch"]) + "</code>")}</li>'
             for o in orphans["branches"]]),
         ("Regressions", [f'<li class="alert">{_line(e)}</li>' for e in model["regressions"]]),
+        ("CI", [f'<li class="alert">{_e(_ci_text(row))}</li>'
+                         for row in model["ci"] if _ci_alert(row)]),
         ("Classification", [f'<li class="flag">{_line(p, _tag(p["problem"], "warn"))}</li>'
                             for p in model["classification"]]),
         ("Soft cap", [f'<li class="alert">{_line(None, head=_e(over))}</li>'] if cap["over"] else []),
@@ -767,7 +797,6 @@ def _in_progress(model: dict, order: List[str]) -> str:
              + (" (draft)" if pr["draft"] else "") + "</div>") if pr else "<div><span class=key>no pull request</span></div>",
         ]
         tags = (_tag(r["status"]), _priority(r.get("priority"), order),
-                _check("checks", pr["checks"]) if pr else "", _check("verify", pr["verify"]) if pr else "",
                 _tag("stale", "warn") if r["stale"] else _tag(_idle(r["idle_hours"])))
         rows.append(f'<li class="{"flag" if r["stale"] else ""}"><details><summary>{_line(r, *tags)}</summary>'
                     f'<div class="more">{"".join(detail)}</div></details></li>')
@@ -895,12 +924,29 @@ def _epics(model: dict) -> str:
     return _section("epics", "Epics", _rows(items, "No epics"), str(len(items)))
 
 
+def _ci_section(model: dict) -> str:
+    if not model["ci"]:
+        return ""
+    rows = []
+    for row in model["ci"]:
+        url = row["url"] or ""
+        link = f'<a href="{_e(url)}">run</a>' if url.startswith("https://") else ""
+        jobs = " ".join(
+            f'<a href="{_e(job["url"])}">{_e(name)}={_e(job["state"])}</a>'
+            if (job["url"] or "").startswith("https://") else f'{_e(name)}={_e(job["state"])}'
+            for name, job in row["jobs"].items())
+        rows.append(f'<li>{_e(row["scope"])} {_e(row["branch"])} <code>{_e(row["sha"] or "unknown")}</code>'
+                    f' {_e(row["state"])} {link}<div>{jobs}</div></li>')
+    return _section("ci", "CI", '<div class="panel rows">' + "".join(rows) + '</div>',
+                    "Latest main push; not failure history")
+
+
 def render_html(model: dict) -> str:
     order = model.get("priority_order", [])
     cap = model["soft_cap"]
     alerts = (len(model["stale"]) + len(model["disagreements"]) + len(model["orphans"]["worktrees"])
               + len(model["orphans"]["branches"]) + len(model["regressions"]) + len(model["classification"])
-              + int(cap["over"]))
+              + int(cap["over"]) + sum(_ci_alert(row) for row in model["ci"]))
     open_work = sum(1 for r in model["work"] if r["state"] == "OPEN")
     closed = len(model["work"]) - open_work
 
@@ -909,7 +955,6 @@ def render_html(model: dict) -> str:
                 f"<span>{_e(label)}</span></a>")
 
     tiles = ('<nav class="tiles" aria-label="Overview">'
-             + tile("needs-you", len(model["needs_you"]), "needs you", bool(model["needs_you"]))
              + tile("health", alerts, "alerts", bool(alerts))
              + tile("in-progress", f"{cap['in_progress']}/{cap['cap']}", "in progress", cap["over"])
              + tile("work", open_work, "open work")
@@ -927,7 +972,7 @@ def render_html(model: dict) -> str:
         f'<header><div class="brand">{_e(model["project"])} · work</div><h1>{_e(model["repository"])}</h1>'
         f'<div class="sub">Snapshot {_e(stamp)} · live from GitHub and Git when generated</div>'
         '<div class="stripe"></div></header>'
-        + tiles + _needs_you(model) + _health(model) + _in_progress(model, order) + work + _epics(model)
+        + tiles + _health(model) + _ci_section(model) + _in_progress(model, order) + work + _epics(model)
         + ignored + "</body></html>\n"
     )
 

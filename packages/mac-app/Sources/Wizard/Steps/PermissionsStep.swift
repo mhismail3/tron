@@ -38,10 +38,10 @@ struct PermissionSetupView: View {
                         .disabled(busy || !setup.canManageLaunchAgent)
                 }
                 if serviceState == .enabled {
-                    Button("Disable Helper for Update") { changeService(disable: true) }
+                    Button("Disable Helper") { changeService(disable: true) }
                         .buttonStyle(.wizardLink)
                         .disabled(busy || !setup.canManageLaunchAgent)
-                    Text("Before replacing Tron.app, disable this helper using the current app. This joins capture before unregistering; it does not revoke permissions or stop the Gateway.")
+                    Text("This unregisters the helper after draining native work. It does not revoke permissions or stop the Gateway. Use Quit Tron before replacing Tron.app; Quit preserves the approved helper registration.")
                         .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
                 }
                 if let actionError {

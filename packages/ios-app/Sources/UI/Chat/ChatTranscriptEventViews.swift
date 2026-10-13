@@ -1,5 +1,21 @@
 import SwiftUI
 
+/// Remove only repeated turn clearance inside contiguous event runs. Each event
+/// keeps its own identity and 44-point target; prose/tools end the run.
+enum ChatNotificationRunSpacing {
+    nonisolated static func compactIDs<S: Sequence>(in items: S) -> Set<String> where S.Element == ChatTranscriptRenderItem {
+        var result = Set<String>()
+        var previous: String?
+        for item in items {
+            if case .notification = item {
+                if let previous { result.insert(previous) }
+                previous = item.id
+            } else { previous = nil }
+        }
+        return result
+    }
+}
+
 /// Shared compact visual treatment for transcript navigation actions.
 /// The glass remains content-sized while the owning button supplies a separate
 /// 44-point semantic target.
@@ -57,16 +73,16 @@ struct ChatNotificationView: View {
         // offers none.
         let detailAction: (() -> Void)? = showsDetailAction ? { showDetail() } : nil
         return pill
+            // The semantic target includes its clearance, not only the visible
+            // glass. Adjacent notification rows can then meet without overlap.
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
             .chatCompactPillInteraction(
                 accessibilityLabel: accessibilityLabel,
                 addsButtonTrait: showsDetailAction,
                 action: detailAction
             )
             .allowsHitTesting(showsDetailAction)
-            .frame(
-                minWidth: showsDetailAction ? 44 : 0,
-                minHeight: showsDetailAction ? 44 : 0
-            )
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
             .contentTransition(.interpolate)
             // A runtime notification that stops showing progress is the one
@@ -75,9 +91,7 @@ struct ChatNotificationView: View {
             // row-host animation would be suppressed by the projection's own
             // transaction below it.
             .animation(
-                ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(
-                    reduceMotion: reduceMotion
-                ),
+                ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion),
                 value: presentation.showsProgress
             )
             .accessibilityLabel(accessibilityLabel)
@@ -160,11 +174,13 @@ struct ChatNotificationDetailSheet: View {
                     }
                     if let body = presentation.body {
                         ChatPreparedMarkdownDetail(text: body, detailID: detailID)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(14)
                             .modifier(DetailBodySurface(
                                 usesGlass: presentation.detailUsesGlassSurface,
                                 accent: presentation.tone.surfaceColor
                             ))
+                            .accessibilityIdentifier("chat-notification-body")
                     }
                 }
                 .padding(18)
@@ -292,7 +308,7 @@ struct TranscriptNotice: View {
             guard animatesEntrance, !revealed else { return }
             if reduceMotion { revealed = true }
             else {
-                withAnimation(.smooth(duration: 0.24)) { revealed = true }
+                withAnimation(ChatMotion.eventArrive(reduceMotion: false)) { revealed = true }
             }
         }
     }

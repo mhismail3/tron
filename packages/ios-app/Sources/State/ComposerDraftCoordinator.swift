@@ -229,6 +229,14 @@ enum ComposerAttachmentPolicy {
     }
 }
 
+/// The logical route a submission is admitted for. A Home conversation keeps
+/// its physical chapter as presentation identity, but its prompts go through
+/// `home.prompt`, which resolves the current chapter when the prompt is sent.
+enum ComposerSubmissionRoute: Equatable, Sendable {
+    case session
+    case home
+}
+
 struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let target: SessionPresentationIdentity
     let textRevision: Int
@@ -239,6 +247,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let resourceInvocation: ComposerResourceInvocation?
     let attachmentIDs: [String]
     let behavior: String?
+    let route: ComposerSubmissionRoute
     let baselineQueuedMessageIDs: Set<String>
 
     init(
@@ -248,6 +257,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         resourceInvocation: ComposerResourceInvocation? = nil,
         attachmentIDs: [String],
         behavior: String?,
+        route: ComposerSubmissionRoute = .session,
         baselineQueuedMessageIDs: Set<String> = [],
         localNonce: UInt64
     ) {
@@ -258,6 +268,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         self.resourceInvocation = resourceInvocation
         self.attachmentIDs = attachmentIDs
         self.behavior = behavior
+        self.route = route
         self.baselineQueuedMessageIDs = baselineQueuedMessageIDs
     }
 
@@ -348,7 +359,8 @@ typealias ComposerSendOperation = @MainActor @Sendable (
     _ sessionID: String,
     _ uploadIDs: [String],
     _ behavior: String?,
-    _ resourceInvocation: ComposerResourceInvocation?
+    _ resourceInvocation: ComposerResourceInvocation?,
+    _ route: ComposerSubmissionRoute
 ) async throws -> String
 
 typealias ComposerAttachmentPreviewPreparation = @Sendable (
@@ -528,6 +540,16 @@ final class ComposerDraftCoordinator {
         let scope = ComposerDraftScope(profileID: profileID, sessionID: sessionID)
         touch(scope, installing: initialText)
         return scope
+    }
+
+    /// A Home route's unsent text follows it to the chapter Home names next. The
+    /// destination takes the text only as an absent draft, the same seed rule as an
+    /// initial editor text, so a retained successor draft is never replaced. The
+    /// source keeps its own draft: a submission still in flight on the sealed
+    /// chapter may restore that text.
+    func carryDraft(from source: ComposerDraftScope, to destination: ComposerDraftScope) {
+        guard source != destination, let text = drafts[source]?.text, !text.isEmpty else { return }
+        touch(destination, installing: text)
     }
 
     func text(for scope: ComposerDraftScope) -> String {
@@ -1433,6 +1455,7 @@ final class ComposerDraftCoordinator {
         target: SessionPresentationIdentity,
         behavior: String?,
         resourceInvocation: ComposerResourceInvocation? = nil,
+        route: ComposerSubmissionRoute = .session,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
         runtimeGeneration: String? = nil
@@ -1441,6 +1464,7 @@ final class ComposerDraftCoordinator {
             target: target,
             behavior: behavior,
             resourceInvocation: resourceInvocation,
+            route: route,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages,
             runtimeGeneration: runtimeGeneration
@@ -1472,7 +1496,8 @@ final class ComposerDraftCoordinator {
                 submission.target.sessionID,
                 admission.snapshot.attachmentIDs,
                 admission.snapshot.behavior,
-                admission.snapshot.resourceInvocation
+                admission.snapshot.resourceInvocation,
+                admission.snapshot.route
             )
         } catch {
             // A route may disappear after admission. The exact submission
@@ -1880,6 +1905,7 @@ final class ComposerDraftCoordinator {
         target: SessionPresentationIdentity,
         behavior: String?,
         resourceInvocation: ComposerResourceInvocation?,
+        route: ComposerSubmissionRoute,
         canonicalTranscript: [TranscriptItem],
         queuedMessages: [SessionSnapshot.QueuedMessage],
         runtimeGeneration: String?
@@ -1972,6 +1998,7 @@ final class ComposerDraftCoordinator {
             resourceInvocation: selectedResource,
             attachmentIDs: attachmentIDs,
             behavior: behavior,
+            route: route,
             baselineQueuedMessageIDs: Set(queuedMessages.map(\.id)),
             localNonce: sequence
         )
@@ -2428,8 +2455,6 @@ final class ComposerDraftCoordinator {
     }
 
     #if HOSTED_TEST
-    var hostedDraftCount: Int { drafts.count }
-    var hostedUploadAdmissionCount: Int { uploadAdmissions.count }
 
     func installHostedPresentation(
         profileID: String,
@@ -2443,27 +2468,5 @@ final class ComposerDraftCoordinator {
         return scope
     }
 
-    func installHostedRestoredPresentation(
-        profileID: String,
-        target: SessionPresentationIdentity,
-        lifecycleGeneration: Int,
-        initialText: String? = nil
-    ) async -> ComposerDraftScope {
-        let scope = prepareDraft(
-            profileID: profileID,
-            sessionID: target.sessionID,
-            initialText: initialText
-        )
-        await restoreDraftIfNeeded(scope)
-        _ = beginOpening(scope: scope, lifecycleGeneration: lifecycleGeneration)
-        _ = mountPreparedPresentation(target)
-        return scope
-    }
-
-    func installHostedAttachment(_ attachment: PendingAttachment, target: SessionPresentationIdentity) {
-        guard admits(target), let scope = lease?.scope else { return }
-        attachmentsByScope[scope, default: []].append(attachment)
-        schedulePersistence(for: scope)
-    }
     #endif
 }

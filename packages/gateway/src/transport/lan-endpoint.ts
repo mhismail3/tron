@@ -67,6 +67,8 @@ export interface LanEndpointHandlers {
    * handed that same socket later, so the accept time the listener recorded at
    * `onConnection` is carried across here. */
   readonly onSecureConnection: (socket: Duplex) => void;
+  readonly onClientError: (error: Error, socket: Duplex) => void;
+  readonly onTlsClientError: (error: Error, socket: Duplex) => void;
   readonly onRequest: (request: IncomingMessage, response: ServerResponse) => void;
   readonly onUpgrade: (request: IncomingMessage, socket: Duplex, head: Buffer) => void;
 }
@@ -516,6 +518,10 @@ export class LanEndpoint {
       this.options.onConnection(socket);
     });
     listener.on("secureConnection", (socket) => this.options.onSecureConnection(socket));
+    listener.on("clientError", (error, socket) => this.options.onClientError(error, socket));
+    // Observe before HTTPS forwards the error to clientError and retires the
+    // wrapper; its live address/port still joins the accepted physical socket.
+    listener.prependListener("tlsClientError", (error, socket) => this.options.onTlsClientError(error, socket));
     listener.on("upgrade", (request, socket, head) => this.options.onUpgrade(request, socket, head));
     try {
       await new Promise<void>((resolve, reject) => {

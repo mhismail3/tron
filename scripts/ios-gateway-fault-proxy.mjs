@@ -58,8 +58,11 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     logsExportRequestBytes: null, logsExportResponseBytes: null,
   };
   const logsExportRequestIDs = new Set();
+  // Ping timelines keep the last 128 client pings across every bridge of this
+  // fixture, so a failing case's final pings are never the ones evicted.
   const outstandingClientPings = [];
   let clientPingSequence = 0;
+  let bridgeSequence = 0;
   let heldHTTP = false;
   let releaseHTTP;
   let httpHoldTimer;
@@ -93,7 +96,13 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     for (const response of waiters) answer(response, 200, { intercepted: true });
     waiters.clear();
   };
-  const server = createServer({ requestTimeout: 5_000, headersTimeout: 5_000 }, async (request, response) => {
+  // Once shaped, this proxy, not the client, paces how fast a request body is
+  // read, so its listener bounds must measure client inactivity rather than
+  // the fixture's own pacing: there is no whole-request deadline, and the
+  // socket's idle bound (`server.timeout`) is disarmed while a body part waits
+  // in the shared schedule and re-armed once it is forwarded. Headers are read
+  // unpaced and keep their own deadline.
+  const server = createServer({ requestTimeout: 0, headersTimeout: 5_000 }, async (request, response) => {
     if (request.url === "/_fixture/control") {
       if (request.headers["x-tron-fixture-token"] !== token) { answer(response, 403, {}); return; }
       try {
@@ -148,6 +157,15 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           answer(response, 200, { mode: policy.mode });
           return;
         }
+        if (next.mode === "replace-held-open") {
+          if (policy.mode !== "hold-open" || !intercepted) throw new Error("no held open to replace");
+          // Discard the old response and arm the same barrier for the new
+          // transport. await-intercepted now proves a replacement answered.
+          intercepted = false;
+          for (const bridge of [...bridges]) bridge.terminate();
+          answer(response, 200, { mode: next.mode });
+          return;
+        }
         if (next.mode === "close") {
           if (![1000, 1001, 1008, 1012, 1013].includes(next.code)) throw new Error("invalid close code");
           for (const bridge of bridges) bridge.close(next.code);
@@ -171,7 +189,7 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           answer(response, 200, { mode: next.mode, pid });
           return;
         }
-        if (!["pass", "blackhole", "hold-hello", "hold-open", "hold-sync", "hold-http-response", "drop-prompt-response", "reject-upgrade"].includes(next.mode)) throw new Error("unknown fault");
+        if (!["pass", "blackhole", "hold-hello", "hold-open", "hold-sync", "reject-open", "hold-http-response", "drop-prompt-response", "reject-upgrade"].includes(next.mode)) throw new Error("unknown fault");
         if (next.http !== undefined && (next.mode !== "blackhole" || typeof next.http !== "boolean")) throw new Error("invalid http blackhole");
         if (next.mode === "reject-upgrade" && ![401, 403, 503].includes(next.status)) throw new Error("invalid rejection status");
         if (next.mode === "drop-prompt-response" && (typeof next.commandId !== "string" || !/^[A-Za-z0-9._:-]{8,160}$/.test(next.commandId))) throw new Error("invalid command identity");
@@ -254,7 +272,9 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           }
           for (let offset = 0; offset < bytes.length; offset += 16_384) {
             const part = bytes.subarray(offset, Math.min(offset + 16_384, bytes.length));
+            request.socket.setTimeout(0);
             await schedule("http-request-body", part.length, () => upstream.write(part));
+            request.socket.setTimeout(server.timeout);
           }
         }
         if (uploadTransfer?.startMs !== null && uploadTransfer?.startMs !== undefined) {
@@ -267,6 +287,14 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     }).catch(() => { response.destroy(); });
   });
   server.timeout = 10_000;
+  // Name the fixture's own idle retirement in proxy.log, which CI retains, so a
+  // reset client is attributed in one step. The socket's armed bound tells a
+  // keep-alive expiry (5 s) from a stalled client (10 s). A listener replaces
+  // Node's implicit destroy, so it destroys the socket itself.
+  server.on("timeout", socket => {
+    console.log(JSON.stringify({ event: "proxy.client-idle-timeout", elapsedMs: elapsedMilliseconds(), idleTimeoutMs: socket.timeout, shaped: Boolean(shaper) }));
+    socket.destroy();
+  });
   server.on("connection", socket => {
     if (closing || sockets.size >= 12) { socket.destroy(); return; }
     sockets.add(socket); socket.once("close", () => sockets.delete(socket));
@@ -295,6 +323,7 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
         headers: request.headers.authorization ? { authorization: request.headers.authorization } : {},
         maxPayload: maximumBytes, perMessageDeflate: compressed ? { clientMaxWindowBits: false } : false, autoPong: false,
       });
+      const connectionOrdinal = ++bridgeSequence;
       const pending = [];
       const heldFrames = [];
       let pendingBytes = 0, heldBytes = 0;
@@ -348,6 +377,13 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
         try {
           frame = JSON.parse(data.toString());
           if (frame.type === "request" && typeof frame.method === "string") linkStats.dispatchedRPCs++;
+          if (policy.mode === "reject-open" && frame.type === "request" && frame.method === "session.open") {
+            // Ask the real Gateway for an absent session: its own error travels
+            // through the unchanged response decoder, unlike a fabricated reply.
+            frame.params = { sessionId: "00000000-0000-4000-8000-000000000393" };
+            data = Buffer.from(JSON.stringify(frame));
+            signalInterception();
+          }
           if (frame.type === "request" && frame.method === "system.logs.export") {
             linkStats.logsExportRequestBytes = data.length;
             if (logsExportRequestIDs.size >= 16) logsExportRequestIDs.delete(logsExportRequestIDs.values().next().value);
@@ -391,20 +427,28 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
       for (const [source, destination, direction] of [[front, back, "client"], [back, front, "gateway"]]) {
         source.on("ping", data => {
           if (policy.mode === "blackhole") { signalInterception(); return; }
+          // Wall-clock stamps (`*At`) join these records to the phone's own
+          // liveness records on the one host clock; the `*Ms` offsets are
+          // proxy-relative and only order the proxy's events.
           const heartbeat = direction === "client" ? {
             payload: data.toString("hex"),
             timeline: {
               sequence: ++clientPingSequence,
+              connection: connectionOrdinal,
+              enqueuedAt: new Date().toISOString(),
               enqueuedMs: elapsedMilliseconds(),
               forwardedMs: null,
+              gatewayPongAt: null,
               gatewayPongMs: null,
+              roundTripMs: null,
+              appPongForwardedAt: null,
               appPongForwardedMs: null,
             },
           } : undefined;
           if (heartbeat) {
             outstandingClientPings.push(heartbeat);
             linkStats.clientHeartbeatTimeline.push(heartbeat.timeline);
-            if (linkStats.clientHeartbeatTimeline.length > 16) linkStats.clientHeartbeatTimeline.shift();
+            if (linkStats.clientHeartbeatTimeline.length > 128) linkStats.clientHeartbeatTimeline.shift();
             if (outstandingClientPings.length > 16) outstandingClientPings.shift();
           }
           void schedule("websocket-ping", data.length + (direction === "client" ? 6 : 2), () => {
@@ -421,14 +465,19 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
             ? outstandingClientPings.find(ping => ping.payload === data.toString("hex") && ping.timeline.gatewayPongMs === null)
             : undefined;
           if (heartbeat) {
+            heartbeat.timeline.gatewayPongAt = new Date().toISOString();
             heartbeat.timeline.gatewayPongMs = elapsedMilliseconds();
+            heartbeat.timeline.roundTripMs = heartbeat.timeline.gatewayPongMs - heartbeat.timeline.enqueuedMs;
             linkStats.heartbeatRoundTripMilliseconds.push(heartbeat.timeline.gatewayPongMs - heartbeat.timeline.enqueuedMs);
             if (linkStats.heartbeatRoundTripMilliseconds.length > 32) linkStats.heartbeatRoundTripMilliseconds.shift();
           }
           void schedule("websocket-pong", data.length + (direction === "gateway" ? 6 : 2), () => {
             if (destination.readyState === WebSocket.OPEN) {
               destination.pong(data);
-              if (heartbeat) heartbeat.timeline.appPongForwardedMs = elapsedMilliseconds();
+              if (heartbeat) {
+                heartbeat.timeline.appPongForwardedAt = new Date().toISOString();
+                heartbeat.timeline.appPongForwardedMs = elapsedMilliseconds();
+              }
               if (direction === "gateway") linkStats.forwardedWebSocketPongs++;
               if (heartbeat) {
                 const index = outstandingClientPings.indexOf(heartbeat);

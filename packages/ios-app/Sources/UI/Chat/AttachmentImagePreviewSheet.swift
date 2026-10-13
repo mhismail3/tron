@@ -167,7 +167,7 @@ struct AttachmentImagePreviewSheet: View {
                     minHeight: AttachmentImagePreviewLayout.dismissButtonDiameter
                 )
                 .opacity(isZoomed ? 0 : 1)
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: isZoomed)
+                .animation(ChatMotion.attachmentPreview(reduceMotion: reduceMotion), value: isZoomed)
                 .accessibilityHidden(isZoomed)
                 .allowsHitTesting(false)
 

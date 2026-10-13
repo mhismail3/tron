@@ -260,6 +260,9 @@ export type ChatDirection = "inboundContext" | "agentOutput" | "agentInvocation"
 export type ChatContextEffect = "none" | "modelInput" | "hiddenModelInput" | "toolResult";
 export type ChatDelivery = "stored" | "nextTurn" | "steer" | "followUp" | "triggeredTurn" | "continuedTurn" | "beforeAgentStart" | "toolResult" | "unknown";
 export type ChatOriginKind = "user" | "subagent" | "extension" | "process" | "gateway" | "assistant" | "unknown";
+// Released protocol-7 iOS clients decode this vocabulary as a closed enum and
+// reject the whole snapshot on an unknown value. Express new row classes through
+// existing axes (direction/visibility/origin) or a protocol version change.
 export type ChatSemanticKind = "prompt" | "resourcePrompt" | "command" | "message" | "tool" | "status" | "state" | "unknown";
 
 export interface ChatOrigin {
@@ -285,9 +288,13 @@ export interface ChatSemanticMetadata {
   resourceInvocation?: ResourceInvocation;
   /** Authored text retained for image prompts whose SDK history includes generated resize notes. */
   submittedText?: string;
+  /** Set only on a command row a fork inherited from its origin, whose lifecycle settled there. */
+  settledInOriginSession?: true;
 }
 
 export interface ContextDeliveryMetadata {
+  /** Exact canonical user entry of a receipt-bound internal wake, when present. */
+  wakeEntryId?: string;
   source: "extension";
   delivery: "stored" | "triggeredTurn";
   origin?: ExtensionToolOrigin;
@@ -680,6 +687,9 @@ export interface ExtensionOwner {
   id: string;
   title: string;
   source: string;
+  /** Gateway-classified capability, independent of the package source spelling.
+   * Canonical receipts written before classification may omit it. */
+  kind?: "extension" | "subagent";
 }
 
 export interface ExtensionWidget {
@@ -728,7 +738,7 @@ export interface ExtensionSurface {
   placement: ExtensionSurfacePlacement;
   lifecycle: "retained" | "blocking" | "transient" | "restored";
   targetId?: string;
-  provenance?: { source?: string; path?: string };
+  provenance?: { source?: string; path?: string; kind?: "subagent" | "extension" };
   revision: number;
   focused: boolean;
   inputMode: "none" | "keys" | "textAndKeys";
@@ -833,6 +843,8 @@ export interface ResourceInvocation {
 }
 
 export interface QueuedMessageState {
+  /** Internal producer inputs retain their invocation semantics before binding. */
+  semantic?: ChatSemanticMetadata;
   id: string;
   behavior: "steer" | "followUp";
   text: string;
@@ -848,6 +860,8 @@ export interface QueuedMessageState {
 /** A prompt admitted before its canonical user entry exists, usually while
  * Pi performs automatic compaction during prompt preflight. */
 export interface PendingPromptState {
+  /** Internal producer inputs retain their invocation semantics before binding. */
+  semantic?: ChatSemanticMetadata;
   id: string;
   createdAt?: string;
   behavior?: "steer" | "followUp";
@@ -885,7 +899,7 @@ export interface CompactionConfiguration {
   keepRecentTokens: number;
   thinkingLevel: "inherit" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   instructions: string;
-  source: Record<"enabled" | "reserveTokens" | "keepRecentTokens" | "thinkingLevel" | "instructions", "global" | "project" | "default">;
+  source: Record<"enabled" | "reserveTokens" | "keepRecentTokens" | "thinkingLevel" | "instructions", "chat" | "global" | "project" | "default">;
 }
 export interface ResolvedCompactionConfiguration extends CompactionConfiguration {
   model?: ModelRef;
@@ -900,6 +914,8 @@ export interface CompactionPolicyProjection {
   warning?: string;
 }
 
+export type SessionConfigurationBlocker = "running" | "queued" | "settling" | "mutation" | "interaction" | "unavailable";
+
 export interface SessionSnapshot {
   sessionId: string;
   runtimeGeneration: string;
@@ -908,6 +924,8 @@ export interface SessionSnapshot {
   phase: SessionPhase;
   /** Exact live Pi capability; unlike phase, distinguishes nested compaction and settlement gaps. */
   acceptsQueuedPrompts: boolean;
+  /** Parent configuration admission, independent of detached child activity. */
+  configurationBlocker: SessionConfigurationBlocker | null;
   /** Disposable Gateway projection of the inherited-to-child transition. */
   forkBoundary?: TranscriptForkBoundary;
   name?: string;
@@ -964,7 +982,9 @@ export interface SessionTreeNode {
   bookmarkTargetId?: string;
   parentId: string | null;
   timestamp: string;
-  kind: TranscriptItem["kind"] | "sessionInfo" | "contextEdit" | "systemMessage";
+  /** `usage` is Pi's model-attributed usage record (cache warming): canonical
+   * evidence with no chat row, published under its own declared kind. */
+  kind: TranscriptItem["kind"] | "sessionInfo" | "contextEdit" | "systemMessage" | "usage";
   label?: string;
   preview: string;
   role?: "user" | "assistant" | "toolResult";
@@ -1005,6 +1025,12 @@ export interface TronModuleSummary {
  * `resources` inventory stays authoritative for every resolved path — and each
  * kind is capped. A kind whose source failed to resolve is empty, and the
  * response carries one bounded `providesDiagnostic`. */
+/** A configured user package excluded from execution by Tron's managed owner. */
+export interface PackageConflict {
+  code: "managed-provider";
+  message: string;
+}
+
 export interface PackageProvides {
   skills: string[];
   prompts: string[];
@@ -1017,3 +1043,286 @@ export interface PackageProvides {
 /** `hooks.list`: exactly the hook fields `session.resources` returns, for one
  * scope and without a session. */
 export type HooksProjection = HookRegistrationProjection;
+
+/** The capability string `hello`/`system.info` advertise for Tron Home. */
+export const HOME_CAPABILITY = "home.v1";
+/** Native browser reads are separately gated; older home.v1 servers lack them. */
+export const HOME_MEMORY_BROWSER_CAPABILITY = "home-memory-browser.v1";
+/** The full chapter-list read (#740); older home.v1 servers lack it. */
+export const HOME_CHAPTER_LIST_CAPABILITY = "home-chapter-list.v1";
+
+/** One ledger chapter as `home.chapterList` answers it. Sealed chapters carry
+ * exactly their recorded seal metrics (a disable-sealed chapter has none); the
+ * active chapter is measured live only while its session is present, so absent
+ * sizes mean "not measured", never zero. */
+export interface HomeChapterSummary {
+  sessionId: string;
+  ordinal: number;
+  state: "active" | "sealed" | "reserved" | "materializing";
+  createdAt: string;
+  activationStarted: boolean;
+  /** Whether the chapter's session exists right now, live or on disk. */
+  sessionPresent: boolean;
+  sealedAt?: string;
+  bytes?: number;
+  entries?: number;
+  /** What the chapter holds, read from its canonical history and memory. Absent when the
+   * chapter's history could not be read; a chapter with no file has zero counts. */
+  contents?: HomeChapterContents;
+}
+
+/** A chapter's contents as `home.chapterList` answers them. Counts are canonical entries:
+ * `userMessages` are maintainer messages, `homeReplies` Home's replies, and `tasksDelegated`
+ * the `delegate` calls the chapter's history accepted. */
+export interface HomeChapterContents {
+  /** Canonical timestamps of the chapter's first and last entries. */
+  firstAt?: string;
+  lastAt?: string;
+  userMessages: number;
+  homeReplies: number;
+  tasksDelegated: number;
+  /** At most 5 of the chapter's newest memory summaries, each at most 120 characters.
+   * Empty when Home's memory is not open. */
+  topics: string[];
+}
+
+/** `home.chapterList`: the whole chapter ledger in ledger (ordinal) order, with
+ * the shared soft and hard rollover limits. A bounded read: at most the ledger's
+ * chapters, and one live measurement for the active chapter. */
+export interface HomeChapterList {
+  homeId: string;
+  generation: number;
+  enabled: boolean;
+  limits: { softBytes: number; softEntries: number; hardBytes: number; hardEntries: number };
+  chapters: HomeChapterSummary[];
+}
+
+/** Physical canonical identity, never a projected memory line address. */
+export interface HomeMemoryEvidence {
+  index: number;
+  sessionId: string;
+  entryId: string;
+  sourceDigest: string;
+}
+
+export interface HomeMemoryItem {
+  index: number;
+  kind: "user" | "talk" | "echo" | "event";
+  attribution: "user" | "assistant" | "tool" | "event";
+  timestamp?: string;
+  evidence: HomeMemoryEvidence;
+  projection: { format: "memory-projection"; text: string; omitted: boolean; omissions: string[] };
+  /** A leaf summary, not canonical evidence; null while unbuilt/invalidated. */
+  summary: { format: "memory-summary"; text: string; truncated: boolean } | null;
+}
+
+/** home.memory.page: at most 50 rows and 128 KiB encoded JSON. */
+export interface HomeMemoryPage {
+  homeId: string;
+  revision: string;
+  totalItems: number;
+  items: HomeMemoryItem[];
+  nextCursor?: string;
+}
+
+/** home.memory.evidence: the shared history owner's bounded content rendering.
+ * Not raw JSONL or attachment bytes. Off-branch/context-edited originals remain
+ * canonical facts; their projected exclusions do not erase the source. */
+export interface HomeMemoryEvidencePage {
+  format: "canonical-history";
+  evidence: HomeMemoryEvidence;
+  text: string;
+  offset: number;
+  nextOffset?: number;
+  previousOffset?: number;
+  totalCharacters: number;
+  metadata: Record<string, JsonValue>;
+}
+
+/** `home.open`: a logical route and its current physical binding. It does not
+ * materialize a reserved chapter; clients attach physically only when an active
+ * chapter exists. */
+export interface HomeOpen {
+  logicalSessionId: "home";
+  homeId: string;
+  bindingRevision: number;
+  sessionId: string;
+  generation: number;
+  chapterState: "active" | "sealed" | "reserved" | "materializing";
+}
+
+/** `home.status`: the one bounded Home projection. It is a read and performs no
+ * inference. `available` is false only when a stored record exists but cannot be
+ * used, which `reason` explains; the preserved record is never overwritten.
+ * `live` is whether the session holds a runtime right now; `sessionPresent` is
+ * whether it exists at all, live or still on disk. */
+export interface HomeStatus {
+  /** Process-owned task recovery projection; refusal fences only task surfaces
+   * until the next Gateway start, never ordinary session readiness. */
+  taskRecovery: { available: true } | { available: false; reason: string };
+  /** Derived from the durable designation, runtime presence, memory and current/last activation. */
+  phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "rollover-pending" | "blocked" | "paused" | "active" | "ready";
+  /** Current or last activation evidence; never includes message or memory-view bodies. */
+  activation: HomeContextProjection;
+  readiness: { ready: boolean; gaps: string[] };
+  recovery: { action: "inspect-record" | "designate" | "configure-memory" | "resume-memory" | "none"; reason?: string };
+  available: boolean;
+  reason?: string;
+  enabled: boolean;
+  homeId?: string;
+  sessionId?: string;
+  /** The newest chapter a client may open: `sessionId` when it is present, or the
+   * sealed predecessor while `rollover-pending`. Absent when nothing is openable.
+   * Sends from it still go through `home.prompt`, which materializes the successor. */
+  openSessionId?: string;
+  bindingRevision?: number;
+  generation?: number;
+  routeGeneration?: number;
+  model?: ModelRef;
+  chapter?: {
+    count: number;
+    currentBytes?: number;
+    currentEntries?: number;
+    recoveryDecision: "none" | "reserved" | "materializing";
+  };
+  live: boolean;
+  sessionPresent: boolean;
+  /** Home's memory, once a record names one. There are no memory defaults
+   * (decision D4), so a Home whose memory is unconfigured refuses its
+   * activations until the memory model is set (`model.ref[role=memory]`). */
+  memory: HomeMemoryStatus;
+}
+
+/**
+ * `home.status`'s memory part. `configured` is the record's decision, `open` is
+ * whether the memory's store is serving, `episodic` is the memory owner's own
+ * bounded status (view sizes, coverage, pump, blocked state, token spend) and is
+ * absent until that store is open, and `blocked` is the block's reason, reported
+ * even when the store is not open.
+ */
+export interface HomeMemoryStatus {
+  /** Durable operator suspension. Independent of a compactor/source block. */
+  paused?: boolean;
+  configured: boolean;
+  open: boolean;
+  model?: ModelRef;
+  /** Tokens this memory has spent over its life, read from its persisted state;
+   * present whenever a store exists, open or not, because a restart restores it.
+   * Reported, never a ceiling: the memory regulates its own spend (#493). */
+  spentTokens?: number;
+  episodic?: {
+    sourceSessionId: string;
+    generation: number;
+    messages: number;
+    nodes: { total: number; free: number; summary: number; byLevel: Array<{ level: number; count: number }> };
+    view: {
+      parts: Array<{ address: string; start: number; messages: number; bytes: number; built: boolean }>;
+      truncatedParts: number;
+      bytes: number;
+      budgetBytes: number;
+      built: number;
+      unbuilt: number;
+    };
+    coverage: { admitted: number; summarized: number };
+    pump: { busy: number };
+    blocked: { reason: string; detail?: string } | null;
+    /** Spend, reported and never a ceiling (#493). */
+    tokens: {
+      used: number;
+      sinceOpen: { input: number; output: number; cacheRead: number; cacheWrite: number };
+    };
+  };
+  blocked?: string;
+  reason?: string;
+}
+
+/**
+ * `home.context`: the bounded request context of Home's current or last
+ * activation, and nothing else. It carries no message body: the activation's
+ * start entry is named by id, the memory view only by its line and byte counts,
+ * and the refusal only by its reason and detail. A caller that needs the
+ * conversation reads the transcript, and the view text never leaves the request
+ * that carried it.
+ */
+export type HomeContextProjection =
+  | { available: false }
+  | {
+    available: true;
+    /** The canonical entry the activation's input followed; null when nothing
+     * preceded it (the first activation of an empty Home). */
+    activationStartEntryId: string | null;
+    /** Whether that activation is still open (its run has not settled). */
+    activationOpen: boolean;
+    /** The sizes of the request that activation prepared. Absent when it was
+     * refused before it prepared one: the start entry and the refusal below are
+     * still this activation's, never another's. */
+    viewLines?: number;
+    viewBytes?: number;
+    effectiveTokens?: number;
+    contextWindow?: number;
+    /** The request's effective size by section, present with the sizes above. */
+    breakdown?: HomeContextBreakdown;
+    /** This activation's own refusal, when it was refused. */
+    lastRefusalReason?: string;
+    lastRefusalDetail?: string;
+  };
+
+/** One section of a Home request's effective size. Tokens are estimates; the sections
+ * sum to the breakdown's `effectiveTokens`. */
+export interface HomeContextSection {
+  id: "instructions" | "profile" | "memory" | "chapter" | "results" | "input";
+  tokens: number;
+  /** The section's own unit: profile notes, memory summary lines, chapter entries or
+   * task results. Absent for instructions and input. */
+  count?: number;
+}
+
+/** The last request an activation prepared, by section. */
+export interface HomeContextBreakdown {
+  activation: { state: "running" | "settled"; kind: "user" | "wake"; startedAt: string };
+  contextWindow: number;
+  effectiveTokens: number;
+  sections: HomeContextSection[];
+}
+
+export interface HomeDesignation {
+  homeId: string;
+  sessionId: string;
+  generation: number;
+}
+
+/** The name a task is shown by: its worker session's name when set, else its brief's first
+ * non-empty line, and at most 80 characters. */
+export interface HomeTaskDisplay {
+  title: string;
+  /** The target directory's last path component. */
+  project: string;
+}
+
+/** Exact task counts over the whole task store, independent of any page. `active` covers every
+ * non-terminal lifecycle (`pending` and `active`); `finished` covers `terminal`. */
+export interface HomeTaskCounts {
+  active: number;
+  finished: number;
+}
+
+/** home.taskList: bounded newest-first task metadata; no canonical reports. */
+export interface HomeTaskSummary extends HomeTaskDisplay {
+  taskId: string;
+  createdAt: number;
+  updatedAt: number;
+  /** The worker session the task dispatched (the task's `sessionId`), or null before dispatch. */
+  sessionId: string | null;
+  target: string;
+  lifecycle: "pending" | "active" | "terminal";
+  outcome: "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown" | null;
+  spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
+  attention: boolean;
+  pendingGrant: boolean;
+}
+export interface HomeTaskPage {
+  items: HomeTaskSummary[];
+  nextCursor?: string;
+  /** Exact counts for the whole store, read with this page; never capped by `limit`. */
+  counts: HomeTaskCounts;
+}

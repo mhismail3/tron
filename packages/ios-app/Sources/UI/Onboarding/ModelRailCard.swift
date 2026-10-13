@@ -9,6 +9,7 @@ struct ModelRailCard: View {
     let model: ModelSummary
     /// Non-nil paints the selected checkmark in that accent.
     let selectionAccent: Color?
+    var isApplying = false
 
     static let width: CGFloat = 138
     /// A minimum, so larger Dynamic Type grows the card instead of clipping it.
@@ -19,7 +20,7 @@ struct ModelRailCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // The checkmark slot has a fixed size in both states, so selecting
-            // a card changes no layout (`ModelRailCardLayoutTests`). It is
+            // a card changes no layout. It is
             // centred on the provider line, clear of the model name below.
             HStack(alignment: .center, spacing: 4) {
                 Text(model.displayProviderName)
@@ -31,9 +32,13 @@ struct ModelRailCard: View {
                     .frame(width: Self.checkmarkSize, height: Self.checkmarkSize)
                     .overlay {
                         if let selectionAccent {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: Self.checkmarkSize, weight: .semibold))
-                                .foregroundStyle(selectionAccent)
+                            if isApplying {
+                                TronPulseLoadingIndicator(accent: selectionAccent, size: Self.checkmarkSize)
+                            } else {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: Self.checkmarkSize, weight: .semibold))
+                                    .foregroundStyle(selectionAccent)
+                            }
                         }
                     }
             }

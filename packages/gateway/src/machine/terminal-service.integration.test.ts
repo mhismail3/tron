@@ -1,0 +1,43 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { TerminalService } from "./terminal-service.js";
+import { waitFor } from "../../test-support/wait-for.js";
+
+describe("TerminalService", () => {
+  it("opens a PTY and retains bounded replay", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tron-terminal-"));
+    const events: Array<{ topic: string; payload: unknown }> = [];
+    const service = new TerminalService(64_000, (_id, topic, payload) => events.push({ topic, payload }));
+    const terminal = service.open("session", cwd, 80, 24);
+    expect(service.belongsToSession(terminal.id, "session")).toBe(true);
+    expect(service.belongsToSession(terminal.id, "other-session")).toBe(false);
+    service.write(terminal.id, "write", "printf TRON_TERMINAL_OK\\n");
+
+    await waitFor(() => JSON.stringify(events).includes("TRON_TERMINAL_OK"), "the terminal output");
+    const replay = service.attach(terminal.id, 0);
+    expect(replay.chunks.map((chunk) => chunk.data).join("")).toContain("TRON_TERMINAL_OK");
+    await service.terminate(terminal.id);
+    expect(service.activeTerminalIds()).not.toContain(terminal.id);
+    expect(events.some(({ topic }) => topic === "terminal.exit")).toBe(true);
+    service.dispose();
+  });
+
+  it("closes terminal admission atomically only when no PTY is active", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tron-terminal-drain-"));
+    const active = new TerminalService(64_000, () => {});
+    const first = active.open("session", cwd);
+    expect(active.beginRestartDrain()).toBe(false);
+    await active.terminate(first.id);
+    // A rejected restart did not leave the admission gate closed.
+    const second = active.open("session", cwd);
+    await active.terminate(second.id);
+    active.dispose();
+
+    const draining = new TerminalService(64_000, () => {});
+    expect(draining.beginRestartDrain()).toBe(true);
+    expect(() => draining.open("session", cwd)).toThrow(/not accepting terminal/u);
+    draining.dispose();
+  });
+});

@@ -7,14 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { CONTEXT_WINDOW_ENTRY } from "../providers/context-window-policy.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error("context fixture did not settle");
-    await new Promise(resolve => setTimeout(resolve, 5));
-  }
-}
+import { waitFor } from "../../test-support/wait-for.js";
 
 /** Wait for the catalog owner's first published cut: a read that lands before
  * it refuses retryably, and no reader walks the folder (G-1c). */
@@ -84,7 +77,7 @@ describe.sequential("Gateway session context windows", () => {
     expect(slot.snapshot().contextWindowPolicy?.effective).toBe(1_000_000);
     faux.setResponses([fauxAssistantMessage("materialize canonical session")]);
     await slot.prompt("remember this choice");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.snapshot().contextWindowPolicy?.warning).toBeUndefined();
     // An idle change in a materialized session must survive without another turn.
     await slot.setContextWindow("context-test", "large", 900_000, slot.snapshot().revision, slot.snapshot().runtimeGeneration);
@@ -116,7 +109,7 @@ describe.sequential("Gateway session context windows", () => {
       await expect(slot.setContextWindow("context-test", "large", 1_000_000, slot.snapshot().revision, slot.snapshot().runtimeGeneration)).rejects.toMatchObject({ code: "busy" });
       expect(slot.snapshot().contextWindowPolicy?.effective).toBe(272_000);
     } finally { release(); }
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const revision = slot.snapshot().revision;
     await slot.setModel("context-test", "small");
     await expect(slot.setContextWindow("context-test", "large", 1_000_000, slot.snapshot().revision, slot.snapshot().runtimeGeneration)).rejects.toMatchObject({ code: "conflict" });
@@ -137,7 +130,7 @@ describe.sequential("Gateway session context windows", () => {
     await slot.setContextWindow("context-test", "large", 1_000_000, slot.snapshot().revision, slot.snapshot().runtimeGeneration);
     faux.setResponses([fauxAssistantMessage("checkpoint")]);
     await slot.prompt("create branch point");
-    await waitUntil(() => !slot.isBusy);
+    await waitFor(() => !slot.isBusy, "the slot to go idle");
     const parentId = slot.id;
     const leaf = slot.snapshot().leafEntryId!;
     const forked = await slot.fork(leaf);

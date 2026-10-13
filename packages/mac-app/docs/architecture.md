@@ -54,13 +54,53 @@ The retired `~/.tron-machine-group-id` source is never read as startup fallback:
 an operator migration must preserve its exact bytes and retire it before either
 profile starts.
 
+## Coordinated Quit and approved-service restoration
+
+User Quit is owned by `MacQuitCoordinator`, reached through AppKit's deferred
+termination callback. It reads the exact Stable Gateway PID, command and process
+start identity, sends one authenticated receipt-backed `gateway.stop` command,
+then waits until that process is gone with no replacement PID. A reachable
+canonical `gateway.drain.status` in preparing/waiting remains unbounded. After
+all shutdown owners settle, the Gateway atomically publishes its one
+`gateway/stop-completed.json` receipt (version, PID, accepted drain UUID), before
+entering Node exit. Only that exact receipt starts the five-second exit-stall
+grace. Diagnostic logs and their timestamp formats/rotation are not lifecycle
+authority. The process PID, command and start identity remain fenced on every
+observation.
+
+A missing, unreadable, malformed or stale receipt cannot silently create an
+endless wait after transport retirement: five seconds without a reachable active
+drain reports observation uncertainty (plus at most the current bounded probe),
+not fabricated completion. This fails only Quit, never accepted work. Both
+uncertainty and a proven exit stall leave Tron open without signaling the
+Gateway, since launchd could treat a signal as a crash and relaunch it. Only
+confirmed process disappearance joins native-host retirement. Runtime changes
+and failed drain observations fail closed. A manual retry retains the accepted
+response/drain UUID for the same captured runtime, avoiding a stop replay against
+its already-closed transport. If acceptance was uncertain it reuses the command
+ID; a canonically failed drain permits a new explicit attempt. A retry after the Gateway has stopped
+resumes at native-host retirement only while the Login Item stays enabled and
+no Gateway process runs.
+
+Quit does not unregister either approved Login Item. The Gateway LaunchAgent is
+`RunAtLoad` with `KeepAlive.SuccessfulExit=false`, so its clean intentional exit
+does not relaunch it; startup invokes the existing launch owner only while
+ServiceManagement reports `.enabled`. Approval revocation is shown through the
+existing Login Items path and never causes registration from startup. The native
+host LaunchAgent exposes Mach services with `RunAtLoad` and no `KeepAlive`.
+After native capture and automation retirement joins, the helper exits; its
+registration and macOS approval remain intact. Startup probes the native Mach
+service only while ServiceManagement reports `.enabled`, causing launchd to
+start the approved helper on demand. TCC grants remain native permission-probe
+results, not a wrapper-maintained desired-state flag.
+
 ## Source owners
 
 - `packages/mac-app/Sources/App/` — wrapper modes, lifecycle, single-instance ownership
 - `packages/mac-app/Sources/Wizard/` — location, installation, permissions, Tailscale, pairing, finish
 - `packages/mac-app/Sources/MenuBar/` — status poller, controls, pairing window, gateway logs
 - `packages/mac-app/Sources/Server/LaunchAgent/` — the retained internal name for SMAppService ownership
-- `packages/mac-app/Sources/Server/Health/` — authenticated `system.info` gateway probe and the shared Gateway response-envelope decoder
+- `packages/mac-app/Sources/Server/Health/` — authenticated Gateway health, restart and stop clients, and the shared response-envelope decoder
 - `packages/mac-app/Sources/Server/Paths/` — canonical wrapper identities and filesystem paths
 - `packages/mac-app/Sources/Support/Pairing/` — strict invitation URL and QR generation
 - `packages/mac-app/Sources/Resources/Library/` — tracked Gateway Login Item and LaunchAgent skeletons
@@ -196,9 +236,7 @@ explicit user action against fresh validation and ServiceManagement state.
 Entry discovery is asynchronous presentation, not installation authority. It is
 retired on cancellation or when an explicit installation supersedes it. Completed
 installation does not repeat discovery whose result is hidden by the authoritative
-install outcome. `WizardInstallationTests` exercises accepted lifetime, duplicate
-admission, first failure, progress continuity and stale observation rejection with
-owned fixtures and synthetic service callbacks.
+install outcome.
 
 ## Pairing
 
@@ -313,8 +351,7 @@ Refresh/takeover are reasons for real bootout/unregister/register steps, not
 separate execution modes or no-op steps. Live load and its focused tests share
 one sequential executor: await each accepted step, stop at the first reported
 failure, and never retry or re-derive ownership between steps.
-`LiveLaunchAgentManagerTests` exercises the real planner with synthetic inputs
-and the live executor with controlled callbacks, without changing Login Items. Bearer, enrollment, and network-cache credentials
+Bearer, enrollment, and network-cache credentials
 use one bounded owner-only regular-file/no-symlink descriptor reader, followed
 by separate exact-key schema validation. Stable transport never probes loopback
 when Tailscale resolution is unavailable; Debug admits only the exact lifecycle
@@ -383,10 +420,7 @@ survives. Empty credentials and non-sensitive fields remain useful. This is a
 targeted export safeguard, not a general secret detector or a change to the
 private log viewer.
 
-`DiagnosticsRedactorTests` protects the string boundaries; `FeedbackComposerTests`
-checks the decoded issue body and the exact body used by the clipboard branch.
-Neither requires live logs, credentials, a clipboard write or an issue submission.
-`MenuBarLogReaderTransportTests` also exercises the actual reader against owned
+`MenuBarLogReaderTransportTests` exercises the actual reader against owned
 loopback WebSocket peers: stalled hello/response, cancellation and socket close,
 large/oversized responses, hello admission, frame count and sanitized Gateway
 error export. Its watchdog only releases broken clients; deadline assertions must
@@ -507,9 +541,8 @@ escapes, which is why the key set and every value shape are checked before
 decoding; a decoder would silently keep the last of a repeated key. Payload
 admission also requires the immutable tree, the alias targets, the required
 files and the recomputed fingerprint described above. Each rule has a refused
-fixture: one per rule in `packages/mac-app/scripts/test-tron-gateway-launcher.sh`,
-the same table in `GatewayPayloadStoreTests`, and the identity and key cases in
-`scripts/gateway-payload-deploy.test.mjs`. The LaunchAgent exports the selected payload's validated
+fixture in `packages/mac-app/scripts/test-tron-gateway-launcher.sh`, which compiles
+the launcher and runs it against temporary payloads. The LaunchAgent exports the selected payload's validated
 `app/scripts/gateway-payload-deploy.mjs` as the only update helper; verified
 artifact promotion is wired, and source builds read only the validated
 `gateway/update-config.json` projection. Source mode compiles with the repository's

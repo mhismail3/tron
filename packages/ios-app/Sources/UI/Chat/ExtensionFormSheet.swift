@@ -54,7 +54,7 @@ struct ExtensionFormSheet: View {
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
-                    .animation(.snappy(duration: 0.24), value: currentQuestionIndex)
+                    .animation(ChatMotion.questionProgressControl, value: currentQuestionIndex)
                 } else {
                     Label("This form is unavailable.", systemImage: "exclamationmark.triangle.fill")
                         .font(TronTypography.bodySM)
@@ -129,7 +129,7 @@ struct ExtensionFormSheet: View {
             guard questionID != nil else { return }
             // Give the paged form room before keyboard avoidance compresses
             // its medium-height viewport. UIKit still owns editor focus.
-            withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
+            withAnimation(reduceMotion ? nil : ChatMotion.extensionSelectionControl) {
                 selectedDetent = .large
             }
         }
@@ -208,7 +208,7 @@ struct ExtensionFormSheet: View {
                 .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
                 .foregroundStyle(Color.tronAmber)
         }
-        .animation(.easeInOut(duration: 0.18), value: currentQuestionIndex)
+        .animation(ChatMotion.extensionQuestionControl, value: currentQuestionIndex)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(currentQuestion?.multiSelect == true ? "Select all that apply" : "Select one"). Question \(currentQuestionIndex + 1) of \(form.questions.count)")
     }
@@ -377,7 +377,7 @@ struct ExtensionFormSheet: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
-        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: selected)
+        .animation(reduceMotion ? nil : ChatMotion.extensionSelectionControl, value: selected)
         .accessibilityElement(children: .contain)
     }
 

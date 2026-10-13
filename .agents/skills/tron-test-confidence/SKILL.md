@@ -1,69 +1,35 @@
 ---
 name: tron-test-confidence
-description: Evaluate and strengthen Tron tests through behavioral oracles, lifecycle isolation, and negative controls. Use for test cleanup, flaky failures, coverage claims, and mechanism ablation.
+description: Judge whether an integration or E2E test proves its behavior, clean up tests that cannot fail for the right reason, and diagnose timing or lifecycle flakes at real boundaries. Use for test cleanup, flaky runs, and coverage claims.
 ---
 
 # Test confidence
 
-Apply [project rules](../../../AGENTS.md). Match test changes and experiments to
-the user's authorization; a test audit alone does not authorize source mutation.
+Apply [project rules](../../../AGENTS.md). Tron validates with integration and E2E
+tests at real boundaries; unit tests are not kept
+([testing policy](../../../AGENTS.md#testing-policy)).
 
-## Find what the test actually proves
+## Judge a test
 
-Map the affected product risk to its production entrypoint, owner, test setup,
-action, and assertion. Inspect runner/configuration wiring as well as test bodies.
-Ask whether the assertion would fail if the real behavior broke while mocks,
-recorders, helper return values, and internal counters remained unchanged.
+Trace the product risk to the real entrypoint, its owner, the setup, the action,
+and the assertion. Ask whether the test would fail if the real behavior broke.
+A test that only reasserts a mock, a fixture constant, a literal, source text, or
+a presentation detail proves nothing: delete it, or replace it with an observable
+outcome (durable bytes, an admitted or rejected operation, the presented
+interface). Mark any boundary the suite does not cross as a gap, and do not
+claim coverage for it.
 
-Prefer an independently observable outcome: durable bytes, admitted/rejected
-operations, cancellation of the exact lease, or the actual presented interface.
-Follow the [testing policy](../../../AGENTS.md#testing-policy): prefer E2E
-coverage, and keep an isolated test only when it targets a written-down failure
-mode that catches a real bug the E2E tests miss. Mark gaps between those
-boundaries.
-For chat layout, use the owning native geometry/identity harness and regressions;
-command consumption, projection installation, cached geometry, and lazy estimated
-offsets do not prove a rendered frame. Observe settlement after ownership changes.
+## Diagnose a flake
 
-Choose **KEEP / UPDATE / MERGE / DELETE / ADD** for affected tests. Delete
-self-reasserting, obsolete, or redundant checks only after identifying surviving
-oracles for still-required behavior. If no trustworthy oracle remains, report the
-gap rather than claiming equivalent coverage. A rare critical regression can
-justify a test even when it has never failed recently.
+Preserve the first failure, its seed or ordering, its configuration, and its log.
+Separate a scheduling assumption from a production race using the owning event.
+Prefer bounded waits on that event to fixed sleeps. Confirm cleanup on success,
+failure, timeout, and cancellation. Isolate files, ports, processes, global state,
+and simulator lanes. Never loosen an assertion, update a golden, add a retry, or
+skip a case to obtain green. Compare against the unchanged base before calling a
+failure pre-existing.
 
-## Make a disputed claim falsifiable
+## Report
 
-When authorized, freeze a bounded mutation or ablation before running it:
-
-1. Name the hypothesis, exact production path, baseline revision, representative
-   scenarios, independent oracle, expected failure, and stop/retention rules.
-2. Identify run-owned edits, fixtures, processes, and artifacts; establish an exact
-   restoration path that cannot overwrite unrelated work.
-3. Run the baseline. Change only the challenged mechanism. Include a known-bad
-   control that breaks the intended behavior, and verify that path actually runs.
-4. Capture results without changing assertions to favor the candidate. Restore
-   the baseline and verify restoration; use an A/B/A sequence when environment or
-   ordering could explain the result.
-
-A known-bad control passing exposes an oracle gap, not safe production deletion.
-Retain only an authorized, behavior-preserving change. Performance comparisons
-belong to [performance](../tron-performance/SKILL.md), not pass-count comparisons.
-
-## Diagnose timing and lifecycle failures
-
-Preserve the first failure, selection, seed/order, configuration, and logs.
-Distinguish scheduling assumptions from a production race using the owning
-observable event. Prefer controlled clocks and bounded registration/completion
-waits to fixed sleeps or repeated scheduler yields. Verify cleanup on success,
-throw, timeout, cancellation, and partial initialization; isolate files, ports,
-processes, global state, and simulator leases.
-
-Start with the failing owner; compare isolated and in-suite behavior only as
-needed to test a hypothesis. A narrow pass does not refute a wider failure.
-Never loosen a meaningful assertion, update a golden, add retries, or skip a case
-merely to obtain green. Separate pre-existing failures through a controlled
-baseline rather than assumption.
-
-Report actual executed counts (check selectors did not run zero tests), failures,
-skips, experimental controls and restoration, remaining oracles after deletion,
-and untested environments. A green suite is not a complete risk assessment.
+State the tests that ran with their counts, the failures and skips, and the
+boundaries that remain untested. A green run is not a complete risk assessment.

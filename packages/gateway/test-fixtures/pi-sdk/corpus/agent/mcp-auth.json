@@ -1,0 +1,47 @@
+{
+  "mcp__corpus_oauth|«corpus-mcp-url»": {
+    "serverUrl": "«corpus-mcp-url»",
+    "discovery": {
+      "authorizationServerUrl": "«corpus-mcp-origin»",
+      "authorizationServerMetadata": {
+        "issuer": "«corpus-mcp-origin»",
+        "authorization_endpoint": "«corpus-mcp-origin»/authorize",
+        "token_endpoint": "«corpus-mcp-origin»/token",
+        "registration_endpoint": "«corpus-mcp-origin»/register",
+        "response_types_supported": [
+          "code"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "none"
+        ],
+        "code_challenge_methods_supported": [
+          "S256"
+        ]
+      },
+      "resourceMetadata": {
+        "resource": "«corpus-mcp-url»",
+        "authorization_servers": [
+          "«corpus-mcp-origin»"
+        ]
+      },
+      "resourceMetadataUrl": "«corpus-mcp-origin»/.well-known/oauth-protected-resource"
+    },
+    "clientInformation": {
+      "client_id": "corpus-mcp-fixture-client",
+      "redirect_uris": []
+    },
+    "oauthState": "187e0d332f9a68e33b962d7ca7fb04f30505fc7f2541ddeed85c95d3f731c5c9",
+    "codeVerifier": "oHiEk-BRcDFJG52K7RGa87QfrxyVrMpLYPZL2TAMixQ",
+    "tokens": {
+      "access_token": "corpus-mcp-access-token",
+      "token_type": "Bearer",
+      "expires_in": 315360000,
+      "refresh_token": "corpus-fixture-refresh-token"
+    },
+    "tokensExpireAt": 2106692032760
+  }
+}
