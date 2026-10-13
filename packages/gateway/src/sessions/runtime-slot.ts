@@ -698,10 +698,6 @@ export class RuntimeSlot {
    * runtime. Re-resolved in `runtimeFactory`, so a profile change takes effect
    * with the runtime it applies to. */
   private homeRequestPolicy: HomeRequestPolicy | undefined;
-  /** The `settings-run-applied` policy last published in the current agent run.
-   * Reset at `agent_start`, so every run reports its policy once and a request
-   * whose applied policy changed mid-run (same-turn narrowing) reports again. */
-  private runSettingsDiagnostic: string | undefined;
   private detachOpenAIEligibility: (() => void) | undefined;
   private runtime!: AgentSessionRuntime;
   private unsubscribe: (() => void) | undefined;
@@ -2343,17 +2339,12 @@ export class RuntimeSlot {
         admittedSettings = await this.applyLiveRunSettings(created.session);
         if (signal?.aborted) throw new Error("Request cancelled during settings resolution");
         if (this.dependencies.settings()) {
-          const applied = safeJson({
+          this.emit("session.diagnostic", safeJson({
             code: "settings-run-applied", retry: created.session.settingsManager.getRetrySettings(),
             imagesBlocked: created.session.settingsManager.getBlockImages(),
             transport: created.session.agent.transport,
             steeringMode: created.session.agent.steeringMode, followUpMode: created.session.agent.followUpMode,
-          });
-          const key = JSON.stringify(applied);
-          if (key !== this.runSettingsDiagnostic) {
-            this.runSettingsDiagnostic = key;
-            this.emit("session.diagnostic", applied);
-          }
+          }));
         }
         return (await prepareRequest?.(request, signal)) ?? undefined;
       };
@@ -4446,7 +4437,6 @@ export class RuntimeSlot {
     }
     switch (event.type) {
       case "agent_start": {
-        this.runSettingsDiagnostic = undefined;
         const precedingAssistant = this.notificationRun?.assistant;
         this.notificationRun = undefined;
         const continuationFromSettlement = this.pendingAssistantCompletion !== undefined
