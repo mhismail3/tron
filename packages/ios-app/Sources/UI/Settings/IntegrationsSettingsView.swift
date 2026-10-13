@@ -110,7 +110,8 @@ struct IntegrationsSettingsView: View {
             selectedInstance = nil; setupDefinition = nil; snapshot = nil
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in
-            if !active { loadGeneration &+= 1; isLoading = false; credits.begin(clear: true) }
+            // Covered: retire reads in flight, keep what is shown (the Mac did not change).
+            if !active { loadGeneration &+= 1; isLoading = false; credits.begin() }
         }
         .tronManagedSheet(isPresented: Binding(get: { setupDefinition != nil }, set: { isPresented in
             guard !isPresented else { return }

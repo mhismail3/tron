@@ -19,8 +19,9 @@ struct SettingsRendererRow: View {
     /// On a key's own sheet: each action is its own full-width row.
     var actionsAsRows = false
     var externalControl = false
-    /// Changes when a key this row's options depend on changes, so they are re-requested.
-    let dependencyDisplay: String
+    /// The options the key's source serves, read by the renderer with the
+    /// resolution itself, so a row is never without them once it renders.
+    let options: SettingsOptionsResponse?
     let error: String?
     /// "Edit at Mac/Project" for a key this surface cannot write.
     var layerEditorTitle: String? = nil
@@ -30,10 +31,6 @@ struct SettingsRendererRow: View {
     var onApplyAgain: ((String) -> Void)? = nil
 
     @Environment(AppModel.self) private var model
-    @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var options: [SettingsOption]?
-    @State private var dynamicRange: SettingsRange?
-    @State private var optionsGeneration = 0
 
     private var presentation: SettingsKeyPresentation? { setting.presentation }
     private var title: String {
@@ -59,13 +56,6 @@ struct SettingsRendererRow: View {
         editable && !externalControl ? SettingsRowControl(negotiated: presentation?.control) : .readOnly
     }
 
-    private struct OptionsLoadID: Hashable {
-        let key: String
-        let target: JSONValue
-        let dependencies: String
-        let foreground: Int
-    }
-
     /// The key's help and note, on detailed rows only; an instance's help is on its group.
     private var subtitle: String? {
         guard detailed else { return nil }
@@ -88,7 +78,7 @@ struct SettingsRendererRow: View {
     }
 
     private var numberRange: SettingsRange? {
-        presentation?.optionsSource == nil ? presentation?.range : dynamicRange
+        presentation?.optionsSource == nil ? presentation?.range : options?.range
     }
 
     var body: some View {
@@ -103,26 +93,6 @@ struct SettingsRendererRow: View {
         .accessibilityValue(detailed ? setting.badges.map { badge in
             badge.detail.map { "\(badge.label), \($0)" } ?? badge.label
         }.joined(separator: " · ") : "")
-        .onChange(of: dependencyDisplay) { _, _ in
-            optionsGeneration &+= 1
-            options = nil
-            dynamicRange = nil
-        }
-        .onChange(of: presentationActivity) { _, _ in
-            optionsGeneration &+= 1
-            options = nil
-            dynamicRange = nil
-        }
-        .onDisappear { optionsGeneration &+= 1 }
-        .task(id: PresentationActivityTaskID(
-            source: OptionsLoadID(key: setting.id, target: target, dependencies: dependencyDisplay,
-                                  foreground: model.foregroundReconciliationGeneration),
-            presentationActive: presentationActivity.allowsPresentationPublication
-        )) {
-            guard presentation?.optionsSource != nil, [.choice, .number, .checklist].contains(control),
-                  presentationActivity.allowsPresentationPublication else { return }
-            await loadOptions()
-        }
     }
 
     @ViewBuilder
@@ -148,7 +118,7 @@ struct SettingsRendererRow: View {
             TronToggleRow(icon: icon, title: title, detail: subtitle,
                           isOn: Binding(get: { setting.value?.boolValue == true }, set: { onChange(.bool($0)) }))
         case .choice:
-            let choices = presentation?.optionsSource != nil ? (options ?? []) : (presentation?.options?.map {
+            let choices = presentation?.optionsSource != nil ? (options?.options ?? []) : (presentation?.options?.map {
                 SettingsOption(value: $0.value, label: $0.label, detail: nil, disabledReason: nil)
             } ?? [])
             if choices.isEmpty {
@@ -228,7 +198,7 @@ struct SettingsRendererRow: View {
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
                     TronChecklistPicker(
                         title: title, help: presentation?.help,
-                        choices: options?.compactMap { option in option.value.stringValue.map {
+                        choices: options?.options.compactMap { option in option.value.stringValue.map {
                             TronChoice(id: $0, label: option.label, detail: option.detail, disabledReason: option.disabledReason)
                         } },
                         selected: values.compactMap(\.stringValue)
@@ -304,32 +274,6 @@ struct SettingsRendererRow: View {
                 .padding(.trailing, TronSettingsLayoutPolicy.rowHorizontalPadding)
                 .padding(.bottom, 12)
                 .accessibilityIdentifier("\(settingsRowIdentifier(setting))-error")
-        }
-    }
-
-    private func loadOptions() async {
-        optionsGeneration &+= 1
-        let ticket = optionsGeneration
-        let activity = presentationActivity
-        let identity = model.knowledgePresentationIdentity
-        let foreground = model.foregroundReconciliationGeneration
-        // Never keep choices for a previous dependency value visible while its replacement loads.
-        options = nil
-        dynamicRange = nil
-        @MainActor func isCurrent() -> Bool {
-            ticket == optionsGeneration && !Task.isCancelled
-                && activity == presentationActivity && activity.allowsPresentationPublication
-                && identity == model.knowledgePresentationIdentity
-                && foreground == model.foregroundReconciliationGeneration
-        }
-        do {
-            let response = try await model.settingsOptions(target: target, key: setting.key, qualifiers: setting.qualifiers, query: nil)
-            guard isCurrent() else { return }
-            options = response.options
-            dynamicRange = response.range
-        } catch {
-            // Options are disposable; stale failures must not publish or hide a newer result.
-            guard isCurrent() else { return }
         }
     }
 }
@@ -414,7 +358,6 @@ private struct SettingsCatalogPicker: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var query = ""
     @State private var options: [SettingsOption]?
     @State private var nextCursor: String?
     @State private var pageCursor: String?
@@ -424,12 +367,13 @@ private struct SettingsCatalogPicker: View {
     @State private var requestGeneration = 0
     @State private var reloadTick = 0
     @State private var displayedSource: Source?
+    /// The read whose result is on screen; the same read never runs twice.
+    @State private var installedLoad: LoadID?
 
     private struct Source: Hashable {
         let target: JSONValue
         let key: String
         let qualifiers: [String: String]?
-        let query: String
         let identity: KnowledgePresentationIdentity
         let foreground: Int
     }
@@ -441,7 +385,7 @@ private struct SettingsCatalogPicker: View {
     }
 
     private var source: Source {
-        Source(target: target, key: setting.key, qualifiers: setting.qualifiers, query: query,
+        Source(target: target, key: setting.key, qualifiers: setting.qualifiers,
                identity: model.knowledgePresentationIdentity, foreground: model.foregroundReconciliationGeneration)
     }
 
@@ -462,7 +406,7 @@ private struct SettingsCatalogPicker: View {
                         .accessibilityIdentifier("settings-option-\(option.label)")
                     }
                     if options.isEmpty {
-                        TronSettingsCaption(query.isEmpty ? "No available options" : "No options match this search")
+                        TronSettingsCaption("No available options")
                     }
                     if let nextCursor {
                         Button { pageCursor = nextCursor } label: {
@@ -485,22 +429,24 @@ private struct SettingsCatalogPicker: View {
             .padding(.vertical, 12)
         }
         .tronScrollEdgeChrome()
-        .tronFloatingSearch(text: $query)
         .tronNavigationTitle(title)
         .onChange(of: source) { _, _ in reset() }
-        .onChange(of: presentationActivity) { _, _ in reset() }
+        // A covering sheet retires the read in flight; what is shown stays.
+        .onChange(of: presentationActivity) { _, _ in requestGeneration &+= 1; loading = false }
         .onDisappear { requestGeneration &+= 1 }
         .task(id: PresentationActivityTaskID(
             source: LoadID(source: source, cursor: pageCursor, reloadTick: reloadTick),
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
-            guard presentationActivity.allowsPresentationPublication else { return }
+            guard presentationActivity.allowsPresentationPublication,
+                  installedLoad != LoadID(source: source, cursor: pageCursor, reloadTick: reloadTick) else { return }
             await load()
         }
     }
 
     private func reset() {
         requestGeneration &+= 1
+        installedLoad = nil
         options = nil
         displayedSource = nil
         pageCursor = nil
@@ -516,13 +462,9 @@ private struct SettingsCatalogPicker: View {
         let activity = presentationActivity
         let requestedSource = source
         let cursor = pageCursor
+        let requested = LoadID(source: requestedSource, cursor: cursor, reloadTick: reloadTick)
         loading = true
         loadError = nil
-        if cursor == nil {
-            options = nil
-            nextCursor = nil
-            consumedCursors = []
-        }
         @MainActor func isCurrent() -> Bool {
             ticket == requestGeneration && !Task.isCancelled && source == requestedSource
                 && activity == presentationActivity && activity.allowsPresentationPublication
@@ -531,7 +473,7 @@ private struct SettingsCatalogPicker: View {
         do {
             let response = try await model.settingsOptions(
                 target: requestedSource.target, key: requestedSource.key, qualifiers: requestedSource.qualifiers,
-                query: requestedSource.query.isEmpty ? nil : requestedSource.query, cursor: cursor
+                query: nil, cursor: cursor
             )
             guard isCurrent() else { return }
             // Values identify rows across pages; overlapping server pages must
@@ -540,10 +482,11 @@ private struct SettingsCatalogPicker: View {
             let additions = response.options.filter { seen.insert($0.id).inserted }
             options = (cursor == nil ? [] : options ?? []) + additions
             displayedSource = requestedSource
+            installedLoad = requested
             if let cursor { consumedCursors.insert(cursor) }
             if let next = response.nextCursor, consumedCursors.contains(next) {
                 nextCursor = nil
-                loadError = "The catalog could not advance. Search to narrow the results."
+                loadError = "The catalog could not advance."
             } else {
                 nextCursor = response.nextCursor
             }

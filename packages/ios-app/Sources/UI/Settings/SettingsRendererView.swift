@@ -33,11 +33,13 @@ struct SettingsRendererView: View {
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
 
     @State private var resolution: SettingsResolution?
+    /// Served options for the rows this presentation shows, by row id. Read and
+    /// installed with `resolution`, so the two never disagree.
+    @State private var options: [String: SettingsOptionsResponse] = [:]
     @State private var loadError: String?
     @State private var loadGeneration = 0
     @State private var previewGeneration = 0
     @State private var reloadTick = 0
-    @State private var search = ""
     @State private var sliderPresentation = ConfigurationSliderPresentation()
     /// Gateway refusals of a dry run, shown under their row; nothing was applied.
     @State private var rowErrors: [String: String] = [:]
@@ -74,7 +76,6 @@ struct SettingsRendererView: View {
                     rendererContents
                 }
                 .tronScrollEdgeChrome()
-                .tronFloatingSearch(text: $search, prompt: "Search settings", identifier: "settings-renderer-search")
             }
         }
         .tronConfigurationSliderHost(sliderPresentation)
@@ -111,6 +112,7 @@ struct SettingsRendererView: View {
         .onChange(of: target) { _, _ in
             retirePreview()
             resolution = nil
+            options = [:]
             rowErrors = [:]
         }
         .onDisappear {
@@ -158,42 +160,37 @@ struct SettingsRendererView: View {
 
     @ViewBuilder
     private func content(_ resolution: SettingsResolution) -> some View {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !query.isEmpty {
-            searchResults(resolution, query: query)
-        } else {
-            switch presentation {
-            case .sections:
-                overview(resolution)
-            case .section(let id):
-                if let served = Self.sections(resolution).first(where: { $0.id == id }) {
-                    sectionDetail(served, keys: keys(resolution, in: served.id), resolution: resolution)
-                }
-            case .overrides(let scope, let allTitle):
-                overrides(resolution, scope: scope, allTitle: allTitle)
-            case .detail(let id):
-                if let setting = resolution.keys.first(where: { $0.id == id }) {
-                    TronSettingsGroup(setting.presentation?.label ?? setting.key) {
-                        SettingsRendererRow(
-                            setting: setting, target: target, editable: writableLayer(for: setting) != nil,
-                            detailed: true, actionsAsRows: true,
-                            externalControl: externalControlKeys.contains(setting.key),
-                            dependencyDisplay: Self.dependencyDisplay(setting, in: resolution), error: rowErrors[setting.id],
-                            layerEditorTitle: layerEditor(for: setting)?.title,
-                            onEditLayer: { if let editor = layerEditor(for: setting) { layerEditor = editor } },
-                            onChange: { value in change(setting, value: value) },
-                            onApplyAgain: { changeID in applyAgain(changeID, rowID: setting.id) }
-                        )
-                        .disabled(changingID != nil || previewingID != nil)
-                    }
-                }
-            case .overridesLink(let scope, let title, let icon):
-                overridesLink(resolution, scope: scope, title: title, icon: icon)
-            case .keys(let ids):
-                let chosen = ids.flatMap { id in resolution.keys.filter { $0.key == id } }
-                if dividerBeforeKeys, !chosen.isEmpty { TronSettingsDivider() }
-                rows(chosen, resolution: resolution, detailed: false)
+        switch presentation {
+        case .sections:
+            overview(resolution)
+        case .section(let id):
+            if let served = Self.sections(resolution).first(where: { $0.id == id }) {
+                sectionDetail(served, keys: keys(resolution, in: served.id), resolution: resolution)
             }
+        case .overrides(let scope, let allTitle):
+            overrides(resolution, scope: scope, allTitle: allTitle)
+        case .detail(let id):
+            if let setting = resolution.keys.first(where: { $0.id == id }) {
+                TronSettingsGroup(setting.presentation?.label ?? setting.key) {
+                    SettingsRendererRow(
+                        setting: setting, target: target, editable: writableLayer(for: setting) != nil,
+                        detailed: true, actionsAsRows: true,
+                        externalControl: externalControlKeys.contains(setting.key),
+                        options: options[setting.id], error: rowErrors[setting.id],
+                        layerEditorTitle: layerEditor(for: setting)?.title,
+                        onEditLayer: { if let editor = layerEditor(for: setting) { layerEditor = editor } },
+                        onChange: { value in change(setting, value: value) },
+                        onApplyAgain: { changeID in applyAgain(changeID, rowID: setting.id) }
+                    )
+                    .disabled(changingID != nil || previewingID != nil)
+                }
+            }
+        case .overridesLink(let scope, let title, let icon):
+            overridesLink(resolution, scope: scope, title: title, icon: icon)
+        case .keys(let ids):
+            let chosen = ids.flatMap { id in resolution.keys.filter { $0.key == id } }
+            if dividerBeforeKeys, !chosen.isEmpty { TronSettingsDivider() }
+            rows(chosen, resolution: resolution, detailed: false)
         }
     }
 
@@ -385,7 +382,7 @@ struct SettingsRendererView: View {
                 instanced: instanced,
                 detailDestination: detailed ? detailDestination(setting) : nil,
                 externalControl: externalControlKeys.contains(setting.key),
-                dependencyDisplay: Self.dependencyDisplay(setting, in: resolution),
+                options: options[setting.id],
                 error: rowErrors[setting.id],
                 layerEditorTitle: editor?.title,
                 onEditLayer: { if let editor { layerEditor = editor } },
@@ -396,30 +393,6 @@ struct SettingsRendererView: View {
             // completes; replacing it with read-only would retire its child sheet.
             .disabled(changingID != nil || previewingID != nil)
         }
-    }
-
-    private func searchResults(_ resolution: SettingsResolution, query: String) -> some View {
-        let scoped: String? = if case .section(let id) = presentation { id } else { nil }
-        let matches = resolution.keys.filter { setting in
-            (scoped == nil || setting.group == scoped) &&
-            [setting.presentation?.label, setting.key, setting.presentation?.help, setting.display]
-                .compactMap { $0 }
-                .contains { $0.localizedCaseInsensitiveContains(query) }
-        }
-        return VStack(alignment: .leading, spacing: 20) {
-            if matches.isEmpty {
-                TronSettingsCaption("No setting matches \u{201C}\(query)\u{201D}.")
-            }
-            ForEach(Self.sections(resolution).filter { section in matches.contains { $0.group == section.id } }) { section in
-                TronSettingsGroup(section.title) {
-                    VStack(spacing: 0) {
-                        rows(Self.sorted(matches.filter { $0.group == section.id }), resolution: resolution, detailed: true)
-                    }
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("settings-renderer-results")
     }
 
     // MARK: Ordering
@@ -441,12 +414,38 @@ struct SettingsRendererView: View {
         keys.sorted { ($0.presentation?.order ?? .max, $0.id) < ($1.presentation?.order ?? .max, $1.id) }
     }
 
-    /// The displays of the keys an options source depends on: when one changes,
-    /// the row asks the Gateway for its options again (doc 7.5).
-    private static func dependencyDisplay(_ setting: ResolvedSetting, in resolution: SettingsResolution) -> String {
-        (setting.presentation?.optionsSource?.dependsOn ?? []).map { key in
-            resolution.keys.first { $0.key == key }?.display ?? ""
-        }.joined(separator: "|")
+    /// The rows this presentation shows that edit through a served option source.
+    /// A primary surface shows section rows only, so it reads none. A change to a
+    /// key a source depends on reloads the resolution, and these with it (doc 7.5).
+    private func optionReads(_ resolution: SettingsResolution) -> [ResolvedSetting] {
+        let shown: [ResolvedSetting]
+        switch presentation {
+        case .sections, .overridesLink: return []
+        case .section(let id): shown = resolution.keys.filter { $0.group == id }
+        case .overrides: shown = resolution.keys.filter { $0.layer == writeLayer || ownedLayers.contains($0.layer) }
+        case .detail(let id): shown = resolution.keys.filter { $0.id == id }
+        case .keys(let ids): shown = resolution.keys.filter { ids.contains($0.key) }
+        }
+        return shown.filter { setting in
+            setting.presentation?.optionsSource != nil && writableLayer(for: setting) != nil
+                && !externalControlKeys.contains(setting.key)
+                && [.choice, .number, .checklist].contains(SettingsRowControl(negotiated: setting.presentation?.control))
+        }
+    }
+
+    /// One row's options, or none when the source cannot answer: that row then
+    /// shows its value read-only, and every other row is unaffected.
+    private func readOptions(_ settings: [ResolvedSetting]) async -> [String: SettingsOptionsResponse] {
+        await withTaskGroup(of: (String, SettingsOptionsResponse?).self) { group in
+            for setting in settings {
+                group.addTask { [model, target] in
+                    (setting.id, try? await model.settingsOptions(target: target, key: setting.key, qualifiers: setting.qualifiers, query: nil))
+                }
+            }
+            var read: [String: SettingsOptionsResponse] = [:]
+            for await (id, response) in group { if let response { read[id] = response } }
+            return read
+        }
     }
 
     // MARK: Reads and changes
@@ -471,7 +470,10 @@ struct SettingsRendererView: View {
         do {
             let value = try await model.resolveSettingsForRenderer(target: target)
             guard current() else { return }
+            let read = await readOptions(optionReads(value))
+            guard current() else { return }
             resolution = value
+            options = read
             loadError = nil
         } catch is CancellationError {
             return

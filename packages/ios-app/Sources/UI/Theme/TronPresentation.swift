@@ -687,55 +687,6 @@ private struct TronSaveToolbarModifier: ViewModifier {
     }
 }
 
-extension View {
-    /// The standard sheet search: a round button at the bottom right that opens
-    /// a search field above the keyboard. Closing clears the query.
-    func tronFloatingSearch(text: Binding<String>, prompt: String = "Search", identifier: String? = nil) -> some View {
-        modifier(TronFloatingSearchModifier(text: text, prompt: prompt, identifier: identifier))
-    }
-}
-
-private struct TronFloatingSearchModifier: ViewModifier {
-    @Binding var text: String
-    let prompt: String
-    let identifier: String?
-    @State private var active = false
-    @Environment(\.tronSettingsVisualTheme) private var theme
-
-    func body(content: Content) -> some View {
-        content.safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack {
-                if active {
-                    TronSearchBar(text: $text, prompt: prompt, focusOnAppear: true, onClose: close)
-                        .accessibilityIdentifier(identifier ?? "tron-floating-search")
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                } else {
-                    Spacer()
-                    Button { withAnimation(.snappy) { active = true } } label: {
-                        Image(systemName: "magnifyingglass")
-                            .font(TronTypography.sans(size: 24, weight: .semibold))
-                            .foregroundStyle(theme?.accent ?? .tronEmerald)
-                            .frame(width: 56, height: 56)
-                            .glassEffect(.regular.tint((theme?.accent ?? .tronEmerald).opacity(0.12)).interactive(), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(prompt)
-                    .accessibilityIdentifier((identifier ?? "tron-floating-search") + "-open")
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-        }
-    }
-
-    private func close() {
-        withAnimation(.snappy) {
-            text = ""
-            active = false
-        }
-    }
-}
-
 struct TronSearchBar: View {
     @Binding var text: String
     var prompt = "Search"

@@ -99,19 +99,12 @@ struct TronChoicePicker<ID: Hashable>: View {
     let selected: ID?
     var optionIdentifierPrefix = "settings-option-"
     let onChoose: (ID) -> Void
-    @State private var query = ""
     @Environment(\.dismiss) private var dismiss
-
-    private var shown: [TronChoice<ID>] {
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return choices }
-        return choices.filter { $0.label.localizedCaseInsensitiveContains(trimmed) || $0.detail?.localizedCaseInsensitiveContains(trimmed) == true }
-    }
 
     var body: some View {
         ScrollView(.vertical) {
             LazyVStack(alignment: .leading, spacing: 8) {
-                ForEach(shown) { choice in
+                ForEach(choices) { choice in
                     TronCatalogOptionRow(title: choice.label, summary: choice.disabledReason, detail: choice.detail,
                                          icon: "circle", isSelected: choice.id == selected,
                                          isEnabled: choice.disabledReason == nil) {
@@ -120,14 +113,12 @@ struct TronChoicePicker<ID: Hashable>: View {
                     }
                     .accessibilityIdentifier(optionIdentifierPrefix + choice.label)
                 }
-                if shown.isEmpty { TronSettingsCaption("No options match this search") }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle(title)
-        .modifier(TronChoiceSearch(enabled: choices.count > 12, query: $query))
     }
 }
 
@@ -140,7 +131,6 @@ struct TronChecklistPicker<ID: Hashable>: View {
     var optionIdentifierPrefix = "settings-option-"
     let onSave: ([ID]) -> Void
     @State private var chosen: [ID]
-    @State private var query = ""
     @Environment(\.dismiss) private var dismiss
     private let initial: [ID]
 
@@ -152,12 +142,6 @@ struct TronChecklistPicker<ID: Hashable>: View {
         _chosen = State(initialValue: selected)
     }
 
-    private var shown: [TronChoice<ID>] {
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard let choices, !trimmed.isEmpty else { return choices ?? [] }
-        return choices.filter { $0.label.localizedCaseInsensitiveContains(trimmed) || $0.detail?.localizedCaseInsensitiveContains(trimmed) == true }
-    }
-
     var body: some View {
         ScrollView(.vertical) {
             LazyVStack(alignment: .leading, spacing: 8) {
@@ -165,7 +149,7 @@ struct TronChecklistPicker<ID: Hashable>: View {
                 if choices == nil {
                     TronLoadingState(label: "Loading…").frame(maxWidth: .infinity, alignment: .leading)
                 }
-                ForEach(shown) { choice in
+                ForEach(choices ?? []) { choice in
                     let isChosen = chosen.contains(choice.id)
                     TronCatalogOptionRow(title: choice.label, summary: choice.disabledReason, detail: choice.detail,
                                          icon: "circle", isSelected: isChosen,
@@ -174,7 +158,6 @@ struct TronChecklistPicker<ID: Hashable>: View {
                     }
                     .accessibilityIdentifier(optionIdentifierPrefix + choice.label)
                 }
-                if choices != nil && shown.isEmpty { TronSettingsCaption("No options match this search") }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -185,15 +168,6 @@ struct TronChecklistPicker<ID: Hashable>: View {
             onSave(chosen)
             dismiss()
         }
-        .modifier(TronChoiceSearch(enabled: (choices?.count ?? 0) > 12, query: $query))
-    }
-}
-
-private struct TronChoiceSearch: ViewModifier {
-    let enabled: Bool
-    @Binding var query: String
-    func body(content: Content) -> some View {
-        if enabled { content.tronFloatingSearch(text: $query) } else { content }
     }
 }
 
