@@ -6,9 +6,10 @@ import Testing
 struct MenuBarTerminationTests {
     @Test("real AppKit deferred termination completes, retries, and rejects dispatch-based controls")
     func appKitTermination() async throws {
+        // Tests/Integration/<file> -> packages/mac-app
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("tron-termination-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

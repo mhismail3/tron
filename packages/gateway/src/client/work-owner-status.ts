@@ -4,7 +4,8 @@ import { networkInterfaces } from "node:os";
 import { resolveBindHost } from "../config.js";
 import type { JsonValue } from "../protocol/types.js";
 import { resolveTronHome } from "../tron-home.js";
-import { GatewayProtocolClient } from "./gateway-client.js";
+import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
+import { PROTOCOL_VERSION } from "../version.js";
 import { readLocalCredential } from "./local-credential.js";
 
 const settledEvidence = new Set([
@@ -97,4 +98,15 @@ async function main(): Promise<void> {
     process.stdout.write("unknown\n");
   } finally { client.close(); }
 }
-main().catch(error => { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 2; });
+main().catch(error => {
+  if (error instanceof GatewayClientError && error.code === "protocol_mismatch") {
+    const details = error.details && typeof error.details === "object" && !Array.isArray(error.details)
+      ? error.details as Record<string, unknown> : {};
+    const gatewayProtocol = details.gatewayProtocol;
+    process.stderr.write(`${JSON.stringify({ kind: "protocol_mismatch", gatewayProtocol: Number.isSafeInteger(gatewayProtocol) ? gatewayProtocol : null, helperProtocol: PROTOCOL_VERSION })}\n`);
+    process.exitCode = 3;
+    return;
+  }
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 2;
+});
