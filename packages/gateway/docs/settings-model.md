@@ -1295,7 +1295,10 @@ show any key without understanding its type.
 
 **Dynamic options are served.** A key with an `optionsSource` gets its options
 from `settings.options { key, target, qualifiers }`: each option has a value,
-label, detail and an optional disabled reason. The schema names the keys a
+label, detail and an optional disabled reason. `catalog.tools` choices also carry
+`resource`, the serializable tool record (description, parameter schema and
+origin metadata) used by Settings and Manage Session's shared tool list/detail
+presentation. The schema names the keys a
 source depends on, and iOS re-requests when one of them changes (for example
 the thinking levels after a model change). Catalogs are paged and searchable on
 the Gateway.

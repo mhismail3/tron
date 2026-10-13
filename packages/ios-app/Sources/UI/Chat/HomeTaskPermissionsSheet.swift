@@ -29,9 +29,7 @@ extension HomeTaskSheet.PendingRevocation.Target {
 extension HomeTaskSheet {
     func permissionList(_ permissions: HomeTaskPermissionsDTO) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("After a restore, reconfirm active standing scopes. This never renews one-use grants or revoked scopes.")
-                .font(TronTypography.secondaryDescription)
-                .foregroundStyle(Color.tronTextMuted)
+            TronSettingsCaption("After a restore, reconfirm active standing scopes. This never renews one-use grants or revoked scopes.")
             actionRow(title: "Reconfirm permissions", icon: "checkmark.arrow.trianglehead.counterclockwise",
                       id: "home-permissions-reconfirm", enabled: canMutate) { mutate(.reconfirmPermissions) }
             sectionCard("Standing scopes") {

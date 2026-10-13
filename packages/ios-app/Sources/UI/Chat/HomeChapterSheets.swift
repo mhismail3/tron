@@ -6,9 +6,7 @@ import TronMobileCore
 extension HomeSheet {
     func chapters(_ list: HomeChapterListDTO) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Newest first. Sealed chapters stay readable and refuse changes.")
-                .font(TronTypography.secondaryDescription)
-                .foregroundStyle(Color.tronTextMuted)
+            TronSettingsCaption("Newest first. Sealed chapters stay readable and refuse changes.")
             TronGlassCard(accent: .tronSessionTeal) {
                 VStack(spacing: 0) {
                     ForEach(Array(list.chapters.reversed().enumerated()), id: \.element.id) { index, chapter in

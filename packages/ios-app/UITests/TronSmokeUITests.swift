@@ -2129,6 +2129,77 @@ final class TronSmokeUITests: XCTestCase {
             .matching(NSPredicate(format: "label CONTAINS %@", "Off")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 
+    /// Settings' tools.active editor reuses Available Tools grouping and tool detail.
+    @MainActor
+    func testSettingsToolsEditorUsesAvailableToolsListAndDetails() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let toolsSection = app.buttons["settings-section-tools-open"]
+        XCTAssertTrue(toolsSection.waitForExistence(timeout: 10), app.debugDescription)
+        tapScrolling(toolsSection, in: app)
+        let toolsRow = app.descendants(matching: .any)["settings-row-tools.active"]
+        XCTAssertTrue(toolsRow.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(toolsRow.buttons.firstMatch.buttons.firstMatch, in: app)
+        let any = app.descendants(matching: .any)
+        let count = any.matching(NSPredicate(format: "label == %@", "2 of 2 on")).firstMatch
+        XCTAssertTrue(count.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(any.matching(NSPredicate(format: "label == %@", "Read")).firstMatch.exists, app.debugDescription)
+        keepScreenshot(named: "900-tools-list-light")
+        let detailButton = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Read, Read file contents")).firstMatch
+        tapScrolling(detailButton, in: app)
+        XCTAssertTrue(app.staticTexts["Fixture path input"].waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "900-tools-detail-light")
+        closeTopSheet(app)
+        // A chosen tool the catalog no longer offers stays listed with its reason, so it can be cleared.
+        XCTAssertTrue(app.staticTexts["Not available here"].exists, app.debugDescription)
+        // Toggles edit a draft like every checklist; Save applies one change.
+        let applied = app.staticTexts["fixture.settings-renderer-applied"]
+        let read = app.switches["Read"]
+        XCTAssertTrue(read.waitForExistence(timeout: 5), app.debugDescription)
+        read.tap()
+        tapScrolling(app.switches["Retired"], in: app)
+        XCTAssertTrue(any.matching(NSPredicate(format: "label == %@", "0 of 2 on")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(applied.label, "applied:0", "Toggling edits the draft; nothing applies before Save")
+        app.buttons["tron-sheet-save"].tap()
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
+    }
+
+    /// Sheet intro text renders at the settings row subtitle's size and text style
+    /// (#900): at a large type size each wrapped intro line is one row-subtitle line.
+    @MainActor
+    func testSheetIntroTextMatchesRowSubtitleSize() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
+        app.launch()
+        defer { app.terminate() }
+        let subtitle = app.staticTexts["Paired Macs, devices, and push"]
+        XCTAssertTrue(subtitle.waitForExistence(timeout: 10), app.debugDescription)
+        let line = subtitle.frame.height
+        XCTAssertGreaterThan(line, 8)
+        tapScrolling(app.buttons["Changes"].firstMatch, in: app)
+        let intro = app.staticTexts["Settings agents changed, and edits made outside Tron. Open one to see it in full or undo it."]
+        XCTAssertTrue(intro.waitForExistence(timeout: 5), app.debugDescription)
+        // A medium-detent sheet is drawn slightly scaled; measure at large, settled.
+        app.staticTexts["Changes"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+        var frame = intro.frame
+        for _ in 0..<10 {
+            _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 0.3)
+            if intro.frame == frame { break }
+            frame = intro.frame
+        }
+        keepScreenshot(named: "900-changes-intro")
+        let lines = (frame.height / line).rounded()
+        XCTAssertGreaterThanOrEqual(lines, 1)
+        XCTAssertEqual(frame.height, lines * line, accuracy: 0.5,
+                       "The intro uses the row subtitle's size: \(frame.height) is not \(lines) lines of \(line)")
+    }
+
     /// Opens one section's sheet from Settings.
     @MainActor
     private func openRendererSection(_ app: XCUIApplication, _ id: String) {

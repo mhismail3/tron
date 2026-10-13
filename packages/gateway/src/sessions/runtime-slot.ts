@@ -1362,10 +1362,25 @@ export class RuntimeSlot {
 
   /** The tools this chat's selection may name: its registry, less hidden tools
    * (`setTools` refuses those). */
-  settingsToolCatalog(): Array<{ name: string; description?: string }> {
+  settingsToolCatalog(): Array<{ name: string; description?: string; resource: Record<string, unknown> }> {
     this.assertNoTrustReload();
     return this.runtime.session.getAllTools().filter(tool => tool.exposure !== "hidden")
-      .map(tool => ({ name: tool.name, ...(tool.description ? { description: tool.description } : {}) }));
+      .map(tool => {
+        const distribution = resourceDistribution(tool.sourceInfo);
+        return {
+          name: tool.name,
+          ...(tool.description ? { description: tool.description } : {}),
+          resource: {
+            name: tool.name,
+            ...(this.toolLabel(tool.name) ? { label: this.toolLabel(tool.name)! } : {}),
+            description: tool.description,
+            parameters: tool.parameters,
+            source: tool.sourceInfo.source,
+            ...(distribution ? { distribution } : {}),
+            ...(tool.namespace ? { namespace: tool.namespace } : {}),
+          },
+        };
+      });
   }
 
   /** This chat's Chat layer as its session record holds it (settings-model.md

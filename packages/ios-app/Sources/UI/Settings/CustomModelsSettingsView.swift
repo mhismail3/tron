@@ -133,7 +133,7 @@ struct CustomModelsSettingsView: View {
                     .font(TronTypography.sheetSectionHeader)
                     .foregroundStyle(Color.tronTextPrimary)
                     .accessibilityAddTraits(.isHeader)
-                TronSettingsDetailText("Choose a provider to edit its endpoint, format, and model IDs.")
+                TronSettingsCaption("Choose a provider to edit its endpoint, format, and model IDs.")
             }
 
             if providers.isEmpty {

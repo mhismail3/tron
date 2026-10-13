@@ -1,7 +1,13 @@
 import type { ManagedSubagents } from "../sessions/managed-subagents.js";
 import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import {
+  createBashToolDefinition, createEditToolDefinition, createFindToolDefinition, createGrepToolDefinition,
+  createLsToolDefinition, createPowerShellToolDefinition, createReadToolDefinition, createWriteToolDefinition,
+} from "@earendil-works/pi-coding-agent";
+import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { loadSessionFreeExtensions } from "./session-free-extensions.js";
+import { resourceDistribution } from "../sessions/resource-distribution.js";
 import type { ToolCatalogEntry } from "./settings-model.js";
 import { PI_BUILTIN_TOOL_NAMES } from "./settings-types.js";
 import type { TrustService } from "./trust-service.js";
@@ -31,12 +37,36 @@ export class ScopeToolCatalog {
     try {
       return await this.mutex.run(async () => {
         const loaded = await loadSessionFreeExtensions(this.agentDir, this.trust, cwd, this.managedSubagents);
+        const workingDirectory = cwd ?? process.cwd();
+        const builtIns = [
+          createReadToolDefinition(workingDirectory), createBashToolDefinition(workingDirectory),
+          createPowerShellToolDefinition(workingDirectory), createEditToolDefinition(workingDirectory),
+          createWriteToolDefinition(workingDirectory), createGrepToolDefinition(workingDirectory),
+          createFindToolDefinition(workingDirectory), createLsToolDefinition(workingDirectory),
+        ];
+        const builtInByName = new Map(builtIns.map(definition => [definition.name, definition]));
+        const builtInEntries = PI_BUILTIN_TOOL_NAMES.map(name => {
+          const definition = builtInByName.get(name);
+          if (!definition) throw new GatewayError("internal", `Pi built-in tool ${name} has no definition`);
+          return { name, description: definition.description, resource: {
+            name, label: definition.label, description: definition.description, parameters: definition.parameters,
+          } };
+        });
         const optIn = loaded.extensions.flatMap(extension => [...extension.tools.values()])
           .filter(tool => tool.definition.defaultActive === false && tool.definition.exposure !== "hidden")
-          .map(tool => ({ name: tool.definition.name, ...(tool.definition.description ? { description: tool.definition.description } : {}) }))
+          .map(tool => ({
+            name: tool.definition.name,
+            description: tool.definition.description,
+            resource: {
+              name: tool.definition.name, label: tool.definition.label, description: tool.definition.description,
+              parameters: tool.definition.parameters,
+              ...(resourceDistribution(tool.sourceInfo) ? { distribution: resourceDistribution(tool.sourceInfo) } : {}),
+              source: tool.sourceInfo.source, ...(tool.definition.namespace ? { namespace: tool.definition.namespace } : {}),
+            },
+          }))
           .filter(tool => !PI_BUILTIN_TOOL_NAMES.includes(tool.name))
           .sort((a, b) => a.name.localeCompare(b.name));
-        return [...PI_BUILTIN_TOOL_NAMES.map(name => ({ name })), ...optIn];
+        return [...builtInEntries, ...optIn];
       });
     } finally {
       work?.settle();
