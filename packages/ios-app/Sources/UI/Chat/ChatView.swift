@@ -1850,6 +1850,11 @@ struct ChatView: View {
     private var retainedRecoveryStatus: ChatRetainedRecoveryStatus? {
         guard hasRetainedTranscript else { return nil }
         if !model.admitsSessionPresentationOpen {
+            // A rejected credential stops automatic recovery: it is a failure
+            // to explain at once, not a reconnect to wait out.
+            if model.connectionState == .unauthorized {
+                return .unavailable("The Mac no longer accepts this iPhone. Pair again in Settings.")
+            }
             return model.isConnectionRecoveryVisible ? .waitingForConnection : nil
         }
         if model.hasFailedConversationSynchronization(sessionID: sessionID) {
@@ -3723,9 +3728,11 @@ enum ChatRetainedRecoveryStatus: Equatable {
     }
 }
 
-/// A one-line recovery subtitle beneath the chat title, in the navigation
-/// chrome, with its Retry beside it. The reason stays one accessibility element
-/// whose value carries the full explanation; Retry is independently reachable.
+/// A one-line recovery capsule beneath the chat title, in the navigation
+/// chrome, with its Retry inside it. Liquid Glass matches the bar's own back
+/// and settings controls and keeps the line legible over the scrolled
+/// transcript. The reason stays one accessibility element whose value carries
+/// the full explanation; Retry is independently reachable.
 struct ChatRecoveryStatusLine: View {
     let status: ChatRetainedRecoveryStatus
     let retry: () -> Void
@@ -3751,15 +3758,18 @@ struct ChatRecoveryStatusLine: View {
                 .foregroundStyle(Color.tronEmerald)
                 .buttonStyle(.plain)
                 .fixedSize()
-                // The visible word is small; the touch target still meets
-                // the bar's hit-testing area without growing the chrome.
-                .padding(.horizontal, 6)
-                .contentShape(Rectangle().inset(by: -8))
+                // The visible word is small; extend its touch area past the
+                // capsule rather than growing the fixed-height bar.
+                .contentShape(Rectangle().inset(by: -12))
                 .accessibilityHint("Reconnects this conversation")
         }
         .minimumScaleFactor(0.8)
-        // The navigation bar has a fixed height; the long-press large content
-        // viewer carries the reason at accessibility text sizes instead.
+        .padding(.horizontal, 10)
+        .padding(.vertical, 3)
+        .glassEffect(.regular, in: .capsule)
+        // Like the system bar items beside it, the fixed-height bar stops
+        // growing at the largest standard size; the long-press large content
+        // viewer and VoiceOver value carry the reason beyond it.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .accessibilityShowsLargeContentViewer {
             Label(status.title, systemImage: "exclamationmark.triangle.fill")

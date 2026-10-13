@@ -1800,10 +1800,6 @@ final class AppModel {
         recordSceneTransition(to: .active)
         let requiresRetirementBarrier = lifecycle.routeActivationRequiresRetirementBarrier
         let lifecycleTask = lifecycle.becameActive()
-        // Background retirement emits no transport loss of its own. Start the
-        // grace at activation so a replacement that stays unavailable becomes
-        // visible on the same schedule as any other loss, and a fast one never does.
-        if requiresRetirementBarrier { beginRecoveryDisplayEpisodeIfNeeded() }
         return Task { @MainActor [weak self] in
             // A true background transition must first finish retiring the old
             // socket; an inactive/active transition already has a safe route
@@ -5758,7 +5754,12 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     }
 
     func lifecycleRecordDiagnostic(event: String, message: String) {
-        if event == "reconnect.failure" || event == "reconnect.exhausted" || event == "reconnect.stopped" {
+        // Every scheduled reconnect starts the grace, including the one each
+        // foreground performs after background retirement (which emits no
+        // transport loss of its own): a replacement that outlives the grace is
+        // shown on one schedule, and a fast one never is (#878).
+        if event == "reconnect.scheduled" || event == "reconnect.failure"
+            || event == "reconnect.exhausted" || event == "reconnect.stopped" {
             beginRecoveryDisplayEpisodeIfNeeded()
         }
         let recordedEvents = ["reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "reconnect.parked", "reconnect.parked-resume", "reconnect.skipped", "path.changed", "detail.tap", "detail.preparation"]

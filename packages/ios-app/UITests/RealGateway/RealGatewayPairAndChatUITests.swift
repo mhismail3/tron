@@ -222,6 +222,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(statusAppearedAfter, 2,
                                     "recovery appeared before the reconnect outlived the recovery grace")
         keepScreenshot(app, name: "878-simulator-delayed-foreground-status")
+        // The app-scoped recovery card arrives with the same grace and briefly
+        // covers the bar; the persistent status must remain after it retires.
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: transientNotice
+        )], timeout: 20), .completed)
+        keepScreenshot(app, name: "878-simulator-delayed-foreground-status-persistent")
         assertRecoveryInChrome(app, status: waitingStatus)
         XCTAssertTrue(sameRouteReply.isHittable, "delayed-connection status covered the retained reply")
         XCTAssertEqual(sameRouteReply.frame.minY, replyFrameBeforeForeground.minY, accuracy: 3,
@@ -380,6 +386,41 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "the waiting route did not resume without another tap: \(app.debugDescription)")
         XCTAssertFalse(app.staticTexts["Waiting for connection"].exists)
         keepScreenshot(app, name: "393-simulator-reconnected-without-retry")
+
+        // #878 at accessibility text size: relaunch the same paired app (no
+        // reset) and require the persistent status and Retry to stay inside the
+        // navigation chrome, reachable, without covering the retained reply.
+        app.terminate()
+        let largeText = XCUIApplication()
+        largeText.launchArguments = [
+            "-ApplePersistenceIgnoreState", "YES",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+        ]
+        largeText.launch()
+        defer { largeText.terminate() }
+        let largeRow = largeText.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")
+        ).firstMatch
+        XCTAssertTrue(waitForHittable(largeRow, timeout: 90), largeText.debugDescription)
+        largeRow.tap()
+        let largeReply = largeText.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+        XCTAssertTrue(largeReply.waitForExistence(timeout: 60), largeText.debugDescription)
+        try setProxyMode(fixture, mode: "blackhole")
+        let largeStatus = recoveryStatus(largeText, "Waiting for connection")
+        XCTAssertTrue(largeStatus.waitForExistence(timeout: 90),
+                      "transport loss at accessibility text size showed no recovery: \(largeText.debugDescription)")
+        let largeNotice = largeText.descendants(matching: .any).matching(identifier: "in-app-notice-card").firstMatch
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: largeNotice
+        )], timeout: 20), .completed)
+        keepScreenshot(largeText, name: "878-simulator-accessibility-xxxl-recovery")
+        assertRecoveryInChrome(largeText, status: largeStatus)
+        XCTAssertEqual(largeStatus.value as? String, "This conversation will resume when the Mac reconnects.",
+                       "VoiceOver must receive the full recovery explanation")
+        try setProxyMode(fixture, mode: "pass")
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: largeStatus
+        )], timeout: 90), .completed, "the large-text route did not reconnect on its own")
     }
 
     @MainActor
