@@ -328,7 +328,7 @@ describe("HomeTaskStore durable namespace", () => {
     const refused = await owner.authorize(binding).then(() => { throw new Error("authorized without a grant"); },
       error => error as HomeTaskAuthorizationError);
     expect(refused).toMatchObject({ code: "grant-required" });
-    const rows = async () => Object.fromEntries((await f.store.page({})).items.map(row => [row.taskId, row.pendingGrant]));
+    const rows = async () => Object.fromEntries((await f.store.page({})).items.map(row => [row.task.taskId, row.pendingGrant]));
     expect(await rows()).toEqual({ "task-1": true, "task-2": false, "task-3": false });
     await owner.recordDecisionAndGrant(refused.requestId!, { decisionId: "decision-1", approved: false, expiresAt: 2_000, restoreEpoch: epoch });
     expect(await rows()).toEqual({ "task-1": false, "task-2": false, "task-3": false });
@@ -474,7 +474,7 @@ describe("Home task recency pages", () => {
       await new Promise(resolve => setTimeout(resolve, 2));
     }
     const first = await f.store.page({ limit: 2 });
-    expect(first.items.map(row => row.taskId)).toEqual(["page-5", "page-4"]);
+    expect(first.items.map(row => row.task.taskId)).toEqual(["page-5", "page-4"]);
     const original = (await f.store.read("page-5"))!;
     expect(original.createdAt).toBeGreaterThan(0);
     const name = (await readdir(f.directory)).find(name => name.endsWith("-page-5.json"))!;
@@ -483,13 +483,13 @@ describe("Home task recency pages", () => {
     expect((await readdir(f.directory)).filter(name => name.endsWith("-page-5.json"))).toEqual([name]);
     expect(await f.store.read("page-5")).toMatchObject({ createdAt: original.createdAt, updatedAt: expect.any(Number), revision: 2 });
     const reopened = new HomeTaskStore(f.root, f.workspace);
-    expect((await reopened.page({ limit: 2 })).items.map(row => row.taskId)).toEqual(["page-5", "page-4"]);
+    expect((await reopened.page({ limit: 2 })).items.map(row => row.task.taskId)).toEqual(["page-5", "page-4"]);
     await f.store.put({ ...task(), taskId: "newest" }, null);
     const second = await reopened.page({ limit: 2, cursor: first.nextCursor });
     const third = await reopened.page({ limit: 2, cursor: second.nextCursor });
-    expect([...second.items, ...third.items].map(row => row.taskId)).toEqual(["page-3", "page-2", "page-1", "page-0"]);
+    expect([...second.items, ...third.items].map(row => row.task.taskId)).toEqual(["page-3", "page-2", "page-1", "page-0"]);
     expect(third.nextCursor).toBeUndefined();
-    expect((await reopened.page({ limit: 1 })).items[0].taskId).toBe("newest");
+    expect((await reopened.page({ limit: 1 })).items[0].task.taskId).toBe("newest");
     expect(await reopened.read("page-0")).toMatchObject({ taskId: "page-0" });
     const snapshot = join(f.root, "copy"); await cp(f.directory, snapshot, { recursive: true });
     await rm(f.directory, { recursive: true }); await rename(snapshot, f.directory);
@@ -529,7 +529,7 @@ describe("Home task recency pages", () => {
       await expect(f.store.restoreEpoch()).rejects.toMatchObject({ code: "unsafe-state" });
       await expect(f.store.page({})).rejects.toMatchObject({ code: "unsafe-state" });
     } finally { fsSeam.zeroBirthtimePaths.delete(f.directory); }
-    expect((await f.store.page({})).items.map(row => row.taskId)).toEqual(["task-1"]);
+    expect((await f.store.page({})).items.map(row => row.task.taskId)).toEqual(["task-1"]);
   });
 
   it("refuses two individually valid files for one task identity in every enumeration", async () => {
@@ -576,7 +576,7 @@ describe("HomeTaskStore staged publications", () => {
     await writeFile(taskTemporary, "{\"partial\":", { mode: 0o600 });
     await writeFile(authorizationTemporary, "{", { mode: 0o600 });
     expect((await collectRecords(f.store)).map(row => row.taskId)).toEqual(["task-1"]);
-    expect((await f.store.page({})).items.map(row => row.taskId)).toEqual(["task-1"]);
+    expect((await f.store.page({})).items.map(row => row.task.taskId)).toEqual(["task-1"]);
     expect(await f.store.read("task-1")).toMatchObject({ taskId: "task-1" });
     const streamed: string[] = [];
     for await (const row of f.store.records()) streamed.push(row.taskId);

@@ -18,6 +18,10 @@ import type { FixedSetting } from "../admin/settings-resolver.js";
 import { HOME_TASK_SUBAGENTS, HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, parseHomeTaskSubagentsEntry, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "./home-task-subagents.js";
 import type { HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
 import { basename } from "node:path";
+import { abortableRead } from "../util/abortable-read.js";
+
+/** One shared home.taskList store pass and the readers waiting on it. */
+interface ListFlight { result: Promise<HomeTaskPage>; readers: number; controller: AbortController }
 
 export type HomeTaskDiagnostic =
   | HomeTaskAuthorizationDiagnostic
@@ -29,6 +33,7 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; outputTokens: number }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
+  | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
 export type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
 /** `title` names the worker session; it is never persisted with the task record. */
@@ -61,6 +66,7 @@ export function homeTaskTitle(brief: string, workerName: string | undefined): st
 /** Installation capability owner. Each dispatch closure, not a parallel ID map,
  * owns its lease, cancellation signal, terminal promise and report lifetime. */
 export class HomeTaskDispatcher {
+  private readonly listFlights = new Map<string, ListFlight>();
   private readonly setup = new AsyncMutex();
   private recovery: Promise<HomeTaskRecoveryStatus> | undefined;
   constructor(readonly store: HomeTaskStore, readonly authorization: HomeTaskAuthorization,
@@ -477,17 +483,45 @@ export class HomeTaskDispatcher {
     }
   }
 
-  /** The list page of the newest tasks, each with its display. Reads each listed record once more, so
-   * a page costs at most twice its `limit` record reads and never a report body. */
-  async list(input: { limit?: number; cursor?: string }): Promise<HomeTaskPage> {
-    const page = await this.store.page(input);
-    const items: HomeTaskSummary[] = [];
-    for (const item of page.items) {
-      const task = await this.store.read(item.taskId);
-      if (!task) throw new GatewayError("conflict", "Listed task is missing");
-      items.push({ ...item, ...await this.display(task), sessionId: task.sessionId });
+  /** The list page of the newest tasks, each with its display, from one store pass
+   * and never a report body. Identical reads in flight share that pass (#906): a
+   * client that re-asks while one read is pending adds no store work. The pass
+   * leaves the store queue once every reader waiting on it has gone. */
+  async list(input: { limit?: number; cursor?: string }, signal?: AbortSignal): Promise<HomeTaskPage> {
+    const key = JSON.stringify([input.limit ?? null, input.cursor ?? null]);
+    let flight = this.listFlights.get(key);
+    if (!flight) {
+      const controller = new AbortController();
+      const created: ListFlight = { readers: 0, controller, result: this.readList(input, controller.signal)
+        .finally(() => { if (this.listFlights.get(key) === created) this.listFlights.delete(key); }) };
+      this.listFlights.set(key, created);
+      flight = created;
     }
-    return { ...page, items, counts: await this.store.counts() };
+    const joined = flight;
+    joined.readers += 1;
+    try {
+      return await abortableRead(signal, () => joined.result);
+    } finally {
+      joined.readers -= 1;
+      if (joined.readers === 0 && signal?.aborted) {
+        if (this.listFlights.get(key) === joined) this.listFlights.delete(key);
+        joined.controller.abort(signal.reason);
+      }
+    }
+  }
+
+  private async readList(input: { limit?: number; cursor?: string }, signal: AbortSignal): Promise<HomeTaskPage> {
+    const page = await this.store.page(input, signal);
+    const items: HomeTaskSummary[] = [];
+    for (const { task, pendingGrant } of page.items) {
+      items.push({
+        taskId: task.taskId, createdAt: task.createdAt, updatedAt: task.updatedAt, sessionId: task.sessionId, target: task.target,
+        lifecycle: task.lifecycle, outcome: task.terminalEvidence?.outcome ?? null, spend: task.spend,
+        attention: task.terminalEvidence?.outcome === "needs-input" || task.terminalEvidence?.outcome === "unknown",
+        pendingGrant, ...await this.display(task),
+      });
+    }
+    return { items, counts: page.counts, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
   }
 
   /** A task's display. A worker's name is read from its canonical session, never a transcript scan. */

@@ -6,9 +6,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, isDurablePublicationUncertain, syncDurably, type DurableJsonFileSystem } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { authorizationRequestId, type HomeTaskAuthorizationState, type HomeTaskAuthorizationStore } from "./home-task-authorization.js";
-import type { HomeTaskCounts, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
-/** A list row before the dispatcher adds the project and the session of its display. */
-type HomeTaskRow = Omit<HomeTaskSummary, "project" | "sessionId">;
+import type { HomeTaskCounts } from "../protocol/types.js";
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
 
 const TASK_BYTES = 256 * 1_024;
@@ -77,9 +75,17 @@ interface Options {
   fileSystem?: DurableJsonFileSystem;
 }
 
+/** One listed record, with whether a maintainer decision is still owed for it. */
+export interface HomeTaskPageItem {
+  task: HomeTaskRecord;
+  pendingGrant: boolean;
+}
+
 /** Durable namespace authority only; dispatch and domain lifecycle belong to
  * their later owners. One store per installation shares the workspace lease.
- * Enumeration streams files, never builds a second task catalog. */
+ * Enumeration streams files, never builds a second task catalog, so its owners
+ * keep scans few: a list page is one pass, and Home admission never scans once
+ * per delivered operation (#906). */
 export class HomeTaskStore {
   private readonly mutex = new AsyncMutex();
   private readonly home: string;
@@ -274,7 +280,8 @@ export class HomeTaskStore {
     });
   }
 
-  private async run<T>(operation: () => Promise<T>): Promise<T> {
+  /** `signal` withdraws a read still queued for the mutex (a caller that went away). */
+  private async run<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.mutex.run(async () => {
       try {
         if (this.publicationUncertain) throw new HomeTaskStoreError("publication-uncertain");
@@ -289,7 +296,7 @@ export class HomeTaskStore {
         this.options.diagnostic?.({ event: "home.task.store-refused", reason: refusal.code });
         throw refusal;
       }
-    });
+    }, signal);
   }
 
   private async publish(path: string, document: unknown, maximumBytes: number): Promise<void> {
@@ -336,6 +343,8 @@ export class HomeTaskStore {
     }
     return state;
   }
+
+
 
   private taskPath(task: Pick<HomeTaskRecord, "createdAt" | "taskId">): string {
     return join(this.directory, `${String(task.createdAt).padStart(13, "0")}-${task.taskId}.json`);
@@ -388,27 +397,17 @@ export class HomeTaskStore {
     return createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
   }
 
-  /** Exact lifecycle counts over every task record. Each record is read once, so the cost grows with
-   * the namespace; a never-initialized namespace has none. */
-  async counts(): Promise<HomeTaskCounts> {
-    const counts: HomeTaskCounts = { active: 0, finished: 0 };
-    for await (const task of this.records()) {
-      if (task.lifecycle === "terminal") counts.finished += 1;
-      else counts.active += 1;
-    }
-    return counts;
-  }
-
-  /** Maintainer list reads only the selected records, never report bodies.
-   * A continuation is bound to the physical namespace, not installation text. */
-  async page(input: { limit?: number; cursor?: string }): Promise<{ items: HomeTaskRow[]; nextCursor?: string }> {
+  /** The newest tasks after `cursor`, with exact lifecycle counts for the whole
+   * namespace, from one locked pass: the counts read every record anyway, so the
+   * page's records come from that same read. Never a report body. */
+  async page(input: { limit?: number; cursor?: string }, signal?: AbortSignal): Promise<{ items: HomeTaskPageItem[]; nextCursor?: string; counts: HomeTaskCounts }> {
     return this.run(async () => {
       const limit = input.limit ?? 20;
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) invalid();
       const authority = await this.inspectAuthority();
       if (!authority) {
         if (input.cursor) invalid();
-        return { items: [] };
+        return { items: [], counts: { active: 0, finished: 0 } };
       }
       const epoch = await this.directoryEpoch();
       let after: TaskName | undefined;
@@ -420,28 +419,27 @@ export class HomeTaskStore {
           after = { createdAt: value.createdAt as number, taskId: value.taskId as string };
         } catch { invalid(); }
       }
-      const selected: TaskName[] = [];
+      // Each record is read once: it counts, and only the page's newest `limit + 1`
+      // are retained, so the cost is one read per record and memory stays bounded.
+      const counts: HomeTaskCounts = { active: 0, finished: 0 };
+      const selected: HomeTaskRecord[] = [];
       for await (const name of this.taskNames()) {
-        if (after && compareTaskNames(name, after) <= 0) continue;
-        selected.push(name);
+        const task = await this.readNamedTask(name);
+        validateAuthorityReferences(task, authority);
+        if (task.lifecycle === "terminal") counts.finished += 1;
+        else counts.active += 1;
+        if (after && compareTaskNames(task, after) <= 0) continue;
+        selected.push(task);
         selected.sort(compareTaskNames);
         if (selected.length > limit + 1) selected.pop();
       }
-      const items: HomeTaskRow[] = [];
-      for (const name of selected.slice(0, limit)) {
-        const task = await this.readNamedTask(name);
-        validateAuthorityReferences(task, authority);
-        items.push({ taskId: task.taskId, createdAt: task.createdAt, updatedAt: task.updatedAt,
-          title: [...task.intent.text].slice(0, 160).join(""), target: task.target, lifecycle: task.lifecycle,
-          outcome: task.terminalEvidence?.outcome ?? null, spend: task.spend,
-          attention: task.terminalEvidence?.outcome === "needs-input" || task.terminalEvidence?.outcome === "unknown",
-          pendingGrant: task.lifecycle === "pending" && authority.requests.some(pending => pending.request.intentDigest === task.intentDigest
-            && pending.request.target === task.target && !authority.decisions.some(decision => decision.requestId === pending.id)) });
-      }
+      const items = selected.slice(0, limit).map(task => ({ task,
+        pendingGrant: task.lifecycle === "pending" && authority.requests.some(pending => pending.request.intentDigest === task.intentDigest
+          && pending.request.target === task.target && !authority.decisions.some(decision => decision.requestId === pending.id)) }));
       const last = selected[Math.min(limit, selected.length) - 1];
-      return { items, ...(selected.length > limit && last
+      return { items, counts, ...(selected.length > limit && last
         ? { nextCursor: Buffer.from(JSON.stringify({ epoch, createdAt: last.createdAt, taskId: last.taskId })).toString("base64url") } : {}) };
-    });
+    }, signal);
   }
 
 }

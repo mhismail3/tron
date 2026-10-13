@@ -4838,9 +4838,11 @@ export class RuntimeRegistry {
 
   /** The worker session's canonical name. A live slot answers from its projection; a settled
    * one from the catalog's index of its file, so no transcript is parsed. */
+  /** A worker's display name: the live session's own name, else its catalog row.
+   * A list shows it for every row, so it is never a session snapshot build (#906). */
   async taskWorkerName(sessionId: string): Promise<string | undefined> {
     const live = this.slots.get(sessionId);
-    if (live) return live.snapshot().name;
+    if (live) return live.sessionName;
     const path = await this.homeSessionFile(sessionId);
     return path ? this.sessionCatalog.row(path)?.name : undefined;
   }
