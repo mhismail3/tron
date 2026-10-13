@@ -896,18 +896,35 @@ describe("Home task list RPC", () => {
     const lists = await Promise.all(Array.from({ length: 20 }, () => service.invoke(client, "home.taskList", { limit: 50 }))) as Array<{ items: unknown[]; counts: { finished: number } }>;
     expect(lists.every(page => page.items.length === 50 && page.counts.finished === 100)).toBe(true);
     const listReads = reads;
-    f.faux.setResponses([fauxAssistantMessage("Home answered")]);
     const home = await f.registry.acquire(f.home.sessionId);
-    reads = 0;
-    await home.prompt("are you there?");
-    const admissionReads = reads;
-    await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle");
-    evidence.push({ case: "task-store-reads-per-list-and-admission", records: records.size, listReads, admissionReads });
+    // One whole Home turn: lane admission, the run, and its inbox settlement.
+    const turn = async (text: string) => {
+      f.faux.setResponses([fauxAssistantMessage("Home answered")]);
+      reads = 0;
+      await home.prompt(text);
+      const admission = reads;
+      await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle");
+      return { admission, turn: reads };
+    };
+    // The first turn after startup proves the inbox quiet with one validating and one
+    // reading pass; every later turn reads no task record until a task write (#922).
+    const first = await turn("are you there?");
+    const quiet = await turn("still there?");
+    // A new result is a task write, so the quiet proof no longer holds: its wake
+    // delivers it, the next turn proves the inbox quiet again, and the one after reads nothing.
+    f.faux.setResponses([fauxAssistantMessage([reportCall("late", "Late result")], { stopReason: "toolUse" }), fauxAssistantMessage("Late result read")]);
+    await (await dispatch(f, "late")).completion;
+    await waitFor(async () => (await owner.taskResult("late")).wake?.state === "acknowledged", "late result delivered once");
+    await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle after wake");
+    const reproved = await turn("anything new?");
+    const quietAgain = await turn("and now?");
+    evidence.push({ case: "task-store-reads-per-list-and-admission", records: records.size + 1, listReads, first, quiet, reproved, quietAgain });
     // Twenty identical reads in flight share one pass over the records.
     expect(listReads).toBe(100);
-    // Admission scans the store twice (recovery, then selection), each a validating
-    // pass and a reading pass, and never once per delivered operation in the history.
-    expect(admissionReads).toBeLessThanOrEqual(400);
+    expect(first.turn).toBeLessThanOrEqual(200);
+    expect(quiet).toEqual({ admission: 0, turn: 0 });
+    expect(reproved.turn).toBeLessThanOrEqual(202);
+    expect(quietAgain).toEqual({ admission: 0, turn: 0 });
   }, 60_000);
 });
 

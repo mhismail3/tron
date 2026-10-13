@@ -93,6 +93,10 @@ export class HomeTaskStore {
   private readonly authorizationPath: string;
   private publicationUncertain = false;
   readonly authorization: HomeTaskAuthorizationStore;
+  /** Durable publications this process attempted. This process is the namespace's
+   * only writer, so an unchanged count proves no record changed (#922). */
+  private writes = 0;
+  get writeCount(): number { return this.writes; }
 
   constructor(private readonly tronHome: string, private readonly workspace: TronWorkspace, private readonly options: Options = {}) {
     this.home = join(tronHome, "gateway", "home");
@@ -300,6 +304,8 @@ export class HomeTaskStore {
   }
 
   private async publish(path: string, document: unknown, maximumBytes: number): Promise<void> {
+    // Counted before the attempt: a failed or uncertain write still ends a quiet proof.
+    this.writes += 1;
     if (Buffer.byteLength(`${JSON.stringify(document, null, 2)}\n`) > maximumBytes) throw new HomeTaskStoreError("invalid-record");
     try { await durableAtomicWriteJson(path, document, 0o600, this.options.fileSystem); }
     catch (error) {
