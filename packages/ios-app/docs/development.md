@@ -1884,6 +1884,15 @@ configuration `Test`, and plan `UIValidation`, under `scripts/ios-test-lock.py` 
 `scripts/ios-test-simulator.py validate`. Use `-only-testing:TronMobileUITests/TronSmokeUITests/<test>`
 for focused interaction checks rather than running every journey during diagnosis.
 
+`TronComposerUploadUITests` launches `-tron-composer-upload-fixture`: the real `ChatView`,
+composer edit-menu Paste, draft coordinator and scene lifecycle against a scripted Gateway that
+mirrors upload staging (an unclaimed staged ID survives reconnects; a prompt with an unknown ID is
+`not_found`). Four photos are pasted, the third transfer is in flight when the app backgrounds,
+and the fixture counts every staging the Gateway receives. One journey asserts that after the
+reconnect and a reopened chat each photo is staged exactly once (`restaged:0`) and the prompt
+carries all four; the other loses staging while backgrounded and asserts the rejected send
+re-uploads every photo and the retried send carries all four (#916).
+
 `TronReadonlyAttachmentUITests` launches `-tron-readonly-attachment-fixture` against a
 `HOSTED_TEST` scripted Gateway/media owner, then drives real `ChatView`, sheet controls,
 Home/background and foreground reconnect. It waits for downloaded native viewports (not a
