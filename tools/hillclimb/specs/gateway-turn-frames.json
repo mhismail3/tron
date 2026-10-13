@@ -1,0 +1,56 @@
+{
+  "schema": "tron.eval-spec.v1",
+  "id": "gateway-turn-frames",
+  "question": "How many WebSocket messages does a phone mounted in a chat decode while one agent turn runs ten sequential tool calls? Each message is a radio/CPU wakeup and a decode on the phone.",
+  "why_objective": "Faux model, fixed workload, fresh fixture Gateway; integer counts repeat exactly except documented one-frame timing jitter, which compare never treats as a verdict.",
+  "harness": {
+    "tool": "gateway",
+    "scenario": "tool-loop",
+    "args": ["--iterations", "3"],
+    "rounds": 2
+  },
+  "primary": {
+    "metric": "wire.mobile.total.frames",
+    "better": "lower",
+    "min_effect": 0.03
+  },
+  "ungated": [
+    "gateway.cpu.*",
+    "gateway.wakeups.*",
+    "wire.*.bytes_per_second"
+  ],
+  "ungated_reason": "Host-load and window-length sensitive; reported, never decisive. Every other metric of every measured scenario must not regress beyond the shared noise bound.",
+  "held_out": [
+    { "scenario": "stream-reply", "args": ["--iterations", "3"] }
+  ],
+  "correctness": [
+    "cd packages/gateway && t=$(mktemp -d) && HOME=$t TMPDIR=$t NPM_CONFIG_UPDATE_NOTIFIER=false npx vitest run src/admin/settings-gate.e2e.test.ts; s=$?; rm -rf \"$t\"; exit $s"
+  ],
+  "editable": [
+    "packages/gateway/src/*",
+    "packages/gateway/docs/*",
+    "packages/gateway/README.md"
+  ],
+  "frozen": [
+    "*.test.ts",
+    "*.test.mjs",
+    "scripts/tron-profile*",
+    "scripts/tron_profile_*",
+    "scripts/tron-hillclimb",
+    "tools/hillclimb/*",
+    "packages/gateway/package.json",
+    "packages/gateway/package-lock.json",
+    "packages/protocol-fixtures/*"
+  ],
+  "protected_behavior": [
+    "Wire protocol shape and every event the iOS app decodes (protocol-fixtures are frozen).",
+    "Streaming cadence (STREAMING_PROGRESS_FLUSH_MS) and every UX-visible timing; fewer frames bought by slower or coarser UI updates is not an improvement.",
+    "Diagnostic meaning documented in packages/gateway/docs/observability.md."
+  ],
+  "budget": {
+    "max_rounds": 3,
+    "max_stalled_rounds": 2,
+    "max_wall_minutes": 60,
+    "max_changed_lines": 60
+  }
+}

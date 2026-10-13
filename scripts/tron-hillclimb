@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+"""Run one hill-climb trial: a frozen eval spec, a base ref and a candidate ref.
+
+Prototype for #885 (docs: tools/hillclimb/README.md). It never edits code and
+never merges. It builds both refs in run-owned detached worktrees, measures
+them in ABBA order with the existing profiler (scripts/tron-profile, whose
+report schema and noise bound stay the single authority), runs the held-out
+scenarios and the spec's correctness commands on the candidate, and writes a
+keep / revert / inconclusive verdict. Every run-owned worktree is removed on
+success, failure and interruption.
+"""
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import hashlib
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import tron_profile_report as reports  # noqa: E402  (single owner of noise bound and verdicts)
+
+SPEC_SCHEMA = "tron.eval-spec.v1"
+VERDICT_SCHEMA = "tron.hillclimb-verdict.v1"
+EXIT_KEEP, EXIT_INVALID, EXIT_REVERT, EXIT_INCONCLUSIVE, EXIT_HARNESS = 0, 2, 3, 4, 5
+
+
+class TrialError(Exception):
+    def __init__(self, message: str, code: int = EXIT_HARNESS):
+        super().__init__(message)
+        self.code = code
+
+
+def log(message: str) -> None:
+    # Live progress: every phase announces itself before it starts.
+    print(f"[hillclimb {time.strftime('%H:%M:%S')}] {message}", flush=True)
+
+
+def git(*args: str, cwd: Path = ROOT) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def load_spec(path: Path) -> dict[str, Any]:
+    spec = json.loads(path.read_text())
+    if spec.get("schema") != SPEC_SCHEMA:
+        raise TrialError(f"{path}: schema must be {SPEC_SCHEMA}", EXIT_INVALID)
+    for key in ("id", "primary", "harness", "editable", "frozen", "budget"):
+        if key not in spec:
+            raise TrialError(f"{path}: missing {key}", EXIT_INVALID)
+    return spec
+
+
+def path_guard(spec: dict[str, Any], base: str, candidate: str) -> dict[str, Any]:
+    """Anti-gaming: the candidate may touch only editable paths and never the
+    harness, grader, eval spec or tests that judge it."""
+    changed = [line for line in git("diff", "--name-only", f"{base}..{candidate}").splitlines() if line]
+    frozen = [p for p in changed if any(fnmatch.fnmatch(p, g) for g in spec["frozen"])]
+    outside = [p for p in changed if not any(fnmatch.fnmatch(p, g) for g in spec["editable"])]
+    stat = git("diff", "--shortstat", f"{base}..{candidate}")
+    lines = sum(int(word) for word in stat.replace(",", "").split() if word.isdigit()) - (len(changed) if changed else 0)
+    limit = spec["budget"].get("max_changed_lines")
+    return {
+        "changed": changed, "frozen_touched": frozen, "outside_editable": outside,
+        "changed_lines": lines, "max_changed_lines": limit,
+        "ok": bool(changed) and not frozen and not outside and (limit is None or lines <= limit),
+    }
+
+
+class Workspace:
+    """Run-owned detached worktrees; cleanup is registered before creation."""
+
+    def __init__(self, out: Path):
+        self.out = out
+        self.trees: list[Path] = []
+
+    def add(self, name: str, ref: str) -> Path:
+        tree = self.out / f"wt-{name}"
+        self.trees.append(tree)
+        git("worktree", "add", "--detach", str(tree), ref)
+        # Reuse this checkout's installed dependencies when the lockfile is
+        # identical (APFS clone, no extra disk); otherwise the profiler runs npm ci.
+        source, target = ROOT / "packages/gateway/node_modules", tree / "packages/gateway/node_modules"
+        same_lock = (ROOT / "packages/gateway/package-lock.json").read_bytes() == (tree / "packages/gateway/package-lock.json").read_bytes()
+        if same_lock and source.is_dir():
+            subprocess.run(["cp", "-cR", str(source), str(target)], check=True)
+        return tree
+
+    def close(self) -> None:
+        for tree in self.trees:
+            if tree.exists():
+                subprocess.run(["git", "worktree", "remove", "--force", str(tree)], cwd=ROOT, capture_output=True)
+            shutil.rmtree(tree, ignore_errors=True)
+        subprocess.run(["git", "worktree", "prune"], cwd=ROOT, capture_output=True)
+
+
+def profile(tree: Path, scenario: str, args: list[str], results: Path, build: bool, label: str) -> dict[str, Any]:
+    command = [str(tree / "scripts/tron-profile"), "gateway", "--scenario", scenario, *args]
+    if not build:
+        command.append("--no-build")
+    env = {**os.environ, "TRON_PROFILE_RESULTS_DIR": str(results)}
+    log_path = results / f"{label}.log"
+    log(f"measure {label}: {scenario} ({'build + ' if build else ''}{' '.join(args)}) -> {log_path}")
+    with log_path.open("w") as handle:
+        status = subprocess.run(command, cwd=tree, env=env, stdout=handle, stderr=subprocess.STDOUT).returncode
+    text = log_path.read_text()
+    if status != 0:
+        # Plumbing failure, not a score: the profiler refuses runs whose
+        # canonical outcome or recording is wrong (exit 6) or whose build failed.
+        raise TrialError(f"{label}: profiler exit {status}; see {log_path}")
+    report_line = [line for line in text.splitlines() if line.startswith("Report: ")]
+    if not report_line:
+        raise TrialError(f"{label}: profiler wrote no report; see {log_path}")
+    return reports.load_report(Path(report_line[-1].removeprefix("Report: ")))
+
+
+def pooled(reports_: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pool samples of the same scenario across rounds into one report."""
+    metrics: dict[str, Any] = {}
+    for report in reports_:
+        for metric_id, metric in report["metrics"].items():
+            entry = metrics.setdefault(metric_id, {**metric, "samples": []})
+            entry["samples"].extend(metric["samples"])
+    for metric_id, metric in metrics.items():
+        metrics[metric_id] = {**metric, **reports.summarize(metric["samples"])}
+    return {"metrics": metrics, "run_ids": [r["run_id"] for r in reports_],
+            "warnings": sorted({w for r in reports_ for w in r.get("measurement_warnings", [])})}
+
+
+def compare_all(base: dict[str, Any], candidate: dict[str, Any], floor: float, ungated: list[str]) -> dict[str, Any]:
+    results = {}
+    for metric_id in sorted(set(base["metrics"]) & set(candidate["metrics"])):
+        result = reports.compare_metric(base["metrics"][metric_id], candidate["metrics"][metric_id], floor)
+        result["gated"] = not any(fnmatch.fnmatch(metric_id, g) for g in ungated)
+        results[metric_id] = result
+    missing = sorted(set(base["metrics"]) ^ set(candidate["metrics"]))
+    return {"metrics": results, "missing": missing,
+            "gated_regressions": sorted(m for m, r in results.items() if r["gated"] and r["verdict"] == "regression")}
+
+
+def run_commands(tree: Path, commands: list[str], results: Path) -> list[dict[str, Any]]:
+    outcomes = []
+    for index, command in enumerate(commands):
+        log_path = results / f"correctness-{index}.log"
+        log(f"correctness {index}: {command} -> {log_path}")
+        started = time.monotonic()
+        with log_path.open("w") as handle:
+            status = subprocess.run(command, shell=True, cwd=tree, stdout=handle, stderr=subprocess.STDOUT).returncode
+        outcomes.append({"command": command, "exit": status, "seconds": round(time.monotonic() - started, 1), "log": str(log_path)})
+        if status != 0:
+            log(f"correctness {index} FAILED (exit {status})")
+            break  # fail early; later commands cannot rescue the verdict
+    return outcomes
+
+
+def interrupted(*_: Any) -> None:
+    raise KeyboardInterrupt()
+
+
+def trial(spec_path: Path, base_ref: str, candidate_ref: str, out: Path) -> int:
+    spec = load_spec(spec_path)
+    base, candidate = git("rev-parse", base_ref), git("rev-parse", candidate_ref)
+    out.mkdir(parents=True, exist_ok=False)
+    results = out / "profiles"
+    results.mkdir()
+    verdict: dict[str, Any] = {"schema": VERDICT_SCHEMA, "spec": spec["id"],
+                               "spec_sha256": hashlib.sha256(spec_path.read_bytes()).hexdigest(),
+                               "base": base, "candidate": candidate, "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+
+    def finish(decision: str, reason: str, code: int) -> int:
+        verdict.update({"decision": decision, "reason": reason,
+                        "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+        (out / "verdict.json").write_text(json.dumps(verdict, indent=2) + "\n")
+        log(f"VERDICT {decision}: {reason} ({out / 'verdict.json'})")
+        return code
+
+    guard = path_guard(spec, base, candidate)
+    verdict["path_guard"] = guard
+    if not guard["ok"]:
+        return finish("revert", "path guard refused the candidate diff (frozen/outside-editable paths or over budget)", EXIT_REVERT)
+
+    deadline = time.monotonic() + 60 * spec["budget"]["max_wall_minutes"]
+    workspace = Workspace(out)
+    previous = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, interrupted)
+    try:
+        trees = {"base": workspace.add("base", base), "candidate": workspace.add("candidate", candidate)}
+        harness, primary = spec["harness"], spec["primary"]
+        built: set[str] = set()
+        arms: dict[str, list[dict[str, Any]]] = {"base": [], "candidate": []}
+        # ABBA balances slow host drift across arms; the first base round is
+        # also checked against the last for drift (an A/A control).
+        order = ["base", "candidate", "candidate", "base"][: 2 * harness.get("rounds", 2)]
+        for index, arm in enumerate(order):
+            if time.monotonic() > deadline:
+                return finish("inconclusive", "wall-clock budget exhausted during measurement", EXIT_INCONCLUSIVE)
+            arms[arm].append(profile(trees[arm], harness["scenario"], harness["args"], results, arm not in built, f"{index}-{arm}"))
+            built.add(arm)
+        floor = primary["min_effect"]
+        drift = reports.compare_metric(arms["base"][0]["metrics"][primary["metric"]], arms["base"][-1]["metrics"][primary["metric"]], floor) \
+            if len(arms["base"]) > 1 else {"verdict": "unmeasured"}
+        comparison = compare_all(pooled(arms["base"]), pooled(arms["candidate"]), floor, spec.get("ungated", []))
+        verdict["primary"] = {"metric": primary["metric"], **comparison["metrics"].get(primary["metric"], {"verdict": "missing"})}
+        verdict["drift_control"] = drift
+        verdict["guard_regressions"] = comparison["gated_regressions"]
+        verdict["comparison"] = comparison
+        verdict["warnings"] = sorted(set(pooled(arms["base"])["warnings"]) | set(pooled(arms["candidate"])["warnings"]))
+
+        held_out = {}
+        for scenario in spec.get("held_out", []):
+            if time.monotonic() > deadline:
+                return finish("inconclusive", "wall-clock budget exhausted during held-out checks", EXIT_INCONCLUSIVE)
+            pair = {arm: pooled([profile(trees[arm], scenario["scenario"], scenario["args"], results, False, f"heldout-{scenario['scenario']}-{arm}")])
+                    for arm in ("base", "candidate")}
+            held = compare_all(pair["base"], pair["candidate"], floor, spec.get("ungated", []))
+            held_out[scenario["scenario"]] = {"gated_regressions": held["gated_regressions"],
+                                              "improvements": sorted(m for m, r in held["metrics"].items() if r["verdict"] == "improvement")}
+        verdict["held_out"] = held_out
+
+        verdict["correctness"] = run_commands(trees["candidate"], spec.get("correctness", []), results)
+
+        if drift["verdict"] not in ("unchanged", "unmeasured"):
+            return finish("inconclusive", f"A/A drift on {primary['metric']}: base moved {drift['verdict']} between its rounds", EXIT_INCONCLUSIVE)
+        if any(r["exit"] != 0 for r in verdict["correctness"]):
+            return finish("revert", "a correctness command failed on the candidate", EXIT_REVERT)
+        held_regressions = {k: v["gated_regressions"] for k, v in held_out.items() if v["gated_regressions"]}
+        if comparison["gated_regressions"] or held_regressions:
+            return finish("revert", f"guard regression: {comparison['gated_regressions']} held-out: {held_regressions}", EXIT_REVERT)
+        if verdict["primary"]["verdict"] == "improvement":
+            return finish("keep", f"{primary['metric']} improved beyond noise with no gated regression, held-out flat or better, correctness passed", EXIT_KEEP)
+        return finish("revert", f"{primary['metric']} {verdict['primary']['verdict']} (not beyond the noise bound)", EXIT_REVERT)
+    except TrialError as error:
+        return finish("inconclusive", f"harness/plumbing failure: {error}", EXIT_HARNESS)
+    except KeyboardInterrupt:
+        return finish("inconclusive", "interrupted", EXIT_HARNESS)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+        workspace.close()
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="scripts/tron-hillclimb", description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+    trial_parser = sub.add_parser("trial", help="measure base vs candidate under a frozen eval spec")
+    trial_parser.add_argument("--spec", type=Path, required=True)
+    trial_parser.add_argument("--base", required=True)
+    trial_parser.add_argument("--candidate", required=True)
+    trial_parser.add_argument("--out", type=Path, required=True, help="new run directory (must not exist)")
+    guard_parser = sub.add_parser("guard", help="only check the candidate diff against the spec's path rules")
+    guard_parser.add_argument("--spec", type=Path, required=True)
+    guard_parser.add_argument("--base", required=True)
+    guard_parser.add_argument("--candidate", required=True)
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "guard":
+            result = path_guard(load_spec(args.spec), git("rev-parse", args.base), git("rev-parse", args.candidate))
+            print(json.dumps(result, indent=2))
+            return EXIT_KEEP if result["ok"] else EXIT_REVERT
+        return trial(args.spec.resolve(), args.base, args.candidate, args.out.resolve())
+    except TrialError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return error.code
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
