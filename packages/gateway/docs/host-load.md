@@ -61,9 +61,9 @@ This replaces the manual `/tmp/tron-heavy-run.lock` protocol.
   settles, the oldest queued task starts through the normal admission steps
   (bounded per #919). Accepted identity, authorization and the brief are
   unchanged; queueing is not a refusal.
-- **Visibility.** `home.taskList` and `task status` show `queued` with the
-  1-based position, and `home.status` shows `workers: { running, queued, limit }`.
-  Home's operating context tells Home that admission is not start.
+- **Visibility.** `delegate` returns the 1-based `queuePosition` (null session and
+  operation) and tells Home the task starts when a slot frees; `task status` shows
+  `queuePosition`, and `home.status` shows `workers: { running, queued, limit }`.
 - **Priority.** Home's own turns and maintainer chats are never queued. Under
   host pressure `critical` (below), a queued task does not start until pressure
   falls to `elevated` or lower; running workers are never preempted.
