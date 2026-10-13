@@ -401,7 +401,7 @@ describe("settings renderer contract", () => {
     const everything = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
     expect(everything.renderer).toEqual({ version: 1 });
     expect(presentedRow(everything, "model.thinking[role=chat]", { model: f.modelKey }).presentation).toMatchObject({
-      control: "choice", valueKind: "orderedChoice", options: expect.arrayContaining([{ value: "high", label: "High" }]),
+      control: "choice", valueKind: "orderedChoice", options: expect.arrayContaining([{ value: "high", label: "High", detail: expect.any(String) }]),
     });
     expect(presentedRow(everything, "run.retry.maxRetries").presentation).toMatchObject({
       control: "number", importance: "essential", label: "Retries", range: { min: 0, max: 20, unit: "retries" },
@@ -484,7 +484,7 @@ describe("settings renderer contract", () => {
     const levels = await options(f, { key: "model.thinking[role=chat]" });
     expect(levels).toMatchObject({ source: "catalog.thinkingLevels", dependsOn: ["model.ref[role=chat]"] });
     expect(levels.options.map(option => option.value)).toEqual(getSupportedThinkingLevels(reasoner));
-    expect(levels.options).toContainEqual({ value: "high", label: "High" });
+    expect(levels.options).toContainEqual({ value: "high", label: "High", detail: expect.any(String) });
 
     // A named model is followed instead: a model without reasoning offers no thinking level.
     const followed = await options(f, { key: "model.thinking[role=chat]", qualifiers: { model: plainKey } });
