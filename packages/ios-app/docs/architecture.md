@@ -1733,7 +1733,8 @@ an unexplained spinner. Retirement of the opening's captured transport is
 resumable on the existing connected callback, not a second reconnect loop.
 A same-session installed transcript with a retained authoritative snapshot stays
 visible independently of subscription admission. Its persistent recovery treatment
-is one Liquid Glass capsule beneath the chat title in the navigation chrome—a
+is one Liquid Glass capsule that takes the chat title's place in the navigation
+chrome, so the bar and transcript viewport never change geometry—a
 tone-colored reason and a Retry label, the whole capsule being the Retry control
 (`ChatRecoveryStatusLine`), matching the bar's own controls—never a control floating over transcript rows, inside the
 flipped transcript, or a new structural inset (#878). Like the system bar items

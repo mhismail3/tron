@@ -1842,7 +1842,7 @@ struct ChatView: View {
     }
 
     /// Persistent recovery for a retained same-session transcript. It is route
-    /// chrome beneath the title, never a control floating over readable rows.
+    /// chrome in the title's place, never a control floating over readable rows.
     /// A missing transport is shown only once the app's recovery episode says
     /// it outlived the grace: every foreground reconnects after background
     /// retirement, and that expected replacement is not an outage (#878).
@@ -2790,18 +2790,23 @@ struct ChatView: View {
             .accessibilityLabel("Back")
         }
         ToolbarItem(placement: .principal) {
-            VStack(spacing: 1) {
-                Text(chatTitle)
-                    .font(TronTypography.headline)
-                    .foregroundStyle(Color.tronEmerald)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(width: titleWidth)
-                    .clipped()
-                    .accessibilityLabel(chatTitle)
+            // Recovery takes the title's place, as messaging apps show
+            // "Connecting" there, so the bar never changes height and the
+            // transcript viewport (pinned or anchored) never moves (#878).
+            ZStack {
                 if let status = retainedRecoveryStatus {
                     ChatRecoveryStatusLine(status: status) { Task { await retryRecovery() } }
                         .frame(maxWidth: titleWidth)
+                        .transition(.opacity)
+                } else {
+                    Text(chatTitle)
+                        .font(TronTypography.headline)
+                        .foregroundStyle(Color.tronEmerald)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(width: titleWidth)
+                        .clipped()
+                        .accessibilityLabel(chatTitle)
                         .transition(.opacity)
                 }
             }
@@ -3728,7 +3733,7 @@ enum ChatRetainedRecoveryStatus: Equatable {
     }
 }
 
-/// A one-line recovery capsule beneath the chat title, in the navigation
+/// A one-line recovery capsule in the chat title's place in the navigation
 /// chrome. The whole capsule is the Retry control, so its touch target is the
 /// visible glass rather than one small word. Liquid Glass matches the bar's own
 /// back and settings controls and keeps the line legible over the scrolled
@@ -3753,10 +3758,10 @@ struct ChatRecoveryStatusLine: View {
                     .foregroundStyle(Color.tronEmerald)
                     .fixedSize()
             }
-            .font(TronTypography.caption)
+            .font(TronTypography.bodySM)
             .minimumScaleFactor(0.8)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
