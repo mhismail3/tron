@@ -1332,6 +1332,21 @@ result as a context-bearing `tron.home-task-result.v1` message with an exact
 `tron.context-delivery.v4` attribution receipt. Ordinary chats, steers and continuations
 do not drain the inbox.
 
+**Quiet inbox (#922).** Recovery, admission, settlement and wake attempts run on Home's
+session lane, so each reads only records whose wake it may still act on. A complete
+pass that finds none (every wake absent, `acknowledged`, `blocked`, or
+`outcome-unknown` with its push decided), with no task-store write during it, proves
+the inbox quiet until the store's next write; until then those steps read no record.
+The Gateway is the namespace's only writer, and every durable publication (a new
+result, a delivery, an acknowledgement) ends the proof. A quiet Home turn therefore
+reads zero task records, whatever the history size.
+
+Every other step before a Home prompt is accepted is needed for that prompt: the
+attention barrier, live run settings, the archive gate (a cheap check for an
+unarchived Home), the invocation start receipt, and the delivery headroom, which waits
+for the memory view only when a result is selected and is cancelled by Stop.
+`home.inbox.admission-slow` names a slow inbox admission.
+
 - **Wake (#749).** A settled result wakes an idle Home. One owner decides every wake,
   `HomeOwner`'s wake scheduler, which runs one drain at a time and has no timers or
   polling. It is asked by exactly these events: a result settles while Home is eligible
