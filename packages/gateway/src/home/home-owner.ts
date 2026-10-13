@@ -580,19 +580,22 @@ export class HomeOwner {
   }
 
   async status(): Promise<HomeStatus> {
+    // Host pressure and the worker budget (#915) are process facts, shown in every phase.
     const taskRecovery = await this.tasks.recoveryStatus();
+    const hostPressure = this.tasks.hostPressure();
+    const workers = this.tasks.workers();
     const memory = await this.memoryStatus();
     const activation = this.contextStatus();
     if (this.unavailable) {
       return {
-        taskRecovery, phase: "unavailable", activation, readiness: { ready: false, gaps: ["record-unavailable"] },
+        taskRecovery, hostPressure, workers, phase: "unavailable", activation, readiness: { ready: false, gaps: ["record-unavailable"] },
         recovery: { action: "inspect-record", reason: this.unavailable },
         available: false, reason: this.unavailable, enabled: false, live: false, sessionPresent: false, memory,
       };
     }
     const record = this.record;
     if (!record) return {
-      taskRecovery, phase: "undesignated", activation, readiness: { ready: false, gaps: ["not-designated"] },
+      taskRecovery, hostPressure, workers, phase: "undesignated", activation, readiness: { ready: false, gaps: ["not-designated"] },
       recovery: { action: "designate" },
       available: true, enabled: false, live: false, sessionPresent: false, memory,
     };
@@ -626,7 +629,7 @@ export class HomeOwner {
           : memory.blocked || !memory.configured ? "blocked"
           : activation.available && activation.activationOpen ? "active" : memory.paused ? "paused" : "ready";
     return {
-      taskRecovery, phase, activation, readiness: { ready, gaps }, recovery,
+      taskRecovery, hostPressure, workers, phase, activation, readiness: { ready, gaps }, recovery,
       available: true,
       enabled: record.enabled,
       homeId: record.homeId,
