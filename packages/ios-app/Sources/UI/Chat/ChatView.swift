@@ -3729,50 +3729,48 @@ enum ChatRetainedRecoveryStatus: Equatable {
 }
 
 /// A one-line recovery capsule beneath the chat title, in the navigation
-/// chrome, with its Retry inside it. Liquid Glass matches the bar's own back
-/// and settings controls and keeps the line legible over the scrolled
-/// transcript. The reason stays one accessibility element whose value carries
-/// the full explanation; Retry is independently reachable.
+/// chrome. The whole capsule is the Retry control, so its touch target is the
+/// visible glass rather than one small word. Liquid Glass matches the bar's own
+/// back and settings controls and keeps the line legible over the scrolled
+/// transcript. VoiceOver reads the reason, its full explanation, then Retry.
 struct ChatRecoveryStatusLine: View {
     let status: ChatRetainedRecoveryStatus
     let retry: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
-            HStack(spacing: 4) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .imageScale(.small)
-                    .accessibilityHidden(true)
-                Text(status.title)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+        Button(action: retry) {
+            HStack(spacing: 6) {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .imageScale(.small)
+                    Text(status.title)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .foregroundStyle(status.tone.primaryColor)
+                Text("Retry")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.tronEmerald)
+                    .fixedSize()
             }
             .font(TronTypography.caption)
-            .foregroundStyle(status.tone.primaryColor)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(status.title)
-            .accessibilityValue(status.message)
-            .accessibilityIdentifier("chat-recovery-status")
-            Button("Retry", action: retry)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(Color.tronEmerald)
-                .buttonStyle(.plain)
-                .fixedSize()
-                // The visible word is small; extend its touch area past the
-                // capsule rather than growing the fixed-height bar.
-                .contentShape(Rectangle().inset(by: -12))
-                .accessibilityHint("Reconnects this conversation")
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .contentShape(Capsule())
         }
-        .minimumScaleFactor(0.8)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 3)
-        .glassEffect(.regular, in: .capsule)
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
         // Like the system bar items beside it, the fixed-height bar stops
-        // growing at the largest standard size; the long-press large content
-        // viewer and VoiceOver value carry the reason beyond it.
+        // growing at the largest standard size; the large content viewer and
+        // the VoiceOver value carry the reason beyond it.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .accessibilityShowsLargeContentViewer {
             Label(status.title, systemImage: "exclamationmark.triangle.fill")
         }
+        .accessibilityLabel(status.title)
+        .accessibilityValue(status.message)
+        .accessibilityHint("Retries the connection")
+        .accessibilityIdentifier("chat-recovery-status")
     }
 }

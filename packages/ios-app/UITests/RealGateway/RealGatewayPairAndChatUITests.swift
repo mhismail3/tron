@@ -261,8 +261,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         XCTAssertFalse(app.otherElements["Opening conversation"].exists)
         try setProxyMode(fixture, mode: "pass")
-        XCTAssertTrue(waitForHittable(app.buttons["Retry"], timeout: 10))
-        app.buttons["Retry"].tap()
+        XCTAssertTrue(waitForHittable(unavailableStatus, timeout: 10))
+        unavailableStatus.tap()
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "explicit retry did not restore command authority")
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: unavailableStatus
@@ -1116,20 +1116,20 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
     }
 
-    /// Recovery belongs to the route's navigation chrome with its Retry: it is
-    /// never a detached control floating over readable transcript rows (#878).
+    /// Recovery belongs to the route's navigation chrome and is itself the
+    /// Retry control: never a detached control floating over readable
+    /// transcript rows (#878).
     @MainActor
     private func assertRecoveryInChrome(_ app: XCUIApplication, status: XCUIElement,
                                         file: StaticString = #filePath, line: UInt = #line) {
         let bar = app.navigationBars.firstMatch
         XCTAssertTrue(bar.exists, "the chat route has no navigation bar", file: file, line: line)
-        let retry = app.buttons["Retry"]
-        XCTAssertTrue(retry.isHittable, "persistent recovery offers no Retry", file: file, line: line)
-        for (name, element) in [("status", status), ("Retry", retry)] {
-            XCTAssertTrue(bar.frame.contains(element.frame),
-                          "recovery \(name) \(element.frame) left the navigation chrome \(bar.frame)",
-                          file: file, line: line)
-        }
+        XCTAssertEqual(status.elementType, .button, "persistent recovery offers no Retry",
+                       file: file, line: line)
+        XCTAssertTrue(status.isHittable, "persistent recovery Retry is not reachable", file: file, line: line)
+        XCTAssertTrue(bar.frame.contains(status.frame),
+                      "recovery \(status.frame) left the navigation chrome \(bar.frame)",
+                      file: file, line: line)
     }
 
     @MainActor

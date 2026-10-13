@@ -1734,8 +1734,8 @@ resumable on the existing connected callback, not a second reconnect loop.
 A same-session installed transcript with a retained authoritative snapshot stays
 visible independently of subscription admission. Its persistent recovery treatment
 is one Liquid Glass capsule beneath the chat title in the navigation chrome—a
-tone-colored reason with Retry inside it (`ChatRecoveryStatusLine`), matching the
-bar's own controls—never a control floating over transcript rows, inside the
+tone-colored reason and a Retry label, the whole capsule being the Retry control
+(`ChatRecoveryStatusLine`), matching the bar's own controls—never a control floating over transcript rows, inside the
 flipped transcript, or a new structural inset (#878). Like the system bar items
 beside it, it stops growing at the largest standard text size; its large content
 viewer and VoiceOver value carry the reason beyond that. A missing transport is

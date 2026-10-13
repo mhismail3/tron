@@ -1021,16 +1021,18 @@ The other real-boundary owners are:
   composer keyboard to remain visible through transport retirement and held
   replacement, checks composer geometry, then types without refocusing to prove
   retained responder/caret ownership. It waits for the transient app notice to
-  expire before checking the persistent recovery status and its Retry, both
-  inside the navigation bar's frame (#878). An ordinary background/foreground
+  expire before checking the persistent recovery status, itself the Retry
+  button, inside the navigation bar's frame (#878). An ordinary background/foreground
   must never show that status, and with `hold-hello` holding the foreground
   handshake it may appear only after the two-second recovery grace, without
   moving the pinned reply, and must retire on its own when the handshake is
   released. `reject-open` asks the real Gateway for an absent session and
-  forwards its actual `not_found` response: the failure status and Retry remain
-  usable beside retained rows after the catch-up notice lifetime, and Retry
-  restores command admission and retires the status. No proxy response
-  fabricates a Gateway error.
+  forwards its actual `not_found` response: the failure status remains a usable
+  Retry beside retained rows after the catch-up notice lifetime, and Retry
+  restores command admission and retires the status. A final relaunch of the
+  same paired app at accessibility XXXL text repeats the chrome, reachability
+  and VoiceOver-value checks across a blackhole and automatic return. No proxy
+  response fabricates a Gateway error.
   The long prompt permits a real non-tail reader gesture; the test targets the
   conversation scroll view, not the separate one-point status-bar scroll owner.
   Its anchor stays within three points through loss and a held replacement open.
