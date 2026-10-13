@@ -288,6 +288,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let anchorFrame = sent.frame
         try setProxyMode(fixture, mode: "blackhole")
         XCTAssertTrue(waitingStatus.waitForExistence(timeout: 60))
+        keepScreenshot(app, name: "878-simulator-anchored-reader-recovery")
         XCTAssertEqual(sent.frame.minY, anchorFrame.minY, accuracy: 3,
                        "transport retirement moved the anchored reader")
         try setProxyMode(fixture, mode: "pass")
