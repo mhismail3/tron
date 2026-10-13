@@ -1979,13 +1979,13 @@ export class RuntimeSlot {
     return this.createdAt;
   }
 
-  /** The name a snapshot would show, without building one. */
-  get sessionName(): string | undefined {
-    return this.isHomeChapter ? "Home" : this.runtime.session.sessionName;
-  }
-
   get sessionFile(): string | undefined {
     return this.runtime.session.sessionFile;
+  }
+
+  /** The name `snapshot()` projects, without building a snapshot: list rows read it per task (#905). */
+  get displayName(): string | undefined {
+    return this.isHomeChapter ? "Home" : this.runtime.session.sessionName || undefined;
   }
 
   get canonicalEntryCount(): number {

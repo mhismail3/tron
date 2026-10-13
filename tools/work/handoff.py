@@ -113,16 +113,14 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, f
             _audit_comment(gh, number, previous_owner, session, pre_head, commit, prior_reason)
         print(f"claim #{number} already belongs to {session}")
         return 0
-    # Known-owner lifecycle proof is intentionally conservative. The normal
-    # runtime probe is provided by the gateway-backed helper when available.
+    # Known-owner lifecycle proof is intentionally conservative: only a settled
+    # Home task transfers a claim. `absent` is release-only evidence.
     if not force:
         if old == "unknown":
             raise HandoffError("owner session is unknown; refusing handoff (maintainer may use --force-maintainer and confirm HANDOFF #<issue> FROM unknown)")
-        state = owner_lifecycle(old)
-        if state.startswith("protocol-mismatch:"):
-            raise HandoffError(f"owner status unavailable: {state.removeprefix('protocol-mismatch:')}; refusing handoff (maintainer may use --force-maintainer)")
+        state, why = owner_status(old)
         if state != "settled":
-            raise HandoffError(f"owner session {old} is {state}; refusing handoff (maintainer may use --force-maintainer)")
+            raise HandoffError(f"owner session {old} is {state} ({why}); refusing handoff (maintainer may use --force-maintainer)")
     else:
         confirm(number, old)
 
@@ -252,8 +250,9 @@ def recover(gh: Gh, cwd: Path, config: dict, number: int, expected_local: str, e
         prior_claim, old = _claim_at(worktree, expected_remote, number)
         if not old or (prior_claim, old) != _claim_at(worktree, expected_local, number):
             raise HandoffError("recovery requires the same known claim at both expected heads")
-        if owner_lifecycle(old) != "settled":
-            raise HandoffError(f"owner session {old} is live or unknown; refusing recovery")
+        state, why = owner_status(old)
+        if state != "settled":
+            raise HandoffError(f"owner session {old} is {state} ({why}); refusing recovery")
         if json.loads(gh.run("issue", "view", str(number), "--json", "state")).get("state") != "OPEN":
             raise HandoffError(f"issue #{number} is not open")
         marker = f"<!-- work:recovery remote={expected_remote} candidate={expected_local} -->"
@@ -268,7 +267,7 @@ def recover(gh: Gh, cwd: Path, config: dict, number: int, expected_local: str, e
         # Re-read authority and both heads after all potentially slow preparation.
         # The exact remote lease below is a CAS, never permission to rewrite:
         # strict ancestry was proven above and the pushed object is immutable.
-        if owner_lifecycle(old) != "settled":
+        if owner_status(old)[0] != "settled":
             raise HandoffError("owner settlement changed; recovery refused")
         check_local()
         current_heads = claim._remote_heads(worktree, remote)
@@ -357,25 +356,40 @@ def _audit_comment(gh: Gh, number: int, old: str, new: str, head: str, transitio
     gh.run("issue", "comment", str(number), "--body-file", "-", stdin=body)
 
 
-def owner_lifecycle(session: str) -> str:
-    # Consult only the supported Home task RPC; ordinary sessions, unavailable
-    # Home, and malformed/incomplete evidence remain indeterminate.
+OWNER_STATES = {"settled", "live", "absent", "indeterminate"}
+
+
+def owner_status(session: str) -> tuple[str, str]:
+    """(state, reason) from the Gateway owner helper (README.md, "Owner status").
+
+    Every failure is `indeterminate` with an actionable reason, so callers fail closed.
+    The helper bounds itself at 20s; this timeout only guards a wedged process.
+    """
     root = Path(__file__).resolve().parents[2]
     helper = root / "packages/gateway/dist/client/work-owner-status.js"
     if not helper.is_file():
-        return "unknown"
+        return "indeterminate", "owner status helper is not built; run `npm run build` in packages/gateway"
     try:
-        result = subprocess.run(["node", str(helper), session], cwd=root, capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.TimeoutExpired):
-        return "unknown"
+        result = subprocess.run(["node", str(helper), session], cwd=root, capture_output=True, text=True, timeout=40)
+    except subprocess.TimeoutExpired:
+        return "indeterminate", "owner status helper did not exit within 40s"
+    except OSError as error:
+        return "indeterminate", f"cannot run the owner status helper: {error}"
     if result.returncode == 3:
         try:
             detail = json.loads(result.stderr)
         except (json.JSONDecodeError, TypeError):
-            return "unknown"
+            detail = None
         if isinstance(detail, dict) and detail.get("kind") == "protocol_mismatch":
-            gateway = detail.get("gatewayProtocol")
-            helper = detail.get("helperProtocol")
-            if isinstance(gateway, int) and isinstance(helper, int):
-                return f"protocol-mismatch:Gateway protocol {gateway}, helper protocol {helper}"
-    return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() in {"settled", "live-or-indeterminate", "unknown"} else "unknown"
+            return "indeterminate", (f"Gateway protocol {detail.get('gatewayProtocol')}, helper protocol "
+                                     f"{detail.get('helperProtocol')}; rebuild the helper from the Gateway's source")
+    if result.returncode == 0:
+        try:
+            verdict = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            verdict = None
+        if (isinstance(verdict, dict) and verdict.get("state") in OWNER_STATES
+                and isinstance(verdict.get("reason"), str)):
+            return verdict["state"], verdict["reason"]
+    detail = (result.stderr.strip().splitlines() or ["no output"])[-1]
+    return "indeterminate", f"owner status helper failed: {detail}"

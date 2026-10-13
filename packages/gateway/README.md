@@ -1352,7 +1352,8 @@ record, RPC shapes, chapters, runtime profile, memory, task delegation and termi
   `home.decideTaskGrant` RPCs list and revoke authority, or approve or deny an exact durable request with a one-use,
   expiry-bound grant. Home cannot approve its own requests.
 - **Task control.** `home.taskList`, `home.taskStatus`, `home.steerTask` and `home.stopTask` expose durable spend
-  and shared control. Terminal `/home task`, `/home steer` and `/home stop` target one task. Steering shares the
+  and shared control. A list row reads its worker's name without building a session snapshot or a catalog
+  acquisition, so a page stays cheap however large the catalog or the live transcripts are. Terminal `/home task`, `/home steer` and `/home stop` target one task. Steering shares the
   session lane; Stop persists exact intent and cancels outside blocked admission. Canonical usage identities dedupe
   tokens before display. Task results never trigger an automatic Home call: terminal tasks co-commit a durable inbox
   event, delivered on the next maintainer Home message, and make one advisory push decision at most.

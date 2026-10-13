@@ -4818,14 +4818,24 @@ export class RuntimeRegistry {
   /** The canonical file behind one session id: the live runtime's when it has
    * one, else the catalog's exact path. Home's memory must open across an idle
    * eviction, so a live runtime is not required. */
+  /** One session's indexed file, by direct row lookup on the published cut.
+   * Home task list/status call this per task row; building the whole catalog
+   * acquisition here made every row O(catalog) and timed out `home.taskList`
+   * for the work owner check (#905). Admission matches `catalogMembership`:
+   * no cut or an ambiguous ID yields no file. */
   private async homeSessionFile(sessionId: string): Promise<string | undefined> {
     const live = this.slots.get(sessionId)?.sessionFile;
     if (live) return live;
-    try {
-      return (await this.catalogMembership(sessionId)).entry?.path;
-    } catch {
-      return undefined;
-    }
+    if (!this.sessionCatalog.hasCompleteCut()) return undefined;
+    const indexed = () => {
+      if (this.indexAmbiguousSessionIds().has(sessionId)) return undefined;
+      const row = this.sessionCatalog.rows().find((candidate) => candidate.id === sessionId);
+      return row ? resolve(row.path) : undefined;
+    };
+    const found = indexed();
+    if (found) return found;
+    await this.sessionCatalog.awaitQueuedChanges();
+    return indexed();
   }
 
   /** The model a task worker's transcript recorded last (`model_change`). A live worker
@@ -4836,13 +4846,11 @@ export class RuntimeRegistry {
     return change?.type === "model_change" ? { provider: change.provider, id: change.modelId } : undefined;
   }
 
-  /** The worker session's canonical name. A live slot answers from its projection; a settled
-   * one from the catalog's index of its file, so no transcript is parsed. */
   /** A worker's display name: the live session's own name, else its catalog row.
-   * A list shows it for every row, so it is never a session snapshot build (#906). */
+   * A list shows it for every row, so it is never a session snapshot build (#905, #906). */
   async taskWorkerName(sessionId: string): Promise<string | undefined> {
     const live = this.slots.get(sessionId);
-    if (live) return live.sessionName;
+    if (live) return live.displayName;
     const path = await this.homeSessionFile(sessionId);
     return path ? this.sessionCatalog.row(path)?.name : undefined;
   }
