@@ -7,6 +7,7 @@ import {
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { loadSessionFreeExtensions } from "./session-free-extensions.js";
+import { resourceDistribution } from "../sessions/resource-distribution.js";
 import type { ToolCatalogEntry } from "./settings-model.js";
 import { PI_BUILTIN_TOOL_NAMES } from "./settings-types.js";
 import type { TrustService } from "./trust-service.js";
@@ -58,7 +59,8 @@ export class ScopeToolCatalog {
             description: tool.definition.description,
             resource: {
               name: tool.definition.name, label: tool.definition.label, description: tool.definition.description,
-              parameters: tool.definition.parameters, distribution: "external",
+              parameters: tool.definition.parameters,
+              ...(resourceDistribution(tool.sourceInfo) ? { distribution: resourceDistribution(tool.sourceInfo) } : {}),
               source: tool.sourceInfo.source, ...(tool.definition.namespace ? { namespace: tool.definition.namespace } : {}),
             },
           }))

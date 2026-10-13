@@ -363,7 +363,7 @@ describe("settings renderer contract", () => {
     const read = scope.options.find(option => option.value === "read")!;
     expect(read.resource).toMatchObject({ name: "read", label: expect.any(String), description: expect.any(String), parameters: { type: "object", properties: expect.any(Object) } });
     const codemode = scope.options.find(option => option.value === "codemode")!;
-    expect(codemode.resource).toMatchObject({ name: "codemode", description: expect.any(String), parameters: { type: "object" }, distribution: "external" });
+    expect(codemode.resource).toMatchObject({ name: "codemode", description: expect.any(String), parameters: { type: "object" } });
     transcript.push({ case: "tools catalog: project", response: scope });
 
     // The built-in names are pi's own: a plain pi session registers exactly these.

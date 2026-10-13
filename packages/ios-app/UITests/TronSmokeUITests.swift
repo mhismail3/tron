@@ -2133,7 +2133,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(count.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(any.matching(NSPredicate(format: "label == %@", "Read")).firstMatch.exists, app.debugDescription)
         keepScreenshot(named: "900-tools-list-light")
-        let detailButton = app.buttons["Read"].firstMatch
+        let detailButton = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Read, Read file contents")).firstMatch
         tapScrolling(detailButton, in: app)
         XCTAssertTrue(app.staticTexts["Fixture path input"].waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "900-tools-detail-light")

@@ -125,6 +125,7 @@ struct AvailableToolsList: View {
     let groups: [AvailableToolGroup]
     let active: Set<String>
     let accent: Color
+    var isSaving = false
     let onToggle: (AvailableToolRow, Bool) -> Void
     let onSelect: (AvailableToolRow) -> Void
 
@@ -149,9 +150,12 @@ struct AvailableToolsList: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .disabled(isSaving)
+                            .opacity(isSaving ? 0.62 : 1)
                             .accessibilityRepresentation {
                                 Toggle(isOn: Binding(get: { active.contains(tool.name) },
                                                      set: { onToggle(tool, $0) })) { Text(tool.title) }
+                                    .disabled(isSaving)
                             }
                         }
                     }
@@ -201,7 +205,7 @@ struct SessionToolPickerSheet: View {
                             accent: .tronSessionTeal
                         )
                     } else {
-                        AvailableToolsList(groups: groups, active: active, accent: .tronSessionTeal,
+                        AvailableToolsList(groups: groups, active: active, accent: .tronSessionTeal, isSaving: saving != nil,
                                           onToggle: { tool, enabled in set(tool, enabled: enabled) },
                                           onSelect: { tool in
                             selected = ProjectResourceSelection(kind: .tools, title: tool.title, value: tool.value)
