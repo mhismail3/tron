@@ -2191,7 +2191,9 @@ final class TronSmokeUITests: XCTestCase {
         outside.tap()
         XCTAssertTrue(slider.waitForNonExistence(timeout: 5))
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
-        XCTAssertTrue(showsText("Off", in: app))
+        // The row itself reads back the chosen value (not a section summary).
+        XCTAssertTrue(row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value == %@", "Off", "Off"))
+            .firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 
     /// A schema number uses the same anchored slider interaction and saves its
