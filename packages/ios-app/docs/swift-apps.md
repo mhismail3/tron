@@ -1,0 +1,171 @@
+# Experimental: running single-file SwiftUI apps (#889)
+
+Status: experimental prototype, off by default behind a flag.
+
+The idea comes from an X post by @ronithhh: a Swift interpreter that runs native,
+fully interactive iOS apps directly from a `.swift` file
+(<https://x.com/ronithhh/status/2102163666422702538>). In Tron, the agent writes a
+single-file SwiftUI app and presents it with `display`. The phone shows the
+source in the shared document sheet and, when the flag is on, a play control
+runs that file as a native SwiftUI app in a large sheet.
+
+## End to end
+
+1. The agent writes `Habits.swift` and calls `display` with a `path` or
+   `internal_file` source. The Gateway already classifies `.swift` as a `code`
+   artifact; no Gateway change is involved.
+2. iOS opens the artifact in `AttachmentFilePreviewSheet`
+   ([display artifacts](display-artifacts.md)).
+3. When `SwiftAppExperiment` allows it, `TronDocumentSheet` shows a leading
+   play control (`Run Habits.swift`). Truncated previews never run.
+4. `SwiftAppRunnerSheet` parses the file once (`SwiftAppParser`) and renders the
+   root view through `SwiftAppRenderer`. Dismissing the sheet discards the
+   program and its state.
+
+## Flag
+
+Off by default; without it `.swift` artifacts are unchanged. Launch the app once
+with the argument `-tron.experimental.swiftApps YES` to enable it. The choice is
+recorded under the UserDefaults key `tron.experimental.swiftApps`, so later
+normal launches keep it; launching with `NO` turns it off.
+
+```bash
+# Simulator (Development build)
+xcrun simctl launch booted com.tron.mobile.beta -tron.experimental.swiftApps YES
+# Physical device (Tron Device / LocalDevice build)
+xcrun devicectl device process launch --device <device-id> --terminate-existing com.tron.mobile -tron.experimental.swiftApps YES
+```
+
+## Runtime and safety
+
+`Sources/UI/SwiftApps/` owns the interpreter: lexer and AST
+(`SwiftAppSyntax.swift`), parser, dynamic values, a tree-walking evaluator, the
+bounded standard library, and native rendering. Each interpreted view struct is
+a real `SwiftAppCustomView` whose SwiftUI identity owns that instance's
+interpreted `@State`, so state follows the normal SwiftUI lifecycle.
+
+The interpreter has no file, network, process, or native-call surface. A
+program can only build views and change its own interpreted state: names
+resolve to the program's own declarations or to a fixed list of builtins
+(`SwiftAppRuntimeMembers.swift`), and there is no reflection, selector, URL,
+`Link`, `AsyncImage`, timer, or task. Text renders verbatim, so Markdown
+links never open URLs. `print` is a no-op and `dismiss` closes
+nothing outside the program. Unsupported syntax shows a readable message with
+its line number instead of running; an unsupported view or a failing body
+renders an inline diagnostic beside the working views; a failing action shows
+its message over the app, and the next successful action clears it.
+
+Every entry from SwiftUI (a view body, an action, a container's content
+closure) runs under one work budget. Exhausting any limit stops that entry
+with a diagnostic; it never hangs or crashes the app.
+
+| Limit | Value | Owner |
+| --- | --- | --- |
+| Steps | 2,000,000 per entry | `SwiftAppRuntime.tick` |
+| Wall clock | 2 s per entry | `SwiftAppRuntime.tick` |
+| Interpreted call depth (functions, closures, computed properties) | 160 | `SwiftAppRuntime.enterCall` |
+| Native stack headroom (evaluator and parser) | 256 KB reserved | `SwiftAppStackGuard` |
+| Syntax nesting (bounds AST depth) | 256 levels | `SwiftAppParser.nest` |
+| Nested interpreted view structs | 48 | `SwiftAppCustomView.maximumDepth` |
+| Array, range, or string-as-characters | 100,000 elements | `SwiftAppRuntime.admit`, `SwiftAppValue.asArray` |
+| String | 1,000,000 UTF-8 bytes | `SwiftAppRuntime.admit` |
+| Composite value description | 10,000 characters | `SwiftAppValue.display` |
+| Format width or precision | 64 | `SwiftAppFormat` |
+
+Each newly produced array or string is charged to the step budget by size, so
+one entry allocates a bounded amount. Integer arithmetic and conversions that
+would trap in Swift (`Int.min / -1`, `Int(Double.nan)`, `abs(Int.min)`,
+`b + 1` in `a...Int.max`) report an overflow instead; `+`, `-`, and `*` wrap.
+`String(format:)` and `specifier:` go through `SwiftAppFormat`, which pairs
+each conversion with an argument of the right dynamic type, so a format such as
+`%s` or `%@` can never make Foundation read a number as a pointer; `*`
+widths, positional arguments and `%n` are rejected. Frame, padding, font and
+other sizes are clamped to ±10,000 points.
+
+Remaining limits, by design of this prototype:
+
+- Budgets are per entry, not per app. A program can keep the main thread busy
+  for up to two seconds per action or body, and a list of many expensive rows
+  multiplies that. Arrays are copied on mutation, so appending thousands of
+  items in one action reaches the step budget.
+- An `onChange` that changes its own value, or `onAppear` that re-presents
+  itself, can loop at the run loop's pace without blocking it.
+- Memory retained across many separate actions is bounded only by the
+  per-value limits and the user's taps.
+- Closures can form reference cycles with their scopes; they are released
+  when the program's last view goes away only if no cycle holds them.
+- Physical-device stack size (1 MB main thread) is protected by the stack
+  guard but has been validated only on the simulator.
+
+## Supported subset
+
+- **Declarations:** `@main struct …: App` with `WindowGroup`, view structs,
+  value structs (memberwise init, `mutating func`), classes used as
+  `ObservableObject` stores, and enums with cases, raw values, `CaseIterable`,
+  computed properties, and methods. Top-level `let`, `var`, and `func` are
+  supported.
+- **Property wrappers:** `@State`, `@Binding`, `@StateObject`,
+  `@ObservedObject`, `@Published`, and `@EnvironmentObject` with
+  `.environmentObject(_:)`. `$name`, `$item.field`, and `ForEach($items)` work.
+- **Statements:** `let`/`var`, assignment and compound assignment, `if`/`else`,
+  `if let`, `guard`, `for … in … where`, `while`, `switch` (cases, lists,
+  ranges, `default`), `return`, `break`, and `continue`.
+- **Expressions:** literals, string interpolation (including `specifier:`),
+  arithmetic, comparison, logic, ternary, `??`, ranges, arrays, tuples,
+  closures (`$0`, named parameters), key paths, and operator references such as
+  `reduce(0, +)`.
+- **Library:** common `Array`, `String`, `Int`, and `Double` members
+  (`filter`, `map`, `reduce`, `sorted`, `contains`, `append`, `remove`,
+  `firstIndex`, `enumerated`, `joined`, `uppercased`, `formatted`, …),
+  `min`, `max`, `abs`, `random(in:)`, `String(format:)`, `UUID()`, and
+  `withAnimation`.
+- **Views:** Text, Label, Image(systemName:), Button, Toggle, TextField,
+  SecureField, Stepper, Slider, ProgressView, Picker, V/H/Z stacks (and lazy
+  forms), LazyVGrid, ScrollView, List, Form, Section, Group, GroupBox,
+  DisclosureGroup, NavigationStack, NavigationLink, TabView, ForEach (with
+  `onDelete`/`onMove`), Spacer, Divider, Color, basic shapes, and
+  ContentUnavailableView.
+- **Modifiers:** layout (padding, frame, offset), typography, colors, tint,
+  backgrounds and overlays, clip shapes, shadows, navigation titles, button,
+  list, picker, and text field styles, `sheet`, `alert`, `toolbar`,
+  `swipeActions`, `searchable`, `tabItem`, `badge`, `onAppear`,
+  `onTapGesture`, `onChange`, `disabled`, and accessibility identifiers and
+  labels.
+
+Not supported: custom `init`, enums with associated values, generics,
+protocols with requirements, dictionaries, `async`/`await` tasks, Swift
+Concurrency, frameworks other than SwiftUI (WeatherKit, CoreLocation,
+networking), persistence, and custom `ViewModifier`s.
+
+## Validation
+
+Hosted XCUITest journeys in `TronReadonlyAttachmentUITests` display the
+sources in `HostedSwiftAppFixtureSource` through the readonly attachment
+fixture (`-readonly-preview-scenario display-swift…`):
+
+- `testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag` runs
+  `habits`: state changes through `@Binding`, segmented `Picker` filtering, and
+  `TextField` input with an array append.
+- `testSwiftRunControlRequiresFlagAndCompletePreview` proves that with the flag
+  off the `.swift` sheet is the ordinary document sheet (no run control, large
+  detent, Done dismisses), and that a preview truncated at the text limit never
+  offers to run.
+- `testDisplayedSwiftStoreAppSharesStateAcrossTabs` runs `budget`: an
+  `ObservableObject` store shared through `environmentObject`, `TabView`,
+  `List`, an enum `switch`, and `String(format:)`.
+- `testSwiftAppFailuresStayContainedInTheRunner` runs `broken` (line-numbered
+  unsupported syntax), a file nested past the parser limit, and `limits`: an
+  unsupported view, an infinite loop, unbounded recursion, unbounded string
+  growth, a self-reading computed property, `Int.min / -1`, comparing and
+  describing a value with 2^40 shared leaves, a hostile format string, and a
+  view that contains itself. Each ends in a diagnostic or a bounded value while
+  the app stays responsive.
+
+```bash
+scripts/tron-ios-test build
+scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag \
+  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftRunControlRequiresFlagAndCompletePreview \
+  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testDisplayedSwiftStoreAppSharesStateAcrossTabs \
+  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftAppFailuresStayContainedInTheRunner
+```

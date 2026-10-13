@@ -153,6 +153,23 @@ enum TronFontLoader {
         }
     }
 
+    /// The UIKit counterpart of the Dynamic Type style `createFont` scales
+    /// with, so UIKit text renders at the same size as the SwiftUI text it
+    /// replaces.
+    static func uiTextStyle(for size: CGFloat) -> UIFont.TextStyle {
+        switch textStyle(for: size) {
+        case .caption2: .caption2
+        case .caption: .caption1
+        case .footnote: .footnote
+        case .subheadline: .subheadline
+        case .headline: .headline
+        case .title3: .title3
+        case .title2: .title2
+        case .title: .title1
+        default: .body
+        }
+    }
+
     private static func textStyle(for size: CGFloat) -> Font.TextStyle {
         switch size {
         case ..<10: .caption2
