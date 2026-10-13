@@ -77,7 +77,11 @@ export class GatewayProtocolClient {
           const frame = JSON.parse(raw.toString()) as Record<string, unknown>;
           if (frame.type === "hello") {
             if (frame.protocolVersion !== PROTOCOL_VERSION || frame.minProtocolVersion !== PROTOCOL_VERSION) {
-              fail(new GatewayClientError("protocol_mismatch", "Gateway protocol is not compatible", false));
+              fail(new GatewayClientError("protocol_mismatch", "Gateway protocol is not compatible", false, {
+                gatewayProtocol: typeof frame.protocolVersion === "number" ? frame.protocolVersion : null,
+                gatewayMinimumProtocol: typeof frame.minProtocolVersion === "number" ? frame.minProtocolVersion : null,
+                clientProtocol: PROTOCOL_VERSION,
+              }));
               socket.terminate();
               return;
             }
@@ -135,6 +139,7 @@ export class GatewayProtocolClient {
       "protocol_mismatch",
       `Gateway protocol mismatch (Gateway accepts ${range.minProtocol ?? "?"}-${range.gatewayProtocol ?? "?"}, this client speaks ${PROTOCOL_VERSION}). ${staleSide}.`,
       false,
+      { gatewayProtocol: range.gatewayProtocol ?? null, gatewayMinimumProtocol: range.minProtocol ?? null, clientProtocol: PROTOCOL_VERSION },
     );
   }
 

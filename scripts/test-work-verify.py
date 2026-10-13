@@ -106,6 +106,8 @@ def run() -> None:
             evidence.append({"case": "build publication precedes Gateway reads and explicit journey", "exit": result.returncode,
                              "stdout": result.stdout, "stderr": result.stderr})
             assert result.returncode == 0, evidence[-1]
+            for check in ("privacy", "whitespace", "gateway", "test-1"):
+                assert f"running: {check} (log: " in result.stdout, evidence[-1]
             assert (root / "state/related-ran").exists() and (root / "state/journey-done").exists()
             result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=30)
             assert result.returncode == 0 and "already passed" in result.stdout
