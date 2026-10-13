@@ -2,8 +2,11 @@ import SwiftUI
 
 /// Tree-walking evaluator for one parsed single-file SwiftUI program (#889).
 /// It has no file, network, process or native-call surface: programs can only
-/// build interpreted views and mutate their own interpreted state. A step and
-/// depth budget turns runaway loops and recursion into diagnostics.
+/// build interpreted views and mutate their own interpreted state. Every entry
+/// from SwiftUI (a body, an action, a container's content) gets one bounded
+/// work budget: steps, wall-clock time, call depth, native stack headroom and
+/// allocated collection size. Exhausting any of them is a diagnostic, never a
+/// hang or a crash (docs/swift-apps.md, "Runtime and safety").
 @MainActor @Observable
 final class SwiftAppRuntime {
     enum Flow {
@@ -19,13 +22,23 @@ final class SwiftAppRuntime {
     }
 
     static let stepBudget = 2_000_000
+    static let timeBudget: Duration = .seconds(2)
     static let depthBudget = 160
+    /// Largest array (and string-as-characters) one value may hold.
+    static let maximumCollectionCount = 100_000
+    /// Largest string, in UTF-8 bytes, one value may hold.
+    static let maximumStringBytes = 1_000_000
+    static let tooLong = "Stopped: the program ran too long (possible infinite loop)"
+    static let tooDeep = "Stopped: recursion is too deep"
 
     @ObservationIgnored let program: SwiftAppProgramSyntax
     @ObservationIgnored let globals: SwiftAppScope
     @ObservationIgnored var staticStorage: [String: SwiftAppValue] = [:]
     @ObservationIgnored private var steps = 0
+    @ObservationIgnored private var nextClockCheck = 0
+    @ObservationIgnored private var deadline = ContinuousClock.now
     @ObservationIgnored private var depth = 0
+    @ObservationIgnored private var activeEntries = 0
     /// The latest action failure, shown over the running app.
     var actionError: String?
 
@@ -35,14 +48,15 @@ final class SwiftAppRuntime {
         guard rootDeclaration != nil else {
             throw SwiftAppRuntimeError("The file needs a struct conforming to View or App")
         }
-        beginWork()
-        for (name, expression) in program.globals {
-            globals.declare(name, try evaluate(expression, in: globals))
-        }
-        for name in program.typeOrder {
-            guard let declaration = program.types[name] else { continue }
-            for property in declaration.stored where property.isStatic {
-                staticStorage["\(name).\(property.name)"] = try property.initialValue.map { try evaluate($0, in: globals) } ?? .nilValue
+        try entered {
+            for (name, expression) in program.globals {
+                globals.declare(name, try evaluate(expression, in: globals))
+            }
+            for name in program.typeOrder {
+                guard let declaration = program.types[name] else { continue }
+                for property in declaration.stored where property.isStatic {
+                    staticStorage["\(name).\(property.name)"] = try property.initialValue.map { try evaluate($0, in: globals) } ?? .nilValue
+                }
             }
         }
     }
@@ -55,22 +69,62 @@ final class SwiftAppRuntime {
             ?? ordered.first(where: \.isView)
     }
 
-    func beginWork() {
-        steps = 0
-        depth = 0
+    /// Runs one entry from SwiftUI under a fresh work budget. Nested entries
+    /// (a content closure evaluated inside a body) share the outer budget, so
+    /// SwiftUI cannot refill it from inside one runaway evaluation.
+    func entered<T>(_ work: () throws -> T) rethrows -> T {
+        if activeEntries == 0 {
+            steps = 0
+            nextClockCheck = 0
+            depth = 0
+            deadline = .now + Self.timeBudget
+        }
+        activeEntries += 1
+        defer { activeEntries -= 1 }
+        return try work()
     }
 
-    private func tick() throws {
-        steps += 1
-        if steps > Self.stepBudget { throw SwiftAppRuntimeError("Stopped: the program ran too long (possible infinite loop)") }
+    /// Spends `cost` steps. The clock and native stack are the backstops for
+    /// work whose per-step cost is high (copying large values) and for
+    /// recursion that does not pass through `call`, such as computed properties.
+    func tick(_ cost: Int = 1) throws {
+        steps += cost
+        if steps > Self.stepBudget { throw SwiftAppRuntimeError(Self.tooLong) }
+        if steps >= nextClockCheck {
+            nextClockCheck = steps + 1_024
+            if ContinuousClock.now > deadline { throw SwiftAppRuntimeError(Self.tooLong) }
+        }
+        if !SwiftAppStackGuard.hasHeadroom() { throw SwiftAppRuntimeError(Self.tooDeep) }
+    }
+
+    /// Admits a newly produced value: enforces the per-value size limits and
+    /// charges its size to the step budget, which bounds what one evaluation
+    /// can allocate.
+    @discardableResult
+    func admit(_ value: SwiftAppValue) throws -> SwiftAppValue {
+        switch value {
+        case .array(let values):
+            guard values.count <= Self.maximumCollectionCount else {
+                throw SwiftAppRuntimeError("Stopped: a collection grew past \(Self.maximumCollectionCount) elements")
+            }
+            try tick(values.count)
+        case .string(let text):
+            let bytes = text.utf8.count
+            guard bytes <= Self.maximumStringBytes else {
+                throw SwiftAppRuntimeError("Stopped: a string grew past \(Self.maximumStringBytes) bytes")
+            }
+            try tick(bytes / 64)
+        default:
+            break
+        }
+        return value
     }
 
     /// Runs a user action (button, toggle side effect, gesture) and reports
     /// failures over the app instead of terminating it.
     func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = []) {
-        beginWork()
         do {
-            _ = try apply(callable, arguments.map { SwiftAppLabeledValue(label: nil, value: $0) })
+            _ = try entered { try apply(callable, arguments.map { SwiftAppLabeledValue(label: nil, value: $0) }) }
             actionError = nil
         } catch {
             actionError = String(describing: error)
@@ -80,9 +134,12 @@ final class SwiftAppRuntime {
     // MARK: Calls
 
     func call(_ closure: SwiftAppClosure, _ arguments: [SwiftAppValue]) throws -> SwiftAppValue {
-        depth += 1
-        defer { depth -= 1 }
-        if depth > Self.depthBudget { throw SwiftAppRuntimeError("Stopped: recursion is too deep") }
+        try entered { try callClosure(closure, arguments) }
+    }
+
+    private func callClosure(_ closure: SwiftAppClosure, _ arguments: [SwiftAppValue]) throws -> SwiftAppValue {
+        try enterCall()
+        defer { leaveCall() }
         let scope = SwiftAppScope(parent: closure.scope)
         let parameters = closure.literal.parameters
         if parameters.isEmpty {
@@ -97,10 +154,20 @@ final class SwiftAppRuntime {
         return try run(closure.literal.body, in: scope)
     }
 
-    func call(_ function: SwiftAppFunction, receiver: SwiftAppSelf?, _ arguments: [SwiftAppLabeledValue]) throws -> SwiftAppValue {
+    /// Counts one interpreted call frame; callers pair it with `leaveCall()`.
+    func enterCall() throws {
         depth += 1
-        defer { depth -= 1 }
-        if depth > Self.depthBudget { throw SwiftAppRuntimeError("Stopped: recursion is too deep") }
+        if depth > Self.depthBudget {
+            depth -= 1
+            throw SwiftAppRuntimeError(Self.tooDeep)
+        }
+    }
+
+    func leaveCall() { depth -= 1 }
+
+    func call(_ function: SwiftAppFunction, receiver: SwiftAppSelf?, _ arguments: [SwiftAppLabeledValue]) throws -> SwiftAppValue {
+        try enterCall()
+        defer { leaveCall() }
         let scope = SwiftAppScope(parent: globals, selfReference: receiver)
         var remaining = arguments
         for parameter in function.parameters {
@@ -247,7 +314,7 @@ final class SwiftAppRuntime {
             case .doubleRange(let lower, let upper):
                 if let number = try? subject.asDouble(), number >= lower, number <= upper { return true }
             default:
-                if SwiftAppValue.equal(value, subject) { return true }
+                if try equal(value, subject) { return true }
             }
         }
         return false
@@ -279,8 +346,9 @@ final class SwiftAppRuntime {
                 case .text(let value): text += value
                 case .value(let arguments): text += try interpolate(arguments, in: scope)
                 }
+                guard text.utf8.count <= Self.maximumStringBytes else { return try admit(.string(text)) }
             }
-            return .string(text)
+            return try admit(.string(text))
         case .identifier(let name, _):
             return try lookup(name, in: scope)
         case .selfValue:
@@ -302,17 +370,19 @@ final class SwiftAppRuntime {
         case .member(let base, let name):
             return try property(of: try evaluate(base, in: scope), name)
         case .call(let callee, let arguments, let line):
-            do { return try evaluateCall(callee, arguments, in: scope) }
+            do { return try admit(try evaluateCall(callee, arguments, in: scope)) }
             catch let error as SwiftAppRuntimeError where !error.message.hasPrefix("Line ") {
                 throw SwiftAppRuntimeError("Line \(line): \(error.message)")
             }
         case .subscripted(let base, let index):
-            return try subscriptValue(try evaluate(base, in: scope).resolved, try evaluate(index, in: scope).resolved)
+            return try admit(try subscriptValue(try evaluate(base, in: scope).resolved, try evaluate(index, in: scope).resolved))
         case .unary(let op, let operand):
             let value = try evaluate(operand, in: scope).resolved
             switch (op, value) {
             case ("!", _): return .bool(!(try value.asBool()))
-            case ("-", .int(let v)): return .int(-v)
+            case ("-", .int(let v)):
+                guard v != .min else { throw SwiftAppRuntimeError("Integer overflow") }
+                return .int(-v)
             case ("-", .double(let v)): return .double(-v)
             case ("+", _): return value
             default: throw SwiftAppRuntimeError("Cannot apply '\(op)' to \(value.debugDisplay)")
@@ -325,12 +395,12 @@ final class SwiftAppRuntime {
                 let value = try evaluate(left, in: scope).resolved
                 return value.isNone ? try evaluate(right, in: scope) : value
             default:
-                return try binary(op, try evaluate(left, in: scope), try evaluate(right, in: scope))
+                return try admit(try binary(op, try evaluate(left, in: scope), try evaluate(right, in: scope)))
             }
         case .ternary(let condition, let whenTrue, let whenFalse):
             return try evaluate(try evaluate(condition, in: scope).asBool() ? whenTrue : whenFalse, in: scope)
         case .array(let elements):
-            return .array(try elements.map { try evaluate($0, in: scope).resolved })
+            return try admit(.array(try elements.map { try evaluate($0, in: scope).resolved }))
         case .closure(let literal):
             return .closure(SwiftAppClosure(literal: literal, scope: scope))
         case .keyPath(let path):
@@ -346,9 +416,8 @@ final class SwiftAppRuntime {
         guard let first = arguments.first else { return "" }
         let value = try evaluate(first.value, in: scope).resolved
         if let specifier = arguments.first(where: { $0.label == "specifier" }) {
-            guard case .string(let format) = try evaluate(specifier.value, in: scope) else { return value.display }
-            if case .int(let number) = value, format.contains("d") { return String(format: format, number) }
-            return String(format: format, try value.asDouble())
+            guard case .string(let format) = try evaluate(specifier.value, in: scope).resolved else { return value.display }
+            return try SwiftAppFormat.format(format, [value])
         }
         return value.display
     }
@@ -357,8 +426,8 @@ final class SwiftAppRuntime {
         let left = leftValue.resolved
         let right = rightValue.resolved
         switch op {
-        case "==": return .bool(SwiftAppValue.equal(left, right))
-        case "!=": return .bool(!SwiftAppValue.equal(left, right))
+        case "==": return .bool(try equal(left, right))
+        case "!=": return .bool(try !equal(left, right))
         case "<": return .bool(try SwiftAppValue.compare(left, right))
         case ">": return .bool(try SwiftAppValue.compare(right, left))
         case "<=": return .bool(try !SwiftAppValue.compare(right, left))
@@ -367,7 +436,10 @@ final class SwiftAppRuntime {
             if case .int(let a) = left, case .int(let b) = right { return .range(a, b) }
             return .doubleRange(try left.asDouble(), try right.asDouble())
         case "...":
-            if case .int(let a) = left, case .int(let b) = right { return .range(a, b + 1) }
+            if case .int(let a) = left, case .int(let b) = right {
+                guard b < .max else { throw SwiftAppRuntimeError("Integer overflow") }
+                return .range(a, b + 1)
+            }
             return .doubleRange(try left.asDouble(), try right.asDouble())
         default: break
         }
@@ -379,12 +451,11 @@ final class SwiftAppRuntime {
             case "+": return .int(a &+ b)
             case "-": return .int(a &- b)
             case "*": return .int(a &* b)
-            case "/":
+            case "/", "%":
                 guard b != 0 else { throw SwiftAppRuntimeError("Division by zero") }
-                return .int(a / b)
-            case "%":
-                guard b != 0 else { throw SwiftAppRuntimeError("Division by zero") }
-                return .int(a % b)
+                let (result, overflow) = op == "/" ? a.dividedReportingOverflow(by: b) : a.remainderReportingOverflow(dividingBy: b)
+                guard !overflow else { throw SwiftAppRuntimeError("Integer overflow") }
+                return .int(result)
             default: break
             }
         default:
@@ -402,6 +473,24 @@ final class SwiftAppRuntime {
         throw SwiftAppRuntimeError("Unsupported operator '\(op)'")
     }
 
+    /// Structural equality. Each visited node is a step, so comparing large
+    /// or deeply shared values stays inside the work budget.
+    func equal(_ a: SwiftAppValue, _ b: SwiftAppValue) throws -> Bool {
+        try tick()
+        switch (a.resolved, b.resolved) {
+        case (.array(let x), .array(let y)):
+            guard x.count == y.count else { return false }
+            for (left, right) in zip(x, y) where try !equal(left, right) { return false }
+            return true
+        case (.record(let x), .record(let y)):
+            guard x.typeName == y.typeName else { return false }
+            for key in x.keys where try !equal(x.fields[key] ?? .nilValue, y.fields[key] ?? .nilValue) { return false }
+            return true
+        case (let x, let y):
+            return SwiftAppValue.equalScalars(x, y)
+        }
+    }
+
     private func subscriptValue(_ base: SwiftAppValue, _ index: SwiftAppValue) throws -> SwiftAppValue {
         switch (base, index) {
         case (.array(let values), .int(let i)):
@@ -413,5 +502,24 @@ final class SwiftAppRuntime {
         default:
             throw SwiftAppRuntimeError("Cannot subscript \(base.debugDisplay)")
         }
+    }
+}
+
+/// Native stack headroom for the interpreter and parser. Both recurse on the
+/// main thread, whose stack is 1 MB on device, and recursion that does not go
+/// through `call` (deep expressions, computed properties) must stop before it
+/// overflows. The reserve leaves room for SwiftUI to render the diagnostic.
+enum SwiftAppStackGuard {
+    static let reserveBytes = 256 * 1_024
+
+    static func hasHeadroom() -> Bool {
+        let thread = pthread_self()
+        // Darwin reports the highest address; the stack grows down from it.
+        let top = UInt(bitPattern: pthread_get_stackaddr_np(thread))
+        let size = UInt(pthread_get_stacksize_np(thread))
+        var marker: UInt8 = 0
+        let current = withUnsafeMutablePointer(to: &marker) { UInt(bitPattern: $0) }
+        guard current <= top, size > UInt(reserveBytes) else { return true }
+        return top - current < size - UInt(reserveBytes)
     }
 }

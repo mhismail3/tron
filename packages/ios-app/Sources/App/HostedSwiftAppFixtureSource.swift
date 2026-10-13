@@ -1,8 +1,22 @@
 #if HOSTED_TEST
-/// The single-file SwiftUI app the #889 run journey displays and runs. It is
-/// ordinary SwiftUI source, the kind an agent writes and presents with
+/// The single-file SwiftUI apps the #889 run journeys display and run. They
+/// are ordinary SwiftUI source, the kind an agent writes and presents with
 /// `display`; docs/swift-apps.md describes the supported subset.
 enum HostedSwiftAppFixtureSource {
+    /// The file a `display-swift…` scenario displays: its name and source.
+    static func file(for scenario: String) -> (name: String, source: String)? {
+        guard scenario.contains("display-swift") else { return nil }
+        if scenario.contains("budget") { return ("Budget.swift", budget) }
+        if scenario.contains("broken") { return ("Broken.swift", broken) }
+        if scenario.contains("limits") { return ("Limits.swift", limits) }
+        if scenario.contains("truncated") {
+            // Past the document sheet's text preview limit, so the preview is truncated.
+            let padding = (0..<6_000).map { "// Padding line \($0) keeps this file past the preview limit." }
+            return ("Habits.swift", habits + "\n" + padding.joined(separator: "\n"))
+        }
+        return ("Habits.swift", habits)
+    }
+
     static let habits = #"""
     import SwiftUI
 
@@ -114,6 +128,175 @@ enum HostedSwiftAppFixtureSource {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Complete \(habit.name)")
             }
+        }
+    }
+    """#
+
+    /// A second app style: a shared `ObservableObject` store passed through
+    /// `environmentObject`, a `TabView`, `List`s, an enum `switch` and
+    /// `String(format:)`.
+    static let budget = #"""
+    import SwiftUI
+
+    @main
+    struct BudgetApp: App {
+        @StateObject private var store = BudgetStore()
+
+        var body: some Scene {
+            WindowGroup {
+                RootView()
+                    .environmentObject(store)
+            }
+        }
+    }
+
+    enum Category: String, CaseIterable {
+        case food, travel, fun
+
+        var icon: String {
+            switch self {
+            case .food: return "fork.knife"
+            case .travel: return "airplane"
+            case .fun: return "gamecontroller.fill"
+            }
+        }
+    }
+
+    struct Expense: Identifiable {
+        let id = UUID()
+        var title: String
+        var amount: Double
+        var category: Category
+    }
+
+    class BudgetStore: ObservableObject {
+        @Published var expenses: [Expense] = [
+            Expense(title: "Groceries", amount: 42.5, category: .food),
+            Expense(title: "Train ticket", amount: 18, category: .travel)
+        ]
+
+        var total: Double {
+            expenses.reduce(0) { $0 + $1.amount }
+        }
+
+        func spent(on category: Category) -> Double {
+            expenses.filter { $0.category == category }.map { $0.amount }.reduce(0, +)
+        }
+
+        func add(_ category: Category) {
+            expenses.append(Expense(title: "New \(category.rawValue)", amount: 12.25, category: category))
+        }
+    }
+
+    struct RootView: View {
+        var body: some View {
+            TabView {
+                ExpensesView()
+                    .tabItem { Label("Expenses", systemImage: "list.bullet") }
+                SummaryView()
+                    .tabItem { Label("Summary", systemImage: "chart.pie") }
+            }
+        }
+    }
+
+    struct ExpensesView: View {
+        @EnvironmentObject var store: BudgetStore
+
+        var body: some View {
+            NavigationStack {
+                List {
+                    ForEach(store.expenses) { expense in
+                        HStack {
+                            Image(systemName: expense.category.icon)
+                            Text(expense.title)
+                            Spacer()
+                            Text(String(format: "$%.2f", expense.amount))
+                        }
+                    }
+                    Section("Add") {
+                        ForEach(Category.allCases, id: \.self) { category in
+                            Button("Add \(category.rawValue)") {
+                                store.add(category)
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("Expenses")
+            }
+        }
+    }
+
+    struct SummaryView: View {
+        @EnvironmentObject var store: BudgetStore
+
+        var body: some View {
+            NavigationStack {
+                List {
+                    ForEach(Category.allCases, id: \.self) { category in
+                        HStack {
+                            Text(category.rawValue.capitalized)
+                            Spacer()
+                            Text(String(format: "%.2f", store.spent(on: category)))
+                                .accessibilityIdentifier("budget.\(category.rawValue)")
+                        }
+                    }
+                    Text(String(format: "Total $%.2f across %d expenses", store.total, store.expenses.count))
+                        .accessibilityIdentifier("budget.total")
+                }
+                .navigationTitle("Summary")
+            }
+        }
+    }
+    """#
+
+    /// Swift outside the subset: a dictionary literal on line 4.
+    static let broken = #"""
+    import SwiftUI
+
+    struct ContentView: View {
+        @State private var scores: [String: Int] = ["Ada": 3]
+
+        var body: some View {
+            Text("Scores")
+        }
+    }
+    """#
+
+    /// Runaway programs and an unsupported view. Each must end in a
+    /// diagnostic while the rest of the app keeps working.
+    static let limits = #"""
+    import SwiftUI
+
+    struct ContentView: View {
+        @State private var taps = 0
+
+        var body: some View {
+            VStack(spacing: 16) {
+                Text("Taps: \(taps)")
+                    .accessibilityIdentifier("limits.taps")
+                Button("Count") { taps += 1 }
+                Button("Loop forever") {
+                    var n = 0
+                    while true { n += 1 }
+                }
+                Button("Recurse forever") { taps = deeper(taps) }
+                Button("Grow forever") {
+                    var text = "ab"
+                    while true { text = text + text }
+                }
+                MapCard()
+            }
+            .padding()
+        }
+
+        func deeper(_ n: Int) -> Int {
+            deeper(n + 1)
+        }
+    }
+
+    struct MapCard: View {
+        var body: some View {
+            Map()
         }
     }
     """#

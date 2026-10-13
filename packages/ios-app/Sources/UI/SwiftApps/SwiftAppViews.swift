@@ -139,7 +139,7 @@ struct SwiftAppModifiedView: View {
             return AnyView(TextField(title ?? "", text: stringBinding(binding)))
         case "Stepper":
             guard let binding = bindingValue("value") else { throw SwiftAppRuntimeError("Stepper needs value: $state") }
-            let step = SwiftAppRenderer.number(node.argument("step")).map(Double.init) ?? 1
+            let step = SwiftAppRenderer.number(node.argument("step")).map(Double.init).flatMap { $0 > 0 ? $0 : nil } ?? 1
             let label = closure(nil)
             let title = title ?? ""
             let labelView = Group {
@@ -152,7 +152,7 @@ struct SwiftAppModifiedView: View {
         case "Slider":
             guard let binding = bindingValue("value") else { throw SwiftAppRuntimeError("Slider needs value: $state") }
             let range = SwiftAppRenderer.closedRange(node.argument("in")) ?? 0...1
-            if let step = SwiftAppRenderer.number(node.argument("step")) {
+            if let step = SwiftAppRenderer.number(node.argument("step")), step > 0 {
                 return AnyView(Slider(value: doubleBinding(binding), in: range, step: Double(step)))
             }
             return AnyView(Slider(value: doubleBinding(binding), in: range))
@@ -423,7 +423,7 @@ struct SwiftAppModifiedView: View {
         case "multilineTextAlignment":
             guard case .member(let alignment, _)? = first else { return view }
             return AnyView(view.multilineTextAlignment(alignment == "center" ? .center : alignment == "trailing" ? .trailing : .leading))
-        case "lineLimit": return AnyView(view.lineLimit((try? first?.asInt()) ?? nil))
+        case "lineLimit": return AnyView(view.lineLimit(((try? first?.asInt()) ?? nil).flatMap { $0 > 0 ? $0 : nil }))
         case "disabled": return AnyView(view.disabled((try? first?.asBool()) ?? true))
         case "labelsHidden": return AnyView(view.labelsHidden())
         case "imageScale":
@@ -439,7 +439,7 @@ struct SwiftAppModifiedView: View {
             return AnyView(view.onAppear { runtime.perform(action) })
         case "onTapGesture":
             guard let action = arguments.last?.value else { return view }
-            let count = (try? argument(arguments, "count")?.asInt()) ?? 1
+            let count = min(max(1, ((try? argument(arguments, "count")?.asInt()) ?? nil) ?? 1), 10)
             return AnyView(view.onTapGesture(count: count) { runtime.perform(action) })
         case "onChange":
             guard let action = arguments.last?.value else { return view }

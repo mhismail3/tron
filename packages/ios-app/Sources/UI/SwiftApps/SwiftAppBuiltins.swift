@@ -129,28 +129,14 @@ enum SwiftAppBuiltins {
         let first = positional(arguments).first?.resolved
         switch typeName {
         case "String":
-            if let format = arguments.first(where: { $0.label == "format" })?.value, case .string(let pattern) = format {
-                let values = positional(arguments).map(\.resolved)
-                let formatted = values.reduce(pattern) { partial, value in
-                    guard let range = partial.range(of: "%[-+0-9.]*[dfs@]", options: .regularExpression) else { return partial }
-                    let token = String(partial[range])
-                    let piece: String
-                    switch value {
-                    case .int(let number) where token.hasSuffix("d"): piece = String(format: token, number)
-                    case .int(let number): piece = String(format: token.replacingOccurrences(of: "@", with: "f"), Double(number))
-                    case .double(let number) where token.hasSuffix("d"): piece = String(format: token, Int(number))
-                    case .double(let number): piece = String(format: token, number)
-                    default: piece = value.display
-                    }
-                    return partial.replacingCharacters(in: range, with: piece)
-                }
-                return .string(formatted)
+            if let format = arguments.first(where: { $0.label == "format" })?.value, case .string(let pattern) = format.resolved {
+                return .string(try SwiftAppFormat.format(pattern, positional(arguments)))
             }
             return .string(first?.display ?? "")
         case "Int":
             switch first {
             case .string(let text)?: return Int(text.trimmingCharacters(in: .whitespaces)).map { .int($0) } ?? .nilValue
-            case .double(let number)?: return .int(Int(number))
+            case .double(let number)?: return .int(try SwiftAppValue.double(number).asInt())
             case .int?: return first!
             default: return .int(0)
             }
@@ -216,9 +202,11 @@ enum SwiftAppBuiltins {
         case .int, .double:
             let number = try receiver.resolved.asDouble()
             switch name {
-            case "formatted": return .string(receiver.resolved.isInt ? Int(number).formatted() : number.formatted())
+            case "formatted":
+                if case .int(let integer) = receiver.resolved { return .string(integer.formatted()) }
+                return .string(number.formatted())
             case "rounded": return .double(number.rounded())
-            case "isMultiple": return .bool(try Int(number).isMultiple(of: argument(arguments, "of").asInt()))
+            case "isMultiple": return .bool(try receiver.resolved.asInt().isMultiple(of: argument(arguments, "of").asInt()))
             default: break
             }
         case .color(let color):
@@ -248,7 +236,10 @@ enum SwiftAppBuiltins {
             for value in values.dropFirst() where try SwiftAppValue.compare(value, best) == (name == "min") { best = value }
             return best
         case "abs":
-            if case .int(let number)? = values.first { return .int(abs(number)) }
+            if case .int(let number)? = values.first {
+                guard number != .min else { throw SwiftAppRuntimeError("Integer overflow") }
+                return .int(abs(number))
+            }
             return .double(abs(try argument(arguments, nil).asDouble()))
         case "round": return .double((try argument(arguments, nil).asDouble()).rounded())
         case "floor": return .double(Foundation.floor(try argument(arguments, nil).asDouble()))
@@ -263,9 +254,13 @@ enum SwiftAppBuiltins {
             let isInt = arguments.allSatisfy { $0.value.resolved.isInt }
             let through = arguments.first(where: { $0.label == "through" })
             let end = try (through ?? arguments.first(where: { $0.label == "to" }))?.value.asDouble() ?? from
+            // Bound the length before materializing anything.
+            guard from.isFinite, end.isFinite, step.isFinite,
+                  (end - from) / step <= Double(SwiftAppRuntime.maximumCollectionCount) else {
+                throw SwiftAppRuntimeError("stride is too long")
+            }
             let sequence: [Double] = through != nil ? Array(Swift.stride(from: from, through: end, by: step)) : Array(Swift.stride(from: from, to: end, by: step))
-            guard sequence.count <= 100_000 else { throw SwiftAppRuntimeError("stride is too long") }
-            return .array(sequence.map { isInt ? .int(Int($0)) : .double($0) })
+            return .array(try sequence.map { isInt ? .int(try SwiftAppValue.double($0).asInt()) : .double($0) })
         case "zip":
             guard values.count == 2 else { throw SwiftAppRuntimeError("zip needs two sequences") }
             return .array(zip(try values[0].asArray(), try values[1].asArray()).map {
@@ -285,8 +280,9 @@ enum SwiftAppBuiltins {
             switch range {
             case .range(let lower, let upper) where upper > lower:
                 return name == "Int.random" ? .int(Int.random(in: lower..<upper)) : .double(Double.random(in: Double(lower)...Double(upper - 1)))
-            case .doubleRange(let lower, let upper) where upper >= lower:
-                return name == "Int.random" ? .int(Int.random(in: Int(lower)...Int(upper))) : .double(Double.random(in: lower...upper))
+            case .doubleRange(let lower, let upper) where upper >= lower && lower.isFinite && upper.isFinite:
+                guard name == "Int.random" else { return .double(Double.random(in: lower...upper)) }
+                return .int(Int.random(in: try SwiftAppValue.double(lower).asInt()...SwiftAppValue.double(upper).asInt()))
             default:
                 throw SwiftAppRuntimeError("random(in:) needs a non-empty range")
             }
@@ -311,7 +307,7 @@ enum SwiftAppBuiltins {
             }
             let needle = try argument(arguments, nil)
             if case .closure = needle { return .bool(try values.contains { try predicate(needle, $0, runtime: runtime) }) }
-            return .bool(values.contains { SwiftAppValue.equal($0, needle) })
+            return .bool(try values.contains { try runtime.equal($0, needle) })
         case "filter":
             guard let function else { break }
             return .array(try values.filter { try predicate(function, $0, runtime: runtime) })
@@ -336,7 +332,7 @@ enum SwiftAppBuiltins {
         case "firstIndex", "lastIndex":
             let indices = name == "firstIndex" ? Array(values.indices) : values.indices.reversed()
             if let needle = arguments.first(where: { $0.label == "of" })?.value {
-                return indices.first { SwiftAppValue.equal(values[$0], needle) }.map { .int($0) } ?? .nilValue
+                return try indices.first { try runtime.equal(values[$0], needle) }.map { .int($0) } ?? .nilValue
             }
             guard let condition = arguments.first(where: { $0.label == "where" })?.value ?? function else { break }
             return try indices.first { try predicate(condition, values[$0], runtime: runtime) }.map { .int($0) } ?? .nilValue
@@ -357,7 +353,14 @@ enum SwiftAppBuiltins {
         case "dropLast": return .array(Array(values.dropLast(max(0, (try? argument(arguments, nil).asInt()) ?? 1))))
         case "joined":
             let separator = (try? argument(arguments, "separator"))?.display ?? ""
-            return .string(values.map(\.display).joined(separator: separator))
+            var text = ""
+            for (index, value) in values.enumerated() {
+                if index > 0 { text += separator }
+                text += value.display
+                // Stop as soon as the result is too large rather than after building it.
+                guard text.utf8.count <= SwiftAppRuntime.maximumStringBytes else { return try runtime.admit(.string(text)) }
+            }
+            return .string(text)
         case "min", "max":
             guard var best = values.first else { return .nilValue }
             for value in values.dropFirst() where try SwiftAppValue.compare(value, best) == (name == "min") { best = value }
@@ -376,7 +379,16 @@ enum SwiftAppBuiltins {
         case "hasPrefix": return .bool(text.hasPrefix(try string(nil)))
         case "hasSuffix": return .bool(text.hasSuffix(try string(nil)))
         case "trimmingCharacters": return .string(text.trimmingCharacters(in: .whitespacesAndNewlines))
-        case "replacingOccurrences": return .string(text.replacingOccurrences(of: try string("of"), with: try string("with")))
+        case "replacingOccurrences":
+            let target = try string("of"), replacement = try string("with")
+            // Reject a result past the string limit before building it.
+            if !target.isEmpty, replacement.utf8.count > target.utf8.count {
+                let occurrences = text.components(separatedBy: target).count - 1
+                guard text.utf8.count + occurrences * (replacement.utf8.count - target.utf8.count) <= SwiftAppRuntime.maximumStringBytes else {
+                    throw SwiftAppRuntimeError("Stopped: a string grew past \(SwiftAppRuntime.maximumStringBytes) bytes")
+                }
+            }
+            return .string(text.replacingOccurrences(of: target, with: replacement))
         case "split", "components":
             let separator = try string(name == "split" ? "separator" : "separatedBy")
             return .array(text.components(separatedBy: separator).filter { name == "components" || !$0.isEmpty }.map { .string($0) })

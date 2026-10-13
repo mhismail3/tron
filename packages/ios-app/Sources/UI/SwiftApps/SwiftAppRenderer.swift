@@ -33,7 +33,9 @@ enum SwiftAppRenderer {
     static func number(_ value: SwiftAppValue?) -> CGFloat? {
         switch value?.resolved {
         case .member("infinity", _)?: .infinity
-        case let value?: (try? value.asDouble()).map { CGFloat($0) }
+        // Finite sizes are clamped so a program cannot request a gigantic
+        // frame, padding or font whose rendering exhausts memory.
+        case let value?: (try? value.asDouble()).flatMap { $0.isNaN ? nil : CGFloat(min(max($0, -10_000), 10_000)) }
         default: nil
         }
     }
@@ -203,10 +205,19 @@ private struct SwiftAppEnvironmentObjectsKey: EnvironmentKey {
     static let defaultValue: [String: SwiftAppValue] = [:]
 }
 
+private struct SwiftAppViewDepthKey: EnvironmentKey {
+    static let defaultValue = 0
+}
+
 extension EnvironmentValues {
     var swiftAppEnvironmentObjects: [String: SwiftAppValue] {
         get { self[SwiftAppEnvironmentObjectsKey.self] }
         set { self[SwiftAppEnvironmentObjectsKey.self] = newValue }
+    }
+    /// How many interpreted view structs enclose this one.
+    var swiftAppViewDepth: Int {
+        get { self[SwiftAppViewDepthKey.self] }
+        set { self[SwiftAppViewDepthKey.self] = newValue }
     }
 }
 
@@ -217,6 +228,10 @@ struct SwiftAppCustomView: View {
     let node: SwiftAppViewNode
     @State private var state: SwiftAppStateStore
     @Environment(\.swiftAppEnvironmentObjects) private var environmentObjects
+    @Environment(\.swiftAppViewDepth) private var depth
+    /// A view that contains itself (`struct A { var body { A() } }`) is
+    /// unbounded SwiftUI recursion; it stops here with a diagnostic.
+    static let maximumDepth = 48
 
     init(runtime: SwiftAppRuntime, node: SwiftAppViewNode) {
         self.runtime = runtime
@@ -225,9 +240,15 @@ struct SwiftAppCustomView: View {
     }
 
     var body: some View {
-        switch evaluate() {
-        case .success(let node): SwiftAppNodeView(runtime: runtime, node: node)
-        case .failure(let error): SwiftAppErrorView(message: String(describing: error))
+        if depth >= Self.maximumDepth {
+            SwiftAppErrorView(message: "Stopped: views are nested too deeply")
+        } else {
+            switch evaluate() {
+            case .success(let node):
+                SwiftAppNodeView(runtime: runtime, node: node)
+                    .environment(\.swiftAppViewDepth, depth + 1)
+            case .failure(let error): SwiftAppErrorView(message: String(describing: error))
+            }
         }
     }
 

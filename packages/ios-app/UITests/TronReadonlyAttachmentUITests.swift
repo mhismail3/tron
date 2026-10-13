@@ -118,17 +118,11 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
     }
 
     /// #889: a displayed `.swift` file runs as a native, interactive app only
-    /// behind the experimental flag; without it the document sheet is unchanged.
+    /// behind the experimental flag.
     @MainActor func testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag() {
         continueAfterFailure = false
-        // The flag is sticky across launches, so the control turns it off explicitly.
-        let control = launch("display-swift", extraArguments: ["-tron.experimental.swiftApps", "NO"]); defer { control.terminate() }
-        openSwiftDisplay(control)
-        XCTAssertFalse(control.buttons["Run Habits.swift"].exists, "Without the flag the shared document sheet has no run control")
-        control.terminate()
-
-        let app = launch("display-swift", extraArguments: ["-tron.experimental.swiftApps", "YES"])
-        openSwiftDisplay(app)
+        let app = launchSwift("display-swift", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Habits.swift")
         let run = app.buttons["Run Habits.swift"]
         XCTAssertTrue(run.waitForExistence(timeout: 10), "The flag adds the run control to the .swift document sheet")
         keepScreenshot(app, "889-1-swift-source-sheet")
@@ -160,8 +154,112 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(app, "889-4-app-after-add")
     }
 
-    @MainActor private func openSwiftDisplay(_ app: XCUIApplication) {
-        let display = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Habits.swift'")).firstMatch
+    /// #889: without the flag a `.swift` display is an ordinary document
+    /// sheet, and even with it a truncated preview never runs.
+    @MainActor func testSwiftRunControlRequiresFlagAndCompletePreview() {
+        continueAfterFailure = false
+        // The flag is sticky across launches, so the control turns it off explicitly.
+        let control = launchSwift("display-swift", flag: false); defer { control.terminate() }
+        openSwiftDisplay(control, named: "Habits.swift")
+        let done = control.buttons["Done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10))
+        XCTAssertFalse(runControl(control).exists, "Without the flag the shared document sheet has no run control")
+        XCTAssertLessThan(done.frame.minY, control.windows.firstMatch.frame.height * 0.35, "The sheet keeps its large document detent")
+        keepScreenshot(control, "889-0-flag-off-document-sheet")
+        done.tap()
+        XCTAssertTrue(wait(done, predicate: "exists == false"), "Done still dismisses the document sheet")
+        control.terminate()
+
+        let truncated = launchSwift("display-swift-truncated", flag: true)
+        openSwiftDisplay(truncated, named: "Habits.swift")
+        XCTAssertTrue(truncated.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Preview shows the first'")).firstMatch.waitForExistence(timeout: 10),
+                      "The fixture is past the preview limit")
+        XCTAssertFalse(runControl(truncated).exists, "A truncated preview never offers to run a partial program")
+        keepScreenshot(truncated, "889-5-truncated-no-run")
+    }
+
+    /// #889: a second app style — a shared ObservableObject store passed
+    /// through environmentObject, a TabView, Lists, an enum switch and
+    /// String(format:) — keeps one store across tabs.
+    @MainActor func testDisplayedSwiftStoreAppSharesStateAcrossTabs() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-budget", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Budget.swift")
+        let run = app.buttons["Run Budget.swift"]
+        XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
+
+        XCTAssertTrue(app.staticTexts["Groceries"].waitForExistence(timeout: 10), "The App's WindowGroup renders the first tab")
+        XCTAssertTrue(app.staticTexts["$42.50"].exists, "String(format:) formats currency")
+        app.buttons["Add food"].tap()
+        XCTAssertTrue(app.staticTexts["New food"].waitForExistence(timeout: 5), "A store method appends a @Published expense")
+        XCTAssertTrue(app.staticTexts["$12.25"].exists)
+        keepScreenshot(app, "889-6-budget-expenses")
+
+        app.buttons["Summary"].tap()
+        let total = app.staticTexts["budget.total"]
+        XCTAssertTrue(total.waitForExistence(timeout: 5), "The TabView switches to the second tab")
+        XCTAssertEqual(total.label, "Total $72.75 across 3 expenses", "The other tab reads the same environment object")
+        XCTAssertEqual(app.staticTexts["budget.food"].label, "54.75")
+        XCTAssertEqual(app.staticTexts["budget.travel"].label, "18.00")
+        XCTAssertEqual(app.staticTexts["budget.fun"].label, "0.00")
+        keepScreenshot(app, "889-7-budget-summary")
+
+        app.buttons["Expenses"].tap()
+        XCTAssertTrue(app.staticTexts["New food"].waitForExistence(timeout: 5), "Switching tabs keeps the shared store")
+    }
+
+    /// #889: unsupported Swift shows a line-numbered diagnostic, and runaway
+    /// loops, recursion and growth stop at the runtime limits while the app
+    /// stays responsive.
+    @MainActor func testSwiftAppFailuresStayContainedInTheRunner() {
+        continueAfterFailure = false
+        let broken = launchSwift("display-swift-broken", flag: true); defer { broken.terminate() }
+        openSwiftDisplay(broken, named: "Broken.swift")
+        let runBroken = broken.buttons["Run Broken.swift"]
+        XCTAssertTrue(runBroken.waitForExistence(timeout: 10)); runBroken.tap()
+        let unsupported = broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 4: Dictionaries are not supported'")).firstMatch
+        XCTAssertTrue(unsupported.waitForExistence(timeout: 10), "Unsupported syntax names its line instead of running")
+        keepScreenshot(broken, "889-8-unsupported-syntax")
+        broken.terminate()
+
+        let app = launchSwift("display-swift-limits", flag: true)
+        openSwiftDisplay(app, named: "Limits.swift")
+        let run = app.buttons["Run Limits.swift"]
+        XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
+        let taps = app.staticTexts["limits.taps"]
+        XCTAssertTrue(taps.waitForExistence(timeout: 10))
+        XCTAssertTrue(diagnostic(app, "Line 32: Unknown name 'Map'").exists, "An unsupported view renders an inline diagnostic beside working views")
+
+        var expectedTaps = 0
+        for (button, message) in [
+            ("Loop forever", "ran too long"),
+            ("Recurse forever", "recursion is too deep"),
+            ("Grow forever", "string grew past"),
+        ] {
+            app.buttons[button].tap()
+            XCTAssertTrue(diagnostic(app, message).waitForExistence(timeout: 15), "\(button) stops with a diagnostic")
+            keepScreenshot(app, "889-9-\(button)")
+            app.buttons["Count"].tap()
+            expectedTaps += 1
+            XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: \(expectedTaps)"), "The app stays responsive after \(button)")
+            XCTAssertTrue(wait(diagnostic(app, message), predicate: "exists == false"), "A successful action clears the diagnostic")
+        }
+    }
+
+    @MainActor private func launchSwift(_ scenario: String, flag: Bool) -> XCUIApplication {
+        launch(scenario, extraArguments: ["-tron.experimental.swiftApps", flag ? "YES" : "NO"])
+    }
+
+    @MainActor private func runControl(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Run '")).firstMatch
+    }
+
+    @MainActor private func diagnostic(_ app: XCUIApplication, _ text: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'swiftApp.error' AND label CONTAINS %@", text)).firstMatch
+    }
+
+    @MainActor private func openSwiftDisplay(_ app: XCUIApplication, named name: String) {
+        let display = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
         XCTAssertTrue(display.waitForExistence(timeout: 15)); display.tap()
         let reader = app.textViews.matching(NSPredicate(format: "value BEGINSWITH 'import SwiftUI'")).firstMatch
         XCTAssertTrue(reader.waitForExistence(timeout: 10), "The .swift source is shown in the shared document sheet")

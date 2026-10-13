@@ -51,6 +51,9 @@ extension SwiftAppRuntime {
         }
         if let value = staticStorage["\(declaration.name).\(name)"] { return value }
         if let body = declaration.computed[name] {
+            // A computed property is a call: `var x: Int { x }` must hit the depth limit.
+            try enterCall()
+            defer { leaveCall() }
             return try run(body, in: SwiftAppScope(parent: globals, selfReference: receiver))
         }
         if let function = declaration.functions[name] { return .function(function, receiver) }
@@ -323,10 +326,15 @@ extension SwiftAppRuntime {
             let result = try call(function, receiver: .record(declaration, box), arguments)
             return (box.value, result)
         }
-        return try SwiftAppBuiltins.mutate(value, name, arguments, runtime: self)
+        let (updated, result) = try SwiftAppBuiltins.mutate(value, name, arguments, runtime: self)
+        return (try admit(updated), result)
     }
 
     func apply(_ callee: SwiftAppValue, _ arguments: [SwiftAppLabeledValue]) throws -> SwiftAppValue {
+        try entered { try applyEntered(callee, arguments) }
+    }
+
+    private func applyEntered(_ callee: SwiftAppValue, _ arguments: [SwiftAppLabeledValue]) throws -> SwiftAppValue {
         switch callee {
         case .typeReference(let name):
             if let declaration = program.types[name] { return try construct(declaration, arguments) }
@@ -341,7 +349,7 @@ extension SwiftAppRuntime {
         case .member(let name, nil):
             return .member(name, arguments)
         case .binding(let binding):
-            return try apply(binding.get(), arguments)
+            return try applyEntered(binding.get(), arguments)
         default:
             throw SwiftAppRuntimeError("\(callee.debugDisplay) is not callable")
         }
@@ -353,7 +361,7 @@ extension SwiftAppRuntime {
             guard let raw = arguments.first(where: { $0.label == "rawValue" })?.value else {
                 throw SwiftAppRuntimeError("\(declaration.name) can only be created with rawValue:")
             }
-            for caseName in declaration.cases where SwiftAppValue.equal(try rawValue(of: caseName, in: declaration), raw) {
+            for caseName in declaration.cases where try equal(try rawValue(of: caseName, in: declaration), raw) {
                 return .member(caseName, nil)
             }
             return .nilValue
@@ -383,6 +391,10 @@ extension SwiftAppRuntime {
     // MARK: View instances
 
     func initialState(for declaration: SwiftAppTypeDeclaration, arguments: [SwiftAppLabeledValue]) -> SwiftAppStateStore {
+        entered { initialStateEntered(for: declaration, arguments: arguments) }
+    }
+
+    private func initialStateEntered(for declaration: SwiftAppTypeDeclaration, arguments: [SwiftAppLabeledValue]) -> SwiftAppStateStore {
         var values: [String: SwiftAppValue] = [:]
         for property in declaration.stored where !property.isStatic {
             guard let wrapper = property.wrapper, Self.stateWrappers.contains(wrapper) else { continue }
@@ -398,6 +410,10 @@ extension SwiftAppRuntime {
     }
 
     func properties(for node: SwiftAppViewNode) throws -> [String: SwiftAppValue] {
+        try entered { try propertiesEntered(for: node) }
+    }
+
+    private func propertiesEntered(for node: SwiftAppViewNode) throws -> [String: SwiftAppValue] {
         guard let declaration = node.declaration else { return [:] }
         var properties: [String: SwiftAppValue] = [:]
         var positional = node.arguments.filter { $0.label == nil }.map(\.value)
@@ -417,11 +433,10 @@ extension SwiftAppRuntime {
     }
 
     func body(of instance: SwiftAppViewInstance) throws -> SwiftAppValue {
-        beginWork()
         guard let body = instance.declaration.computed["body"] else {
             throw SwiftAppRuntimeError("\(instance.declaration.name) has no body")
         }
-        return try run(body, in: SwiftAppScope(parent: globals, selfReference: .view(instance)))
+        return try entered { try run(body, in: SwiftAppScope(parent: globals, selfReference: .view(instance))) }
     }
 
     private static let builtinTypes: Set<String> = [

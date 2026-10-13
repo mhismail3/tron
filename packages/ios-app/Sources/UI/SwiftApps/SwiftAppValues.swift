@@ -104,28 +104,19 @@ indirect enum SwiftAppValue {
 
     var isNone: Bool { if case .nilValue = self { true } else { false } }
 
+    /// Composite values (arrays, records, tuples) print at most this many
+    /// characters, so describing a large or deeply shared value is bounded.
+    static let compositeDisplayLimit = 10_000
+
     var display: String {
         switch self {
-        case .void: "()"
-        case .nilValue: "nil"
-        case .int(let v): String(v)
-        case .double(let v): String(v)
-        case .bool(let v): String(v)
-        case .string(let v): v
-        case .array(let values): "[" + values.map(\.debugDisplay).joined(separator: ", ") + "]"
-        case .record(let record):
-            "\(record.typeName)(" + record.keys.map { "\($0): \(record.fields[$0]?.debugDisplay ?? "nil")" }.joined(separator: ", ") + ")"
-        case .object(let object): object.typeName
-        case .member(let name, _): name
-        case .view(let node): node.name
-        case .closure, .function, .builtin: "(function)"
-        case .binding(let binding): binding.get().display
-        case .keyPath(let path): "\\." + path.joined(separator: ".")
-        case .typeReference(let name): name
-        case .color: "Color"
-        case .range(let a, let b): "\(a)..<\(b)"
-        case .doubleRange(let a, let b): "\(a)...\(b)"
-        case .tuple(let values): "(" + values.map(\.value.debugDisplay).joined(separator: ", ") + ")"
+        case .string(let v): return v
+        case .binding(let binding): return binding.get().display
+        default:
+            var text = ""
+            var budget = Self.compositeDisplayLimit
+            write(into: &text, budget: &budget, quoted: false)
+            return text
         }
     }
 
@@ -134,10 +125,57 @@ indirect enum SwiftAppValue {
         return display
     }
 
+    private func write(into text: inout String, budget: inout Int, quoted: Bool) {
+        budget -= 1
+        guard budget > 0 else {
+            if !text.hasSuffix("…") { text += "…" }
+            return
+        }
+        func append(_ piece: String) {
+            let room = max(0, budget)
+            if piece.utf8.count <= room { text += piece; budget -= piece.utf8.count }
+            else { text += piece.prefix(room) + "…"; budget = 0 }
+        }
+        func list(_ open: String, _ close: String, _ items: [(label: String?, value: SwiftAppValue)]) {
+            append(open)
+            for (index, item) in items.enumerated() {
+                guard budget > 0 else { break }
+                if index > 0 { append(", ") }
+                if let label = item.label { append("\(label): ") }
+                item.value.write(into: &text, budget: &budget, quoted: true)
+            }
+            append(close)
+        }
+        switch self {
+        case .void: append("()")
+        case .nilValue: append("nil")
+        case .int(let v): append(String(v))
+        case .double(let v): append(String(v))
+        case .bool(let v): append(String(v))
+        case .string(let v): append(quoted ? "\"\(v)\"" : v)
+        case .array(let values): list("[", "]", values.map { (nil, $0) })
+        case .record(let record):
+            list("\(record.typeName)(", ")", record.keys.map { ($0, record.fields[$0] ?? .nilValue) })
+        case .object(let object): append(object.typeName)
+        case .member(let name, _): append(name)
+        case .view(let node): append(node.name)
+        case .closure, .function, .builtin: append("(function)")
+        case .binding(let binding): binding.get().write(into: &text, budget: &budget, quoted: quoted)
+        case .keyPath(let path): append("\\." + path.joined(separator: "."))
+        case .typeReference(let name): append(name)
+        case .color: append("Color")
+        case .range(let a, let b): append("\(a)..<\(b)")
+        case .doubleRange(let a, let b): append("\(a)...\(b)")
+        case .tuple(let values): list("(", ")", values.map { (nil, $0.value) })
+        }
+    }
+
     func asInt() throws -> Int {
         switch self {
         case .int(let v): return v
-        case .double(let v): return Int(v)
+        case .double(let v):
+            guard let integer = Int(exactly: v.rounded(.towardZero)) else { throw SwiftAppRuntimeError("\(v) does not fit in an Int") }
+            return integer
         case .binding(let b): return try b.get().asInt()
         default: throw SwiftAppRuntimeError("Expected an Int but found \(debugDisplay)")
         }
@@ -163,8 +201,18 @@ indirect enum SwiftAppValue {
     func asArray() throws -> [SwiftAppValue] {
         switch self {
         case .array(let v): return v
-        case .range(let a, let b): return a < b ? (a..<b).map { .int($0) } : []
-        case .string(let s): return s.map { .string(String($0)) }
+        case .range(let a, let b):
+            guard a < b else { return [] }
+            let (count, overflow) = b.subtractingReportingOverflow(a)
+            guard !overflow, count <= SwiftAppRuntime.maximumCollectionCount else {
+                throw SwiftAppRuntimeError("Stopped: the range \(a)..<\(b) is larger than \(SwiftAppRuntime.maximumCollectionCount) elements")
+            }
+            return (a..<b).map { .int($0) }
+        case .string(let s):
+            guard s.utf8.count <= SwiftAppRuntime.maximumCollectionCount else {
+                throw SwiftAppRuntimeError("Stopped: the string is longer than \(SwiftAppRuntime.maximumCollectionCount) characters")
+            }
+            return s.map { .string(String($0)) }
         case .binding(let b): return try b.get().asArray()
         default: throw SwiftAppRuntimeError("Expected a collection but found \(debugDisplay)")
         }
@@ -198,8 +246,10 @@ indirect enum SwiftAppValue {
         return debugDisplay
     }
 
-    static func equal(_ a: SwiftAppValue, _ b: SwiftAppValue) -> Bool {
-        switch (a.resolved, b.resolved) {
+    /// Equality of non-composite values; `SwiftAppRuntime.equal` owns
+    /// arrays and records so their traversal is budgeted.
+    static func equalScalars(_ a: SwiftAppValue, _ b: SwiftAppValue) -> Bool {
+        switch (a, b) {
         case (.nilValue, .nilValue): true
         case (.void, .void): true
         case (.int(let x), .int(let y)): x == y
@@ -209,9 +259,6 @@ indirect enum SwiftAppValue {
         case (.bool(let x), .bool(let y)): x == y
         case (.string(let x), .string(let y)): x == y
         case (.member(let x, _), .member(let y, _)): x == y
-        case (.array(let x), .array(let y)): x.count == y.count && zip(x, y).allSatisfy { equal($0, $1) }
-        case (.record(let x), .record(let y)):
-            x.typeName == y.typeName && x.keys.allSatisfy { key in equal(x.fields[key] ?? .nilValue, y.fields[key] ?? .nilValue) }
         case (.object(let x), .object(let y)): x === y
         case (.range(let a, let b), .range(let c, let d)): a == c && b == d
         default: false

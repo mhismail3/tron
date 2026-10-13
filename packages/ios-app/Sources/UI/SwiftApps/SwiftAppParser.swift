@@ -7,18 +7,26 @@ struct SwiftAppParser {
     private var position = 0
     /// `if`/`for`/`while`/`switch` heads cannot take trailing closures, as in Swift.
     private var forbidTrailingClosure = false
+    /// Syntax nesting so far. It bounds the AST depth, which bounds the
+    /// evaluator's recursion and the recursive release of the tree; the stack
+    /// guard bounds the parser's own recursion.
+    private var nesting = 0
+    static let maximumNesting = 256
 
-    init(tokens: [SwiftAppToken]) { self.tokens = tokens }
+    init(tokens: [SwiftAppToken], nesting: Int = 0) {
+        self.tokens = tokens
+        self.nesting = nesting
+    }
 
     static func parse(_ source: String) throws -> SwiftAppProgramSyntax {
         var parser = SwiftAppParser(tokens: try SwiftAppLexer.tokenize(source))
         return try parser.parseProgram()
     }
 
-    static func parseArguments(_ source: String, line: Int) throws -> [SwiftAppArgument] {
+    static func parseArguments(_ source: String, line: Int, nesting: Int) throws -> [SwiftAppArgument] {
         var parser = SwiftAppParser(tokens: try SwiftAppLexer.tokenize(source).map {
             SwiftAppToken(kind: $0.kind, line: line, newlineBefore: $0.newlineBefore, spaceBefore: $0.spaceBefore)
-        })
+        }, nesting: nesting)
         var arguments: [SwiftAppArgument] = []
         while !parser.atEnd {
             arguments.append(try parser.parseArgument())
@@ -36,6 +44,13 @@ struct SwiftAppParser {
     private mutating func advance() { if position < tokens.count - 1 { position += 1 } }
     private func error(_ message: String) -> SwiftAppSyntaxError {
         SwiftAppSyntaxError(message: message, line: current.line)
+    }
+    /// Enters one nesting level; callers pair it with `nesting -= 1`.
+    private mutating func nest() throws {
+        guard nesting < Self.maximumNesting, SwiftAppStackGuard.hasHeadroom() else {
+            throw error("Code is nested too deeply")
+        }
+        nesting += 1
     }
     private mutating func consumeSymbol(_ value: String) -> Bool {
         if current.isSymbol(value) { advance(); return true }
@@ -305,6 +320,8 @@ struct SwiftAppParser {
 
     /// Statements up to and including the closing brace of an opened block.
     private mutating func parseBlockBody() throws -> [SwiftAppStmt] {
+        try nest()
+        defer { nesting -= 1 }
         let saved = forbidTrailingClosure
         forbidTrailingClosure = false
         defer { forbidTrailingClosure = saved }
@@ -440,6 +457,8 @@ struct SwiftAppParser {
     // MARK: Expressions
 
     mutating func parseExpression() throws -> SwiftAppExpr {
+        try nest()
+        defer { nesting -= 1 }
         while let word = current.identifier, ["try", "await"].contains(word) {
             advance()
             if current.isSymbol("?") || current.isSymbol("!") { advance() }
@@ -456,7 +475,12 @@ struct SwiftAppParser {
 
     private mutating func parseNilCoalescing() throws -> SwiftAppExpr {
         var left = try parseBinary(level: 0)
-        while consumeSymbol("??") { left = .binary("??", left, try parseBinary(level: 0)) }
+        var chained = 0
+        defer { nesting -= chained }
+        while consumeSymbol("??") {
+            try nest(); chained += 1
+            left = .binary("??", left, try parseBinary(level: 0))
+        }
         return left
     }
 
@@ -467,7 +491,11 @@ struct SwiftAppParser {
     private mutating func parseBinary(level: Int) throws -> SwiftAppExpr {
         guard level < Self.precedence.count else { return try parseUnary() }
         var left = try parseBinary(level: level + 1)
+        var chained = 0
+        defer { nesting -= chained }
         while let op = current.symbol, Self.precedence[level].contains(op), !(op == "<" && !current.spaceBefore) {
+            // Each operator in a chain deepens the left-nested tree.
+            try nest(); chained += 1
             advance()
             left = .binary(op, left, try parseBinary(level: level + 1))
         }
@@ -477,6 +505,8 @@ struct SwiftAppParser {
 
     private mutating func parseUnary() throws -> SwiftAppExpr {
         if let op = current.symbol, ["!", "-", "+"].contains(op) {
+            try nest()
+            defer { nesting -= 1 }
             advance()
             return .unary(op, try parseUnary())
         }
@@ -485,7 +515,11 @@ struct SwiftAppParser {
 
     private mutating func parsePostfix(_ base: SwiftAppExpr) throws -> SwiftAppExpr {
         var expression = base
+        var chained = 0
+        defer { nesting -= chained }
         while true {
+            // Each member, call or subscript wraps the expression once more.
+            try nest(); chained += 1
             if current.isSymbol("."), let name = peek(1).identifier {
                 advance(); advance()
                 expression = .member(expression, name)
@@ -628,7 +662,7 @@ struct SwiftAppParser {
             return .string(try parts.map { part in
                 switch part {
                 case .text(let text): .text(text)
-                case .interpolation(let raw, let line): .value(try Self.parseArguments(raw, line: line))
+                case .interpolation(let raw, let line): .value(try Self.parseArguments(raw, line: line, nesting: nesting))
                 }
             })
         case .identifier(let name):

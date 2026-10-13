@@ -129,15 +129,15 @@ private actor ReadonlyAttachmentGateway {
             var artifact = display["artifact"] as! [String: Any]
             artifact["kind"] = "text"; artifact["name"] = "readonly.txt"; artifact["mimeType"] = "text/plain"
             display["artifact"] = artifact; rows[1]["display"] = display
-        } else if scenario.contains("display-swift") {
-            // A displayed single-file SwiftUI app for the #889 run journey.
+        } else if let swiftFile = HostedSwiftAppFixtureSource.file(for: scenario) {
+            // A displayed single-file SwiftUI app for the #889 run journeys.
             var display = rows[1]["display"] as! [String: Any]
-            display["kind"] = "code"; display["title"] = "Habits.swift"
-            display["altText"] = "Habits.swift, a single-file SwiftUI app"
+            display["kind"] = "code"; display["title"] = swiftFile.name
+            display["altText"] = "\(swiftFile.name), a single-file SwiftUI app"
             display["eligibleSurfaces"] = ["sheet", "inline"]
             display["presentation"] = ["requestedSurface": "sheet", "inlineTapAction": "sheet"]
             var artifact = display["artifact"] as! [String: Any]
-            artifact["kind"] = "code"; artifact["name"] = "Habits.swift"; artifact["mimeType"] = "text/plain; charset=utf-8"
+            artifact["kind"] = "code"; artifact["name"] = swiftFile.name; artifact["mimeType"] = "text/plain; charset=utf-8"
             display["artifact"] = artifact; rows[1]["display"] = display
         } else if scenario.contains("display-video") {
             var display = rows[1]["display"] as! [String: Any]
@@ -155,9 +155,8 @@ private actor ReadonlyAttachmentGateway {
         }
         image = Self.image(height: 320)
         poison = Self.image(height: 640)
-        file = scenario.contains("display-swift")
-            ? Data(HostedSwiftAppFixtureSource.habits.utf8)
-            : Data((0..<300).map { "Readonly fixture row \($0): preserved native selection and viewport." }.joined(separator: "\n").utf8)
+        file = HostedSwiftAppFixtureSource.file(for: scenario).map { Data($0.source.utf8) }
+            ?? Data((0..<300).map { "Readonly fixture row \($0): preserved native selection and viewport." }.joined(separator: "\n").utf8)
     }
     @MainActor private static func image(height: Int) -> Data {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
