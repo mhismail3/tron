@@ -684,13 +684,15 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // Scroll toward it: a blind downward swipe at the top of a medium sheet
         // would drag the sheet itself.
         let link = links.allElementsBoundByIndex.last!
-        let window = app.windows.firstMatch.frame
-        for _ in 0..<24 where !link.isHittable {
-            if link.frame.minY < window.minY + 160 { app.swipeDown() } else { app.swipeUp() }
+        // Hittable is not enough: a row under the top-most navigation bar still
+        // reports hittable while a tap there lands on the bar.
+        func barBottom() -> CGFloat { app.navigationBars.allElementsBoundByIndex.last?.frame.maxY ?? 0 }
+        for _ in 0..<24 where !(link.isHittable && link.frame.minY >= barBottom()) {
+            if link.frame.minY < barBottom() + 40 { app.swipeDown() } else { app.swipeUp() }
         }
         // No reachable link means this surface serves the section nothing, which
         // the per-key checks then prove.
-        guard link.isHittable else { return nil }
+        guard link.isHittable, link.frame.minY >= barBottom() else { return nil }
         link.tap()
         let detail = app.descendants(matching: .any)["settings-section-\(group)-detail"]
         XCTAssertTrue(detail.waitForExistence(timeout: 30), "the \(group) sub-sheet did not open: \(app.debugDescription)")
