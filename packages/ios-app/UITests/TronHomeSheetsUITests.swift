@@ -43,7 +43,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(cacheHit.exists)
         XCTAssertLessThanOrEqual(element(app, "context-segment-free").frame.maxY, cacheHit.frame.minY, "The legend sits above the metrics")
         keep("02-context")
+        let contextOpened = reads(app)
         app.buttons["home-sheet-done-context"].tap()
+        assertNoReads(app, since: contextOpened, "Returning from a read-only child to Manage Home re-reads nothing")
 
         // Memory: the recent messages and the summaries Home sees, without raw kind prefixes.
         open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory")

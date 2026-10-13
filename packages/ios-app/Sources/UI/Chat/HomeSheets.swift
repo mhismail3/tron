@@ -133,6 +133,9 @@ struct HomeSheet: View {
     /// Rows present an existing Home sheet as a managed child, so each child keeps
     /// its own read owner and lifetime.
     @State var childDestination: HomeSheetDestination?
+    /// Manage Home's open child only reads (Context, Memory, Chapters), so its return
+    /// keeps the installed page instead of re-reading every row.
+    @State private var returnsFromBrowsing = false
     @State private var showsTerminal = false
     @State var mutationFailure: String?
     @State var confirmingDisable = false
@@ -213,9 +216,15 @@ struct HomeSheet: View {
             guard active else { owner.retireLoading(); return }
             let query = request.query
             let requestID = request.id
-            // Uncovering a read-only sheet keeps its installed page: returning from a
-            // child is not a new request (#911). Manage Home refreshes behind its frame.
-            if case .manage = destination {} else if owner.holds(requestID: requestID, identity: identity) { return }
+            // Uncovering a sheet keeps its installed page: returning from a child is not a
+            // new request (#911). Manage Home refreshes behind its frame only after a child
+            // that can change Home (tasks, permissions, settings, terminal).
+            if owner.holds(requestID: requestID, identity: identity) {
+                if case .manage = destination, !returnsFromBrowsing { /* refresh below */ } else {
+                    returnsFromBrowsing = false
+                    return
+                }
+            }
             await owner.load(requestID: requestID, identity: identity, coordinator: coordinator,
                              isCurrent: { self.identity == identity && self.request.id == requestID },
                              preserveInstalledFrame: destination.id == "manage") {
@@ -278,6 +287,10 @@ struct HomeSheet: View {
 
     /// Presents a managed child sheet; rows use this, not their own navigation.
     func present(_ child: HomeSheetDestination) {
+        switch child {
+        case .context, .memory, .chapters: returnsFromBrowsing = true
+        default: returnsFromBrowsing = false
+        }
         childDestination = child
     }
 
