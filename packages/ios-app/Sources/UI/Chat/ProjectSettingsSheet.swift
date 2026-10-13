@@ -96,7 +96,7 @@ struct ProjectSettingsContent: View {
                     // fills values in place instead of inserting rows (no flicker).
                     TronSettingsGroup("Project", detail: cwd, accent: .tronEmerald) {
                         TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: trust?.stateTitle ?? "Trust",
-                                        subtitle: trust?.stateDetail ?? "Checking…", subtitleColor: .tronTextSecondary) {
+                                        subtitle: trust?.stateDetail ?? " ", subtitleColor: .tronTextSecondary) {
                             TronProgressiveSheetLink(accessibilityLabel: "Review trust",
                                 destination: { TrustSettingsView(target: TrustTarget(cwd: cwd)) }) {
                                 TronInlineActionLabel("Review")
@@ -105,7 +105,7 @@ struct ProjectSettingsContent: View {
                         TronSettingsDivider()
                         TronSettingsRow(icon: "arrow.triangle.branch", title: "Workspace",
                                         subtitle: git.map { !$0.isRepository ? "Not a Git repository"
-                                            : $0.isDirty ? "Uncommitted changes" : "No uncommitted changes" } ?? "Checking…",
+                                            : $0.isDirty ? "Uncommitted changes" : "No uncommitted changes" } ?? " ",
                                         subtitleColor: .tronTextSecondary) {
                             TronDynamicValue(text: git.map { $0.isRepository ? ($0.branch ?? "Detached HEAD") : "—" } ?? "")
                         }

@@ -51,7 +51,8 @@ struct SettingsChangesView: View {
         let profileID: String
     }
     @State private var errorMessage: String?
-    @State private var loading = false
+    /// A surface starts loading: its empty state waits for the first read.
+    @State private var loading = true
     @State private var loadGeneration = 0
     @State private var busyIDs: Set<String> = []
     @State private var decisionConfirmation: PendingDecision?
@@ -99,14 +100,15 @@ struct SettingsChangesView: View {
                             .accessibilityAddTraits(.isHeader)
                         ForEach(pending) { request in pendingCard(request) }
                     }
-                    if entries.isEmpty && !loading && errorMessage == nil {
+                    // An empty page with a cursor is not the end: only the end is "No changes".
+                    if entries.isEmpty && cursor == nil && !loading && errorMessage == nil {
                         TronPlaceholderState(title: "No changes", detail: "Agent and outside changes will appear here.", icon: "clock.arrow.circlepath")
                             .frame(maxWidth: .infinity)
                     }
                     ForEach(entries) { entry in
                         historyRow(entry)
                     }
-                    if cursor != nil, !entries.isEmpty {
+                    if cursor != nil {
                         Button { Task { await loadNextPage() } } label: {
                             if loading { TronLoadingState(label: "Loading changes…") }
                             else { Text("Load more") }

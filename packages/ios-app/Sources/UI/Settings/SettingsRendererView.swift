@@ -134,7 +134,7 @@ struct SettingsRendererView: View {
             if let resolution { content(resolution) }
         } else if case .overridesLink(_, let title, let icon) = presentation, resolution == nil {
             // The scope row keeps its place in the caller's card while the schema loads.
-            TronSettingsRow(icon: icon, title: title, subtitle: loadError == nil ? "Loading…" : "Unavailable",
+            TronSettingsRow(icon: icon, title: title, subtitle: loadError == nil ? " " : "Unavailable",
                             subtitleColor: .tronTextSecondary)
         } else {
             VStack(alignment: .leading, spacing: 20) {

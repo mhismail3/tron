@@ -69,7 +69,8 @@ struct IntegrationsSettingsView: View {
                                              icon: "link")
                     }
                 } else if isLoading {
-                    HStack { Spacer(); ProgressView("Loading integrations…"); Spacer() }
+                    TronLoadingState(label: "Loading integrations…")
+                        .frame(maxWidth: .infinity)
                         .padding(.vertical, 28)
                 }
                 if let error { TronSettingsNotice(message: error, accent: .tronError) }

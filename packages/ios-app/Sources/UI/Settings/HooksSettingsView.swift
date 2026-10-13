@@ -145,7 +145,8 @@ struct HooksSettingsView: View {
     @State private var selectedEvent: HookEventRecord?
     @State private var projection: JSONValue?
     @State private var loadError: String?
-    @State private var loading = false
+    /// A surface starts loading: its empty state waits for the first read.
+    @State private var loading = true
     @State private var refreshGeneration = 0
     @State private var trust: ProjectTrustSummary?
 
@@ -436,6 +437,7 @@ struct HooksSettingsView: View {
         ) else {
             projection = nil
             loadError = nil
+            loading = false
             return
         }
         loading = projection == nil
