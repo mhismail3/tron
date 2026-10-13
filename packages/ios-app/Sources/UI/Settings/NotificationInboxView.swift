@@ -213,8 +213,7 @@ struct NotificationInboxRowList: View {
 
     var body: some View {
         if model.notificationInbox.isLoading && notifications.isEmpty {
-            TronLoadingState(label: "Loading notifications from paired Gateways…", accent: .tronEmerald)
-                .frame(maxWidth: .infinity, minHeight: 220)
+            TronSheetLoadingState(label: "Loading notifications from paired Gateways…", accent: .tronEmerald)
         } else if notifications.isEmpty {
             NotificationInboxEmptyState(filter: filter)
         } else if PresentationClockPolicy.runs(

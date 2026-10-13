@@ -147,7 +147,7 @@ struct TronChecklistPicker<ID: Hashable>: View {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if let help { TronSettingsCaption(help).padding(.bottom, 4) }
                 if choices == nil {
-                    TronLoadingState(label: "Loading…").frame(maxWidth: .infinity, alignment: .leading)
+                    TronSheetLoadingState(label: "Loading…")
                 }
                 ForEach(choices ?? []) { choice in
                     let isChosen = chosen.contains(choice.id)

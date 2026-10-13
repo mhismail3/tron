@@ -239,7 +239,7 @@ struct HomeSheet: View {
     @ViewBuilder private var loadedContent: some View {
         switch owner.state {
         case .idle, .loading(_, nil):
-            TronLoadingState(label: "Loading Home…").accessibilityIdentifier("home-sheet-loading")
+            TronSheetLoadingState(label: "Loading Home…", accent: .tronEmerald)
         case .failed(_, let error):
             TronPlaceholderState(title: "Home could not be read", detail: error, icon: "exclamationmark.triangle",
                                  actionTitle: "Reload") { reload() }
@@ -257,7 +257,7 @@ struct HomeSheet: View {
                 case .tasks, .task, .permissions: EmptyView()
                 }
             } else {
-                TronLoadingState(label: "Waiting for Home…")
+                TronSheetLoadingState(label: "Waiting for Home…", accent: .tronEmerald)
             }
         }
     }

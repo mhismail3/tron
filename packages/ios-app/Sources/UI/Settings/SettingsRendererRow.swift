@@ -343,8 +343,7 @@ private struct SettingsModelPicker: View {
             } else if let models {
                 ModelPicker(selection: selection, models: models)
             } else {
-                TronLoadingState(label: "Loading models…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                TronSheetLoadingState(label: "Loading models…")
             }
         }
             .tronNavigationTitle(title)
@@ -473,7 +472,7 @@ private struct SettingsCatalogPicker: View {
                     Button("Try again") { reloadTick &+= 1 }
                         .buttonStyle(.plain)
                 } else if options == nil || displayedSource != source {
-                    TronLoadingState(label: "Loading…")
+                    TronSheetLoadingState(label: "Loading…")
                 }
             }
             .padding(.horizontal, 16)

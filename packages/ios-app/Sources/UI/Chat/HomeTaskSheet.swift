@@ -110,7 +110,7 @@ struct HomeTaskSheet: View {
     @ViewBuilder private var content: some View {
         switch owner.state {
         case .idle, .loading:
-            TronLoadingState(label: "Loading Home…")
+            TronSheetLoadingState(label: "Loading Home…", accent: .tronEmerald)
         case .failed(_, let message):
             TronPlaceholderState(title: "Home could not be read", detail: message, icon: "exclamationmark.triangle", actionTitle: "Reload") { reload() }
         case .loaded(let read, let content):
@@ -131,7 +131,7 @@ struct HomeTaskSheet: View {
                 default: EmptyView()
                 }
             } else {
-                TronLoadingState(label: "Waiting for Home…")
+                TronSheetLoadingState(label: "Waiting for Home…", accent: .tronEmerald)
             }
         }
     }

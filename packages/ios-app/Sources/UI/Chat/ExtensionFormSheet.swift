@@ -96,9 +96,7 @@ struct ExtensionFormSheet: View {
                     if form != nil {
                         Button(action: submit) {
                             if submitting {
-                                ProgressView()
-                                    .scaleEffect(0.72)
-                                    .tint(Color.tronAmber)
+                                TronPulseLoadingIndicator(accent: .tronAmber, size: 14)
                             } else {
                                 Image(systemName: "paperplane.fill")
                                     .font(TronTypography.buttonSM)

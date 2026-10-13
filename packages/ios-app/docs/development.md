@@ -474,7 +474,7 @@ scripts/tron-ios-simulator install
 ```
 
 The generated Xcode project is not architectural truth; edit `project.yml` and
-source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `packages/ios-app/scripts/test-source-policy.sh` from the repository root to guard this boundary, the bundled notification sound, and the rule that app-owned sheets use the activity-managed presentation modifiers.
+source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `packages/ios-app/scripts/test-source-policy.sh` from the repository root to guard this boundary, the bundled notification sound, the rule that app-owned sheets use the activity-managed presentation modifiers, and the shared sheet-loading pulse.
 
 ### Module layout
 
@@ -1418,8 +1418,16 @@ wrapping secondary details, a decorative category-colored icon, and an independe
 button when the owner supplies one. An explicit category accent wins over the inherited settings theme;
 otherwise the sheet theme supplies the hue. Terminal and Project Resources do not use native
 `ContentUnavailableView`. Notifications/history, Automations, Extensions, queue editing, and subagent
-placeholders share this composition; subagents retain their owning glass surface. Loading stays with
-`TronLoadingState`/the Tron pulse. Compact picker misses, inline resource/file notices, and camera/media
+placeholders share this composition; subagents retain their owning glass surface. Loading never shows
+text. A sheet, sub-sheet or settings page whose content is not yet available uses
+`TronSheetLoadingState(label:accent:)` with its title's accent: it takes no layout space and its
+`TronPresentationSurface` draws the one chat-opening pulse (size 44) centered over the visible sheet, so
+it stays put across medium, large and in-flight detents, paints no background, and arriving content never
+shifts layout. A partial load inside an already-visible section uses `TronLoadingState` (the pulse alone,
+labelled for VoiceOver). Labels are VoiceOver-only. `packages/ios-app/scripts/test-source-policy.sh`
+rejects indeterminate `ProgressView`, `Text("Loading…")`-style placeholders and any other host of the
+sheet pulse; `TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth` proves centering at both
+detents, content arrival without chrome movement, and the shared pulse in light and dark. Compact picker misses, inline resource/file notices, and camera/media
 overlays retain their existing themed geometry and contrast rather than expanding into full-page states.
 and mounted placeholder previews; recovery ownership and loading/error transitions remain unchanged.
 

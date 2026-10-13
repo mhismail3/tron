@@ -1842,6 +1842,11 @@ time and chapter in a metadata card, the canonical text in a reading card, and
 its entry reference in the footer. Pagination replaces one page; a chapter's
 memory is the same browser filtered by `sessionId`. Canonical text is selectable.
 Loading, empty, blocked and retryable error states use shared presentation owners.
+Whole-content sheet loading is a `TronSheetLoadingState` preference that the enclosing
+`TronPresentationSurface` (every managed sheet and registered surface) draws as one centered
+pulse and consumes, so nested surfaces never repeat it. Manage Home sends its independent
+`home.status`, `home.context` and `home.chapterList` reads together, then task and permission
+reads together once status admits them.
 The shared `tronTopBlurSurface` establishes full available width **before** attaching
 edge chrome. `tronScrollEdgeChrome` and document underlap delegate to that same
 owner: a native scroll viewport can fill a sheet while SwiftUI otherwise sizes its

@@ -69,9 +69,7 @@ struct IntegrationsSettingsView: View {
                                              icon: "link")
                     }
                 } else if isLoading {
-                    TronLoadingState(label: "Loading integrations…")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 28)
+                    TronSheetLoadingState(label: "Loading integrations…", accent: .tronCyan)
                 }
                 if let error { TronSettingsNotice(message: error, accent: .tronError) }
             }
@@ -460,7 +458,7 @@ private struct IntegrationSetupView: View {
                 policySection
             } else {
                 TronSettingsCaption("Completing setup on the selected Mac. Credentials remain in its secure store.")
-                ProgressView("Completing setup…")
+                TronPulseLoadingIndicator(accent: .tronCyan, size: 18)
             }
             if model.connectionState != .connected {
                 TronSettingsCaption("Reconnecting to this Mac. Your setup inputs and accepted operation are kept.")

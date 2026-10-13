@@ -106,6 +106,7 @@ struct HostedHomeDashboardFixture: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var homeStatusCount = 0
     @State private var taskListReads = 0
+    @State private var sheetReadPeak = 0
     @State private var reconnectRequested = false
     @State private var configuredModel = "none"
     @State private var controlCount = 0
@@ -173,6 +174,8 @@ struct HostedHomeDashboardFixture: View {
                                 .accessibilityIdentifier("fixture.home-status-count")
                             Text("task-list-reads:\(taskListReads)")
                                 .accessibilityIdentifier("fixture.home-task-list-reads")
+                            Text("sheet-read-peak:\(sheetReadPeak)")
+                                .accessibilityIdentifier("fixture.home-sheet-read-peak")
                             Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.capabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
                                 .accessibilityIdentifier("fixture.home-diagnostics")
                         }
@@ -230,6 +233,7 @@ struct HostedHomeDashboardFixture: View {
             while !Task.isCancelled {
                 homeStatusCount = await gateway.statusCount()
                 taskListReads = await gateway.taskListReadCount()
+                sheetReadPeak = await gateway.sheetReadPeakCount()
                 (controlCount, abortCount) = await gateway.controlCounts()
                 configuredModel = await gateway.configuredModelIdentity()
                 promptRoute = await gateway.lastPromptRoute()
@@ -279,6 +283,10 @@ private actor HostedHomeShellGateway {
     private let sheetState: String?
     private var browserReads = 0
     private var taskListReads = 0
+    // Sheet-only reads (never polled by the shell), so their overlap proves the
+    // Manage Home load sends independent reads together rather than in series.
+    private var sheetReadsInFlight = 0
+    private var sheetReadPeak = 0
     private var configuredModel: ModelRef?
     private var workerThinking = "sameAsHome"
     private var taskStopped = false
@@ -323,6 +331,37 @@ private actor HostedHomeShellGateway {
     }
     func statusCount() -> Int { homeStatusCount }
     func taskListReadCount() -> Int { taskListReads }
+    func sheetReadPeakCount() -> Int { sheetReadPeak }
+    private func chapterListFixture() -> JSONValue {
+        .object([
+            "homeId": .string("home-fixture"), "generation": .number(1), "enabled": .bool(designated),
+            "limits": .object(["softBytes": .number(25_165_824), "softEntries": .number(50_000),
+                                "hardBytes": .number(209_715_200), "hardEntries": .number(100_000)]),
+            "chapters": .array([
+                .object(["sessionId": .string("home-chapter-sealed"), "ordinal": .number(1), "state": .string("sealed"),
+                         "createdAt": .string(isoAgo(40 * 86_400)), "sealedAt": .string(isoAgo(10 * 86_400)),
+                         "activationStarted": .bool(true), "sessionPresent": .bool(true),
+                         "bytes": .number(25_165_824), "entries": .number(50_001),
+                         "contents": .object(["firstAt": .string(isoAgo(40 * 86_400)), "lastAt": .string(isoAgo(10 * 86_400)),
+                             "userMessages": .number(412), "homeReplies": .number(409), "tasksDelegated": .number(7),
+                             "topics": .array([.string("Quarterly planning"), .string("Travel bookings"), .string("Kitchen renovation")])])]),
+                .object(["sessionId": .string("home-session"), "ordinal": .number(2), "state": .string("active"),
+                         "createdAt": .string(isoAgo(3 * 86_400)), "activationStarted": .bool(true),
+                         "sessionPresent": .bool(true), "bytes": .number(480), "entries": .number(12),
+                         "contents": .object(["firstAt": .string(isoAgo(3 * 86_400)), "lastAt": .string(isoAgo(3 * 60)),
+                             "userMessages": .number(6), "homeReplies": .number(6), "tasksDelegated": .number(1),
+                             "topics": .array([.string("Garden redesign")])])]),
+            ]),
+        ])
+    }
+    private func heldSheetRead<Value>(_ value: () -> Value) async throws -> Value {
+        guard sheetState == "presentation-loading" else { return value() }
+        sheetReadsInFlight += 1
+        sheetReadPeak = max(sheetReadPeak, sheetReadsInFlight)
+        defer { sheetReadsInFlight -= 1 }
+        try await Task.sleep(for: .seconds(1))
+        return value()
+    }
     func controlCounts() -> (Int, Int) { (controlCount, abortCount) }
     func configuredModelIdentity() -> String { configuredModel.map { "\($0.provider)/\($0.id)" } ?? "none" }
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
@@ -366,7 +405,7 @@ private actor HostedHomeShellGateway {
             taskListReads += 1
             // Hold the real sheet's read at the socket boundary, not its view state.
             // Both Manage Home and its nested Tasks sheet must lay out before data.
-            if sheetState == "presentation-loading" { try await Task.sleep(for: .seconds(8)) }
+            if sheetState == "presentation-loading" { try await Task.sleep(for: .seconds(12)) }
             if sheetState == "tasks-error", taskListReads == 2 {
                 return (nil, .object(["code": .string("busy"), "message": .string("Task list unavailable"), "retryable": .bool(true)]))
             }
@@ -413,26 +452,9 @@ private actor HostedHomeShellGateway {
             taskDecisions[id] = result; controlCount += 1
             return (result, nil)
         case "home.chapterList":
-            return (.object([
-                "homeId": .string("home-fixture"), "generation": .number(1), "enabled": .bool(designated),
-                "limits": .object(["softBytes": .number(25_165_824), "softEntries": .number(50_000),
-                                    "hardBytes": .number(209_715_200), "hardEntries": .number(100_000)]),
-                "chapters": .array([
-                    .object(["sessionId": .string("home-chapter-sealed"), "ordinal": .number(1), "state": .string("sealed"),
-                             "createdAt": .string(isoAgo(40 * 86_400)), "sealedAt": .string(isoAgo(10 * 86_400)),
-                             "activationStarted": .bool(true), "sessionPresent": .bool(true),
-                             "bytes": .number(25_165_824), "entries": .number(50_001),
-                             "contents": .object(["firstAt": .string(isoAgo(40 * 86_400)), "lastAt": .string(isoAgo(10 * 86_400)),
-                                 "userMessages": .number(412), "homeReplies": .number(409), "tasksDelegated": .number(7),
-                                 "topics": .array([.string("Quarterly planning"), .string("Travel bookings"), .string("Kitchen renovation")])])]),
-                    .object(["sessionId": .string("home-session"), "ordinal": .number(2), "state": .string("active"),
-                             "createdAt": .string(isoAgo(3 * 86_400)), "activationStarted": .bool(true),
-                             "sessionPresent": .bool(true), "bytes": .number(480), "entries": .number(12),
-                             "contents": .object(["firstAt": .string(isoAgo(3 * 86_400)), "lastAt": .string(isoAgo(3 * 60)),
-                                 "userMessages": .number(6), "homeReplies": .number(6), "tasksDelegated": .number(1),
-                                 "topics": .array([.string("Garden redesign")])])]),
-                ]),
-            ]), nil)
+            return (try await heldSheetRead { chapterListFixture() }, nil)
+        case "home.context":
+            return (try await heldSheetRead { contextProjection() }, nil)
         case "home.memory.page":
             browserReads += 1
             if browserState == "loading", browserReads == 1 { try? await Task.sleep(for: .seconds(4)) }
@@ -462,8 +484,6 @@ private actor HostedHomeShellGateway {
         case "session.prompt":
             promptRoutes.append("session.prompt:\(params["sessionId"]?.stringValue ?? "none")")
             return (nil, .object(["code": .string("conflict"), "message": .string("Sealed chapter refused"), "retryable": .bool(false)]))
-        case "home.context":
-            return (contextProjection(), nil)
         case "home.status":
             homeStatusCount += 1
             // Hold the actual response across native back navigation so a transient

@@ -192,8 +192,7 @@ struct AgentInstructionsSheet: View {
             if let projection = AgentInstructionsProjection(context: model.context) {
                 AgentInstructionsOverview(projection: projection)
             } else if loading {
-                TronLoadingState(label: "Loading instructions…", accent: .tronSessionTeal)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                TronSheetLoadingState(label: "Loading instructions…", accent: .tronSessionTeal)
             } else {
                 TronInfoCard(icon: "doc.text", text: "Instructions are unavailable for this session.", accent: .tronSessionTeal)
                     .padding(18)
@@ -578,8 +577,7 @@ struct PreparedAgentInstructions: View {
                         }
                 }
             } else {
-                TronLoadingState(label: "Preparing instructions…", accent: .tronSessionTeal)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                TronSheetLoadingState(label: "Preparing instructions…", accent: .tronSessionTeal)
             }
         }
         .task(id: PresentationActivityTaskID(
