@@ -101,6 +101,40 @@ class Workspace:
         subprocess.run(["git", "worktree", "prune"], cwd=ROOT, capture_output=True)
 
 
+def wait_for_quiet_host(limit_per_cpu: float, deadline: float) -> float:
+    """Load-sensitive plumbing (session.open deadlines, startup budget) fails on
+    a saturated shared Mac; wait for headroom instead of loosening timeouts."""
+    cpus = os.cpu_count() or 1
+    while True:
+        load = os.getloadavg()[0]
+        if load <= limit_per_cpu * cpus:
+            return load
+        if time.monotonic() + 30 > deadline:
+            raise TrialError(f"host stayed busy (1-min load {load:.1f} on {cpus} CPUs) until the wall-clock budget")
+        log(f"waiting for host headroom: 1-min load {load:.1f} > {limit_per_cpu * cpus:.0f}")
+        time.sleep(30)
+
+
+def measure(tree: Path, scenario: str, args: list[str], results: Path, build: bool, label: str,
+            limit_per_cpu: float, deadline: float, attempts: list[dict[str, Any]]) -> dict[str, Any]:
+    """One measurement; a plumbing failure is retried once after the host is
+    quiet again, and every attempt is kept in the verdict."""
+    for attempt in (1, 2):
+        load = wait_for_quiet_host(limit_per_cpu, deadline)
+        name = label if attempt == 1 else f"{label}-retry"
+        try:
+            report = profile(tree, scenario, args, results, build, name)
+            attempts.append({"label": name, "load": round(load, 1), "outcome": "measured", "run_id": report["run_id"]})
+            return report
+        except TrialError as error:
+            attempts.append({"label": name, "load": round(load, 1), "outcome": "plumbing-failure", "error": str(error)})
+            log(f"{name}: plumbing failure ({error})")
+            if attempt == 2:
+                raise
+            build = False if (tree / "packages/gateway/dist/index.js").is_file() else build
+    raise AssertionError("unreachable")
+
+
 def profile(tree: Path, scenario: str, args: list[str], results: Path, build: bool, label: str) -> dict[str, Any]:
     command = [str(tree / "scripts/tron-profile"), "gateway", "--scenario", scenario, *args]
     if not build:
@@ -194,6 +228,9 @@ def trial(spec_path: Path, base_ref: str, candidate_ref: str, out: Path) -> int:
         trees = {"base": workspace.add("base", base), "candidate": workspace.add("candidate", candidate)}
         harness, primary = spec["harness"], spec["primary"]
         built: set[str] = set()
+        limit = harness.get("max_load_per_cpu", 1.0)
+        attempts: list[dict[str, Any]] = []
+        verdict["attempts"] = attempts
         arms: dict[str, list[dict[str, Any]]] = {"base": [], "candidate": []}
         # ABBA balances slow host drift across arms; the first base round is
         # also checked against the last for drift (an A/A control).
@@ -201,7 +238,8 @@ def trial(spec_path: Path, base_ref: str, candidate_ref: str, out: Path) -> int:
         for index, arm in enumerate(order):
             if time.monotonic() > deadline:
                 return finish("inconclusive", "wall-clock budget exhausted during measurement", EXIT_INCONCLUSIVE)
-            arms[arm].append(profile(trees[arm], harness["scenario"], harness["args"], results, arm not in built, f"{index}-{arm}"))
+            arms[arm].append(measure(trees[arm], harness["scenario"], harness["args"], results, arm not in built,
+                                     f"{index}-{arm}", limit, deadline, attempts))
             built.add(arm)
         floor = primary["min_effect"]
         drift = reports.compare_metric(arms["base"][0]["metrics"][primary["metric"]], arms["base"][-1]["metrics"][primary["metric"]], floor) \
@@ -217,7 +255,8 @@ def trial(spec_path: Path, base_ref: str, candidate_ref: str, out: Path) -> int:
         for scenario in spec.get("held_out", []):
             if time.monotonic() > deadline:
                 return finish("inconclusive", "wall-clock budget exhausted during held-out checks", EXIT_INCONCLUSIVE)
-            pair = {arm: pooled([profile(trees[arm], scenario["scenario"], scenario["args"], results, False, f"heldout-{scenario['scenario']}-{arm}")])
+            pair = {arm: pooled([measure(trees[arm], scenario["scenario"], scenario["args"], results, False,
+                                         f"heldout-{scenario['scenario']}-{arm}", limit, deadline, attempts)])
                     for arm in ("base", "candidate")}
             held = compare_all(pair["base"], pair["candidate"], floor, spec.get("ungated", []))
             held_out[scenario["scenario"]] = {"gated_regressions": held["gated_regressions"],

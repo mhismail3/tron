@@ -13,6 +13,7 @@ facts in the owning source and package docs, not copied into skills.
 | [tron-code-health](skills/tron-code-health/SKILL.md) | Ownership and architecture review, honest exhaustive coverage, deletion-first simplification, and root-cause hardening |
 | [tron-test-confidence](skills/tron-test-confidence/SKILL.md) | Judging integration and E2E tests at real boundaries, test cleanup, and timing or lifecycle flakes |
 | [tron-performance](skills/tron-performance/SKILL.md) | Profiling a demonstrated bottleneck or comparing alternatives under a frozen experiment |
+| [tron-hillclimb](skills/tron-hillclimb/SKILL.md) | Prototype (#885): improving one metric against a frozen eval spec with a runner-written keep/revert verdict and held-out guard |
 | [tron-ios](skills/tron-ios/SKILL.md) | Required routing for iOS build, test, simulator, device, signing, archive, and artifact work |
 | [tron-workspace-housekeeping](skills/tron-workspace-housekeeping/SKILL.md) | Evidence-based post-merge cleanup of branches, inactive worktrees, and stale Git metadata; task worktrees defer to `scripts/tron work cleanup`; protect active agents and unmerged work |
 | [tron-work](skills/tron-work/SKILL.md) | The work dashboard, and taking a tracked task end to end (claim, isolated worktree, verify, land, clean up); filing discovered work and epics |

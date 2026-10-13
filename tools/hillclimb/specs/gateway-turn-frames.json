@@ -6,8 +6,12 @@
   "harness": {
     "tool": "gateway",
     "scenario": "tool-loop",
-    "args": ["--iterations", "3"],
-    "rounds": 2
+    "args": [
+      "--iterations",
+      "3"
+    ],
+    "rounds": 2,
+    "max_load_per_cpu": 1.0
   },
   "primary": {
     "metric": "wire.mobile.total.frames",
@@ -21,7 +25,13 @@
   ],
   "ungated_reason": "Host-load and window-length sensitive; reported, never decisive. Every other metric of every measured scenario must not regress beyond the shared noise bound.",
   "held_out": [
-    { "scenario": "stream-reply", "args": ["--iterations", "3"] }
+    {
+      "scenario": "stream-reply",
+      "args": [
+        "--iterations",
+        "3"
+      ]
+    }
   ],
   "correctness": [
     "cd packages/gateway && t=$(mktemp -d) && HOME=$t TMPDIR=$t NPM_CONFIG_UPDATE_NOTIFIER=false npx vitest run src/admin/settings-gate.e2e.test.ts; s=$?; rm -rf \"$t\"; exit $s"
@@ -50,7 +60,7 @@
   "budget": {
     "max_rounds": 3,
     "max_stalled_rounds": 2,
-    "max_wall_minutes": 60,
+    "max_wall_minutes": 120,
     "max_changed_lines": 60
   }
 }
