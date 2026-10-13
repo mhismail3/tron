@@ -4850,7 +4850,7 @@ export class RuntimeRegistry {
    * one from the catalog's index of its file, so no transcript is parsed. */
   async taskWorkerName(sessionId: string): Promise<string | undefined> {
     const live = this.slots.get(sessionId);
-    if (live) return live.snapshot().name;
+    if (live) return live.displayName;
     const path = await this.homeSessionFile(sessionId);
     return path ? this.sessionCatalog.row(path)?.name : undefined;
   }
