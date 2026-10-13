@@ -126,7 +126,8 @@ export class SettingsModel {
     if (!key) throw new GatewayError("invalid_request", `Unknown setting ${request.key}`);
     if (!key.optionsSource) {
       if (!key.type.options) throw new GatewayError("invalid_request", `${key.label} has no options to choose from`);
-      return { key: key.id, source: "static", dependsOn: [], options: key.type.options.map(option => ({ value: option.value, label: option.label })) };
+      return { key: key.id, source: "static", dependsOn: [], options: key.type.options.map(option => ({
+        value: option.value, label: option.label, ...(option.detail ? { detail: option.detail } : {}) })) };
     }
     const { name, dependsOn } = key.optionsSource;
     const runtime = session?.modelRuntime ?? this.dependencies.modelRuntime;
@@ -139,8 +140,9 @@ export class SettingsModel {
         const supported = model ? getSupportedThinkingLevels(model) : [];
         // pi reports only "off" for a model without reasoning: there is no level to offer.
         const levels = supported.length === 1 && supported[0] === "off" ? [] : supported;
-        const labels = new Map(schemaKey("model.thinking[role=chat]").type.options!.map(option => [option.value, option.label]));
-        return { ...base, options: levels.map(level => ({ value: level, label: labels.get(level) ?? level })) };
+        const declared = new Map(schemaKey("model.thinking[role=chat]").type.options!.map(option => [option.value, option]));
+        return { ...base, options: levels.map(level => ({ value: level, label: declared.get(level)?.label ?? level,
+          ...(declared.get(level)?.detail ? { detail: declared.get(level)!.detail } : {}) })) };
       }
       case "catalog.contextWindow": {
         // The bounds `settings.change` validates the value against (contextWindowValue).

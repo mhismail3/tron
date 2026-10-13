@@ -113,23 +113,31 @@ struct ProjectSettingsContent: View {
                     if let error {
                         TronSettingsNotice(message: error, retry: { reload &+= 1 })
                     }
-                    SettingsRendererView(target: .object(["kind": .string("project"), "cwd": .string(cwd)]),
-                                         writeLayer: "project", embedded: true, externalControlKeys: ["sources.packages"], projectCWD: cwd,
-                                         presentation: .overrides(scope: "this project", allTitle: "Project Settings"))
-                    TronSettingsGroup(SettingsFamily.tools.title, accent: SettingsFamily.tools.accent) {
+                    let sections = (model.settingsSnapshot(for: SettingsTarget.project(cwd: cwd).gatewayTarget).map { SettingsRendererView.sections($0.resolution) } ?? [])
+                        .filter { $0.id != "sources" }
+                    SettingsGroupCard(.agent) {
+                        SettingsSectionLinks(ids: sections.map(\.id), sections: sections, target: SettingsTarget.project(cwd: cwd).gatewayTarget,
+                                             writeLayer: "project", projectCWD: cwd)
+                    }
+                    SettingsGroupCard(.tools) {
+                        TronProgressiveSheetLink(accessibilityLabel: "MCP Servers",
+                            destination: { MCPServersSettingsView(projectCWD: cwd, initialScope: "project") }) {
+                            TronSettingsRow(icon: "server.rack", title: "MCP Servers", subtitle: "Servers this project adds",
+                                            subtitleColor: .tronTextSecondary)
+                        }
+                        TronSettingsDivider()
                         TronProgressiveSheetLink(accessibilityLabel: "Extensions",
                             destination: { ExtensionsSettingsView(projectCWD: cwd) }) {
                             TronSettingsRow(icon: "shippingbox", title: "Extensions", subtitle: "Packages installed for this project",
                                             subtitleColor: .tronTextSecondary)
                         }
-                        TronSettingsDivider(accent: SettingsFamily.tools.accent)
+                        TronSettingsDivider()
                         TronProgressiveSheetLink(accessibilityLabel: "Hooks",
                             destination: { HooksSettingsView(projectCWD: cwd) }) {
-                            TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks", subtitle: "Loaded project event handlers",
+                            TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks", subtitle: "Event handlers this project loads",
                                             subtitleColor: .tronTextSecondary)
                         }
                     }
-                    .tronSettingsVisualTheme(accent: SettingsFamily.tools.accent)
                     TronSettingsCaption("Project values live in this workspace's .pi files. Changes are staged when possible; Tron never commits them.")
                 }
             }
@@ -141,6 +149,11 @@ struct ProjectSettingsContent: View {
             if !active { generation &+= 1 }
         }
         .onDisappear { generation &+= 1 }
+        .task(id: PresentationActivityTaskID(source: model.settingsFreshness,
+                                             presentationActive: presentationActivity.allowsPresentationPublication)) {
+            guard presentationActivity.allowsPresentationPublication, model.selectedGatewayProfileID() == profileID else { return }
+            try? await model.refreshSettingsSnapshot(for: SettingsTarget.project(cwd: cwd).gatewayTarget)
+        }
         .task(id: PresentationActivityTaskID(source: readID,
                                            presentationActive: presentationActivity.allowsPresentationPublication)) {
             await load()

@@ -39,6 +39,12 @@ extension SettingsTarget {
     /// The layer a write to this target lands in: Mac for global, Project for a project.
     var writeLayer: String { scope == .global ? "mac" : "project" }
 
+    /// One chat's `settings.resolve`/`settings.change` target. Every surface names a
+    /// target the same way, so they share one snapshot.
+    static func sessionGatewayTarget(_ sessionID: String) -> JSONValue {
+        .object(["kind": .string("session"), "sessionId": .string(sessionID)])
+    }
+
     /// The `target` of `settings.resolve` and `settings.change` (docs/settings-model.md 3.1).
     var gatewayTarget: JSONValue {
         switch self {

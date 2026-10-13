@@ -236,6 +236,8 @@ struct SessionContextSheet: View {
                         SessionContextUsageCard(snapshot: snapshot)
                             .settingsApprovals(.session(sessionID))
                         modelConfigurationCard(snapshot)
+                        ChatSettingsCard(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd,
+                                         changesScope: .session(sessionID, projectCWD: snapshot.cwd), accent: sessionRowAccent)
                         sessionSection(snapshot)
                         exportSection
                     } else {
@@ -463,8 +465,7 @@ struct SessionContextSheet: View {
             // through the shared settings path, then the manual action.
             manualCompactionRow(snapshot)
             SettingsRendererView(
-                target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
-                writeLayer: "chat", embedded: true, ownedLayers: ["chat"],
+                target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: "chat", ownedLayers: ["chat"],
                 projectCWD: snapshot.cwd, presentation: .keys(["context.compaction.enabled"]), dividerBeforeKeys: true
             )
         }

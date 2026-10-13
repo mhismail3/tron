@@ -1205,18 +1205,25 @@ iPhone** where the surface has them. `settings.resolve` serves each section that
 has a key for the target as `{ id, title, description, order, note? }`; the
 `description` is the one line a client shows beside the title.
 
-On iOS (#876) Settings groups related sections into titled cards that share an
-accent: **Agent** (Model, Context, Run, Accounts), **Tools & Extensions** (Tools,
-Permissions, Sources) and **Data & Diagnostics** (Setup); a section the app does
-not know joins **More**. Each section is one row with its description. The row
-opens a sub-sheet, in the same accent, holding the section's hand-built
-destinations and every key: essential first, then each subgroup and
-**Advanced**, each row with its help and source tags. A row has one control; a
-key whose source also offers an action (reset, Apply again) previews its value
-and opens its own sheet, which holds the control and one row per action. The
-renderer reads each shown row's served options with the resolution, so a row
-never renders without them and a covering sheet never changes it. Nothing
-expands in place.
+On iOS (#876) the gear's **Settings** is this Mac and this iPhone, one row per
+destination in five titled cards that share an accent: **Agent** (Model, Context,
+Run, Permissions), **Tools & Extensions** (Tools, MCP Servers, Extensions, Hooks),
+**Accounts** (Model Providers, Custom Models, Connected Services), **Data &
+Diagnostics** (Connections, Logs, Setup) and **This iPhone**. Sources' keys show
+in Extensions and Setup's beside Import; a section the app does not place joins
+**More**. A chat's own settings are in **Manage Session** (Home's in Manage Home),
+next to the chat: Changes, then every section for that chat, each value tagged
+with where it comes from, and the chat's Project. A section row carries its
+`description` and opens the section's sheet in its card's accent: essential keys
+first, then each subgroup and **Advanced**, each row with its help and source
+tags. A key with many instances (the approval levels) is one row opening them,
+grouped by the section of the setting each governs and described by its help. A
+row has one control; a key whose source also offers an action (reset, Apply
+again) previews its value and opens its own sheet, which holds the control and
+one row per action. Every choice option carries a `detail` line on what it
+changes. All surfaces for a target read one shared snapshot of the resolution and
+its rows' options, so a sheet never re-reads what the surface beneath it shows.
+Nothing expands in place.
 
 ### 7.3 Badges
 

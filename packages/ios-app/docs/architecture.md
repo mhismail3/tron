@@ -844,13 +844,12 @@ for an outside entry that refers to the Tron change it replaced.
 `testSettingsRendererUsesCurrentDefaultSourceAction` proves one applied unset
 against the hosted socket and preserves the unknown badge without dispatching it.
 This is primitive coverage; session-surface adoption still owns the runtime fence.
-Settings (the gear) owns configuration; Manage Session and Manage Home (the ring)
-own the chat's live state and keep only its direct controls: the shared Chat
-card for model, thinking and context window, Compact Now with automatic
-compaction, and, on Home, the memory model, each through the renderer's `.keys`
-presentation. The Chat card's receipt/revision adapter remains the only value
-editor for those keys; the renderer keeps their provenance and reset rows on
-Settings › This Chat. Disposable previews own separate busy state
+The ring opens Manage Session or Manage Home: the chat's live state, its direct
+controls (the shared Chat card for model, thinking and context window; Compact Now
+with automatic compaction; on Home, the memory model) and `ChatSettingsCard`. The
+Chat card edits through its session receipt/revision adapter; the same keys in the
+chat's sections edit through `settings.change` at the Chat layer, with the same
+controls (the model picker, the thinking and context sliders) everywhere. Disposable previews own separate busy state
 from accepted mutations. Exact request, surface-token, target, foreground and
 profile fences reject stale responses; retirement releases preview state without
 cancelling a receipt. The controlled hosted preview journey holds a response
@@ -1707,23 +1706,23 @@ Project root (`TrustInspection.projectDir`), and its rows carry the resolver's
 git-state and Changed outside Tron badges with Apply again; this UI never infers
 a root or replays audit.
 
-Settings is ordered from the most specific scope to the most general. Its first
-card holds Changes and the scope it was opened from: This Chat and its Project
-from a chat, Home from Home, or Projects from the dashboard. Each scope row
-previews what that scope sets and opens it overrides-first, with Override a
-Setting for everything else. The Mac renderer follows, grouped into the shared
-`SettingsFamily` palette: Agent (purple), Tools & Extensions (cyan) and Data &
-Diagnostics (blue), each a titled card of one row per section; then This iPhone
-(emerald), which never changes harness behaviour. Every sub-sheet a family row
-opens inherits that accent through `TronProgressiveSheetLink`. Native account,
-MCP, package, hook and Setup flows lead their section's sub-sheet without
-duplicating harness controls, and stay reachable in the same family cards when
-resolution is offline. The default trust key is in Permissions; per-project
-trust belongs to the Project surface. The former defaults, compaction and
-resource-path editors and all Global/Project scope pickers are removed; hook
-inventory inherits its caller's target. Hosted Mac-settings and offline
-navigation journeys protect the shared thinking editor, no-write dismissal and
-native flow reachability.
+Settings (the gear) is this Mac and this iPhone: Changes, then one row per
+destination in the shared `SettingsGroupKind` palette: Agent (purple: Model,
+Context, Run, Permissions), Tools & Extensions (cyan: Tools, MCP Servers,
+Extensions, Hooks), Accounts (indigo: Model Providers, Custom Models, Connected
+Services), Data & Diagnostics (blue: Connections, Logs, Setup with Import) and
+This iPhone (emerald), which never changes harness behaviour. Schema sections the
+app does not place join More. Every sheet a row opens inherits its card's accent
+through `TronProgressiveSheetLink`. A chat's settings are in Manage Session and
+Manage Home (`ChatSettingsCard`): Changes for that chat, every section for the
+chat's target with each value's source tag, and the Project card. The Project
+card shows the project's sections and its MCP Servers, Extensions and Hooks.
+`SettingsTrustCoordinator` owns one bounded `SettingsSnapshot` per target (the
+resolution and its rows' served options, read together); every renderer for a
+target reads it, so a section sheet opens on what its parent shows and refreshes
+only when a settings event or foregrounding makes it stale. The dashboard warms
+the Mac snapshot on connection. `testSettingsSheetsOpenStably` (real Gateway)
+proves section sheets open on their content and keeps each sheet's first frames.
 
 Manage Session's bounded cards use an ordinary stack so the
 shared Models presenter's lifetime cannot be ended by lazy eviction behind a

@@ -2083,14 +2083,9 @@ struct TronPlaceholderState: View {
     }
 }
 
-/// A read in progress. It keeps its place but stays invisible for the first
-/// moments, so a quick read goes straight to its content without flashing a
-/// placeholder; only a read that is actually slow shows the indicator.
 struct TronLoadingState: View {
-    static let revealDelay: Duration = .milliseconds(400)
     let label: String
     var accent: Color = .tronEmerald
-    @State private var revealed = false
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {
@@ -2099,12 +2094,6 @@ struct TronLoadingState: View {
             Text(label)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(Color.tronTextSecondary)
-        }
-        .opacity(revealed ? 1 : 0)
-        .task {
-            try? await Task.sleep(for: Self.revealDelay)
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeIn(duration: 0.2)) { revealed = true }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)

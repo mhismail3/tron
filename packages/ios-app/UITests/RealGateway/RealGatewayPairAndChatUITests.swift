@@ -346,6 +346,69 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// and an accepted edit reads back after reopening, from the Gateway's
     /// resolution. Expectations come from the fixture Gateway's own schema
     /// inventory (`TRON_E2E_SETTINGS_INVENTORY`), never from a Swift key list.
+    /// Every settings sheet opens on its content against a real Gateway. A schema
+    /// section sheet reads the snapshot its parent already has, so it never shows a
+    /// loading state; each sheet's first frames are kept to review the rest.
+    @MainActor
+    func testSettingsSheetsOpenStably() throws {
+        continueAfterFailure = true
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        let loading = app.staticTexts["Loading settings…"]
+        func burst(_ name: String) {
+            for index in 0..<10 {
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                shot.name = String(format: "%@-%02d", name, index)
+                shot.lifetime = .keepAlways
+                add(shot)
+            }
+        }
+        func openSheet(_ identifier: String, _ name: String, section: String? = nil) {
+            guard let button = app.buttons.matching(identifier: identifier).allElementsBoundByIndex.last else {
+                XCTFail("no \(identifier): \(app.debugDescription)"); return
+            }
+            for _ in 0..<12 where !button.isHittable { app.swipeUp() }
+            button.tap()
+            if let section {
+                XCTAssertTrue(app.descendants(matching: .any)["settings-section-\(section)-detail"].waitForExistence(timeout: 2),
+                              "the \(name) sheet did not open on its content")
+                XCTAssertFalse(loading.exists, "the \(name) sheet showed a loading state")
+            }
+            burst(name)
+        }
+
+        // Manage Session: this chat's settings card.
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(ring.waitForExistence(timeout: 60), app.debugDescription)
+        ring.tap()
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
+        burst("manage-session")
+        openSheet("settings-section-model-open", "chat-model", section: "model"); dismissTopSheet(app)
+        openSheet("settings-section-run-open", "chat-run", section: "run"); dismissTopSheet(app)
+        dismissTopSheet(app)
+
+        // Settings: this Mac.
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
+        gear.tap()
+        XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
+        burst("settings")
+        openSheet("settings-section-model-open", "mac-model", section: "model"); dismissTopSheet(app)
+        openSheet("settings-section-run-open", "mac-run", section: "run"); dismissTopSheet(app)
+        openSheet("settings-section-permissions-open", "mac-permissions", section: "permissions")
+        openSheet("settings-instances-permissions.floor-open", "agent-approvals"); dismissTopSheet(app); dismissTopSheet(app)
+        openSheet("settings-section-tools-open", "mac-tools", section: "tools"); dismissTopSheet(app)
+        for (title, name) in [("MCP Servers", "mcp"), ("Extensions", "extensions"), ("Hooks", "hooks"),
+                              ("Model Providers", "providers"), ("Custom Models", "custom-models"), ("Setup", "setup")] {
+            openSheet("settings-link-\(title)", name); dismissTopSheet(app)
+        }
+    }
+
     @MainActor
     func testSettingsSurfacesServeEveryKeyAndEditAtItsLayer() throws {
         continueAfterFailure = false

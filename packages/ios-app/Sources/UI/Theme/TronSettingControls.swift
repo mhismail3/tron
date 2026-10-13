@@ -246,8 +246,7 @@ struct TronCatalogOptionRow: View {
                         Text(detail)
                             .font(TronTypography.secondaryDescription)
                             .foregroundStyle(Color.tronTextSecondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                            .lineLimit(2)
                     }
                 }
                 Spacer(minLength: 8)

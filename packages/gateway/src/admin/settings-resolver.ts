@@ -334,7 +334,9 @@ function resolveInstance(
   if (qualifiers.model && key.qualifier === "model") badges.push({ kind: "scope", label: qualifiers.model });
   if (qualifiers.project && key.qualifier === "project") badges.push({ kind: "scope", label: qualifiers.project });
   if (qualifiers.key && key.qualifier === "key") {
-    badges.push({ kind: "scope", label: qualifiers.direction ? `${schemaKey(qualifiers.key).label} (${qualifiers.direction})` : schemaKey(qualifiers.key).label });
+    // A directional approval level names what the agent's change does to the setting.
+    badges.push({ kind: "scope", label: qualifiers.direction
+      ? `${schemaKey(qualifiers.key).label}: ${qualifiers.direction === "widen" ? "loosening" : "tightening"}` : schemaKey(qualifiers.key).label });
   }
   if (notApplied) {
     badges.push({ kind: "state", label: "Not applied (untrusted)", detail: `${LAYER_LABELS[notApplied.layer]}: ${format(notApplied.value)}`,

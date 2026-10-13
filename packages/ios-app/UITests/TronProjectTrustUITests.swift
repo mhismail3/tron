@@ -126,7 +126,7 @@ final class TronProjectTrustUITests: XCTestCase {
         let row = app.descendants(matching: .any)["settings-row-permissions.floor_direction_widen_key_permissions.projectTrust"]
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(counts(app, contain: "floor:approve previews:0 applies:0"), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Project trust (widen)"].exists
+        XCTAssertTrue(app.staticTexts["Project trust: loosening"].exists
                       && row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Built-in")).firstMatch.exists, app.debugDescription)
 
         // Lowering: the dry run carries confirm text, and nothing is applied until confirmed.

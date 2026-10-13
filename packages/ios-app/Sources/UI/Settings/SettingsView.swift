@@ -1,16 +1,10 @@
 import SwiftUI
+import TronMobileCore
 
-/// Where Settings was opened from. Settings orders its content from the most
-/// specific scope to the most general: this chat (or Home), its project, then
-/// the Mac defaults every chat inherits, then this iPhone.
-enum SettingsContext: Equatable {
-    case dashboard
-    case chat(sessionID: String, projectCWD: String?)
-    case home(sessionID: String)
-}
-
+/// Settings: this Mac's defaults, its accounts and resources, and this iPhone.
+/// A chat's own settings (and its project's) are in Manage Session, next to the
+/// chat they apply to. Every destination is one row; each group is one card.
 struct SettingsView: View {
-    let context: SettingsContext
     let onImported: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -21,91 +15,84 @@ struct SettingsView: View {
     #endif
     @State private var showsNotifications = false
     @State private var hasRefreshedNotificationBadge = false
-    @State private var browsingProjects = false
-    @State private var pickedProject: String?
-    @State private var projectRoute: ProjectSettingsRoute?
 
-    init(context: SettingsContext = .dashboard, onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
-        self.context = context
+    init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
         self.onImported = onImported
     }
 
-    private var changesScope: SettingsChangesScope {
-        switch context {
-        case .dashboard: .all
-        case .chat(let sessionID, let cwd): .session(sessionID, projectCWD: cwd)
-        case .home(let sessionID): .home(sessionID)
-        }
-    }
-
-    /// The first card: changes, then what is specific to where Settings opened —
-    /// this chat and its project, Home, or (from the dashboard) every project.
-    @ViewBuilder
-    private var scopeRows: some View {
-        SettingsChangesLink(scope: changesScope, subtitle: "What agents changed, and approvals waiting for you",
-                            onOpenSession: onImported)
-        TronSettingsDivider(accent: .tronEmerald)
-        switch context {
-        case .chat(let sessionID, let cwd):
-            scopeLink("This Chat", icon: "bubble.left.and.text.bubble.right", subtitle: "Settings set only for this chat") {
-                SettingsRendererView(
-                    target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
-                    writeLayer: "chat", ownedLayers: ["chat"],
-                    externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"],
-                    projectCWD: cwd, presentation: .overrides(scope: "this chat", allTitle: "Override a Setting")
-                )
-            }
-            if let cwd, !cwd.isEmpty, let profileID = model.selectedGatewayProfileID() {
-                TronSettingsDivider(accent: .tronEmerald)
-                ProjectSettingsLink(cwd: cwd, profileID: profileID)
-            }
-        case .home(let sessionID):
-            scopeLink("Home", icon: "house", subtitle: "Settings set only for Home") {
-                SettingsRendererView(
-                    target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
-                    writeLayer: nil, ownedLayers: ["chat", "profile"],
-                    externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"],
-                    presentation: .overrides(scope: "Home", allTitle: "Override a Setting")
-                )
-            }
-        case .dashboard:
-            Button { browsingProjects = true } label: {
-                TronSettingsRow(icon: "folder.badge.gearshape", title: "Projects",
-                                subtitle: "Settings for a chosen workspace", subtitleColor: .tronTextSecondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("settings-projects")
-        }
+    private var sections: [SettingsRendererSection] {
+        model.settingsSnapshot(for: SettingsTarget.global.gatewayTarget).map { SettingsRendererView.sections($0.resolution) } ?? []
     }
 
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
-                    TronGlassCard(accent: .tronEmerald) { scopeRows }
-                        .tronSettingsVisualTheme(accent: .tronEmerald)
-                    if context != .dashboard {
-                        TronSettingsDetailText("Defaults on this Mac. Everything above takes precedence.")
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    TronGlassCard(accent: .tronEmerald) {
+                        SettingsChangesLink(scope: .all, subtitle: "What agents changed, and approvals waiting for you",
+                                            onOpenSession: onImported)
                     }
-                    // Each renderer keeps its own target; opening Settings never changes scope.
-                    SettingsRendererView(
-                        target: .object(["kind": .string("mac")]),
-                        writeLayer: "mac",
-                        embedded: true,
-                        externalControlKeys: ["sources.packages"],
-                        sectionSupplement: { sectionSupplement($0) },
-                        unresolvedSupplement: AnyView(offlineDestinations)
-                    )
-                    TronSettingsGroup("This iPhone", detail: "Stored on this iPhone. Never changes harness behaviour.",
-                                      accent: .tronEmerald) {
+                    .tronSettingsVisualTheme(accent: .tronEmerald)
+                    SettingsGroupCard(.agent) {
+                        SettingsSectionLinks(ids: ["model", "context", "run", "permissions"], sections: sections,
+                                             target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
+                    }
+                    SettingsGroupCard(.tools) {
+                        SettingsSectionLinks(ids: ["tools"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
+                        TronSettingsDivider()
+                        settingsLink("MCP Servers", summary: "Tool providers and their sign-ins", icon: "server.rack") {
+                            MCPServersSettingsView(projectCWD: nil, sessionID: nil)
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Extensions", summary: "Packages, built-ins, and themes", icon: "shippingbox") {
+                            ExtensionsSettingsView(projectCWD: nil)
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Hooks", summary: "Event handlers extensions register", icon: "bolt.horizontal.circle") {
+                            HooksSettingsView(projectCWD: nil)
+                        }
+                    }
+                    SettingsGroupCard(.accounts) {
+                        settingsLink("Model Providers", summary: "Provider accounts and sign-in", icon: "key") {
+                            ProvidersSettingsView(sessionID: nil)
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Custom Models", summary: "Your own model definitions", icon: "slider.horizontal.3") {
+                            CustomModelsSettingsView()
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Connected Services", summary: "Service accounts and what they offer", icon: "link") {
+                            IntegrationsSettingsView()
+                        }
+                    }
+                    SettingsGroupCard(.data) {
+                        settingsLink("Connections", summary: "Paired Macs, devices, and push", icon: "desktopcomputer") {
+                            ConnectionsSettingsView()
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Logs", summary: "Recent diagnostics from your Macs", icon: "text.alignleft") {
+                            GatewayLogsSettingsView()
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Setup", summary: "Import, session storage, and telemetry", icon: "gearshape.2") {
+                            SetupSettingsView(onImported: onImported)
+                        }
+                    }
+                    let placed = SettingsGroupKind.placedSections
+                    let unplaced = sections.filter { !placed.contains($0.id) }
+                    if !unplaced.isEmpty {
+                        SettingsGroupCard(.more) {
+                            SettingsSectionLinks(ids: unplaced.map(\.id), sections: sections,
+                                                 target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
+                        }
+                    }
+                    SettingsGroupCard(.iphone, detail: "Stored on this iPhone. Never changes what the agent does.") {
                         settingsLink("Appearance", summary: "Theme, type scale, and visual preferences",
                                      icon: "circle.lefthalf.filled") { AppearanceSettingsView() }
-                        TronSettingsDivider(accent: .tronEmerald)
+                        TronSettingsDivider()
                         settingsLink("Sessions", summary: "Dashboard list and subagent activity",
                                      icon: "slider.horizontal.2.square") { AppLocalBehaviorSettingsView() }
                     }
-                    .tronSettingsVisualTheme(accent: .tronEmerald)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
@@ -142,23 +129,17 @@ struct SettingsView: View {
         ) {
             NotificationInboxView(onOpenSession: onImported)
         }
-        // Projects: pick a workspace, then open its settings once the picker is gone.
-        .tronManagedSheet(isPresented: $browsingProjects, identity: "settings.projects", onDismiss: {
-            defer { pickedProject = nil }
-            guard let cwd = pickedProject, let profileID = model.selectedGatewayProfileID() else { return }
-            projectRoute = ProjectSettingsRoute(cwd: cwd, profileID: profileID)
-        }) {
-            WorkspaceBrowser(initialPath: model.defaultWorkspace) { pickedProject = $0 }
-        }
-        .tronManagedSheet(item: $projectRoute, identity: { "settings.project.\($0.id)" }) { route in
-            ProjectSettingsSheet(route: route)
+        .task(id: PresentationActivityTaskID(source: model.settingsFreshness,
+                                             presentationActive: presentationActivity.allowsPresentationPublication)) {
+            guard presentationActivity.allowsPresentationPublication else { return }
+            try? await model.refreshSettingsSnapshot(for: SettingsTarget.global.gatewayTarget)
         }
         .task(id: presentationActivity.allowsPresentationPublication) {
             guard presentationActivity.allowsPresentationPublication,
                   !hasRefreshedNotificationBadge else { return }
             // Only the root-owned badge is refreshed here. Destination owners
-            // load their own settings data after the sheet transition, keeping
-            // unrelated network publications out of the presentation path.
+            // load their own data after the sheet transition, keeping unrelated
+            // network publications out of the presentation path.
             await model.refreshNotificationInbox()
             guard !Task.isCancelled else { return }
             hasRefreshedNotificationBadge = true
@@ -169,91 +150,6 @@ struct SettingsView: View {
         .onAppear { hostedTrace?.record("settings.root.appear") }
         .onDisappear { hostedTrace?.record("settings.root.disappear") }
         #endif
-    }
-
-    /// While the schema cannot load, the hand-built flows (pairing and account
-    /// repair among them) stay reachable, in the same family cards.
-    private var offlineDestinations: some View {
-        VStack(spacing: 18) {
-            ForEach(SettingsFamily.allCases, id: \.self) { family in
-                let rows = Self.supplementedSections.filter { SettingsSectionStyle($0).family == family }
-                    .compactMap { sectionSupplement($0) }
-                if !rows.isEmpty {
-                    TronSettingsGroup(family.title, accent: family.accent) {
-                        ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                            if index > 0 { TronSettingsDivider(accent: family.accent) }
-                            row
-                        }
-                    }
-                    .tronSettingsVisualTheme(accent: family.accent)
-                }
-            }
-        }
-    }
-
-    private static let supplementedSections = ["accounts", "tools", "sources", "setup"]
-
-    /// Native flows keep their established controls inside the schema's section.
-    /// Harness values (including default trust) have just one generic editor.
-    /// Rows take their family's accent from the presenting card or sheet.
-    private func sectionSupplement(_ section: String) -> AnyView? {
-        switch section {
-        case "tools":
-            AnyView(settingsLink("MCP Servers", summary: "Tool providers and authentication", icon: "server.rack") {
-                MCPServersSettingsView(projectCWD: nil, sessionID: nil)
-            })
-        case "accounts":
-            AnyView(VStack(spacing: 0) {
-                settingsLink("Model Providers", summary: "Provider accounts and authentication", icon: "key") {
-                    ProvidersSettingsView(sessionID: nil)
-                }
-                TronSettingsDivider()
-                settingsLink("Custom Models", summary: "Saved model definitions and aliases", icon: "slider.horizontal.3") {
-                    CustomModelsSettingsView()
-                }
-                TronSettingsDivider()
-                settingsLink("Connected Services", summary: "Accounts and service capabilities", icon: "link") {
-                    IntegrationsSettingsView()
-                }
-            })
-        case "sources":
-            AnyView(VStack(spacing: 0) {
-                settingsLink("Extensions", summary: "Installed packages and what they contribute", icon: "shippingbox") {
-                    ExtensionsSettingsView(projectCWD: nil)
-                }
-                TronSettingsDivider()
-                settingsLink("Hooks", summary: "Loaded event handlers from extensions", icon: "bolt.horizontal.circle") {
-                    HooksSettingsView(projectCWD: nil)
-                }
-            })
-        case "setup":
-            AnyView(VStack(spacing: 0) {
-                settingsLink("Connections", summary: "Pair Macs, devices, and push readiness", icon: "desktopcomputer") {
-                    ConnectionsSettingsView()
-                }
-                TronSettingsDivider()
-                settingsLink("Import", summary: "Restore a session export", icon: "tray.and.arrow.down") {
-                    ImportSettingsView(onImported: onImported)
-                }
-                TronSettingsDivider()
-                settingsLink("Logs", summary: "Recent diagnostics from paired Mac gateways", icon: "text.alignleft") {
-                    GatewayLogsSettingsView()
-                }
-            })
-        default:
-            nil
-        }
-    }
-
-    /// The scope Settings was opened from: opens what that scope itself sets.
-    private func scopeLink<Destination: View>(_ title: String, icon: String, subtitle: String,
-                                              @ViewBuilder destination: @escaping () -> Destination) -> some View {
-        TronProgressiveSheetLink(accessibilityLabel: title, identity: "settings.scope.\(title)") {
-            destination().tronNavigationTitle(title)
-        } label: {
-            TronSettingsRow(icon: icon, title: title, subtitle: subtitle, subtitleColor: .tronTextSecondary)
-        }
-        .accessibilityIdentifier("settings-scope-open")
     }
 
     private func settingsLink<Destination: View>(
@@ -267,6 +163,154 @@ struct SettingsView: View {
                 .contentShape(Rectangle())
         }
         .accessibilityIdentifier("settings-link-\(title)")
+    }
+}
+
+/// The settings palette: each group is one titled card with one accent, and every
+/// sheet a row opens keeps that accent. Groups follow what is being configured:
+/// the agent's behaviour, what it can use, the accounts it reaches, this Mac's
+/// maintenance, then this iPhone.
+enum SettingsGroupKind {
+    case agent, tools, accounts, data, more, iphone
+
+    var title: String {
+        switch self {
+        case .agent: "Agent"
+        case .tools: "Tools & Extensions"
+        case .accounts: "Accounts"
+        case .data: "Data & Diagnostics"
+        case .more: "More"
+        case .iphone: "This iPhone"
+        }
+    }
+
+    var accent: Color {
+        switch self {
+        case .agent: .tronPurple
+        case .tools: .tronCyan
+        case .accounts: .tronIndigo
+        case .data: .tronBlue
+        case .more, .iphone: .tronEmerald
+        }
+    }
+
+    /// Schema sections Settings places itself; any other served section joins More.
+    /// Sources and setup are shown inside Extensions and Setup.
+    static let placedSections: Set<String> = ["model", "context", "run", "permissions", "tools", "sources", "setup"]
+
+    static func icon(forSection id: String) -> String {
+        switch id {
+        case "model": "cpu"
+        case "context": "rectangle.compress.vertical"
+        case "run": "arrow.clockwise"
+        case "permissions": "checkmark.shield"
+        case "tools": "wrench.and.screwdriver"
+        case "sources": "shippingbox"
+        case "setup": "gearshape.2"
+        default: "slider.horizontal.3"
+        }
+    }
+}
+
+/// One group's titled card, its rows and every sheet they open in its accent.
+struct SettingsGroupCard<Content: View>: View {
+    let kind: SettingsGroupKind
+    var detail: String?
+    @ViewBuilder let content: () -> Content
+
+    init(_ kind: SettingsGroupKind, detail: String? = nil, @ViewBuilder content: @escaping () -> Content) {
+        self.kind = kind; self.detail = detail; self.content = content
+    }
+
+    var body: some View {
+        TronSettingsGroup(kind.title, detail: detail, accent: kind.accent) { content() }
+            .tronSettingsVisualTheme(accent: kind.accent)
+    }
+}
+
+/// The rows for served schema sections, in the given order: each opens the
+/// section's sheet for one target. A section the target does not serve has no row.
+struct SettingsSectionLinks: View {
+    let ids: [String]
+    let sections: [SettingsRendererSection]
+    let target: JSONValue
+    var writeLayer: String?
+    var ownedLayers: [String] = []
+    var projectCWD: String?
+
+    var body: some View {
+        let shown = ids.compactMap { id in sections.first { $0.id == id } }
+        ForEach(Array(shown.enumerated()), id: \.element.id) { index, section in
+            if index > 0 { TronSettingsDivider() }
+            TronProgressiveSheetLink(accessibilityLabel: section.title, identity: "settings.section.\(section.id)") {
+                SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
+                                     projectCWD: projectCWD, presentation: .section(section.id))
+                    .tronNavigationTitle(section.title)
+            } label: {
+                TronSettingsRow(icon: SettingsGroupKind.icon(forSection: section.id), title: section.title,
+                                subtitle: section.description, subtitleColor: .tronTextSecondary)
+            }
+            .accessibilityIdentifier("settings-section-\(section.id)-open")
+        }
+    }
+}
+
+/// What applies to one chat, next to the chat: its changes, then every settings
+/// section for it. Each value carries where it comes from (Chat, Profile, Project,
+/// Mac or Built-in); a value this chat can set has its control, any other a link to
+/// the layer that owns it. An ordinary chat also links its project.
+struct ChatSettingsCard: View {
+    let sessionID: String
+    /// The layers this chat writes, in order of preference.
+    let ownedLayers: [String]
+    var projectCWD: String?
+    let changesScope: SettingsChangesScope
+    let accent: Color
+    @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+
+    private var target: JSONValue { SettingsTarget.sessionGatewayTarget(sessionID) }
+
+    var body: some View {
+        let sections = model.settingsSnapshot(for: target).map { SettingsRendererView.sections($0.resolution) } ?? []
+        TronSettingsGroup("Settings", detail: "What applies to this chat, and where each value comes from.", accent: accent) {
+            SettingsChangesLink(scope: changesScope, subtitle: "What agents changed, and approvals waiting for you")
+            if !sections.isEmpty {
+                TronSettingsDivider()
+                SettingsSectionLinks(ids: sections.map(\.id), sections: sections, target: target,
+                                     writeLayer: nil, ownedLayers: ownedLayers, projectCWD: projectCWD)
+            }
+            if let projectCWD, !projectCWD.isEmpty, let profileID = model.selectedGatewayProfileID() {
+                TronSettingsDivider()
+                ProjectSettingsLink(cwd: projectCWD, profileID: profileID)
+            }
+        }
+        .tronSettingsVisualTheme(accent: accent)
+        .task(id: PresentationActivityTaskID(source: model.settingsFreshness,
+                                             presentationActive: presentationActivity.allowsPresentationPublication)) {
+            guard presentationActivity.allowsPresentationPublication else { return }
+            try? await model.refreshSettingsSnapshot(for: target)
+        }
+    }
+}
+
+/// Setup: this Mac's session storage and telemetry, and importing a session.
+struct SetupSettingsView: View {
+    let onImported: (AppModel.SessionNavigationRoute) -> Void
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 20) {
+                TronSettingsGroup("Import", detail: "Open a Tron session export in a new session.") {
+                    ImportSessionRow(onImported: onImported)
+                }
+                SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
+                                     presentation: .section("setup"), embedded: true)
+            }
+            .padding(20)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle("Setup")
     }
 }
 

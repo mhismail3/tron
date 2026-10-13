@@ -4,8 +4,11 @@ import TronMobileCore
 
 /// Owns settings and trust request admission. Gateway settings and trust state
 /// remain canonical; settings are read and written through `settings.resolve` and
-/// `settings.change` by the generic renderer and the few screens that share its
-/// target contract, so this coordinator keeps no settings projection.
+/// `settings.change`. The one projection kept here is each target's last served
+/// resolution with its rows' options (`SettingsSnapshot`): every settings surface
+/// for a target reads the same snapshot, so a sheet opened from another never
+/// re-reads what its parent shows. It is bounded, dropped with the profile, and
+/// replaced whenever a settings event or foregrounding makes it stale.
 @MainActor
 @Observable
 final class SettingsTrustCoordinator {
@@ -18,6 +21,17 @@ final class SettingsTrustCoordinator {
     private let uuidSource: UUIDSource
 
     private var profileGeneration = 0
+    private(set) var snapshots: [JSONValue: SettingsSnapshot] = [:]
+    /// Most recently refreshed last, so the bound evicts the least recent target.
+    private var snapshotOrder: [JSONValue] = []
+    private var refreshes: [JSONValue: SnapshotRefresh] = [:]
+    private static let snapshotLimit = 16
+
+    private struct SnapshotRefresh {
+        let id = UUID()
+        let freshness: SettingsFreshness
+        let task: Task<Void, Error>
+    }
 
     private(set) var settingsInvalidationGeneration = 0
     private(set) var trustRevision = 0
@@ -150,6 +164,54 @@ final class SettingsTrustCoordinator {
         approvalsRevision &+= 1
     }
 
+    /// Brings a target's snapshot up to `freshness`. A current snapshot is not read
+    /// again, and concurrent callers for one target share one read.
+    func refreshSnapshot(target: JSONValue, freshness: SettingsFreshness) async throws {
+        if snapshots[target]?.freshness == freshness { return }
+        if let running = refreshes[target], running.freshness == freshness { return try await running.task.value }
+        let admittedProfileGeneration = profileGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let resolution = try await self.resolveForRenderer(target: target)
+            let options = await self.options(for: resolution, target: target)
+            try self.requireProfile(admittedProfileGeneration)
+            self.snapshots[target] = SettingsSnapshot(resolution: resolution, options: options, freshness: freshness)
+            self.snapshotOrder.removeAll { $0 == target }
+            self.snapshotOrder.append(target)
+            while self.snapshotOrder.count > Self.snapshotLimit { self.snapshots[self.snapshotOrder.removeFirst()] = nil }
+        }
+        let refresh = SnapshotRefresh(freshness: freshness, task: task)
+        refreshes[target] = refresh
+        defer { if refreshes[target]?.id == refresh.id { refreshes[target] = nil } }
+        try await task.value
+    }
+
+    /// The options each editable control of a resolution needs, read with it. A
+    /// source that cannot answer leaves its row read-only; other rows are unaffected.
+    private func options(for resolution: SettingsResolution, target: JSONValue) async -> [String: SettingsOptionsResponse] {
+        let sourced = resolution.keys.filter { setting in
+            setting.presentation?.optionsSource != nil
+                && [.choice, .number, .checklist].contains(SettingsRowControl(negotiated: setting.presentation?.control))
+        }
+        let client = client
+        return await withTaskGroup(of: (String, SettingsOptionsResponse?).self) { group in
+            for setting in sourced {
+                let id = setting.id, key = setting.key, qualifiers = setting.qualifiers
+                group.addTask { (id, try? await Self.readOptions(client: client, target: target, key: key, qualifiers: qualifiers)) }
+            }
+            var read: [String: SettingsOptionsResponse] = [:]
+            for await (id, response) in group { if let response { read[id] = response } }
+            return read
+        }
+    }
+
+    private nonisolated static func readOptions(client: GatewayClient, target: JSONValue, key: String,
+                                                qualifiers: [String: String]?) async throws -> SettingsOptionsResponse {
+        var params: [String: JSONValue] = ["target": target, "key": .string(key)]
+        if let qualifiers { params["qualifiers"] = .object(qualifiers.mapValues { JSONValue.string($0) }) }
+        return try await client.requestValue("settings.options", JSONValue.object(params)).decode(SettingsOptionsResponse.self)
+    }
+
     /// `settings.resolve` for the generic renderer: the controls it implements are
     /// named so the Gateway negotiates each key's control (docs/settings-model.md 7.5).
     func resolveForRenderer(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
@@ -219,6 +281,10 @@ final class SettingsTrustCoordinator {
     /// Synchronously revokes every suspended operation owned by the retired profile.
     func clearProfile() {
         profileGeneration &+= 1
+        snapshots = [:]
+        snapshotOrder = []
+        refreshes.values.forEach { $0.task.cancel() }
+        refreshes = [:]
         settingsInvalidationGeneration &+= 1
         approvalsRevision &+= 1
     }
@@ -226,4 +292,17 @@ final class SettingsTrustCoordinator {
     private func requireProfile(_ admittedProfileGeneration: Int) throws {
         guard profileGeneration == admittedProfileGeneration else { throw CancellationError() }
     }
+}
+
+/// When a snapshot was read: the settings events and foregrounding it reflects.
+struct SettingsFreshness: Hashable, Sendable {
+    let invalidation: Int
+    let foreground: Int
+}
+
+/// A target's resolution and the options its rows' controls offer, read together.
+struct SettingsSnapshot {
+    let resolution: SettingsResolution
+    let options: [String: SettingsOptionsResponse]
+    let freshness: SettingsFreshness
 }

@@ -31,7 +31,7 @@ export interface KeyPresentation {
   note?: string;
   valueKind: string;
   /** The static choices, for a `choice` control. Dynamic options come from `settings.options`. */
-  options?: readonly { value: unknown; label: string }[];
+  options?: readonly { value: unknown; label: string; detail?: string }[];
   range?: NonNullable<ValueType["range"]>;
   optionsSource?: { name: string; dependsOn: readonly string[] };
   confirm?: string;

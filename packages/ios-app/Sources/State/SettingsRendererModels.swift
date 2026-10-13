@@ -46,6 +46,8 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
 struct SettingsChoice: Decodable, Equatable, Sendable {
     let value: JSONValue
     let label: String
+    /// One line on what choosing it changes.
+    let detail: String?
 }
 
 struct SettingsRange: Decodable, Equatable, Sendable {

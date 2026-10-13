@@ -22,11 +22,11 @@ export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "model", title: "Model", description: "Models, thinking, and context window", order: 10, harness: true },
   { id: "context", title: "Context", description: "Compaction and image handling", order: 20, harness: true },
   { id: "tools", title: "Tools", description: "Available tools, code mode, and shell", order: 30, harness: true },
-  { id: "permissions", title: "Permissions", description: "Project trust and change approvals", order: 40, harness: true },
+  { id: "permissions", title: "Permissions", description: "Project trust and agent approvals", order: 40, harness: true },
   { id: "run", title: "Run", description: "Message delivery, retries, and transport", order: 50, harness: true },
   { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60, harness: false },
-  { id: "sources", title: "Sources", description: "Extensions, hooks, and packages", order: 70, harness: false },
-  { id: "setup", title: "Setup", description: "Connections, import, and logs", order: 80, harness: false },
+  { id: "sources", title: "Sources", description: "Packages and how they install", order: 70, harness: false },
+  { id: "setup", title: "Setup", description: "Import, session storage, and telemetry", order: 80, harness: false },
   { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, harness: false, note: "Stored on this iPhone. It never changes what the agent does." },
 ];
 
@@ -90,11 +90,18 @@ export interface KeyDeclaration {
 const ANY_ACTOR: readonly Writer[] = ["ui", "home", "agent", "worker"];
 
 const THINKING = [
-  { value: "off", label: "Off" }, { value: "minimal", label: "Minimal" }, { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" }, { value: "high", label: "High" }, { value: "xhigh", label: "Extra high" },
-  { value: "max", label: "Max" },
+  { value: "off", label: "Off", detail: "No reasoning before answering" },
+  { value: "minimal", label: "Minimal", detail: "The least reasoning the model supports" },
+  { value: "low", label: "Low", detail: "Brief reasoning; faster and cheaper" },
+  { value: "medium", label: "Medium", detail: "Balanced reasoning for most work" },
+  { value: "high", label: "High", detail: "Thorough reasoning for hard problems" },
+  { value: "xhigh", label: "Extra high", detail: "More thorough than High, and slower" },
+  { value: "max", label: "Max", detail: "The most reasoning the model allows" },
 ] as const;
-const QUEUE = [{ value: "all", label: "All at once" }, { value: "one-at-a-time", label: "One at a time" }] as const;
+const QUEUE = [
+  { value: "all", label: "All at once", detail: "Every waiting message is delivered together" },
+  { value: "one-at-a-time", label: "One at a time", detail: "Waiting messages are delivered one per turn" },
+] as const;
 
 const larger = (before: unknown, after: unknown): Direction =>
   typeof before === "number" && typeof after === "number" && after < before ? "narrow" : "widen";
@@ -181,7 +188,11 @@ const chatPi = (...path: string[]) => ({ chat: { store: "chat-settings", path } 
 
 const thinkingType = types.choice(THINKING, true);
 
-const TIER_LABELS = [{ value: "quiet", label: "Quiet" }, { value: "notify", label: "Notify" }, { value: "approve", label: "Approve" }] as const;
+const TIER_LABELS = [
+  { value: "quiet", label: "Quiet", detail: "The change applies without telling you" },
+  { value: "notify", label: "Notify", detail: "The change applies, and you are told" },
+  { value: "approve", label: "Approve", detail: "The change waits for your approval" },
+] as const;
 function tierType(): ValueType { return types.choice(TIER_LABELS, true); }
 const TIER_ORDER = ["quiet", "notify", "approve"];
 /** A floor change lowers (widens) when the new tier is below the one it replaces. */
@@ -231,7 +242,7 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   {
     id: "model.thinking[role=summarizer]", group: "model", fixed: { role: "summarizer" }, subgroup: "Compaction",
-    type: types.choice([{ value: "inherit", label: "Same as chat" }, ...THINKING], true),
+    type: types.choice([{ value: "inherit", label: "Same as chat", detail: "Uses the chat's own thinking level" }, ...THINKING], true),
     layers: both(pi("compaction", "thinkingLevel")), builtin: "inherit", timing: "live", effect: "next-compaction", floor: "quiet",
     writers: ANY_ACTOR, label: "Summary thinking", help: "Thinking level for compaction summaries.", order: 80,
     importance: "advanced", control: "choice",
@@ -312,7 +323,10 @@ export const KEYS: readonly KeyDeclaration[] = [
     label: "Tools", help: "The tools the model may call.", order: 10, importance: "essential", control: "checklist",
   },
   {
-    id: "tools.codemode.mode", group: "tools", subgroup: "Code mode", type: types.choice([{ value: "on", label: "On" }, { value: "only", label: "Only code mode" }]),
+    id: "tools.codemode.mode", group: "tools", subgroup: "Code mode", type: types.choice([
+      { value: "on", label: "On", detail: "The model calls tools directly or from a script" },
+      { value: "only", label: "Only code mode", detail: "The model calls tools only from scripts" },
+    ]),
     layers: both(pi("codemode", "mode")), timing: "fixed", effect: "new-chat", floor: { widen: "notify", narrow: "quiet" },
     writers: ["ui", "home"], label: "Code mode", help: "Let the model call tools from a script.", order: 20, importance: "advanced", control: "choice",
   },
@@ -340,7 +354,11 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   {
     id: "permissions.defaultProjectTrust", group: "permissions",
-    type: types.choice([{ value: "ask", label: "Ask" }, { value: "always", label: "Always trust" }, { value: "never", label: "Never trust" }]),
+    type: types.choice([
+      { value: "ask", label: "Ask", detail: "Asks you the first time a project opens" },
+      { value: "always", label: "Always trust", detail: "Loads every project's extensions and hooks" },
+      { value: "never", label: "Never trust", detail: "Never loads a project's extensions or hooks" },
+    ]),
     layers: { mac: pi("defaultProjectTrust") }, builtin: "ask", timing: "live", effect: "next-change",
     floor: { widen: "approve", narrow: "notify" }, direction: (_b, a) => a === "always" ? "widen" : "narrow", writers: ["ui"],
     label: "Default trust policy", help: "What happens with a project that has no trust decision.", order: 20, importance: "advanced",
@@ -353,7 +371,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "permissions.floor", group: "permissions", subgroup: "Floors", qualifier: "key", type: tierType(),
     layers: { mac: { store: "floors" } }, builtinFor: (qualifiers) => codeFloor(qualifiers),
     timing: "live", effect: "next-change", floor: { widen: "approve", narrow: "quiet" }, direction: lowers, writers: ["ui"],
-    label: "Floor", help: "Quiet applies an agent's change, Notify also tells you, Approve waits for you.",
+    label: "Agent approvals", help: "How much of your attention an agent's change to each setting gets: Quiet applies it, Notify also tells you, Approve waits for you.",
     order: 90, importance: "advanced", control: "choice",
     confirm: "Lowering a floor lets agents make this change with less of your attention.",
   },
@@ -411,7 +429,12 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   {
     id: "run.transport", group: "run", subgroup: "Connection",
-    type: types.choice([{ value: "auto", label: "Automatic" }, { value: "sse", label: "SSE" }, { value: "websocket", label: "WebSocket" }, { value: "websocket-cached", label: "WebSocket (cached)" }]),
+    type: types.choice([
+      { value: "auto", label: "Automatic", detail: "The provider's best available transport" },
+      { value: "sse", label: "SSE", detail: "Server-sent events over HTTP" },
+      { value: "websocket", label: "WebSocket", detail: "A WebSocket for each request" },
+      { value: "websocket-cached", label: "WebSocket (cached)", detail: "One WebSocket reused between requests" },
+    ]),
     layers: chatPi("transport"), builtin: "auto", timing: "live", effect: "next-request", floor: "quiet", writers: ANY_ACTOR,
     label: "Transport", help: "How requests reach the provider.", order: 90, importance: "advanced", control: "choice",
   },
@@ -432,7 +455,11 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   {
     id: "run.cacheWarming", group: "run", subgroup: "Connection",
-    type: types.choice([{ value: "off", label: "Off" }, { value: "streaming", label: "While running" }, { value: "idle", label: "Also between runs" }]),
+    type: types.choice([
+      { value: "off", label: "Off", detail: "Prompt caches are never kept warm" },
+      { value: "streaming", label: "While running", detail: "Caches stay warm while a turn runs" },
+      { value: "idle", label: "Also between runs", detail: "Also kept warm between turns; costs more" },
+    ]),
     layers: { mac: pi("cacheWarming") }, builtin: "streaming", timing: "live", effect: "next-turn", floor: { widen: "notify", narrow: "quiet" },
     direction: (_b, a) => a === "idle" ? "widen" : "narrow", writers: ["ui", "home"],
     label: "Cache warming", help: "Keep prompt caches warm between runs. Costs money.", order: 130, importance: "advanced", control: "choice",

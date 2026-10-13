@@ -4387,6 +4387,20 @@ final class AppModel {
         try await settingsTrust.resolveForRenderer(target: target, keys: keys)
     }
 
+    /// The shared snapshot every settings surface for `target` reads.
+    func settingsSnapshot(for target: JSONValue) -> SettingsSnapshot? { settingsTrust.snapshots[target] }
+
+    var settingsFreshness: SettingsFreshness {
+        SettingsFreshness(invalidation: settingsTrust.settingsInvalidationGeneration, foreground: foregroundReconciliationGeneration)
+    }
+
+    func refreshSettingsSnapshot(for target: JSONValue) async throws {
+        try await settingsTrust.refreshSnapshot(target: target, freshness: settingsFreshness)
+    }
+
+    /// A settings change this app made: every surface's snapshot is stale.
+    func noteSettingsChanged() { settingsTrust.noteSettingsChanged() }
+
     func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, query: String?, cursor: String? = nil) async throws -> SettingsOptionsResponse {
         try await settingsTrust.settingsOptions(target: target, key: key, qualifiers: qualifiers, query: query, cursor: cursor)
     }

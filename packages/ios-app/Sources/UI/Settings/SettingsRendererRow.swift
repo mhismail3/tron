@@ -18,7 +18,9 @@ struct SettingsRendererRow: View {
     var detailDestination: AnyView? = nil
     /// On a key's own sheet: each action is its own full-width row.
     var actionsAsRows = false
-    var externalControl = false
+    /// An instance's own description, when its group's help does not say it
+    /// (an approval level describes the setting it governs).
+    var instanceHelp: String? = nil
     /// The options the key's source serves, read by the renderer with the
     /// resolution itself, so a row is never without them once it renders.
     let options: SettingsOptionsResponse?
@@ -53,13 +55,17 @@ struct SettingsRendererRow: View {
         return setting.badges.filter { !(instanced && $0.kind == "scope") }.map(TronTagModel.init)
     }
     private var control: SettingsRowControl {
-        editable && !externalControl ? SettingsRowControl(negotiated: presentation?.control) : .readOnly
+        editable ? SettingsRowControl(negotiated: presentation?.control) : .readOnly
     }
 
     /// The key's help and note, on detailed rows only; an instance's help is on its group.
     private var subtitle: String? {
         guard detailed else { return nil }
-        let lines = [instanced ? "" : presentation?.help ?? "", presentation?.note ?? ""].filter { !$0.isEmpty }
+        // An instance is titled by its short name; its full scope (a project's path)
+        // describes it when nothing else does.
+        let scope = setting.badge("scope")?.label
+        let instanceLine = instanceHelp ?? (scope != title ? scope : nil) ?? ""
+        let lines = [instanced ? instanceLine : presentation?.help ?? "", presentation?.note ?? ""].filter { !$0.isEmpty }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
@@ -102,7 +108,7 @@ struct SettingsRendererRow: View {
                 detailDestination
             } label: {
                 TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
-                    TronDynamicValue(text: setting.display, color: .tronTextSecondary)
+                    TronInlineActionLabel(setting.display)
                 }
             }
             .accessibilityIdentifier("\(settingsRowIdentifier(setting))-open")
@@ -119,7 +125,7 @@ struct SettingsRendererRow: View {
                           isOn: Binding(get: { setting.value?.boolValue == true }, set: { onChange(.bool($0)) }))
         case .choice:
             let choices = presentation?.optionsSource != nil ? (options?.options ?? []) : (presentation?.options?.map {
-                SettingsOption(value: $0.value, label: $0.label, detail: nil, disabledReason: nil)
+                SettingsOption(value: $0.value, label: $0.label, detail: $0.detail, disabledReason: nil)
             } ?? [])
             if choices.isEmpty {
                 // A source with nothing to offer (a model that does not think) is a value, not a menu.
@@ -242,7 +248,7 @@ struct SettingsRendererRow: View {
     @ViewBuilder
     private var details: some View {
         let actions = actionsAsRows ? setting.badges.compactMap(\.action) : []
-        let resets = editable && (control != .readOnly || externalControl)
+        let resets = editable && control != .readOnly
             ? actions.filter { ["useCurrentDefault", "followDefault"].contains($0.kind) } : []
         let applyAgain = onApplyAgain == nil ? [] : actions.filter { $0.kind == "applyAgain" && $0.changeId != nil }
         // Action primitives are served with the source badge. A future action stays

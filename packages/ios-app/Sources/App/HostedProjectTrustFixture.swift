@@ -45,7 +45,7 @@ struct HostedProjectTrustFixture: View {
             VStack(spacing: 0) {
                 if ready {
                     if mountsFloors {
-                        NavigationStack { SettingsRendererView(target: .object(["kind": .string("mac")]), writeLayer: "mac") }
+                        NavigationStack { SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("permissions")) }
                             .tronSettingsLayout()
                     } else {
                         NavigationStack { TrustSettingsView(target: TrustTarget(cwd: "/fixture/project")) }
@@ -164,8 +164,8 @@ private actor ProjectTrustFixtureGateway {
             "display": .string(labels[floor] ?? floor), "layer": .string(floorOverride == nil ? "builtin" : "mac"), "applied": .bool(true),
             "layers": .array([.object(["layer": .string("mac")])]),
             "badges": .array([.object(["kind": .string("layer"), "label": .string(floorOverride == nil ? "Built-in" : "Mac")]),
-                              .object(["kind": .string("scope"), "label": .string("Project trust (widen)")])]),
-            "presentation": .object(["label": .string("Project trust (widen)"),
+                              .object(["kind": .string("scope"), "label": .string("Project trust: loosening")])]),
+            "presentation": .object(["label": .string("Project trust: loosening"),
                 "help": .string("Lowering this floor requires your confirmation."), "order": .number(10), "importance": .string("advanced"),
                 "control": .string("choice"), "valueKind": .string("orderedChoice"), "options": .array(["quiet", "notify", "approve"].map { tier in
                     .object(["value": .string(tier), "label": .string(labels[tier]!)])

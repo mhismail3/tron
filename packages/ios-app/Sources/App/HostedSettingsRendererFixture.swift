@@ -50,11 +50,8 @@ struct HostedSettingsRendererFixture: View {
                         SettingsChangesView(scope: ProcessInfo.processInfo.arguments.contains("-settings-changes-session")
                             ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,
                             onOpenSession: { openedRoute = $0 })
-                    } else if ProcessInfo.processInfo.arguments.contains("-tron-mac-settings-fixture") {
-                        SettingsView()
                     } else {
-                        SettingsRendererView(target: .object(["kind": .string("mac")]), writeLayer: "mac")
-                            .tronNavigationTitle("Settings")
+                        SettingsView()
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
@@ -318,10 +315,10 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             section("model", "Model", 10, "Models, thinking, and context window"),
             section("context", "Context", 20, "Compaction and image handling"),
             section("tools", "Tools", 30, "Available tools, code mode, and shell"),
-            section("permissions", "Permissions", 40, "Project trust and change approvals"),
+            section("permissions", "Permissions", 40, "Project trust and agent approvals"),
             section("accounts", "Accounts", 60, "Providers, custom models, and services"),
-            section("sources", "Sources", 70, "Extensions, hooks, and packages"),
-            section("setup", "Setup", 80, "Connections, import, and logs"),
+            section("sources", "Sources", 70, "Packages and how they install"),
+            section("setup", "Setup", 80, "Import, session storage, and telemetry"),
             section("run", "Run", 50, "Message delivery, retries, and transport"),
             section("lab", "Lab", 95, "A section this app has never seen"),
         ]

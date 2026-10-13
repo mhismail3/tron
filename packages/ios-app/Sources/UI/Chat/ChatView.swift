@@ -192,8 +192,6 @@ struct ChatView: View {
         }
         .modifier(ChatRoutes(
             sessionID: sessionID,
-            projectCWD: model.sessionContextPresentation(for: sessionID)?.cwd,
-            isHomeRoute: isHomeRoute,
             initialHistoryEntryID: initialHistoryEntryID,
             onForkCreated: onForkCreated,
             showContext: $sessionPresentation.showContext,
@@ -2832,8 +2830,8 @@ struct ChatView: View {
             }
         }
         ToolbarItem(placement: .primaryAction) {
-            // Two surfaces: the context ring opens Manage Session/Home (this chat's
-            // live state and controls); the gear opens Settings scoped to this chat.
+            // Two surfaces: the context ring opens Manage Session/Home (this chat,
+            // its settings and project); the gear opens Settings (this Mac and iPhone).
             Button { sessionPresentation.showSettings = true } label: {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))

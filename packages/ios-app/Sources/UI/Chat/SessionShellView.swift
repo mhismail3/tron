@@ -283,6 +283,12 @@ struct SessionShellView: View {
                 rankingPolicyTask?.cancel()
                 rankingPolicyTask = nil
             }
+            // Settings opens with this Mac's sections already read: warm the shared
+            // snapshot once a Gateway is connected (and again when it goes stale).
+            .task(id: model.connectionState == .connected ? model.settingsFreshness : nil) {
+                guard model.connectionState == .connected else { return }
+                try? await model.refreshSettingsSnapshot(for: SettingsTarget.global.gatewayTarget)
+            }
             .task(id: model.actionablePushNavigationRequest?.id) {
                 guard let request = model.actionablePushNavigationRequest else { return }
                 await presentPushNavigation(request)

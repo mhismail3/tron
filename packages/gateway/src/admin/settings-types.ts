@@ -54,7 +54,8 @@ export interface ValueType {
    * composed below it and what the layer holds now. Undefined: hold nothing. */
   encode?(value: unknown, below: unknown, current: unknown): unknown;
   /** Static options for `choice` controls. */
-  options?: readonly { value: unknown; label: string }[];
+  /** A choice's `detail` is one line on what choosing it changes. */
+  options?: readonly { value: unknown; label: string; detail?: string }[];
   range?: { min: number; max: number; step?: number; unit?: string };
 }
 
@@ -89,7 +90,7 @@ export const types = {
       range: { min, max, ...(step ? { step } : {}), unit },
     };
   },
-  choice(values: readonly { value: string; label: string }[], ordered = false): ValueType {
+  choice(values: readonly { value: string; label: string; detail?: string }[], ordered = false): ValueType {
     const allowed = values.map(option => option.value);
     return {
       kind: ordered ? "orderedChoice" : "choice",
@@ -157,7 +158,7 @@ export function sameAsHomeChoice(inner: ValueType): ValueType {
     kind: `${inner.kind}OrSameAsHome`,
     validate: (value, label, context) => isSameAsHome(value) ? { sameAs: "home" } : inner.validate(value, label, context),
     format: (value, context) => isSameAsHome(value) ? "Same as Home" : inner.format(value, context),
-    ...(inner.options ? { options: [{ value: { sameAs: "home" }, label: "Same as Home" }, ...inner.options] } : {}),
+    ...(inner.options ? { options: [{ value: { sameAs: "home" }, label: "Same as Home", detail: "Uses Home's own choice" }, ...inner.options] } : {}),
   };
 }
 

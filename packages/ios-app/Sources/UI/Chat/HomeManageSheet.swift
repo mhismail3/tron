@@ -20,6 +20,10 @@ extension HomeSheet {
         let mutating = model.homeMutations.isRunning(profileID: profileID)
         return VStack(alignment: .leading, spacing: 18) {
             statsAndModel(read.status)
+            if let sessionID {
+                ChatSettingsCard(sessionID: sessionID, ownedLayers: ["chat", "profile"],
+                                 changesScope: .home(sessionID), accent: .tronSessionTeal)
+            }
             manageRows(read, unresolved: unresolved)
             manageControls(read.status, unresolved: unresolved, mutating: mutating)
         }
@@ -43,10 +47,9 @@ extension HomeSheet {
                 }
             }) {
                 // Home's memory model is part of its configuration: Home cannot
-                // answer until it is set. Other Home settings live in Settings.
+                // answer until it is set. Every other Home setting is in the card below.
                 SettingsRendererView(
-                    target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
-                    writeLayer: nil, embedded: true, ownedLayers: ["chat", "profile"],
+                    target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: nil, ownedLayers: ["chat", "profile"],
                     presentation: .keys(["model.ref[role=memory]"])
                 )
             }
