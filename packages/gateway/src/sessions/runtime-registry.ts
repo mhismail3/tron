@@ -2236,10 +2236,10 @@ export class RuntimeRegistry {
 
   /** The leased worker of a task resumed in place (#929). Viewing the session never blocks
    * this: an open slot keeps its subscribers and is rebound, not replaced. */
-  async resumeTaskWorker(sessionId: string, report: import("../home/home-task-report.js").HomeTaskReportOwner): Promise<{ slot: RuntimeSlot; release: () => void }> {
+  async resumeTaskWorker(sessionId: string, report: import("../home/home-task-report.js").HomeTaskReportOwner, exceptWorkToken?: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
     const lease = await this.acquireOwnedSessionLease(sessionId);
     try {
-      await lease.slot.bindTaskWorker(report);
+      await lease.slot.bindTaskWorker(report, exceptWorkToken);
       return lease;
     } catch (error) { lease.release(); throw error; }
   }

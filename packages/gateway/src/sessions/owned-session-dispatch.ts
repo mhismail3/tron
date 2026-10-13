@@ -25,8 +25,8 @@ export class OwnedSessionDispatch {
   }
 
   /** Rebinds an existing worker session to a resumed task's report owner (#929). */
-  resumeWorker(sessionId: string, report: HomeTaskReportOwner): Promise<OwnedLease> {
-    return this.sessions.resumeTaskWorker(sessionId, report);
+  resumeWorker(sessionId: string, report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<OwnedLease> {
+    return this.sessions.resumeTaskWorker(sessionId, report, exceptWorkToken);
   }
 
   lease(sessionId: string): Promise<OwnedLease> {

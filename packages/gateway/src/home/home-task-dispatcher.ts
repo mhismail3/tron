@@ -281,20 +281,20 @@ export class HomeTaskDispatcher {
    * immutable; each task has at most one successor, so a lineage never forks. `text` is the
    * maintainer's or Home's instruction; the brief restates any question the run was
    * stopped before it was answered. */
-  async resume(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest, signal?: AbortSignal): Promise<HomeTaskHandle> {
+  async resume(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest, signal?: AbortSignal, workToken?: string): Promise<HomeTaskHandle> {
     if (signal?.aborted) throw new HomeTaskDispatchStageError("choice", "cancelled");
     await this.assertAvailable();
     const registry = this.sessions.administrativeWorkRegistry;
     const work = registry.begin({ kind: "queued-mutation", hostEpoch: registry.runtimeEpoch });
     try {
-      const handle = await this.resumeOwned(identity, request, work, signal);
+      const handle = await this.resumeOwned(identity, request, work, signal, workToken);
       const completion = handle.completion.finally(() => work.settle());
       void completion.catch(() => {});
       return { ...handle, completion };
     } catch (error) { work.settle(); throw error; }
   }
 
-  private async resumeOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest, work: GatewayWorkHandle, signal: AbortSignal | undefined): Promise<HomeTaskHandle> {
+  private async resumeOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest, work: GatewayWorkHandle, signal: AbortSignal | undefined, workToken: string | undefined): Promise<HomeTaskHandle> {
     const text = request.text?.trim();
     if (typeof request.taskId !== "string" || typeof request.operationId !== "string"
       || (request.text !== undefined && (typeof request.text !== "string" || Buffer.byteLength(request.text) > 32768))) throw new GatewayError("invalid_request", "Invalid task resume");
@@ -324,7 +324,7 @@ export class HomeTaskDispatcher {
     this.transition(task, "created");
     const sessionId = previous.sessionId;
     return this.launch(task, epoch, work, signal, {
-      worker: (dispatch, reports) => this.stage("create-worker", taskId, signal, () => dispatch.resumeWorker(sessionId, reports), late => late.release()),
+      worker: (dispatch, reports) => this.stage("create-worker", taskId, signal, () => dispatch.resumeWorker(sessionId, reports, workToken), late => late.release()),
       configure: async () => "",
     });
   }

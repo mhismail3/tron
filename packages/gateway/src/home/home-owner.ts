@@ -342,24 +342,24 @@ export class HomeOwner {
 
   /** Resumes a settled task in place as its successor (#929): from Home's task tool or the
    * maintainer's Continue. The result wakes this Home like any task's. */
-  async resumeTask(request: HomeTaskResumeRequest, sessionId?: string) {
+  async resumeTask(request: HomeTaskResumeRequest, sessionId?: string, workToken?: string) {
     await this.taskOwner();
     const record = this.record;
     if (this.unavailable || !record?.enabled || (sessionId !== undefined && homeSessionId(record) !== sessionId)) {
       throw new GatewayError("conflict", "Task resume is unavailable for this Home");
     }
-    return this.tasks.resume({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, request);
+    return this.tasks.resume({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, request, undefined, workToken);
   }
 
   /** A maintainer message to a Home worker whose task has settled continues that task in
    * place with the message as its instruction, instead of being refused (#929). */
-  async resumeWorkerSession(workerSessionId: string, text: string) {
+  async resumeWorkerSession(workerSessionId: string, text: string, workToken?: string) {
     const task = await (await this.taskOwner()).latestTaskForSession(workerSessionId);
     if (!task) throw new GatewayError("conflict", "This session runs no Home task");
     if (task.lifecycle !== "terminal" || !task.operationId) {
       throw new GatewayError("busy", "The worker's task is still settling; send the message again in a moment", true);
     }
-    return this.resumeTask({ taskId: task.taskId, operationId: task.operationId, text });
+    return this.resumeTask({ taskId: task.taskId, operationId: task.operationId, text }, undefined, workToken);
   }
 
   async maintainTask(control: HomeTaskControlRequest & { text: string }): Promise<void> {

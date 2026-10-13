@@ -2764,9 +2764,9 @@ export class RuntimeSlot {
    * so the predecessor's operation is never shared. The runtime is rebuilt over the same
    * session manager, keeping identity, subscribers and presentation, so the task worker's
    * tools and producer gates belong to the new operation. */
-  async bindTaskWorker(report: HomeTaskReportOwner): Promise<void> {
+  async bindTaskWorker(report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<void> {
     await this.lane.run(async () => {
-      this.assertIdle();
+      this.assertIdle(false, exceptWorkToken);
       if (this.liveProfile() === "home" || this.dependencies.homeChapterState(this.id).homeId) {
         throw new GatewayError("conflict", "A Home chapter cannot run a task");
       }
