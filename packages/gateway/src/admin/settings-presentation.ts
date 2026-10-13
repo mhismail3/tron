@@ -129,4 +129,3 @@ export function presentResolution(resolution: Resolution, input: PresentationInp
     }] : []);
   return { ...resolution, renderer: { version: RENDERER_CONTRACT_VERSION }, keys, sections };
 }
-
