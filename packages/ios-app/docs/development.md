@@ -1021,10 +1021,17 @@ The other real-boundary owners are:
   composer keyboard to remain visible through transport retirement and held
   replacement, checks composer geometry, then types without refocusing to prove
   retained responder/caret ownership. It waits for the transient app notice to
-  expire before checking the visible persistent recovery pill. `reject-open`
-  asks the real Gateway for an absent session and forwards its actual `not_found`
-  response: the inline failure and Retry remain usable over retained rows after
-  the catch-up notice lifetime, and Retry restores command admission. No proxy
+  expire before checking the persistent recovery status, itself the Retry
+  button, inside the navigation bar's frame (#878). An ordinary background/foreground
+  must never show that status, and with `hold-hello` holding the foreground
+  handshake it may appear only after the two-second recovery grace, without
+  moving the pinned reply, and must retire on its own when the handshake is
+  released. `reject-open` asks the real Gateway for an absent session and
+  forwards its actual `not_found` response: the failure status remains a usable
+  Retry beside retained rows after the catch-up notice lifetime, and Retry
+  restores command admission and retires the status. A final relaunch of the
+  same paired app at accessibility XXXL text repeats the chrome, reachability
+  and VoiceOver-value checks across a blackhole and automatic return. No proxy
   response fabricates a Gateway error.
   The long prompt permits a real non-tail reader gesture; the test targets the
   conversation scroll view, not the separate one-point status-bar scroll owner.
@@ -1034,7 +1041,7 @@ The other real-boundary owners are:
   allowing synchronization and returning to the tail. It separately navigates
   back, reopens during a blackhole, taps Retry offline, verifies waiting rather
   than a spinner, and requires automatic opening when the path returns.
-  `393-simulator-*` xcresult attachments show these scenarios. Navigation retires
+  `393-simulator-*` and `878-simulator-*` xcresult attachments show these scenarios. Navigation retires
   the prior snapshot; only the same-route cases qualify retention. These are
   simulator/network-boundary checks, not physical-device or exhaustive scheduler
   interleaving proof. The Gateway's `rpc.error`/`rpc.completed` records identify

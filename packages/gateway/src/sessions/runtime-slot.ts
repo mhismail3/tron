@@ -8609,6 +8609,8 @@ export class RuntimeSlot {
       let resolveQueueDisposition: ((disposition: QueueAdmissionDisposition) => void) | undefined;
       let queueDispositionFailure: unknown;
       let startPersisted = false;
+      /** The phase this admission replaced when it marked the session running. */
+      let phaseBeforeAdmission: SessionPhase | undefined;
       try {
         // Retained archive state is cleared here, inside the same lane critical
         // section that admits this run and after every synchronous rejection
@@ -8719,6 +8721,7 @@ export class RuntimeSlot {
           // never before it.
           // Gateway owns preflight even before Pi creates an Agent controller
           // (including auth and compaction preparation). It is not idle work.
+          phaseBeforeAdmission = this.phase;
           this.phase = "running";
           this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
           this.pendingPromptMessage = undefined;
@@ -8816,6 +8819,14 @@ export class RuntimeSlot {
           this.pendingPromptMessage = undefined;
         }
         if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
+        // An admission that failed before any run started gives back the phase it
+        // took (#881): a "running" session with nothing running admits nothing.
+        if (phaseBeforeAdmission !== undefined && this.phase === "running" && !this.hasActiveAgentRun
+          && this.activeOperationId === undefined && this.operation === undefined) {
+          this.phase = phaseBeforeAdmission;
+          this.revision += 1;
+          this.publishSnapshot();
+        }
         if (startPersisted) {
           await this.persistInvocationReceipt(makeInvocationReceipt({
             version: 1,

@@ -2233,6 +2233,9 @@ enum ChatToolbarTitleLayout {
     static let horizontalControlReservation: CGFloat = 152
     static let minimumWidth: CGFloat = 80
     static let maximumWidth: CGFloat = 360
+    /// One title-view height for the title and the recovery capsule that
+    /// replaces it, so swapping them never relays out the bar (#878).
+    static let height: CGFloat = 32
 
     static func width(containerWidth: CGFloat) -> CGFloat {
         min(maximumWidth, max(minimumWidth, containerWidth - horizontalControlReservation))

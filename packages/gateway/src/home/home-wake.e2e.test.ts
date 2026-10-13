@@ -250,6 +250,33 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(f.notifications.filter(isWaitingPush)).toHaveLength(1);
   }, 60_000);
 
+  // #881: delivering a waiting result needs the memory view. When that refuses,
+  // the prompt fails before any run starts and must leave Home idle, not stuck
+  // "running" with nothing running, which made every later prompt wait forever.
+  it("leaves Home idle when a prompt is refused while delivering a waiting result, so the next prompt runs", async () => {
+    const f = await fixture();
+    await configure(f);
+    const hold = gate();
+    f.faux.setResponses([async () => { await hold.wait; return fauxAssistantMessage([reportCall("rf", "Refused delivery result")], { stopReason: "toolUse" }); }]);
+    const run = await dispatch(f, "task-refused-delivery");
+    await f.registry.homeOwner().pauseMemory();
+    hold.open();
+    await run.completion;
+    await waitFor(async () => (await settledTask(f, "task-refused-delivery")).wake?.push === "decided", "task-finished push decided");
+    const home = await f.registry.acquire(f.home.sessionId);
+    const calls = f.faux.state.callCount;
+    await expect(home.prompt("while memory is paused")).rejects.toThrow();
+    expect(f.faux.state.callCount).toBe(calls);
+    expect(home.snapshot()).toMatchObject({ phase: "idle", configurationBlocker: null });
+    expect(home.snapshot().operation).toBeUndefined();
+
+    await f.registry.homeOwner().resumeMemory();
+    f.faux.setResponses([fauxAssistantMessage("Answered after resume")]);
+    await home.prompt("after resume");
+    await waitFor(() => home.snapshot().configurationBlocker === null, "second prompt settled");
+    expect(f.faux.state.callCount).toBe(calls + 1);
+  }, 30_000);
+
   it("never wakes Home for a user activation that Stop ends, even with a result waiting", async () => {
     const f = await fixture();
     await configure(f);
