@@ -441,7 +441,7 @@ struct QueuedMessageRow: View {
         // a large queued prompt arrives causes a visible container flash.
         card.fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
-        .modifier(ChatMessageCopyMenu(text: displayText, mutationIdentity: message.id, actions: menuActions))
+        .modifier(ChatMessageCopyMenu(text: ChatAnnotationEnvelope.body(of: displayText), mutationIdentity: message.id, actions: menuActions))
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .contain)
         .accessibilityHint(isManageable ? "" : readOnlyExplanation)
@@ -468,9 +468,12 @@ struct QueuedMessageRow: View {
             if let resource = message.resourceInvocation, !resource.isExtensionCommand {
                 CanonicalResourceChip(resource: resource)
             }
+            if let parsed = ChatAnnotationEnvelope.parse(displayText) {
+                ChatSentAnnotationChips(annotations: parsed.annotations)
+            }
             ChatPromptCard(
                 behavior: behavior,
-                text: displayText,
+                text: ChatAnnotationEnvelope.body(of: displayText),
                 detail: "\(deliveryDetail) · \(position) of \(total)",
                 isInteractive: isManageable,
                 onActivate: isManageable && !isMutating ? onEdit : nil,

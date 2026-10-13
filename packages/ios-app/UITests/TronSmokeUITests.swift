@@ -1763,6 +1763,21 @@ final class TronSmokeUITests: XCTestCase {
             let compaction = app.switches["Automatic compaction"]
             reveal(compaction, in: app)
             XCTAssertTrue(compaction.isHittable, "The automatic compaction row must stay reachable at XXXL")
+            // The shared row moves a competing trailing control below its labels at
+            // accessibility sizes, so titles and values wrap only at word
+            // boundaries (#868): a compact action and a plain value both stack.
+            let compactNow = app.buttons["Compact Now"]
+            let compactTitle = app.staticTexts["Compact conversation"]
+            XCTAssertTrue(compactNow.waitForExistence(timeout: 5), app.debugDescription)
+            for _ in 0..<6 where !(compactNow.isHittable && compactTitle.isHittable) { app.swipeDown() }
+            keepScreenshot(named: "868-manage-session-\(appearance)-xxxl-compact-row")
+            assertStacked(compactNow, below: compactTitle, in: app)
+            let branchTitle = app.staticTexts["Current Branch"]
+            let branchValue = app.staticTexts["Unavailable"]
+            XCTAssertTrue(branchValue.waitForExistence(timeout: 5), app.debugDescription)
+            for _ in 0..<6 where !(branchTitle.isHittable && branchValue.isHittable) { app.swipeUp() }
+            keepScreenshot(named: "868-manage-session-\(appearance)-xxxl-branch-row")
+            assertStacked(branchValue, below: branchTitle, in: app)
             for _ in 0..<12 where !app.buttons["chat-settings-link"].isHittable { app.swipeUp() }
             keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-context")
             openChatThinking(app)
@@ -2356,6 +2371,17 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<16 where !(element.exists && element.isHittable) { app.swipeUp() }
+    }
+
+    /// A trailing control stacked under its row's title, aligned with it.
+    @MainActor
+    private func assertStacked(_ control: XCUIElement, below title: XCUIElement, in app: XCUIApplication,
+                               file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(title.exists && control.exists, app.debugDescription, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(control.frame.minY, title.frame.maxY,
+                                    "\(control.label) sits below \(title.label), not beside it", file: file, line: line)
+        XCTAssertLessThan(abs(control.frame.minX - title.frame.minX), 2,
+                          "\(control.label) aligns with \(title.label)", file: file, line: line)
     }
 
     /// Scrolls until the element is hittable.
