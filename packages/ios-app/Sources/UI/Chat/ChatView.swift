@@ -2791,31 +2791,27 @@ struct ChatView: View {
         }
         ToolbarItem(placement: .principal) {
             // Recovery takes the title's place, as messaging apps show
-            // "Connecting" there. Both layers stay laid out and only their
-            // opacity changes: a changed title-view size relays out the bar and
-            // its safe area, which moves an anchored transcript reader (#878).
-            let status = retainedRecoveryStatus
+            // "Connecting" there. The title view keeps one fixed size in both
+            // states: a changed title-view size relays out the bar and its
+            // safe area, which moves an anchored transcript reader (#878).
             ZStack {
-                Text(chatTitle)
-                    .font(TronTypography.headline)
-                    .foregroundStyle(Color.tronEmerald)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(width: titleWidth)
-                    .clipped()
-                    .accessibilityLabel(chatTitle)
-                    .opacity(status == nil ? 1 : 0)
-                    .accessibilityHidden(status != nil)
-                ChatRecoveryStatusLine(status: status ?? .waitingForConnection) {
-                    Task { await retryRecovery() }
+                if let status = retainedRecoveryStatus {
+                    ChatRecoveryStatusLine(status: status) { Task { await retryRecovery() } }
+                        .transition(.opacity)
+                } else {
+                    Text(chatTitle)
+                        .font(TronTypography.headline)
+                        .foregroundStyle(Color.tronEmerald)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(width: titleWidth)
+                        .clipped()
+                        .accessibilityLabel(chatTitle)
+                        .transition(.opacity)
                 }
-                .frame(maxWidth: titleWidth)
-                .opacity(status == nil ? 0 : 1)
-                .allowsHitTesting(status != nil)
-                .accessibilityHidden(status == nil)
             }
-            .frame(width: titleWidth)
-            .animation(ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion), value: status)
+            .frame(width: titleWidth, height: ChatToolbarTitleLayout.height)
+            .animation(ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion), value: retainedRecoveryStatus)
         }
         if model.isShowingHistoricalTranscript {
             ToolbarItemGroup(placement: .primaryAction) {
