@@ -433,6 +433,79 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         )], timeout: 90), .completed, "the large-text route did not reconnect on its own")
     }
 
+    /// #935: reopening a running session whose agent is waiting on `ask_user`
+    /// presents the form only after the transcript's first ready frame. Sending
+    /// the answers must leave that mounted transcript alone: no second opening
+    /// attempt, no hidden-then-revealed transcript (the reported flicker and
+    /// reload), the same rows, and the newest reply visible at the tail. The
+    /// hosted lifecycle element is a monotonic per-route counter, so a transient
+    /// reopen cannot slip between two polls.
+    @MainActor
+    func testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(
+            waitForHittable(app.buttons["dashboard.menu"], timeout: 90),
+            "the invitation link and setup did not reach the dashboard: \(app.debugDescription)"
+        )
+        createSession(app, inWorkspace: fixture.workspace)
+
+        // The fixture model answers this marker with an ask_user call and waits.
+        let composer = app.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60), app.debugDescription)
+        composer.tap()
+        composer.typeText("Fixture ask journey: ask me where to deploy.")
+        let send = app.buttons["Send message"]
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), "the composer never accepted the prompt: \(app.debugDescription)")
+        send.tap()
+        let submit = app.buttons["Submit all answers"]
+        XCTAssertTrue(submit.waitForExistence(timeout: 90),
+                      "the running agent's ask_user form never appeared: \(app.debugDescription)")
+        // Leave the question pending and the agent running, then open the
+        // running session again the way the user does: from the dashboard.
+        app.buttons["Close form and keep answers"].tap()
+        XCTAssertTrue(waitForAbsence(submit, timeout: 30), app.debugDescription)
+        app.buttons["Back"].tap()
+        let sessionRow = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")
+        ).firstMatch
+        XCTAssertTrue(waitForHittable(sessionRow, timeout: 60), app.debugDescription)
+        sessionRow.tap()
+        XCTAssertTrue(submit.waitForExistence(timeout: 90),
+                      "the reopened running session did not present its pending form: \(app.debugDescription)")
+
+        let lifecycle = app.descendants(matching: .any)["chat.hosted.presentation-lifecycle"]
+        XCTAssertTrue(lifecycle.waitForExistence(timeout: 30), app.debugDescription)
+        let openedLifecycle = lifecycle.value as? String
+        XCTAssertEqual(openedLifecycle, "attempts=1 ready-exits=0",
+                       "the reopened route must reach ready in one opening before the form covers it")
+        let prompt = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fixture ask journey")).firstMatch
+        XCTAssertTrue(prompt.exists, "the reopened transcript does not show the prompt: \(app.debugDescription)")
+        keepScreenshot(app, name: "935-reopened-running-session-ask-user-form")
+
+        app.buttons["Staging"].tap()
+        XCTAssertTrue(waitForEnabled(submit, timeout: 30), "the form never admitted the answer: \(app.debugDescription)")
+        submit.tap()
+        XCTAssertTrue(waitForAbsence(submit, timeout: 60), "the answered form did not dismiss: \(app.debugDescription)")
+        let reply = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Ask journey answered")
+        ).firstMatch
+        XCTAssertTrue(reply.waitForExistence(timeout: 90),
+                      "the agent's reply to the answer never reached the transcript: \(app.debugDescription)")
+        // Still pinned to the newest content, without any user scroll.
+        XCTAssertTrue(waitForHittable(reply, timeout: 30),
+                      "the transcript left the tail after the answer: \(app.debugDescription)")
+        keepScreenshot(app, name: "935-answered-ask-user-transcript-mounted")
+        XCTAssertEqual(lifecycle.value as? String, openedLifecycle,
+                       "answering the form reopened or re-revealed the mounted transcript")
+        XCTAssertTrue(prompt.exists, "answering the form dropped the earlier transcript rows")
+        XCTAssertFalse(app.otherElements["Opening conversation"].exists)
+    }
+
     @MainActor
     func testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs() throws {
         continueAfterFailure = false
@@ -1273,6 +1346,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             object: app
         )
         return XCTWaiter().wait(for: [foreground], timeout: timeout) == .completed
+    }
+
+    private func waitForAbsence(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let absent = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
+        return XCTWaiter().wait(for: [absent], timeout: timeout) == .completed
     }
 
     private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
