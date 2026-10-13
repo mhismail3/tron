@@ -17,6 +17,7 @@ final class ChatComposerHeightLedger {
 struct ChatComposerAccessoryLayoutIdentity: Equatable {
     let attachmentIDs: [String]
     let selectedResourceID: String?
+    let annotationIDs: [String]
     let resourcePickerKind: ComposerResourceEntry.Kind?
     let resourceResultIDs: [String]
 }
