@@ -118,6 +118,7 @@ targets:
         Development:
           INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.tron.mobile.beta
         Test:
+          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.testhost.watchkitapp
           INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.tron.mobile.testhost
         LocalDevice:
           INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.tron.mobile
@@ -215,6 +216,7 @@ targets:
         createIntermediateGroups: true
         optional: true
       - path: WatchApp/WatchRecordingStore.swift
+      - path: Tests/Support/WatchRecordingConnectivityTestDouble.swift
       - path: ../protocol-fixtures
         type: folder
         buildPhase: resources

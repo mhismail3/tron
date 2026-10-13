@@ -1,4 +1,3 @@
-import AVFoundation
 import CryptoKit
 import Foundation
 import XCTest
@@ -77,20 +76,17 @@ final class WatchRecordingStoreTests: XCTestCase {
         try await store.begin(id: id, startedAt: Date())
         let url = store.segmentURL(recordingID: id, number: 1)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        do {
-            let format = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48_000, channels: 1, interleaved: true))
-            let file = try AVAudioFile(forWriting: url, settings: format.settings)
-            let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4_800))
-            buffer.frameLength = 4_800
-            try file.write(from: buffer)
-        }
+        let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/Resources/Sounds/tron-notification.caf")
+        try FileManager.default.copyItem(at: fixtureURL, to: url)
         try await store.recoverUnadmittedSegments(recordingID: id)
         try await store.finish(recordingID: id, stoppedAt: Date(), recovered: true)
         let inventory = try await store.inventory()
         let manifest = try XCTUnwrap(inventory.first)
         XCTAssertEqual(manifest.segments.map(\.segment), [1])
-        XCTAssertEqual(manifest.segments[0].frameCount, 4_800)
-        XCTAssertEqual(manifest.segments[0].durationMilliseconds, 100)
+        XCTAssertEqual(manifest.segments[0].frameCount, 64_512)
+        XCTAssertEqual(manifest.segments[0].durationMilliseconds, 1_462)
         XCTAssertEqual(manifest.recoveryStatus, "interrupted")
     }
 

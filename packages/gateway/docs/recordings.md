@@ -93,10 +93,13 @@ finalize recovered captures distinctly. Do not forward credentials to the Watch.
 
 ## Current milestone boundaries
 
-This implementation supplies authenticated Gateway ingestion, device and
-machine binding, stream/hash/size bounds, per-recording serialization,
-immutable segment admissions, disk-floor admission, receipt/status paging, and
-normal/recovered exact finalization. It does not establish iOS background upload,
-WatchConnectivity custody, capture quality, retention deletion, backup, or
-physical-device reliability. Those remain later milestones and physical hardware
-qualification is mandatory before release.
+The Gateway owns authenticated ingestion, device and machine binding,
+stream/hash/size bounds, per-recording serialization, immutable segment
+admissions, disk-floor admission, receipt/status paging, and normal/recovered
+exact finalization. Native sources now provide Watch capture/WatchConnectivity
+custody and iPhone background URLSession delivery with verified receipt relay;
+focused simulator checks cover their local state and validation seams. These
+checks are not physical qualification. Recording routes are present only after
+the matching source-built Mac payload is manually activated, even though this
+feature does not change the shared Gateway protocol version. Preserve source
+media and require physical Watch → iPhone → Mac receipt testing before release.
