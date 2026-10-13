@@ -129,6 +129,16 @@ private actor ReadonlyAttachmentGateway {
             var artifact = display["artifact"] as! [String: Any]
             artifact["kind"] = "text"; artifact["name"] = "readonly.txt"; artifact["mimeType"] = "text/plain"
             display["artifact"] = artifact; rows[1]["display"] = display
+        } else if let swiftFile = HostedSwiftAppFixtureSource.file(for: scenario) {
+            // A displayed single-file SwiftUI app for the #889 run journeys.
+            var display = rows[1]["display"] as! [String: Any]
+            display["kind"] = "code"; display["title"] = swiftFile.name
+            display["altText"] = "\(swiftFile.name), a single-file SwiftUI app"
+            display["eligibleSurfaces"] = ["sheet", "inline"]
+            display["presentation"] = ["requestedSurface": "sheet", "inlineTapAction": "sheet"]
+            var artifact = display["artifact"] as! [String: Any]
+            artifact["kind"] = "code"; artifact["name"] = swiftFile.name; artifact["mimeType"] = "text/plain; charset=utf-8"
+            display["artifact"] = artifact; rows[1]["display"] = display
         } else if scenario.contains("display-video") {
             var display = rows[1]["display"] as! [String: Any]
             display["kind"] = "video"
@@ -145,7 +155,8 @@ private actor ReadonlyAttachmentGateway {
         }
         image = Self.image(height: 320)
         poison = Self.image(height: 640)
-        file = Data((0..<300).map { "Readonly fixture row \($0): preserved native selection and viewport." }.joined(separator: "\n").utf8)
+        file = HostedSwiftAppFixtureSource.file(for: scenario).map { Data($0.source.utf8) }
+            ?? Data((0..<300).map { "Readonly fixture row \($0): preserved native selection and viewport." }.joined(separator: "\n").utf8)
     }
     @MainActor private static func image(height: Int) -> Data {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
@@ -239,7 +250,7 @@ private actor ReadonlyAttachmentGateway {
     }
     func fetch(_ identity: ChatMediaIdentity) async -> ChatMediaPayload {
         fetches += 1
-        let isFile = identity.blobID == "readonly-file" || scenario.contains("display-file")
+        let isFile = identity.blobID == "readonly-file" || scenario.contains("display-file") || scenario.contains("display-swift")
         if isFile { fileFetches += 1 } else { imageFetches += 1 }
         publish()
         let holdsThisPayload = isFile ? scenario.contains("file-held") && fileFetches == 2 : scenario.contains("held") && imageFetches == 2

@@ -228,6 +228,7 @@ struct AttachmentFilePreviewSheet: View {
     @State private var phase: Phase = .loading
     @State private var loadGeneration = 0
     @State private var loadedSourceID: String?
+    @State private var swiftApp: SwiftAppLaunch?
 
     private enum Phase {
         case loading
@@ -236,7 +237,8 @@ struct AttachmentFilePreviewSheet: View {
     }
 
     var body: some View {
-        TronDocumentSheet(title: title ?? name) { content }
+        TronDocumentSheet(title: title ?? name, leadingAction: runAction) { content }
+        .sheet(item: $swiftApp) { launch in SwiftAppRunnerSheet(launch: launch) }
         .task(id: PresentationActivityTaskID(
             source: "\(source.loadID)-\(model.knowledgePresentationIdentity)-ready:\(model.connectionState == .connected)",
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -246,6 +248,17 @@ struct AttachmentFilePreviewSheet: View {
                model.chatMediaDestinationIdentity(blobID: identity.blobID, sessionID: identity.sessionID) != identity { dismiss() }
         }
         .onDisappear { cancelRemoteLoad() }
+    }
+
+    /// Experimental: a displayed `.swift` file can run as an interpreted app (#889).
+    private var runAction: TronDocumentSheetAction? {
+        guard SwiftAppExperiment.canRun(fileNamed: name),
+              case .prepared(let preview) = phase,
+              case .code(let source) = preview.content,
+              !preview.isTruncated else { return nil }
+        return TronDocumentSheetAction(systemImage: "play.fill", accessibilityLabel: "Run \(name)") {
+            swiftApp = SwiftAppLaunch(name: name, source: source)
+        }
     }
 
     @ViewBuilder

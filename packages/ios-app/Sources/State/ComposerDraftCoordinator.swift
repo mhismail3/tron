@@ -244,6 +244,10 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
     /// User-visible text. Skill transport metadata is deliberately separate so
     /// optimistic, queued, and canonical presentation never expose `/skill:`.
     let outgoingText: String
+    /// The typed message without staged annotations; a rejected submission
+    /// restores this and `annotations` separately, never the composed envelope.
+    let draftText: String
+    let annotations: [ChatAnnotation]
     let resourceInvocation: ComposerResourceInvocation?
     let attachmentIDs: [String]
     let behavior: String?
@@ -254,6 +258,8 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         target: SessionPresentationIdentity,
         textRevision: Int,
         outgoingText: String,
+        draftText: String? = nil,
+        annotations: [ChatAnnotation] = [],
         resourceInvocation: ComposerResourceInvocation? = nil,
         attachmentIDs: [String],
         behavior: String?,
@@ -265,6 +271,8 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         self.textRevision = textRevision
         self.localNonce = localNonce
         self.outgoingText = outgoingText
+        self.draftText = draftText ?? outgoingText
+        self.annotations = annotations
         self.resourceInvocation = resourceInvocation
         self.attachmentIDs = attachmentIDs
         self.behavior = behavior
@@ -469,6 +477,9 @@ final class ComposerDraftCoordinator {
 
     private var drafts: [ComposerDraftScope: Draft] = [:]
     private var selectedResourceByScope: [ComposerDraftScope: CommandInfo] = [:]
+    /// Staged quote+comment annotations. Like the selected resource they are
+    /// presentation-lifetime draft state, not persisted with the text draft.
+    private var annotationsByScope: [ComposerDraftScope: [ChatAnnotation]] = [:]
     private var resourceMutationRevisionByScope: [ComposerDraftScope: Int] = [:]
     private var preparedOpenBySession: [String: PreparedOpen] = [:]
     private var lease: PresentationLease?
@@ -580,6 +591,26 @@ final class ComposerDraftCoordinator {
 
     func selectedResource(for scope: ComposerDraftScope) -> CommandInfo? {
         selectedResourceByScope[scope]
+    }
+
+    func annotations(for scope: ComposerDraftScope) -> [ChatAnnotation] {
+        annotationsByScope[scope] ?? []
+    }
+
+    func addAnnotation(_ annotation: ChatAnnotation, for scope: ComposerDraftScope) {
+        guard !annotation.quote.isEmpty else { return }
+        annotationsByScope[scope, default: []].append(annotation)
+        touch(scope, installing: nil)
+    }
+
+    func updateAnnotation(id: String, comment: String, for scope: ComposerDraftScope) {
+        guard let index = annotationsByScope[scope]?.firstIndex(where: { $0.id == id }) else { return }
+        annotationsByScope[scope]?[index].comment = comment
+    }
+
+    func removeAnnotation(id: String, for scope: ComposerDraftScope) {
+        annotationsByScope[scope]?.removeAll { $0.id == id }
+        if annotationsByScope[scope]?.isEmpty == true { annotationsByScope[scope] = nil }
     }
 
     func selectResource(_ command: CommandInfo, for scope: ComposerDraftScope) {
@@ -1575,6 +1606,7 @@ final class ComposerDraftCoordinator {
         restoreTasks[scope]?.cancel()
         restoreTasks[scope] = nil
         selectedResourceByScope[scope] = nil
+        annotationsByScope[scope] = nil
         resourceMutationRevisionByScope[scope] = nil
         preparedOpenBySession[sessionID] = nil
         submissionByScope[scope] = nil
@@ -1603,6 +1635,7 @@ final class ComposerDraftCoordinator {
         }
         restoreTasks = restoreTasks.filter { $0.key.profileID != profileID }
         selectedResourceByScope = selectedResourceByScope.filter { $0.key.profileID != profileID }
+        annotationsByScope = annotationsByScope.filter { $0.key.profileID != profileID }
         resourceMutationRevisionByScope = resourceMutationRevisionByScope.filter { $0.key.profileID != profileID }
         preparedOpenBySession = preparedOpenBySession.filter { $0.value.scope.profileID != profileID }
         submissionByScope = submissionByScope.filter { $0.key.profileID != profileID }
@@ -1933,7 +1966,17 @@ final class ComposerDraftCoordinator {
         let rawOutgoing = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachmentsByScope[scope] ?? []
         let submittedResource = selectedResourceByScope[scope]
-        let selectedResource = resourceInvocation ?? submittedResource.map {
+        let submittedAnnotations = annotationsByScope[scope] ?? []
+        // A manually typed leading invocation is normalized at the ChatView
+        // boundary. Its arguments become the sole visible/executed prompt text.
+        let draftOutgoing = resourceInvocation?.arguments ?? rawOutgoing
+        // Annotations travel as prompt text ahead of the message (and of a
+        // resource's arguments), so the model and canonical transcript see
+        // exactly what was sent.
+        let outgoing = ChatAnnotationEnvelope.compose(annotations: submittedAnnotations, body: draftOutgoing)
+        let selectedResource = resourceInvocation.map {
+            ComposerResourceInvocation(source: $0.source, name: $0.name, arguments: outgoing)
+        } ?? submittedResource.map {
             let source: ComposerResourceInvocation.Source = switch $0.source {
             case .skill: .skill
             case .prompt: .prompt
@@ -1944,12 +1987,9 @@ final class ComposerDraftCoordinator {
                 name: source == .skill && $0.name.hasPrefix("skill:")
                     ? String($0.name.dropFirst("skill:".count))
                     : $0.name,
-                arguments: rawOutgoing
+                arguments: outgoing
             )
         }
-        // A manually typed leading invocation is normalized at the ChatView
-        // boundary. Its arguments become the sole visible/executed prompt text.
-        let outgoing = resourceInvocation?.arguments ?? rawOutgoing
         if let selectedResource, !selectedResource.isTransportValid {
             throw GatewayFailure(
                 code: "invalid_request",
@@ -1967,6 +2007,14 @@ final class ComposerDraftCoordinator {
             )
         }
         let attachmentIDs = submittedAttachments.compactMap(\.gatewayUploadID)
+        if selectedResource?.isExtensionCommand == true, !submittedAnnotations.isEmpty {
+            throw GatewayFailure(
+                code: "command_annotations_unsupported",
+                message: "Extension commands cannot include annotations.",
+                retryable: false,
+                details: nil
+            )
+        }
         if selectedResource?.isExtensionCommand == true, !attachmentIDs.isEmpty {
             throw GatewayFailure(
                 code: "command_attachments_unsupported",
@@ -1995,6 +2043,8 @@ final class ComposerDraftCoordinator {
             target: target,
             textRevision: draft.revision,
             outgoingText: outgoing,
+            draftText: draftOutgoing,
+            annotations: submittedAnnotations,
             resourceInvocation: selectedResource,
             attachmentIDs: attachmentIDs,
             behavior: behavior,
@@ -2028,6 +2078,7 @@ final class ComposerDraftCoordinator {
         submissionByScope[scope] = admission
         setText("", for: scope)
         selectedResourceByScope[scope] = nil
+        annotationsByScope[scope] = nil
         return admission
     }
 
@@ -2059,11 +2110,12 @@ final class ComposerDraftCoordinator {
         let current = text(for: scope)
         setText(
             ComposerDraftTextPolicy.restoredDraft(
-                outgoing: currentAdmission.snapshot.outgoingText,
+                outgoing: currentAdmission.snapshot.draftText,
                 currentDraft: current
             ),
             for: scope
         )
+        restoreAnnotations(currentAdmission.snapshot.annotations, for: scope)
         if let mounted = lease, mounted.scope == scope {
             attachmentsByScope[scope] = Self.restoredAttachments(
                 captured: currentAdmission.submittedAttachments,
@@ -2084,6 +2136,15 @@ final class ComposerDraftCoordinator {
             rejected.transportState = .rejected
             submissionByScope[scope] = rejected
         }
+    }
+
+    /// Captured annotations return ahead of any staged since the submission;
+    /// one already present again is not duplicated.
+    private func restoreAnnotations(_ captured: [ChatAnnotation], for scope: ComposerDraftScope) {
+        guard !captured.isEmpty else { return }
+        let current = annotationsByScope[scope] ?? []
+        let currentIDs = Set(current.map(\.id))
+        annotationsByScope[scope] = captured.filter { !currentIDs.contains($0.id) } + current
     }
 
     private func restoreRejectedSubmissionIfNeeded(
@@ -2274,11 +2335,12 @@ final class ComposerDraftCoordinator {
         guard let scope = scope(for: target) else { return }
         setText(
             ComposerDraftTextPolicy.restoredDraft(
-                outgoing: handoff.snapshot.outgoingText,
+                outgoing: handoff.snapshot.draftText,
                 currentDraft: text(for: scope)
             ),
             for: scope
         )
+        restoreAnnotations(handoff.snapshot.annotations, for: scope)
         attachmentsByScope[scope] = Self.restoredAttachments(
             captured: handoff.submittedAttachments,
             current: attachmentsByScope[scope] ?? [],
@@ -2444,6 +2506,7 @@ final class ComposerDraftCoordinator {
             dirtyScopes.remove(scope)
             enqueuePersistence { store in await store.remove(scope) }
             selectedResourceByScope[scope] = nil
+            annotationsByScope[scope] = nil
             resourceMutationRevisionByScope[scope] = nil
             settledQueueHandoffs[scope] = nil
             // Safe bounded eviction may retire an accepted presentation-only

@@ -1083,6 +1083,29 @@ owning scrolling. Only extension command source has a local excerpt limit: 480 c
 whichever is reached first. Short extension content remains complete. A muted-gray footer appears only when
 content was actually omitted locally or by the Gateway. The 96-KiB transport admission, invocation identity,
 canonical resource, and loaded byte-count facts are unchanged.
+
+**Quote annotations (#899).** A completed assistant text block in the transcript renders through
+`ChatSelectableInlineText`, a non-editable TextKit 2 `UITextView` with the same typography, link
+tint, and wrapping as the SwiftUI text it replaces. This gives native range selection with drag
+handles, which SwiftUI `Text` lacks on iOS 26. Streaming text and every other Markdown surface keep
+the SwiftUI reveal renderer. The transcript row opts in through the `chatAnnotationSource`
+environment, so sheets and previews are unchanged. The edit menu puts **Annotate** first.
+`ChatAnnotationPresenter` (owned by `ChatView`, bound to the current `ComposerDraftScope`) holds
+only the open floating bubble. That bubble sits in the transcript's usable region above the composer
+and keyboard, and it follows the selection by the region's bottom-edge shift. Staged annotations
+belong to `ComposerDraftCoordinator` alongside the selected resource: presentation-lifetime, not
+persisted, cleared at admission, and restored with the draft on definitive rejection. They render
+as `ComposerAnnotationChip`s on the shared `ComposerStagedChip` (also behind `ComposerResourceChip`)
+in the one staged-chip strip, and each opens `ChatAnnotationSheet` (quote in the Markdown
+`ChatQuoteBlock` style plus an editable comment, with the queued-message editor's toolbar). Staged
+ranges get a subtle amber highlight. On send, `ChatAnnotationEnvelope` composes
+`<annotation>` blocks (a Markdown blockquote of the selected text, a blank line, then the comment)
+ahead of the typed message or resource arguments. This text is exactly what the model receives and
+what the canonical user message stores; there is no Gateway field. User, pending, outgoing, and
+queued prompt rows parse that envelope back into read-only `ChatSentAnnotationChip`s above the
+bubble, and text that does not parse exactly is shown unchanged. Extension commands refuse
+annotations, as they refuse attachments. `TronChatAnnotationUITests` owns the
+select → annotate → chip → edit → send journey and the shared-chip assertions.
 surface.
 Unsent attachment bytes and metadata belong to draft scope. Prepared previews, concurrent upload admissions, editor requests, and canonical presentation handoffs remain exact-presentation scoped; the one bounded pre-canonical queue recovery handoff is keyed by `ComposerDraftScope`, while admitted submission transport is keyed by that scope plus lifecycle generation. Its original presentation target is origin metadata only: route revocation/remount projects the same sending or accepted lifecycle and never resends it. Exact canonical/queue settlement, definitive rejection, lifecycle/profile/session retirement, or bounded safe eviction retires that owner. Revocation cancels upload work and discards disposable Gateway upload IDs without erasing the scoped strip. Fresh photo and file selection installs one stable local chip and its bounded exact bytes before starting HTTP; Gateway upload identity is a disposable field on that chip, never SwiftUI or draft identity. Capacity, network, cancellation, and unknown transport failure therefore leave one upload-required chip rather than losing or duplicating user input. A newly admitted mount restores chips only for that exact profile/session target, rebuilds bounded thumbnails through the existing off-main preparation seam, and reacquires every Gateway upload ID before enabling submission. Restore never auto-sends; transient re-upload failure retains the payload and chip for a later mount/retry. Definitive rejection merges by stable chip ID, preferring the remount's current fresh/missing upload representation; a captured chip absent after route replacement becomes upload-required rather than reusing its stale Gateway ID. In-flight bytes remain recoverable through a definitive rejection, while transport acceptance or authoritative queue/canonical settlement removes the captured submission from the durable draft without disturbing newer edits. Until canonical delivery, one bounded local queue handoff retains enough accepted input to restore explicit user review if the authoritative runtime generation is replaced; it never replays transport automatically. The system photo picker and its import loop share the draft's 10-item selection ceiling. Completed plus active uploads are still admitted against one 10-item/25 MiB draft budget before network work; selecting photos does not bypass capacity already occupied by files or other attachments. Each image chip uses
 an orientation-correct 192-pixel PNG preview with 1 MiB decoded/encoded ceilings, so normal composer rendering
