@@ -47,6 +47,12 @@ struct HostedSessionConfigurationFixture: View {
     var body: some View {
         NavigationStack {
             if ready {
+                // A running chat whose Gateway keeps rebaselining (full session
+                // snapshots, as tool boundaries publish) while Manage Session is open.
+                Button("Manage running session") {
+                    presented = true
+                    Task { await socket.streamRunningRebaselines() }
+                }
                 Button("Stop session") {
                     Task {
                         await model.abort(sessionID: snapshot.sessionId)
@@ -313,6 +319,22 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             "result": fixtureSettingsChangeResult(key: "model.thinking[role=chat]", revision: pendingThinking.revision)]))
         return true
     }
+    /// Running, still locked, with only usage moving: each frame is a full
+    /// `session.snapshot`, as the Gateway sends at tool boundaries.
+    func streamRunningRebaselines() async {
+        for step in 1...40 {
+            guard !closed else { return }
+            snapshot.eventSequence += 1
+            snapshot.revision += 1
+            snapshot.stats = SessionStats(userMessages: 1, assistantMessages: step, toolCalls: step, toolResults: step,
+                totalMessages: 1 + 2 * step, tokens: .init(input: step * 1_000, output: step * 100, cacheRead: 0, cacheWrite: 0,
+                total: step * 1_100), latestCacheHitRate: nil, cost: 0)
+            try? enqueue(.object(["type": .string("event"), "topic": .string("session.snapshot"),
+                "sessionId": .string(snapshot.sessionId), "payload": (try? JSONValue.encode(snapshot)) ?? .null]))
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
     private func enqueue(_ frame: JSONValue) throws {
         let data = try JSONEncoder.gateway.encode(frame)
         if let receiver { self.receiver = nil; receiver.resume(returning: data) }

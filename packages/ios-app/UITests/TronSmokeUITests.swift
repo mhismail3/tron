@@ -1492,6 +1492,27 @@ final class TronSmokeUITests: XCTestCase {
         configurationFeedbackJourney(appearance: "dark")
     }
 
+    /// A running chat's Manage Session stays locked while the Gateway rebaselines
+    /// it: the lock and the disabled Thinking control never blink.
+    @MainActor
+    func testRunningConfigurationLockHoldsAcrossRebaselines() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Manage running session"].waitForExistence(timeout: 5))
+        app.buttons["Manage running session"].tap()
+        let thinking = app.buttons["thinking-level-control"]
+        let lock = app.buttons["Why configuration is unavailable"]
+        XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
+        var samples: [String] = []
+        for _ in 0..<30 {
+            samples.append("\(lock.exists ? "L" : "-")\(thinking.exists ? (thinking.isEnabled ? "E" : "D") : "?")")
+        }
+        XCTAssertEqual(Set(samples), ["LD"], "Lock/Thinking across rebaselines: \(samples.joined(separator: " "))")
+    }
+
     @MainActor
     private func configurationFeedbackJourney(appearance: String) {
         continueAfterFailure = false

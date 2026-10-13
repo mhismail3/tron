@@ -239,7 +239,11 @@ struct SettingsRendererRow: View {
             }
         case .catalog:
             TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
-                SettingsCatalogPicker(setting: setting, target: target, title: title) { onChange($0) }
+                if presentation?.optionsSource?.name == "catalog.models" {
+                    SettingsModelPicker(setting: setting, target: target, title: title) { onChange($0) }
+                } else {
+                    SettingsCatalogPicker(setting: setting, target: target, title: title) { onChange($0) }
+                }
             }
         case .readOnly:
             readOnlyRow
@@ -330,6 +334,44 @@ struct SettingsRendererRow: View {
     }
 }
 
+/// A model key (`catalog.models`) uses the app's one model picker over the
+/// configured providers' catalog, like every other model choice in the app.
+/// Choosing sends the model reference through the row's change owner.
+private struct SettingsModelPicker: View {
+    let setting: ResolvedSetting
+    let target: JSONValue
+    let title: String
+    let onChoose: (JSONValue) -> Void
+    @Environment(AppModel.self) private var model
+
+    private var catalogTarget: ProviderCatalogTarget {
+        if target.objectValue?["kind"]?.stringValue == "session", let id = target.objectValue?["sessionId"]?.stringValue {
+            return .session(id: id)
+        }
+        return .global
+    }
+
+    private var selection: Binding<ModelRef?> {
+        Binding(
+            get: {
+                guard let value = setting.value?.objectValue, let provider = value["provider"]?.stringValue,
+                      let id = value["id"]?.stringValue else { return nil }
+                return ModelRef(provider: provider, id: id)
+            },
+            set: { ref in
+                guard let ref else { return }
+                onChoose(.object(["provider": .string(ref.provider), "id": .string(ref.id)]))
+            }
+        )
+    }
+
+    var body: some View {
+        ModelPicker(selection: selection, models: model.providerCatalog(for: catalogTarget)?.models.filter(\.available) ?? [])
+            .tronNavigationTitle(title)
+            .task { try? await model.refreshModelCatalog(target: catalogTarget, force: false) }
+    }
+}
+
 /// A text value committed when editing ends; the Gateway validates it.
 private struct SettingsRendererTextRow: View {
     let title: String
@@ -407,9 +449,7 @@ private struct SettingsCatalogPicker: View {
         ScrollView(.vertical) {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if let options, displayedSource == source {
-                    // Only choices this account can use (a model catalog lists every
-                    // provider's models); the current value stays visible even if not.
-                    ForEach(options.filter { $0.disabledReason == nil || $0.value == setting.value }) { option in
+                    ForEach(options) { option in
                         TronCatalogOptionRow(
                             title: option.label, summary: option.disabledReason, detail: option.detail,
                             icon: "square.stack.3d.up", isSelected: option.value == setting.value,
@@ -421,7 +461,7 @@ private struct SettingsCatalogPicker: View {
                         }
                         .accessibilityIdentifier("settings-option-\(option.label)")
                     }
-                    if !options.contains(where: { $0.disabledReason == nil || $0.value == setting.value }) {
+                    if options.isEmpty {
                         TronSettingsCaption(query.isEmpty ? "No available options" : "No options match this search")
                     }
                     if let nextCursor {
