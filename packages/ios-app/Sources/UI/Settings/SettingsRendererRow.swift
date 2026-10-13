@@ -340,12 +340,16 @@ private struct SettingsModelPicker: View {
             if let models, models.isEmpty {
                 TronPlaceholderState(title: "No Models", detail: "No available model can be used here.", icon: "cpu")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let models {
+                ModelPicker(selection: selection, models: models)
             } else {
-                ModelPicker(selection: selection, models: models ?? [])
+                TronLoadingState(label: "Loading models…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
             .tronNavigationTitle(title)
-            .task { try? await model.refreshModelCatalog(target: catalogTarget, force: false) }
+            // Reads the catalog; it never asks providers to refresh their model lists.
+            .task { await model.refreshProviders(target: catalogTarget) }
             .task { await readServedPages() }
     }
 
