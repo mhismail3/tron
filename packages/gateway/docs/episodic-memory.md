@@ -470,7 +470,11 @@ report is `test-results/home-activation/report.json`.
   classifier `isRetryableAssistantError` calls retryable) retry after
   `retryMs` (production 10 s, the recipe's `RETRY`) up to `maxRetries`, then the
   node blocks with `retries-exhausted`. A thrown auth or configuration error is
-  classified by that same pinned classifier and blocks at once.
+  classified by that same pinned classifier and blocks at once. A provider's
+  prompt-safety flag ("flagged as potentially violating our usage policy") is
+  intermittent for the same input, so it is transient too (#880): one false
+  positive no longer stops Home, and a flag on every attempt blocks as
+  `retries-exhausted` with the flag in its detail (`home-source.e2e.test.ts`).
 - An **empty reply, a refusal, or any other permanent error** blocks at once
   with `permanent-failure`. A reasoning model can spend its whole output on
   reasoning; that block's detail says so. To make it rare, each call asks a
