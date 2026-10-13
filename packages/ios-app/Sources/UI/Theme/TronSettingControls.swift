@@ -64,6 +64,81 @@ struct TronSelectionRow<Choices: View>: View {
     }
 }
 
+/// One option of a `TronChoiceRow`/`TronChoicePicker`.
+struct TronChoice<ID: Hashable>: Identifiable {
+    let id: ID
+    let label: String
+    var detail: String? = nil
+    var disabledReason: String? = nil
+}
+
+/// The standard single-choice row: the chosen value in a right-aligned capsule
+/// that opens a picker sheet of option rows. Use it instead of a menu; SwiftUI
+/// menus fail to open in a sheet presented from another sheet (#877).
+struct TronChoiceRow<ID: Hashable>: View {
+    let icon: String
+    let title: String
+    var detail: String? = nil
+    let choices: [TronChoice<ID>]
+    let selected: ID?
+    var accent: Color = .tronEmerald
+    let onChoose: (ID) -> Void
+
+    var body: some View {
+        TronSelectionSheetRow(icon: icon, title: title, detail: detail,
+                              value: choices.first { $0.id == selected }?.label ?? "None", accent: accent) {
+            TronChoicePicker(title: title, choices: choices, selected: selected, onChoose: onChoose)
+        }
+    }
+}
+
+/// A picker sheet of standard option rows; long lists get the floating search.
+struct TronChoicePicker<ID: Hashable>: View {
+    let title: String
+    let choices: [TronChoice<ID>]
+    let selected: ID?
+    var optionIdentifierPrefix = "settings-option-"
+    let onChoose: (ID) -> Void
+    @State private var query = ""
+    @Environment(\.dismiss) private var dismiss
+
+    private var shown: [TronChoice<ID>] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return choices }
+        return choices.filter { $0.label.localizedCaseInsensitiveContains(trimmed) || $0.detail?.localizedCaseInsensitiveContains(trimmed) == true }
+    }
+
+    var body: some View {
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(shown) { choice in
+                    TronCatalogOptionRow(title: choice.label, summary: choice.disabledReason, detail: choice.detail,
+                                         icon: "circle", isSelected: choice.id == selected,
+                                         isEnabled: choice.disabledReason == nil) {
+                        onChoose(choice.id)
+                        dismiss()
+                    }
+                    .accessibilityIdentifier(optionIdentifierPrefix + choice.label)
+                }
+                if shown.isEmpty { TronSettingsCaption("No options match this search") }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle(title)
+        .modifier(TronChoiceSearch(enabled: choices.count > 12, query: $query))
+    }
+}
+
+private struct TronChoiceSearch: ViewModifier {
+    let enabled: Bool
+    @Binding var query: String
+    func body(content: Content) -> some View {
+        if enabled { content.tronFloatingSearch(text: $query) } else { content }
+    }
+}
+
 /// The same selected-value row can open a richer picker instead of a menu.
 struct TronSelectionSheetRow<Destination: View>: View {
     let icon: String

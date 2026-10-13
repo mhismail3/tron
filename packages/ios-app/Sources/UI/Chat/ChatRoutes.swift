@@ -26,6 +26,8 @@ struct ChatForkNavigationOwner {
 struct ChatRoutes: ViewModifier {
     let sessionID: String
     let projectCWD: String?
+    /// Home's Settings scopes to Home; an ordinary chat's to the chat and its project.
+    let isHomeRoute: Bool
     let initialHistoryEntryID: String?
     let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     @Binding var showContext: Bool
@@ -88,6 +90,7 @@ struct ChatRoutes: ViewModifier {
                 identity: "chat.\(sessionID).settings"
             ) {
                 SettingsView(
+                    context: isHomeRoute ? .home(sessionID: sessionID) : .chat(sessionID: sessionID, projectCWD: projectCWD),
                     onImported: { route in
                         showSettings = false
                         onForkCreated(route)

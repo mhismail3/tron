@@ -75,6 +75,7 @@ struct HostedAskUserFixtureView: View {
             .modifier(ChatRoutes(
                 sessionID: sessionID,
                 projectCWD: nil,
+                isHomeRoute: false,
                 initialHistoryEntryID: nil,
                 onForkCreated: { _ in },
                 showContext: $showContext,

@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 private enum ManageSessionDestination: String, Identifiable {
-    case settings, agentInstructions, tools, projectResources, history, processHistory, terminal, workspace
+    case agentInstructions, tools, projectResources, history, processHistory, terminal, workspace
     var id: String { rawValue }
 }
 
@@ -231,34 +231,11 @@ struct SessionContextSheet: View {
                                 Task { _ = await model.retryConversationSynchronization(target: target) }
                             }
                         }
-                        if let cwd = displayedPresentation?.cwd, !cwd.isEmpty,
-                           let profileID = model.selectedGatewayProfileID() {
-                            ProjectSettingsLink(cwd: cwd, profileID: profileID)
-                                .tronGlassSurface(accent: .tronEmerald)
-                        }
+                        // Manage Session is this chat's live state and its few direct
+                        // controls. Settings (the gear) owns every scope's settings.
                         SessionContextUsageCard(snapshot: snapshot)
                             .settingsApprovals(.session(sessionID))
-                        SettingsChangesLink(scope: .session(sessionID, projectCWD: displayedPresentation?.cwd),
-                                            subtitle: "This chat and its project's settings changes", onOpenSession: onForkCreated)
-                            .tronGlassSurface(accent: .tronEmerald)
-                        .accessibilityIdentifier("manage-session-changes")
                         modelConfigurationCard(snapshot)
-                        SettingsRendererView(
-                            target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
-                            writeLayer: "chat",
-                            embedded: true,
-                            ownedLayers: ["chat"],
-                            externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"],
-                            projectCWD: displayedPresentation?.cwd,
-                            sectionSupplement: { settingsSectionSupplement($0) }
-                        )
-                        TronGlassCard(accent: .tronEmerald) {
-                            manageRow(icon: "gearshape", title: "Settings",
-                                      subtitle: "Mac defaults, accounts, and this iPhone", accent: .tronEmerald) {
-                                destination = .settings
-                            }
-                            .accessibilityIdentifier("manage-session-settings")
-                        }
                         sessionSection(snapshot)
                         exportSection
                     } else {
@@ -340,9 +317,6 @@ struct SessionContextSheet: View {
             ) { route in
                 Group {
                     switch route {
-                    case .settings:
-                        SettingsView(onImported: onForkCreated)
-                            .environment(\.tronSettingsVisualTheme, nil)
                     case .agentInstructions:
                         AgentInstructionsSheet(sessionID: sessionID)
                     case .tools:
@@ -485,7 +459,14 @@ struct SessionContextSheet: View {
 
     private func modelConfigurationCard(_ snapshot: SessionContextPresentation) -> some View {
         SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot, onError: { surfaceActionError($0) }) {
-            EmptyView()
+            // Compaction is this chat's one context control: the policy toggle
+            // through the shared settings path, then the manual action.
+            manualCompactionRow(snapshot)
+            SettingsRendererView(
+                target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
+                writeLayer: "chat", embedded: true, ownedLayers: ["chat"],
+                projectCWD: snapshot.cwd, presentation: .keys(["context.compaction.enabled"]), dividerBeforeKeys: true
+            )
         }
     }
 
@@ -504,35 +485,6 @@ struct SessionContextSheet: View {
         }
     }
 
-    /// Hand-built rows inside their schema section; nil for a section without any.
-    private func settingsSectionSupplement(_ section: String) -> AnyView? {
-        switch section {
-        case "context":
-            AnyView(VStack(spacing: 0) {
-                if let snapshot = displayedPresentation {
-                    manualCompactionRow(snapshot)
-                    divider()
-                }
-                manageRow(icon: "doc.text.magnifyingglass", title: "Agent Instructions",
-                          subtitle: "Delivered: complete assembled instructions", accent: sessionRowAccent) { destination = .agentInstructions }
-                divider()
-                manageRow(icon: "shippingbox", title: "Project Resources",
-                          subtitle: "Loaded skills, subagents, prompts, and commands", accent: sessionRowAccent) { destination = .projectResources }
-            })
-        case "tools":
-            AnyView(manageRow(icon: "wrench.and.screwdriver", title: "Available Tools",
-                              subtitle: "Loaded tools and this chat's active selection", accent: sessionRowAccent) { destination = .tools })
-        case "run":
-            AnyView(TronProgressiveSheetLink(accessibilityLabel: "Hooks", accent: sessionRowAccent,
-                destination: { HooksSettingsView(projectCWD: displayedPresentation?.cwd) }) {
-                TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks",
-                                subtitle: "Loaded event handlers", accent: sessionRowAccent, subtitleColor: .tronTextSecondary)
-            })
-        default:
-            nil
-        }
-    }
-
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
         TronGlassCard(accent: sessionRowAccent) {
             VStack(spacing: 0) {
@@ -541,6 +493,15 @@ struct SessionContextSheet: View {
                     divider()
                 }
                 gitRow
+                divider()
+                manageRow(icon: "doc.text.magnifyingglass", title: "Agent Instructions",
+                          subtitle: "The complete assembled instructions", accent: sessionRowAccent) { destination = .agentInstructions }
+                divider()
+                manageRow(icon: "wrench.and.screwdriver", title: "Available Tools",
+                          subtitle: "Loaded tools and this chat's active selection", accent: sessionRowAccent) { destination = .tools }
+                divider()
+                manageRow(icon: "shippingbox", title: "Project Resources",
+                          subtitle: "Loaded skills, subagents, prompts, and commands", accent: sessionRowAccent) { destination = .projectResources }
                 divider()
                 manageRow(
                     icon: "point.3.connected.trianglepath.dotted",

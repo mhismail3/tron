@@ -69,7 +69,7 @@ struct SettingsNumberSliderEditor: View {
             }
         ) { actions in
             if continuous {
-                VStack(spacing: 4) {
+                VStack(spacing: SettingsSliderLabelPolicy.gap) {
                     track(actions)
                         .accessibilityAction(named: request.resetLabel ?? "Use default") {
                             guard actions.admitsInput(), let reference = request.referenceValue else { return }
@@ -87,17 +87,21 @@ struct SettingsNumberSliderEditor: View {
                     .font(TronTypography.secondaryCodeDescription.weight(.bold))
                     .foregroundStyle(colorScheme == .dark ? Color.white : Color.tronTextSecondary)
                     .lineLimit(1).minimumScaleFactor(0.6).accessibilityHidden(true)
+                    .padding(.horizontal, SettingsSliderLabelPolicy.inset)
                 }
             } else {
-                track(actions)
-                HStack {
-                    Text(minimum.formatted())
-                    Spacer()
-                    Text(maximumLabel)
+                VStack(spacing: SettingsSliderLabelPolicy.gap) {
+                    track(actions)
+                    HStack {
+                        Text(minimum.formatted())
+                        Spacer()
+                        Text(maximumLabel)
+                    }
+                    .font(TronTypography.secondaryCodeDescription.weight(.bold))
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .padding(.horizontal, SettingsSliderLabelPolicy.inset)
+                    .accessibilityHidden(true)
                 }
-                .font(TronTypography.secondaryCodeDescription.weight(.bold))
-                .foregroundStyle(Color.tronTextSecondary)
-                .accessibilityHidden(true)
             }
         }
     }
@@ -152,6 +156,13 @@ struct SettingsNumberSliderEditor: View {
         let aligned = minimum + Int((Double(bounded - minimum) / Double(step)).rounded()) * step
         return scale.clamp(aligned)
     }
+}
+
+/// Slider end labels sit under the track's ends, near the track rather than at
+/// the container's edges: inset by about the thumb's radius, a small gap below.
+enum SettingsSliderLabelPolicy {
+    static let inset: CGFloat = 18
+    static let gap: CGFloat = 4
 }
 
 struct SettingsNumberSelectionRow: View {

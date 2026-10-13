@@ -659,6 +659,55 @@ struct TronReadOnlyTextView: UIViewRepresentable {
 
 // MARK: - Search and selection controls
 
+extension View {
+    /// The standard sheet search: a round button at the bottom right that opens
+    /// a search field above the keyboard. Closing clears the query.
+    func tronFloatingSearch(text: Binding<String>, prompt: String = "Search", identifier: String? = nil) -> some View {
+        modifier(TronFloatingSearchModifier(text: text, prompt: prompt, identifier: identifier))
+    }
+}
+
+private struct TronFloatingSearchModifier: ViewModifier {
+    @Binding var text: String
+    let prompt: String
+    let identifier: String?
+    @State private var active = false
+    @Environment(\.tronSettingsVisualTheme) private var theme
+
+    func body(content: Content) -> some View {
+        content.safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack {
+                if active {
+                    TronSearchBar(text: $text, prompt: prompt, focusOnAppear: true, onClose: close)
+                        .accessibilityIdentifier(identifier ?? "tron-floating-search")
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                } else {
+                    Spacer()
+                    Button { withAnimation(.snappy) { active = true } } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                            .foregroundStyle(theme?.accent ?? .tronEmerald)
+                            .frame(width: 52, height: 52)
+                            .glassEffect(.regular.tint((theme?.accent ?? .tronEmerald).opacity(0.12)).interactive(), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(prompt)
+                    .accessibilityIdentifier((identifier ?? "tron-floating-search") + "-open")
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+    }
+
+    private func close() {
+        withAnimation(.snappy) {
+            text = ""
+            active = false
+        }
+    }
+}
+
 struct TronSearchBar: View {
     @Binding var text: String
     var prompt = "Search"
@@ -1241,18 +1290,28 @@ struct SettingsBadgeView: View {
     let badge: SettingsBadge
 
     var body: some View {
-        Text(badge.label)
-            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(tint.opacity(0.14)))
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityLabel(badge.detail.map { "\(badge.label), \($0)" } ?? badge.label)
+        TronTag(TronTagModel(badge))
+    }
+}
+
+/// A small tinted label for provenance and state ("Mac", "Changed outside Tron").
+/// The one tag primitive: rows attach tags with `tronSettingsRowTags`.
+struct TronTagModel: Identifiable {
+    let label: String
+    let tint: Color
+    var accessibilityText: String? = nil
+    var id: String { label }
+}
+
+extension TronTagModel {
+    init(_ badge: SettingsBadge) {
+        label = badge.label
+        tint = Self.tint(forKind: badge.kind)
+        accessibilityText = badge.detail.map { "\(badge.label), \($0)" }
     }
 
-    private var tint: Color {
-        switch badge.kind {
+    static func tint(forKind kind: String) -> Color {
+        switch kind {
         case "layer": .tronEmerald
         case "scope": .tronCyan
         case "source": .tronPurple
@@ -1260,6 +1319,42 @@ struct SettingsBadgeView: View {
         case "state": .tronAmber
         default: .tronTextSecondary
         }
+    }
+}
+
+struct TronTag: View {
+    let model: TronTagModel
+    init(_ model: TronTagModel) { self.model = model }
+
+    var body: some View {
+        Text(model.label)
+            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+            .foregroundStyle(model.tint)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(model.tint.opacity(0.14)))
+            .accessibilityLabel(model.accessibilityText ?? model.label)
+    }
+}
+
+private struct TronSettingsRowTagsKey: EnvironmentKey {
+    static let defaultValue: [TronTagModel] = []
+}
+
+extension EnvironmentValues {
+    /// Tags for the nearest `TronSettingsRow`, which shows them beside its title
+    /// and clears them for its trailing control and anything that control presents.
+    var tronSettingsRowTags: [TronTagModel] {
+        get { self[TronSettingsRowTagsKey.self] }
+        set { self[TronSettingsRowTagsKey.self] = newValue }
+    }
+}
+
+extension View {
+    func tronSettingsRowTags(_ tags: [TronTagModel]) -> some View {
+        environment(\.tronSettingsRowTags, tags)
     }
 }
 
@@ -1341,6 +1436,7 @@ struct TronSettingsRow<Trailing: View>: View {
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     @Environment(\.controlSize) private var controlSize
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.tronSettingsRowTags) private var tags
 
     init(
         icon: String?,
@@ -1400,9 +1496,22 @@ struct TronSettingsRow<Trailing: View>: View {
                         }
                         .scrollBounceBehavior(.basedOnSize)
                         .accessibilityLabel(title)
-                    } else {
+                    } else if tags.isEmpty {
                         Text(title).font(titleFont).foregroundStyle(titleColor)
                             .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        // Tags sit on the title's line when they fit, else just below it.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(title).font(titleFont).foregroundStyle(titleColor)
+                                tagList
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(title).font(titleFont).foregroundStyle(titleColor)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                tagList
+                            }
+                        }
                     }
                     if let subtitle {
                         Text(subtitle)
@@ -1415,7 +1524,7 @@ struct TronSettingsRow<Trailing: View>: View {
                 }
                 .padding(.vertical, labelsOwnInsets ? TronSpacing.xl : 0)
                 if !stacksAction { Spacer(minLength: TronSpacing.md) }
-                trailing
+                trailing.environment(\.tronSettingsRowTags, [])
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -1424,6 +1533,12 @@ struct TronSettingsRow<Trailing: View>: View {
         .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+    }
+}
+
+private extension TronSettingsRow {
+    var tagList: some View {
+        HStack(spacing: 4) { ForEach(tags) { TronTag($0) } }
     }
 }
 

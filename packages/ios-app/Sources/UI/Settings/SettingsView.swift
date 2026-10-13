@@ -1,6 +1,16 @@
 import SwiftUI
 
+/// Where Settings was opened from. Settings orders its content from the most
+/// specific scope to the most general: this chat (or Home), its project, then
+/// the Mac defaults every chat inherits, then this iPhone.
+enum SettingsContext: Equatable {
+    case dashboard
+    case chat(sessionID: String, projectCWD: String?)
+    case home(sessionID: String)
+}
+
 struct SettingsView: View {
+    let context: SettingsContext
     let onImported: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -11,20 +21,71 @@ struct SettingsView: View {
     #endif
     @State private var showsNotifications = false
     @State private var hasRefreshedNotificationBadge = false
+    @State private var browsingProjects = false
+    @State private var pickedProject: String?
+    @State private var projectRoute: ProjectSettingsRoute?
 
-    init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
+    init(context: SettingsContext = .dashboard, onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
+        self.context = context
         self.onImported = onImported
+    }
+
+    private var changesScope: SettingsChangesScope {
+        switch context {
+        case .dashboard: .all
+        case .chat(let sessionID, let cwd): .session(sessionID, projectCWD: cwd)
+        case .home(let sessionID): .home(sessionID)
+        }
+    }
+
+    /// This chat's or Home's own settings, then the project's (or the project picker).
+    @ViewBuilder
+    private var scopedSettings: some View {
+        switch context {
+        case .chat(let sessionID, let cwd):
+            SettingsRendererView(
+                target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
+                writeLayer: "chat", embedded: true, ownedLayers: ["chat"],
+                externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"],
+                projectCWD: cwd, presentation: .overrides(scope: "this chat", allTitle: "Chat Settings")
+            )
+            if let cwd, !cwd.isEmpty, let profileID = model.selectedGatewayProfileID() {
+                TronSettingsGroup("Project", accent: .tronEmerald) {
+                    ProjectSettingsLink(cwd: cwd, profileID: profileID)
+                }
+            }
+        case .home(let sessionID):
+            SettingsRendererView(
+                target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
+                writeLayer: nil, embedded: true, ownedLayers: ["chat", "profile"],
+                externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"],
+                presentation: .overrides(scope: "Home", allTitle: "Home Settings")
+            )
+        case .dashboard:
+            TronSettingsGroup("Projects", accent: .tronEmerald) {
+                Button { browsingProjects = true } label: {
+                    TronSettingsRow(icon: "folder.badge.gearshape", title: "Project settings",
+                                    subtitle: "Choose a workspace to see what it sets", subtitleColor: .tronTextSecondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("settings-projects")
+            }
+        }
     }
 
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
-                    SettingsChangesLink(scope: .all, subtitle: "Review agent changes and pending approvals",
+                    SettingsChangesLink(scope: changesScope, subtitle: "What agents changed, and approvals waiting for you",
                                         onOpenSession: onImported)
                         .tronGlassSurface(accent: .tronEmerald)
-                    // Settings owns only Mac defaults. Project and Chat editors
-                    // retain their own targets; opening Settings never changes scope.
+                    scopedSettings
+                    if context != .dashboard {
+                        TronSettingsDetailText("Defaults on this Mac. Everything above takes precedence.")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    // Each renderer keeps its own target; opening Settings never changes scope.
                     SettingsRendererView(
                         target: .object(["kind": .string("mac")]),
                         writeLayer: "mac",
@@ -77,12 +138,24 @@ struct SettingsView: View {
             }
         }
         .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tronManagedSheet(
             isPresented: $showsNotifications,
             identity: "settings.notifications"
         ) {
             NotificationInboxView(onOpenSession: onImported)
+        }
+        // Projects: pick a workspace, then open its settings once the picker is gone.
+        .tronManagedSheet(isPresented: $browsingProjects, identity: "settings.projects", onDismiss: {
+            defer { pickedProject = nil }
+            guard let cwd = pickedProject, let profileID = model.selectedGatewayProfileID() else { return }
+            projectRoute = ProjectSettingsRoute(cwd: cwd, profileID: profileID)
+        }) {
+            WorkspaceBrowser(initialPath: model.defaultWorkspace) { pickedProject = $0 }
+        }
+        .tronManagedSheet(item: $projectRoute, identity: { "settings.project.\($0.id)" }) { route in
+            ProjectSettingsSheet(route: route)
         }
         .task(id: presentationActivity.allowsPresentationPublication) {
             guard presentationActivity.allowsPresentationPublication,
@@ -212,8 +285,8 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let destination: () -> Destination
     let label: Label
     let accent: Color?
-    /// Settings destinations open full height; a destination that publishes
-    /// `TronSheetFitHeightKey` (the model picker) passes `.contentFit`.
+    /// Settings destinations open at medium and expand to large; a destination
+    /// that publishes `TronSheetFitHeightKey` (the model picker) passes `.contentFit`.
     let detents: TronSheetDetentPolicy
     @State private var isPresented = false
     @Environment(\.tronSettingsVisualTheme) private var inheritedTheme
@@ -222,7 +295,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         accessibilityLabel: String,
         identity: String? = nil,
         accent: Color? = nil,
-        detents: TronSheetDetentPolicy = .fixed([.large]),
+        detents: TronSheetDetentPolicy = .fixed([.medium, .large]),
         @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder label: () -> Label
     ) {

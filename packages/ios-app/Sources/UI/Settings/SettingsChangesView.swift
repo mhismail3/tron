@@ -44,6 +44,7 @@ struct SettingsChangesView: View {
     @State private var sectionFilter = ""
     @State private var keyFilter = ""
     @State private var statusFilter = ""
+    @State private var showsFilters = false
     @State private var selected: SelectedChange?
     private struct SelectedChange {
         let entry: SettingsChangeHistoryEntry
@@ -78,7 +79,9 @@ struct SettingsChangesView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    filters
+                    // Changes is the audit of settings that changed without you:
+                    // agents' changes and edits outside Tron, each undoable.
+                    TronSettingsCaption("Settings that agents changed, and edits made outside Tron. Open a change to see it in full or undo it; approvals agents are waiting on appear first.")
                     if loading && entries.isEmpty {
                         TronLoadingState(label: "Loading changes…")
                             .frame(maxWidth: .infinity)
@@ -100,7 +103,7 @@ struct SettingsChangesView: View {
                     ForEach(entries) { entry in
                         historyRow(entry)
                     }
-                    if cursor != nil {
+                    if cursor != nil, !entries.isEmpty {
                         Button { Task { await loadNextPage() } } label: {
                             if loading { TronLoadingState(label: "Loading changes…") }
                             else { Text("Load more") }
@@ -116,6 +119,15 @@ struct SettingsChangesView: View {
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showsFilters = true } label: {
+                        Image(systemName: filtersActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .accessibilityLabel("Filters")
+                    .accessibilityIdentifier("settings-changes-filters")
+                }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Changes") }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
@@ -128,6 +140,27 @@ struct SettingsChangesView: View {
             }
         }
         .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large])
+        .tronManagedSheet(isPresented: $showsFilters, identity: "settings.changes.filters.\(scope.storageKey)") {
+            NavigationStack {
+                ScrollView { filters.padding(18) }
+                    .tronScrollEdgeChrome()
+                    .tronNavigationTitle("Filters")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button { showsFilters = false } label: {
+                                Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(Color.tronEmerald)
+                            }
+                            .accessibilityLabel("Done")
+                        }
+                    }
+            }
+            .tronTopBlur(.sheet)
+            .tronPresentation()
+            .tronSettingsLayout()
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.hidden)
+        }
         .presentationDragIndicator(.hidden)
         .presentationDetents([.medium, .large])
         .tronManagedSheet(isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } }), identity: "settings.changes.detail") {
@@ -176,61 +209,46 @@ struct SettingsChangesView: View {
         "settings.changes.lastLookedAt.\(model.selectedGatewayProfileID() ?? "offline").\(scope.storageKey)"
     }
 
+    private var filtersActive: Bool {
+        actorFilter != "agents" || !layerFilter.isEmpty || !statusFilter.isEmpty || !sectionFilter.isEmpty || !keyFilter.isEmpty
+    }
+
     private var filters: some View {
-        TronSettingsGroup("Filters") {
-            TronSelectionRow(icon: "person.2", title: "Actor", value: actorLabel) {
-                Button("Agents and outside") { actorFilter = "agents" }
-                Button("Everything") { actorFilter = "" }
-                ForEach(["home", "worker", "agent", "outside", "ui"], id: \.self) { actor in
-                    Button(actor == "ui" ? "You" : actor.capitalized) { actorFilter = actor }
-                }
-            }
-            .accessibilityIdentifier("settings-changes-actor")
-            if !actorFilter.isEmpty {
-                Button("Everything") { actorFilter = "" }
-                    .buttonStyle(.plain).padding(.horizontal, 16).padding(.bottom, 10)
-            }
+        TronSettingsGroup("Show") {
+            TronChoiceRow(icon: "person.2", title: "Changed by",
+                          choices: [TronChoice(id: "agents", label: "Agents and outside"), TronChoice(id: "", label: "Everyone")]
+                            + ["home", "worker", "agent", "outside", "ui"].map { TronChoice(id: $0, label: $0 == "ui" ? "You" : $0.capitalized) },
+                          selected: actorFilter) { actorFilter = $0 }
+                .accessibilityIdentifier("settings-changes-actor")
             TronSettingsDivider()
-            TronSelectionRow(icon: "square.3.layers.3d", title: "Layer",
-                             value: layerFilter.isEmpty ? "Any layer" : layerLabel(layerFilter)) {
-                Button("Any layer") { layerFilter = "" }
-                ForEach(["mac", "project", "chat", "profile"], id: \.self) { layer in
-                    Button(layerLabel(layer)) { layerFilter = layer }
-                }
-            }
-            .accessibilityIdentifier("settings-changes-layer")
+            TronChoiceRow(icon: "square.3.layers.3d", title: "Layer",
+                          choices: [TronChoice(id: "", label: "Any layer")]
+                            + ["mac", "project", "chat", "profile"].map { TronChoice(id: $0, label: layerLabel($0)) },
+                          selected: layerFilter) { layerFilter = $0 }
+                .accessibilityIdentifier("settings-changes-layer")
             TronSettingsDivider()
-            TronSelectionRow(icon: "circle", title: "Status",
-                             value: statusFilter.isEmpty ? "Any status" : statusFilter.capitalized) {
-                Button("Any status") { statusFilter = "" }
-                ForEach(["applied", "pending", "approved", "declined", "expired", "superseded", "failed", "outside", "committed"], id: \.self) { status in
-                    Button(status.capitalized) { statusFilter = status }
-                }
-            }
-            .accessibilityIdentifier("settings-changes-status")
+            TronChoiceRow(icon: "circle", title: "Status",
+                          choices: [TronChoice(id: "", label: "Any status")]
+                            + ["applied", "pending", "approved", "declined", "expired", "superseded", "failed", "outside", "committed"]
+                                .map { TronChoice(id: $0, label: $0.capitalized) },
+                          selected: statusFilter) { statusFilter = $0 }
+                .accessibilityIdentifier("settings-changes-status")
             TronSettingsDivider()
-            TronSettingsRow(icon: "square.grid.2x2", title: "Section") {
-                TextField("Any section", text: $sectionFilter)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .font(TronTypography.secondaryCodeDescription)
-                    .accessibilityIdentifier("settings-changes-section")
-            }
+            filterField(icon: "square.grid.2x2", title: "Section", prompt: "Any section", text: $sectionFilter,
+                        identifier: "settings-changes-section")
             TronSettingsDivider()
-            TronSettingsRow(icon: "key", title: "Key") {
-                TextField("Any key", text: $keyFilter)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .font(TronTypography.secondaryCodeDescription)
-                    .accessibilityIdentifier("settings-changes-key")
-            }
+            filterField(icon: "key", title: "Key", prompt: "Any key", text: $keyFilter, identifier: "settings-changes-key")
         }
     }
 
-    private var actorLabel: String {
-        switch actorFilter {
-        case "": "Everything"
-        case "agents": "Agents and outside"
-        case "ui": "You"
-        default: actorFilter.capitalized
+    private func filterField(icon: String, title: String, prompt: String, text: Binding<String>, identifier: String) -> some View {
+        TronSettingsRow(icon: icon, title: title) {
+            TextField(prompt, text: text)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .tronInlineField(monospaced: true)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 160)
+                .accessibilityIdentifier(identifier)
         }
     }
 

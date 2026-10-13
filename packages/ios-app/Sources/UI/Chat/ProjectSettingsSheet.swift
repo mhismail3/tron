@@ -49,6 +49,7 @@ struct ProjectSettingsSheet: View {
         .tronTopBlur(.sheet)
         .tronPresentation()
         .tronSettingsLayout()
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }
 }
@@ -91,22 +92,22 @@ struct ProjectSettingsContent: View {
                         Task { await model.switchGateway(profile) }
                     }
                 } else {
+                    // Every header row is present from the first frame, so loading
+                    // fills values in place instead of inserting rows (no flicker).
                     TronSettingsGroup("Project", detail: cwd, accent: .tronEmerald) {
-                        if let trust {
-                            TronSettingsRow(icon: trust.stateIcon, title: trust.stateTitle, subtitle: trust.stateDetail)
-                        }
-                        if let git {
-                            TronSettingsDivider()
-                            TronValueRow(icon: "arrow.triangle.branch", title: "Workspace",
-                                         value: git.isRepository ? (git.branch ?? "Detached HEAD") : "No repository")
-                            if git.isDirty {
-                                TronSettingsCaption("The workspace has uncommitted changes.")
+                        TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: trust?.stateTitle ?? "Trust",
+                                        subtitle: trust?.stateDetail ?? "Checking…", subtitleColor: .tronTextSecondary) {
+                            TronProgressiveSheetLink(accessibilityLabel: "Review trust", accent: .tronAmber,
+                                destination: { TrustSettingsView(target: TrustTarget(cwd: cwd)) }) {
+                                TronInlineActionLabel("Review", accent: .tronAmber)
                             }
                         }
                         TronSettingsDivider()
-                        TronProgressiveSheetLink(accessibilityLabel: "Review trust", accent: .tronAmber,
-                            destination: { TrustSettingsView(target: TrustTarget(cwd: cwd)) }) {
-                            TronSettingsRow(icon: "checkmark.shield", title: "Review trust", accent: .tronAmber)
+                        TronSettingsRow(icon: "arrow.triangle.branch", title: "Workspace",
+                                        subtitle: git.map { !$0.isRepository ? "Not a Git repository"
+                                            : $0.isDirty ? "Uncommitted changes" : "No uncommitted changes" } ?? "Checking…",
+                                        subtitleColor: .tronTextSecondary) {
+                            TronDynamicValue(text: git.map { $0.isRepository ? ($0.branch ?? "Detached HEAD") : "—" } ?? "")
                         }
                     }
                     if let error {
@@ -114,24 +115,21 @@ struct ProjectSettingsContent: View {
                     }
                     SettingsRendererView(target: .object(["kind": .string("project"), "cwd": .string(cwd)]),
                                          writeLayer: "project", embedded: true, externalControlKeys: ["sources.packages"], projectCWD: cwd,
-                                         sectionSupplement: { section in
-                        switch section {
-                        case "sources":
-                            AnyView(TronProgressiveSheetLink(accessibilityLabel: "Packages", accent: .tronCyan,
-                                destination: { ExtensionsSettingsView(projectCWD: cwd) }) {
-                                TronSettingsRow(icon: "shippingbox", title: "Packages", subtitle: "Installed for this project",
-                                                accent: .tronCyan, subtitleColor: .tronTextSecondary)
-                            })
-                        case "run":
-                            AnyView(TronProgressiveSheetLink(accessibilityLabel: "Hooks", accent: .tronAmber,
-                                destination: { HooksSettingsView(projectCWD: cwd) }) {
-                                TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks", subtitle: "Loaded project event handlers",
-                                                accent: .tronAmber, subtitleColor: .tronTextSecondary)
-                            })
-                        default:
-                            nil
+                                         presentation: .overrides(scope: "this project", allTitle: "Project Settings"))
+                    TronSettingsGroup("Resources", accent: .tronCyan) {
+                        TronProgressiveSheetLink(accessibilityLabel: "Extensions", accent: .tronCyan,
+                            destination: { ExtensionsSettingsView(projectCWD: cwd) }) {
+                            TronSettingsRow(icon: "shippingbox", title: "Extensions", subtitle: "Packages installed for this project",
+                                            accent: .tronCyan, subtitleColor: .tronTextSecondary)
                         }
-                    })
+                        TronSettingsDivider()
+                        TronProgressiveSheetLink(accessibilityLabel: "Hooks", accent: .tronCyan,
+                            destination: { HooksSettingsView(projectCWD: cwd) }) {
+                            TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks", subtitle: "Loaded project event handlers",
+                                            accent: .tronCyan, subtitleColor: .tronTextSecondary)
+                        }
+                    }
+                    .tronSettingsVisualTheme(accent: .tronCyan)
                     TronSettingsCaption("Project values live in this workspace's .pi files. Changes are staged when possible; Tron never commits them.")
                 }
             }

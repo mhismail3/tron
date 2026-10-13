@@ -10,6 +10,9 @@ struct SettingsRendererRow: View {
     let editable: Bool
     /// Sub-sheet rows show source, help and actions; primary rows only title and control.
     var detailed = false
+    /// One of several instances of a key (per project, per model): titled by its
+    /// instance, with the key's label and help on the enclosing group.
+    var instanced = false
     var externalControl = false
     /// Changes when a key this row's options depend on changes, so they are re-requested.
     let dependencyDisplay: String
@@ -28,7 +31,25 @@ struct SettingsRendererRow: View {
     @State private var optionsGeneration = 0
 
     private var presentation: SettingsKeyPresentation? { setting.presentation }
-    private var title: String { presentation?.label ?? setting.key }
+    private var title: String {
+        instanced ? (Self.instanceName(setting) ?? presentation?.label ?? setting.key) : (presentation?.label ?? setting.key)
+    }
+
+    /// An instance's name: its scope ("tron" for a project path), else its qualifiers.
+    static func instanceName(_ setting: ResolvedSetting) -> String? {
+        if let scope = setting.badge("scope")?.label {
+            return scope.hasPrefix("/") ? URL(fileURLWithPath: scope).lastPathComponent : scope
+        }
+        let values = (setting.qualifiers ?? [:]).sorted { $0.key < $1.key }.map(\.value)
+        return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+
+    /// Detailed rows carry their sources as tags beside the title. An instance's
+    /// scope is its title, so it is not repeated as a tag.
+    private var tags: [TronTagModel] {
+        guard detailed else { return [] }
+        return setting.badges.filter { !(instanced && $0.kind == "scope") }.map(TronTagModel.init)
+    }
     private var control: SettingsRowControl {
         editable && !externalControl ? SettingsRowControl(negotiated: presentation?.control) : .readOnly
     }
@@ -40,11 +61,10 @@ struct SettingsRendererRow: View {
         let foreground: Int
     }
 
-    /// Source first ("Mac · openai-codex/gpt-6-astra"), then the key's help, on detailed rows only.
+    /// The key's help and note, on detailed rows only; an instance's help is on its group.
     private var subtitle: String? {
         guard detailed else { return nil }
-        let source = setting.badges.map(\.label).joined(separator: " · ")
-        let lines = [source, presentation?.help ?? "", presentation?.note ?? ""].filter { !$0.isEmpty }
+        let lines = [instanced ? "" : presentation?.help ?? "", presentation?.note ?? ""].filter { !$0.isEmpty }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
@@ -67,7 +87,7 @@ struct SettingsRendererRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            controlRow
+            controlRow.tronSettingsRowTags(tags)
             details
         }
         .accessibilityElement(children: .contain)
@@ -120,18 +140,33 @@ struct SettingsRendererRow: View {
             } else {
                 // A picker sheet, not a Menu: section sub-sheets are presented from
                 // other sheets, where SwiftUI menus fail to open (#877).
-                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
-                    SettingsChoicePicker(title: title, options: choices, selected: setting.value) { onChange($0) }
-                }
+                TronChoiceRow(icon: icon, title: title, detail: subtitle,
+                              choices: choices.map { TronChoice(id: $0.value, label: $0.label, detail: $0.detail,
+                                                                disabledReason: $0.disabledReason) },
+                              selected: setting.value) { onChange($0) }
             }
         case .number:
-            if let range = numberRange, range.supportsIntegerSlider,
-               case .number(let raw) = setting.value, let value = Int(exactly: raw) {
-                SettingsNumberSelectionRow(title: title, value: value, display: setting.display, range: range,
-                                           icon: icon, information: subtitle) {
-                    onChange(.number(Double($0)))
+            if let range = numberRange, range.supportsIntegerSlider {
+                if case .number(let raw) = setting.value, let value = Int(exactly: raw) {
+                    SettingsNumberSelectionRow(title: title, value: value, display: setting.display, range: range,
+                                               icon: icon, information: subtitle) {
+                        onChange(.number(Double($0)))
+                    }
+                    .controlSize(.small)
+                } else if setting.value == nil {
+                    // Unset: the slider still opens. A token limit's unset value is the
+                    // served maximum (the model's capacity), its reference "Default".
+                    let tokens = range.unit == "tokens"
+                    SettingsNumberSelectionRow(title: title, value: Int(tokens ? range.max : range.min), display: setting.display,
+                                               range: range, icon: icon, information: subtitle,
+                                               actionDisplay: setting.display,
+                                               referenceValue: tokens ? Int(range.max) : nil) {
+                        onChange(.number(Double($0)))
+                    }
+                    .controlSize(.small)
+                } else {
+                    readOnlyRow
                 }
-                .controlSize(.small)
             } else {
                 readOnlyRow
             }
@@ -175,11 +210,20 @@ struct SettingsRendererRow: View {
         }
     }
 
-    /// A value this surface shows but does not edit: trailing, like every other value.
+    /// A value this surface shows but does not edit. When another scope owns it,
+    /// the value is a right-aligned link to that scope's editor.
     private var readOnlyRow: some View {
         TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
-            TronDynamicValue(text: setting.display, color: .tronTextSecondary)
-                .textSelection(.enabled)
+            if let layerEditorTitle {
+                Button(action: onEditLayer) { TronInlineActionLabel(setting.display, icon: "arrow.up.forward") }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(layerEditorTitle)
+                    .accessibilityValue(setting.display)
+                    .accessibilityIdentifier("\(settingsRowIdentifier(setting))-edit-layer")
+            } else {
+                TronDynamicValue(text: setting.display, color: .tronTextSecondary)
+                    .textSelection(.enabled)
+            }
         }
     }
 
@@ -192,10 +236,11 @@ struct SettingsRendererRow: View {
         let resets = editable && (control != .readOnly || externalControl)
             ? actions.filter { ["useCurrentDefault", "followDefault"].contains($0.kind) } : []
         let applyAgain = onApplyAgain == nil ? [] : actions.filter { $0.kind == "applyAgain" && $0.changeId != nil }
-        if !resets.isEmpty || !applyAgain.isEmpty || layerEditorTitle != nil || error != nil {
-            VStack(alignment: .leading, spacing: 8) {
-                if !resets.isEmpty || !applyAgain.isEmpty || layerEditorTitle != nil {
+        if !resets.isEmpty || !applyAgain.isEmpty || error != nil {
+            VStack(alignment: .trailing, spacing: 8) {
+                if !resets.isEmpty || !applyAgain.isEmpty {
                     HStack(spacing: 8) {
+                        Spacer(minLength: 0)
                         // Action primitives are served with the source badge. A future
                         // action stays absent, never an arbitrary RPC; reset reuses the
                         // row's dry-run and receipt owner, Apply again the change record.
@@ -209,11 +254,6 @@ struct SettingsRendererRow: View {
                                 .buttonStyle(.plain)
                                 .accessibilityIdentifier("\(settingsRowIdentifier(setting))-applyAgain")
                         }
-                        if let layerEditorTitle {
-                            Button(action: onEditLayer) { TronInlineActionLabel(layerEditorTitle) }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("\(settingsRowIdentifier(setting))-edit-layer")
-                        }
                     }
                 }
                 if let error {
@@ -221,6 +261,7 @@ struct SettingsRendererRow: View {
                         .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronError)
                         .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityIdentifier("\(settingsRowIdentifier(setting))-error")
                 }
             }
@@ -289,36 +330,6 @@ private struct SettingsRendererTextRow: View {
     }
 }
 
-/// A short served choice list in the same option rows as the catalog picker.
-private struct SettingsChoicePicker: View {
-    let title: String
-    let options: [SettingsOption]
-    let selected: JSONValue?
-    let onChoose: (JSONValue) -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                ForEach(options) { option in
-                    TronCatalogOptionRow(
-                        title: option.label, summary: option.disabledReason, detail: option.detail,
-                        icon: "circle", isSelected: option.value == selected, isEnabled: option.disabledReason == nil
-                    ) {
-                        onChoose(option.value)
-                        dismiss()
-                    }
-                    .accessibilityIdentifier("settings-option-\(option.label)")
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-        }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle(title)
-    }
-}
-
 /// A searchable, paged catalog over the Gateway's option source. Presentation
 /// uses the same option row as ModelPicker; values and cursors remain opaque.
 private struct SettingsCatalogPicker: View {
@@ -363,10 +374,10 @@ private struct SettingsCatalogPicker: View {
     var body: some View {
         ScrollView(.vertical) {
             LazyVStack(alignment: .leading, spacing: 8) {
-                TronSearchBar(text: $query, prompt: "Search")
-                    .padding(.bottom, 8)
                 if let options, displayedSource == source {
-                    ForEach(options) { option in
+                    // Only choices this account can use (a model catalog lists every
+                    // provider's models); the current value stays visible even if not.
+                    ForEach(options.filter { $0.disabledReason == nil || $0.value == setting.value }) { option in
                         TronCatalogOptionRow(
                             title: option.label, summary: option.disabledReason, detail: option.detail,
                             icon: "square.stack.3d.up", isSelected: option.value == setting.value,
@@ -378,7 +389,9 @@ private struct SettingsCatalogPicker: View {
                         }
                         .accessibilityIdentifier("settings-option-\(option.label)")
                     }
-                    if options.isEmpty { TronSettingsCaption("No options match this search") }
+                    if !options.contains(where: { $0.disabledReason == nil || $0.value == setting.value }) {
+                        TronSettingsCaption(query.isEmpty ? "No available options" : "No options match this search")
+                    }
                     if let nextCursor {
                         Button { pageCursor = nextCursor } label: {
                             TronInlineActionLabel("Load more", isWorking: loading)
@@ -400,6 +413,7 @@ private struct SettingsCatalogPicker: View {
             .padding(.vertical, 12)
         }
         .tronScrollEdgeChrome()
+        .tronFloatingSearch(text: $query)
         .tronNavigationTitle(title)
         .onChange(of: source) { _, _ in reset() }
         .onChange(of: presentationActivity) { _, _ in reset() }

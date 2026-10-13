@@ -16,8 +16,10 @@ struct SettingsRendererView: View {
     /// retain provenance/reset actions without creating a second value editor.
     var externalControlKeys: Set<String> = []
     var projectCWD: String? = nil
-    /// One section on its own sub-sheet; nil renders every section's overview.
-    var section: String? = nil
+    var presentation: SettingsRendererPresentation = .sections
+    /// `.keys` rows that follow a caller's row get their divider only once loaded,
+    /// so a card never shows a dangling separator while the schema loads.
+    var dividerBeforeKeys = false
     /// Hand-built account, package and setup flows supplement schema rows, never
     /// replace them. Nil means the section has no hand-built rows.
     var sectionSupplement: ((String) -> AnyView?)? = nil
@@ -70,6 +72,7 @@ struct SettingsRendererView: View {
                     rendererContents
                 }
                 .tronScrollEdgeChrome()
+                .tronFloatingSearch(text: $search, prompt: "Search settings", identifier: "settings-renderer-search")
             }
         }
         .tronConfigurationSliderHost(sliderPresentation)
@@ -122,28 +125,29 @@ struct SettingsRendererView: View {
         }
     }
 
+    @ViewBuilder
     private var rendererContents: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Primary surfaces stay calm; search belongs to a settings sub-sheet.
-            if !embedded {
-                TronSearchBar(text: $search, prompt: "Search settings")
-                    .accessibilityIdentifier("settings-renderer-search")
+        if case .keys = presentation {
+            // Rows inside a caller's card: no states of their own while loading.
+            if let resolution { content(resolution) }
+        } else {
+            VStack(alignment: .leading, spacing: 20) {
+                if let resolution {
+                    content(resolution)
+                } else if let failure = loadError {
+                    TronPlaceholderState(title: "Settings Unavailable", detail: failure, icon: "slider.horizontal.3",
+                                         accent: .tronAmber, actionTitle: "Reload", action: reload)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    TronLoadingState(label: "Loading settings…")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if resolution == nil, let unresolvedSupplement {
+                    unresolvedSupplement
+                }
             }
-            if let resolution {
-                content(resolution)
-            } else if let failure = loadError {
-                TronPlaceholderState(title: "Settings Unavailable", detail: failure, icon: "slider.horizontal.3",
-                                     accent: .tronAmber, actionTitle: "Reload", action: reload)
-                    .frame(maxWidth: .infinity)
-            } else {
-                TronLoadingState(label: "Loading settings…")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if resolution == nil, let unresolvedSupplement {
-                unresolvedSupplement
-            }
+            .padding(embedded ? 0 : 20)
         }
-        .padding(embedded ? 0 : 20)
     }
 
     @ViewBuilder
@@ -151,11 +155,22 @@ struct SettingsRendererView: View {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         if !query.isEmpty {
             searchResults(resolution, query: query)
-        } else if let section, let served = Self.sections(resolution).first(where: { $0.id == section }) {
-            sectionDetail(served, keys: keys(resolution, in: served.id), resolution: resolution)
         } else {
-            ForEach(Self.sections(resolution)) { section in
-                overviewSection(section, keys: keys(resolution, in: section.id), resolution: resolution)
+            switch presentation {
+            case .sections:
+                ForEach(Self.sections(resolution)) { section in
+                    overviewSection(section, keys: keys(resolution, in: section.id), resolution: resolution)
+                }
+            case .section(let id):
+                if let served = Self.sections(resolution).first(where: { $0.id == id }) {
+                    sectionDetail(served, keys: keys(resolution, in: served.id), resolution: resolution)
+                }
+            case .overrides(let scope, let allTitle):
+                overrides(resolution, scope: scope, allTitle: allTitle)
+            case .keys(let ids):
+                let chosen = ids.flatMap { id in resolution.keys.filter { $0.key == id } }
+                if dividerBeforeKeys, !chosen.isEmpty { TronSettingsDivider() }
+                rows(chosen, resolution: resolution, detailed: false)
             }
         }
     }
@@ -169,7 +184,10 @@ struct SettingsRendererView: View {
     private func overviewSection(_ section: SettingsRendererSection, keys: [ResolvedSetting],
                                  resolution: SettingsResolution) -> some View {
         let style = SettingsSectionStyle(section.id)
-        let inline = keys.filter { $0.presentation?.importance == "essential" && !externalControlKeys.contains($0.key) }
+        // A key served once per project or model (trust, floors) is a list, not a
+        // primary control: it lives on the sub-sheet, grouped under its label.
+        let inline = keys.filter { $0.presentation?.importance == "essential" && !externalControlKeys.contains($0.key)
+            && Self.instanceCount($0, in: keys) == 1 }
         let supplement = sectionSupplement?(section.id)
         let pending = section.summary.pending
         if !keys.isEmpty || supplement != nil || !pending.isEmpty {
@@ -218,7 +236,8 @@ struct SettingsRendererView: View {
         return TronProgressiveSheetLink(accessibilityLabel: title, identity: "settings.section.\(section.id)",
                                         accent: style.accent) {
             SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
-                                 externalControlKeys: externalControlKeys, projectCWD: projectCWD, section: section.id)
+                                 externalControlKeys: externalControlKeys, projectCWD: projectCWD,
+                                 presentation: .section(section.id))
                 .tronNavigationTitle(title, accent: style.accent)
         } label: {
             TronSettingsRow(icon: style.icon, title: title, subtitle: recent ?? (summary.isEmpty ? count : summary),
@@ -228,13 +247,17 @@ struct SettingsRendererView: View {
     }
 
     /// One section on its own sheet: the essential keys first, then each Gateway
-    /// subgroup and the remaining advanced keys as standard titled groups.
+    /// subgroup and the remaining advanced keys as standard titled groups. A key
+    /// served once per project or model gets its own group, titled by its label
+    /// with its help once, and one row per instance.
     private func sectionDetail(_ section: SettingsRendererSection, keys: [ResolvedSetting],
                                resolution: SettingsResolution) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             ForEach(Array(Self.detailGroups(section, keys: keys).enumerated()), id: \.offset) { index, group in
-                TronSettingsGroup(group.title, detail: index == 0 ? section.note : nil) {
-                    VStack(spacing: 0) { rows(group.keys, resolution: resolution, detailed: true) }
+                TronSettingsGroup(group.title, detail: group.detail ?? (index == 0 ? section.note : nil)) {
+                    VStack(spacing: 0) {
+                        rows(group.keys, resolution: resolution, detailed: true, instanced: group.instanced)
+                    }
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("settings-detail-\(section.id)-\(index)")
@@ -244,23 +267,69 @@ struct SettingsRendererView: View {
         .accessibilityIdentifier("settings-section-\(section.id)-detail")
     }
 
-    private static func detailGroups(_ section: SettingsRendererSection,
-                                     keys: [ResolvedSetting]) -> [(title: String, keys: [ResolvedSetting])] {
-        var groups: [(title: String, keys: [ResolvedSetting])] = []
-        func add(_ title: String, _ key: ResolvedSetting) {
-            if let index = groups.firstIndex(where: { $0.title == title }) { groups[index].keys.append(key) }
-            else { groups.append((title, [key])) }
+    private struct DetailGroup {
+        let title: String
+        var detail: String? = nil
+        var instanced = false
+        var keys: [ResolvedSetting]
+    }
+
+    private static func detailGroups(_ section: SettingsRendererSection, keys: [ResolvedSetting]) -> [DetailGroup] {
+        var groups: [DetailGroup] = []
+        func add(_ title: String, _ key: ResolvedSetting, detail: String? = nil, instanced: Bool = false) {
+            if let index = groups.firstIndex(where: { $0.title == title && $0.instanced == instanced }) { groups[index].keys.append(key) }
+            else { groups.append(DetailGroup(title: title, detail: detail, instanced: instanced, keys: [key])) }
         }
-        for key in keys where key.subgroup == nil && key.presentation?.importance == "essential" { add(section.title, key) }
-        for key in keys { if let subgroup = key.subgroup { add(subgroup, key) } }
-        for key in keys where key.subgroup == nil && key.presentation?.importance != "essential" { add("Advanced", key) }
+        let single = keys.filter { instanceCount($0, in: keys) == 1 }
+        for key in single where key.subgroup == nil && key.presentation?.importance == "essential" { add(section.title, key) }
+        for key in single { if let subgroup = key.subgroup { add(subgroup, key) } }
+        for key in keys where instanceCount(key, in: keys) > 1 {
+            add(key.presentation?.label ?? key.key, key, detail: key.presentation?.help, instanced: true)
+        }
+        for key in single where key.subgroup == nil && key.presentation?.importance != "essential" { add("Advanced", key) }
         return groups
     }
 
-    /// Rows in Gateway order. Detailed rows (sub-sheets) carry source, help and
+    private static func instanceCount(_ setting: ResolvedSetting, in keys: [ResolvedSetting]) -> Int {
+        keys.reduce(0) { $0 + ($1.key == setting.key ? 1 : 0) }
+    }
+
+    /// The overrides-first scope view: what this scope itself sets, then one link to
+    /// every setting the scope could set. Mac Settings shows the full defaults instead.
+    private func overrides(_ resolution: SettingsResolution, scope: String, allTitle: String) -> some View {
+        let set = Self.sorted(resolution.keys.filter { setting in
+            setting.layer == writeLayer || ownedLayers.contains(setting.layer)
+        })
+        return TronSettingsGroup("Set for \(scope)") {
+            VStack(spacing: 0) {
+                if set.isEmpty {
+                    TronSettingsRow(icon: "checkmark.circle", title: "Using defaults",
+                                    subtitle: "Nothing is set only for \(scope).", subtitleColor: .tronTextSecondary)
+                        .accessibilityIdentifier("settings-overrides-empty")
+                } else {
+                    rows(set, resolution: resolution, detailed: true)
+                }
+                TronSettingsDivider()
+                TronProgressiveSheetLink(accessibilityLabel: "Override a setting", identity: "settings.overrides.\(scope)") {
+                    SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
+                                         externalControlKeys: externalControlKeys, projectCWD: projectCWD)
+                        .tronNavigationTitle(allTitle)
+                } label: {
+                    TronSettingsRow(icon: "plus.circle", title: "Override a setting",
+                                    subtitle: "Choose any setting to set for \(scope)", subtitleColor: .tronTextSecondary)
+                }
+                .accessibilityIdentifier("settings-overrides-all")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("settings-overrides")
+    }
+
+    /// Rows in Gateway order. Detailed rows (sub-sheets) carry source tags, help and
     /// the row's actions; primary rows show only the title and its control.
     @ViewBuilder
-    private func rows(_ keys: [ResolvedSetting], resolution: SettingsResolution, detailed: Bool) -> some View {
+    private func rows(_ keys: [ResolvedSetting], resolution: SettingsResolution, detailed: Bool,
+                      instanced: Bool = false) -> some View {
         ForEach(Array(keys.enumerated()), id: \.element.id) { index, setting in
             if index > 0 { TronSettingsDivider() }
             let editor = writableLayer(for: setting) == nil
@@ -271,10 +340,11 @@ struct SettingsRendererView: View {
                 target: target,
                 editable: writableLayer(for: setting) != nil,
                 detailed: detailed,
+                instanced: instanced,
                 externalControl: externalControlKeys.contains(setting.key),
                 dependencyDisplay: Self.dependencyDisplay(setting, in: resolution),
                 error: rowErrors[setting.id],
-                layerEditorTitle: detailed ? editor?.title : nil,
+                layerEditorTitle: editor?.title,
                 onEditLayer: { if let editor { layerEditor = editor } },
                 onChange: { value in change(setting, value: value) },
                 onApplyAgain: { changeID in applyAgain(changeID, rowID: setting.id) }
@@ -286,8 +356,9 @@ struct SettingsRendererView: View {
     }
 
     private func searchResults(_ resolution: SettingsResolution, query: String) -> some View {
+        let scoped: String? = if case .section(let id) = presentation { id } else { nil }
         let matches = resolution.keys.filter { setting in
-            (section == nil || setting.group == section) &&
+            (scoped == nil || setting.group == scoped) &&
             [setting.presentation?.label, setting.key, setting.presentation?.help, setting.display]
                 .compactMap { $0 }
                 .contains { $0.localizedCaseInsensitiveContains(query) }
@@ -490,34 +561,16 @@ struct SettingsRendererView: View {
     }
 }
 
-/// The same renderer on a managed native sheet; its caller owns the target,
-/// never a global/project scope picker.
-struct SettingsRendererSheet: View {
-    let target: JSONValue
-    let writeLayer: String
-    var projectCWD: String? = nil
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            SettingsRendererView(target: target, writeLayer: writeLayer, projectCWD: projectCWD)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .principal) { TronSheetTitle(title: "Settings") }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { dismiss() } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
-                        }
-                        .accessibilityLabel("Done")
-                        .accessibilityIdentifier("settings-renderer-done")
-                    }
-                }
-        }
-        .tronTopBlur(.sheet)
-        .presentationDragIndicator(.hidden)
-    }
+/// What a renderer shows. Surfaces choose; the Gateway still supplies every word.
+enum SettingsRendererPresentation: Hashable {
+    /// Every section: essential rows inline, then one link to the section's sub-sheet.
+    case sections
+    /// One section's sub-sheet: every key, grouped, with sources, help and actions.
+    case section(String)
+    /// What `scope` itself sets ("this project"), then a link to everything it could set.
+    case overrides(scope: String, allTitle: String)
+    /// Just these keys, as inline rows inside a caller's card.
+    case keys([String])
 }
 
 /// A section's glyph and accent on primary surfaces and its sub-sheet, so each

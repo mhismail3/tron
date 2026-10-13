@@ -84,12 +84,22 @@ struct SettingsNumberMapEditor: View {
                     ForEach(Array(fields.enumerated()), id: \.offset) { index, field in
                         if index > 0 { TronSettingsDivider() }
                         if let key = field.value.stringValue {
-                            TronSettingsRow(icon: nil, title: field.label, subtitle: range.unit) {
-                                TextField("Not set", text: Binding(get: { drafts[key] ?? "" }, set: { drafts[key] = $0 }))
-                                    .keyboardType(.numbersAndPunctuation).submitLabel(.done)
-                                    .focused($editing).onSubmit { editing = false }
-                                    .tronInlineField(monospaced: true)
-                                    .accessibilityLabel(field.label)
+                            // The standard value row: label left, a fixed-width field right.
+                            TronSettingsRow(icon: nil, title: field.label) {
+                                HStack(spacing: 6) {
+                                    TextField("Not set", text: Binding(get: { drafts[key] ?? "" }, set: { drafts[key] = $0 }))
+                                        .keyboardType(.numbersAndPunctuation).submitLabel(.done)
+                                        .focused($editing).onSubmit { editing = false }
+                                        .tronInlineField(monospaced: true)
+                                        .multilineTextAlignment(.trailing)
+                                        .frame(width: 120)
+                                        .accessibilityLabel(field.label)
+                                    if let unit = range.unit {
+                                        Text(unit)
+                                            .font(TronTypography.secondaryDescription)
+                                            .foregroundStyle(Color.tronTextSecondary)
+                                    }
+                                }
                             }
                         }
                     }
