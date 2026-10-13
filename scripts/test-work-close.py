@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise work issue close through the real CLI, Git and a process-level gh fixture."""
+"""Exercise work issue close and reopen through the real CLI, Git and a process-level gh fixture."""
 from __future__ import annotations
 
 import json
@@ -11,6 +11,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+OPTIONS = {"done": "Done", "ready": "Ready", "in-progress": "In progress"}
 
 
 def fixture_gh() -> None:
@@ -30,14 +31,15 @@ def fixture_gh() -> None:
                 path.write_text(json.dumps(state))
                 print("fixture status transport failure", file=sys.stderr)
                 sys.exit(1)
-            state["status"] = "Done"
+            state["status"] = OPTIONS[request["variables"]["option"]]
             write = "status"
             response = {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "item"}}}}
         elif "repositoryOwner" in query:
             response = {"data": {"repositoryOwner": {"id": "owner", "projectsV2": {
                 "pageInfo": page, "nodes": [{"id": "project", "title": "Tron",
                     "repositories": {"nodes": [{"id": "repo"}]}, "fields": {"nodes": [
-                        {"id": "status", "name": "Status", "options": [{"id": "done", "name": "Done"}]}]}}]}}}}
+                        {"id": "status", "name": "Status", "options": [
+                            {"id": option, "name": label} for option, label in OPTIONS.items()]}]}}]}}}}
         elif "projectItems" in query:
             response = {"data": {"node": {"projectItems": {"pageInfo": page, "nodes": [
                 {"id": "item", "project": {"id": "project", "title": "Tron"}}]}}}}
@@ -59,6 +61,9 @@ def fixture_gh() -> None:
         state["state"] = "closed"
         state["reason"] = args[args.index("--reason") + 1]
         write = "close"
+    elif args[:2] == ["issue", "reopen"]:
+        state["state"] = "open"
+        write = "reopen"
     else:
         raise AssertionError(f"Unexpected fixture gh invocation: {args}")
     if write:
@@ -152,7 +157,46 @@ def run() -> None:
             git("checkout", "main")
             state, error = close("foreign claim refused", False)
             assert "another session" in error and not state["writes"]
-        print(f"Passed {len(evidence)} real-CLI close journeys; evidence: {artifact}")
+
+            reason = root / "reopen.md"
+            git("push", "origin", "--delete", "feat/41-foreign")
+
+            def reopen(name, success):
+                result = subprocess.run([sys.executable, str(ROOT / "tools/work/cli.py"), "issue", "reopen", "41",
+                                         "--comment-file", str(reason)],
+                                        cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+                evidence.append({"case": name, "exit": result.returncode, "stdout": result.stdout, "stderr": result.stderr})
+                assert (result.returncode == 0) == success, evidence[-1]
+                return json.loads(state_path.read_text()), result.stderr
+
+            # An issue closed by mistake (for example by a PR's closing keyword) reopens only with a stated reason.
+            reset(state="closed", status="Done", label="task")
+            reason.write_text("  \n")
+            state, error = reopen("reopen without a reason refused", False)
+            assert "must not be empty" in error and not state["writes"]
+            reason.write_text("Closed by a closing keyword in an unrelated PR; the bug is unfixed.\n")
+            state, _ = reopen("unclaimed reopen", True)
+            assert state["state"] == "open" and state["status"] == "Ready"
+            assert state["writes"] == ["comment", "reopen", "status"]
+            assert "unrelated PR" in state["comments"][0] and "<!-- work:reopen digest=" in state["comments"][0]
+            state, _ = reopen("same reopen is idempotent", True)
+            assert len(state["comments"]) == 1 and state["writes"].count("reopen") == 1
+
+            reset(label="task")
+            state, error = reopen("open issue it did not reopen refused", False)
+            assert "is open" in error and not state["writes"]
+
+            # A claim survives the mistaken close: reopening returns the issue to its owner, In progress.
+            reset(state="closed", status="Done", label="task", fail_status_once=True)
+            git("push", "origin", "feat/41-foreign")
+            state, _ = reopen("partial status failure", False)
+            assert state["state"] == "open" and state["status"] == "Done"
+            state, _ = reopen("retry finishes claimed reopen", True)
+            assert state["status"] == "In progress" and len(state["comments"]) == 1
+            assert state["writes"] == ["comment", "reopen", "status"]
+            audit = (repo / ".git/work/github-writes.jsonl").read_text()
+            assert '"issue.reopen"' in audit and "unrelated PR" not in audit
+        print(f"Passed {len(evidence)} real-CLI close and reopen journeys; evidence: {artifact}")
     finally:
         artifact.write_text(json.dumps(evidence, indent=2) + "\n")
 
