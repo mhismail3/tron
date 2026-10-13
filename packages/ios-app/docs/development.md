@@ -89,6 +89,15 @@ surfaces share its width owner. Camera, Safari, system pickers, video and
 content-fit detents keep their existing presentation policy. Audit coverage is
 structural, not a claim that every destination was exercised by this journey.
 
+`testHomeSheetsJourney` (`TronHomeSheetsUITests`) walks Manage Home and every sub-sheet
+at its large detent and keeps one screenshot per sheet plus a `home-sheet-measurements`
+JSON attachment (tap-to-content times and Home read counts). It proves the Context
+card's segmented bar and legend, the memory hierarchy (recent messages, summaries opened
+down to one message, a chapter's own lines), that a chapter opens from its loaded row and
+that closing a child re-reads nothing (`fixture.home-read-counts` publishes every Home read
+before it is answered), and that task detail opens the worker session and has no Stop,
+Steer or Reload. Regenerate with the same `--only-testing` filter.
+
 `testHomeCrossSurfaceProofMatrix` is the cross-surface proof for the Home stack. In one
 hosted run it mounts the production chat in light and dark, at normal and accessibility
 Dynamic Type, opens Manage Home from the composer context ring and each child sheet from it (Home context,
@@ -109,8 +118,8 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeAcceptedControlContinuesInBackground \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeBackgroundReconnectAndUnresolvedCompletion \
   --only-testing TronMobileUITests/TronSmokeUITests/testManageHomeRejectsStaleRouteAction \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskListStopSteerAndRedelivery \
-  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskDetailOpensWorkerChat \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskListAndRedelivery \
+  --only-testing TronMobileUITests/TronHomeSheetsUITests/testHomeSheetsJourney \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomePermissionRevokeRequiresConfirmation \
   --only-testing TronMobileUITests/TronSmokeUITests/testHomeTaskEmptyAndRecoveryFence \
@@ -146,7 +155,7 @@ reconnect after a dropped transport, or physical-iPhone behavior.
 
 canonical evidence identity/offsets, latest-request and managed-lifecycle
 
-The hosted Gateway fixture uses the real `home.status`, `home.memory.page` and
+The hosted Gateway fixture uses the real `home.status`, `home.memory.view` and
 `home.memory.evidence` DTO shapes; it proves native navigation, physical-model
 selection/refusal, empty/blocked/loading/error/reload states, distinct summary/
 projection/canonical labeling, attribution and page replacement. Its model

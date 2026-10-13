@@ -449,12 +449,16 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await coldRegistry.recoverCanonicalAttention();
     expect(coldRegistry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
     const callsBefore = item.faux.state.callCount;
-    // Disabled changes the profile, not sealed evidence ownership. A cold
-    // chapter must never enter the writer-capable SDK constructor at all.
-    await expect(coldRegistry.acquire(item.slot.id)).rejects.toMatchObject({ code: "conflict" });
+    // Disabled changes the profile, not sealed evidence ownership. A cold sealed
+    // chapter opens read-only (#911): the catalog header proved its tail complete
+    // before the SDK opened it, opening writes nothing, and every write refuses.
+    const cold = await coldRegistry.acquire(item.slot.id);
+    expect(JSON.stringify(cold.canonicalSessionEntries())).toContain("canonical baseline");
+    expect(await item.jsonl()).toBe(oldBytes);
+    await expect(cold.prompt("write to a sealed chapter")).rejects.toThrow();
     expect(item.faux.state.callCount).toBe(callsBefore);
     expect(await item.jsonl()).toBe(oldBytes);
-    item.record("disabled-sealed-chapter", { profile: "ordinary", refusedBeforeConstruction: true, bytesUnchanged: true });
+    item.record("disabled-sealed-chapter", { profile: "ordinary", openedReadOnly: true, bytesUnchanged: true });
   });
 
   it("refuses sealed Slot mutation paths before changing SDK state or the canonical file", async () => {

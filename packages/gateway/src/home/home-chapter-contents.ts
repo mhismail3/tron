@@ -3,8 +3,8 @@ import { open, stat } from "node:fs/promises";
 import type { HomeChapterContents } from "../protocol/types.js";
 
 /** Bounds of a chapter's topics (`home.chapterList`). */
-export const HOME_CHAPTER_TOPIC_COUNT = 5;
-export const HOME_CHAPTER_TOPIC_CHARACTERS = 120;
+export const HOME_CHAPTER_TOPIC_COUNT = 8;
+export const HOME_CHAPTER_TOPIC_CHARACTERS = 200;
 
 /** Bytes read per chunk while a chapter's canonical file is scanned. */
 const CHUNK_BYTES = 1024 * 1024;
@@ -12,9 +12,18 @@ const CHUNK_BYTES = 1024 * 1024;
 const PREFIX_WINDOW_BYTES = 4096;
 const NEWLINE = 0x0a;
 
-/** One memory summary as a topic: a single line, cut to the topic bound in code points. */
+/** One memory summary as a topic: its user and Home lines without kind prefixes
+ * (tool and event lines are noise), one line, ended only at a word boundary. */
 export function homeChapterTopic(summary: string): string {
-  return [...summary.replace(/\s+/gu, " ").trim()].slice(0, HOME_CHAPTER_TOPIC_CHARACTERS).join("");
+  const text = summary.split("\n")
+    .filter(line => !/^(?:echo|event):/u.test(line.trim()))
+    .map(line => line.trim().replace(/^(?:user|talk|summary):\s*/u, ""))
+    .join(" ").replace(/\s+/gu, " ").trim();
+  if (!text || /^\[call\b/iu.test(text)) return "";
+  if ([...text].length <= HOME_CHAPTER_TOPIC_CHARACTERS) return text;
+  const prefix = [...text].slice(0, HOME_CHAPTER_TOPIC_CHARACTERS - 1).join("");
+  const boundary = prefix.lastIndexOf(" ");
+  return boundary > 0 ? `${prefix.slice(0, boundary).replace(/[\s,;:.–-]+$/u, "")}…` : "";
 }
 
 /** The counts one canonical chapter file holds, before topics are attached. */

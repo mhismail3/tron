@@ -4,8 +4,12 @@ import Vision
 import XCTest
 
 final class TronSmokeUITests: XCTestCase {
+    /// The task list names each task and its project; a finished task whose result the
+    /// current Home has not admitted can be redelivered from its detail. Stop and steer
+    /// live in the worker's own session (#911), so the detail has neither; the journey in
+    /// TronHomeSheetsUITests opens that session.
     @MainActor
-    func testHomeTaskListStopSteerAndRedelivery() {
+    func testHomeTaskListAndRedelivery() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
@@ -16,49 +20,20 @@ final class TronSmokeUITests: XCTestCase {
         tapManageRow(app, "home-manage-tasks")
         XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
         // A row names the task and its project; spend and unavailable copy never appear in a row.
-        XCTAssertTrue(app.staticTexts["Settings model: continue epic #758"].exists)
-        XCTAssertTrue(app.staticTexts["tron"].exists)
+        XCTAssertTrue(app.buttons["home-task-active"].label.contains("Settings model: continue epic #758"))
+        XCTAssertTrue(app.buttons["home-task-active"].label.contains("tron"))
         XCTAssertFalse(app.staticTexts["Spend unavailable"].exists)
         keepScreenshot(named: "home-task-list")
         app.buttons["home-task-active"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-task-detail"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["12 input · 3 output tokens"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["home-task-spend"].label.contains("12 in · 3 out"))
         XCTAssertFalse(app.staticTexts["Unpriced"].exists, "Task spend shows token counts only; the Gateway reports no cost")
-        app.textFields["home-task-steer"].tap(); app.textFields["home-task-steer"].typeText("Use the exact task")
-        app.buttons["home-task-steer-send"].tap()
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
-        XCTAssertTrue(app.buttons["home-task-stop"].waitForExistence(timeout: 5)); app.buttons["home-task-stop"].tap()
-        XCTAssertTrue(app.staticTexts["Stopped"].waitForExistence(timeout: 5))
-        keepScreenshot(named: "home-task-stopped")
         app.buttons["home-sheet-done-task"].tap()
         XCTAssertTrue(app.buttons["home-task-terminal"].waitForExistence(timeout: 5)); app.buttons["home-task-terminal"].tap()
         XCTAssertTrue(app.staticTexts["Finished · Final"].waitForExistence(timeout: 5))
-        app.buttons["home-task-redeliver"].tap()
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:3", timeout: 5))
+        app.descendants(matching: .any)["home-task-redeliver"].firstMatch.tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
         keepScreenshot(named: "home-task-redelivered")
-    }
-
-    /// The task detail's worker row opens the worker's own chat, read-only to Home
-    /// (an ordinary session), and never through a Home route.
-    @MainActor
-    func testHomeTaskDetailOpensWorkerChat() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-        app.buttons["home-pinned-row"].tap()
-        openManageHome(app)
-        tapManageRow(app, "home-manage-tasks")
-        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
-        app.buttons["home-task-active"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["home-task-detail"].waitForExistence(timeout: 5))
-        // The live subagent run is part of the worker's detail, not the row.
-        XCTAssertTrue(app.staticTexts["1 live subagent run"].waitForExistence(timeout: 5))
-        keepScreenshot(named: "home-task-detail")
-        tapManageRow(app, "home-task-open-worker")
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-opened-session"], containing: "opened-session:worker-session", timeout: 10))
-        XCTAssertFalse(app.buttons["Manage Home"].exists, "The worker chat is an ordinary session and must not claim Home")
     }
 
     @MainActor
@@ -270,14 +245,14 @@ final class TronSmokeUITests: XCTestCase {
             if state == "loading" {
                 XCTAssertTrue(app.descendants(matching: .any)["home-sheet-loading"].waitForExistence(timeout: 2))
                 keepScreenshot(named: "home-memory-loading")
-                XCTAssertTrue(app.staticTexts["Asked to move garden planning to Thursday reviews"].waitForExistence(timeout: 10))
+                XCTAssertTrue(app.descendants(matching: .any)["home-memory-row-39"].waitForExistence(timeout: 10))
             } else if state == "empty" {
                 XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "No memory yet")).firstMatch.waitForExistence(timeout: 5))
             } else {
                 XCTAssertTrue(app.buttons["Reload"].waitForExistence(timeout: 5))
                 keepScreenshot(named: "home-memory-error")
                 app.buttons["Reload"].tap()
-                XCTAssertTrue(app.staticTexts["Asked to move garden planning to Thursday reviews"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.descendants(matching: .any)["home-memory-row-39"].waitForExistence(timeout: 5))
             }
             keepScreenshot(named: "home-sheet-\(state)")
             app.terminate()
@@ -307,17 +282,19 @@ final class TronSmokeUITests: XCTestCase {
         openManageHome(app)
         tapManageRow(app, "home-manage-context")
         XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.descendants(matching: .any)["home-context-bar"].exists)
-        for label in ["Instructions", "About you", "Memory", "This chapter", "Task results", "Your message"] {
-            XCTAssertTrue(app.staticTexts[label].exists, label)
+        XCTAssertTrue(app.descendants(matching: .any)["context-segmented-bar"].exists)
+        for (id, label) in [("instructions", "Instructions"), ("profile", "About you"), ("memory", "Memory"),
+                            ("chapter", "This chapter"), ("results", "Task results"), ("input", "Your message"), ("free", "Free")] {
+            XCTAssertTrue(app.descendants(matching: .any)["context-segment-\(id)"].label.hasPrefix(label), label)
         }
-        XCTAssertTrue(app.descendants(matching: .any)["home-context-section-memory"].label.contains("260 summaries"))
+        XCTAssertTrue(app.descendants(matching: .any)["context-segment-memory"].label.contains("260 summaries"))
         XCTAssertFalse(app.staticTexts["activation-entry"].exists, "Context must not show an entry ID")
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", " bytes")).firstMatch.exists, "Context must not show byte counts")
         keepScreenshot(named: "home-context-populated")
     }
 
-    /// Opening a memory row shows its detail; its exact evidence opens from one standard row.
+    /// Opening a memory row shows its detail; its exact evidence opens from one standard row,
+    /// and the next page continues to the older summaries.
     @MainActor
     func testHomeMemoryRowDetailOpensExactEvidence() {
         continueAfterFailure = false
@@ -328,16 +305,14 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
         tapManageRow(app, "home-manage-memory-browser")
-        let row = app.descendants(matching: .any)["home-memory-row-0"]
+        let row = app.descendants(matching: .any)["home-memory-row-39"]
         XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Asked to move garden planning to Thursday reviews"].exists)
-        // The secondary line names the chapter the entry belongs to, never its IDs.
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "chapter 1")).firstMatch.exists)
+        XCTAssertTrue(row.label.contains("Task result: settings model epic #758 finished."))
         XCTAssertFalse(app.staticTexts["source-session · source-entry"].exists, "Memory rows show no raw evidence identifiers")
         keepScreenshot(named: "home-memory-rows")
         row.tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-memory-detail"].waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Asked to move garden planning to Thursday reviews"].exists)
+        XCTAssertTrue(app.staticTexts["Task result: settings model epic #758 finished."].exists)
         keepScreenshot(named: "home-memory-detail")
         tapManageRow(app, "home-memory-exact-evidence")
         XCTAssertTrue(app.descendants(matching: .any)["home-evidence-text"].waitForExistence(timeout: 5), app.debugDescription)
@@ -346,10 +321,11 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["home-sheet-done-evidence"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-memory-detail"].waitForExistence(timeout: 5))
         app.buttons["home-sheet-done-memory-item"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["home-memory-row-0"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Next memory page"].exists)
-        app.buttons["Next memory page"].tap()
-        XCTAssertTrue(app.staticTexts["Wants the Thursday summary emailed"].waitForExistence(timeout: 5))
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        // The oldest summary is on the next page of the newest-first view.
+        XCTAssertFalse(app.descendants(matching: .any)["home-memory-summary-0-16"].exists)
+        tapManageRow(app, "home-memory-next-page")
+        XCTAssertTrue(app.descendants(matching: .any)["home-memory-summary-0-16"].waitForExistence(timeout: 5))
         keepScreenshot(named: "home-memory-next-page")
     }
 
@@ -374,8 +350,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["home-chapter-open-transcript"].exists, "The active chapter is the current chat and has no transcript row")
         keepScreenshot(named: "home-chapter-active-detail")
         tapManageRow(app, "home-chapter-browse-memory")
-        XCTAssertTrue(app.staticTexts["Scheduled the garden review for Thursday at 10:00."].waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertFalse(app.staticTexts["Asked to move garden planning to Thursday reviews"].exists, "Browsing a chapter shows only that chapter's memory")
+        XCTAssertTrue(app.descendants(matching: .any)["home-memory-summary-32-2"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.descendants(matching: .any)["home-memory-summary-28-4"].exists, "Browsing a chapter shows only that chapter's memory")
         keepScreenshot(named: "home-chapter-memory-filtered")
         app.buttons["home-sheet-done-memory"].tap()
         app.buttons["home-sheet-done-chapter"].tap()
@@ -502,9 +478,9 @@ final class TronSmokeUITests: XCTestCase {
             keepScreenshot(named: "home-\(appearance)-context")
             app.buttons["home-sheet-done-context"].tap()
             tapManageRow(app, "home-manage-memory-browser")
-            XCTAssertTrue(app.staticTexts["Asked to move garden planning to Thursday reviews"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.descendants(matching: .any)["home-memory-row-39"].waitForExistence(timeout: 5))
             keepScreenshot(named: "home-\(appearance)-memory")
-            app.descendants(matching: .any)["home-memory-row-0"].tap()
+            app.descendants(matching: .any)["home-memory-row-39"].tap()
             XCTAssertTrue(app.descendants(matching: .any)["home-memory-detail"].waitForExistence(timeout: 5))
             keepScreenshot(named: "home-\(appearance)-memory-detail")
             tapManageRow(app, "home-memory-exact-evidence")
@@ -547,7 +523,7 @@ final class TronSmokeUITests: XCTestCase {
         continueAfterFailure = false
         let sheets: [(row: String, doneID: String, content: String, name: String)] = [
             ("home-manage-context", "context", "home-context-breakdown", "context"),
-            ("home-manage-memory-browser", "memory", "Asked to move garden planning to Thursday reviews", "memory-browser"),
+            ("home-manage-memory-browser", "memory", "home-memory-row-39", "memory-browser"),
             ("home-manage-chapters", "chapters", "home-chapter-2", "chapters"),
             ("home-manage-tasks", "tasks", "home-task-active", "tasks"),
             ("home-manage-permissions", "permissions", "Reconfirm permissions", "permissions"),
@@ -861,7 +837,7 @@ final class TronSmokeUITests: XCTestCase {
         }
         // A child surface keeps its own sheet lifetime above Manage Home and returns to it.
         tapManageRow(app, "home-manage-memory-browser")
-        XCTAssertTrue(app.staticTexts["Asked to move garden planning to Thursday reviews"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.descendants(matching: .any)["home-memory-row-39"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["home-sheet-done-memory"].tap()
         XCTAssertTrue(state.waitForExistence(timeout: 5), app.debugDescription)
         // The Chapters child sheet shows the whole ledger (#740): state, dates and

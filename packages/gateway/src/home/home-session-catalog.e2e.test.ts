@@ -57,5 +57,17 @@ describe("Home chapters in the dashboard session list", () => {
     // Opening a chapter by id is the pinned row's and the Chapters sheet's route, so it still resolves.
     expect((await f.registry.acquire(predecessor)).id).toBe(predecessor);
     expect((await f.registry.acquire(accepted.sessionId)).id).toBe(accepted.sessionId);
+
+    // A sealed chapter's transcript opens read-only after its runtime was evicted (#911):
+    // the cold open is the Chapters sheet's route once the chapter has idled out.
+    const registry = f.registry as unknown as { slots: Map<string, unknown>; retireIdleRuntime(input: unknown): Promise<boolean> };
+    const sealedSlot = registry.slots.get(predecessor);
+    expect(await registry.retireIdleRuntime({ sessionId: predecessor, slot: sealedSlot, reason: "idle", eligible: () => true })).toBe(true);
+    expect(registry.slots.has(predecessor)).toBe(false);
+    const reopened = await f.registry.acquire(predecessor);
+    expect(registry.slots.get(predecessor)).toBe(reopened);
+    expect(JSON.stringify(reopened.canonicalSessionEntries())).toContain("Initial Home conversation");
+    // Read-only: the sealed chapter still refuses a prompt.
+    await expect(reopened.prompt("write to a sealed chapter")).rejects.toThrow();
   }, 30_000);
 });

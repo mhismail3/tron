@@ -3545,8 +3545,12 @@ export class RuntimeRegistry {
   private async scanHomeBeforeManager(sessionId: string, path: string): Promise<void> {
     const chapter = this.home.chapterStateFor(sessionId);
     if (!chapter.homeId) return;
-    if (chapter.sealed || chapter.materializing || chapter.expectedPath && resolve(chapter.expectedPath) !== resolve(path)) {
-      throw new GatewayError("conflict", "Home chapter cannot be opened as a writable runtime");
+    // A sealed chapter opens cold exactly as a warm one does: read-only. The caller's
+    // header read refuses an unstable tail before the SDK can repair it, and the slot's
+    // chapter state refuses every write (`assertChapterWritable`). Only an in-progress
+    // materialization or a path the ledger does not name is refused.
+    if (chapter.materializing || chapter.expectedPath && resolve(chapter.expectedPath) !== resolve(path)) {
+      throw new GatewayError("conflict", "Home chapter cannot be opened as a runtime");
     }
     const canonicalPath = resolve(path);
     // The exact file owns its evidence directory. Re-encoding cwd can select

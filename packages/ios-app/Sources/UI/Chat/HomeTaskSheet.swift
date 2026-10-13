@@ -18,7 +18,6 @@ struct HomeTaskSheet: View {
     @State var query: HomeSheetReadQuery
     @State var child: HomeSheetDestination?
     @State var failure: String?
-    @State var steering = ""
     @State var expiry = Date.now
     @State var briefExpanded = false
     @State var revoking: PendingRevocation?
@@ -54,6 +53,12 @@ struct HomeTaskSheet: View {
               case .loaded(let read, _) = owner.state else { return false }
         return read.requestID == requestID && read.identity == identity
     }
+    /// The loaded task's worker chat, when this sheet can open it.
+    private var openableWorkerSession: String? {
+        guard onOpenSession != nil, case .loaded(let read, .task(let task?, _)) = owner.state,
+              read.identity == identity else { return nil }
+        return task.workerSessionId
+    }
     private struct TaskID: Hashable { let identity: HomeSheetReadIdentity?; let request: UUID; let active: Bool }
 
     var body: some View {
@@ -72,6 +77,17 @@ struct HomeTaskSheet: View {
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if let worker = openableWorkerSession {
+                    // Stop and steer belong to the worker's own chat (#911).
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { onOpenSession?(worker) } label: {
+                            TronToolbarTextLabel("Open Session", systemImage: "arrow.up.right.square")
+                        }
+                        .tronToolbarAction(accent: .tronEmerald)
+                        .accessibilityLabel("Open session")
+                        .accessibilityIdentifier("home-task-open-session")
+                    }
+                }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: destination.title, accent: .tronEmerald) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
@@ -86,6 +102,8 @@ struct HomeTaskSheet: View {
             guard let identity, let coordinator else { owner.retire(); return }
             guard active else { owner.retireLoading(); return }
             let currentID = requestID; let currentQuery = query
+            // Uncovering this sheet (a child closed) is not a new request: keep its page (#911).
+            if owner.holds(requestID: currentID, identity: identity) { return }
             await owner.load(requestID: currentID, identity: identity, coordinator: coordinator,
                              isCurrent: { self.identity == identity && self.requestID == currentID }) {
                 try await model.readHomeSheet(currentQuery, identity: identity, isCurrent: { self.requestID == currentID && self.active })
@@ -146,11 +164,11 @@ struct HomeTaskSheet: View {
     }
 
     private func taskList(_ page: HomeTaskPageDTO) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
             if page.items.isEmpty {
                 TronPlaceholderState(title: "No tasks", detail: "Home has not recorded any tasks.", icon: "checklist")
             } else {
-                TronGlassCard(accent: .tronSessionTeal) {
+                TronSettingsGroup("Tasks", detail: "Newest first. Open a task to see its brief and worker.", accent: .tronSessionTeal) {
                     VStack(spacing: 0) {
                         ForEach(Array(page.items.enumerated()), id: \.element.id) { index, row in
                             if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
@@ -160,85 +178,58 @@ struct HomeTaskSheet: View {
                 }
             }
             if let cursor = page.nextCursor {
-                actionRow(title: "Next tasks page", icon: "chevron.down", id: "home-tasks-next") { query = .tasks(cursor); requestID = UUID() }
+                actionRow(title: "Older tasks", icon: "arrow.down", id: "home-tasks-next") { query = .tasks(cursor); requestID = UUID() }
             }
-            actionRow(title: "Reload tasks", icon: "arrow.clockwise", id: "home-tasks-reload") { reload() }
         }
     }
 
     private func taskRow(_ row: HomeTaskPageDTO.Row) -> some View {
         let title = HomeTaskPresentation.title(title: row.title, briefText: nil, project: row.project)
+        let subtitle = [row.project, HomeSheetTime.relative(milliseconds: row.updatedAt)].compactMap { $0 }.joined(separator: " · ")
         return Button { child = .task(row.taskId) } label: {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .lineLimit(2)
-                    if let project = row.project {
-                        Text(project)
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .trailing, spacing: 6) {
-                    TronStatusPill(text: HomeTaskPresentation.stateLabel(lifecycle: row.lifecycle, outcome: row.outcome),
-                                   accent: Self.taskAccent(row.lifecycle, outcome: row.outcome))
-                    Text(HomeSheetTime.relative(milliseconds: row.updatedAt) ?? "")
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextMuted)
-                }
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.caption)
-                    .foregroundStyle(Color.tronSessionTeal)
-                    .accessibilityHidden(true)
+            TronSettingsRow(icon: Self.taskIcon(row.lifecycle, outcome: row.outcome), title: title, subtitle: subtitle,
+                            subtitleLineLimit: 1, accent: .tronSessionTeal) {
+                TronStatusPill(text: HomeTaskPresentation.stateLabel(lifecycle: row.lifecycle, outcome: row.outcome),
+                               accent: Self.taskAccent(row.lifecycle, outcome: row.outcome))
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("home-task-\(row.taskId)")
     }
 
     private func taskDetail(_ task: HomeTaskDTO, status: HomeStatusDTO) -> some View {
         let title = HomeTaskPresentation.title(title: task.title, briefText: task.intent.text, project: task.project)
-        return VStack(alignment: .leading, spacing: 14) {
-            TronGlassCard(accent: .tronSessionTeal) {
-                VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(title)
-                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+                        .font(SessionSummaryTypography.headline)
                         .foregroundStyle(Color.tronTextPrimary)
-                    HStack(spacing: 8) {
-                        TronStatusPill(text: HomeTaskPresentation.stateLabel(lifecycle: task.lifecycle, outcome: task.terminalEvidence?.outcome),
-                                       accent: Self.taskAccent(task.lifecycle, outcome: task.terminalEvidence?.outcome))
-                        if let project = task.project {
-                            Text(project)
-                                .font(TronTypography.secondaryDescription)
-                                .foregroundStyle(Color.tronTextSecondary)
-                        }
-                    }
-                    Text(dateLine(created: task.createdAt, updated: task.updatedAt))
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    TronStatusPill(text: HomeTaskPresentation.stateLabel(lifecycle: task.lifecycle, outcome: task.terminalEvidence?.outcome),
+                                   accent: Self.taskAccent(task.lifecycle, outcome: task.terminalEvidence?.outcome))
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text([task.project, dateLine(created: task.createdAt, updated: task.updatedAt)].compactMap { $0 }.joined(separator: " · "))
+                    .font(SessionSummaryTypography.detail)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .tronGlassSurface(accent: .tronSessionTeal, tintOpacity: 0.14)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("home-task-header")
             briefCard(task.intent.text)
             if let terminal = task.terminalEvidence {
-                sectionCard("Result") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(terminal.outcome.rawValue.capitalized).font(TronTypography.bodySM)
-                        Text(terminal.reason).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
-                    }
+                TronSettingsGroup("Result", accent: .tronSessionTeal) {
+                    TronSettingsRow(icon: Self.taskIcon(task.lifecycle, outcome: terminal.outcome),
+                                    title: terminal.outcome.rawValue.capitalized, subtitle: terminal.reason,
+                                    subtitleLineLimit: nil, accent: .tronSessionTeal)
                 }
             }
-            workerCard(task, status: status)
-            actionsCard(task, status: status)
+            workerCard(task)
+            redeliverCard(task, status: status)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home-task-detail")
@@ -247,62 +238,54 @@ struct HomeTaskSheet: View {
     /// The brief, collapsed to six lines until the user asks for all of it.
     private func briefCard(_ text: String) -> some View {
         let long = text.count > 320 || text.split(whereSeparator: \.isNewline).count > 6
-        return sectionCard("Brief") {
-            VStack(alignment: .leading, spacing: 8) {
+        return TronSettingsGroup("Brief", accent: .tronSessionTeal) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(text)
-                    .font(TronTypography.bodySM)
+                    .font(TronTypography.body)
+                    .lineSpacing(4)
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(briefExpanded ? nil : 6)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
                 if long {
-                    Button(briefExpanded ? "Show less" : "Show all") { briefExpanded.toggle() }
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronEmerald)
-                        .accessibilityIdentifier("home-task-brief-toggle")
+                    TronSettingsDivider(accent: .tronSessionTeal)
+                    Button { briefExpanded.toggle() } label: {
+                        TronSettingsRow(icon: briefExpanded ? "arrow.up.and.line.horizontal.and.arrow.down" : "arrow.down.and.line.horizontal.and.arrow.up",
+                                        title: briefExpanded ? "Show less" : "Show all", accent: .tronSessionTeal)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("home-task-brief-toggle")
                 }
             }
         }
     }
 
-    /// The worker: its model, its subagent launches, and the runs live right now.
-    @ViewBuilder private func workerCard(_ task: HomeTaskDTO, status: HomeStatusDTO) -> some View {
-        if task.workerModel != nil || task.subagents != nil || task.subagentRuns != nil {
-            sectionCard("Worker") {
-                VStack(alignment: .leading, spacing: 0) {
-                    if let model = task.workerModel {
-                        TronValueRow(icon: "cpu", title: "Model", value: model.displayName)
+    /// The worker: its model, its subagents, the runs live right now and its token spend.
+    @ViewBuilder private func workerCard(_ task: HomeTaskDTO) -> some View {
+        let runs = task.subagentRuns.flatMap { $0.total > 0 ? $0 : nil }
+        if task.workerModel != nil || task.subagents != nil || runs != nil || task.spend != nil {
+            TronSettingsGroup("Worker", accent: .tronSessionTeal) {
+                VStack(spacing: 0) {
+                    let rows = workerRows(task)
+                    ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                        if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
+                        TronValueRow(icon: row.icon, title: row.title, value: row.value, accent: .tronSessionTeal)
+                            .accessibilityIdentifier(row.id)
                     }
-                    if let subagents = task.subagents {
-                        if task.workerModel != nil { TronSettingsDivider(accent: .tronSessionTeal) }
-                        // The counts are a sentence, so they sit under the title rather than
-                        // squeezing it into a trailing value column.
-                        TronValueRow(icon: "person.2", title: "Subagents", detail: Self.subagentLine(subagents))
-                    }
-                    if let runs = task.subagentRuns, runs.total > 0 {
+                    if let runs {
                         TronSettingsDivider(accent: .tronSessionTeal)
-                        Text("\(runs.total) live subagent \(runs.total == 1 ? "run" : "runs")")
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .padding(.vertical, 10)
-                        ForEach(runs.runs) { run in
-                            HStack(alignment: .center, spacing: 10) {
-                                Text(run.agent)
-                                    .font(TronTypography.secondaryCodeDescription)
-                                    .foregroundStyle(Color.tronTextPrimary)
-                                    .lineLimit(1)
-                                Spacer(minLength: 6)
+                        ForEach(Array(runs.runs.enumerated()), id: \.element.id) { index, run in
+                            if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
+                            TronSettingsRow(icon: "person.crop.circle.badge.clock", title: run.agent,
+                                            subtitle: HomeSheetTime.relative(run.lastActivityAt ?? run.startedAt),
+                                            accent: .tronSessionTeal) {
                                 TronStatusPill(text: run.state.capitalized, accent: .tronSessionTeal)
-                                Text(HomeSheetTime.relative(run.lastActivityAt ?? run.startedAt) ?? "")
-                                    .font(TronTypography.caption)
-                                    .foregroundStyle(Color.tronTextMuted)
                             }
-                            .padding(.vertical, 6)
                         }
                         if runs.total > runs.runs.count {
-                            Text("+ \(runs.total - runs.runs.count) more")
-                                .font(TronTypography.caption)
-                                .foregroundStyle(Color.tronTextMuted)
+                            TronSettingsDivider(accent: .tronSessionTeal)
+                            TronSettingsRow(icon: "ellipsis", title: "\(runs.total - runs.runs.count) more live runs", accent: .tronSessionTeal)
                         }
                     }
                 }
@@ -310,63 +293,53 @@ struct HomeTaskSheet: View {
         }
     }
 
-    private func actionsCard(_ task: HomeTaskDTO, status: HomeStatusDTO) -> some View {
+    private func workerRows(_ task: HomeTaskDTO) -> [(icon: String, title: String, value: String, id: String)] {
+        var rows: [(icon: String, title: String, value: String, id: String)] = []
+        if let model = task.workerModel { rows.append(("cpu", "Model", model.displayName, "home-task-model")) }
+        if let subagents = task.subagents { rows.append(("person.2", "Subagents", Self.subagentLine(subagents), "home-task-subagents")) }
+        if let spend = task.spend {
+            rows.append(("gauge.with.dots.needle.33percent", "Tokens",
+                         "\(spend.inputTokens.formatted(.number.notation(.compactName))) in · \(spend.outputTokens.formatted(.number.notation(.compactName))) out",
+                         "home-task-spend"))
+        }
+        return rows
+    }
+
+    /// Explicitly delivers an unadmitted result to the current Home after replacement.
+    @ViewBuilder private func redeliverCard(_ task: HomeTaskDTO, status: HomeStatusDTO) -> some View {
         let redeliverable = status.enabled && task.homeId == status.homeId ? status.routeGeneration.flatMap { route in
             task.wake.flatMap { wake in wake.canRedeliver && wake.routeGeneration != route ? route : nil }
         } : nil
-        return VStack(alignment: .leading, spacing: 14) {
-            if let spend = task.spend {
-                Text("\(spend.inputTokens.formatted()) input · \(spend.outputTokens.formatted()) output tokens")
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .accessibilityIdentifier("home-task-spend")
-            }
-            if let worker = task.workerSessionId, let onOpenSession {
-                actionRow(title: "Open worker chat", subtitle: "The ordinary chat Home delegated to", icon: "bubble.left.and.text.bubble.right", id: "home-task-open-worker") {
-                    onOpenSession(worker)
+        if let route = redeliverable {
+            TronSettingsGroup("Redeliver", detail: "Deliver this unadmitted result to the current Home. This does not replay the task.",
+                              accent: .tronSessionTeal) {
+                Button { mutate(.redeliver(taskID: task.taskId, homeID: task.homeId, routeGeneration: route)) } label: {
+                    TronSettingsRow(icon: "arrow.uturn.forward", title: "Redeliver result", accent: .tronSessionTeal)
                 }
+                .buttonStyle(.plain)
+                .disabled(!canMutate)
+                .accessibilityIdentifier("home-task-redeliver")
             }
-            if task.lifecycle == .active, let operation = task.operationId {
-                actionRow(title: "Stop task", icon: "stop.fill", destructive: true, id: "home-task-stop", enabled: canMutate) {
-                    mutate(.stopTask(taskID: task.taskId, operationID: operation))
-                }
-                sectionCard("Steer") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        TextField("Steering message", text: $steering, axis: .vertical)
-                            .tronField()
-                            .accessibilityIdentifier("home-task-steer")
-                        actionRow(title: "Send steer", icon: "paperplane", id: "home-task-steer-send",
-                                  enabled: canMutate && !steering.isEmpty && steering.count <= 65536) {
-                            mutate(.steerTask(taskID: task.taskId, operationID: operation, text: steering))
-                        }
-                    }
-                }
-            }
-            if let route = redeliverable {
-                sectionCard("Redeliver") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Explicitly deliver this unadmitted result to the current Home after replacement. This does not replay the task.")
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextMuted)
-                        actionRow(title: "Redeliver result", icon: "arrow.uturn.forward", id: "home-task-redeliver", enabled: canMutate) {
-                            mutate(.redeliver(taskID: task.taskId, homeID: task.homeId, routeGeneration: route))
-                        }
-                    }
-                }
-            }
-            actionRow(title: "Reload task", icon: "arrow.clockwise", id: "home-task-reload") { reload() }
         }
     }
 
-    /// Dates in the Gateway's clock, one line.
+    /// Dates in the Gateway's clock, relative, one line.
     private func dateLine(created: Int, updated: Int) -> String {
-        "Created \(Date(timeIntervalSince1970: Double(created) / 1000).formatted()) · Updated \(Date(timeIntervalSince1970: Double(updated) / 1000).formatted())"
+        "Created \(HomeSheetTime.relative(milliseconds: created)) · updated \(HomeSheetTime.relative(milliseconds: updated))"
     }
 
     static func subagentLine(_ subagents: HomeTaskDTO.Subagents) -> String {
         let started = "\(subagents.started.formatted()) started"
         guard let stopped = subagents.stoppedAtEnd else { return started }
         return "\(started) · \(stopped.formatted()) stopped at end"
+    }
+
+    static func taskIcon(_ lifecycle: HomeTaskLifecycle, outcome: HomeTaskOutcome?) -> String {
+        switch lifecycle {
+        case .pending: "clock"
+        case .active: "bolt.fill"
+        case .terminal: outcome == .final ? "checkmark.circle" : outcome == .interrupted ? "stop.circle" : "exclamationmark.circle"
+        }
     }
 
     static func taskAccent(_ lifecycle: HomeTaskLifecycle, outcome: HomeTaskOutcome?) -> Color {
@@ -429,7 +402,7 @@ struct HomeTaskSheet: View {
                 try await model.performHomeControl(command, authority: admission.authority)
                 guard self.identity == admission.identity, self.requestID == intent,
                       admission.coordinator.activity(for: admission.identity.surfaceToken).allowsPresentationPublication else { return }
-                failure = nil; steering = ""; reload()
+                failure = nil; reload()
             } catch {
                 guard self.identity == admission.identity, self.requestID == intent,
                       admission.coordinator.activity(for: admission.identity.surfaceToken).allowsPresentationPublication,

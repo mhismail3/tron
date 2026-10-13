@@ -4878,7 +4878,7 @@ final class AppModel {
             try HomeStatusDTO.decode(try await read("home.status"))
         }
         func requireMemoryBrowser() throws {
-            guard lifecycle.gatewayInfo?.capabilities.contains("home-memory-browser.v1") == true else {
+            guard lifecycle.gatewayInfo?.capabilities.contains("home-memory-view.v1") == true else {
                 throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the memory browser.", retryable: false, details: nil)
             }
         }
@@ -4930,16 +4930,15 @@ final class AppModel {
             return .chapters(try await readChapterList())
         case .memory(let sessionID, let continuation):
             try requireMemoryBrowser()
-            var values: [String: JSONValue] = ["limit": .number(20)]
+            var values: [String: JSONValue] = ["limit": .number(30)]
             if let continuation { values["cursor"] = .string(continuation.cursor) }
             if let sessionID { values["sessionId"] = .string(sessionID) }
-            let page = try HomeMemoryPageDTO.decode(try await read("home.memory.page", .object(values)), continuation: continuation)
-            // Each row names its chapter by ordinal; the list supplies the mapping.
-            var ordinals: [String: Int] = [:]
-            if chapterListCapable() {
-                for chapter in try await readChapterList().chapters { ordinals[chapter.sessionId] = chapter.ordinal }
-            }
-            return .memory(page, chapterOrdinals: ordinals)
+            return .memory(try HomeMemoryViewDTO.decode(try await read("home.memory.view", .object(values)), continuation: continuation))
+        case .memoryPart(let sessionID, let line):
+            try requireMemoryBrowser()
+            var values: [String: JSONValue] = ["part": .object(["start": .number(Double(line.start)), "span": .number(Double(line.span))])]
+            if let sessionID { values["sessionId"] = .string(sessionID) }
+            return .memory(try HomeMemoryViewDTO.decode(try await read("home.memory.view", .object(values)), continuation: nil, part: line))
         case .evidence(let source, let offset):
             try requireMemoryBrowser()
             let params = JSONValue.object(["evidence": try JSONValue.encode(source), "offset": .number(Double(offset))])

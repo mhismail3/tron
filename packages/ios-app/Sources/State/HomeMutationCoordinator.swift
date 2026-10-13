@@ -14,8 +14,6 @@ struct HomeDesignationReceipt: Codable, Equatable, Sendable {
 final class HomeMutationCoordinator {
     enum Command: Equatable {
         case designate, disable, configureMemory(ModelRef), pauseMemory, resumeMemory
-        case stopTask(taskID: String, operationID: String)
-        case steerTask(taskID: String, operationID: String, text: String)
         case revokeScope(String), revokeGrant(String)
         case decideGrant(requestID: String, approved: Bool, expiresAt: Int)
         case reconfirmPermissions
@@ -30,8 +28,6 @@ final class HomeMutationCoordinator {
             case .configureMemory: "settings.change"
             case .pauseMemory: "home.pauseMemory"
             case .resumeMemory: "home.resumeMemory"
-            case .stopTask: "home.stopTask"
-            case .steerTask: "home.steerTask"
             case .revokeScope: "home.revokeTaskScope"
             case .revokeGrant: "home.revokeTaskGrant"
             case .decideGrant: "home.decideTaskGrant"
@@ -129,10 +125,6 @@ final class HomeMutationCoordinator {
                 "key": .string("model.ref[role=memory]"), "layer": .string("profile"),
                 "op": .string("set"), "value": try JSONValue.encode(model),
             ])])
-        case .stopTask(let task, let operation):
-            params["taskId"] = .string(task); params["operationId"] = .string(operation)
-        case .steerTask(let task, let operation, let text):
-            params["taskId"] = .string(task); params["operationId"] = .string(operation); params["text"] = .string(text)
         case .revokeScope(let id): params["scopeId"] = .string(id)
         case .revokeGrant(let id): params["grantId"] = .string(id)
         case .decideGrant(let request, let approved, let expires):
