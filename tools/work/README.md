@@ -20,7 +20,7 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | `cleanup [--all] [--dry-run]` | Removes a task worktree and its branches once its pull request merged at its head (or its issue is closed and it holds only its claim commit). Names what it keeps and why. |
 | `dashboard [--html P] [--json P]` | Read-only view of claims, Status, epics, stale work, orphans and main CI. |
 | `comment <issue> --body-file F` | Privacy-checks, then posts a public issue comment. |
-| `issue create\|labels\|close\|parent\|block` | Files issues and changes labels and links. Labels are optional; only declared labels are accepted. `close` posts a comment, closes, and sets Status Done. Epics may close only when all linked children are closed (every page is checked before any write, for either close reason). |
+| `issue create\|labels\|close\|reopen\|parent\|block` | Files issues and changes labels and links. Labels are optional; only declared labels are accepted. `close` posts a comment, closes, and sets Status Done. Epics may close only when all linked children are closed (every page is checked before any write, for either close reason). `reopen <issue> --comment-file F` requires the reason as a non-empty, privacy-checked comment, posts it with an audit marker, reopens, and sets Status In progress when the issue is claimed (claims are left as they are) or Ready otherwise; it refuses an open issue it did not reopen, and a re-run finishes a partial reopen without a second comment. `parent --replace-parent` moves a task from its current epic to another. |
 | `project add\|set` | Adds an issue to the Project, or sets Status (Proposed, Ready, Blocked) and Priority. |
 | `bootstrap [--apply]` | Plans or converges labels and the Project fields to `.github/work.json`. Adds and updates only. |
 
@@ -65,8 +65,12 @@ dependencies, so those publishers must settle before consumers run. The first
 failed phase prevents later phases from starting; no assertion or timeout is
 relaxed. Explicit journeys must themselves avoid conflicting writes.
 
-Each log is kept under `<git dir>/work/logs/`, and a failing check prints the end
-of its log. A tree that passed with the same check set and build-order contract is
+Each log is kept under `<git dir>/work/logs/`; every check prints a flushed
+`running: <check> (log: <path>)` line before it starts, and a failing check prints
+the end of its log. `land` uses the same verify runner. On cleanup of a merged task,
+the exact merged head's log directory is retained in the common Git directory;
+retained log directories older than 30 days are pruned. Claim-only cleanup does not
+retain or prune logs. A tree that passed with the same check set and build-order contract is
 recorded under `<git dir>/work/verified/` and is not run again. `verify` refuses
 a dirty worktree, because it checks a commit. `python3 -B scripts/test-work-verify.py`
 exercises the real CLI with child-process dependency replacement, an explicit
@@ -178,15 +182,24 @@ left open after its merge. Evidence is written to
 `test-results/work-land.json`; the fixture repository, home, and temporary files are
 removed on exit.
 
-`python3 scripts/test-work-close.py` exercises epic/task close through the real CLI
-and Git with a process-level GitHub fixture in an isolated temporary home. It covers
-completed epics, unfinished children on later pages, failed reads, foreign claims,
-and idempotent recovery after a partial close. Regenerable evidence is written to
+`python3 scripts/test-work-cleanup.py` exercises merged cleanup against real temporary
+Git repositories and linked worktrees, checking exact-head evidence retention, 30-day
+pruning, and remote-branch/worktree removal. Evidence is written to
+`test-results/work-cleanup.json`; the temporary repositories are removed on exit.
+
+`python3 scripts/test-work-close.py` exercises epic/task close and reopen through the
+real CLI and Git with a process-level GitHub fixture in an isolated temporary home. It
+covers completed epics, unfinished children on later pages, failed reads, foreign claims,
+and idempotent recovery after a partial close; and for reopen, refusal without a reason
+or of an open issue, the Ready/In progress Status choice, the audited write, and
+idempotent recovery after a partial reopen. Regenerable evidence is written to
 `test-results/work-close.json`; the fixture repository and home are removed on exit.
 
 `python3 scripts/test-work-handoff.py` exercises handoff through the real CLI and Git
 in an isolated fixture, with owner-status evidence served by real Gateway WebSockets
-using the built client helper. It checks refusal of an unassigned IP before socket
+using the built client helper. A protocol mismatch is emitted as a structured helper
+refusal with distinct exit code 3 and is named by `handoff`; other helper failures
+remain indeterminate and cannot establish settlement. It checks refusal of an unassigned IP before socket
 access, acceptance of a locally assigned interface IP when one is available, active-only
 refusal without status reads, pagination to a finished matching owner, malformed
 evidence, settled no-report proof with stopped or naturally completed children, task/session/operation mismatches, missing or failed settlement, excluded unknown reasons, status races, natural completion with zero stopped subagents, refusal preservation of

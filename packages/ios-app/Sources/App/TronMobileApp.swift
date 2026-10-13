@@ -47,6 +47,8 @@ struct TronMobileApp: App {
                 HostedReadonlyAttachmentFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-chat-display-fixture") {
                 HostedChatDisplayFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-chat-annotation-fixture") {
+                HostedChatAnnotationFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-fixture") {
                 HostedAskUserFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-pagination-fixture") {
