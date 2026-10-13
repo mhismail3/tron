@@ -2144,7 +2144,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(toolsRow.waitForExistence(timeout: 5), app.debugDescription)
         tapScrolling(toolsRow.buttons.firstMatch.buttons.firstMatch, in: app)
         let any = app.descendants(matching: .any)
-        let count = any.matching(NSPredicate(format: "label == %@", "1 of 1 on")).firstMatch
+        let count = any.matching(NSPredicate(format: "label == %@", "2 of 2 on")).firstMatch
         XCTAssertTrue(count.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(any.matching(NSPredicate(format: "label == %@", "Read")).firstMatch.exists, app.debugDescription)
         keepScreenshot(named: "900-tools-list-light")
@@ -2153,11 +2153,18 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Fixture path input"].waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "900-tools-detail-light")
         closeTopSheet(app)
-        let toggle = app.switches["Read"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5), app.debugDescription)
-        toggle.tap()
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
-        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:1")
+        // A chosen tool the catalog no longer offers stays listed with its reason, so it can be cleared.
+        XCTAssertTrue(app.staticTexts["Not available here"].exists, app.debugDescription)
+        // Toggles edit a draft like every checklist; Save applies one change.
+        let applied = app.staticTexts["fixture.settings-renderer-applied"]
+        let read = app.switches["Read"]
+        XCTAssertTrue(read.waitForExistence(timeout: 5), app.debugDescription)
+        read.tap()
+        tapScrolling(app.switches["Retired"], in: app)
+        XCTAssertTrue(any.matching(NSPredicate(format: "label == %@", "0 of 2 on")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(applied.label, "applied:0", "Toggling edits the draft; nothing applies before Save")
+        app.buttons["tron-sheet-save"].tap()
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
     }
 
     /// Sheet intro text renders at the settings row subtitle's size and text style

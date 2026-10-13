@@ -1,52 +1,60 @@
 import SwiftUI
 import TronMobileCore
 
-/// Edits the tools.active setting with the same catalog groups, rows and detail
-/// surface used by Manage Session → Available Tools.
+/// Edits a tool selection (a `catalog.tools` setting) with the same groups, rows
+/// and detail sheet as Manage Session → Available Tools. Like every checklist
+/// it edits a draft committed with Save; the order chosen is kept.
 struct SettingsToolsEditor: View {
     let title: String
-    let selected: [String]
     let options: [SettingsOption]
-    let onChange: ([String]) -> Void
+    let onSave: ([String]) -> Void
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.dismiss) private var dismiss
+    @State private var chosen: [String]
     @State private var detail: ProjectResourceSelection?
+    private let initial: [String]
+
+    init(title: String, selected: [String], options: [SettingsOption], onSave: @escaping ([String]) -> Void) {
+        self.title = title; self.options = options; self.onSave = onSave
+        initial = selected
+        _chosen = State(initialValue: selected)
+    }
 
     private var accent: Color { settingsTheme?.accent ?? .tronEmerald }
     private var rows: [AvailableToolRow] {
         options.compactMap { option in
-            guard let name = option.value.stringValue, let value = option.resource else { return nil }
-            return AvailableToolRow(name: name, title: option.label, detail: option.detail, value: value)
+            guard let name = option.value.stringValue else { return nil }
+            // A chosen tool the catalog no longer offers has no record; it stays
+            // listed with its reason so it can be turned off.
+            let reason = option.disabledReason.map { ["description": JSONValue.string($0)] } ?? [:]
+            return AvailableToolRow(name: name, title: option.label, detail: option.disabledReason ?? option.detail,
+                                    value: option.resource ?? .object(["name": .string(name)].merging(reason) { $1 }))
         }
     }
     private var groups: [AvailableToolGroup] {
-        let values = JSONValue.object(["tools": .array(rows.map(\.value))])
-        return AvailableToolsPresentation.groups(from: values)
+        AvailableToolsPresentation.groups(from: .object(["tools": .array(rows.map(\.value))]))
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                AvailableToolsList(groups: groups, active: Set(selected), accent: accent,
-                                   onToggle: { tool, enabled in
-                    var next = Set(selected)
-                    if enabled { next.insert(tool.name) } else { next.remove(tool.name) }
-                    onChange(options.compactMap { $0.value.stringValue }.filter(next.contains))
-                }, onSelect: { tool in
-                    detail = ProjectResourceSelection(kind: .tools, title: tool.title, value: tool.value)
-                })
-                .padding(.horizontal, 20)
-                .padding(.vertical, 18)
-            }
-            .tronScrollEdgeChrome()
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: title, accent: accent) }
-            }
+        ScrollView {
+            AvailableToolsList(groups: groups, active: Set(chosen), accent: accent,
+                               onToggle: { tool, enabled in
+                if enabled { if !chosen.contains(tool.name) { chosen.append(tool.name) } }
+                else { chosen.removeAll { $0 == tool.name } }
+            }, onSelect: { tool in
+                detail = ProjectResourceSelection(kind: .tools, title: tool.title, value: tool.value)
+            })
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle(title)
+        .tronSaveToolbar(enabled: chosen != initial) {
+            onSave(chosen)
+            dismiss()
         }
         .tronManagedSheet(item: $detail, identity: { _ in "settings.tool-detail" }) { selection in
             ProjectResourceDetailSheet(sessionID: "", selection: selection, accentOverride: accent) { detail = nil }
         }
-        .tronSettingsVisualTheme(accent: accent)
-        .tint(accent)
     }
 }

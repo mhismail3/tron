@@ -116,7 +116,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var closed = false
     // The fixture's stores: one Mac layer over built-ins.
     private var model = "pro"
-    private var activeTools = ["read"]
+    private var activeTools = ["read", "retired"]
     private var thinking = "high"
     private var retries = 6
     private var invalidValue = ""
@@ -359,6 +359,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                     "distribution": .string(name == "read" ? "sdk" : "external"), "source": .string(name == "read" ? "builtin" : "npm:fixture"),
                     "parameters": .object(["type": .string("object"), "properties": .object([field: .object(["type": .string("string"), "description": .string("Fixture \(field) input")])]), "required": .array([.string(field)])]),
                 ])])
+            } + activeTools.filter { name in !definitions.contains { $0.0 == name } }.map { name in
+                // The Gateway lists a chosen tool its catalog no longer offers, so it can be cleared.
+                .object(["value": .string(name), "label": .string(name), "disabledReason": .string("Not available here")])
             })])
         case "run.retry.maxRetries":
             return .object(["key": .string(key), "source": .string("fixture.retryRange"), "dependsOn": .array([]),
