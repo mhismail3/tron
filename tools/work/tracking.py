@@ -275,7 +275,8 @@ def _relation(gh: Gh, issue_id: str) -> dict:
     return result
 
 
-def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number: int) -> None:
+def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number: int,
+               replace_parent: bool = False) -> None:
     owner, name = _repository(gh)
     child = _issue(gh, f"{owner}/{name}", child_number)
     epic = _issue(gh, f"{owner}/{name}", epic_number)
@@ -287,9 +288,10 @@ def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number:
         print(f"issue #{child_number} is already a sub-issue of #{epic_number}")
         return
     gh.graphql(
-        "mutation($epic: ID!, $child: ID!) { addSubIssue(input: {issueId: $epic, subIssueId: $child}) "
-        "{ issue { id } } }",
-        epic=epic["node_id"], child=child["node_id"],
+        # GitHub allows one parent; moving a task to another epic must say so explicitly.
+        "mutation($epic: ID!, $child: ID!, $replace: Boolean!) { addSubIssue(input: "
+        "{issueId: $epic, subIssueId: $child, replaceParent: $replace}) { issue { id } } }",
+        epic=epic["node_id"], child=child["node_id"], replace=replace_parent,
     )
     print(f"linked issue #{child_number} under epic #{epic_number}")
 
@@ -409,3 +411,50 @@ def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comm
         _finish_step(finished, f"Status set to {done_status}", "Status update",
                      lambda: start.set_status(gh, status_item, done_status))
     print(f"closed issue #{number} as {_CLOSE_REASONS[reason]}")
+
+
+def reopen_issue(gh: Gh, repo: Path, config: dict, number: int, comment_file: Path) -> None:
+    """Post the stated reason, reopen, and restore Status, refusing before any write.
+
+    The reason comment is required and carries an audit marker, so a re-run after a
+    partial failure finds it and finishes the reopen instead of posting it again.
+    Claims are left as they are: reopening returns work to its owner, if any.
+    """
+    if number <= 0:
+        raise TrackingError("issue numbers must be positive")
+    text = comments.prepared_body(repo, config, comment_file)
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    marker = f"<!-- work:reopen digest={digest} -->"
+    rules = config["claim"]
+    owner, name = _repository(gh)
+    repository = f"{owner}/{name}"
+    issue = _issue(gh, repository, number)
+    posted = any(marker in (comment.get("body") or "")
+                 for comment in gh.rest_pages(f"repos/{repository}/issues/{number}/comments"))
+    is_closed = issue.get("state") != "open"
+    if not is_closed and not posted:
+        raise TrackingError(f"#{number} is open; work issue reopen only finishes a reopen it started")
+    claimed = claims.existing_claims(repo, rules["remote"], rules["baseBranch"], number)
+    status = rules["claimedStatus"] if claimed else rules["readyStatus"]
+
+    _, project = _project(gh, repo, config)
+    items = [item for item in _project_items(gh, issue["node_id"]) if item["project"]["id"] == project["id"]]
+    status_item = None
+    if items:
+        field = next((f for f in project["fields"]["nodes"] if f and f["name"] == rules["statusField"]), None)
+        if field is None or status not in {option["name"] for option in field.get("options", [])}:
+            raise TrackingError(f"Project has no configured {rules['statusField']} option {status!r}; "
+                                "run work bootstrap")
+        status_item = {"id": items[0]["id"], "project": {"id": project["id"], "field": field}}
+
+    finished: List[str] = []
+    if not posted:
+        _finish_step(finished, "reason posted", "comment",
+                     lambda: gh.run("issue", "comment", str(number), "--body-file", "-", stdin=text + marker + "\n"))
+    if is_closed:
+        _finish_step(finished, "issue reopened", "reopen", lambda: gh.run("issue", "reopen", str(number)))
+    if status_item is not None:
+        _finish_step(finished, f"Status set to {status}", "Status update",
+                     lambda: start.set_status(gh, status_item, status))
+    print(f"reopened issue #{number}" + (f" with Status {status}" if status_item else
+                                          "; it is not in the work Project, so its Status is unchanged"))
