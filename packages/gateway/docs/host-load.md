@@ -67,11 +67,12 @@ This replaces the manual `/tmp/tron-heavy-run.lock` protocol.
 - **Priority.** Home's own turns and maintainer chats are never queued. Under
   host pressure `critical` (below), a queued task does not start until pressure
   falls to `elevated` or lower; running workers are never preempted.
-- **Stop.** Stop on a queued task settles it `interrupted` with
-  `stopped-before-start`; the 24-hour deadline counts from start, not from
+- **Stop.** Stop on a queued task (operation `queued`) settles it `interrupted`
+  with `stopped-before-start`; the 24-hour deadline counts from start, not from
   queueing.
-- **Recovery.** Cold recovery keeps a queued task queued (it never had a
-  worker), and settles a pending task that had begun worker creation as today.
+- **Recovery.** The queue is in memory. A restart settles a queued task `unknown`
+  (`cold-queued-not-started`) through cold recovery and wakes Home with it; accepted
+  work is never replayed, so Home delegates again if it still wants the work.
 
 ## 3. Host-pressure signal (Gateway)
 
