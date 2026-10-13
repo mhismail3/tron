@@ -130,8 +130,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             predicate: NSPredicate(format: "exists == false"), object: transientNotice
         )], timeout: 20), .completed)
         keepScreenshot(app, name: "393-simulator-retained-after-transient-notice")
-        XCTAssertTrue(app.buttons["Waiting for connection"].isHittable,
-                      "the mounted chat must keep its visible inline lifecycle reason after the transient notice expires")
+        let waitingStatus = recoveryStatus(app, "Waiting for connection")
+        XCTAssertTrue(waitingStatus.isHittable,
+                      "the mounted chat must keep its visible lifecycle reason after the transient notice expires")
+        assertRecoveryInChrome(app, status: waitingStatus)
         XCTAssertTrue(sameRouteReply.isHittable, "recovery must not cover the retained reply")
         try setProxyMode(fixture, mode: "pass")
         try setProxyMode(fixture, mode: "hold-open")
@@ -163,20 +165,91 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         try setProxyMode(fixture, mode: "pass")
         XCTAssertTrue(sameRouteReply.waitForExistence(timeout: 60))
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "replacement authority did not become ready")
+        XCTAssertFalse(waitingStatus.exists, "the replacement connection left its recovery status behind")
+
+        // #878: a background transition intentionally retires the transport, so
+        // every foreground reconnects. An ordinary reconnect is not an outage and
+        // must stay quiet for the whole foreground, not flash recovery chrome.
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(waitForBackground(app, timeout: 60))
+        app.activate()
+        XCTAssertTrue(waitForForeground(app, timeout: 90))
+        let quietForegroundUntil = Date().addingTimeInterval(4)
+        while Date() < quietForegroundUntil {
+            if waitingStatus.exists {
+                keepScreenshot(app, name: "878-simulator-fast-foreground-flashed-recovery")
+                XCTFail("an ordinary foreground reconnect showed connection recovery")
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), "the ordinary foreground did not reconnect")
+        keepScreenshot(app, name: "878-simulator-fast-foreground-quiet")
+        XCTAssertTrue(sameRouteReply.isHittable)
+        XCTAssertEqual(composer.value as? String, unsentDraft)
+        XCTAssertTrue(app.keyboards.firstMatch.exists,
+                      "an ordinary foreground must preserve the active composer keyboard")
+
+        // A foreground reconnect whose handshake is still in flight stays quiet
+        // through the app's recovery grace, then names the delay honestly in
+        // the route chrome without covering rows or disturbing the draft.
+        let replyFrameBeforeForeground = sameRouteReply.frame
+        try setProxyMode(fixture, mode: "hold-hello")
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(waitForBackground(app, timeout: 60))
+        let activationRequestedAt = Date()
+        app.activate()
+        XCTAssertTrue(waitForForeground(app, timeout: 90))
+        // The scene became active no earlier than the request, so a status seen
+        // inside this window predates the app's two-second recovery grace.
+        // Activation normally returns in about one second; a slower runner
+        // records the window rather than asserting against a legitimate status.
+        let insideGrace = Date().timeIntervalSince(activationRequestedAt)
+        let shownInsideGrace = waitingStatus.exists
+        keepScreenshot(app, name: "878-simulator-foreground-handshake-held")
+        let graceWindow = XCTAttachment(string: "checkedAfter=\(insideGrace)s shown=\(shownInsideGrace)")
+        graceWindow.name = "878-foreground-grace-window"
+        graceWindow.lifetime = .keepAlways
+        add(graceWindow)
+        if insideGrace < 1.8 {
+            XCTAssertFalse(shownInsideGrace,
+                           "recovery appeared \(insideGrace)s into an ordinary foreground reconnect")
+        }
+        try setProxyMode(fixture, mode: "await-intercepted")
+        XCTAssertTrue(waitingStatus.waitForExistence(timeout: 30),
+                      "a held foreground reconnect never named the delay: \(app.debugDescription)")
+        let statusAppearedAfter = Date().timeIntervalSince(activationRequestedAt)
+        XCTAssertGreaterThanOrEqual(statusAppearedAfter, 2,
+                                    "recovery appeared before the reconnect outlived the recovery grace")
+        keepScreenshot(app, name: "878-simulator-delayed-foreground-status")
+        assertRecoveryInChrome(app, status: waitingStatus)
+        XCTAssertTrue(sameRouteReply.isHittable, "delayed-connection status covered the retained reply")
+        XCTAssertEqual(sameRouteReply.frame.minY, replyFrameBeforeForeground.minY, accuracy: 3,
+                       "delayed-connection status moved the pinned transcript")
+        XCTAssertEqual(composer.value as? String, unsentDraft)
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        try setProxyMode(fixture, mode: "pass")
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), "the delayed reconnect did not finish without Retry")
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: waitingStatus
+        )], timeout: 30), .completed, "a finished reconnect left its recovery status behind")
+        XCTAssertEqual(composer.value as? String, unsentDraft)
 
         // A definitive answer from the real Gateway is not transport loss. The
         // proxy asks for an absent session, then forwards the actual rejection.
         try setProxyMode(fixture, mode: "reject-open")
         try setProxyMode(fixture, mode: "close", code: 1012)
         try setProxyMode(fixture, mode: "await-intercepted")
-        XCTAssertTrue(app.buttons["Conversation unavailable"].waitForExistence(timeout: 30),
-                      "a Gateway rejection must leave a persistent inline failure over retained rows")
+        let unavailableStatus = recoveryStatus(app, "Conversation unavailable")
+        XCTAssertTrue(unavailableStatus.waitForExistence(timeout: 30),
+                      "a Gateway rejection must leave a persistent failure beside retained rows")
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: transientNotice
         )], timeout: 30), .completed,
                        "the transient catch-up notice must retire before qualifying persistent failure")
         keepScreenshot(app, name: "393-simulator-persistent-gateway-failure")
-        XCTAssertTrue(app.buttons["Conversation unavailable"].isHittable)
+        XCTAssertTrue(unavailableStatus.isHittable)
+        assertRecoveryInChrome(app, status: unavailableStatus)
         XCTAssertTrue(sameRouteReply.isHittable, "Gateway failure covered the retained transcript")
         XCTAssertEqual(composer.value as? String, unsentDraft)
         XCTAssertTrue(app.keyboards.firstMatch.exists)
@@ -185,6 +258,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForHittable(app.buttons["Retry"], timeout: 10))
         app.buttons["Retry"].tap()
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "explicit retry did not restore command authority")
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: unavailableStatus
+        )], timeout: 30), .completed, "a successful Retry left its failure status behind")
 
         // A real reader detaches from the tail; this is not a short transcript
         // that happens to fit in the viewport. Scrolling intentionally dismisses
@@ -205,7 +281,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(sent.isHittable)
         let anchorFrame = sent.frame
         try setProxyMode(fixture, mode: "blackhole")
-        XCTAssertTrue(app.buttons["Waiting for connection"].waitForExistence(timeout: 60))
+        XCTAssertTrue(waitingStatus.waitForExistence(timeout: 60))
         XCTAssertEqual(sent.frame.minY, anchorFrame.minY, accuracy: 3,
                        "transport retirement moved the anchored reader")
         try setProxyMode(fixture, mode: "pass")
@@ -228,7 +304,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "393-simulator-replacement-transport-open-held")
         XCTAssertTrue(sent.isHittable)
         XCTAssertEqual(sent.frame.minY, anchorFrame.minY, accuracy: 3)
-        XCTAssertFalse(app.buttons["Conversation unavailable"].exists)
+        XCTAssertFalse(unavailableStatus.exists)
         XCTAssertFalse(app.otherElements["Opening conversation"].exists)
         try setProxyMode(fixture, mode: "pass")
         XCTAssertTrue(waitForEnabled(send, timeout: 60))
@@ -990,6 +1066,29 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             completed.fulfill()
         }.resume()
         wait(for: [completed], timeout: 15)
+    }
+
+    /// The route's persistent recovery reason, matched by what it tells the user
+    /// rather than by the control type that happens to render it.
+    @MainActor
+    private func recoveryStatus(_ app: XCUIApplication, _ label: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+    }
+
+    /// Recovery belongs to the route's navigation chrome with its Retry: it is
+    /// never a detached control floating over readable transcript rows (#878).
+    @MainActor
+    private func assertRecoveryInChrome(_ app: XCUIApplication, status: XCUIElement,
+                                        file: StaticString = #filePath, line: UInt = #line) {
+        let bar = app.navigationBars.firstMatch
+        XCTAssertTrue(bar.exists, "the chat route has no navigation bar", file: file, line: line)
+        let retry = app.buttons["Retry"]
+        XCTAssertTrue(retry.isHittable, "persistent recovery offers no Retry", file: file, line: line)
+        for (name, element) in [("status", status), ("Retry", retry)] {
+            XCTAssertTrue(bar.frame.contains(element.frame),
+                          "recovery \(name) \(element.frame) left the navigation chrome \(bar.frame)",
+                          file: file, line: line)
+        }
     }
 
     @MainActor
