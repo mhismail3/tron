@@ -47,7 +47,7 @@ is the median absolute deviation (MAD) of the samples; the compare bound is
 | Aspect | Metric (source) | Cost per sample set | Noise today | Ready to climb? |
 |---|---|---|---|---|
 | Gateway→phone traffic, streaming | `wire.mobile.total.frames` / `.bytes`, `stream-reply` (`tron-profile gateway`) | ~2.5 min for 5 iterations incl. build | frames 164, MAD 0; bytes 681.38 KiB, MAD 863 B (0.12%) | **Yes** |
-| Gateway→phone traffic, tool turn | same metrics, `tool-loop` | ~2 min for 3 iterations | frames 228, MAD 2; bytes 14.34 MiB, MAD 5.8 KiB (0.04%) | **Yes, on a quiet host** (fails `session.open` 10 s deadline under load) |
+| Gateway→phone traffic, tool turn | same metrics, `tool-loop` | ~2 min for 3 iterations | frames 228, MAD 2; bytes 14.34 MiB, MAD 5.8 KiB (0.04%) at load ~19; under heavy load frames MAD 3.5 (A/A bound ±13–16) and bytes vary 4% as snapshots turn into rebaselines | **Yes, on a quiet host** (fails `session.open` 10 s deadline under load) |
 | Gateway CPU | `gateway.cpu.instructions` (same runs) | free with the above | 1.206 G, MAD 80.7 M (6.7%) → bound ≈ 30% | Not gateable on this host; report only |
 | iOS CPU per scenario | instructions retired (`tron-profile ios`, owned simulator) | minutes + simulator lease + memory admission | unmeasured here (needs `--self-test`) | Next, after a quiet-host noise study |
 | iOS launch / sheet load | not instrumented as a profiler scenario | — | — | Needs a scenario in `ProfilingTests/` first |
@@ -173,7 +173,8 @@ See [results/2026-10-13-gateway-turn-frames.md](results/2026-10-13-gateway-turn-
 ## 10. Proposed issues
 
 1. **Promote the hill-climb runner and skill** (this prototype) after review:
-   add a `baseline`/A-A subcommand, an HTML results page, and a real-boundary
+   make the A/A pre-flight a runner step that refuses a round whose noise
+   bound exceeds `min_effect`, add an HTML results page, and a real-boundary
    test of the runner (path-guard refusal, plumbing-failure classification,
    worktree cleanup on interrupt) in `scripts/test-*` style.
 2. **Durable per-check timing for `work verify`/`land`** (extends #870): write
@@ -190,5 +191,12 @@ See [results/2026-10-13-gateway-turn-frames.md](results/2026-10-13-gateway-turn-
 6. **Investigate snapshot volume in tool turns** (12.94 MiB decoded per
    ten-tool turn): a maintainer-scoped protocol question, not an automated
    climb.
-7. **First LLM-side eval: skill/route triggering** with a human-approved case
+7. **Profiler verdict resolution for small effects:** consider a
+   difference-of-medians bootstrap interval beside the 3-spread bound so
+   more samples buy resolution (decision for the profiler owner).
+8. **Quiet-window measurement on the shared Mac:** the 1-minute load ranged
+   5–770 on 18 CPUs during this prototype; climbing needs a scheduled quiet
+   window or a host-wide measurement lease that other agents' simulator boots
+   respect.
+9. **First LLM-side eval: skill/route triggering** with a human-approved case
    set, train/test split and a judge model different from the climber.
