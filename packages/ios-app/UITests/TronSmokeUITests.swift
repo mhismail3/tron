@@ -2114,6 +2114,37 @@ final class TronSmokeUITests: XCTestCase {
             .matching(NSPredicate(format: "label CONTAINS %@", "Off")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 
+    /// Settings' tools.active editor reuses Available Tools grouping and tool detail.
+    @MainActor
+    func testSettingsToolsEditorUsesAvailableToolsListAndDetails() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let toolsSection = app.buttons["settings-section-tools-open"]
+        XCTAssertTrue(toolsSection.waitForExistence(timeout: 10), app.debugDescription)
+        tapScrolling(toolsSection, in: app)
+        let toolsRow = app.descendants(matching: .any)["settings-row-tools.active"]
+        XCTAssertTrue(toolsRow.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(toolsRow.buttons.firstMatch.buttons.firstMatch, in: app)
+        let any = app.descendants(matching: .any)
+        let count = any.matching(NSPredicate(format: "label == %@", "1 of 1 on")).firstMatch
+        XCTAssertTrue(count.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(any.matching(NSPredicate(format: "label == %@", "Read")).firstMatch.exists, app.debugDescription)
+        keepScreenshot(named: "900-tools-list-light")
+        let detailButton = app.buttons["Read"].firstMatch
+        tapScrolling(detailButton, in: app)
+        XCTAssertTrue(app.staticTexts["Fixture path input"].waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "900-tools-detail-light")
+        closeTopSheet(app)
+        let toggle = app.switches["Read"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), app.debugDescription)
+        toggle.tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:1")
+    }
+
     /// Sheet intro text renders at the settings row subtitle's size and text style
     /// (#900): at a large type size each wrapped intro line is one row-subtitle line.
     @MainActor

@@ -116,6 +116,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var closed = false
     // The fixture's stores: one Mac layer over built-ins.
     private var model = "pro"
+    private var activeTools = ["read"]
     private var thinking = "high"
     private var retries = 6
     private var invalidValue = ""
@@ -282,6 +283,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                                                                               "dependsOn": .array([.string("model.ref")])])])),
             key("context.images.block", group: "context", value: .bool(blockImages), display: blockImages ? "On" : "Off",
                 presentation: presentation("Block images", "Images are not sent to the model.", 10, "essential", "toggle")),
+            key("tools.active", group: "tools", value: .array(activeTools.map(JSONValue.string)), display: activeTools.joined(separator: ", "),
+                layer: "mac", presentation: presentation("Tools", "Tools available to new chats.", 10, "essential", "checklist",
+                    extra: ["optionsSource": .object(["name": .string("catalog.tools"), "dependsOn": .array([])])])),
             key("run.retry.maxRetries", group: "run", subgroup: "Retry", value: .number(Double(retries)), display: "\(retries) retries",
                 layer: "mac", presentation: presentation("Retries", "How many times a failed request is retried.", 10, "essential", "number",
                     extra: ["range": .object(["min": .number(0), "max": .number(100), "unit": .string("retries")]),
@@ -344,6 +348,18 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 })]
             if offset + page.count < entries.count { result["nextCursor"] = .string(String(offset + page.count)) }
             return .object(result)
+        case "tools.active":
+            let definitions: [(String, String, String, String)] = [
+                ("read", "Read", "Read file contents from a path.", "path"),
+                ("codemode", "Code mode", "Run TypeScript against available tools.", "code"),
+            ]
+            return .object(["key": .string(key), "source": .string("catalog.tools"), "dependsOn": .array([]), "options": .array(definitions.map { name, label, description, field in
+                .object(["value": .string(name), "label": .string(label), "detail": .string(description), "resource": .object([
+                    "name": .string(name), "label": .string(label), "description": .string(description),
+                    "distribution": .string(name == "read" ? "sdk" : "external"), "source": .string(name == "read" ? "builtin" : "npm:fixture"),
+                    "parameters": .object(["type": .string("object"), "properties": .object([field: .object(["type": .string("string"), "description": .string("Fixture \(field) input")])]), "required": .array([.string(field)])]),
+                ])])
+            })])
         case "run.retry.maxRetries":
             return .object(["key": .string(key), "source": .string("fixture.retryRange"), "dependsOn": .array([]),
                             "options": .array([]), "range": .object(["min": .number(0), "max": .number(10),
@@ -379,6 +395,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             case "lab.invalidValue": invalidValue = value?.stringValue ?? invalidValue
             case "run.transport": transport = value?.stringValue ?? transport
             case "context.images.block": blockImages = value?.boolValue ?? blockImages
+            case "tools.active": activeTools = value?.arrayValue?.compactMap(\.stringValue) ?? activeTools
             case "lab.focusMode": focusMode = value?.stringValue ?? focusMode
             case "lab.paths": paths = value?.arrayValue?.compactMap(\.stringValue) ?? []
             case "lab.weights": weights = value?.objectValue ?? [:]

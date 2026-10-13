@@ -759,6 +759,14 @@ struct ProjectResourceDetailSheet: View {
         let identity = loadIdentity
         detail = nil
         loadError = nil
+        // The settings catalog carries the authoritative tool record already;
+        // there is no session RPC to fetch for a Mac/Project settings editor.
+        if selection.kind == .tools,
+           selection.value.objectValue?["description"]?.stringValue != nil,
+           selection.value.objectValue?["parameters"] != nil {
+            loadedIdentity = identity
+            return
+        }
         guard let command = selection.commandInfo else { return }
         do {
             let loaded = try await model.commandDetail(sessionID: sessionID, command: command)

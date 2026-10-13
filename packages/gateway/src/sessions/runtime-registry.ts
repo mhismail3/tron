@@ -3415,7 +3415,7 @@ export class RuntimeRegistry {
 
   /** A live chat's selectable tools, for its settings tool selection. The caller
    * has already opened the chat. */
-  liveToolCatalog(sessionId: string): Array<{ name: string; description?: string }> {
+  liveToolCatalog(sessionId: string): Array<{ name: string; description?: string; resource: Record<string, unknown> }> {
     const slot = this.slots.get(sessionId);
     if (!slot || slot.isDisposed) throw new GatewayError("busy", "Session runtime is no longer available", true);
     return slot.settingsToolCatalog();

@@ -125,7 +125,7 @@ struct SettingsRendererRow: View {
                           isOn: Binding(get: { setting.value?.boolValue == true }, set: { onChange(.bool($0)) }))
         case .choice:
             let choices = presentation?.optionsSource != nil ? (options?.options ?? []) : (presentation?.options?.map {
-                SettingsOption(value: $0.value, label: $0.label, detail: $0.detail, disabledReason: nil)
+                SettingsOption(value: $0.value, label: $0.label, detail: $0.detail, disabledReason: nil, resource: nil)
             } ?? [])
             if choices.isEmpty {
                 // A source with nothing to offer (a model that does not think) is a value, not a menu.
@@ -200,7 +200,13 @@ struct SettingsRendererRow: View {
                 readOnlyRow
             }
         case .checklist:
-            if let values = setting.value?.arrayValue, values.allSatisfy({ $0.stringValue != nil }) {
+            if setting.key == "tools.active", let values = setting.value?.arrayValue,
+               values.allSatisfy({ $0.stringValue != nil }), options?.source == "catalog.tools" {
+                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
+                    SettingsToolsEditor(title: title, selected: values.compactMap(\.stringValue),
+                                        options: options?.options ?? []) { onChange(.array($0.map(JSONValue.string))) }
+                }
+            } else if let values = setting.value?.arrayValue, values.allSatisfy({ $0.stringValue != nil }) {
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
                     TronChecklistPicker(
                         title: title, help: presentation?.help,

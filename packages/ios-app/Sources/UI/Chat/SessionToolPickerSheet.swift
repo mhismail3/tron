@@ -119,6 +119,48 @@ enum AvailableToolsPresentation {
     }
 }
 
+/// The grouped tools surface shared by Available Tools and the settings renderer.
+/// The caller owns selection/mutation so both routes retain their own authority.
+struct AvailableToolsList: View {
+    let groups: [AvailableToolGroup]
+    let active: Set<String>
+    let accent: Color
+    let onToggle: (AvailableToolRow, Bool) -> Void
+    let onSelect: (AvailableToolRow) -> Void
+
+    var body: some View {
+        LazyVStack(alignment: .leading, spacing: 18) {
+            ForEach(groups) { group in
+                let enabled = group.tools.filter { active.contains($0.name) }.count
+                TronSettingsGroup(group.title, detail: "\(enabled) of \(group.tools.count) on", accent: accent,
+                                  surfaceStyle: .scrollOptimized) {
+                    ForEach(Array(group.tools.enumerated()), id: \.element.id) { index, tool in
+                        if index > 0 { TronSettingsDivider(accent: accent) }
+                        HStack(spacing: 0) {
+                            Button { onSelect(tool) } label: {
+                                TronSettingsRow(icon: nil, title: tool.title, subtitle: tool.detail, accent: accent)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Shows the tool's description and inputs")
+                            Button { onToggle(tool, !active.contains(tool.name)) } label: {
+                                TronToggleControl(isOn: active.contains(tool.name), accent: accent)
+                                    .padding(.trailing, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                                    .frame(minHeight: TronSettingsLayoutPolicy.rowMinimumHeight)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityRepresentation {
+                                Toggle(isOn: Binding(get: { active.contains(tool.name) },
+                                                     set: { onToggle(tool, $0) })) { Text(tool.title) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Available Tools: turn individual tools on or off for this chat. Pi records
 /// the change in the chat's history; defaults for new chats live in
 /// Settings → Extensions → Default Tools. Only the switch toggles a tool; the
@@ -159,7 +201,11 @@ struct SessionToolPickerSheet: View {
                             accent: .tronSessionTeal
                         )
                     } else {
-                        ForEach(groups) { group in toolGroup(group) }
+                        AvailableToolsList(groups: groups, active: active, accent: .tronSessionTeal,
+                                          onToggle: { tool, enabled in set(tool, enabled: enabled) },
+                                          onSelect: { tool in
+                            selected = ProjectResourceSelection(kind: .tools, title: tool.title, value: tool.value)
+                        })
                     }
                 }
                 .padding(.horizontal, 20)
@@ -194,52 +240,6 @@ struct SessionToolPickerSheet: View {
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             await load()
-        }
-    }
-
-    private func toolGroup(_ group: AvailableToolGroup) -> some View {
-        let enabled = group.tools.filter { active.contains($0.name) }.count
-        return TronSettingsGroup(
-            group.title,
-            detail: "\(enabled) of \(group.tools.count) on",
-            accent: .tronSessionTeal,
-            surfaceStyle: .scrollOptimized
-        ) {
-            ForEach(Array(group.tools.enumerated()), id: \.element.id) { index, tool in
-                if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
-                toolRow(tool)
-            }
-        }
-    }
-
-    private func toolRow(_ tool: AvailableToolRow) -> some View {
-        let isOn = active.contains(tool.name)
-        return HStack(spacing: 0) {
-            Button {
-                selected = ProjectResourceSelection(kind: .tools, title: tool.title, value: tool.value)
-            } label: {
-                TronSettingsRow(
-                    icon: nil,
-                    title: tool.title,
-                    subtitle: tool.detail,
-                    accent: .tronSessionTeal
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Shows the tool's description and inputs")
-            Button { set(tool, enabled: !isOn) } label: {
-                TronToggleControl(isOn: isOn, accent: .tronSessionTeal)
-                    .padding(.trailing, TronSettingsLayoutPolicy.rowHorizontalPadding)
-                    .frame(minHeight: TronSettingsLayoutPolicy.rowMinimumHeight)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(saving != nil)
-            .opacity(saving == nil ? 1 : 0.62)
-            .accessibilityRepresentation {
-                Toggle(isOn: Binding(get: { isOn }, set: { set(tool, enabled: $0) })) { Text(tool.title) }
-                    .disabled(saving != nil)
-            }
         }
     }
 

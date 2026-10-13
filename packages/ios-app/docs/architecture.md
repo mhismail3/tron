@@ -1739,7 +1739,11 @@ never writes. The renderer uses the resolver's allowed layer list: other-layer
 rows remain read-only and link to the Project or Mac editor rather than attempting
 a Chat write. Gateway settings-gate coverage owns persistence and provider-effect proof.
 Manage Session keeps Agent Instructions, Available Tools and Project Resources as
-its own rows.
+its own rows. Available Tools and the `tools.active` settings editor share the
+same grouped tool rows and resource-detail surface; Settings edits the complete
+selected-name array through the renderer mutation path, while Manage Session
+continues to own live per-chat toggles. Its options carry the Gateway's tool
+record so settings details do not require a live session.
 Manage Home's Context section opens the existing next-request/delivered Home Context view; memory,
 chapters, tasks and permission requests retain their established domain owners.
 

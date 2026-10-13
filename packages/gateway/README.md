@@ -817,7 +817,8 @@ qualifiers?, query?, cursor?, limit? }` serves a key's choices: its static
 options, or its `optionsSource` (`catalog.models`, searchable and paged;
 `catalog.thinkingLevels` for the `model` qualifier or the target's chat model,
 empty for a model without reasoning; `catalog.contextWindow` as a `range` with
-the bounds `settings.change` enforces).
+the bounds `settings.change` enforces; and `catalog.tools`, whose options carry
+the selected tool's serializable `resource` record for shared list/detail UI).
 `settings.change { commandId, target, fence?, changes[], reason?, dryRun? }` is the one path every setting changes through
 ([docs/settings-model.md](docs/settings-model.md) 5). Each change is `{ key,
 qualifiers?, layer, op: "set" | "unset", value?, expected? }`. The Gateway
