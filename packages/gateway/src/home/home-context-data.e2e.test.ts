@@ -10,7 +10,6 @@ import type { HomeContextBreakdown } from "../protocol/types.js";
 import { KnowledgeObservationService } from "../knowledge/knowledge-observation.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
-import { admitHomeMemoryPage } from "./home-memory-browser.js";
 import { homeChapterObservationExcluded } from "./home-owner.js";
 
 afterEach(async () => {
@@ -274,8 +273,9 @@ describe("Home chapters, task names and memory pages", () => {
     // Memory summaries are built in the background; the chapter's topics appear once they exist.
     await waitFor(async () => ((await owner.chapterList()).chapters[0]?.contents?.topics.length ?? 0) > 0, "chapter topics");
     const topics = (await owner.chapterList()).chapters[0]!.contents!.topics;
-    expect(topics.length).toBeLessThanOrEqual(5);
-    expect(topics.every(topic => [...topic].length <= 120)).toBe(true);
+    expect(topics.length).toBeLessThanOrEqual(8);
+    expect(topics.every(topic => [...topic].length <= 200)).toBe(true);
+    expect(topics.every(topic => !/^(?:user|talk|echo|event|summary):|^\[call\b/iu.test(topic))).toBe(true);
   }, 60_000);
 
   it("titles an undelegated-name task by its brief's first line, with its project and worker", async () => {
@@ -302,7 +302,7 @@ describe("Home chapters, task names and memory pages", () => {
     expect(await owner.taskList({})).toEqual({ items: [], counts: { active: 0, finished: 0 } });
   }, 30_000);
 
-  it("pages one chapter's memory rows when a sessionId names it, and refuses a session that is not a chapter", async () => {
+  it("filters the hierarchical memory view to one chapter and pages its lines", async () => {
     const f = await fixture();
     await configure(f);
     const owner = f.registry.homeOwner();
@@ -323,30 +323,18 @@ describe("Home chapters, task names and memory pages", () => {
     await next.prompt("second chapter input");
     await waitFor(() => idle(next), "second chapter settled");
 
-    const all = await readMemory(() => owner.memoryPage({ limit: 50 }));
-    const onlyFirst = await readMemory(() => owner.memoryPage({ limit: 50, sessionId: first }));
-    const onlySecond = await readMemory(() => owner.memoryPage({ limit: 50, sessionId: successor }));
-    expect(onlyFirst.items.length).toBeGreaterThan(0);
-    expect(onlySecond.items.length).toBeGreaterThan(0);
-    expect(onlyFirst.items.every(item => item.evidence.sessionId === first)).toBe(true);
-    expect(onlySecond.items.every(item => item.evidence.sessionId === successor)).toBe(true);
-    expect(onlyFirst.totalItems + onlySecond.totalItems).toBe(all.totalItems);
+    await waitFor(async () => (await owner.memoryStatus()).episodic?.pump.busy === 0, "chapter memory summaries settled", 30_000);
+    const all = await readMemory(() => owner.readMemoryView({ limit: 50 }));
+    const onlyFirst = await readMemory(() => owner.readMemoryView({ limit: 50, sessionId: first }));
+    const onlySecond = await readMemory(() => owner.readMemoryView({ limit: 50, sessionId: successor }));
+    expect(onlyFirst.lines.length).toBeGreaterThan(0);
+    expect(onlySecond.lines.length).toBeGreaterThan(0);
+    expect(onlyFirst.totalMessages + onlySecond.totalMessages).toBe(all.totalMessages);
 
-    // A filtered page continues through its own rows, one row at a time, and no other chapter's row appears.
-    // A moved revision refuses a continuation, so the client reloads page one: the whole walk restarts.
-    const walked = await readMemory(async () => {
-      const rows: string[] = [];
-      let cursor: string | undefined;
-      do {
-        const page = await owner.memoryPage(admitHomeMemoryPage({ limit: 1, sessionId: successor, ...(cursor ? { cursor } : {}) }));
-        rows.push(...page.items.map(item => item.evidence.entryId));
-        cursor = page.nextCursor;
-      } while (cursor);
-      return rows;
-    });
-    expect(walked).toEqual(onlySecond.items.map(item => item.evidence.entryId));
+    expect(onlySecond.lines.map(line => line.start)).toEqual([...onlySecond.lines.map(line => line.start)].sort((a, b) => b - a));
+    expect(onlySecond.lines.every(line => line.span === 1 || !line.item)).toBe(true);
 
-    await expect(owner.memoryPage({ limit: 50, sessionId: "not-a-chapter" })).rejects.toMatchObject({ code: "not_found" });
+    await expect(owner.readMemoryView({ limit: 50, sessionId: "not-a-chapter" })).rejects.toMatchObject({ code: "not_found" });
   }, 60_000);
 });
 

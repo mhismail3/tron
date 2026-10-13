@@ -1047,7 +1047,7 @@ export type HooksProjection = HookRegistrationProjection;
 /** The capability string `hello`/`system.info` advertise for Tron Home. */
 export const HOME_CAPABILITY = "home.v1";
 /** Native browser reads are separately gated; older home.v1 servers lack them. */
-export const HOME_MEMORY_BROWSER_CAPABILITY = "home-memory-browser.v1";
+export const HOME_MEMORY_VIEW_CAPABILITY = "home-memory-view.v1";
 /** The full chapter-list read (#740); older home.v1 servers lack it. */
 export const HOME_CHAPTER_LIST_CAPABILITY = "home-chapter-list.v1";
 
@@ -1081,7 +1081,7 @@ export interface HomeChapterContents {
   userMessages: number;
   homeReplies: number;
   tasksDelegated: number;
-  /** At most 5 of the chapter's newest memory summaries, each at most 120 characters.
+  /** At most 8 useful recent merged memory summaries, each at most 200 characters.
    * Empty when Home's memory is not open. */
   topics: string[];
 }
@@ -1116,12 +1116,25 @@ export interface HomeMemoryItem {
   summary: { format: "memory-summary"; text: string; truncated: boolean } | null;
 }
 
-/** home.memory.page: at most 50 rows and 128 KiB encoded JSON. */
-export interface HomeMemoryPage {
+/** One range in Home's rendered memory view. Leaf messages carry the same
+ * bounded projection/evidence object as the independent evidence read. */
+export interface HomeMemoryViewLine {
+  start: number;
+  span: number;
+  text: string | null;
+  truncated: boolean;
+  kind?: "user" | "talk" | "echo" | "event";
+  firstAt?: string;
+  lastAt?: string;
+  item?: HomeMemoryItem;
+}
+
+/** home.memory.view: at most 50 lines and 128 KiB encoded JSON. */
+export interface HomeMemoryView {
   homeId: string;
   revision: string;
-  totalItems: number;
-  items: HomeMemoryItem[];
+  totalMessages: number;
+  lines: HomeMemoryViewLine[];
   nextCursor?: string;
 }
 
