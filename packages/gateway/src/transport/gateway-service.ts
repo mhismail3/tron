@@ -18,7 +18,7 @@ import type { Actor, ChangeEntry } from "../admin/settings-record.js";
 import { SECTIONS, recordSubject, schemaKey } from "../admin/settings-schema.js";
 import type { ObservedStore } from "../admin/settings-outside.js";
 import type { SettingsTarget } from "../admin/settings-resolver.js";
-import { RECENT_SCAN_LIMIT, actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
+import { actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
 import { QUALIFIER_NAMES, maxTier, type Qualifiers } from "../admin/settings-types.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
@@ -2068,21 +2068,7 @@ export class GatewayService {
         const keys = params.keys === undefined ? undefined : arrayOfStrings(params.keys, "keys", 200);
         const controls = params.renderer === undefined ? undefined : settingsRendererControls(params.renderer);
         const resolution = await this.dependencies.settingsModel.resolve(target, await this.readSettingsSession(client, target), keys);
-        // History pages stop at a segment boundary. Preserve the presentation's
-        // bounded recent-entry horizon even just after a new segment is opened.
-        const history: ChangeEntry[] = [];
-        let cursor: string | undefined;
-        for (let page = 0; page < RECENT_SCAN_LIMIT; page += 1) {
-          const recent = await this.dependencies.settingsChanges.history({ limit: RECENT_SCAN_LIMIT - history.length, ...(cursor ? { cursor } : {}) });
-          history.push(...recent.entries);
-          cursor = recent.nextCursor;
-          if (!cursor || history.length >= RECENT_SCAN_LIMIT) break;
-        }
-        return safeJson(presentResolution(resolution, {
-          ...(controls ? { controls } : {}), ...(keys ? { keys } : {}),
-          approvals: await this.dependencies.settingsChanges.pendingApprovals(),
-          history,
-        }));
+        return safeJson(presentResolution(resolution, controls ? { controls } : {}));
       }
       case "settings.options": {
         rejectUnknownFields(params, ["target", "key", "qualifiers", "query", "cursor", "limit"], method);

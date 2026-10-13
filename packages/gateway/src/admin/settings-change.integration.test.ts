@@ -465,10 +465,7 @@ describe("settings.change", () => {
     expect(oldest.entries.map(entry => entry.changeId)).toEqual([first.changes[0]!.changeId]);
     expect(oldest.nextCursor).toBeUndefined();
     expect((await f.history(query)).map(entry => entry.changeId)).toEqual([first.changes[0]!.changeId]);
-    const resolved = await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" } }) as unknown as PresentedResolution;
-    const recent = resolved.sections.find(section => section.id === "run")!.summary.recent;
-    expect(recent.map(entry => entry.changeId)).toEqual([first.changes[0]!.changeId]);
-    transcript.push({ case: "sparse filtered paging", detail: { newest, middle, oldest, recent } });
+    transcript.push({ case: "sparse filtered paging", detail: { newest, middle, oldest } });
   });
 
   it("keeps every entry forever in bounded segments and pages through them", async () => {

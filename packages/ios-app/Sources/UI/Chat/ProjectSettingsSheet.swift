@@ -22,7 +22,7 @@ struct ProjectSettingsLink: View {
             destination: { ProjectSettingsContent(cwd: cwd, profileID: profileID) }
         ) {
             TronSettingsRow(icon: "folder.badge.gearshape", title: "Project",
-                            subtitle: URL(fileURLWithPath: cwd).lastPathComponent,
+                            subtitle: "Settings for \(URL(fileURLWithPath: cwd).lastPathComponent)",
                             accent: .tronEmerald, subtitleColor: .tronTextSecondary)
         }
         .accessibilityIdentifier("project-settings-link")

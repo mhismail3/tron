@@ -604,8 +604,7 @@ private actor HostedHomeShellGateway {
         ])
         return .object(["keys": .array([workerThinkingKey, contextWindowKey, memoryKey]), "sections": .array([.object([
             "id": .string("model"), "title": .string("Model"), "order": .number(10),
-            "summary": .object(["essential": .array([]), "overrides": .array([]), "pending": .array([]), "recent": .array([]), "moreRecent": .number(0)]),
-        ]), .object(["id": .string("context"), "title": .string("Context"), "order": .number(20), "summary": .object([:])])])])
+        ]), .object(["id": .string("context"), "title": .string("Context"), "order": .number(20)])])])
     }
 
     private func homeSettingsOptions(_ params: [String: JSONValue]) -> JSONValue {

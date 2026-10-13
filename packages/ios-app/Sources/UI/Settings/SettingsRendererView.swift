@@ -23,8 +23,6 @@ struct SettingsRendererView: View {
     /// Hand-built account, package and setup flows supplement schema rows, never
     /// replace them. Nil means the section has no hand-built rows.
     var sectionSupplement: ((String) -> AnyView?)? = nil
-    /// The link's secondary line for a section the schema serves no keys for.
-    var sectionSubtitle: ((String) -> String?)? = nil
     /// Pairing/account repair must remain reachable while the schema cannot load.
     var unresolvedSupplement: AnyView? = nil
 
@@ -134,10 +132,6 @@ struct SettingsRendererView: View {
         if case .keys = presentation {
             // Rows inside a caller's card: no states of their own while loading.
             if let resolution { content(resolution) }
-        } else if case .overridesLink(_, let title, let icon) = presentation, resolution == nil {
-            // The scope row keeps its place in the caller's card while the schema loads.
-            TronSettingsRow(icon: icon, title: title, subtitle: loadError == nil ? " " : "Unavailable",
-                            subtitleColor: .tronTextSecondary)
         } else {
             VStack(alignment: .leading, spacing: 20) {
                 if let resolution {
@@ -185,8 +179,6 @@ struct SettingsRendererView: View {
                     .disabled(changingID != nil || previewingID != nil)
                 }
             }
-        case .overridesLink(let scope, let title, let icon):
-            overridesLink(resolution, scope: scope, title: title, icon: icon)
         case .keys(let ids):
             let chosen = ids.flatMap { id in resolution.keys.filter { $0.key == id } }
             if dividerBeforeKeys, !chosen.isEmpty { TronSettingsDivider() }
@@ -201,7 +193,7 @@ struct SettingsRendererView: View {
     @ViewBuilder
     private func overview(_ resolution: SettingsResolution) -> some View {
         let shown = Self.sections(resolution).filter { section in
-            !keys(resolution, in: section.id).isEmpty || sectionSupplement?(section.id) != nil || !section.summary.pending.isEmpty
+            !keys(resolution, in: section.id).isEmpty || sectionSupplement?(section.id) != nil
         }
         ForEach(SettingsFamily.allCases, id: \.self) { family in
             let members = shown.filter { SettingsSectionStyle($0.id).family == family }
@@ -221,17 +213,6 @@ struct SettingsRendererView: View {
 
     private func sectionLink(_ section: SettingsRendererSection, keys: [ResolvedSetting]) -> some View {
         let style = SettingsSectionStyle(section.id)
-        let summary = section.summary.essential.filter { !externalControlKeys.contains($0.key) }
-            .map(\.display).joined(separator: " · ")
-        let pending = section.summary.pending.count
-        // Most actionable first: approvals waiting, then an agent's latest change.
-        let recent = section.summary.recent.first.map { change in
-            let more = section.summary.recent.count - 1 + section.summary.moreRecent
-            return "\(change.actor) changed \(change.label)" + (more > 0 ? " and \(more) more" : "")
-        }
-        let subtitle = pending > 0 ? (pending == 1 ? "1 waiting for you" : "\(pending) waiting for you")
-            : recent ?? summary.nonEmpty ?? sectionSubtitle?(section.id)
-            ?? (keys.isEmpty ? section.note : keys.count == 1 ? "1 setting" : "\(keys.count) settings")
         return TronProgressiveSheetLink(accessibilityLabel: section.title, identity: "settings.section.\(section.id)",
                                         accent: style.accent) {
             SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
@@ -239,8 +220,8 @@ struct SettingsRendererView: View {
                                  presentation: .section(section.id), sectionSupplement: sectionSupplement)
                 .tronNavigationTitle(section.title, accent: style.accent)
         } label: {
-            TronSettingsRow(icon: style.icon, title: section.title, subtitle: subtitle, accent: style.accent,
-                            subtitleColor: pending > 0 ? .tronAmber : .tronTextSecondary)
+            TronSettingsRow(icon: style.icon, title: section.title, subtitle: section.description, accent: style.accent,
+                            subtitleColor: .tronTextSecondary)
         }
         .accessibilityIdentifier("settings-section-\(section.id)-open")
     }
@@ -329,25 +310,6 @@ struct SettingsRendererView: View {
         .accessibilityIdentifier("settings-overrides")
     }
 
-    /// A scope as one row in its caller's card: what the scope sets, previewed,
-    /// opening the overrides sheet for that scope.
-    private func overridesLink(_ resolution: SettingsResolution, scope: String, title: String, icon: String) -> some View {
-        let set = Self.sorted(resolution.keys.filter { $0.layer == writeLayer || ownedLayers.contains($0.layer) })
-        let preview = set.prefix(3).map { "\($0.presentation?.label ?? $0.key): \($0.display)" }
-            + (set.count > 3 ? ["+\(set.count - 3) more"] : [])
-        return TronProgressiveSheetLink(accessibilityLabel: title, identity: "settings.scope.\(scope)") {
-            SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
-                                 externalControlKeys: externalControlKeys, projectCWD: projectCWD,
-                                 presentation: .overrides(scope: scope, allTitle: "Override a Setting"))
-                .tronNavigationTitle(title)
-        } label: {
-            TronSettingsRow(icon: icon, title: title,
-                            subtitle: set.isEmpty ? "Using defaults" : preview.joined(separator: " · "),
-                            subtitleColor: .tronTextSecondary)
-        }
-        .accessibilityIdentifier("settings-scope-open")
-    }
-
     private func layerEditor(for setting: ResolvedSetting) -> LayerEditor? {
         writableLayer(for: setting) == nil
             ? setting.layers.compactMap({ LayerEditor(rawValue: $0.layer) }).first(where: { $0 != .project || projectCWD != nil })
@@ -420,7 +382,7 @@ struct SettingsRendererView: View {
     private func optionReads(_ resolution: SettingsResolution) -> [ResolvedSetting] {
         let shown: [ResolvedSetting]
         switch presentation {
-        case .sections, .overridesLink: return []
+        case .sections: return []
         case .section(let id): shown = resolution.keys.filter { $0.group == id }
         case .overrides: shown = resolution.keys.filter { $0.layer == writeLayer || ownedLayers.contains($0.layer) }
         case .detail(let id): shown = resolution.keys.filter { $0.id == id }
@@ -606,10 +568,6 @@ struct SettingsRendererView: View {
     }
 }
 
-private extension String {
-    var nonEmpty: String? { isEmpty ? nil : self }
-}
-
 /// What a renderer shows. Surfaces choose; the Gateway still supplies every word.
 enum SettingsRendererPresentation: Hashable {
     /// Every section: essential rows inline, then one link to the section's sub-sheet.
@@ -622,8 +580,6 @@ enum SettingsRendererPresentation: Hashable {
     case keys([String])
     /// One key on its own sheet: its control, then each action as its own row.
     case detail(String)
-    /// A scope (this chat, Home) as one previewing row that opens its overrides.
-    case overridesLink(scope: String, title: String, icon: String)
 }
 
 /// The settings palette (as before the renderer): related sections share one

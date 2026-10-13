@@ -15,18 +15,19 @@ import {
  * entry here.
  */
 
-export interface SectionDeclaration { id: string; title: string; order: number; harness: boolean; note?: string }
+/** A section's `description` is the one line a client shows beside its title. */
+export interface SectionDeclaration { id: string; title: string; description: string; order: number; harness: boolean; note?: string }
 
 export const SECTIONS: readonly SectionDeclaration[] = [
-  { id: "model", title: "Model", order: 10, harness: true },
-  { id: "context", title: "Context", order: 20, harness: true },
-  { id: "tools", title: "Tools", order: 30, harness: true },
-  { id: "permissions", title: "Permissions", order: 40, harness: true },
-  { id: "run", title: "Run", order: 50, harness: true },
-  { id: "accounts", title: "Accounts", order: 60, harness: false },
-  { id: "sources", title: "Sources", order: 70, harness: false },
-  { id: "setup", title: "Setup", order: 80, harness: false },
-  { id: "iphone", title: "This iPhone", order: 90, harness: false, note: "Stored on this iPhone. It never changes what the agent does." },
+  { id: "model", title: "Model", description: "Models, thinking, and context window", order: 10, harness: true },
+  { id: "context", title: "Context", description: "Compaction and image handling", order: 20, harness: true },
+  { id: "tools", title: "Tools", description: "Available tools, code mode, and shell", order: 30, harness: true },
+  { id: "permissions", title: "Permissions", description: "Project trust and change approvals", order: 40, harness: true },
+  { id: "run", title: "Run", description: "Message delivery, retries, and transport", order: 50, harness: true },
+  { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60, harness: false },
+  { id: "sources", title: "Sources", description: "Extensions, hooks, and packages", order: 70, harness: false },
+  { id: "setup", title: "Setup", description: "Connections, import, and logs", order: 80, harness: false },
+  { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, harness: false, note: "Stored on this iPhone. It never changes what the agent does." },
 ];
 
 /** Where a layer stores a key (doc 3.2). Paths may hold `{model}`, which a

@@ -315,17 +315,15 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                     extra: ["note": .string("Update Tron to edit"), "redacted": .bool(true)])),
         ]
         let sections: [JSONValue] = [
-            section("model", "Model", 10, essential: [("model.ref", modelName), ("model.thinking", model == "pro" ? thinking.capitalized : "Off")],
-                    overrides: [("model.ref", modelName)]),
-            section("context", "Context", 20, essential: [("context.images.block", blockImages ? "On" : "Off")]),
-            section("tools", "Tools", 30, essential: []),
-            section("permissions", "Permissions", 40, essential: []),
-            section("accounts", "Accounts", 60, essential: []),
-            section("sources", "Sources", 70, essential: []),
-            section("setup", "Setup", 80, essential: []),
-            section("run", "Run", 50, essential: [("run.retry.maxRetries", "\(retries) retries")], overrides: [("run.retry.maxRetries", "\(retries) retries")],
-                    pending: true, recent: true),
-            section("lab", "Lab", 95, essential: [("lab.focusMode", focusMode.capitalized)]),
+            section("model", "Model", 10, "Models, thinking, and context window"),
+            section("context", "Context", 20, "Compaction and image handling"),
+            section("tools", "Tools", 30, "Available tools, code mode, and shell"),
+            section("permissions", "Permissions", 40, "Project trust and change approvals"),
+            section("accounts", "Accounts", 60, "Providers, custom models, and services"),
+            section("sources", "Sources", 70, "Extensions, hooks, and packages"),
+            section("setup", "Setup", 80, "Connections, import, and logs"),
+            section("run", "Run", 50, "Message delivery, retries, and transport"),
+            section("lab", "Lab", 95, "A section this app has never seen"),
         ]
         return .object(["target": .object(["kind": .string("mac")]), "layers": .array([.string("mac"), .string("builtin")]),
                         "renderer": .object(["version": .number(1)]), "keys": .array(keys), "sections": .array(sections),
@@ -420,19 +418,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         .object(["value": .string(value), "label": .string(label)])
     }
 
-    private func section(_ id: String, _ title: String, _ order: Int, essential: [(String, String)], overrides: [(String, String)] = [],
-                         pending: Bool = false, recent: Bool = false) -> JSONValue {
-        .object(["id": .string(id), "title": .string(title), "order": .number(Double(order)), "summary": .object([
-            "essential": .array(essential.map { .object(["key": .string($0.0), "label": .string($0.0), "display": .string($0.1)]) }),
-            "overrides": .array(overrides.map { .object(["key": .string($0.0), "label": .string($0.0), "display": .string($0.1),
-                                                          "layer": .string("mac"), "layerLabel": .string("Mac")]) }),
-            "pending": .array(pending ? [.object(["requestId": .string("fixture-request"), "requester": .string("Home"),
-                                                  "labels": .array([.string("Transport")])])] : []),
-            "recent": .array(recent ? [.object(["changeId": .string("fixture-change"), "key": .string("run.retry.maxRetries"),
-                                                "label": .string("Retries"), "actor": .string("Home"),
-                                                "reason": .string("The provider is flaky today"), "at": .string("2026-01-01T00:00:00.000Z")])] : []),
-            "moreRecent": .number(pending ? 2 : 0),
-        ])])
+    private func section(_ id: String, _ title: String, _ order: Int, _ description: String) -> JSONValue {
+        .object(["id": .string(id), "title": .string(title), "description": .string(description), "order": .number(Double(order))])
     }
 
     private func enqueue(_ frame: JSONValue) throws {

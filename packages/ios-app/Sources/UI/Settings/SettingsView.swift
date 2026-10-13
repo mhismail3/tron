@@ -47,27 +47,31 @@ struct SettingsView: View {
         TronSettingsDivider(accent: .tronEmerald)
         switch context {
         case .chat(let sessionID, let cwd):
-            SettingsRendererView(
-                target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
-                writeLayer: "chat", embedded: true, ownedLayers: ["chat"],
-                externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"],
-                projectCWD: cwd, presentation: .overridesLink(scope: "this chat", title: "This Chat", icon: "bubble.left.and.text.bubble.right")
-            )
+            scopeLink("This Chat", icon: "bubble.left.and.text.bubble.right", subtitle: "Settings set only for this chat") {
+                SettingsRendererView(
+                    target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
+                    writeLayer: "chat", ownedLayers: ["chat"],
+                    externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"],
+                    projectCWD: cwd, presentation: .overrides(scope: "this chat", allTitle: "Override a Setting")
+                )
+            }
             if let cwd, !cwd.isEmpty, let profileID = model.selectedGatewayProfileID() {
                 TronSettingsDivider(accent: .tronEmerald)
                 ProjectSettingsLink(cwd: cwd, profileID: profileID)
             }
         case .home(let sessionID):
-            SettingsRendererView(
-                target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
-                writeLayer: nil, embedded: true, ownedLayers: ["chat", "profile"],
-                externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"],
-                presentation: .overridesLink(scope: "Home", title: "Home", icon: "house")
-            )
+            scopeLink("Home", icon: "house", subtitle: "Settings set only for Home") {
+                SettingsRendererView(
+                    target: .object(["kind": .string("session"), "sessionId": .string(sessionID)]),
+                    writeLayer: nil, ownedLayers: ["chat", "profile"],
+                    externalControlKeys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"],
+                    presentation: .overrides(scope: "Home", allTitle: "Override a Setting")
+                )
+            }
         case .dashboard:
             Button { browsingProjects = true } label: {
                 TronSettingsRow(icon: "folder.badge.gearshape", title: "Projects",
-                                subtitle: "Choose a workspace to see what it sets", subtitleColor: .tronTextSecondary)
+                                subtitle: "Settings for a chosen workspace", subtitleColor: .tronTextSecondary)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("settings-projects")
@@ -91,14 +95,6 @@ struct SettingsView: View {
                         embedded: true,
                         externalControlKeys: ["sources.packages"],
                         sectionSupplement: { sectionSupplement($0) },
-                        sectionSubtitle: { section in
-                            switch section {
-                            case "accounts": "Model providers, custom models, and connected services"
-                            case "sources": "Extensions, hooks, and package sources"
-                            case "setup": "Connections, import, and logs"
-                            default: nil
-                            }
-                        },
                         unresolvedSupplement: AnyView(offlineDestinations)
                     )
                     TronSettingsGroup("This iPhone", detail: "Stored on this iPhone. Never changes harness behaviour.",
@@ -247,6 +243,17 @@ struct SettingsView: View {
         default:
             nil
         }
+    }
+
+    /// The scope Settings was opened from: opens what that scope itself sets.
+    private func scopeLink<Destination: View>(_ title: String, icon: String, subtitle: String,
+                                              @ViewBuilder destination: @escaping () -> Destination) -> some View {
+        TronProgressiveSheetLink(accessibilityLabel: title, identity: "settings.scope.\(title)") {
+            destination().tronNavigationTitle(title)
+        } label: {
+            TronSettingsRow(icon: icon, title: title, subtitle: subtitle, subtitleColor: .tronTextSecondary)
+        }
+        .accessibilityIdentifier("settings-scope-open")
     }
 
     private func settingsLink<Destination: View>(

@@ -457,49 +457,14 @@ describe("settings renderer contract", () => {
       .rejects.toMatchObject({ code: "invalid_request" });
   });
 
-  it("serves each section's essential values, overrides, pending approvals and recent agent changes", async () => {
+  it("serves each section with its title, one-line description and order, only where the target has keys", async () => {
     const f = await fixture();
     const before = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    const model = section(before, "model");
-    expect(model).toMatchObject({ title: "Model", order: 10 });
-    expect(model.summary.essential.map(entry => entry.key)).toEqual(["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]);
-    expect(model.summary.essential[1]).toMatchObject({ qualifiers: { role: "chat", model: f.modelKey }, label: "Thinking", display: expect.any(String) });
+    expect(section(before, "model")).toEqual({ id: "model", title: "Model", description: "Models, thinking, and context window", order: 10 });
+    for (const served of before.sections) expect(served.description.length, served.id).toBeGreaterThan(0);
     // A section the target has no key in is not presented at all.
     expect(before.sections.map(entry => entry.id)).not.toContain("accounts");
-
-    // A maintainer's own Mac-layer change is an override, named by its layer; it is not an agent change.
-    const tapped = await maintainerChange(f, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6, expected: 5 }]);
-    expect(tapped.status).toBe("applied");
-    const afterTap = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    expect(section(afterTap, "run").summary.overrides).toContainEqual({
-      key: "run.retry.maxRetries", label: "Retries", display: "6 retries", layer: "mac", layerLabel: "Mac",
-    });
-    expect(section(afterTap, "run").summary.recent).toEqual([]);
-
-    // A quiet change by a chat's agent, with its reason, is recent.
-    await f.settingsChanges.change(macTarget, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 7, expected: 6 }],
-      { actor: { kind: "agent", id: "chat-1", sessionId: "chat-1" }, reason: "The provider is flaky today" });
-    const afterAgent = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    const run = section(afterAgent, "run");
-    expect(run.summary.recent).toEqual([{
-      changeId: expect.any(String), key: "run.retry.maxRetries", label: "Retries", actor: "A chat's agent",
-      reason: "The provider is flaky today", at: expect.any(String),
-    }]);
-    expect(run.summary.moreRecent).toBe(0);
-    expect(run.summary.overrides).toContainEqual(expect.objectContaining({ key: "run.retry.maxRetries", display: "7 retries", layerLabel: "Mac" }));
-    transcript.push({ case: "section summary: run", response: run });
-
-    // An approve-tier request by Home is held: pending in its section, for this target only.
-    const held = await f.settingsChanges.change(macTarget, [{ key: "permissions.projectTrust", qualifiers: { project: join(f.root, "other") }, layer: "mac", op: "set", value: true }],
-      { actor: { kind: "home", id: "home" }, reason: "The maintainer asked me to work there" });
-    expect(held).toMatchObject({ status: "pending", tier: "approve" });
-    const withPending = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    expect(section(withPending, "permissions").summary.pending).toEqual([{
-      requestId: held.approval!.requestId, requester: "Home", labels: ["Trust for this project"],
-    }]);
-    const otherTarget = await resolveWith(f, { kind: "project", cwd: f.project });
-    expect(section(otherTarget, "permissions").summary.pending).toEqual([]);
-    transcript.push({ case: "section summary: permissions pending", response: section(withPending, "permissions") });
+    transcript.push({ case: "sections", response: before.sections });
   });
 
   it("covers only the named keys when a keys filter is given", async () => {
@@ -507,7 +472,6 @@ describe("settings renderer contract", () => {
     const filtered = await f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, keys: ["run.retry.maxRetries"], renderer: { version: 1, controls: ["number"] } }) as unknown as PresentedResolution;
     expect(filtered.keys.map(key => key.key)).toEqual(["run.retry.maxRetries"]);
     expect(filtered.sections.map(entry => entry.id)).toEqual(["run"]);
-    expect(section(filtered, "run").summary.essential).toEqual([{ key: "run.retry.maxRetries", label: "Retries", display: "5 retries" }]);
   });
 
   it("serves option lists that follow the target's model, page catalogs, and refuse keys with no options", async () => {

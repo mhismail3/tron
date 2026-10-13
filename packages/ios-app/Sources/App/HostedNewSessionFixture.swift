@@ -159,8 +159,7 @@ private actor NewSessionFixtureGateway {
                     "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
                     "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
             ])]),
-            "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10),
-                "summary": .object(["essential": .array([])])])]),
+            "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10)])]),
             "diagnostics": .array([])
         ])
     }
