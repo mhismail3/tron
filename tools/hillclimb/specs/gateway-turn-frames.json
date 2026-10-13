@@ -11,7 +11,7 @@
       "3"
     ],
     "rounds": 2,
-    "max_load_per_cpu": 1.0
+    "max_load_per_cpu": 2.5
   },
   "primary": {
     "metric": "wire.mobile.total.frames",
