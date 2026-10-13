@@ -65,8 +65,12 @@ dependencies, so those publishers must settle before consumers run. The first
 failed phase prevents later phases from starting; no assertion or timeout is
 relaxed. Explicit journeys must themselves avoid conflicting writes.
 
-Each log is kept under `<git dir>/work/logs/`, and a failing check prints the end
-of its log. A tree that passed with the same check set and build-order contract is
+Each log is kept under `<git dir>/work/logs/`; every check prints a flushed
+`running: <check> (log: <path>)` line before it starts, and a failing check prints
+the end of its log. `land` uses the same verify runner. On cleanup of a merged task,
+the exact merged head's log directory is retained in the common Git directory;
+retained log directories older than 30 days are pruned. Claim-only cleanup does not
+retain or prune logs. A tree that passed with the same check set and build-order contract is
 recorded under `<git dir>/work/verified/` and is not run again. `verify` refuses
 a dirty worktree, because it checks a commit. `python3 -B scripts/test-work-verify.py`
 exercises the real CLI with child-process dependency replacement, an explicit
@@ -178,6 +182,11 @@ left open after its merge. Evidence is written to
 `test-results/work-land.json`; the fixture repository, home, and temporary files are
 removed on exit.
 
+`python3 scripts/test-work-cleanup.py` exercises merged cleanup against real temporary
+Git repositories and linked worktrees, checking exact-head evidence retention, 30-day
+pruning, and remote-branch/worktree removal. Evidence is written to
+`test-results/work-cleanup.json`; the temporary repositories are removed on exit.
+
 `python3 scripts/test-work-close.py` exercises epic/task close through the real CLI
 and Git with a process-level GitHub fixture in an isolated temporary home. It covers
 completed epics, unfinished children on later pages, failed reads, foreign claims,
@@ -186,7 +195,9 @@ and idempotent recovery after a partial close. Regenerable evidence is written t
 
 `python3 scripts/test-work-handoff.py` exercises handoff through the real CLI and Git
 in an isolated fixture, with owner-status evidence served by real Gateway WebSockets
-using the built client helper. It checks refusal of an unassigned IP before socket
+using the built client helper. A protocol mismatch is emitted as a structured helper
+refusal with distinct exit code 3 and is named by `handoff`; other helper failures
+remain indeterminate and cannot establish settlement. It checks refusal of an unassigned IP before socket
 access, acceptance of a locally assigned interface IP when one is available, active-only
 refusal without status reads, pagination to a finished matching owner, malformed
 evidence, settled no-report proof with stopped or naturally completed children, task/session/operation mismatches, missing or failed settlement, excluded unknown reasons, status races, natural completion with zero stopped subagents, refusal preservation of
