@@ -2105,7 +2105,6 @@ struct TronSheetLoadingState: View {
     let label: String
     var accent: Color = .tronEmerald
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
-    @Environment(\.tronSheetLoadingHosted) private var hosted
 
     var body: some View {
         Color.clear
@@ -2115,9 +2114,6 @@ struct TronSheetLoadingState: View {
                 key: TronSheetLoadingPreferenceKey.self,
                 value: TronSheetLoadingRequest(label: label, accent: settingsTheme?.accent ?? accent)
             )
-            .onAppear {
-                assert(hosted, "TronSheetLoadingState needs an enclosing TronPresentationSurface")
-            }
     }
 }
 
@@ -2134,25 +2130,14 @@ struct TronSheetLoadingPreferenceKey: PreferenceKey {
     }
 }
 
-private struct TronSheetLoadingHostedKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
-extension EnvironmentValues {
-    var tronSheetLoadingHosted: Bool {
-        get { self[TronSheetLoadingHostedKey.self] }
-        set { self[TronSheetLoadingHostedKey.self] = newValue }
-    }
-}
-
-/// Owned by `TronPresentationSurface`: draws the one centered pulse a surface's
-/// content requests and consumes the request so an outer surface cannot repeat it.
+/// Owned by `TronPresentationSurface` (every managed sheet and the app shell):
+/// draws the one centered pulse a surface's content requests and consumes the
+/// request so an outer surface cannot repeat it.
 struct TronSheetLoadingHostModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content
-            .environment(\.tronSheetLoadingHosted, true)
             .overlayPreferenceValue(TronSheetLoadingPreferenceKey.self) { request in
                 ZStack {
                     if let request {

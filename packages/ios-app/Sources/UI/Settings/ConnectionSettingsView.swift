@@ -1162,15 +1162,15 @@ struct GatewayServerInfoSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 18) {
-                    if metadata.isEmpty {
+                    if metadata.isEmpty && loading {
+                        TronSheetLoadingState(label: "Loading server info…", accent: .tronCyan)
+                    } else if metadata.isEmpty {
                         TronSettingsRow(
-                            icon: loading ? "arrow.clockwise" : "questionmark.circle",
-                            title: loading ? "Loading server info…" : "Server info unavailable",
-                            subtitle: loading ? nil : "Connect to this server to load its metadata.",
+                            icon: "questionmark.circle",
+                            title: "Server info unavailable",
+                            subtitle: "Connect to this server to load its metadata.",
                             accent: .tronCyan
-                        ) {
-                            if loading { TronPulseLoadingIndicator(accent: .tronCyan, size: 18) }
-                        }
+                        ) { EmptyView() }
                         .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.09)
                     } else {
                         TronTechnicalMetadataSection(title: "Gateway", items: metadata, accent: .tronCyan)

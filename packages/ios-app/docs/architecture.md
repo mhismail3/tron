@@ -1843,7 +1843,7 @@ its entry reference in the footer. Pagination replaces one page; a chapter's
 memory is the same browser filtered by `sessionId`. Canonical text is selectable.
 Loading, empty, blocked and retryable error states use shared presentation owners.
 Whole-content sheet loading is a `TronSheetLoadingState` preference that the enclosing
-`TronPresentationSurface` (every managed sheet and registered surface) draws as one centered
+`TronPresentationSurface` (every managed sheet and registered surface, else the app root) draws as one centered
 pulse and consumes, so nested surfaces never repeat it. Manage Home sends its independent
 `home.status`, `home.context` and `home.chapterList` reads together, then task and permission
 reads together once status admits them.

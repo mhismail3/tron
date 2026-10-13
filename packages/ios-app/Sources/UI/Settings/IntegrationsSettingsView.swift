@@ -458,7 +458,7 @@ private struct IntegrationSetupView: View {
                 policySection
             } else {
                 TronSettingsCaption("Completing setup on the selected Mac. Credentials remain in its secure store.")
-                TronPulseLoadingIndicator(accent: .tronCyan, size: 18)
+                TronLoadingState(label: "Completing setup…", accent: .tronCyan)
             }
             if model.connectionState != .connected {
                 TronSettingsCaption("Reconnecting to this Mac. Your setup inputs and accepted operation are kept.")

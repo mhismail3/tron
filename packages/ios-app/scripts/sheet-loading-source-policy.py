@@ -14,7 +14,8 @@ import sys
 import unittest
 
 HOST = "TronSheetLoadingHostModifier"
-HOST_OWNERS = {"UI/Theme/TronPresentation.swift", "State/PresentationActivityCoordinator.swift"}
+HOST_OWNERS = {"UI/Theme/TronPresentation.swift", "State/PresentationActivityCoordinator.swift",
+               "App/TronMobileApp.swift"}  # surfaces, then the app (and fixture) root
 # Indeterminate spinners that are not sheet loading states: main-chat rows and
 # transcript artifacts outside any sheet. A new entry needs the same justification.
 SPINNER_ALLOWED = {
@@ -42,7 +43,7 @@ def _line(code, offset):
 
 def violations(relative_path, text):
     path = pathlib.PurePosixPath(relative_path).as_posix()
-    if not path.startswith("UI/") and path not in HOST_OWNERS:
+    if not path.startswith(("UI/", "State/")) and path not in HOST_OWNERS:
         return []
     code = COMMENTS.sub(lambda m: "\n" * m.group().count("\n"), text)
     bare = STRINGS.sub(lambda m: '""' + "\n" * m.group().count("\n"), code)
@@ -55,7 +56,7 @@ def violations(relative_path, text):
               f"pulse with a VoiceOver label" for m in LOADING_TEXT.finditer(code)
               if (path, m.group(1)) not in TEXT_ALLOWED]
     if path not in HOST_OWNERS:
-        found += [f"{path}:{_line(bare, m.start())}: only TronPresentationSurface hosts the sheet pulse"
+        found += [f"{path}:{_line(bare, m.start())}: only presentation surfaces and the app root host the sheet pulse"
                   for m in re.finditer(rf"\b{HOST}\b", bare)]
     return found
 
