@@ -87,6 +87,10 @@ times. A refused merge after the base moved is retried the same way. A head that
 pull request already merged is refused, so a repeat run cannot open a second one.
 Other refusals stop `land` with nothing merged. Claim handoff serializes through a read-only descriptor on the pre-existing common Git directory (it creates no lock file), checks operation markers in the selected worktree's private Git directory (including linked-worktree merge/rebase/cherry-pick/revert state), and rechecks local and remote heads before changing a ref. An exact accepted transition commit can repair local ref state after a partial push; unrelated or malformed remote objects are never treated as proof. A local head that differs from the remote claim head is not accepted merely because it is unpushed or has the same tree: use the explicit candidate recovery path for a clean settled-owner descendant, or stop and preserve the conflicting state. Force confirmation does not bypass this expected-head fence.
 
+Heavy phases (builds, iOS and real-Gateway journeys) are to run under the host-wide
+heavy-run queue designed in
+[host load management](../../packages/gateway/docs/host-load.md#1-heavy-run-queue-work-tooling) (#915).
+
 ## Candidate recovery
 
 Use only when the former owner and its children are authoritatively settled and
