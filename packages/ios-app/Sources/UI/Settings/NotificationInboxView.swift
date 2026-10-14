@@ -392,8 +392,9 @@ enum NotificationInboxRelativeTime {
 
 /// One inbox row on the shared settings row's feed variant: the chat and time
 /// on the title line (the Gateway beside the time only when more than one is
-/// paired), one line of message below, and the kind as the icon. Unread rows carry the accent tint; read rows sit
-/// clear on the sheet surface.
+/// paired), one line of message below, and the kind as the icon. Every row sits
+/// on the shared Liquid Glass row surface; read rows are clear glass and unread
+/// rows add the accent tint on top (#956).
 private struct NotificationInboxRow: View {
     let item: NotificationInboxItem
     let title: String
@@ -416,9 +417,9 @@ private struct NotificationInboxRow: View {
                 subtitleColor: isUnread ? .tronTextSecondary : .tronTextMuted,
                 feedTrailing: showsGateway ? "\(item.profileLabel) · \(relativeTime)" : relativeTime
             )
-            .tronListRowHighlight(isUnread)
         }
         .buttonStyle(.plain)
+        .tronGlassSurface(accent: .tronEmerald, tintOpacity: isUnread ? 0.14 : 0, interactive: true)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([
             title,

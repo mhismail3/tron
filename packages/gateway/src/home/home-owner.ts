@@ -334,7 +334,9 @@ export class HomeOwner {
     }
     if (request.action === "resume") {
       const resumed = await this.resumeTask({ taskId: request.taskId, operationId: request.operationId, ...(request.text === undefined ? {} : { text: request.text }) }, sessionId);
-      return { accepted: true, taskId: resumed.taskId, sessionId: resumed.sessionId, operationId: resumed.operationId };
+      // A queued resume (#959) is controlled like any queued task until it starts.
+      return { accepted: true, taskId: resumed.taskId, sessionId: resumed.sessionId,
+        operationId: resumed.queuePosition === null ? resumed.operationId : null, queuePosition: resumed.queuePosition };
     }
     if (request.action !== "steer" && request.action !== "stop") throw new GatewayError("invalid_request", "Unknown Home task action");
     if (task.generation !== record.generation) throw new GatewayError("conflict", "Home task generation changed");

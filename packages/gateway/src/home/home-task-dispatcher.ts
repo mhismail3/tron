@@ -33,7 +33,7 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.producer-refused"; taskHash: string; reason: import("./home-task-worker-extension.js").HomeTaskProducerRefusal }
   | { event: "home.task.detached-work"; taskHash: string; operationHash: string; reason: "detached-work-outlived-task" }
   | { event: "home.task.subagents"; taskHash: string; operationHash: string; started: number; stoppedAtEnd: number | null; noticesUndelivered: number }
-  | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null }
+  | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null; errorCode?: string }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; outputTokens: number }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
   | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
@@ -77,10 +77,12 @@ function interruptedQuestion(run: readonly FileEntry[]): InterruptedQuestion | u
     ? { title: data.title, questions: data.questions } : undefined;
 }
 
-/** The resumed operation's brief. The authorized intent is this exact text. */
-function resumeBrief(previous: HomeTaskRecord, text: string | undefined, pending: InterruptedQuestion | undefined): string {
+/** The resumed operation's brief. The authorized intent is this exact text. `instructions` are
+ * oldest first: those of earlier resumes refused before they started (#959), then this one's. */
+function resumeBrief(previous: HomeTaskRecord, instructions: readonly string[], pending: InterruptedQuestion | undefined): string {
   const parts = [`Continue Home task ${previous.taskId} in place. It stopped (${previous.terminalEvidence?.outcome ?? "unknown"}: ${previous.terminalEvidence?.reason ?? "unknown"}); this is the same worker session, so its worktree, branch and work claim are still yours. Pick up exactly where it stopped: re-check the state you were in before acting.`];
-  if (text) parts.push(`Instruction:\n${text}`);
+  if (instructions.length === 1) parts.push(`Instruction:\n${instructions[0]}`);
+  else if (instructions.length > 1) parts.push(`Instructions, oldest first (the earlier ones never reached you because a previous resume was refused):\n\n${instructions.join("\n\n---\n\n")}`);
   if (pending) {
     let question = JSON.stringify({ title: pending.title, questions: pending.questions }, null, 2);
     if (Buffer.byteLength(question) > 24 * 1024) question = `${question.slice(0, 24 * 1024)}\n(truncated)`;
@@ -107,6 +109,8 @@ interface HomeTaskLaunch {
   /** A settled task continued in place (#929): its predecessor's worker session is rebound, not
    * created or configured, and the maintainer's attachments go with the first prompt. */
   resume?: { sessionId: string; images: ImageContent[]; exceptWorkToken?: string };
+  /** The worker operation, fixed at admission so a queued resume can name it before it starts. */
+  operationId?: string;
 }
 const reportDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
@@ -127,6 +131,9 @@ class HomeTaskDispatchStageError extends GatewayError {
       ? `Task dispatch step ${stage} did not finish in time` : `Task dispatch was stopped at ${stage}`, outcome === "timeout", { stage });
   }
 }
+
+/** The longest refusal message a task's terminal evidence keeps. */
+export const HOME_TASK_REFUSAL_DETAIL_CHARACTERS = 500;
 
 /** The longest name a task or its worker session is shown by. */
 export const HOME_TASK_TITLE_CHARACTERS = 80;
@@ -308,27 +315,27 @@ export class HomeTaskDispatcher {
 
   /** Continues a settled task in place (#929): a successor task bound to the same worker
    * session, so its worktree and work claim stay with it. The stopped task's record stays
-   * immutable; each task has at most one successor, so a lineage never forks. `text` is the
-   * maintainer's or Home's instruction; the brief restates any question the run was
-   * stopped before it was answered. A resume takes a running-worker reservation but never
-   * waits in the queue: the maintainer or Home continues a worker that already exists. */
+   * immutable; each task has at most one started successor, so a lineage never forks. A
+   * successor refused before it started is not one (#959): the stopped task stays resumable
+   * and the refused successor's instruction is carried into the next resume's brief. `text`
+   * is the maintainer's or Home's instruction; the brief restates any question the run was
+   * stopped before it was answered. A resume admits like any task: beyond the running-worker
+   * budget it waits in the queue, its worker operation already fixed so the maintainer's
+   * message can name it. */
   async resume(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest,
-    options: { signal?: AbortSignal; exceptWorkToken?: string; images?: ImageContent[] } = {}): Promise<HomeTaskHandle> {
+    options: { signal?: AbortSignal; exceptWorkToken?: string; images?: ImageContent[] } = {}): Promise<HomeTaskHandle & { operationId: string }> {
     const { signal } = options;
     if (signal?.aborted) throw new HomeTaskDispatchStageError("choice", "cancelled");
     await this.assertAvailable();
     const registry = this.sessions.administrativeWorkRegistry;
     const work = registry.begin({ kind: "queued-mutation", hostEpoch: registry.runtimeEpoch });
-    try {
-      const handle = await this.resumeOwned(identity, request, work, options);
-      const completion = handle.completion.finally(() => work.settle());
-      void completion.catch(() => {});
-      return { ...handle, completion };
-    } catch (error) { work.settle(); throw error; }
+    // From here resumeOwned owns `work`, as startOwned does.
+    try { return await this.resumeOwned(identity, request, work, options); }
+    catch (error) { work.settle(); throw error; }
   }
 
   private async resumeOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest, work: GatewayWorkHandle,
-    options: { signal?: AbortSignal; exceptWorkToken?: string; images?: ImageContent[] }): Promise<HomeTaskHandle> {
+    options: { signal?: AbortSignal; exceptWorkToken?: string; images?: ImageContent[] }): Promise<HomeTaskHandle & { operationId: string }> {
     const { signal } = options;
     const text = request.text?.trim();
     if (typeof request.taskId !== "string" || typeof request.operationId !== "string"
@@ -342,18 +349,30 @@ export class HomeTaskDispatcher {
     if (previous.lifecycle !== "terminal" || previous.operationId !== request.operationId || !previous.sessionId)
       throw new GatewayError("conflict", "Only a settled task with a worker session can be resumed in place");
     const sessionId = previous.sessionId;
-    const taskId = successorTaskId(previous.taskId);
-    if (await this.stage("lookup", taskId, signal, () => this.store.read(taskId))) throw new GatewayError("conflict", `Task was already resumed as ${taskId}`);
+    // Successors refused or settled before they started never bound the session (#959): they
+    // are skipped, and the instructions they carried are delivered with this one.
+    const carried: string[] = [];
+    let taskId = successorTaskId(previous.taskId);
+    for (;;) {
+      const existing = await this.stage("lookup", taskId, signal, () => this.store.read(taskId));
+      if (!existing) break;
+      if (existing.lifecycle !== "terminal" || existing.operationId !== null || existing.resumes?.taskId !== previous.taskId) {
+        throw new GatewayError("conflict", `Task was already resumed as ${taskId}${existing.lifecycle === "pending" ? " (queued)" : ""}`);
+      }
+      if (existing.resumes.instruction) carried.push(existing.resumes.instruction);
+      taskId = successorTaskId(taskId);
+    }
+    const instructions = [...carried, ...(text ? [text] : [])];
     const epoch = await this.stage("setup", taskId, signal, () => this.store.restoreEpoch());
     const budget = await this.stage("budget", taskId, signal, () => this.sessions.homeTaskBudget());
     const entries = await this.sessions.readTaskEvidence(sessionId);
-    const brief = resumeBrief(previous, text, interruptedQuestion(homeTaskOperationSpan(entries, previous.operationId!).run));
+    const brief = resumeBrief(previous, instructions, interruptedQuestion(homeTaskOperationSpan(entries, previous.operationId!).run));
     const task = await this.stage("create", taskId, signal, () => this.store.put({
       version: 1, taskId, revision: 1, homeId: identity.homeId, generation: identity.generation, routeGeneration: identity.routeGeneration, wake: null,
       intent: { text: brief }, intentDigest: taskIntentDigest(brief), target: previous.target,
       grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
       stopIntent: null, spend: null, reportRef: null, terminalEvidence: null,
-      resumes: { taskId: previous.taskId, operationId: previous.operationId! },
+      resumes: { taskId: previous.taskId, operationId: previous.operationId!, ...(text ? { instruction: text } : {}) },
       ...(budget && Object.keys(budget).length ? { budget } : {}),
     }, null), created => { this.transition(created, "created"); void this.refuseAdmission(created, "admission-cancelled").catch(() => {}); });
     this.transition(task, "created");
@@ -363,9 +382,11 @@ export class HomeTaskDispatcher {
         target: task.target, authorizationScope: "full-work", restoreEpoch: epoch }));
       if (epoch !== await this.stage("restore-epoch", taskId, signal, () => this.store.restoreEpoch())) throw new GatewayError("conflict", "Task namespace identity changed during admission");
     } catch (error) { await this.admissionFailed(task, error); throw error; }
-    this.reserved.add(taskId);
-    return this.launch({ task, authority, input: { taskId, intent: brief, target: task.target }, title: undefined, choice: {}, deferredThinking: undefined,
-      resume: { sessionId, images: options.images ?? [], ...(options.exceptWorkToken ? { exceptWorkToken: options.exceptWorkToken } : {}) } }, work, signal);
+    const operationId = `task-${randomUUID()}`;
+    const handle = await this.admit({ task, authority, input: { taskId, intent: brief, target: task.target }, title: undefined, choice: {}, deferredThinking: undefined,
+      resume: { sessionId, images: options.images ?? [], ...(options.exceptWorkToken ? { exceptWorkToken: options.exceptWorkToken } : {}) }, operationId }, work, signal);
+    // A queued resume already knows its worker session and operation.
+    return { ...handle, sessionId, operationId };
   }
 
   private async startOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle, signal: AbortSignal | undefined): Promise<HomeTaskHandle> {
@@ -406,9 +427,15 @@ export class HomeTaskDispatcher {
         target: task.target, authorizationScope: "full-work", restoreEpoch: epoch }));
       if (epoch !== await this.stage("restore-epoch", taskId, signal, () => this.store.restoreEpoch())) throw new GatewayError("conflict", "Task namespace identity changed during admission");
     } catch (error) { await this.admissionFailed(task, error); throw error; }
-    const launch: HomeTaskLaunch = { task, authority, input, title, choice, deferredThinking };
-    // Worker budget (#915): an authorized task beyond the running budget, behind
-    // earlier queued tasks, or under critical host pressure waits in order.
+    return this.admit({ task, authority, input, title, choice, deferredThinking }, work, signal);
+  }
+
+  /** Starts an authorized task, or queues it. Worker budget (#915): an authorized task beyond
+   * the running budget, behind earlier queued tasks, or under critical host pressure waits in
+   * order; a resume too (#959). */
+  private async admit(launch: HomeTaskLaunch, work: GatewayWorkHandle, signal: AbortSignal | undefined): Promise<HomeTaskHandle> {
+    let { task } = launch;
+    const taskId = task.taskId;
     const deferred = this.queue.length > 0 || this.reserved.size >= HOME_TASK_RUNNING_LIMIT ? "deferred-limit"
       : this.pressure.sample().level === "critical" ? "deferred-pressure" : undefined;
     if (deferred) {
@@ -441,7 +468,7 @@ export class HomeTaskDispatcher {
     let lease: Awaited<ReturnType<OwnedSessionDispatch["createWorker"]>> | undefined;
     let deadline: OwnedOperationDeadline | undefined;
     try {
-      const operationId = `task-${randomUUID()}`;
+      const operationId = launch.operationId ?? `task-${randomUUID()}`;
       const reports = new HomeTaskReportOwner({ taskId: task.taskId, homeId: task.homeId, generation: task.generation, operationId }, async () => {
         await this.store.update(task.taskId, current => {
           if (current.lifecycle !== "active" || current.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before Stop");
@@ -611,10 +638,12 @@ export class HomeTaskDispatcher {
         return;
       }
       // Accepted identity remains durable and cannot be used for prompt replay.
+      // The refusal's own message is kept, so Home and the app can say why (#959).
+      const detail = error instanceof Error && error.message.trim() ? [...error.message.trim()].slice(0, HOME_TASK_REFUSAL_DETAIL_CHARACTERS).join("") : undefined;
       const final: HomeTaskRecord = { ...task, revision: task.revision + 1, lifecycle: "terminal", wake: this.inbox.event(task),
-        terminalEvidence: { outcome: "unknown", sessionId: task.sessionId, entryIds: [], reason: "admission-refused" } };
+        terminalEvidence: { outcome: "unknown", sessionId: task.sessionId, entryIds: [], reason: "admission-refused", ...(detail ? { detail } : {}) } };
       await this.store.put(final, task.revision);
-      this.transition(final, "admission-refused");
+      this.transition(final, "admission-refused", error instanceof GatewayError ? error.code : "internal");
       await this.inbox.publish(final.taskId);
     }
   }
@@ -910,8 +939,8 @@ export class HomeTaskDispatcher {
     }
     return task;
   }
-  private transition(task: HomeTaskRecord, reason: string): void {
+  private transition(task: HomeTaskRecord, reason: string, errorCode?: string): void {
     this.diagnostic?.({ event: "home.task.transition", taskHash: hash(task.taskId), revision: task.revision,
-      transition: task.lifecycle, reason, operationHash: task.operationId ? hash(task.operationId) : null });
+      transition: task.lifecycle, reason, operationHash: task.operationId ? hash(task.operationId) : null, ...(errorCode ? { errorCode } : {}) });
   }
 }

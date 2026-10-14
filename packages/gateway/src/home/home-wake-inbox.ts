@@ -227,7 +227,8 @@ export class WakeInboxOwner {
             const canonical = parseHomeTaskReport(JSON.parse(result.text) as unknown);
             return `${canonical.text}\n\nEvidence:\n${canonical.evidence.map(item => `- ${item}`).join("\n")}`;
           })()
-          : `No accepted report. Outcome: ${task.terminalEvidence?.outcome ?? "unknown"}.`;
+          // The reason (and a refusal's own words, #959) say why there is no report.
+          : `No accepted report. Outcome: ${task.terminalEvidence?.outcome ?? "unknown"} (${task.terminalEvidence?.reason ?? "unknown"}${task.terminalEvidence?.detail ? `: ${task.terminalEvidence.detail}` : ""}).`;
         let content = `${header}\n\n${reportText}`;
         const message = (): HomeWakeMessage => ({ customType: HOME_TASK_RESULT_MESSAGE, display: true, content,
           details: { eventId: wake.eventId, taskId: task.taskId, resultRef: task.reportRef, terminalEvidence: task.terminalEvidence,
