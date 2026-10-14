@@ -258,14 +258,14 @@ class Bootstrap:
         for key, existing in sorted(live_fields.items()):
             if key in declared_fields or existing.get("dataType") not in _CUSTOM_TYPES:
                 continue
+            # A field nothing declares has no reader, so prune deletes it with its values; the count is
+            # reported first so the plan shows what would be lost.
             used = self._field_in_use(project["id"], existing["name"])
-            if used:
-                drift.append(f"Project field {existing['name']!r} is not declared; {used} item(s) hold a value")
-            elif self.prune:
-                actions.append(Action("delete-field", existing["name"], {"fieldId": existing["id"]}))
+            if self.prune:
+                actions.append(Action("delete-field", existing["name"], {"fieldId": existing["id"], "values": used}))
             else:
-                drift.append(f"Project field {existing['name']!r} is not declared and holds no value "
-                             "(--apply --prune deletes it)")
+                drift.append(f"Project field {existing['name']!r} is not declared; {used} item(s) hold a value "
+                             "(--apply --prune deletes it and its values)")
         for want in declared["fields"]:
             data_type = _TYPES[want["type"]]
             existing = live_fields.get(want["name"].casefold())
