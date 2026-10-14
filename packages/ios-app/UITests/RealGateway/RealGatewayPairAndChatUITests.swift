@@ -732,8 +732,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             guard let row = hittableElement(app, identifier: settingRowToken(key), timeout: 60) else {
                 XCTFail("Extensions has no \(key) row: \(app.debugDescription)"); return
             }
-            row.tap()
-            let value = app.textFields["Value"]
+            row.buttons.firstMatch.tap()
+            // The add-value row combines its labels; its field is the one text field on the editor.
+            let value = app.textFields.matching(NSPredicate(format: "placeholderValue != nil AND placeholderValue != ''")).firstMatch
             XCTAssertTrue(value.waitForExistence(timeout: 15), "the \(key) sheet has no add-value field: \(app.debugDescription)")
             XCTAssertNotEqual(value.placeholderValue ?? "", "Value", "the placeholder must be a real example")
             XCTAssertFalse((value.placeholderValue ?? "").isEmpty, "the add-value field shows the schema's example")
