@@ -101,7 +101,7 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         (worktree/"tracked.txt").write_text("unstaged bytes\n"); (worktree/"staged.txt").write_text("staged bytes\n")
         git(worktree,"add","staged.txt"); (worktree/"untracked.txt").write_bytes(b"untracked\x00bytes")
         cli=ROOT/"tools/work/cli.py"
-        def call(*args,input=None): return subprocess.run([sys.executable,str(cli),*args],cwd=worktree if worktree.exists() else repo,env=env,input=input,capture_output=True,text=True,timeout=30)
+        def call(*args,input=None,timeout=30): return subprocess.run([sys.executable,str(cli),*args],cwd=worktree if worktree.exists() else repo,env=env,input=input,capture_output=True,text=True,timeout=timeout)
         def fixture(pages=None,statuses=None):
             bound={key: ([{"taskId":key, **value} for value in values] if isinstance(values,list) else {"taskId":key, **values}) for key,values in (statuses or {}).items()}
             state.write_text(json.dumps({"comments":[],"writes":[],"calls":[],"pages":pages or {"first":{"items":[]}},"statuses":bound}))
@@ -514,21 +514,41 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         # evidence is consumed, then complete the ordinary audited handoff.
         helper=ROOT/"packages/gateway/dist/client/work-owner-status.js"
         stamp=ROOT/"packages/gateway/dist/.work-owner-status-source"
-        helper.write_text('process.stdout.write("settled\\n");\n')
-        stamp.write_text("stale-source-tree\n")
-        git(repo,"worktree","remove","--force",str(worktree))
-        git(repo,"checkout","main"); git(repo,"checkout","-B","feat/41-fixture")
-        git(repo,"commit","--allow-empty","-m","Claim\n\nWork-Claim-Issue: 41\nWork-Claim-Session: old-owner")
-        git(repo,"push","--force","-u","origin","feat/41-fixture")
-        git(repo,"checkout","main"); git(repo,"worktree","add",str(worktree),"feat/41-fixture")
-        fixture({"first":{"items":[terminal("owner")]}},{"owner":settled})
-        stale=call("handoff","41","--session","new-owner","--reason","stale helper rebuilt")
-        rebuilt=json.loads(state.read_text())
-        evidence.append({"case":"stale helper rebuilt before settled-owner handoff","exit":stale.returncode,"stderr":stale.stderr.strip(),"stamp":stamp.read_text().strip()})
-        assert stale.returncode==0, stale.stderr
-        assert 'process.stdout.write("settled\\n")' not in helper.read_text(), "legacy helper was not replaced"
-        assert [item["method"] for item in rebuilt["calls"]]==["session.list","session.list","home.taskList","home.taskStatus","home.taskStatus"]
-        assert len(rebuilt["writes"])==1 and claim.existing_claims(repo,"origin","main",41)[0].session=="new-owner"
+        original_outputs={}
+        for path in (helper,stamp):
+            try:
+                metadata=path.stat()
+                original_outputs[path]=(path.read_bytes(),metadata.st_mode & 0o7777)
+            except FileNotFoundError:
+                original_outputs[path]=None
+        try:
+            helper.write_text('process.stdout.write("settled\\n");\n')
+            stamp.write_text("stale-source-tree\n")
+            git(repo,"worktree","remove","--force",str(worktree))
+            git(repo,"checkout","main"); git(repo,"checkout","-B","feat/41-fixture")
+            git(repo,"commit","--allow-empty","-m","Claim\n\nWork-Claim-Issue: 41\nWork-Claim-Session: old-owner")
+            git(repo,"push","--force","-u","origin","feat/41-fixture")
+            git(repo,"checkout","main"); git(repo,"worktree","add",str(worktree),"feat/41-fixture")
+            fixture({"first":{"items":[terminal("owner")]}},{"owner":settled})
+            # The helper rebuild itself is bounded to 300s; allow that documented ceiling
+            # plus 30s for the CLI/Gateway handoff, without relaxing other journey calls.
+            stale_started=time.monotonic()
+            stale=call("handoff","41","--session","new-owner","--reason","stale helper rebuilt",timeout=330)
+            stale_elapsed=round(time.monotonic()-stale_started,3)
+            rebuilt=json.loads(state.read_text())
+            evidence.append({"case":"stale helper rebuilt before settled-owner handoff","exit":stale.returncode,"elapsedSeconds":stale_elapsed,"stderr":stale.stderr.strip(),"stamp":stamp.read_text().strip()})
+            assert stale.returncode==0, stale.stderr
+            assert 'process.stdout.write("settled\\n")' not in helper.read_text(), "legacy helper was not replaced"
+            assert [item["method"] for item in rebuilt["calls"]]==["session.list","session.list","home.taskList","home.taskStatus","home.taskStatus"]
+            assert len(rebuilt["writes"])==1 and claim.existing_claims(repo,"origin","main",41)[0].session=="new-owner"
+        finally:
+            for path,original in original_outputs.items():
+                if original is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    contents,mode=original
+                    path.write_bytes(contents)
+                    path.chmod(mode)
 
         recovery_journeys()
     finally:
