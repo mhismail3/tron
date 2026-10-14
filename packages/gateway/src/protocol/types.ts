@@ -1173,6 +1173,10 @@ export interface HomeStatus {
   /** Process-owned task recovery projection; refusal fences only task surfaces
    * until the next Gateway start, never ordinary session readiness. */
   taskRecovery: { available: true } | { available: false; reason: string };
+  /** Host pressure at this read (#915, docs/host-load.md): queued Home workers do not start while it is `critical`. */
+  hostPressure: { level: "normal" | "elevated" | "critical"; load1PerCpu: number; eventLoopUtilization: number; sampledAt: string };
+  /** The Home worker budget: tasks running (or launching), tasks queued for a slot, and the limit. */
+  workers: { running: number; queued: number; limit: number };
   /** Derived from the durable designation, runtime presence, memory and current/last activation. */
   phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "rollover-pending" | "blocked" | "paused" | "active" | "ready";
   /** Current or last activation evidence; never includes message or memory-view bodies. */

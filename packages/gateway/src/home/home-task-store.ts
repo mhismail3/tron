@@ -41,6 +41,8 @@ export interface HomeTaskRecord {
   spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
   /** The Home profile's task budget fixed at dispatch (settings-model.md 6.1); absent is no limit. */
   budget?: { inputTokens?: number; outputTokens?: number };
+  /** When an authorized task began waiting for a running-worker slot (#915); kept once set. */
+  queuedAt?: string;
   /** The one canonical report this task sealed, pinned by entry ID and payload digest. */
   reportRef: { resultId: string; sessionId: string; entryId: string; digest: string } | null;
   terminalEvidence: {
@@ -93,6 +95,10 @@ export class HomeTaskStore {
   private readonly authorizationPath: string;
   private publicationUncertain = false;
   readonly authorization: HomeTaskAuthorizationStore;
+  /** Durable publications this process attempted. This process is the namespace's
+   * only writer, so an unchanged count proves no record changed (#922). */
+  private writes = 0;
+  get writeCount(): number { return this.writes; }
 
   constructor(private readonly tronHome: string, private readonly workspace: TronWorkspace, private readonly options: Options = {}) {
     this.home = join(tronHome, "gateway", "home");
@@ -300,6 +306,8 @@ export class HomeTaskStore {
   }
 
   private async publish(path: string, document: unknown, maximumBytes: number): Promise<void> {
+    // Counted before the attempt: a failed or uncertain write still ends a quiet proof.
+    this.writes += 1;
     if (Buffer.byteLength(`${JSON.stringify(document, null, 2)}\n`) > maximumBytes) throw new HomeTaskStoreError("invalid-record");
     try { await durableAtomicWriteJson(path, document, 0o600, this.options.fileSystem); }
     catch (error) {
@@ -493,7 +501,7 @@ function validateAuthorityReferences(task: HomeTaskRecord, authorization: HomeTa
 
 function validateTask(value: unknown): HomeTaskRecord {
   if (!keys(value, ["version", "taskId", "revision", "createdAt", "updatedAt", "homeId", "generation", "intent", "intentDigest", "target",
-    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"], ["budget"])
+    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"], ["budget", "queuedAt"])
     || value.version !== 1 || !identifier(value.taskId) || value.taskId === "authorization" || !positive(value.revision)
     || !timestamp(value.createdAt) || (value.createdAt as number) > 9_999_999_999_999
     || !timestamp(value.updatedAt) || (value.updatedAt as number) < (value.createdAt as number)
@@ -511,6 +519,7 @@ function validateTask(value: unknown): HomeTaskRecord {
   if (value.spend !== null && (!keys(value.spend, ["sourceDigest", "inputTokens", "outputTokens"])
     || typeof value.spend.sourceDigest !== "string" || !/^[a-f0-9]{64}$/u.test(value.spend.sourceDigest)
     || !count(value.spend.inputTokens) || !count(value.spend.outputTokens))) invalid();
+  if (value.queuedAt !== undefined && (!text(value.queuedAt, 64) || !Number.isFinite(Date.parse(value.queuedAt as string)))) invalid();
   if (value.budget !== undefined && (!keys(value.budget, [], ["inputTokens", "outputTokens"]) || Object.keys(value.budget).length === 0
     || Object.values(value.budget).some(tokens => !positive(tokens)))) invalid();
   const reportRef = value.reportRef;

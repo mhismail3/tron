@@ -1901,6 +1901,15 @@ reconnect and a reopened chat each photo is staged exactly once (`restaged:0`) a
 carries all four; the other loses staging while backgrounded and asserts the rejected send
 re-uploads every photo and the retried send carries all four (#916).
 
+`TronCameraCaptureUITests` launches the same fixture with `-tron-camera-fixture`, which gives the
+real Take Photo sheet and `CameraModel` a granted permission and scripted camera hardware
+(`HostedCameraFixture`: each feed goes live after `-camera-fixture-latency-ms`; the back camera has a
+torch, the front one does not). Opened from the composer menu, the journey asserts the shared
+`sheet-loading` state only while the first feed starts, then reads the model's complete phase
+history (`camera.phase-history`) to prove camera switches and a retake never re-enter loading,
+that the controls keep their frames, that the flashlight follows the live camera's torch, and that
+the used photo is staged as an attachment (#937).
+
 `TronReadonlyAttachmentUITests` launches `-tron-readonly-attachment-fixture` against a
 `HOSTED_TEST` scripted Gateway/media owner, then drives real `ChatView`, sheet controls,
 Home/background and foreground reconnect. It waits for downloaded native viewports (not a

@@ -930,6 +930,18 @@ settles the task `unknown` with `admission-cancelled` (Stop) or
 its one result wake follows. A step that took 5 s or more, timed out or was cancelled
 logs `home.task.dispatch-stage` naming the stage.
 
+**Worker budget (#930, [host load](host-load.md#2-home-worker-admission-gateway)).** At
+most three tasks hold a worker slot (launching or running). An authorized task beyond
+the budget, behind an earlier waiting task, or admitted while host pressure is
+`critical` is not refused: its record stays `pending` with `queuedAt`, `delegate`
+returns a null session and operation with its 1-based `queuePosition`, and it starts in
+order when a slot frees (or, under pressure, on a 5 s re-check). `task status` shows
+`queuePosition`; `home.status.workers` shows `{ running, queued, limit }`. Stop with
+operation `queued` settles a waiting task `interrupted` (`stopped-before-start`)
+before any worker exists. The queue is in memory: a restart settles a waiting task
+`unknown` (`cold-queued-not-started`) and never replays it. Each decision logs
+`home.task.queue`.
+
 **Worker model and thinking.** At each `delegate` call the Gateway resolves `model.ref[role=worker]`
 and `model.thinking[role=worker]` from the typed Home profile. The built-in value for either
 field is same-as-Home, read from Home's live session at that boundary. An explicit `model` or
@@ -1331,6 +1343,21 @@ a Gateway-started activation with no user input. In both cases RuntimeSlot inser
 result as a context-bearing `tron.home-task-result.v1` message with an exact
 `tron.context-delivery.v4` attribution receipt. Ordinary chats, steers and continuations
 do not drain the inbox.
+
+**Quiet inbox (#922).** Recovery, admission, settlement and wake attempts run on Home's
+session lane, so each reads only records whose wake it may still act on. A complete
+pass that finds none (every wake absent, `acknowledged`, `blocked`, or
+`outcome-unknown` with its push decided), with no task-store write during it, proves
+the inbox quiet until the store's next write; until then those steps read no record.
+The Gateway is the namespace's only writer, and every durable publication (a new
+result, a delivery, an acknowledgement) ends the proof. A quiet Home turn therefore
+reads zero task records, whatever the history size.
+
+Every other step before a Home prompt is accepted is needed for that prompt: the
+attention barrier, live run settings, the archive gate (a cheap check for an
+unarchived Home), the invocation start receipt, and the delivery headroom, which waits
+for the memory view only when a result is selected and is cancelled by Stop.
+`home.inbox.admission-slow` names a slow inbox admission.
 
 - **Wake (#749).** A settled result wakes an idle Home. One owner decides every wake,
   `HomeOwner`'s wake scheduler, which runs one drain at a time and has no timers or
