@@ -25,6 +25,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
+        let _ = NSLog("TRON366 settings body sections=%@ unread=%d conn=%@", sections.map(\.id).joined(separator: ","), model.notificationInbox.unreadCount, String(describing: model.connectionState))
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {

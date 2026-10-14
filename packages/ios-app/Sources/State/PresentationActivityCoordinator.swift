@@ -335,6 +335,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @State private var lease = PresentationDismissalLease()
 
     func body(content: Content) -> some View {
+        let _ = identity.hasPrefix("settings.Connected") || identity.hasPrefix("integrations.setup") ? NSLog("TRON366 modifier body %@ presented=%d lease=%@", identity, isPresented ? 1 : 0, String(describing: lease)) : ()
         content
             .sheet(isPresented: $isPresented, onDismiss: didDismiss) {
                 TronPresentationSurface(token: lease.contentToken(identity: identity), parent: parent) {
