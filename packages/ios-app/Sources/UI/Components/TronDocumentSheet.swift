@@ -52,7 +52,7 @@ struct TronDocumentSheet<Content: View>: View {
                             Button(action: leadingAction.action) {
                                 Image(systemName: leadingAction.systemImage)
                                     .font(TronTypography.buttonSM)
-                                    .foregroundStyle(resolvedAccent)
+                                    .tronToolbarAction(accent: resolvedAccent)
                             }
                             .accessibilityLabel(leadingAction.accessibilityLabel)
                         }
@@ -64,7 +64,7 @@ struct TronDocumentSheet<Content: View>: View {
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(resolvedAccent)
+                                .tronToolbarAction(accent: resolvedAccent)
                         }
                         .accessibilityLabel("Done")
                     }

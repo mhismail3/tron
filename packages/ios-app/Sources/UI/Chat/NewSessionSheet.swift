@@ -206,7 +206,7 @@ struct NewSessionSheet: View {
                             Button { showServers = false } label: {
                                 Image(systemName: "checkmark")
                                     .font(TronTypography.buttonSM)
-                                    .foregroundStyle(Color.tronBurgundy)
+                                    .tronToolbarAction(accent: .tronBurgundy)
                             }
                             .accessibilityLabel("Done")
                         }
@@ -230,7 +230,7 @@ struct NewSessionSheet: View {
                                 Button { showModels = false } label: {
                                     Image(systemName: "checkmark")
                                         .font(TronTypography.buttonSM)
-                                        .foregroundStyle(Color.tronPurple)
+                                        .tronToolbarAction(accent: .tronPurple)
                                 }
                                 .accessibilityLabel("Done")
                             }

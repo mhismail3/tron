@@ -424,7 +424,7 @@ struct ExtensionsSettingsView: View {
                 Button { showingInstall = false } label: {
                     Image(systemName: "checkmark")
                         .font(TronTypography.buttonSM)
-                        .tronSettingsAccent()
+                        .tronToolbarAction()
                 }
                 .accessibilityLabel("Done")
             }

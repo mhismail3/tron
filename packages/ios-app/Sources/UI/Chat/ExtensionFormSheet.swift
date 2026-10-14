@@ -72,7 +72,7 @@ struct ExtensionFormSheet: View {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Cancel", action: cancel)
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronError)
+                            .tronToolbarAction(role: .destructive)
                             .disabled(submitting)
                             .accessibilityLabel("Cancel form")
                     }
@@ -85,7 +85,7 @@ struct ExtensionFormSheet: View {
                         Image(systemName: "xmark")
                             .font(TronTypography.buttonSM)
                     }
-                    .tronToolbarAction(accent: .tronTextMuted)
+                    .tronToolbarAction(role: .neutral)
                     .disabled(submitting)
                     .accessibilityLabel("Close form and keep answers")
                 }

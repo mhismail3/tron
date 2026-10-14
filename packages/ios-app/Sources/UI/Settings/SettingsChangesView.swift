@@ -22,7 +22,7 @@ struct SettingsChangesLink: View {
                 Button { presented = true } label: {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(accent)
+                        .tronToolbarAction(accent: accent)
                 }
             }
         }
@@ -139,7 +139,7 @@ struct SettingsChangesView: View {
                     Button { showsFilters = true } label: {
                         Image(systemName: filtersActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Filters")
                     .accessibilityIdentifier("settings-changes-filters")
@@ -149,7 +149,7 @@ struct SettingsChangesView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                             .accessibilityLabel("Done")
                     }
                 }
@@ -165,7 +165,7 @@ struct SettingsChangesView: View {
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button { showsFilters = false } label: {
-                                Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(Color.tronEmerald)
+                                Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronEmerald)
                             }
                             .accessibilityLabel("Done")
                         }
@@ -532,7 +532,7 @@ private struct SettingsChangeDetailView: View {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: entry.title) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(Color.tronEmerald)
+                        Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronEmerald)
                     }.accessibilityLabel("Done")
                 }
             }

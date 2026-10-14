@@ -28,7 +28,7 @@ struct KnowledgeFormSheet<Content: View>: View {
                     ToolbarItem(placement: .cancellationAction) {
                         Button { dismiss() } label: {
                             Image(systemName: "xmark").font(TronTypography.buttonSM)
-                                .foregroundStyle(accent)
+                                .tronToolbarAction(accent: accent)
                         }
                         .accessibilityLabel("Cancel")
                         .disabled(isWorking)
@@ -39,7 +39,7 @@ struct KnowledgeFormSheet<Content: View>: View {
                         TronToolbarTextLabel(onAction == nil ? "Done" : actionTitle,
                                              systemImage: "checkmark", isWorking: isWorking)
                     }
-                    .tronToolbarAction(accent: actionDisabled || isWorking ? .tronTextMuted : accent)
+                    .tronToolbarAction(accent: accent)
                     .disabled(actionDisabled || isWorking)
                 }
             }

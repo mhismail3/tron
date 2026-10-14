@@ -447,7 +447,7 @@ struct CustomModelProviderConfiguration<Content: View>: View {
                     Button(role: .destructive) { confirmingRemoval = true } label: {
                         TronToolbarTextLabel("Remove", systemImage: "trash")
                     }
-                    .tronToolbarAction(accent: .tronError)
+                    .tronToolbarAction(role: .destructive)
                     .accessibilityIdentifier("custom-model-remove")
                 }
             }
@@ -499,7 +499,7 @@ struct CustomModelAdvancedEditorSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: onDone) {
                         Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM).foregroundStyle(accent)
+                            .font(TronTypography.buttonSM).tronToolbarAction(accent: accent)
                     }.accessibilityLabel("Done")
                 }
             }
