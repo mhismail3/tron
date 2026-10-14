@@ -447,37 +447,38 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     func testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let app = launchApp(additionalArguments: ["--tron-hosted-hold-opening-tail"])
-        defer { app.terminate() }
+        let firstRun = launchApp()
         open(fixture.invitationLink())
-        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        completeFirstRunSetup(firstRun, inWorkspace: fixture.workspace)
         XCTAssertTrue(
-            waitForHittable(app.buttons["dashboard.menu"], timeout: 90),
-            "the invitation link and setup did not reach the dashboard: \(app.debugDescription)"
+            waitForHittable(firstRun.buttons["dashboard.menu"], timeout: 90),
+            "the invitation link and setup did not reach the dashboard: \(firstRun.debugDescription)"
         )
-        createSession(app, inWorkspace: fixture.workspace)
+        createSession(firstRun, inWorkspace: fixture.workspace)
 
         // The fixture model answers this marker with an ask_user call and waits.
-        let composer = app.textViews["Message input"]
-        XCTAssertTrue(composer.waitForExistence(timeout: 60), app.debugDescription)
+        let composer = firstRun.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60), firstRun.debugDescription)
         composer.tap()
         composer.typeText("Fixture ask journey: ask me where to deploy.")
-        let send = app.buttons["Send message"]
-        XCTAssertTrue(waitForEnabled(send, timeout: 60), "the composer never accepted the prompt: \(app.debugDescription)")
+        let send = firstRun.buttons["Send message"]
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), "the composer never accepted the prompt: \(firstRun.debugDescription)")
         send.tap()
-        let submit = app.buttons["Submit all answers"]
-        XCTAssertTrue(submit.waitForExistence(timeout: 90),
-                      "the running agent's ask_user form never appeared: \(app.debugDescription)")
+        XCTAssertTrue(firstRun.buttons["Submit all answers"].waitForExistence(timeout: 90),
+                      "the running agent's ask_user form never appeared: \(firstRun.debugDescription)")
+
         // Leave the question pending and the agent running, then open the
-        // running session again the way the user does: from the dashboard.
-        app.buttons["Close form and keep answers"].tap()
-        XCTAssertTrue(waitForAbsence(submit, timeout: 30), app.debugDescription)
-        app.buttons["Back"].tap()
+        // running session again from the dashboard of the relaunched,
+        // still-paired app. The hold argument applies to this launch only.
+        firstRun.terminate()
+        let app = launchApp(resettingState: false, additionalArguments: ["--tron-hosted-hold-opening-tail"])
+        defer { app.terminate() }
         let sessionRow = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")
         ).firstMatch
-        XCTAssertTrue(waitForHittable(sessionRow, timeout: 60), app.debugDescription)
+        XCTAssertTrue(waitForHittable(sessionRow, timeout: 90), app.debugDescription)
         sessionRow.tap()
+        let submit = app.buttons["Submit all answers"]
         XCTAssertTrue(waitForHittable(submit, timeout: 90),
                       "the reopened running session did not present its pending form: \(app.debugDescription)")
 
@@ -1206,10 +1207,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// a user's first launch has, which the journey then drives through the
     /// production scene.
     @MainActor
-    private func launchApp(additionalArguments: [String] = []) -> XCUIApplication {
+    private func launchApp(resettingState: Bool = true, additionalArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = [
-            "--tron-reset-ui-test-state",
+        app.launchArguments = (resettingState ? ["--tron-reset-ui-test-state"] : []) + [
             "-ApplePersistenceIgnoreState",
             "YES",
         ] + additionalArguments
