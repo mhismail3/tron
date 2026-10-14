@@ -188,6 +188,30 @@ describe("Home memory browser at scale", () => {
       const again = await reads(g);         // Repeat: identical answers, steady-state timings.
       expect(again.values).toEqual(warm.values);
 
+      // The same persisted catalog revision can be rendered by a different part
+      // decomposition after reopening. Cursor identity must therefore include the
+      // exact view layout, not only the ledger/source revisions.
+      const memory = (g.registry.homeOwner() as unknown as {
+        memory: { owner: { binding: { memory: { browserRevision(): string; view: Array<{ level: number; index: number; start: number; span: number }> } } } };
+      }).memory.owner.binding.memory;
+      {
+        const original = memory.view;
+        const before = memory.browserRevision();
+        const part = original.find(candidate => candidate.span >= 2)!;
+        memory.view = original.flatMap(candidate => candidate === part
+          ? [
+            { level: part.level - 1, index: part.index * 2, start: part.start, span: part.span / 2 },
+            { level: part.level - 1, index: part.index * 2 + 1, start: part.start + part.span / 2, span: part.span / 2 },
+          ]
+          : [candidate]);
+        expect(memory.browserRevision()).not.toBe(before);
+        try {
+          await expect(view(g, { limit: 30, cursor: warm.values.pages[0]!.nextCursor })).rejects.toMatchObject({ code: "conflict" });
+        } finally {
+          memory.view = original;
+        }
+      }
+
       const first = warm.values.pages[0]!;
       expect(first.totalMessages).toBeGreaterThanOrEqual(1200);
       expect(first.lines.length).toBeGreaterThan(0);
