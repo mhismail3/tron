@@ -122,13 +122,15 @@ struct SettingsListEditor: View {
     private struct Item: Identifiable { let id = UUID(); var text: String }
     let title: String
     let help: String
+    /// The schema's guidance for one new value: its format and a realistic example.
+    let entry: SettingsEntryGuidance?
     let onChange: (JSONValue?) -> Void
     @State private var items: [Item]
     @State private var next = ""
     @Environment(\.dismiss) private var dismiss
 
-    init(title: String, help: String, values: [String], onChange: @escaping (JSONValue?) -> Void) {
-        self.title = title; self.help = help; self.onChange = onChange
+    init(title: String, help: String, entry: SettingsEntryGuidance?, values: [String], onChange: @escaping (JSONValue?) -> Void) {
+        self.title = title; self.help = help; self.entry = entry; self.onChange = onChange
         _items = State(initialValue: values.map { Item(text: $0) })
     }
 
@@ -148,14 +150,18 @@ struct SettingsListEditor: View {
                 }
                 .tronSettingsCaption(help)
                 TronSettingsRow(icon: "plus", title: "Add value") {
-                    TextField("Value", text: $next)
+                    TextField("Value", text: $next,
+                              prompt: entry.map { Text($0.example).foregroundStyle(Color.tronTextMuted) })
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .tronInlineField(monospaced: true)
+                        .tronTextEntryDone(onDone: add)
                         .accessibilityLabel("Value")
-                    Button { items.append(Item(text: next)); next = "" } label: { TronInlineActionLabel("Add") }
+                        .accessibilityHint(entry?.hint ?? "")
+                    Button(action: add) { TronInlineActionLabel("Add") }
                         .buttonStyle(.plain).disabled(next.isEmpty)
                 }
                 .tronGlassSurface(accent: .tronEmerald)
+                .tronSettingsCaption(entry.map { "\($0.hint) For example: \($0.example)" })
             }
             .padding(18)
         }
@@ -163,6 +169,12 @@ struct SettingsListEditor: View {
         .tronScrollEdgeChrome()
         .tronNavigationTitle(title)
         .tronSaveToolbar { onChange(.array(items.map { .string($0.text) })); dismiss() }
+    }
+
+    /// Done on the keyboard adds what was typed, like the Add button; Save still commits the list.
+    private func add() {
+        guard !next.isEmpty else { return }
+        items.append(Item(text: next)); next = ""
     }
 
     private func removeButton(_ item: String, _ action: @escaping () -> Void) -> some View {

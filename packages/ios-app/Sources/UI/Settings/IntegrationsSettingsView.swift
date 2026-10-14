@@ -17,6 +17,9 @@ enum IntegrationPolicySubmission {
 /// profile, lifecycle generation, and connection epoch.
 struct IntegrationsSettingsView: View {
     @Environment(AppModel.self) private var model
+    /// The opening group's accent (Accounts); cyan only when opened alone (#939).
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronCyan }
     @Environment(\.tronPresentationActivity) private var activity
     #if HOSTED_TEST
     @Environment(\.hostedIntegrationPresentationTrace) private var hostedTrace
@@ -40,26 +43,26 @@ struct IntegrationsSettingsView: View {
                         !configured.contains { $0.definitionId == definition.id }
                     }
                     if !configured.isEmpty {
-                        TronSettingsGroup("Configured", accent: .tronCyan, surfaceStyle: .glass) {
+                        TronSettingsGroup("Configured", accent: accent, surfaceStyle: .glass) {
                             ForEach(Array(configured.enumerated()), id: \.element.id) { index, instance in
                                 if let definition = definitions.first(where: { $0.id == instance.definitionId }) {
                                     instanceRow(instance, definition: definition, snapshot: snapshot)
                                 }
-                                if index < configured.count - 1 { TronSettingsDivider(accent: .tronCyan) }
+                                if index < configured.count - 1 { TronSettingsDivider(accent: accent) }
                             }
                         }
                     }
                     if !available.isEmpty {
-                        TronSettingsGroup("Available", accent: .tronCyan, surfaceStyle: .glass) {
+                        TronSettingsGroup("Available", accent: accent, surfaceStyle: .glass) {
                             ForEach(Array(available.enumerated()), id: \.element.id) { index, definition in
                                 let action = "Connect"
                                 IntegrationConfiguredRow(title: definition.displayName, account: "", status: "Not configured", usage: nil,
                                                          isLoadingUsage: false, configured: false, actionTitle: action,
-                                                         accessibilityAction: "\(action) for \(definition.displayName)", accent: .tronCyan) {
+                                                         accessibilityAction: "\(action) for \(definition.displayName)", accent: accent) {
                                     setupDiagnosticContext = nil
                                     setupDefinition = definition
                                 }
-                                if index < available.count - 1 { TronSettingsDivider(accent: .tronCyan) }
+                                if index < available.count - 1 { TronSettingsDivider(accent: accent) }
                             }
                         }
                         .padding(.top, configured.isEmpty ? 0 : TronSpacing.section)
@@ -81,11 +84,11 @@ struct IntegrationsSettingsView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Connected Services", accent: .tronCyan)
+        .tronNavigationTitle("Connected Services", accent: accent)
         .onAppear { NSLog("TRON366 integrations appear") }
         .onDisappear { NSLog("TRON366 integrations disappear") }
         .tronSettingsLayout()
-        .tronSettingsVisualTheme(accent: .tronCyan)
+        .tronSettingsVisualTheme(inheriting: .tronCyan)
         .task(id: PresentationActivityTaskID(source: "integrations/\(model.knowledgePresentationIdentity)/\(model.connectionState)", presentationActive: activity.allowsPresentationPublication)) {
             guard activity.allowsPresentationPublication else { return }
             load()
@@ -153,7 +156,7 @@ struct IntegrationsSettingsView: View {
         IntegrationConfiguredRow(title: definition.displayName, account: instance.displayTitle,
                                  status: connectionStatus(instance, snapshot: snapshot), usage: usage,
                                  isLoadingUsage: credits.loadingIDs.contains(instance.id), configured: true,
-                                 actionTitle: "Details", accessibilityAction: "Details for \(definition.displayName)", accent: .tronCyan) {
+                                 actionTitle: "Details", accessibilityAction: "Details for \(definition.displayName)", accent: accent) {
             selectedInstance = instance
         }
     }
@@ -231,6 +234,9 @@ struct IntegrationsSettingsView: View {
 
 private struct IntegrationInstanceView: View {
     @Environment(AppModel.self) private var model
+    /// The opening group's accent (Accounts); cyan only when opened alone (#939).
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronCyan }
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var activity
     let instance: IntegrationInstance
@@ -249,7 +255,7 @@ private struct IntegrationInstanceView: View {
     }
 
     var body: some View {
-        KnowledgeFormSheet(title: definition?.displayName ?? "Connection", accent: .tronCyan, isWorking: mutation != nil, onAction: save) {
+        KnowledgeFormSheet(title: definition?.displayName ?? "Connection", accent: accent, isWorking: mutation != nil, onAction: save) {
             TronSettingsGroup("Connection", accent: .tronBlue) {
                 TronSettingsRow(icon: "person.crop.circle", title: "Account", subtitle: instance.displayTitle)
                 TronSettingsDivider(accent: .tronBlue)
@@ -262,9 +268,9 @@ private struct IntegrationInstanceView: View {
                 }
             }
             if let mappings = instance.raindropCollections, !mappings.isEmpty {
-                TronSettingsGroup("Raindrop collections", accent: .tronCyan) {
+                TronSettingsGroup("Raindrop collections", accent: accent) {
                     ForEach(Array(mappings.enumerated()), id: \.offset) { index, mapping in
-                        if index > 0 { TronSettingsDivider(accent: .tronCyan) }
+                        if index > 0 { TronSettingsDivider(accent: accent) }
                         TronSettingsRow(icon: "folder", title: "\(mapping.role.capitalized) home", subtitle: "Collection \(mapping.collectionId)")
                     }
                 }
@@ -272,7 +278,7 @@ private struct IntegrationInstanceView: View {
             capabilitiesSection
             TronTechnicalMetadataSection(title: "Technical details", items: technicalMetadata, accent: .tronSlate)
             if let definition {
-                Button { addAccount() } label: { TronInlineActionLabel("Add another account", accent: .tronCyan) }
+                Button { addAccount() } label: { TronInlineActionLabel("Add another account", accent: accent) }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Add another account for \(definition.displayName)")
             }
@@ -309,7 +315,7 @@ private struct IntegrationInstanceView: View {
     }
 
     private var capabilitiesSection: some View {
-        TronSettingsGroup("Capabilities", detail: "Each status reflects the owner’s current prerequisites and policy.", accent: .tronCyan) {
+        TronSettingsGroup("Capabilities", detail: "Each status reflects the owner’s current prerequisites and policy.", accent: accent) {
             if statuses.isEmpty {
                 TronSettingsRow(icon: "questionmark.circle", title: "No capabilities reported", subtitle: "The Gateway did not advertise capability details.")
             } else {
@@ -377,6 +383,9 @@ private struct IntegrationInstanceView: View {
 
 private struct IntegrationSetupView: View {
     @Environment(AppModel.self) private var model
+    /// The opening group's accent (Accounts); cyan only when opened alone (#939).
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronCyan }
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.tronPresentationActivity) private var activity
@@ -413,7 +422,7 @@ private struct IntegrationSetupView: View {
     }
 
     var body: some View {
-        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: .tronCyan, actionTitle: usesXOAuth ? (unresolvedOAuth != nil ? "Check setup status" : (xOAuthOperationID == nil ? "Authorize X" : "Complete setup")) : "Save", isWorking: mutation != nil, actionDisabled: model.connectionState != .connected, onAction: complete) {
+        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: accent, actionTitle: usesXOAuth ? (unresolvedOAuth != nil ? "Check setup status" : (xOAuthOperationID == nil ? "Authorize X" : "Complete setup")) : "Save", isWorking: mutation != nil, actionDisabled: model.connectionState != .connected, onAction: complete) {
             if mutation == nil {
                 if usesXOAuth {
                     TronSettingsGroup("X developer app", accent: .tronBlue) {

@@ -193,7 +193,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 "layer": .string("chat"), "applied": .bool(true),
                 "layers": .array([.object(["layer": .string("chat"), "applied": .bool(true)])]),
                 "badges": .array([.object(["kind": .string("source"),
-                    "label": .string("From default at start: \(snapshot.thinkingLevel.capitalized) (Mac)"),
+                    "label": .string("From Mac default at start: \(snapshot.thinkingLevel.capitalized)"),
                     "action": .object(["kind": .string("useCurrentDefault"), "label": .string("Use the current default")])])]),
                 "presentation": .object(["label": .string("Chat thinking"), "help": .string("Thinking for this chat."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("choice"),

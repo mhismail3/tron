@@ -72,6 +72,9 @@ private struct MCPAddServerDraft: Equatable {
 /// explicitly refreshed projection and sends accepted commands through RPC.
 struct MCPServersSettingsView: View {
     @Environment(AppModel.self) private var model
+    /// The opening group's accent (Tools, or Manage Session's); cyan only when opened alone.
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronCyan }
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.colorScheme) private var colorScheme
     let projectCWD: String?
@@ -120,7 +123,7 @@ struct MCPServersSettingsView: View {
                     TronSegmentedControl(
                         options: [(label: "Global", value: "global"), (label: "Project", value: "project")],
                         selection: $selectedScope,
-                        accent: .tronCyan,
+                        accent: accent,
                         minimumHeight: 40
                     )
                 }
@@ -131,11 +134,10 @@ struct MCPServersSettingsView: View {
                 TronSettingsGroup(
                     "Servers",
                     detail: selectedScope == "global" ? "Available in every session." : "Only in this trusted project.",
-                    accent: .tronCyan,
-                    surfaceStyle: .scrollOptimized
+                    accent: accent
                 ) {
                     if loading && servers.isEmpty {
-                        TronLoadingState(label: "Loading MCP servers…", accent: .tronCyan)
+                        TronLoadingState(label: "Loading MCP servers…", accent: accent)
                             .padding(.vertical, TronSpacing.xl)
                             .frame(maxWidth: .infinity)
                     } else if visibleServers.isEmpty {
@@ -143,7 +145,7 @@ struct MCPServersSettingsView: View {
                     } else {
                         ForEach(visibleServers) { server in
                             serverRow(server)
-                            if server.id != visibleServers.last?.id { TronSettingsDivider(accent: .tronCyan) }
+                            if server.id != visibleServers.last?.id { TronSettingsDivider(accent: accent) }
                         }
                     }
                 }
@@ -152,12 +154,12 @@ struct MCPServersSettingsView: View {
                     TronSettingsRow(
                         icon: "plus",
                         title: "Add Server",
-                        accent: .tronCyan,
-                        titleColor: TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme) ? .white : .tronCyan
+                        accent: accent,
+                        titleColor: TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme) ? .white : accent
                     )
                 }
                 .buttonStyle(.plain)
-                .tronGlassSurface(accent: .tronCyan, interactive: true)
+                .tronGlassSurface(accent: accent, interactive: true)
                 .disabled(working)
             }.padding(.horizontal, 20).padding(.vertical, 18)
         }
@@ -176,7 +178,7 @@ struct MCPServersSettingsView: View {
             clearAddDraft(); transport = "http"
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in if !active { generation &+= 1; loading = false } }
-        .tronSettingsVisualTheme(accent: .tronCyan)
+        .tronSettingsVisualTheme(accent: accent)
         .tronManagedSheet(isPresented: $showingAdd, identity: "settings.mcp.add") {
             MCPAddServerForm(
                 serverName: $serverName,
@@ -197,13 +199,13 @@ struct MCPServersSettingsView: View {
             if let operationID = authOperationID {
                 MCPAuthSheet(operationID: operationID) { authOperationID = nil }
                     .environment(model)
-                    .tronSettingsVisualTheme(accent: .tronCyan)
+                    .tronSettingsVisualTheme(accent: accent)
             }
         }
         .tronManagedSheet(isPresented: Binding(get: { tokenServer != nil }, set: { if !$0 { tokenServer = nil; token = "" } }), identity: "settings.mcp.token") {
             NavigationStack {
                 VStack(spacing: 16) {
-                    TronSettingsGroup("Bearer Token", accent: .tronCyan) {
+                    TronSettingsGroup("Bearer Token", accent: accent) {
                         SecureField("Token", text: $token).textContentType(.password).tronTextEntryDone().padding(12)
                     }
                     Button("Store in Keychain") {
@@ -212,7 +214,7 @@ struct MCPServersSettingsView: View {
                     }.buttonStyle(TronActionButtonStyle(role: .primary)).disabled(working || token.isEmpty)
                     Spacer(minLength: 0)
                 }.padding(18).tronNavigationTitle("MCP Token").tronPresentation().presentationDetents([.medium]).presentationDragIndicator(.hidden)
-            }.tronSettingsVisualTheme(accent: .tronCyan)
+            }.tronSettingsVisualTheme(accent: accent)
         }
     }
 
@@ -229,7 +231,7 @@ struct MCPServersSettingsView: View {
             accent: statusColor(server),
             subtitleColor: statusColor(server)
         ) {
-            TronInlineMenu("Manage", accent: .tronCyan) {
+            TronInlineMenu("Manage", accent: accent) {
                 if MCPServerPresentationPolicy.isNeedsAuth(server.state) {
                     Button("Sign In", systemImage: "person.badge.key") { Task { await startAuth(server.name, destination: destination) } }
                 }
@@ -365,6 +367,8 @@ struct MCPServersSettingsView: View {
 
 /// Shared by the production managed sheet and hosted presentation evidence.
 struct MCPAddServerForm: View {
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronCyan }
     @Binding var serverName: String
     @Binding var transport: String
     @Binding var url: String
@@ -395,13 +399,13 @@ struct MCPAddServerForm: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    TronSettingsGroup("Server name", accent: .tronCyan) {
+                    TronSettingsGroup("Server name", accent: accent) {
                         TextField("For example, calendar", text: $serverName).textInputAutocapitalization(.never).autocorrectionDisabled().tronTextEntryDone().padding(12)
                     }
-                    TronSettingsGroup("Transport", accent: .tronCyan) {
-                        TronSegmentedControl(options: [("HTTP", "http"), ("stdio", "stdio")], selection: $transport, accent: .tronCyan).padding(12)
+                    TronSettingsGroup("Transport", accent: accent) {
+                        TronSegmentedControl(options: [("HTTP", "http"), ("stdio", "stdio")], selection: $transport, accent: accent).padding(12)
                     }
-                    TronSettingsGroup(transport == "http" ? "Server address" : "Local command", accent: .tronCyan) {
+                    TronSettingsGroup(transport == "http" ? "Server address" : "Local command", accent: accent) {
                         if transport == "http" {
                             TextField("https://server.example", text: $url).textInputAutocapitalization(.never).keyboardType(.URL).autocorrectionDisabled().tronTextEntryDone().padding(12)
                             Text("Enter the address provided by your server host.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).padding(.horizontal, 12).padding(.bottom, 10)
@@ -410,7 +414,7 @@ struct MCPAddServerForm: View {
                             TextField("Arguments, separated by spaces (optional)", text: $args).textInputAutocapitalization(.never).autocorrectionDisabled().tronTextEntryDone().padding(12)
                         }
                     }
-                    TronSettingsGroup("Bearer token (optional)", accent: .tronCyan) {
+                    TronSettingsGroup("Bearer token (optional)", accent: accent) {
                         SecureField("Paste token", text: $bearerToken).textContentType(.password).textInputAutocapitalization(.never).autocorrectionDisabled().tronTextEntryDone().padding(12)
                         Text("Stored securely in your Mac’s Keychain.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).padding(.horizontal, 12).padding(.bottom, 10)
                     }
@@ -426,6 +430,6 @@ struct MCPAddServerForm: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.hidden)
         }
-        .tronSettingsVisualTheme(accent: .tronCyan)
+        .tronSettingsVisualTheme(accent: accent)
     }
 }

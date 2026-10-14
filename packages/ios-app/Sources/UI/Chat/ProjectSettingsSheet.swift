@@ -11,10 +11,13 @@ struct ProjectSettingsRoute: Identifiable {
 }
 
 struct ProjectSettingsLink: View {
+    /// A settings row in Manage Session; a setup card among New Session's choices.
+    enum Style { case row, setupCard }
     let cwd: String
     let profileID: String
     /// The row's glyph matches the rows around it.
     var accent: Color = .tronEmerald
+    var style: Style = .row
 
     var body: some View {
         TronProgressiveSheetLink(
@@ -23,8 +26,15 @@ struct ProjectSettingsLink: View {
             accent: .tronEmerald,
             destination: { ProjectSettingsContent(cwd: cwd, profileID: profileID) }
         ) {
-            TronSettingsRow(icon: "folder.badge.gearshape", title: "Project Settings",
-                            subtitle: URL(fileURLWithPath: cwd).lastPathComponent, accent: accent)
+            switch style {
+            case .row:
+                TronSettingsRow(icon: "folder.badge.gearshape", title: "Project Settings",
+                                subtitle: URL(fileURLWithPath: cwd).lastPathComponent, accent: accent)
+            case .setupCard:
+                TronSetupCardLabel(icon: "folder.badge.gearshape", title: "Project Settings",
+                                   value: URL(fileURLWithPath: cwd).lastPathComponent,
+                                   caption: "Settings in this project's .pi folder.", accent: accent)
+            }
         }
         .accessibilityIdentifier("project-settings-link")
     }

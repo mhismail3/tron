@@ -124,7 +124,7 @@ final class TronProjectTrustUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(counts(app, contain: "floor:approve previews:0 applies:0"), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Project trust: loosening"].exists
-                      && row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Built-in")).firstMatch.exists, app.debugDescription)
+                      && row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Tron default")).firstMatch.exists, app.debugDescription)
 
         // Lowering: the dry run carries confirm text, and nothing is applied until confirmed.
         choose(app, row: row, option: "Quiet")
@@ -142,7 +142,7 @@ final class TronProjectTrustUITests: XCTestCase {
         XCTAssertTrue(counts(app, contain: "floor:quiet previews:2 applies:1"), app.debugDescription)
         XCTAssertTrue(waitForValue(row.buttons.firstMatch, "Quiet"), app.debugDescription)
         // The override is now the Mac layer's, named in the row's source line.
-        XCTAssertTrue(row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mac")).firstMatch
+        XCTAssertTrue(row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Set on Mac")).firstMatch
             .waitForExistence(timeout: 5), app.debugDescription)
 
         // Raising: the dry run needs no confirm, so the choice applies directly.

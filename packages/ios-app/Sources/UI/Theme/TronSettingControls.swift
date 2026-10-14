@@ -11,7 +11,7 @@ struct TronSettingsCaption: View {
     init(_ text: String, inset: CGFloat = 4) { self.text = text; self.inset = inset }
     var body: some View {
         Text(text)
-            .font(TronTypography.settingsSubtext(adjustment: TronSettingsLayoutPolicy.metadataSizeAdjustment))
+            .font(TronTypography.settingsRowSubtext)
             .foregroundStyle(Color.tronTextSecondary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)

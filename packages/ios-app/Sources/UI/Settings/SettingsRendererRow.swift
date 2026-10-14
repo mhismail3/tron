@@ -69,6 +69,12 @@ struct SettingsRendererRow: View {
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
+    /// A text row's subtitle also says what to type, on rows that show help.
+    private var entrySubtitle: String? {
+        guard detailed, let hint = presentation?.entry?.hint else { return subtitle }
+        return [subtitle, hint].compactMap { $0 }.joined(separator: "\n")
+    }
+
     /// Every row carries a glyph so titles align; the glyph names the control kind.
     private var icon: String {
         switch control {
@@ -169,7 +175,8 @@ struct SettingsRendererRow: View {
                 readOnlyRow
             }
         case .text:
-            SettingsRendererTextRow(title: title, icon: icon, subtitle: subtitle, value: setting.value?.stringValue ?? "", onCommit: { onChange(.string($0)) })
+            SettingsRendererTextRow(title: title, icon: icon, subtitle: entrySubtitle, example: presentation?.entry?.example,
+                                    value: setting.value?.stringValue ?? "", onCommit: { onChange(.string($0)) })
         case .secret:
             TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
                 SettingsSecretEditor(title: title, help: presentation?.help ?? "", onChange: onChange)
@@ -193,7 +200,7 @@ struct SettingsRendererRow: View {
                setting.value == nil || setting.value?.arrayValue?.allSatisfy({ $0.stringValue != nil }) == true {
                 let values = setting.value?.arrayValue ?? []
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
-                    SettingsListEditor(title: title, help: presentation?.help ?? "",
+                    SettingsListEditor(title: title, help: presentation?.help ?? "", entry: presentation?.entry,
                                        values: values.compactMap(\.stringValue), onChange: onChange)
                 }
             } else {
@@ -379,6 +386,8 @@ private struct SettingsRendererTextRow: View {
     let title: String
     let icon: String
     let subtitle: String?
+    /// The schema's realistic example, as the empty field's placeholder.
+    let example: String?
     let value: String
     let onCommit: (String) -> Void
     @State private var text: String?
@@ -387,7 +396,7 @@ private struct SettingsRendererTextRow: View {
     var body: some View {
         TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
             TextField(title, text: Binding(get: { text ?? value }, set: { text = $0 }),
-                      prompt: Text("(empty)").foregroundStyle(Color.tronTextMuted))
+                      prompt: Text(example ?? "(empty)").foregroundStyle(Color.tronTextMuted))
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .tronInlineField(monospaced: true)
                 .multilineTextAlignment(.trailing)
