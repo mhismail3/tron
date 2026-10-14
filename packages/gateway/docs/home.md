@@ -1662,10 +1662,11 @@ refuses with retryable `busy`.
     identity strings bounded to 200 UTF-8 bytes; references must match the current catalog.
   - **Continuations** are canonical base64url `{ revision, offset, limit, sessionId? }` (at
     most 1,024 characters). Repeat the same `limit` and filter. The content-derived revision
-    covers the Home identity, generation, committed catalog and node revision, and
-    per-chapter source cuts; any append, invalidation, summary settlement or changed cut
-    returns a retryable `conflict` with `home-memory-revision-changed`, and the client
-    reloads the first page. Offsets beyond the lines refuse rather than clamp.
+    covers the Home identity, generation, committed catalog and node revision, per-chapter
+    source cuts, and the exact ordered part decomposition rendered by the current view. A
+    change to any of these—including a different decomposition rebuilt after Gateway restart—
+    returns a retryable `conflict` with `home-memory-revision-changed`, and the client reloads
+    the first page. Offsets beyond the lines refuse rather than clamp.
   - **`sessionId`** filters to one chapter: a line crossing the chapter's boundary is split
     into its halves recursively until each piece is inside or outside, so no line covers
     another chapter's messages. A session that is not a chapter of this Home refuses with
