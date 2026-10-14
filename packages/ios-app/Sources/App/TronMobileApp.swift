@@ -28,6 +28,12 @@ struct TronMobileApp: App {
         // model; the no-fixture arm renders the production scene with the same
         // owner the shipping app builds (`ProductionSceneRoot`).
         _hostedModel = State(initialValue: AppModel())
+        // The dashboard view is a persisted preference, and hosted journeys share
+        // one app's defaults. Each launch states its view: `-dashboard-view-home`
+        // opens the Home view; every other journey runs on project grouping.
+        DashboardServerFilterPreferences.save(DashboardServerFilterState(
+            sortMode: ProcessInfo.processInfo.arguments.contains("-dashboard-view-home") ? .home : .projectServer
+        ))
     }
 
     var body: some Scene {

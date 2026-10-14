@@ -9,7 +9,7 @@ final class TronHomeDashboardUITests: XCTestCase {
     func testHomeDashboardViewJourney() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers"]
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home"]
         app.launch(); defer { app.terminate() }
 
         XCTAssertTrue(element(app, "home-usage-card").waitForExistence(timeout: 10), app.debugDescription)
@@ -40,7 +40,7 @@ final class TronHomeDashboardUITests: XCTestCase {
     func testNewWorkerAppearsWithoutRelaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-home-dashboard-new-worker"]
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home", "-home-dashboard-new-worker"]
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-new"].waitForExistence(timeout: 10), app.debugDescription)
         // Worker identity rides on the synced catalog rows: the view never queries Home's task ledger.
@@ -51,7 +51,7 @@ final class TronHomeDashboardUITests: XCTestCase {
     func testHomeButtonShowsWaitingForUser() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-home-phase-active", "-home-waiting"]
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home", "-home-phase-active", "-home-waiting"]
         app.launch(); defer { app.terminate() }
         let home = app.buttons["home-floating-button"]
         XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
@@ -63,7 +63,7 @@ final class TronHomeDashboardUITests: XCTestCase {
     func testHomeButtonShowsWorking() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-home-phase-active"]
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home", "-home-phase-active"]
         app.launch(); defer { app.terminate() }
         let home = app.buttons["home-floating-button"]
         XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)

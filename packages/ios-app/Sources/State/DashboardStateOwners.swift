@@ -200,9 +200,10 @@ struct DashboardServerSource: Identifiable, Equatable, Sendable {
 }
 
 enum DashboardSessionSortMode: String, CaseIterable, Identifiable, Sendable {
+    // Declaration order is the filter sheet's order; Home is first and the default.
+    case home = "Home"
     case projectServer = "By Project / Server"
     case recent = "Recent Activity"
-    case home = "Home"
 
     var id: String { rawValue }
     var detail: String {
@@ -376,7 +377,7 @@ enum DashboardServerFilterPreferences {
         }
         let legacy = defaults.string(forKey: legacySortModeKey)
             .flatMap(DashboardSessionSortMode.init(rawValue:))
-            ?? .projectServer
+            ?? .home
         return DashboardServerFilterState(sortMode: legacy)
     }
 
@@ -402,13 +403,13 @@ struct DashboardServerFilterState: Equatable, Sendable {
 
     init(
         selectedProfileIDs: Set<String> = [],
-        sortMode: DashboardSessionSortMode = .projectServer
+        sortMode: DashboardSessionSortMode = .home
     ) {
         self.selectedProfileIDs = selectedProfileIDs
         self.sortMode = sortMode
     }
 
-    var isFiltering: Bool { !selectedProfileIDs.isEmpty || sortMode != .projectServer }
+    var isFiltering: Bool { !selectedProfileIDs.isEmpty || sortMode != .home }
     var searchIdentity: String { "\(selectedProfileIDs.sorted().joined(separator: ",")):\(sortMode.rawValue)" }
     var isAllSelected: Bool { selectedProfileIDs.isEmpty }
     mutating func reconcile(profileIDs: [String]) {

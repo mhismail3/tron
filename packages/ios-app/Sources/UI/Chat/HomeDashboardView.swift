@@ -177,7 +177,7 @@ struct HomeUsageSummaryCard: View {
     private func usageLine(_ snapshot: ProviderUsageSnapshot?) -> some View {
         if let snapshot {
             Text(ProviderUsagePresentation.summary(snapshot))
-                .font(TronTypography.sans(size: TronTypography.sizeSecondary, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 .foregroundStyle(snapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted)
                 .monospacedDigit()
                 .transition(.opacity)

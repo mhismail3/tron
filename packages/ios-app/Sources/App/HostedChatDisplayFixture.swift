@@ -137,9 +137,6 @@ struct HostedHomeDashboardFixture: View {
             settingsApprovals: arguments.contains("-home-settings-approvals"),
             terminalEnabled: !arguments.contains("-home-terminal-unsupported"))
         self.gateway = gateway
-        if arguments.contains("-home-sheet-dashboard-workers") {
-            DashboardServerFilterPreferences.save(DashboardServerFilterState(sortMode: .home))
-        }
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture"), token: "fixture-token")
