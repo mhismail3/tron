@@ -114,7 +114,7 @@ struct GatewayLogsSettingsView: View {
                 Button { copyVisibleLogs() } label: {
                     Image(systemName: copySucceeded ? "checkmark" : "doc.on.doc")
                         .font(TronTypography.buttonSM)
-                        .tronSettingsAccent()
+                        .tronToolbarAction(accent: .tronEmerald)
                         .contentTransition(.symbolEffect(.replace.downUp))
                 }
                 .disabled(visibleItems.isEmpty)
@@ -126,7 +126,7 @@ struct GatewayLogsSettingsView: View {
                         else { Image(systemName: "iphone.and.arrow.forward") }
                     }
                     .font(TronTypography.buttonSM)
-                    .tronSettingsAccent()
+                    .tronToolbarAction(accent: .tronEmerald)
                 }
                 .disabled(localCaptureInFlight || shareURL != nil)
                 .accessibilityLabel("Capture on iPhone")
@@ -137,7 +137,7 @@ struct GatewayLogsSettingsView: View {
                         else { Image(systemName: "square.and.arrow.up") }
                     }
                     .font(TronTypography.buttonSM)
-                    .tronSettingsAccent()
+                    .tronToolbarAction(accent: .tronEmerald)
                 }
                 .disabled(visibleItems.isEmpty || exportInFlight)
                 .accessibilityLabel("Export Diagnostics")
@@ -705,7 +705,7 @@ struct GatewayLogDetailView: View {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Log Entry", accent: record.record.accent) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "checkmark").tronSettingsAccent()
+                        Image(systemName: "checkmark").tronToolbarAction(accent: record.record.accent)
                     }
                     .accessibilityLabel("Done")
                 }

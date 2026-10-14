@@ -249,7 +249,7 @@ struct AutomationsDashboardView: View {
                     .tronNavigationTitle("Jump to date", accent: .tronAutomation)
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
-                            Button { datePickerPresented = false; timeline?.load(start: selectedDate) } label: { Image(systemName: "checkmark") }
+                            Button { datePickerPresented = false; timeline?.load(start: selectedDate) } label: { Image(systemName: "checkmark").tronToolbarAction(accent: .tronAutomation) }
                                 .accessibilityLabel("Done")
                         }
                     }

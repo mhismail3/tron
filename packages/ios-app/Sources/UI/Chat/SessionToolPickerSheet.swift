@@ -221,7 +221,7 @@ struct SessionToolPickerSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronSessionTeal)
+                            .tronToolbarAction(accent: .tronSessionTeal)
                     }
                     .accessibilityLabel("Done")
                 }

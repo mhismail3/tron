@@ -823,7 +823,7 @@ private struct KnowledgeChronicleInfoSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronKnowledge)
+                            .tronToolbarAction(accent: .tronKnowledge)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -914,7 +914,7 @@ private struct KnowledgeCoverageSheetHost: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronKnowledge)
+                            .tronToolbarAction(accent: .tronKnowledge)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -1474,7 +1474,7 @@ struct KnowledgeDetailView: View {
                     Button("Correct record", systemImage: "arrow.triangle.2.circlepath") { correctionSheet = true }
                     Button("Exclude from Knowledge", systemImage: "eye.slash") { exclude() }
                     Button("Forget permanently", systemImage: "trash", role: .destructive) { forgetConfirmation = true }
-                } label: { Image(systemName: "ellipsis.circle").foregroundStyle(Color.tronKnowledge) }
+                } label: { Image(systemName: "ellipsis.circle").tronToolbarAction(accent: .tronKnowledge) }
                 .accessibilityLabel("Knowledge record actions")
             }
         }

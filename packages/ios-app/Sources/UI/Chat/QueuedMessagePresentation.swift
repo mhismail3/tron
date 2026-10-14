@@ -599,7 +599,7 @@ struct QueuedMessageEditorSheet: View {
                     } label: {
                         Image(systemName: "trash")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronError)
+                            .tronToolbarAction(role: .destructive)
                     }
                     .accessibilityLabel("Remove queued message")
                     .disabled(isSaving)
@@ -617,7 +617,7 @@ struct QueuedMessageEditorSheet: View {
                         } else {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(accent)
+                                .tronToolbarAction(accent: accent)
                         }
                     }
                     .accessibilityLabel("Save queued message")

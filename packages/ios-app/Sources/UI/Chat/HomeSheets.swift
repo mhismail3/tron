@@ -201,7 +201,8 @@ struct HomeSheet: View {
                     SessionTerminalToolbarButton(
                         enabled: active && sessionID != nil
                             && model.gatewayInfo?.capabilities.contains("terminal.v1") == true,
-                        identifier: "manage-home-terminal"
+                        identifier: "manage-home-terminal",
+                        accent: accent
                     ) { showsTerminal = true }
                 }
             }
@@ -214,7 +215,7 @@ struct HomeSheet: View {
                         dismiss()
                     }
                 } label: {
-                    Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(accent)
+                    Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: accent)
                 }
                 .accessibilityLabel("Done")
                 .accessibilityIdentifier("home-sheet-done-\(destination.id)")

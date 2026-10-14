@@ -95,7 +95,7 @@ struct AutomationDetailView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronAutomation)
+                            .tronToolbarAction(accent: .tronAutomation)
                     }
                     .accessibilityLabel("Done")
                 }

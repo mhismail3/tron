@@ -60,7 +60,7 @@ struct ProcessHistorySheet: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronSessionTeal)
+                    .tronToolbarAction(accent: .tronSessionTeal)
             }
             .accessibilityLabel("Done")
         }
@@ -584,7 +584,7 @@ struct ReadOnlySubagentSessionSheet: View {
                         Button(action: requestStop) {
                             Image(systemName: "stop.fill")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(canStop ? Color.tronError : Color.tronTextMuted)
+                                .tronToolbarAction(role: .destructive)
                                 .animation(
                                     reduceMotion ? nil : .easeOut(duration: 0.2),
                                     value: canStop
@@ -600,7 +600,7 @@ struct ReadOnlySubagentSessionSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronSubagent)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }

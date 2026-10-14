@@ -303,6 +303,7 @@ struct SessionContextSegmentedBar: View {
 }
 
 /// One compact line per section: its dot, its name and its size, two to a row.
+/// The free remainder has no line; the header already says how much is left (#963).
 struct SessionContextSegmentLegend: View {
     let segments: SessionContextSegments
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -317,10 +318,6 @@ struct SessionContextSegmentLegend: View {
                         .compactMap { $0 }.joined(separator: ", "))
                     .accessibilityIdentifier("context-segment-\(segment.id)")
             }
-            item(Circle().stroke(Color.tronSlate.opacity(0.7), lineWidth: 1), label: "Free",
-                 tokens: max(0, segments.window - segments.used))
-                .accessibilityLabel("Free, \(max(0, segments.window - segments.used).formatted()) tokens")
-                .accessibilityIdentifier("context-segment-free")
         }
         .padding(.top, 2)
     }

@@ -1561,7 +1561,7 @@ struct DisplaySheet: View {
                             Button { dismiss() } label: {
                                 Image(systemName: "checkmark")
                                     .font(TronTypography.buttonSM)
-                                    .foregroundStyle(Color.tronBlue)
+                                    .tronToolbarAction(accent: .tronBlue)
                             }
                             .accessibilityLabel("Done")
                         }

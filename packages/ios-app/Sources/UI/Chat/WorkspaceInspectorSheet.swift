@@ -234,7 +234,7 @@ struct WorkspaceInspectorSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronSessionTeal)
+                            .tronToolbarAction(accent: .tronSessionTeal)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -797,7 +797,7 @@ private struct WorkspaceGitDiffSheet: View {
                     TronSheetTitle(title: route.diff.path, accent: .tronSessionTeal, truncationMode: .head)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(Color.tronSessionTeal) }
+                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronSessionTeal) }
                         .accessibilityLabel("Done")
                 }
             }
@@ -883,7 +883,7 @@ private struct WorkspaceCommitDetailSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Commit", accent: .tronSessionTeal) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(Color.tronSessionTeal) }
+                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronSessionTeal) }
                         .accessibilityLabel("Done")
                 }
             }

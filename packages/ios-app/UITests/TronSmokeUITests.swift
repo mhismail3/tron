@@ -358,9 +358,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.descendants(matching: .any)["context-segmented-bar"].exists)
         for (id, label) in [("instructions", "Instructions"), ("profile", "About you"), ("memory", "Memory"),
-                            ("chapter", "This chapter"), ("results", "Task results"), ("input", "Your message"), ("free", "Free")] {
+                            ("chapter", "This chapter"), ("results", "Task results"), ("input", "Your message")] {
             XCTAssertTrue(app.descendants(matching: .any)["context-segment-\(id)"].label.hasPrefix(label), label)
         }
+        // The header says how much is left, so the legend has no Free line (#963).
+        XCTAssertFalse(app.descendants(matching: .any)["context-segment-free"].exists, "The legend has no Free line")
         XCTAssertTrue(app.descendants(matching: .any)["context-segment-memory"].label.contains("260 summaries"))
         XCTAssertFalse(app.staticTexts["activation-entry"].exists, "Context must not show an entry ID")
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", " bytes")).firstMatch.exists, "Context must not show byte counts")
