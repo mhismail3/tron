@@ -1245,7 +1245,7 @@ private actor HostedChatDisplaySocket: GatewaySocketConnection {
 }
 
 /// Home's workers for the Home dashboard view journeys: running, waiting,
-/// recently completed (more than the section shows) and unviewed rows, each
+/// recently completed and unread rows (each more than its section shows), each
 /// carrying the Gateway's `homeTaskId`, plus usage-capable providers.
 enum HostedHomeDashboardWorkers {
     private static func iso(_ secondsAgo: TimeInterval) -> String {
@@ -1274,7 +1274,9 @@ enum HostedHomeDashboardWorkers {
         worker("worker-unread-1", "Weekly reading digest", cwd: "/work/knowledge", ago: 5_400, unread: true),
         worker("worker-unread-2", "Mac reinstall preflight", cwd: "/work/tron", ago: 604_800, unread: true),
         worker("worker-unread-3", "Photo library dedupe plan", cwd: "/work/home", ago: 1_209_600, unread: true),
-        // An ordinary unread chat: no Home task names it, yet it joins the Unviewed queue.
+        worker("worker-unread-4", "Insurance renewal comparison", cwd: "/work/finance", ago: 1_500_000, unread: true),
+        worker("worker-unread-5", "Router firmware notes", cwd: "/work/home", ago: 1_600_000, unread: true),
+        // An ordinary unread chat: no Home task names it, yet it joins the Unread queue.
         worker("chat-unread", "Apple Watch app", cwd: "/work/tron", ago: 1_814_400, unread: true),
     ]
 
