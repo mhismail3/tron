@@ -521,7 +521,7 @@ type PromptOwnership = AutomationPromptOwnership | HomeWakeOwnership | {
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
-  homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
+  homeTask: (sessionId: string, request: unknown) => Promise<unknown>;
   homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;

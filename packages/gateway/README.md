@@ -1361,7 +1361,7 @@ the host-wide heavy-run queue and the host-pressure signal (#915).
   maintainer's message also starts the held task's next turn while it waits between turns for its subagent runs.
 - **Resume in place (#929).** A settled task (stopped, interrupted, limited or reported) continues as its one
   successor task `<id>.resume-<n>`, bound to the same worker session, so its worktree and work claim (claims name
-  the session) stay with it. Home's `task` tool action `resume` and a maintainer message sent in the stopped
+  the session) stay with it. Home's `task` tool action `resume` (only `taskId`; naming any task of the lineage reaches its current one, #961) and a maintainer message sent in the stopped
   worker's chat both resume it; the message becomes the resume instruction. The stopped record stays immutable and
   each task has at most one started successor. A resume admits like any task: beyond the running-worker budget it
   queues, its worker operation already fixed so the maintainer's message names it (#959). A successor refused or

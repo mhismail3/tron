@@ -42,12 +42,15 @@ const UNMANAGED_PROVIDER_VERSION = "0.76.1-tron.4";
 export const TASK_REASONING_MODEL_ID = "tron-task-reasoning";
 export const TASK_VIRTUAL_MODEL_ID = "tron-task-router";
 
-export async function fixture(unmanagedProvider = false, codemode = false, contextWindow?: number, managed = false) {
+/** `models` is written as the agent directory's models.json before any runtime starts, for a
+ * provider the faux one cannot stand in for (a local wire-protocol endpoint). */
+export async function fixture(unmanagedProvider = false, codemode = false, contextWindow?: number, managed = false, models?: Record<string, unknown>) {
   const root = await mkdtemp(join(tmpdir(), "tron-task-dispatch-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
   const tronHome = join(root, "tron");
   await mkdir(agentDir); await mkdir(cwd);
+  if (models) await writeFile(join(agentDir, "models.json"), JSON.stringify(models));
   // jiti transpiles pi and managed extensions into os.tmpdir(). Keep that cache in this
   // fixture's root so disposal removes it instead of leaking into the host's temp.
   const temporary = join(root, "tmp");
@@ -64,7 +67,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   const model = faux.getModel();
   // The Gateway-wide runtime that admits Home's delegate choices (production passes it
   // as `gatewayModelRuntime`). It also holds a virtual router, which must be refused.
-  const gateway = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+  const gateway = await ModelRuntime.create({ modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
   gateway.registerNativeProvider(faux.provider);
   gateway.registerVirtualModel({ provider: model.provider, id: TASK_VIRTUAL_MODEL_ID, name: "Fixture router",
     route: () => ({ model: gateway.getModel(model.provider, model.id)!, thinkingLevel: "off" }) });
@@ -114,9 +117,9 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     ...(managed ? { delegatedArtifactRoot: delegatedArtifactRoot(tronHome) } : {}),
     gatewayModelRuntime: gateway,
     modelRuntimeFactory: async () => {
-      // Managed fixtures read the agent directory's models.json, as production does, so a
-      // scripted child model is registered for the worker's own subagent launches.
-      const runtime = await ModelRuntime.create({ modelsPath: managed ? join(agentDir, "models.json") : null, refreshOnCreate: false });
+      // Every runtime reads the agent directory's models.json, as production does, so a test
+      // can register a scripted child model or a local wire-protocol endpoint there.
+      const runtime = await ModelRuntime.create({ modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
       runtime.registerNativeProvider(faux.provider); return runtime;
     },
     broadcast: (_sessionId: string, topic: string, payload: unknown) => { events.push({ topic, payload }); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
