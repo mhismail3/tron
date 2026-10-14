@@ -211,14 +211,38 @@ describe("Home memory browser at scale", () => {
       expect(retry.value).toEqual(first);
       const afterRetry = await timedRead(() => view(g, { limit: 30 }));
 
-      const steady = [again.ms.firstPage, ...again.ms.pages, again.ms.chapter, again.ms.part, again.ms.evidence, afterRetry.ms];
+      // A live turn appends to the active chapter: reads extend its proof by the
+      // new bytes only. Navigation is not an append and re-proves the chapter.
+      const dropProofs = () => { (g.registry.homeOwner() as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs(); };
+      const active = await g.registry.acquire(chapterIds[2]!);
+      for (let index = 0; index < 4; index += 1) {
+        active.sessionManager.appendMessage({ role: "user", content: `live turn input ${index} ${"while the browser is open ".repeat(30)}`, timestamp: Date.now() });
+      }
+      const appended = await timedRead(() => view(g, { limit: 30 }));
+      expect(appended.value.totalMessages).toBe(first.totalMessages + 4);
+      dropProofs();
+      expect(await view(g, { limit: 30 })).toEqual(appended.value);
+      const branchFrom = first.lines.flatMap(line => line.item ? [line.item] : []).find(item => item.evidence.sessionId === chapterIds[2])!;
+      active.sessionManager.branch(branchFrom.evidence.entryId);
+      active.sessionManager.appendMessage({ role: "user", content: "a navigated branch", timestamp: Date.now() });
+      const navigated = await view(g, { limit: 30 });
+      expect(navigated.lines.some(line => line.item?.projection.omitted)).toBe(true);
+      dropProofs();
+      expect(await view(g, { limit: 30 })).toEqual(navigated);
+
+      const steady = [again.ms.firstPage, ...again.ms.pages, again.ms.chapter, again.ms.part, again.ms.evidence, afterRetry.ms, appended.ms];
       Object.assign(report, {
         chapters: CHAPTERS, totalMessages: first.totalMessages, sourceBytes, buildMs,
         budgetMs: BUDGET_MS, deadlineMs: DEADLINE_MS,
-        firstReads: warm.ms, steady: again.ms, fullProofPerRead: full.ms, retryAfterCancelledColdProof: retry.ms, steadyMaxMs: Math.max(...steady),
+        firstReads: warm.ms, steady: again.ms, fullProofPerRead: full.ms, retryAfterCancelledColdProof: retry.ms, afterLiveAppend: appended.ms, steadyMaxMs: Math.max(...steady),
       });
       process.stdout.write(`home-memory-browser-scale: ${JSON.stringify(report)}\n`);
       for (const ms of steady) expect(ms).toBeLessThan(BUDGET_MS);
+      // Load-independent scaling check, both sides measured in this run: a warm read
+      // must not cost what proving all history costs (the pre-#940 per-read cost).
+      const median = (values: number[]) => [...values].sort((x, y) => x - y)[Math.floor(values.length / 2)]!;
+      const fullProof = [full.ms.firstPage, ...full.ms.pages, full.ms.chapter, full.ms.part, full.ms.evidence];
+      expect(median(steady) * 10).toBeLessThan(median(fullProof));
     } finally {
       await closeGateway(g).catch(() => {});
       await rm(root, { recursive: true, force: true });
