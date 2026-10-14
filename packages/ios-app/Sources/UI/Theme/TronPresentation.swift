@@ -218,6 +218,21 @@ private struct TronScrollSurfaceModifier: ViewModifier {
     }
 }
 
+private struct TronListRowHighlightModifier: ViewModifier {
+    let isHighlighted: Bool
+    let accent: Color
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
+        content
+            .contentShape(shape)
+            .background {
+                shape.fill((settingsTheme?.accent ?? accent).opacity(isHighlighted ? 0.10 : 0))
+            }
+    }
+}
+
 extension View {
     /// Required at the app root so controls created by system containers inherit
     /// Tron's selected family and emerald interaction color.
@@ -289,6 +304,13 @@ extension View {
             cornerRadius: cornerRadius,
             tintOpacity: tintOpacity
         ))
+    }
+
+    /// A row in a plain list on the sheet surface (no card): clear at rest and
+    /// lightly tinted with the accent while it needs attention, such as an
+    /// unread notification.
+    func tronListRowHighlight(_ isHighlighted: Bool, accent: Color = .tronEmerald) -> some View {
+        modifier(TronListRowHighlightModifier(isHighlighted: isHighlighted, accent: accent))
     }
 
     /// A toolbar action takes `accent` when given, else its sheet's inherited
@@ -1403,6 +1425,10 @@ struct TronSettingsRow<Trailing: View>: View {
     let titleFont: Font
     let titleColor: Color
     let subtitleColor: Color
+    /// Non-nil makes this a feed row (an inbox entry): a one-line title with
+    /// this short value trailing on its line, the subtitle in body type, and
+    /// tighter vertical insets.
+    let feedTrailing: String?
     let trailing: Trailing
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
@@ -1421,6 +1447,7 @@ struct TronSettingsRow<Trailing: View>: View {
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
         titleColor: Color = .tronTextPrimary,
         subtitleColor: Color = .tronTextPrimary,
+        feedTrailing: String? = nil,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
@@ -1433,6 +1460,7 @@ struct TronSettingsRow<Trailing: View>: View {
         self.titleFont = titleFont
         self.titleColor = titleColor
         self.subtitleColor = subtitleColor
+        self.feedTrailing = feedTrailing
         self.trailing = trailing()
     }
 
@@ -1469,6 +1497,17 @@ struct TronSettingsRow<Trailing: View>: View {
                         }
                         .scrollBounceBehavior(.basedOnSize)
                         .accessibilityLabel(title)
+                    } else if let feedTrailing {
+                        HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
+                            Text(title).font(titleFont).foregroundStyle(titleColor)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(feedTrailing)
+                                .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
+                                .foregroundStyle(Color.tronTextMuted)
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
                     } else {
                         Text(title).font(titleFont).foregroundStyle(titleColor)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1477,7 +1516,9 @@ struct TronSettingsRow<Trailing: View>: View {
                         Text(subtitleIsMarkdown
                              ? MarkdownPresentation.Inline(source: subtitle).attributedString ?? AttributedString(subtitle)
                              : AttributedString(subtitle))
-                            .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
+                            .font(feedTrailing == nil
+                                ? TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment)
+                                : TronTypography.body)
                             .foregroundStyle(subtitleColor)
                             .lineLimit(subtitleLineLimit)
                             .truncationMode(.tail)
@@ -1494,7 +1535,7 @@ struct TronSettingsRow<Trailing: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-        .padding(.vertical, labelsOwnInsets ? 0 : TronSpacing.xl)
+        .padding(.vertical, labelsOwnInsets ? 0 : feedTrailing == nil ? TronSpacing.xl : TronSpacing.md)
         .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -1587,7 +1628,8 @@ extension TronSettingsRow where Trailing == EmptyView {
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
         titleColor: Color = .tronTextPrimary,
-        subtitleColor: Color = .tronTextPrimary
+        subtitleColor: Color = .tronTextPrimary,
+        feedTrailing: String? = nil
     ) {
         self.init(
             icon: icon,
@@ -1599,7 +1641,8 @@ extension TronSettingsRow where Trailing == EmptyView {
             accent: accent,
             titleFont: titleFont,
             titleColor: titleColor,
-            subtitleColor: subtitleColor
+            subtitleColor: subtitleColor,
+            feedTrailing: feedTrailing
         ) { EmptyView() }
     }
 }

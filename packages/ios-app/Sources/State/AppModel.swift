@@ -3228,6 +3228,16 @@ final class AppModel {
         for profile in enabled { await scheduleNotificationInboxRefresh(profile: profile).value }
     }
 
+    /// The chat a notification belongs to, named as the dashboard names it; nil
+    /// when that chat is not in the profile's loaded catalog (Home, archived, or
+    /// not loaded yet).
+    func notificationSessionTitle(profileID: String, sessionID: String) -> String? {
+        dashboardSessionsByProfile[profileID]?.first { $0.id == sessionID }?.title
+    }
+
+    /// Inbox rows name their Gateway only when more than one Mac feeds the inbox.
+    var notificationInboxSpansMultipleGateways: Bool { notificationInboxProfiles().count > 1 }
+
     func loadMoreNotificationHistory(profileID: String, filter: NotificationInboxFilter) async {
         guard let profile = notificationInboxProfiles().first(where: { $0.id == profileID }) else { return }
         let selectedProfileID = profiles.selected?.id
@@ -3235,7 +3245,7 @@ final class AppModel {
         func connectionID() async -> Int? {
             usesSelectedClient ? await client.activeConnectionID() : await dashboardConnections.connectionID(for: profileID)
         }
-        await notificationInbox.loadNextPage(profileID: profileID, filter: filter) { [weak self] cursor, expectedConnectionID in
+        let needsRefresh = await notificationInbox.loadNextPage(profileID: profileID, filter: filter) { [weak self] cursor, expectedConnectionID in
             guard let self, !Task.isCancelled else { throw CancellationError() }
             let before = await connectionID()
             guard before == expectedConnectionID,
@@ -3263,6 +3273,8 @@ final class AppModel {
             }
             return page
         }
+        // The history moved under the loaded window; the refresh merge owns repair.
+        if needsRefresh { scheduleNotificationInboxRefresh(profile: profile) }
     }
 
     func markNotificationRead(_ item: NotificationInboxItem) async {
@@ -3383,29 +3395,11 @@ final class AppModel {
                 unread: unreadPage,
                 generation: generation
             )
-        } catch let failure as GatewayFailure where failure.code == "unsupported" {
-            let currentConnectionID = await connectionID()
-            guard currentConnectionID == initialConnectionID,
-                  profiles.selected?.id == selectedProfileID,
-                  profiles.profiles.first(where: { $0.id == profile.id }) == profile else { return }
-            notificationInbox.fail(
-                profileID: profile.id,
-                generation: generation,
-                message: "Update the Gateway to view notifications."
-            )
-        } catch is CancellationError {
-            // Retirement invalidates the coordinator generation; cancellation is
-            // not a failed remote read and cannot publish into a successor.
         } catch {
-            let currentConnectionID = await connectionID()
-            guard currentConnectionID == initialConnectionID,
-                  profiles.selected?.id == selectedProfileID,
-                  profiles.profiles.first(where: { $0.id == profile.id }) == profile else { return }
-            notificationInbox.fail(
-                profileID: profile.id,
-                generation: generation,
-                message: (error as? GatewayFailure)?.message ?? "Unable to load notifications."
-            )
+            // The inbox keeps its last rows. An offline Gateway is the app-global
+            // reconnect notice's to present, and its reconnect (or the next
+            // `notification.inbox.changed`) schedules the next read; the
+            // refresh owner clears this generation's loading flag.
         }
     }
 
@@ -5596,6 +5590,12 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         }
         if dashboardStatesByProfile[profileID] != state {
             automationCatalog.invalidate(profileID: profileID)
+        }
+        // Inbox changes published while this Gateway was unreachable never
+        // reached this device, so its reconnect is a real inbox demand.
+        if state == .connected, previousState != .connected,
+           let profile = notificationInboxProfiles().first(where: { $0.id == profileID }) {
+            scheduleNotificationInboxRefresh(profile: profile)
         }
         let existingCount = dashboardSessionsByProfile[profileID]?.count ?? 0
         if DashboardProjectionRetentionPolicy.retainsExistingBucket(

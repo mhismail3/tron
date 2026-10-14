@@ -50,6 +50,8 @@ struct TronMobileApp: App {
                 HostedNewSessionFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-composer-upload-fixture") {
                 HostedComposerUploadFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-notification-inbox-fixture") {
+                HostedNotificationInboxFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-readonly-attachment-fixture") {
                 HostedReadonlyAttachmentFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-chat-display-fixture") {
