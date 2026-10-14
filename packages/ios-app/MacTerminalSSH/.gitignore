@@ -1,2 +1,6 @@
 .build/
 .swiftpm/
+# Xcode writes the whole app's package graph here when it builds TronMobile,
+# and `swift build` writes only this package's; neither is the authority (the
+# Xcode project resolves the app, Package.swift pins swift-nio-ssh exactly).
+Package.resolved
