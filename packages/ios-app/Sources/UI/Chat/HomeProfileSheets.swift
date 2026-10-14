@@ -50,14 +50,14 @@ extension HomeSheet {
             }
             ForEach(HomeProfilePresentation.groups(active), id: \.kind) { group in
                 TronSettingsGroup(HomeProfilePresentation.groupTitle(group.kind), accent: .tronSessionTeal) {
-                    profileRows(group.items, editable: editable)
+                    profileRows(group.items)
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home-profile-group-\(group.kind.rawValue)")
             }
             if !inactive.isEmpty {
                 TronSettingsGroup("No longer applied", detail: "Superseded or retired items, kept in Knowledge.", accent: .tronSessionTeal) {
-                    profileRows(inactive, editable: false)
+                    profileRows(inactive)
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home-profile-inactive")
@@ -68,31 +68,19 @@ extension HomeSheet {
         }
     }
 
-    /// Each row opens its item. An inferred item carries a one-tap Confirm, so
-    /// confirming never needs the detail sheet.
-    private func profileRows(_ items: [HomeProfileListDTO.Item], editable: Bool) -> some View {
+    /// Each row only opens its item; Confirm, Edit and Retire live in the item's
+    /// sheet so the row text keeps the full width (#971).
+    private func profileRows(_ items: [HomeProfileListDTO.Item]) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 if index > 0 { divider() }
-                HStack(spacing: 0) {
-                    Button { present(.profileItem(item)) } label: {
-                        TronSettingsRow(icon: HomeProfilePresentation.stateIcon(item), title: HomeChapterPresentation.topicPreview(item.text, limit: 160),
-                                        subtitle: HomeProfilePresentation.rowSubtitle(item), accent: .tronSessionTeal,
-                                        titleFont: TronTypography.sans(size: TronTypography.sizeBody))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("home-profile-item-\(item.id)")
-                    if editable, item.status == .active, !item.confirmed {
-                        Button { confirm(item) } label: {
-                            TronInlineActionLabel("Confirm", icon: "checkmark", accent: .tronSessionTeal)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(profileEdit.working)
-                        .padding(.trailing, TronSpacing.section)
-                        .accessibilityLabel("Confirm")
-                        .accessibilityIdentifier("home-profile-confirm-\(item.id)")
-                    }
+                Button { present(.profileItem(item)) } label: {
+                    TronSettingsRow(icon: HomeProfilePresentation.stateIcon(item), title: HomeChapterPresentation.topicPreview(item.text, limit: 160),
+                                    subtitle: HomeProfilePresentation.rowSubtitle(item), accent: .tronSessionTeal,
+                                    titleFont: TronTypography.sans(size: TronTypography.sizeBody))
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("home-profile-item-\(item.id)")
             }
         }
     }

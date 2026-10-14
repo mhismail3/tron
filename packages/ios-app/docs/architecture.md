@@ -226,8 +226,9 @@ once. With `home-profile-edit.v1` the maintainer changes items here
 (`HomeProfileSheets.swift`). The list and the detail share these patterns:
 - **States.** An inferred item has a sparkle glyph and an Inferred pill. A confirmed
   item has a filled seal and a Confirmed pill.
-- **Confirm.** An inferred row carries a one-tap Confirm beside it. Confirm all uses
-  the shared `TronConfirmationSheet`.
+- **Confirm.** A list row only opens its item, so its text keeps the full width;
+  an item is confirmed from its detail. Confirm all sits above the list and uses the
+  shared `TronConfirmationSheet`.
 - **Change group.** The detail's Change group has Confirm, Edit and Retire. Edit and
   Retire are progressive sheets in the Settings value-editor pattern:
   - Edit has Save (`tronSaveToolbar`), a text field, `TronChoiceRow` for the kind and
