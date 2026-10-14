@@ -490,22 +490,21 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForEnabled(send, timeout: 60), app.debugDescription)
         send.tap()
 
-        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "code")).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 90), "the running codemode row never appeared: \(app.debugDescription)")
-        // The nested question is pending once the row reports its running ask_user call;
-        // until then a tap opens the row's details, so retry the tap after closing them.
-        let question = app.staticTexts["Approve the codemode step?"]
-        let deadline = Date().addingTimeInterval(60)
-        while !question.exists, Date() < deadline {
-            if row.isHittable { row.tap() }
-            if question.waitForExistence(timeout: 3) { break }
-            dismissTopSheet(app)
-        }
-        XCTAssertTrue(question.exists, "tapping the codemode row never opened its pending question: \(app.debugDescription)")
+        // Tap only once the codemode call is executing: its nested ask_user is then running
+        // and its question pending. A declared ("Invocation") row has no question yet.
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@ AND label CONTAINS %@", "Codemode", "Running")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 90), "the codemode row never ran: \(app.debugDescription)")
+        let submit = app.buttons["Submit all answers"]
+        XCTAssertFalse(submit.exists, "the question must not open before the row is tapped")
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertTrue(waitForHittable(row, timeout: 10), app.debugDescription)
+        row.tap()
+        // The tap opens the pending question itself, not the row's details sheet.
+        XCTAssertTrue(submit.waitForExistence(timeout: 10),
+                      "tapping the running codemode row did not open its pending question: \(app.debugDescription)")
+        XCTAssertTrue(app.staticTexts["Approve the codemode step?"].exists, app.debugDescription)
         keepScreenshot(app, name: "929-codemode-ask-user-opened-from-row")
         app.buttons["Approve it"].tap()
-        let submit = app.buttons["Submit answer"].exists ? app.buttons["Submit answer"] : app.buttons["Submit all answers"]
-        XCTAssertTrue(submit.waitForExistence(timeout: 10), app.debugDescription)
         submit.tap()
         let answered = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Codemode question answered")).firstMatch
         XCTAssertTrue(answered.waitForExistence(timeout: 90), "the answer never reached the codemode script: \(app.debugDescription)")
