@@ -1,3 +1,4 @@
+import type { MacTerminalKeys } from "../security/mac-terminal.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -38,6 +39,9 @@ export interface SettingsModelDependencies {
   /** The tools a target's selection can name (`catalog.tools`): a chat's live
    * registry, or the built-in and opt-in extension tools of a scope. */
   toolCatalog?: (target: SettingsTarget) => Promise<readonly ToolCatalogEntry[]>;
+  /** The Mac Terminal key store (`~/.ssh/authorized_keys`). Absent in a
+   * Gateway that does not own one, such as a fixture that names none. */
+  macTerminalKeys?: MacTerminalKeys;
 }
 
 export interface ToolCatalogEntry { name: string; description?: string; resource: Record<string, unknown> }
@@ -75,6 +79,8 @@ export class SettingsModel {
   }
 
   get modelRuntime(): ModelRuntime { return this.dependencies.modelRuntime; }
+
+  get macTerminalKeys(): MacTerminalKeys | undefined { return this.dependencies.macTerminalKeys; }
 
   get profilePath(): string {
     return join(this.dependencies.tronHome, "gateway", "home", "profile.json");
@@ -235,6 +241,7 @@ export class SettingsModel {
       layers,
       mac,
       trust,
+      macTerminal: await this.dependencies.macTerminalKeys?.read() ?? {},
       floors: await this.floorOverrides(),
       ...(outside ? { outside } : {}),
       ...(project ? { project } : {}),
@@ -554,7 +561,7 @@ const deepEqual = (left: unknown, right: unknown) => JSON.stringify(left ?? null
 
 /** Applier order across stores (doc 5.2): fixed, so rollback is the reverse. */
 const STORE_ORDER: Record<Binding["store"], number> = {
-  "pi": 0, "pi-model-ref": 0, "trust": 1, "home-memory": 2, "profile": 3, "floors": 4, "chat": 5, "chat-settings": 5,
+  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "home-memory": 2, "profile": 3, "floors": 4, "chat": 5, "chat-settings": 5,
 };
 
 const DECIDED = new Set<ChangeStatus>(["approved", "declined", "expired", "superseded", "failed"]);
@@ -1141,6 +1148,12 @@ export class SettingsChangePath {
           return { git };
         }
         await updateJsonLocked<Record<string, unknown>>(join(this.agentDir, "settings.json"), {}, write);
+        return {};
+      }
+      case "mac-terminal": {
+        const keys = this.model.macTerminalKeys;
+        if (!keys) throw new GatewayError("unsupported", "This Gateway has no Mac Terminal key store");
+        await keys.set(qualifiers.device!, unset ? null : value as string);
         return {};
       }
       case "trust":

@@ -1,5 +1,6 @@
 import { availableParallelism } from "node:os";
 import { defineConfig } from "vitest/config";
+import { macTerminalTestFiles } from "./vitest.mac-terminal.config.js";
 import { nestedTestFiles } from "./vitest.nested.config.js";
 
 // `work verify` runs heavy checks in host-wide slots and gives each one its CPU
@@ -9,7 +10,7 @@ const verifyCpuShare = Number(process.env.VERIFY_CPU_SHARE);
 export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
-    exclude: nestedTestFiles,
+    exclude: [...nestedTestFiles, ...macTerminalTestFiles],
     environment: "node",
     // Durable filesystem/SQLite fixtures and SDK child processes share the
     // host. CPU-count fanout starves their owners; bound concurrency rather
