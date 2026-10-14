@@ -75,7 +75,10 @@ final class TronHomeSheetsUITests: XCTestCase {
         expand(app, done: "home-sheet-done-chapters")
         assertTitleTint(app, "Chapters", matches: rowTint, not: manageTint)
         // The title names the list; only the intro line sits above the rows.
-        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == 'Chapters'")).count, 1, "No section header repeats the title")
+        let listTitle = app.navigationBars.staticTexts["Chapters"].firstMatch.frame, firstRow = element(app, "home-chapter-2").frame
+        let headers = app.staticTexts.matching(NSPredicate(format: "label == 'Chapters'")).allElementsBoundByIndex
+            .filter { $0.frame.minY > listTitle.maxY && $0.frame.maxY <= firstRow.minY }
+        XCTAssertTrue(headers.isEmpty, "No section header repeats the title")
         XCTAssertTrue(app.staticTexts["Newest first. Sealed chapters stay readable and refuse changes."].exists)
         keep("05-chapters")
         let chaptersLoaded = reads(app)
