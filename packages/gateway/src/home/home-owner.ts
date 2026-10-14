@@ -11,7 +11,8 @@ import type { HomeTaskSubagents } from "./home-task-subagents.js";
 import { HOME_CHAPTER_TOPIC_COUNT, HOME_CHAPTER_TOPIC_LIST_CHARACTERS, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { HomeChapterList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryView, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
+import type { HomeChapterList, HomeProfileList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryView, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
+import { readHomeProfile } from "./home-profile.js";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { historyEntry } from "../sessions/history.js";
 import type { EpisodicMemory } from "../episodic/episodic-memory.js";
@@ -677,6 +678,20 @@ export class HomeOwner {
         recoveryDecision: currentChapter.state === "reserved" ? "reserved"
           : currentChapter.state === "materializing" ? "materializing" : "none",
       },
+    };
+  }
+
+  /** `home.profileList`: the learned profile Home's instructions apply, read from the
+   * Knowledge owner through the same classifier. Read-only; any Home state answers, since
+   * the profile belongs to the maintainer, not to a designation. */
+  async profileList(): Promise<HomeProfileList> {
+    const knowledge = this.options.knowledge();
+    if (!knowledge) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
+    const read = await readHomeProfile(knowledge);
+    return {
+      items: read.items.map(item => ({ id: item.id, revisionId: item.revisionId, kind: item.kind, text: item.text, confirmed: item.confirmed,
+        status: item.status, createdAt: item.record.createdAt, updatedAt: item.record.updatedAt })),
+      unclassified: read.unclassified,
     };
   }
 

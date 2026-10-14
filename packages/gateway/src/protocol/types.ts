@@ -1050,6 +1050,29 @@ export const HOME_CAPABILITY = "home.v1";
 export const HOME_MEMORY_VIEW_CAPABILITY = "home-memory-view.v1";
 /** The full chapter-list read (#740); older home.v1 servers lack it. */
 export const HOME_CHAPTER_LIST_CAPABILITY = "home-chapter-list.v1";
+/** The learned-profile read (`home.profileList`); advertised only with a Knowledge owner. */
+export const HOME_PROFILE_LIST_CAPABILITY = "home-profile-list.v1";
+
+/** One learned-profile item as `home.profileList` answers it: the Knowledge note's
+ * identity, its kind label, its one-line text and whether the maintainer confirmed it.
+ * `status` is derived the way Home's instructions derive it: only `active` applies. */
+export interface HomeProfileListItem {
+  id: string;
+  revisionId: string;
+  kind: "preference" | "standing-decision" | "delegation-default" | "fact";
+  text: string;
+  confirmed: boolean;
+  status: "active" | "superseded" | "retired";
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** `home.profileList`: every profile-tagged personal note, classified, in Home's
+ * order (kind, then creation); `unclassified` counts notes without one kind label. */
+export interface HomeProfileList {
+  items: HomeProfileListItem[];
+  unclassified: number;
+}
 
 /** One ledger chapter as `home.chapterList` answers it. Sealed chapters carry
  * exactly their recorded seal metrics (a disable-sealed chapter has none); the

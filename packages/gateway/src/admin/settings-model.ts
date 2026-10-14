@@ -477,6 +477,16 @@ export interface ChangeOutcome {
   /** The store's resulting state when its applier reports one (trust's inspection). */
   result?: unknown;
   error?: { code: string; message: string };
+  /** The value at this layer before and after the change, `null` when unset there. A
+   * redacted key reports neither, only `redacted`, as its change record does. */
+  before?: unknown;
+  after?: unknown;
+  redacted?: true;
+}
+
+/** A planned change's values as its outcome reports them. */
+function outcomeValues(redacted: boolean | undefined, before: unknown, after: unknown): Pick<ChangeOutcome, "before" | "after" | "redacted"> {
+  return redacted ? { redacted: true } : { before: before ?? null, after: after ?? null };
 }
 
 export interface ChangeResult {
@@ -586,6 +596,7 @@ export class SettingsChangePath {
             if (error) return { changeId: "", key: request.key, layer: request.layer, status: "failed" as const, tier: "quiet" as const, error: { code: error.code, message: error.message } };
             const plan = planned[next++]!;
             return { changeId: "", key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}), layer: request.layer, status: held ? "pending" as const : "applied" as const, tier: plan.tier,
+              ...outcomeValues(plan.key.redacted, plan.before, plan.after),
               // The maintainer's row shows this before an approve-tier change of his own (doc 5.4, item 4).
               ...(plan.tier === "approve" && plan.key.confirm ? { confirm: plan.key.confirm } : {}) };
           }),
@@ -786,7 +797,8 @@ export class SettingsChangePath {
   }
 
   private pendingOutcome(change: PendingChange, status: ChangeStatus): ChangeOutcome {
-    return { changeId: change.changeId, key: change.key, ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}), layer: change.layer, status, tier: change.tier };
+    return { changeId: change.changeId, key: change.key, ...(change.qualifiers ? { qualifiers: change.qualifiers } : {}), layer: change.layer, status, tier: change.tier,
+      ...outcomeValues(change.redacted, change.before, change.after) };
   }
 
   private pendingEntry(request: ApprovalRequest, change: PendingChange, context: Pick<ChangeContext, "actor" | "commandId" | "reason">): ChangeEntry {
@@ -854,7 +866,7 @@ export class SettingsChangePath {
   private outcomes(applied: ReadonlyArray<{ plan: Planned; changeId: string; revision?: number; git?: GitResult; result?: unknown }>, status: ChangeStatus): ChangeOutcome[] {
     return applied.map(({ plan, changeId, revision, git, result }) => ({
       changeId, key: plan.key.id, ...(Object.keys(plan.qualifiers).length ? { qualifiers: plan.qualifiers } : {}),
-      layer: plan.request.layer, status, tier: plan.tier,
+      layer: plan.request.layer, status, tier: plan.tier, ...outcomeValues(plan.key.redacted, plan.before, plan.after),
       ...(revision === undefined ? {} : { revision }), ...(git ? { git } : {}),
       ...(result === undefined ? {} : { result }),
     }));
