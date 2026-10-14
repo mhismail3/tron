@@ -54,6 +54,17 @@ run settlement and canonical receipt persistence, with the repeatable artifact
 `test-results/failed-stop-natural-completion.json`, alongside actual fast-abort
 and already-completed controls.
 
+Every tool call's life after cancellation is bounded (#961,
+`sessions/bounded-tool-cancellation.ts`). Pi's loop awaits a tool's `execute`
+and its abort waits for the loop to go idle, so one tool that ignored its abort
+signal made Stop hang and left a worker running. Two seconds after cancellation
+the call resolves as an error result naming the abandoned tool; the run ends and
+Stop settles within its grace. Built-in bash kills its process group on abort
+and settles first. The abandoned call's late result is discarded.
+`src/home/home-task-tool.e2e.test.ts` stops a Home worker blocked in such a tool
+and resumes it in place, and stops one in a SIGTERM-ignoring 10-minute command,
+with the repeatable artifact `test-results/home-task-tool.json`.
+
 An invocation's receipts all belong to the session it started in. An extension
 command that replaces its own session (`ctx.switchSession`, `ctx.newSession`,
 `ctx.fork`) is settled there when Pi commits the replacement: at
