@@ -15,8 +15,9 @@ import type { TrustService } from "./trust-service.js";
 import type { Actor, ActorKind, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
 import { composedBelow, readBinding, resolveSettings, targetLayers, type ChatStore, type FixedSetting, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
-import { KEYS, builtinValue, floorFor, floorInstances, chatLayerApplies, hasChatSettingsApplier, hasRuntimeRequestApplier, recordSubject, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, KEYS, auditSubject, builtinValue, floorFor, floorInstances, chatLayerApplies, hasChatSettingsApplier, hasRuntimeRequestApplier, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
+import { formatProfileValue, profileListItem, type HomeProfileAuthor, type HomeProfileItems, type HomeProfileOp, type HomeProfileSaved, type HomeProfileWrite } from "../home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
 
 /** What a session target contributes: its Chat layer and whether it is Home's chat. */
@@ -507,6 +508,26 @@ export interface SettingsWriters {
   setTrust(project: string, decision: boolean | null): Promise<unknown>;
   /** Home memory's applier: HomeOwner (doc 6.1). */
   configureHomeMemory?(model: ModelRefValue): Promise<void>;
+  /** The learned profile's applier: Knowledge notes (doc 6.4). */
+  profile?: HomeProfileItems;
+}
+
+/** A profile change's context: the recorded actor and the note author it writes as. */
+export interface ProfileChangeContext {
+  actor: Actor;
+  author: HomeProfileAuthor;
+  commandId: string;
+  reason?: string;
+  web?: boolean;
+}
+
+export interface ProfileChangeResult {
+  status: "applied";
+  tier: Tier;
+  changes: ChangeOutcome[];
+  saved: HomeProfileSaved[];
+  /** The changed items as `home.profileList` lists them now. */
+  items: ReturnType<typeof profileListItem>[];
 }
 
 /** Who hears about changes once they happen. The Gateway service registers one:
@@ -610,11 +631,106 @@ export class SettingsChangePath {
     });
   }
 
+  /**
+   * A learned-profile change (doc 6.4): Home's `profile` tool and the maintainer's
+   * `home.profileChange` both arrive here. Ops apply in order through the profile
+   * applier under the Home target's lock, and every note they touched is one record
+   * entry in one group. A failure rolls back the ops already applied, newest first.
+   */
+  async changeProfile(ops: readonly HomeProfileOp[], context: ProfileChangeContext): Promise<ProfileChangeResult> {
+    const items = this.writers.profile;
+    if (!items?.available()) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
+    if (ops.length === 0 || ops.length > 50) throw new GatewayError("invalid_request", "A profile change holds 1 to 50 changes");
+    const target: SettingsTarget = { kind: "home" };
+    return this.mutexFor(target).run(async () => {
+      const applied: Array<{ saved: HomeProfileSaved; writes: HomeProfileWrite[] }> = [];
+      try {
+        for (const [index, op] of ops.entries()) applied.push(await items.apply(op, context.author, `${context.commandId}:${index}`));
+      } catch (error) {
+        const rolled: HomeProfileWrite[] = [];
+        for (const [index, done] of [...applied].reverse().entries()) {
+          await items.restore(done.writes.map(write => ({ id: write.id, value: write.before })), context.author, `${context.commandId}:rollback:${index}`)
+            .then(writes => rolled.push(...writes)).catch(() => undefined);
+        }
+        if (applied.length) {
+          const message = error instanceof Error ? error.message : String(error);
+          await this.record.append(applied.flatMap(done => done.writes).map(write =>
+            this.profileEntry(write, ops.find((_op, index) => applied[index]?.writes.includes(write)), context, "failed", `Rolled back: ${message}`)));
+        }
+        throw error;
+      }
+      const writes = applied.flatMap(done => done.writes);
+      return this.recordProfile(writes, (write) => ops[applied.findIndex(done => done.writes.includes(write))], context, applied.map(done => done.saved));
+    });
+  }
+
+  private async recordProfile(writes: readonly HomeProfileWrite[], opOf: (write: HomeProfileWrite) => HomeProfileOp | undefined, context: ProfileChangeContext & { undoOf?: Map<string, string> }, saved: HomeProfileSaved[]): Promise<ProfileChangeResult> {
+    const group = { id: randomUUID(), size: writes.length };
+    const entries = writes.map(write => ({ ...this.profileEntry(write, opOf(write), context, "applied"), group,
+      ...(context.undoOf?.get(write.id) ? { undoOf: context.undoOf.get(write.id)! } : {}) }));
+    await this.record.append(entries);
+    const changes: ChangeOutcome[] = entries.map(entry => ({
+      changeId: entry.changeId, key: entry.key, qualifiers: entry.qualifiers!, layer: "profile", status: "applied", tier: entry.tier,
+      before: entry.before ?? null, after: entry.after ?? null,
+    }));
+    const tier = maxTier(...entries.map(entry => entry.tier));
+    await this.observer?.applied({ kind: "home" }, changes, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
+    const read = await this.writers.profile!.read();
+    const items = writes.flatMap(write => read.items.filter(item => item.id === write.id)).map(profileListItem);
+    return { status: "applied", tier, changes, saved, items };
+  }
+
+  /** One profile note's record entry. Its floor is the subject's (quiet); the run's web
+   * mark raises it, so a profile change after web content tells the maintainer (doc 5.4). */
+  private profileEntry(write: HomeProfileWrite, op: HomeProfileOp | undefined, context: ProfileChangeContext, status: ChangeStatus, failure?: string): ChangeEntry {
+    const web = context.web === true;
+    const direction = op?.action === "retire" ? "narrow" as const : "widen" as const;
+    return {
+      changeId: randomUUID(), at: this.now().toISOString(), commandId: context.commandId, actor: context.actor, target: { kind: "home" },
+      layer: "profile", key: HOME_PROFILE_SUBJECT.id, qualifiers: { note: write.id }, op: "set",
+      ...(write.before === null ? {} : { before: write.before }), ...(write.after === null ? {} : { after: write.after }),
+      ...(context.reason ? { reason: context.reason } : {}),
+      tier: raiseTier(HOME_PROFILE_SUBJECT.floor, web ? 1 : 0),
+      tierBasis: { direction, floor: HOME_PROFILE_SUBJECT.floor, floorSource: "code", web, risk: null },
+      status, ...(failure ? { failure } : {}),
+    };
+  }
+
+  /** Undo of a profile change reverts its whole group, refused unless every note still
+   * holds the value the group wrote (doc 6.4). */
+  private async undoProfile(entry: ChangeEntry, context: Omit<ChangeContext, "undoOf">): Promise<ProfileChangeResult> {
+    const items = this.writers.profile;
+    if (!items?.available()) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
+    if (context.actor.kind !== "ui") throw new GatewayError("invalid_request", "Only the maintainer undoes a profile change");
+    return this.mutexFor({ kind: "home" }).run(async () => {
+      const members = entry.group ? await this.record.group(entry.group.id, entry.group.size) : [entry];
+      if (members.some(member => member.status !== "applied")) throw new GatewayError("conflict", "Only an applied change can be undone");
+      const ids = members.map(member => member.qualifiers?.note ?? "");
+      const current = await items.values(ids);
+      for (const member of members) {
+        const now = current.get(member.qualifiers?.note ?? "") ?? null;
+        const after = member.after ?? null;
+        if (JSON.stringify(now) !== JSON.stringify(after)) {
+          throw new GatewayError("conflict", "The profile item changed since; undo would overwrite a newer change", false,
+            { current: now as never, after: after as never, display: { current: formatProfileValue(now), after: formatProfileValue(after) } });
+        }
+      }
+      const commandId = context.commandId ?? randomUUID();
+      const writes = await items.restore(members.map(member => ({ id: member.qualifiers!.note!, value: (member.before ?? null) as never })),
+        { kind: "maintainer" }, commandId, "Undo");
+      return this.recordProfile(writes, () => undefined, {
+        actor: context.actor, author: { kind: "maintainer" }, commandId,
+        undoOf: new Map(members.map(member => [member.qualifiers!.note!, member.changeId])),
+      }, []);
+    });
+  }
+
   /** Undo writes `before` back; refused when the store no longer holds `after` (doc 5.3). */
   async undo(changeId: string, context: Omit<ChangeContext, "undoOf">, session?: ChangeContext["session"]) {
     const found = await this.record.entry(changeId);
     if (!found) throw new GatewayError("not_found", "No such settings change");
     const { entry } = found;
+    if (entry.key === HOME_PROFILE_SUBJECT.id) return this.undoProfile(entry, context);
     if (entry.redacted) throw new GatewayError("conflict", "This change is not undoable: its previous value was never recorded");
     // A pending entry's outcome is its latest decision fact.
     const status = entry.status === "pending" ? [...found.facts].reverse().find(fact => DECIDED.has(fact.status))?.status ?? "pending" : entry.status;
@@ -662,7 +778,7 @@ export class SettingsChangePath {
         && (!input.layer || entry.layer === input.layer)
         // The permanent record may name a key this Gateway no longer declares.
         // It stays in Everything/key history, but has no current section.
-        && (!input.section || (KEYS.find(key => key.id === entry.key) ?? recordSubject(entry.key))?.group === input.section),
+        && (!input.section || auditSubject(entry.key)?.group === input.section),
     });
   }
 

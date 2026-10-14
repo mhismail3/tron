@@ -36,6 +36,12 @@ import { KnowledgeObservationService, type ObservationModel } from "../knowledge
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import { SettingsChangeRecord, type ChangeEntry } from "../admin/settings-record.js";
+import { SettingsApprovals } from "../admin/settings-approvals.js";
+import { HomeProfileItems } from "../home/home-profile.js";
+import { CommandReceiptStore } from "../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 
 const PROVIDER = "tron-home-profile";
 const MODEL_ID = "chat";
@@ -84,6 +90,11 @@ interface Fixture {
   home: Step[];
   worker: Step[];
   captured: Captured[];
+  /** The Gateway the maintainer's iPhone talks to, over the same registry and change path. */
+  service: GatewayService;
+  record: SettingsChangeRecord;
+  broadcasts: Array<{ topic: string; payload: unknown }>;
+  pushes: Array<{ title: string; message: string }>;
 }
 
 async function fixture(label: string, observation?: ObservationModel): Promise<Fixture> {
@@ -123,13 +134,32 @@ async function fixture(label: string, observation?: ObservationModel): Promise<F
   const knowledge = new KnowledgeService(store, new KnowledgeObservationService(store, observation, undefined, undefined,
     homeChapterObservationExcluded(() => registry.homeOwner())));
   registry.setKnowledgeService(knowledge);
+  // The one settings change path, wired as gateway-main wires it: Home's profile tool
+  // and the maintainer's home.profileChange share its profile applier and record.
+  const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime: runtime });
+  const record = new SettingsChangeRecord(tronHome);
+  const settingsChanges = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
+    setTrust: async () => { throw new Error("trust is not changed here"); },
+    profile: new HomeProfileItems(() => knowledge),
+  }, agentDir);
+  registry.setSettings(settingsModel, settingsChanges);
+  const broadcasts: Array<{ topic: string; payload: unknown }> = [];
+  const pushes: Array<{ title: string; message: string }> = [];
+  const service = new GatewayService({
+    config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
+    modelRuntime: runtime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome),
+    notifications: { enqueue: async (push: { title: string; message: string }) => { pushes.push(push); } },
+    broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
+    globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
+    knowledge, home: registry.homeOwner(),
+  } as unknown as GatewayServiceDependencies);
 
   // Task recovery runs after listen, as in gateway-main; delegation is refused before it.
   await registry.recoverHomeTasks();
   const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
   await registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
   const slot = await registry.acquire(designation.sessionId);
-  const state: Fixture = { registry, knowledge, store, project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [] };
+  const state: Fixture = { registry, knowledge, store, project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [], service, record, broadcasts, pushes };
   // One route answers every provider request. Home and worker requests are told
   // apart by the Home instruction head, so each script is independent of interleaving.
   faux.setResponses(Array.from({ length: 256 }, () => async (context: TranscriptContext) => {

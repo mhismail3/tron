@@ -602,6 +602,21 @@ export function recordSubject(id: string): RecordSubject | undefined {
   return RECORD_SUBJECTS.find(subject => subject.id === id);
 }
 
+/**
+ * Home's learned profile items (doc 6.4): Knowledge notes, changed by Home's `profile`
+ * tool and the maintainer's `home.profileChange` through the change path, which records
+ * one instance per note (qualifier `note`). Not a key: an item never resolves as a
+ * setting, and Knowledge stays its store.
+ */
+export const HOME_PROFILE_SUBJECT = { id: "home.profile.item", label: "Profile item", group: "context", qualifier: "note" as const, floor: "quiet" as Tier };
+
+/** The section group and label of a recorded key or subject, or undefined for one this
+ * Gateway no longer declares. */
+export function auditSubject(id: string): { label: string; group: string } | undefined {
+  if (id === HOME_PROFILE_SUBJECT.id) return HOME_PROFILE_SUBJECT;
+  return KEYS.find(key => key.id === id) ?? recordSubject(id);
+}
+
 export function timingFor(key: KeyDeclaration, direction: Direction): Timing {
   return typeof key.timing === "string" ? key.timing : key.timing[direction];
 }

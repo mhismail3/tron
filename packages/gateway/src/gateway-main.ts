@@ -55,6 +55,7 @@ import { GatewayAutomationExecutor } from "./automations/automation-executor.js"
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
+import { HomeProfileItems } from "./home/home-profile.js";
 import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
@@ -830,6 +831,7 @@ const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, ne
     if (!home) throw new GatewayError("unsupported", "Tron Home is not available");
     await home.configureMemory({ model });
   },
+  profile: new HomeProfileItems(() => knowledge),
 }, config.agentDir);
 sessions.setSettings(settingsModel, settingsChanges);
 

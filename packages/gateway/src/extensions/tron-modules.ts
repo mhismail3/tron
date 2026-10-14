@@ -18,6 +18,7 @@ import type { DisplayArtifactStore } from "../display/display-artifact-store.js"
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import type { HomeProfileChangeAccess } from "../home/home-profile.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { NotificationService } from "../notifications/notification-service.js";
@@ -65,6 +66,8 @@ export interface TronModuleHost {
   /** This chat's settings, as itself (Home, a task worker or an agent), late-bound:
    * the change path is installed after the registry exists. */
   settings: () => SettingsToolAccess | undefined;
+  /** Home's learned-profile changes through the change path, as Home; late-bound like `settings`. */
+  homeProfileChanges: () => HomeProfileChangeAccess | undefined;
 }
 
 /** One built-in Tron extension. `name` is the runtime-registered inline name, so
@@ -239,7 +242,8 @@ export const TRON_HOME_MODULE: TronModule = {
   factory: (host) => createTronHomeExtension(() => host.homeMemoryTools(host.sessionId()),
     (request, signal) => host.homeDelegate(host.sessionId(), request, signal),
     request => host.homeTask(host.sessionId(), request),
-    () => host.knowledge),
+    () => host.knowledge,
+    () => host.homeProfileChanges()),
 };
 
 /** The one research module only a Home runtime loads (#724): read-only web
