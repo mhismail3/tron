@@ -123,7 +123,7 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSurfacesServeEveryKeyAndEditAtItsLayer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserAfterForegroundingRunningSessionKeepsTranscriptMounted"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
 )
 
 ui_journey_is_owned() {

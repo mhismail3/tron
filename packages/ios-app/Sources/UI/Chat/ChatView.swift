@@ -72,7 +72,6 @@ struct ChatView: View {
     /// the ready phase (hidden, unscrollable, then revealed again).
     @State private var hostedOpeningAttempts = 0
     @State private var hostedReadyExits = 0
-    @State private var hostedCoverCancels = 0
     #endif
 
     #if HOSTED_TEST
@@ -173,7 +172,7 @@ struct ChatView: View {
                     .accessibilityElement()
                     .accessibilityLabel("Hosted presentation lifecycle")
                     .accessibilityIdentifier("chat.hosted.presentation-lifecycle")
-                    .accessibilityValue("attempts=\(hostedOpeningAttempts) ready-exits=\(hostedReadyExits) cover-cancels=\(hostedCoverCancels)")
+                    .accessibilityValue("attempts=\(hostedOpeningAttempts) ready-exits=\(hostedReadyExits)")
             }
             .onChange(of: sessionPresentation.open.phase) { previous, current in
                 if previous == .ready, current != .ready { hostedReadyExits += 1 }
@@ -569,9 +568,6 @@ struct ChatView: View {
             scrollCoordinator.viewportActivationChanged(viewportActivation)
             scrollCoordinator.viewportObservationChanged(isActive: false)
             if sessionPresentation.openingTask != nil {
-                #if HOSTED_TEST
-                hostedCoverCancels += 1
-                #endif
                 // A covered transcript cannot publish the native geometry
                 // needed to finish positioning. Cancel the exact opening and
                 // scroll leases now so uncovering resumes with a fresh epoch;
@@ -2476,6 +2472,15 @@ struct ChatView: View {
             intakeLatestTranscriptProjectionIfNeeded()
             admitPendingFloatingDisplay()
             #if HOSTED_TEST
+            // #935 journey: keep this opening's tail alive for a bounded number
+            // of frames so the parent-covering form the line above admits lands
+            // while the opening task still exists, the order a loaded device
+            // produces. Cover cancellation ends the hold early.
+            if ProcessInfo.processInfo.arguments.contains("--tron-hosted-hold-opening-tail") {
+                for _ in 0..<120 where !Task.isCancelled {
+                    try? await displayFrameScheduler.nextFrame()
+                }
+            }
             hostedProbe?.markReady()
             let geometry = scrollCoordinator.latestGeometry
             if geometry.isAtCatchUpBoundary {
