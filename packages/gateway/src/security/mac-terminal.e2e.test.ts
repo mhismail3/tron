@@ -163,7 +163,7 @@ describe("Mac Terminal", () => {
     try {
       const tronHome = join(root, "tron");
       let { service, pair } = await gateway(tronHome, sshDirectory, hostDirectory, port);
-      const phone = await pair("Mohsin's iPhone");
+      const phone = await pair("Fixture iPhone");
       const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
 
       // Before enrollment: the Gateway reports what the iPhone pins and dials.
