@@ -214,54 +214,66 @@ export class HomeTaskDispatcher {
 
   private async recoverOwned(): Promise<void> {
     await this.store.removeAbandonedTemporaries();
-    for await (const task of this.store.records()) {
-      if (task.lifecycle === "terminal" && task.wake?.push !== "pending") continue;
-      if (task.lifecycle !== "terminal") {
-        let report: HomeTaskReport | undefined;
-        let entryId: string | undefined;
-        let spend = task.spend;
-        let entryIds: string[] = [];
-        let reason = task.lifecycle === "pending" && task.queuedAt ? "cold-queued-not-started" : "cold-no-report";
-        // No runtime exists here to stop an async run, so a run whose status cannot be
-        // proven terminal makes the task unknown, even with a valid report.
-        let detached = false;
-        if (task.lifecycle === "active" && task.sessionId && task.operationId) {
-          try {
-            const entries = await this.sessions.readTaskEvidence(task.sessionId);
-            const evidence = await this.reportEvidence(task, entries);
-            report = evidence?.report; entryId = evidence?.entryId;
-            const runEntries = homeTaskOperationSpan(entries, task.operationId).run;
-            const observed = homeTaskSpend(runEntries);
-            if (spend && (observed.inputTokens < spend.inputTokens || observed.outputTokens < spend.outputTokens)) throw new Error("Canonical spend regressed");
-            spend = observed;
-            const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
-            entryIds = entryId ? [entryId] : last ? [last.id] : [];
-            if (report) reason = "cold-explicit-report";
-            const asyncDirs = homeTaskSubagentLaunches(runEntries).flatMap(launch => launch.asyncDir ? [launch.asyncDir] : []);
-            // A malformed settlement fact refuses this evidence rather than being guessed.
-            homeTaskSubagentsProjection(entries, task.operationId);
-            detached = !await this.sessions.taskSubagentRunsSettled(asyncDirs);
-            if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(task.taskId), operationHash: hash(task.operationId), reason: "detached-work-outlived-task" });
-          } catch (error) {
-            // Namespace refusal is not missing report evidence: retire this
-            // process's capability instead of attempting a terminal write.
-            if (error instanceof HomeTaskStoreError) throw error;
-            // Contradictory or unproven bytes cannot qualify a result. Retain
-            // already published spend/authority; never repair or replay work.
-            report = undefined; entryId = undefined; entryIds = []; reason = "cold-evidence-unavailable";
-          }
-        }
-        const final = await this.store.update(task.taskId, current => ({ ...current, lifecycle: "terminal", spend,
-          wake: this.inbox.event(current),
-          reportRef: report && entryId ? { resultId: report.resultId, sessionId: task.sessionId!, entryId, digest: reportDigest(report) } : null,
-          terminalEvidence: { outcome: detached ? "unknown" : report?.outcome ?? "unknown", sessionId: task.sessionId, entryIds,
-            reason: detached ? "detached-work-outlived-task" : reason } }));
-        this.transition(final, reason);
+    // The recovery pass already reads every record; it seeds the catalog's
+    // worker index in one batch rather than a second ledger scan.
+    const workers: Array<[string, string]> = [];
+    try {
+      for await (const task of this.store.records()) {
+        if (task.sessionId) workers.push([task.sessionId, task.taskId]);
+        await this.recoverTask(task);
       }
-      // Includes a crash after terminal/outbox co-commit but before advisory
-      // publication. The inbox's durable decision makes repeats harmless.
-      await this.inbox.publish(task.taskId);
+    } finally {
+      if (workers.length > 0) this.sessions.recordTaskWorkers(workers);
     }
+  }
+
+  private async recoverTask(task: HomeTaskRecord): Promise<void> {
+    if (task.lifecycle === "terminal" && task.wake?.push !== "pending") return;
+    if (task.lifecycle !== "terminal") {
+      let report: HomeTaskReport | undefined;
+      let entryId: string | undefined;
+      let spend = task.spend;
+      let entryIds: string[] = [];
+      let reason = task.lifecycle === "pending" && task.queuedAt ? "cold-queued-not-started" : "cold-no-report";
+      // No runtime exists here to stop an async run, so a run whose status cannot be
+      // proven terminal makes the task unknown, even with a valid report.
+      let detached = false;
+      if (task.lifecycle === "active" && task.sessionId && task.operationId) {
+        try {
+          const entries = await this.sessions.readTaskEvidence(task.sessionId);
+          const evidence = await this.reportEvidence(task, entries);
+          report = evidence?.report; entryId = evidence?.entryId;
+          const runEntries = homeTaskOperationSpan(entries, task.operationId).run;
+          const observed = homeTaskSpend(runEntries);
+          if (spend && (observed.inputTokens < spend.inputTokens || observed.outputTokens < spend.outputTokens)) throw new Error("Canonical spend regressed");
+          spend = observed;
+          const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
+          entryIds = entryId ? [entryId] : last ? [last.id] : [];
+          if (report) reason = "cold-explicit-report";
+          const asyncDirs = homeTaskSubagentLaunches(runEntries).flatMap(launch => launch.asyncDir ? [launch.asyncDir] : []);
+          // A malformed settlement fact refuses this evidence rather than being guessed.
+          homeTaskSubagentsProjection(entries, task.operationId);
+          detached = !await this.sessions.taskSubagentRunsSettled(asyncDirs);
+          if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(task.taskId), operationHash: hash(task.operationId), reason: "detached-work-outlived-task" });
+        } catch (error) {
+          // Namespace refusal is not missing report evidence: retire this
+          // process's capability instead of attempting a terminal write.
+          if (error instanceof HomeTaskStoreError) throw error;
+          // Contradictory or unproven bytes cannot qualify a result. Retain
+          // already published spend/authority; never repair or replay work.
+          report = undefined; entryId = undefined; entryIds = []; reason = "cold-evidence-unavailable";
+        }
+      }
+      const final = await this.store.update(task.taskId, current => ({ ...current, lifecycle: "terminal", spend,
+        wake: this.inbox.event(current),
+        reportRef: report && entryId ? { resultId: report.resultId, sessionId: task.sessionId!, entryId, digest: reportDigest(report) } : null,
+        terminalEvidence: { outcome: detached ? "unknown" : report?.outcome ?? "unknown", sessionId: task.sessionId, entryIds,
+          reason: detached ? "detached-work-outlived-task" : reason } }));
+      this.transition(final, reason);
+    }
+    // Includes a crash after terminal/outbox co-commit but before advisory
+    // publication. The inbox's durable decision makes repeats harmless.
+    await this.inbox.publish(task.taskId);
   }
 
   private async reportEvidence(task: HomeTaskRecord, entries: readonly FileEntry[]): Promise<{ report: HomeTaskReport; entryId: string } | undefined> {
@@ -1013,5 +1025,13 @@ export class HomeTaskDispatcher {
   private transition(task: HomeTaskRecord, reason: string, errorCode?: string): void {
     this.diagnostic?.({ event: "home.task.transition", taskHash: hash(task.taskId), revision: task.revision,
       transition: task.lifecycle, reason, operationHash: task.operationId ? hash(task.operationId) : null, ...(errorCode ? { errorCode } : {}) });
+    // A bound task names its worker; the catalog marks that row a Home worker.
+    if (task.sessionId) this.sessions.recordTaskWorkers([[task.sessionId, task.taskId]]);
+    // Every terminal write reaches here once; attention is presentation state,
+    // so a failed mark never affects the task's own settlement.
+    if (task.lifecycle === "terminal" && task.sessionId) {
+      const sessionId = task.sessionId;
+      void Promise.resolve().then(() => this.sessions.taskWorkerSettled(sessionId, task.taskId)).catch(() => {});
+    }
   }
 }

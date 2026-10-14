@@ -116,6 +116,7 @@ struct HostedHomeDashboardFixture: View {
     @State private var promptRoute = "none"
     @State private var openedSession = "none"
     @State private var settingsDecisionState = "none"
+    @State private var newWorkerAdded = false
     private let actionProbe = HostedHomeActionProbe()
     private let arguments = ProcessInfo.processInfo.arguments
     private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
@@ -227,6 +228,8 @@ struct HostedHomeDashboardFixture: View {
                     parentSessionId: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
                     messageCount: 0, firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1,
                     gatewayProfileID: profile.id, gatewayProfileLabel: profile.label)]
+                    + (arguments.contains("-home-sheet-dashboard-workers")
+                        ? HostedHomeDashboardWorkers.sessions.map { $0.withGatewaySource(id: profile.id, label: profile.label) } : [])
                 ready = true
             } catch { self.error = error.localizedDescription }
         }
@@ -242,6 +245,13 @@ struct HostedHomeDashboardFixture: View {
                 promptRoute = await gateway.lastPromptRoute()
                 openedSession = await gateway.lastOpenedSession()
                 settingsDecisionState = await gateway.settingsDecisionSummary()
+                // Home dispatches a worker after the view loaded: its catalog row
+                // arrives carrying `homeTaskId`, as the Gateway projects it.
+                if arguments.contains("-home-dashboard-new-worker"), !newWorkerAdded,
+                   model.sessions.contains(where: \.isHomeWorker) {
+                    newWorkerAdded = true
+                    model.sessions = model.sessions + [HostedHomeDashboardWorkers.newWorker.withGatewaySource(id: profile.id, label: profile.label)]
+                }
                 // Requested once. A hosted reconnect is a new connection identity, which the mounted
                 // sheet must observe by re-reading, so it fires after the second read (Manage Home's,
                 // then the Tasks sheet's). A profile switch fires after the third (its reload), so a
@@ -355,6 +365,7 @@ private actor HostedHomeShellGateway {
     }
     func statusCount() -> Int { homeStatusCount }
     func taskListReadCount() -> Int { taskListReads }
+
     func sheetReadPeakCount() -> Int { sheetReadPeak }
     private func chapterListFixture() -> JSONValue {
         .object([
@@ -401,7 +412,7 @@ private actor HostedHomeShellGateway {
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
     func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
-    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"] }
+    func capabilities() -> [String] { capabilityEnabled ? (sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"] }
 
     /// Every Home read a sheet sent, so journeys can prove a return to a sheet re-reads nothing.
     private var homeReads: [String: Int] = [:]
@@ -511,8 +522,16 @@ private actor HostedHomeShellGateway {
                 createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z", messageCount: 0,
                 firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1)
             // Home's chapters are never ordinary rows: the Gateway's user list omits them.
-            return (.object(["sessions": .array([try! JSONValue.encode(row)]), "nextCursor": .null,
+            let workers = sheetState == "dashboard-workers" ? HostedHomeDashboardWorkers.sessions : []
+            return (.object(["sessions": .array(([row] + workers).map { try! JSONValue.encode($0) }), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("home-shell-fixture:1"), "archivedCount": .number(0)]), nil)
+        case "provider.list" where sheetState == "dashboard-workers":
+            return (HostedHomeDashboardWorkers.providers, nil)
+        case "session.search.policy.get":
+            return (.object(["enabled": .bool(false), "perQueryMicroCents": .number(268_800),
+                "dailyMicroCents": .number(2_688_000), "policyRevision": .number(1)]), nil)
+        case "provider.usage":
+            return (HostedHomeDashboardWorkers.usage, nil)
         case "provider.list":
             return (.object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),
                 "configured": .bool(true), "authMethods": .array([]), "modelCount": .number(3)])])]), nil)
@@ -744,7 +763,7 @@ private actor HostedHomeShellGateway {
                 user("skill:wordcraft", "skill", "Create, edit, inspect, render and convert word-processor documents."),
             ])]), nil)
         case "session.attention.read": return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil)
-        default: return (nil, .object(["code": .string("not_found"), "message": .string("Not part of this fixture"), "retryable": .bool(false)]))
+        default: return (nil, .object(["code": .string("not_found"), "message": .string("Not part of this fixture: \(method)"), "retryable": .bool(false)]))
         }
     }
 
@@ -851,7 +870,7 @@ private actor HostedHomeShellGateway {
         let updated = id == "active" ? now - 6 * 60_000 : now - 3 * 3_600_000
         return .object(["taskId": .string(id), "createdAt": .number(created), "updatedAt": .number(updated),
             "title": .string(id == "active" ? "Settings model: continue epic #758" : "Garden review email draft"), "project": .string("tron"),
-            "workerSessionId": .string("worker-session"), "target": .string("/trusted/project"),
+            "sessionId": .string("worker-session"), "target": .string("/trusted/project"),
             "lifecycle": .string(terminal ? "terminal" : "active"), "outcome": terminal ? .string(id == "active" ? "interrupted" : "final") : .null,
             "spend": taskSpend(), "attention": .bool(false), "pendingGrant": .bool(false)])
     }
@@ -1085,6 +1104,7 @@ private actor HostedHomeShellGateway {
             "sessionId": sessionPresent ? .string("home-session") : .null,
             "openSessionId": sessionPresent ? .string("home-session") : .null,
             "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(sessionPresent),
+            "waitingForUser": .bool(ProcessInfo.processInfo.arguments.contains("-home-waiting")),
             "model": designated ? .object(["provider": .string("anthropic"), "id": .string("claude-opus-5-5")]) : .null,
             "chapter": designated ? .object(["count": .number(2), "currentBytes": .number(480),
                 "currentEntries": .number(12), "recoveryDecision": .string("none")]) : .null,
@@ -1210,6 +1230,67 @@ private actor HostedChatDisplaySocket: GatewaySocketConnection {
         closed = true
         receiver?.resume(throwing: CancellationError())
         receiver = nil
+    }
+}
+
+/// Home's workers for the Home dashboard view journeys: running, waiting,
+/// recently completed (more than the section shows) and unviewed rows, each
+/// carrying the Gateway's `homeTaskId`, plus usage-capable providers.
+enum HostedHomeDashboardWorkers {
+    private static func iso(_ secondsAgo: TimeInterval) -> String {
+        ISO8601DateFormatter().string(from: Date().addingTimeInterval(-secondsAgo))
+    }
+
+    private static func worker(_ id: String, _ name: String, cwd: String, ago: TimeInterval, phase: SessionPhase = .idle,
+                               waiting: Bool = false, unread: Bool = false) -> SessionSummary {
+        SessionSummary(id: id, name: name, cwd: cwd, parentSessionId: nil,
+            homeTaskId: id.hasPrefix("worker-") ? "task-\(id)" : nil, createdAt: iso(ago + 600), updatedAt: iso(ago),
+            activeSince: phase.isActive ? iso(ago) : nil, messageCount: 4, firstMessage: name, phase: phase,
+            foregroundPhase: phase.isActive ? .running : nil, waitingForUser: waiting, summaryRevision: 1,
+            completionRevision: unread ? 1 : 0, isUnread: unread)
+    }
+
+    static let sessions: [SessionSummary] = [
+        worker("worker-running", "Home dashboard view prototype", cwd: "/work/tron", ago: 120, phase: .running),
+        worker("worker-waiting", "Lisbon fare watch", cwd: "/work/travel", ago: 300, phase: .running, waiting: true),
+        worker("worker-done-1", "Settings model epic report", cwd: "/work/tron", ago: 1_800),
+        worker("worker-done-2", "Garden review email draft", cwd: "/work/home", ago: 3_600),
+        worker("worker-done-3", "Kitchen countertop bids", cwd: "/work/home", ago: 7_200),
+        worker("worker-done-4", "Quarterly budget summary", cwd: "/work/finance", ago: 14_400),
+        worker("worker-done-5", "Push relay certificate check", cwd: "/work/tron", ago: 28_800),
+        worker("worker-done-6", "Raindrop triage", cwd: "/work/knowledge", ago: 86_400),
+        worker("worker-done-7", "Simulator lane cleanup", cwd: "/work/tron", ago: 172_800),
+        worker("worker-unread-1", "Weekly reading digest", cwd: "/work/knowledge", ago: 5_400, unread: true),
+        worker("worker-unread-2", "Mac reinstall preflight", cwd: "/work/tron", ago: 604_800, unread: true),
+        worker("worker-unread-3", "Photo library dedupe plan", cwd: "/work/home", ago: 1_209_600, unread: true),
+        // An ordinary unread chat: no Home task names it, yet it joins the Unviewed queue.
+        worker("chat-unread", "Apple Watch app", cwd: "/work/tron", ago: 1_814_400, unread: true),
+    ]
+
+    static let newWorker = worker("worker-new", "Freshly dispatched worker", cwd: "/work/tron", ago: 5, phase: .running)
+
+    static let providers: JSONValue = .object(["providers": .array([
+        provider("anthropic", "Anthropic"), provider("openai-codex", "OpenAI Codex"),
+        provider("fixture", "Fixture", usage: false),
+    ])])
+
+    private static func provider(_ id: String, _ name: String, usage: Bool = true) -> JSONValue {
+        .object(["id": .string(id), "name": .string(name), "configured": .bool(true), "usageSupported": .bool(usage),
+                 "authMethods": .array([]), "modelCount": .number(3)])
+    }
+
+    static var usage: JSONValue {
+        func window(_ id: String, _ label: String, _ percent: Double, _ seconds: Int) -> JSONValue {
+            .object(["id": .string(id), "label": .string(label), "usedPercent": .number(percent), "windowSeconds": .number(Double(seconds))])
+        }
+        func snapshot(_ id: String, _ windows: [JSONValue]) -> JSONValue {
+            .object(["providerId": .string(id), "status": .string("available"), "updatedAt": .string(iso(60)),
+                     "stale": .bool(false), "windows": .array(windows), "balances": .array([])])
+        }
+        return .object(["providers": .array([
+            snapshot("anthropic", [window("five-hour", "5h", 42, 18_000), window("weekly", "Weekly", 18, 604_800)]),
+            snapshot("openai-codex", [window("five-hour", "5h", 7, 18_000), window("weekly", "Weekly", 63, 604_800)]),
+        ])])
     }
 }
 #endif

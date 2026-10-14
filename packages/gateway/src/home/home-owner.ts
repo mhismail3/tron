@@ -114,6 +114,9 @@ export interface HomeSessionPort {
   sessionFile(sessionId: string): Promise<string | undefined>;
   /** Whether the session currently holds a live runtime. */
   hasLiveRuntime(sessionId: string): boolean;
+  /** Whether a live runtime is blocked on a semantic user interaction. Optional
+   * because only the runtime owner holds interaction state. */
+  waitingForUser?(sessionId: string): boolean;
   /** The record's chapter set changed, so the dashboard's Home rule changed: clients
    * must re-list. Optional because only the runtime owner publishes list changes. */
   homeChaptersChanged?(): void;
@@ -734,6 +737,7 @@ export class HomeOwner {
       model: { ...record.model },
       live,
       sessionPresent,
+      waitingForUser: openSessionId !== undefined && (this.options.sessions.waitingForUser?.(openSessionId) ?? false),
       memory,
       chapter: {
         count: record.chapters.length,

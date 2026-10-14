@@ -5,7 +5,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
+import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 
 afterEach(disposeFixtures);
 
@@ -69,5 +69,40 @@ describe("Home chapters in the dashboard session list", () => {
     expect(JSON.stringify(reopened.canonicalSessionEntries())).toContain("Initial Home conversation");
     // Read-only: the sealed chapter still refuses a prompt.
     await expect(reopened.prompt("write to a sealed chapter")).rejects.toThrow();
+  }, 30_000);
+
+  it("marks Home task workers on their catalog rows, unread once settled, across a cold restart (#973)", async () => {
+    const f = await fixture();
+    const ordinary = await f.registry.create(f.cwd);
+    f.faux.setResponses([fauxAssistantMessage("Ordinary reply")]);
+    await ordinary.prompt("hello");
+    await waitFor(() => ordinary.snapshot().configurationBlocker === null, "ordinary terminal");
+    // A worker ends through its `report` tool call, never a final assistant reply.
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f, "worker-row")).completion;
+    expect(task.lifecycle).toBe("terminal");
+
+    const rows = async (registry = f.registry) => {
+      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: registry, home: registry.homeOwner(),
+        uploads: new UploadStore(join(f.root, "worker-uploads"), 1024),
+        receipts: new CommandReceiptStore(join(f.root, "worker-receipts")) } as unknown as GatewayServiceDependencies);
+      const client = { id: "worker-client", identity: "device:worker-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
+      const listed = await service.invoke(client, "session.list", { scope: "user", limit: 500 }) as { sessions: Array<{ id: string; homeTaskId?: string; isUnread?: boolean }> };
+      const status = await service.invoke(client, "home.status", {}) as { waitingForUser?: boolean };
+      return { byId: new Map(listed.sessions.map(row => [row.id, row])), status };
+    };
+    // The worker row names its task and reads unread like a finished chat; the
+    // ordinary row is neither a worker nor (its reply observed by nobody) changed by this.
+    await waitFor(async () => (await rows()).byId.get(task.sessionId!)?.isUnread === true, "settled worker reads unread");
+    const live = await rows();
+    expect(live.byId.get(task.sessionId!)).toMatchObject({ homeTaskId: "worker-row", isUnread: true });
+    expect(live.byId.get(ordinary.id)?.homeTaskId).toBeUndefined();
+    expect(live.status.waitingForUser).toBe(false);
+
+    // Recovery seeds the worker index from its one pass over the ledger.
+    const cold = await f.restart();
+    const recovered = await rows(cold);
+    expect(recovered.byId.get(task.sessionId!)).toMatchObject({ homeTaskId: "worker-row", isUnread: true });
+    expect(recovered.byId.get(ordinary.id)?.homeTaskId).toBeUndefined();
   }, 30_000);
 });

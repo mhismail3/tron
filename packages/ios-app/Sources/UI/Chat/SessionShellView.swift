@@ -113,6 +113,7 @@ struct SessionShellView: View {
     @State private var dashboardReconcileTask: Task<Void, Never>?
     @State private var homeStatusSurfaceToken: PresentationSurfaceToken?
     @State private var mountedHomeChatRouteID: String?
+    @State private var showingHomeCompletedSheet = false
 
     init() {
         let appSettings = AppLocalBehaviorSettings.shared
@@ -197,6 +198,12 @@ struct SessionShellView: View {
                 identity: "dashboard.server-filter"
             ) {
                 serverFilterSheet
+            }
+            .tronManagedSheet(
+                isPresented: $showingHomeCompletedSheet,
+                identity: "dashboard.home-completed"
+            ) {
+                homeCompletedSheet
             }
             .tronManagedSheet(
                 item: $sessionToDelete,
@@ -441,7 +448,10 @@ struct SessionShellView: View {
             header: dashboardHeader,
             onSelect: selectDashboard,
             actions: dashboardMenuActions,
-            showingSearch: showingSearch
+            showingSearch: showingSearch,
+            floatingAccessory: showsHomeFloatingButton
+                ? AnyView(HomeFloatingButton(state: HomeButtonIndicatorState(status: model.homeStatus.status), action: openHome))
+                : nil
         ) {
             sessionDashboardContent
         } search: {
@@ -938,7 +948,14 @@ struct SessionShellView: View {
         // reads that scroll owner's geometry.
         return ScrollViewReader { proxy in
             List {
-                if model.homeStatus.capabilityEnabled {
+                if serverFilter.sortMode == .home {
+                    Section {
+                        HomeUsageSummaryCard()
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(SessionDashboardLayout.rowInsets)
+                    }
+                } else if model.homeStatus.capabilityEnabled {
                     Section {
                         homePinnedButton
                     }
@@ -950,7 +967,8 @@ struct SessionShellView: View {
             }
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, 38)
-            .contentMargins(.bottom, 92)
+            // The Home view stacks its floating Home button above the logo button.
+            .contentMargins(.bottom, serverFilter.sortMode == .home ? 92 + 56 + HomeDashboardLayout.floatingButtonSpacing : 92)
             .tronCollectionSurface()
             .tronScrollEdgeChrome()
             .tronDashboardScroll(dashboardHeader, topMargin: 6)
@@ -970,7 +988,9 @@ struct SessionShellView: View {
         _ filtered: [SessionSummary],
         onRevealArchivedRows: @escaping () -> Void
     ) -> some View {
-        if serverFilter.sortMode == .recent {
+        if serverFilter.sortMode == .home {
+            homeSections(filtered)
+        } else if serverFilter.sortMode == .recent {
             Section {
                 ForEach(filtered, id: \.dashboardID) { session in
                     sessionButton(session, showsContext: true)
@@ -1053,9 +1073,96 @@ struct SessionShellView: View {
             }
         }
         }
-        archivedContainerSection(onRevealRows: onRevealArchivedRows)
+        if serverFilter.sortMode != .home {
+            archivedContainerSection(onRevealRows: onRevealArchivedRows)
+        }
     }
 
+    private var showsHomeFloatingButton: Bool {
+        serverFilter.sortMode == .home && model.homeStatus.capabilityEnabled && !showingSearch
+    }
+
+    private func homeDashboardSections(_ filtered: [SessionSummary]) -> HomeDashboardSections {
+        HomeDashboardSections(sessions: filtered)
+    }
+
+    @ViewBuilder
+    private func homeSections(_ filtered: [SessionSummary]) -> some View {
+        let sections = homeDashboardSections(filtered)
+        if !sections.inProgress.isEmpty {
+            Section {
+                ForEach(sections.inProgress, id: \.dashboardID) { session in
+                    sessionButton(session, showsContext: true)
+                }
+            } header: {
+                dashboardSectionHeader("In Progress")
+            }
+        }
+        if !sections.completed.isEmpty {
+            Section {
+                ForEach(sections.completed.prefix(HomeDashboardLayout.recentlyCompletedLimit), id: \.dashboardID) { session in
+                    sessionButton(session, showsContext: true)
+                }
+                if sections.completed.count > HomeDashboardLayout.recentlyCompletedLimit {
+                    SessionListExpansionControls(
+                        workspaceName: "Recently Completed",
+                        canShowLess: false,
+                        canShowMore: true,
+                        isEnabled: true,
+                        onShowLess: {},
+                        onShowMore: { showingHomeCompletedSheet = true },
+                        showMoreTitle: "View more",
+                        showMoreHint: "Shows every recently completed Home worker"
+                    )
+                    .accessibilityIdentifier("home-completed-view-more")
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(SessionDashboardLayout.rowInsets)
+                }
+            } header: {
+                dashboardSectionHeader("Recently Completed")
+            }
+        }
+        if !sections.unviewed.isEmpty {
+            Section {
+                ForEach(sections.unviewed, id: \.dashboardID) { session in
+                    sessionButton(session, showsContext: true)
+                }
+            } header: {
+                dashboardSectionHeader("Unviewed · \(sections.unviewed.count)")
+            }
+        }
+    }
+
+    private var homeCompletedSheet: some View {
+        TronDashboardFilterSheet(
+            title: "Recently Completed",
+            accent: .tronEmerald,
+            detents: [.medium, .large],
+            onDone: { showingHomeCompletedSheet = false }
+        ) {
+            ForEach(homeDashboardSections(filteredSessions).completed, id: \.dashboardID) { session in
+                Button {
+                    showingHomeCompletedSheet = false
+                    openSession(session)
+                } label: {
+                    HistoricalSessionRow(
+                        session: session,
+                        activity: dashboardPresentation.activity(for: session),
+                        showsContext: true
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("home-completed-sheet-row-\(session.dashboardID)")
+            }
+        }
+    }
+
+    /// Reads Home's worker ids from its task ledger for the Home view. A new
+    /// worker appears as a new catalog row, so the catalog size keys a re-read.
+    /// The task is keyed by the surface's activity, so it reads that activity
+    /// directly: `dashboardPresentationIsActive` is published by a sibling
+    /// `onChange` that may run after this task starts.
     /// One container row after every workspace group, owned by
     /// `ArchivedSessionsContainerSection`.
     private func archivedContainerSection(onRevealRows: @escaping () -> Void) -> some View {
@@ -1081,7 +1188,11 @@ struct SessionShellView: View {
     }
 
     private var recentActivityHeader: some View {
-        Text("Recent Activity · active first")
+        dashboardSectionHeader("Recent Activity · active first")
+    }
+
+    private func dashboardSectionHeader(_ title: String) -> some View {
+        Text(title)
             .font(TronTypography.sheetSectionHeader)
             .foregroundStyle(Color.tronEmerald)
             .textCase(nil)
@@ -1094,51 +1205,7 @@ struct SessionShellView: View {
 
     private var homePinnedButton: some View {
         Button {
-            guard openingSessionID == nil,
-                  let profileID = model.profiles.selected?.id else { return }
-            openingSessionID = "home:\(profileID)"
-            let navigationIntent = navigationOwner.begin()
-            let presentationToken = homeStatusSurfaceToken
-            guard let authority = try? model.homeMutations.authority(profileID: profileID) else {
-                openingSessionID = nil
-                return
-            }
-            let ownsUnresolvedCommand = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
-            let action = HomePinnedRowPolicy.action(
-                for: model.homeStatus.status,
-                hasUnresolvedCommand: ownsUnresolvedCommand
-            )
-            Task {
-                defer { openingSessionID = nil }
-                do {
-                    let status: HomeStatusDTO
-                    switch action {
-                    case .open:
-                        guard let currentStatus = model.homeStatus.status else { return }
-                        status = currentStatus
-                    case .checkReceipt:
-                        try await model.checkHomeControlCompletion(authority: authority)
-                        return
-                    case .designate:
-                        status = try await model.designateHomeAndRefreshStatus(authority: authority)
-                    case .unavailable:
-                        return
-                    }
-                    let route = try model.navigationRouteForHome(profileID: profileID, status: status)
-                    guard navigationOwner.admit(navigationIntent),
-                          model.profiles.selected?.id == profileID,
-                          model.ownsNavigationRoute(route) else { return }
-                    present(route)
-                } catch is CancellationError {
-                    return
-                } catch {
-                    guard navigationOwner.admit(navigationIntent),
-                          model.profiles.selected?.id == profileID,
-                          presentationToken != nil,
-                          homeStatusSurfaceToken == presentationToken else { return }
-                    model.presentError(error)
-                }
-            }
+            openHome()
         } label: {
             HomePinnedRow(
                 status: model.homeStatus.status,
@@ -1165,24 +1232,78 @@ struct SessionShellView: View {
         .transition(.opacity)
     }
 
-    private func sessionButton(_ session: SessionSummary, showsContext: Bool = false) -> some View {
-        return Button {
-            guard openingSessionID == nil else { return }
-            openingSessionID = session.dashboardID
-            let navigationIntent = navigationOwner.begin()
-            Task {
-                defer { openingSessionID = nil }
-                do {
-                    let route = try await model.navigationRoute(for: session)
-                    guard navigationOwner.admit(navigationIntent),
-                          model.ownsNavigationRoute(route) else { return }
-                    present(route)
-                } catch is CancellationError {
+    /// Opens (or sets up) Home. The pinned row and the Home view's floating
+    /// button share this one route decision.
+    private func openHome() {
+        guard openingSessionID == nil,
+              let profileID = model.profiles.selected?.id else { return }
+        openingSessionID = "home:\(profileID)"
+        let navigationIntent = navigationOwner.begin()
+        let presentationToken = homeStatusSurfaceToken
+        guard let authority = try? model.homeMutations.authority(profileID: profileID) else {
+            openingSessionID = nil
+            return
+        }
+        let ownsUnresolvedCommand = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
+        let action = HomePinnedRowPolicy.action(
+            for: model.homeStatus.status,
+            hasUnresolvedCommand: ownsUnresolvedCommand
+        )
+        Task {
+            defer { openingSessionID = nil }
+            do {
+                let status: HomeStatusDTO
+                switch action {
+                case .open:
+                    guard let currentStatus = model.homeStatus.status else { return }
+                    status = currentStatus
+                case .checkReceipt:
+                    try await model.checkHomeControlCompletion(authority: authority)
                     return
-                } catch {
-                    model.presentError(error)
+                case .designate:
+                    status = try await model.designateHomeAndRefreshStatus(authority: authority)
+                case .unavailable:
+                    return
                 }
+                let route = try model.navigationRouteForHome(profileID: profileID, status: status)
+                guard navigationOwner.admit(navigationIntent),
+                      model.profiles.selected?.id == profileID,
+                      model.ownsNavigationRoute(route) else { return }
+                present(route)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard navigationOwner.admit(navigationIntent),
+                      model.profiles.selected?.id == profileID,
+                      presentationToken != nil,
+                      homeStatusSurfaceToken == presentationToken else { return }
+                model.presentError(error)
             }
+        }
+    }
+
+    private func openSession(_ session: SessionSummary) {
+        guard openingSessionID == nil else { return }
+        openingSessionID = session.dashboardID
+        let navigationIntent = navigationOwner.begin()
+        Task {
+            defer { openingSessionID = nil }
+            do {
+                let route = try await model.navigationRoute(for: session)
+                guard navigationOwner.admit(navigationIntent),
+                      model.ownsNavigationRoute(route) else { return }
+                present(route)
+            } catch is CancellationError {
+                return
+            } catch {
+                model.presentError(error)
+            }
+        }
+    }
+
+    private func sessionButton(_ session: SessionSummary, showsContext: Bool = false) -> some View {
+        Button {
+            openSession(session)
         } label: {
             HistoricalSessionRow(
                 session: session,
@@ -1468,6 +1589,8 @@ struct SessionListExpansionControls: View {
     let isEnabled: Bool
     let onShowLess: () -> Void
     let onShowMore: () -> Void
+    var showMoreTitle = "Show more"
+    var showMoreHint: String?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -1477,9 +1600,9 @@ struct SessionListExpansionControls: View {
         layout {
             if canShowMore {
                 expansionButton(
-                    title: "Show more",
+                    title: showMoreTitle,
                     symbolName: "chevron.down",
-                    hint: "Shows 10 more older sessions in \(workspaceName)",
+                    hint: showMoreHint ?? "Shows 10 more older sessions in \(workspaceName)",
                     action: onShowMore
                 )
                 .transition(.opacity)
@@ -1558,6 +1681,38 @@ enum DashboardSessionIndicatorPresentation {
     static let subagentOrbSize = TronTypography.sizeBody3
 }
 
+/// The one status-indicator transition: a session row's status icon and the
+/// floating Home button swap their indicator through this view, so every state
+/// change scales and fades the same way.
+struct DashboardIndicatorSwap<State: Hashable, Content: View>: View {
+    let state: State
+    @ViewBuilder let content: (State) -> Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            content(state)
+                .id(state)
+                .transition(transition)
+        }
+        .animation(animation, value: state)
+    }
+
+    private var transition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .scale(scale: 0.72).combined(with: .opacity),
+            removal: .scale(scale: 1.14).combined(with: .opacity)
+        )
+    }
+
+    private var animation: Animation {
+        reduceMotion
+            ? .easeOut(duration: 0.12)
+            : .spring(response: 0.3, dampingFraction: 0.8)
+    }
+}
+
 struct HistoricalSessionRow: View {
     let session: SessionSummary
     let activity: DashboardSessionActivity
@@ -1592,13 +1747,8 @@ struct HistoricalSessionRow: View {
     private func row(relativeActivity: String) -> some View {
         let trailingStatus = activity == .waitingForUser ? "Waiting for you" : relativeActivity
         return HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
-            ZStack {
-                sessionIndicator
-                    .id(indicatorState)
-                    .transition(indicatorTransition)
-            }
-            .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
-            .animation(indicatorAnimation, value: indicatorState)
+            DashboardIndicatorSwap(state: indicatorState) { _ in sessionIndicator }
+                .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
 
             VStack(alignment: .leading, spacing: showsContext ? 2 : 0) {
                 Text(session.title)
@@ -1679,20 +1829,6 @@ struct HistoricalSessionRow: View {
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                 .foregroundStyle(Color.tronEmerald.opacity(0.82))
         }
-    }
-
-    private var indicatorTransition: AnyTransition {
-        guard !reduceMotion else { return .opacity }
-        return .asymmetric(
-            insertion: .scale(scale: 0.72).combined(with: .opacity),
-            removal: .scale(scale: 1.14).combined(with: .opacity)
-        )
-    }
-
-    private var indicatorAnimation: Animation {
-        reduceMotion
-            ? .easeOut(duration: 0.12)
-            : .spring(response: 0.3, dampingFraction: 0.8)
     }
 
     private var projectServerContext: String {

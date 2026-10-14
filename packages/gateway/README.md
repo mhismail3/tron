@@ -2946,7 +2946,15 @@ Mark-read carries the exact rendered completion revision so a racing newer
 completion stays unread. A live completion whose shared disposition observes an
 active mobile presentation advances completion and read-through together in one
 durable attention replacement, clears manual unread, and publishes no transient
-unread summary. Successful `session.open` returns its current completion revision,
+unread summary. A Home task worker ends through its `report` tool call, never a
+successful final reply, so a settled task records one completion (`task:<taskId>`)
+for its worker session with the same presentation disposition; an unopened worker
+therefore reads unread like any finished chat. Workers settled before this rule
+carry no attention record and stay read. Catalog rows of a Home task's worker carry `homeTaskId`: RuntimeRegistry
+holds a worker-session index the task dispatcher seeds from its startup recovery
+pass over the ledger and extends on each bind, each change invalidating catalogs
+once, so clients learn which sessions are Home workers from the list they already
+sync rather than by reading `home.taskList`. Successful `session.open` returns its current completion revision,
 and first-party clients acknowledge it only after installing the snapshot and
 retry transient acknowledgement failure against that same absolute revision.
 Protocol-v7 clients require the complete attention and presentation contract;

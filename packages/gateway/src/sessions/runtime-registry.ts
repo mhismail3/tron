@@ -474,6 +474,7 @@ interface CatalogPageSeed {
   readonly kind: SessionSummary["kind"];
   readonly parentSessionId?: string;
   readonly creationOrigin?: SessionCreationOrigin;
+  readonly homeTaskId?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly activeSince?: string;
@@ -649,6 +650,11 @@ export class RuntimeRegistry {
    * generation keys immutable compact page seeds without making them catalog
    * authority. */
   private catalogProjectionGeneration = 0;
+  /** Worker session id → the Home task that created it. The task ledger is the
+   * authority; the dispatcher seeds this from its recovery pass and adds each
+   * bind, so the dashboard learns which rows are Home workers from the catalog
+   * it already syncs instead of querying the ledger. */
+  private readonly homeTaskWorkers = new Map<string, string>();
   private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
   private readonly pendingSlotStarts = new Map<string, PendingColdLoad>();
   private reservedSlotStarts = 0;
@@ -851,6 +857,7 @@ export class RuntimeRegistry {
         },
         sessionFile: (sessionId) => this.homeSessionFile(sessionId),
         hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
+        waitingForUser: (sessionId) => this.slots.get(sessionId)?.catalogWaitingForUser ?? false,
         chapterMetrics: async (sessionId) => {
           const slot = this.slots.get(sessionId);
           if (!slot) return this.coldHomeChapterMetrics(sessionId);
@@ -2837,6 +2844,7 @@ export class RuntimeRegistry {
         kind,
         ...(parentSessionId ? { parentSessionId } : {}),
         ...(session.creationOrigin ? { creationOrigin: session.creationOrigin } : {}),
+        ...(this.homeTaskWorkers.has(session.id) ? { homeTaskId: this.homeTaskWorkers.get(session.id)! } : {}),
         createdAt: session.created.toISOString(),
         updatedAt: latest?.updatedAt ?? session.modified.toISOString(),
         ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
@@ -2871,6 +2879,7 @@ export class RuntimeRegistry {
           ...(automationOwner ? {
             creationOrigin: { kind: "automation", automationId: automationOwner.automationId },
           } as const : {}),
+          ...(this.homeTaskWorkers.has(id) ? { homeTaskId: this.homeTaskWorkers.get(id)! } : {}),
           createdAt: slot.catalogCreatedAt,
           updatedAt: latest?.updatedAt ?? slot.catalogCreatedAt,
           ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
@@ -2910,6 +2919,7 @@ export class RuntimeRegistry {
       + (seed.parentSessionId ? Buffer.byteLength(seed.parentSessionId) : 0)
       + (seed.creationOrigin ? Buffer.byteLength(seed.creationOrigin.kind)
         + Buffer.byteLength(seed.creationOrigin.automationId) : 0)
+      + (seed.homeTaskId ? Buffer.byteLength(seed.homeTaskId) : 0)
       // Object/reference, number, and boolean storage for the seed and captured
       // summary/attention revision fields. String payloads are counted above.
       + 160, 0);
@@ -2925,6 +2935,7 @@ export class RuntimeRegistry {
         kind: seed.kind,
         ...(seed.parentSessionId ? { parentSessionId: seed.parentSessionId } : {}),
         ...(seed.creationOrigin ? { creationOrigin: seed.creationOrigin } : {}),
+        ...(seed.homeTaskId ? { homeTaskId: seed.homeTaskId } : {}),
         createdAt: seed.createdAt,
         updatedAt: seed.updatedAt,
         ...(seed.activeSince ? { activeSince: seed.activeSince } : {}),
@@ -4860,6 +4871,41 @@ export class RuntimeRegistry {
   async taskWorkerModel(sessionId: string): Promise<{ provider: string; id: string } | undefined> {
     const change = (await this.taskWorkerEntries(sessionId)).findLast(entry => entry.type === "model_change");
     return change?.type === "model_change" ? { provider: change.provider, id: change.modelId } : undefined;
+  }
+
+  /** Record which Home task created each worker session. The first task to
+   * name a session owns it (a resumed task rebinds the same worker). A change
+   * invalidates catalogs once per call, so recovery publishes one batch. */
+  recordTaskWorkers(workers: Iterable<readonly [sessionId: string, taskId: string]>): void {
+    let changed = false;
+    for (const [sessionId, taskId] of workers) {
+      if (this.homeTaskWorkers.has(sessionId)) continue;
+      this.homeTaskWorkers.set(sessionId, taskId);
+      changed = true;
+    }
+    if (!changed) return;
+    this.catalogProjectionGeneration += 1;
+    this.options.sessionListChanged();
+  }
+
+  /** A Home task settled: its worker session gains one attention completion,
+   * keyed by the task, so an unopened worker reads as unread exactly like a
+   * chat that finished. A worker ends through its `report` tool call, which is
+   * never a successful final assistant reply, so the ordinary completion path
+   * cannot see it. Observed (read) when the worker chat is presented now. */
+  taskWorkerSettled(sessionId: string, taskId: string): Promise<void> {
+    return this.attentionLane.run(async () => {
+      const result = await this.attention.complete(sessionId, `task:${taskId}`, this.isSessionPresented(sessionId));
+      if (!result.changed) return;
+      const latest = this.latestSummaries.get(sessionId);
+      if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
+      else {
+        // A cold worker has no retained summary: invalidate catalogs, as
+        // `session.attention.set` does, rather than fabricating one.
+        this.catalogProjectionGeneration += 1;
+        this.options.sessionListChanged();
+      }
+    });
   }
 
   /** A worker's display name: the live session's own name, else its catalog row.

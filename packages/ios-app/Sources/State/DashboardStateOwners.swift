@@ -200,12 +200,15 @@ struct DashboardServerSource: Identifiable, Equatable, Sendable {
 }
 
 enum DashboardSessionSortMode: String, CaseIterable, Identifiable, Sendable {
+    // Declaration order is the filter sheet's order; Home is first and the default.
+    case home = "Home"
     case projectServer = "By Project / Server"
     case recent = "Recent Activity"
 
     var id: String { rawValue }
     var detail: String {
         switch self {
+        case .home: "Usage, then the workers Home is running, recently finished, and still unviewed."
         case .projectServer: "Group sessions by project folder and server."
         case .recent: "Show active sessions first, then the newest history across servers."
         }
@@ -374,7 +377,7 @@ enum DashboardServerFilterPreferences {
         }
         let legacy = defaults.string(forKey: legacySortModeKey)
             .flatMap(DashboardSessionSortMode.init(rawValue:))
-            ?? .projectServer
+            ?? .home
         return DashboardServerFilterState(sortMode: legacy)
     }
 
@@ -400,13 +403,13 @@ struct DashboardServerFilterState: Equatable, Sendable {
 
     init(
         selectedProfileIDs: Set<String> = [],
-        sortMode: DashboardSessionSortMode = .projectServer
+        sortMode: DashboardSessionSortMode = .home
     ) {
         self.selectedProfileIDs = selectedProfileIDs
         self.sortMode = sortMode
     }
 
-    var isFiltering: Bool { !selectedProfileIDs.isEmpty || sortMode != .projectServer }
+    var isFiltering: Bool { !selectedProfileIDs.isEmpty || sortMode != .home }
     var searchIdentity: String { "\(selectedProfileIDs.sorted().joined(separator: ",")):\(sortMode.rawValue)" }
     var isAllSelected: Bool { selectedProfileIDs.isEmpty }
     mutating func reconcile(profileIDs: [String]) {
@@ -1042,6 +1045,7 @@ struct SessionCatalogCoordinator: Equatable {
             kind: current.kind,
             parentSessionId: current.parentSessionId,
             creationOrigin: current.creationOrigin,
+            homeTaskId: current.homeTaskId,
             createdAt: current.createdAt,
             updatedAt: current.updatedAt,
             activeSince: current.activeSince,
@@ -1168,6 +1172,7 @@ struct SessionCatalogCoordinator: Equatable {
             kind: summary.kind,
             parentSessionId: summary.parentSessionId,
             creationOrigin: summary.creationOrigin,
+            homeTaskId: summary.homeTaskId,
             createdAt: summary.createdAt,
             updatedAt: update.updatedAt,
             activeSince: update.activeSince,
