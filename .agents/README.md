@@ -27,7 +27,7 @@ configuration changes follow their owning contributor/package runbooks.
 
 ## Maintaining guidance
 
-Capability-use guidance such as `tron-jev`, `tron-raindrop`, and `tron-x` belongs
+Capability-use guidance such as `jev`, `raindrop`, and `x-posts` belongs
 in Tron's user-level global skills directory, not this project catalog. Global
 skills use the existing resource loader and remain subject to tool availability,
 connector admission, and explicit permissions; do not keep project duplicates.
