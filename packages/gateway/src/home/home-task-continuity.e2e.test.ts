@@ -34,6 +34,7 @@ afterAll(async () => {
 });
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
+const PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 /** A provider turn that holds until the task's Stop aborts it. */
 const holding = (entered: { count: number }) => (_context: Context, options?: { signal?: AbortSignal }) => {
   entered.count += 1;
@@ -47,7 +48,10 @@ async function listen(f: Fixture) {
   await devices.initialize();
   const uploads = {
     acquire: async () => ({ release: () => {} }), removeSession: async () => {},
-    materialize: async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 }),
+    // One fixture screenshot upload; the real store's validation is not this journey's boundary.
+    materialize: async (ids: string[]) => ids.includes("screenshot-upload")
+      ? { envelope: "[Attached image: screenshot.png]", images: [{ type: "image", data: PIXEL, mimeType: "image/png" }], attachments: [], photoCount: 1, fileAttachmentCount: 0 }
+      : { envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 },
   };
   const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(), uploads,
     receipts: new CommandReceiptStore(join(f.root, "receipts")), logger: { log: () => {} } } as unknown as GatewayServiceDependencies);
@@ -76,8 +80,8 @@ async function maintainerClient(f: Fixture, port: number) {
       const baseline = await client.request("session.open", { sessionId }) as { syncToken: string };
       await client.request("session.sync", { sessionId, syncToken: baseline.syncToken });
     },
-    send: async (sessionId: string, text: string, behavior?: "followUp" | "steer") => await client.request("session.prompt",
-      { sessionId, text, uploadIds: [], commandId: randomUUID(), ...(behavior ? { behavior } : {}) }) as { operationId: string },
+    send: async (sessionId: string, text: string, behavior?: "followUp" | "steer", uploadIds: string[] = []) => await client.request("session.prompt",
+      { sessionId, text, uploadIds, commandId: randomUUID(), ...(behavior ? { behavior } : {}) }) as { operationId: string },
   };
 }
 
@@ -156,17 +160,25 @@ describe("resuming a stopped Home worker in place", () => {
     const app = await maintainerClient(f, port);
     const entered = { count: 0 };
     const seen: string[] = [];
-    f.faux.setResponses([holding(entered), (context: Context) => { seen.push(lastUser(context)); return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }]);
+    let images = 0;
+    f.faux.setResponses([holding(entered), (context: Context) => {
+      seen.push(lastUser(context));
+      const content = context.messages.findLast(message => message.role === "user")?.content;
+      images = Array.isArray(content) ? content.filter(part => part.type === "image").length : 0;
+      return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+    }]);
     const stopped = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "stopped-worker", intent: "Finite work", target: f.cwd });
     await waitFor(() => entered.count === 1, "worker turn");
     await f.registry.homeOwner().stopTask({ taskId: stopped.taskId, operationId: stopped.operationId });
     await stopped.completion;
     await app.open(stopped.sessionId);
-    const accepted = await app.send(stopped.sessionId, "continue");
+    // The maintainer continues it with the screenshots it was waiting for.
+    const accepted = await app.send(stopped.sessionId, "continue with these screenshots", undefined, ["screenshot-upload"]);
     const resumed = await f.registry.homeOwner().taskStatus("stopped-worker.resume-1");
     expect(resumed).toMatchObject({ sessionId: stopped.sessionId, operationId: accepted.operationId });
     await waitFor(async () => (await f.registry.homeOwner().taskStatus("stopped-worker.resume-1")).lifecycle === "terminal", "maintainer-resumed task settles");
-    expect(seen[0]).toContain("Instruction:\ncontinue");
+    expect(seen[0]).toContain("Instruction:\ncontinue with these screenshots\n\n[Attached image: screenshot.png]");
+    expect(images).toBe(1);
     evidence.push({ case: "maintainer-message-resumes", sessionId: stopped.sessionId, resumed: "stopped-worker.resume-1" });
   }, 60_000);
 });

@@ -1,3 +1,4 @@
+import type { ImageContent } from "@earendil-works/pi-ai";
 import { createHash, randomUUID } from "node:crypto";
 import { clampThinkingLevel } from "@earendil-works/pi-ai";
 import type { FileEntry } from "@earendil-works/pi-coding-agent";
@@ -281,20 +282,20 @@ export class HomeTaskDispatcher {
    * immutable; each task has at most one successor, so a lineage never forks. `text` is the
    * maintainer's or Home's instruction; the brief restates any question the run was
    * stopped before it was answered. */
-  async resume(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest, signal?: AbortSignal, workToken?: string): Promise<HomeTaskHandle> {
+  async resume(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest, signal?: AbortSignal, workToken?: string, images: ImageContent[] = []): Promise<HomeTaskHandle> {
     if (signal?.aborted) throw new HomeTaskDispatchStageError("choice", "cancelled");
     await this.assertAvailable();
     const registry = this.sessions.administrativeWorkRegistry;
     const work = registry.begin({ kind: "queued-mutation", hostEpoch: registry.runtimeEpoch });
     try {
-      const handle = await this.resumeOwned(identity, request, work, signal, workToken);
+      const handle = await this.resumeOwned(identity, request, work, signal, workToken, images);
       const completion = handle.completion.finally(() => work.settle());
       void completion.catch(() => {});
       return { ...handle, completion };
     } catch (error) { work.settle(); throw error; }
   }
 
-  private async resumeOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest, work: GatewayWorkHandle, signal: AbortSignal | undefined, workToken: string | undefined): Promise<HomeTaskHandle> {
+  private async resumeOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest, work: GatewayWorkHandle, signal: AbortSignal | undefined, workToken: string | undefined, images: ImageContent[]): Promise<HomeTaskHandle> {
     const text = request.text?.trim();
     if (typeof request.taskId !== "string" || typeof request.operationId !== "string"
       || (request.text !== undefined && (typeof request.text !== "string" || Buffer.byteLength(request.text) > 32768))) throw new GatewayError("invalid_request", "Invalid task resume");
@@ -326,6 +327,7 @@ export class HomeTaskDispatcher {
     return this.launch(task, epoch, work, signal, {
       worker: (dispatch, reports) => this.stage("create-worker", taskId, signal, () => dispatch.resumeWorker(sessionId, reports, workToken), late => late.release()),
       configure: async () => "",
+      images,
     });
   }
 
@@ -396,6 +398,8 @@ export class HomeTaskDispatcher {
   private async launch(created: HomeTaskRecord, epoch: string, work: GatewayWorkHandle, signal: AbortSignal | undefined, worker: {
     worker: (dispatch: OwnedSessionDispatch, reports: HomeTaskReportOwner) => Promise<Awaited<ReturnType<OwnedSessionDispatch["createWorker"]>>>;
     configure: (slot: Awaited<ReturnType<OwnedSessionDispatch["createWorker"]>>["slot"]) => Promise<string>;
+    /** Images of the first prompt; a resume carries the maintainer's attachments. */
+    images?: ImageContent[];
   }): Promise<HomeTaskHandle> {
     let task = created;
     const taskId = task.taskId;
@@ -453,7 +457,7 @@ export class HomeTaskDispatcher {
       deadline = dispatch.armDeadline();
       const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation }, deadline);
       work.transition("foreground-agent-operation");
-      const admitted = dispatch.admit(slot, `${task.intent.text}${appliedChoice}\n\nThis is a finite Home task. Use report with explicit evidence to finish. A normal reply is not a task result.`, [], undefined, undefined, undefined,
+      const admitted = dispatch.admit(slot, `${task.intent.text}${appliedChoice}\n\nThis is a finite Home task. Use report with explicit evidence to finish. A normal reply is not a task result.`, worker.images ?? [], undefined, undefined, undefined,
         { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
       void admitted.catch(async () => {
         await cancellation("admission-refused").catch(() => {});

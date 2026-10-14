@@ -2580,11 +2580,15 @@ export class GatewayService {
     if (slot.homeTaskWorkerState === "settled") {
       // A message to a Home worker whose task stopped or settled continues that task in place
       // (#929): same session, worktree and claim, with this message as its instruction.
-      if (resourceInvocation !== undefined || uploadIds.length > 0) {
-        throw new GatewayError("invalid_request", "A stopped Home worker continues from a text message; send attachments after it resumes");
+      if (resourceInvocation !== undefined) {
+        throw new GatewayError("invalid_request", "A stopped Home worker continues from a message, not a command");
       }
+      // Attachments (for example the screenshots a stopped worker asked for) go with the
+      // resume instruction; the brief carries their text envelope, the first turn their images.
+      const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
       // This request's own work entry must not count as the session being busy.
-      const resumed = await this.requireHome().resumeWorkerSession(slot.id, text, workToken);
+      const resumed = await this.requireHome().resumeWorkerSession(slot.id,
+        [text, attachments.envelope].filter(Boolean).join("\n\n"), workToken, attachments.images);
       return { operationId: resumed.operationId };
     }
     const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
