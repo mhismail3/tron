@@ -594,7 +594,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // The tap reopens the pending question itself, not the row's details sheet.
         XCTAssertTrue(submit.waitForExistence(timeout: 10),
                       "tapping the running codemode row did not reopen its pending question: \(app.debugDescription)")
-        XCTAssertTrue(app.staticTexts["Approve the codemode step?"].exists, app.debugDescription)
+        // The question text renders as selectable Markdown (#947), so the reopened form is
+        // identified by its own option below rather than a static-text lookup.
+        XCTAssertTrue(app.buttons["Approve it"].exists, app.debugDescription)
         keepScreenshot(app, name: "929-codemode-ask-user-opened-from-row")
         app.buttons["Approve it"].tap()
         submit.tap()
