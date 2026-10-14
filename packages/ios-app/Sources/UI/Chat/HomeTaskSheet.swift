@@ -176,11 +176,15 @@ struct HomeTaskSheet: View {
             if page.items.isEmpty {
                 TronPlaceholderState(title: "No tasks", detail: "Home has not recorded any tasks.", icon: "checklist")
             } else {
-                TronSettingsGroup("Tasks", detail: "Newest first. Open a task to see its brief and worker.", accent: .tronSessionTeal) {
-                    VStack(spacing: 0) {
-                        ForEach(Array(page.items.enumerated()), id: \.element.id) { index, row in
-                            if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
-                            taskRow(row)
+                // The sheet's title already names the list: one intro line, then the rows.
+                VStack(alignment: .leading, spacing: 10) {
+                    TronSettingsCaption("Newest first. Open a task to see its brief and worker.")
+                    TronGlassCard(accent: .tronSessionTeal) {
+                        VStack(spacing: 0) {
+                            ForEach(Array(page.items.enumerated()), id: \.element.id) { index, row in
+                                if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
+                                taskRow(row)
+                            }
                         }
                     }
                 }

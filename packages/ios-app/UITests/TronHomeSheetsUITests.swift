@@ -134,6 +134,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks")
         expand(app, done: "home-sheet-done-tasks")
         assertTitleTint(app, "Tasks", matches: rowTint, not: manageTint)
+        let tasksTitle = app.navigationBars.staticTexts["Tasks"].firstMatch.frame, firstTask = element(app, "home-task-active").frame
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == 'Tasks'")).allElementsBoundByIndex
+            .filter { $0.frame.minY > tasksTitle.maxY && $0.frame.maxY <= firstTask.minY }.isEmpty, "No section header repeats the title")
         keep("08-tasks")
         open(app, element(app, "home-task-active"), ready: "home-task-detail", name: "task")
         expand(app, done: "home-sheet-done-task")
