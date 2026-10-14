@@ -899,6 +899,9 @@ changes are labeled Outside Tron, not You. Native clients need no key-formatting
 `settings.undo { commandId, changeId, fence? }` writes `before` back as an
 ordinary change, refused with the current value when the store no longer holds
 `after`, and refused for a redacted change, which has no `before`.
+A learned-profile entry (`home.profile.item`, written by Home's `profile` tool or
+`home.profileChange`) is undone with its whole group back to each note's `before`,
+and refused unless every note still holds its `after` (docs/settings-model.md 6.4).
 `settings.applyAgain { commandId, changeId }` names an `outside` entry that
 replaced or removed a value Tron wrote and writes that value back through the same
 path and gate (with `applyAgainOf`), refused when the store moved on since.
