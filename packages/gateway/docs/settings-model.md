@@ -531,6 +531,7 @@ Gateway serves it to clients; iOS holds no per-key code.
 | `control` | One of the fixed control primitives, with an optional `fallback` control for older clients. |
 | `unit`, `format` | How the Gateway formats `display` ("200K tokens", "3 retries"). |
 | `confirm` | Optional confirmation text when the maintainer's own tap changes a key whose tier would be `approve` for anyone else. |
+| `entry` | What to type: `{ hint, example }`. The hint names the format in one sentence; the example is a realistic value the client shows as the field's placeholder. Every editable `text` key and string-list key has one, so the client's shared text and add-value rows never invent their own guidance. |
 
 Provenance is not a field. It is part of every resolved value
 ([3.1](#31-precedence-and-the-resolver)).

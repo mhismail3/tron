@@ -204,7 +204,7 @@ struct MCPServersSettingsView: View {
             NavigationStack {
                 VStack(spacing: 16) {
                     TronSettingsGroup("Bearer Token", accent: .tronCyan) {
-                        SecureField("Token", text: $token).textContentType(.password).padding(12)
+                        SecureField("Token", text: $token).textContentType(.password).tronTextEntryDone().padding(12)
                     }
                     Button("Store in Keychain") {
                         let submittedToken = token, submittedServer = tokenServer
@@ -396,22 +396,22 @@ struct MCPAddServerForm: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     TronSettingsGroup("Server name", accent: .tronCyan) {
-                        TextField("For example, calendar", text: $serverName).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
+                        TextField("For example, calendar", text: $serverName).textInputAutocapitalization(.never).autocorrectionDisabled().tronTextEntryDone().padding(12)
                     }
                     TronSettingsGroup("Transport", accent: .tronCyan) {
                         TronSegmentedControl(options: [("HTTP", "http"), ("stdio", "stdio")], selection: $transport, accent: .tronCyan).padding(12)
                     }
                     TronSettingsGroup(transport == "http" ? "Server address" : "Local command", accent: .tronCyan) {
                         if transport == "http" {
-                            TextField("https://server.example", text: $url).textInputAutocapitalization(.never).keyboardType(.URL).autocorrectionDisabled().padding(12)
+                            TextField("https://server.example", text: $url).textInputAutocapitalization(.never).keyboardType(.URL).autocorrectionDisabled().tronTextEntryDone().padding(12)
                             Text("Enter the address provided by your server host.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).padding(.horizontal, 12).padding(.bottom, 10)
                         } else {
-                            TextField("Command that starts the server", text: $command).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
-                            TextField("Arguments, separated by spaces (optional)", text: $args).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
+                            TextField("Command that starts the server", text: $command).textInputAutocapitalization(.never).autocorrectionDisabled().tronTextEntryDone().padding(12)
+                            TextField("Arguments, separated by spaces (optional)", text: $args).textInputAutocapitalization(.never).autocorrectionDisabled().tronTextEntryDone().padding(12)
                         }
                     }
                     TronSettingsGroup("Bearer token (optional)", accent: .tronCyan) {
-                        SecureField("Paste token", text: $bearerToken).textContentType(.password).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
+                        SecureField("Paste token", text: $bearerToken).textContentType(.password).textInputAutocapitalization(.never).autocorrectionDisabled().tronTextEntryDone().padding(12)
                         Text("Stored securely in your Mac’s Keychain.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).padding(.horizontal, 12).padding(.bottom, 10)
                     }
                     if let message = error ?? validationError {

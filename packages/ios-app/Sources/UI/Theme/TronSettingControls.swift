@@ -328,7 +328,7 @@ struct TronNumberSettingRow: View {
                     .multilineTextAlignment(.trailing)
                     .frame(width: 118)
                     .accessibilityLabel(title)
-                    .focused($focused)
+                    .tronTextEntryDone(keyboardToolbar: true, focus: $focused)
             }
             if invalid {
                 Text(Self.invalidInputMessage)
@@ -384,6 +384,7 @@ struct TronTextSettingRow: View {
                 .multilineTextAlignment(.trailing)
                 .frame(minWidth: 100, maxWidth: 220)
                 .accessibilityLabel(title)
+                .tronTextEntryDone()
         }
     }
 }

@@ -259,6 +259,7 @@ struct SettingsChangesView: View {
             TextField(prompt, text: text)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .tronInlineField(monospaced: true)
+                .tronTextEntryDone()
                 .multilineTextAlignment(.trailing)
                 .frame(width: 160)
                 .accessibilityIdentifier(identifier)

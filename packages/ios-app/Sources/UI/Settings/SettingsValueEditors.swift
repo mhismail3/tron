@@ -17,6 +17,7 @@ struct SettingsSecretEditor: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .tronField(monospaced: true, compact: true)
+                    .tronTextEntryDone()
                     .accessibilityLabel("New value")
                     .tronSettingsCaption(help)
                 TronGlassCard(accent: .tronEmerald) {
@@ -81,8 +82,8 @@ struct SettingsNumberMapEditor: View {
                             TronSettingsRow(icon: nil, title: field.label) {
                                 HStack(spacing: 6) {
                                     TextField("Not set", text: Binding(get: { drafts[key] ?? "" }, set: { drafts[key] = $0 }))
-                                        .keyboardType(.numbersAndPunctuation).submitLabel(.done)
-                                        .focused($editing).onSubmit { editing = false }
+                                        .keyboardType(.numbersAndPunctuation)
+                                        .tronTextEntryDone(focus: $editing)
                                         .tronInlineField(monospaced: true)
                                         .multilineTextAlignment(.trailing)
                                         .frame(width: 120)

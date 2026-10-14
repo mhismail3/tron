@@ -563,6 +563,52 @@ extension View {
     func tronTextEditor(monospaced: Bool = false) -> some View {
         modifier(TronTextEditorSurfaceModifier(monospaced: monospaced))
     }
+
+    /// The one way a settings text entry ends (#939). A single-line field's return
+    /// key reads Done and commits. A multi-line field, which keeps return for
+    /// newlines, and a keyboard with no return key (number pad) show Done above
+    /// the keyboard instead. Either way Done runs `onDone`, then the keyboard goes
+    /// away. A caller that commits on focus loss passes its focus.
+    func tronTextEntryDone(
+        keyboardToolbar: Bool = false,
+        focus: FocusState<Bool>.Binding? = nil,
+        onDone: @escaping () -> Void = {}
+    ) -> some View {
+        modifier(TronTextEntryDoneModifier(keyboardToolbar: keyboardToolbar, external: focus, onDone: onDone))
+    }
+}
+
+private struct TronTextEntryDoneModifier: ViewModifier {
+    let keyboardToolbar: Bool
+    let external: FocusState<Bool>.Binding?
+    let onDone: () -> Void
+    @FocusState private var owned: Bool
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    func body(content: Content) -> some View {
+        let focus = external ?? $owned
+        if keyboardToolbar {
+            content
+                .focused(focus)
+                .toolbar {
+                    // Only the focused entry contributes, so sibling fields never stack Done buttons.
+                    if focus.wrappedValue {
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            Button("Done") { onDone(); focus.wrappedValue = false }
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                                .accessibilityIdentifier("text-entry-done")
+                        }
+                    }
+                }
+        } else {
+            content
+                .focused(focus)
+                .submitLabel(.done)
+                .onSubmit { onDone(); focus.wrappedValue = false }
+        }
+    }
 }
 
 // MARK: - Read-only documents

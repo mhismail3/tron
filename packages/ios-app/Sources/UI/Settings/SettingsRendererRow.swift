@@ -393,8 +393,7 @@ private struct SettingsRendererTextRow: View {
                 .multilineTextAlignment(.trailing)
                 .frame(minWidth: 100, maxWidth: 220)
                 .accessibilityLabel(title)
-                .focused($focused)
-                .onSubmit(commit)
+                .tronTextEntryDone(focus: $focused, onDone: commit)
                 .onChange(of: focused) { _, active in if !active { commit() } }
         }
     }

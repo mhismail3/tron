@@ -413,6 +413,17 @@ describe("settings renderer contract", () => {
     const f = await fixture();
     const everything = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
     expect(everything.renderer).toEqual({ version: 1 });
+    // Every editable free-text or string-list key says what to enter, with a
+    // realistic example for the field's placeholder (#939).
+    const writable = everything.keys.filter(key => key.presentation.control === "text"
+      || (key.presentation.control === "list" && key.presentation.valueKind === "stringList"));
+    expect(writable.map(key => key.key)).toEqual(expect.arrayContaining(["sources.npmCommand", "sources.extensions", "tools.shell.path"]));
+    for (const key of writable) {
+      expect(key.presentation.entry, key.key).toEqual({ hint: expect.stringMatching(/\S/), example: expect.stringMatching(/\S/) });
+    }
+    expect(presentedRow(everything, "sources.npmCommand").presentation.entry).toEqual({
+      hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm",
+    });
     expect(presentedRow(everything, "model.thinking[role=chat]", { model: f.modelKey }).presentation).toMatchObject({
       control: "choice", valueKind: "orderedChoice", options: expect.arrayContaining([{ value: "high", label: "High", detail: expect.any(String) }]),
     });
