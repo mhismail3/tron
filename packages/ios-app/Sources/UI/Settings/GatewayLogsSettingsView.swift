@@ -122,7 +122,7 @@ struct GatewayLogsSettingsView: View {
 
                 Button { captureOnIPhone() } label: {
                     Group {
-                        if localCaptureInFlight { ProgressView().controlSize(.small) }
+                        if localCaptureInFlight { TronPulseLoadingIndicator(accent: .tronEmerald, size: 18) }
                         else { Image(systemName: "iphone.and.arrow.forward") }
                     }
                     .font(TronTypography.buttonSM)
@@ -133,7 +133,7 @@ struct GatewayLogsSettingsView: View {
 
                 Button { exportDiagnostics() } label: {
                     Group {
-                        if exportInFlight { ProgressView().controlSize(.small) }
+                        if exportInFlight { TronPulseLoadingIndicator(accent: .tronEmerald, size: 18) }
                         else { Image(systemName: "square.and.arrow.up") }
                     }
                     .font(TronTypography.buttonSM)

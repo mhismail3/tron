@@ -150,7 +150,7 @@ private actor NewSessionFixtureGateway {
                 "display": .string(projectModel == nil ? "Built-in model" : "Project Pro"),
                 "layer": .string(projectModel == nil ? "builtin" : "project"), "applied": .bool(true),
                 "layers": .array([.object(["layer": .string("project"), "applied": .bool(true)])]),
-                "badges": .array([.object(["kind": .string("layer"), "label": .string(projectModel == nil ? "Built-in" : "Project")])]),
+                "badges": .array([.object(["kind": .string("layer"), "label": .string(projectModel == nil ? "Tron default" : "Set in project")])]),
                 "presentation": .object(["label": .string("Model"), "help": .string("The default for new chats in this project."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
                     "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])

@@ -313,10 +313,11 @@ struct TechnicalJSONSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                TronReadOnlyTextView(text: currentDocument ?? "", style: .code)
+            Group {
                 if currentDocument == nil {
-                    TronLoadingState(label: "Preparing JSON…", accent: accent)
+                    TronSheetLoadingState(label: "Preparing JSON…", accent: resolvedAccent)
+                } else {
+                    TronReadOnlyTextView(text: currentDocument ?? "", style: .code)
                 }
             }
             .tronDocumentTopBlurSurface()

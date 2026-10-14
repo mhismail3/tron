@@ -6,21 +6,24 @@ import TronMobileCore
 /// detail comes from the row the ledger already loaded; it never reads again.
 extension HomeSheet {
     func chapters(_ list: HomeChapterListDTO) -> some View {
-        TronSettingsGroup("Chapters", detail: "Newest first. Sealed chapters stay readable and refuse changes.",
-                          accent: .tronSessionTeal) {
-            VStack(spacing: 0) {
-                ForEach(Array(list.chapters.reversed().enumerated()), id: \.element.id) { index, chapter in
-                    if index > 0 { divider() }
-                    Button { present(.chapter(chapter, limits: list.limits)) } label: {
-                        TronSettingsRow(icon: chapter.state == .active ? "book" : "book.closed",
-                                        title: "Chapter \(chapter.ordinal)",
-                                        subtitle: HomeChapterPresentation.dateRange(chapter),
-                                        accent: .tronSessionTeal) {
-                            TronStatusPill(text: HomeChapterPresentation.stateLabel(chapter.state), accent: Self.chapterAccent(chapter.state))
+        // The sheet's title already names the list: one intro line, then the rows.
+        VStack(alignment: .leading, spacing: 10) {
+            TronSettingsCaption("Newest first. Sealed chapters stay readable and refuse changes.")
+            TronGlassCard(accent: .tronSessionTeal) {
+                VStack(spacing: 0) {
+                    ForEach(Array(list.chapters.reversed().enumerated()), id: \.element.id) { index, chapter in
+                        if index > 0 { divider() }
+                        Button { present(.chapter(chapter, limits: list.limits)) } label: {
+                            TronSettingsRow(icon: chapter.state == .active ? "book" : "book.closed",
+                                            title: "Chapter \(chapter.ordinal)",
+                                            subtitle: HomeChapterPresentation.dateRange(chapter),
+                                            accent: .tronSessionTeal) {
+                                TronStatusPill(text: HomeChapterPresentation.stateLabel(chapter.state), accent: Self.chapterAccent(chapter.state))
+                            }
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("home-chapter-\(chapter.ordinal)")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("home-chapter-\(chapter.ordinal)")
                 }
             }
         }
@@ -46,8 +49,12 @@ extension HomeSheet {
                         VStack(spacing: 0) {
                             ForEach(Array(topics.enumerated()), id: \.offset) { index, topic in
                                 if index > 0 { divider() }
-                                TronSettingsRow(icon: nil, title: topic, accent: .tronSessionTeal,
-                                                titleFont: TronTypography.sans(size: TronTypography.sizeBody))
+                                Button { reading = HomeTextReading(id: "topic-\(index)", title: "Topic", text: topic) } label: {
+                                    TronSettingsRow(icon: nil, title: HomeChapterPresentation.topicPreview(topic), accent: .tronSessionTeal,
+                                                    titleFont: TronTypography.sans(size: TronTypography.sizeBody))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("home-chapter-topic-\(index)")
                             }
                         }
                     }

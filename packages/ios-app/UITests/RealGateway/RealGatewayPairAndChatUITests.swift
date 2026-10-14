@@ -709,6 +709,160 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
     }
 
+    /// Settings clarity (#939) against the real Gateway: Accounts leads with
+    /// Connections and its own Push Notifications row; provenance pills carry the
+    /// Gateway's wording and name a per-model value's model; a text setting's
+    /// return key reads Done, commits through the change path and dismisses the
+    /// keyboard; an add-value row shows the schema's example and format. The kept
+    /// screenshots are the approval and review evidence for each sheet.
+    @MainActor
+    func testSettingsClarityPillsTextDoneAndAccountsFirst() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let schema = try SettingsSchemaInventory.fromEnvironment()
+        let sources = Set(schema.layerLabels.values)
+        try addMcpServerOutsideTron(fixture.agentDirectory, name: "docs-server")
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace) {
+            // New Session: Project Settings is a setup card like its neighbours, and the
+            // Model card's source pill uses the Gateway's wording inside the card.
+            let project = app.buttons["project-settings-link"]
+            XCTAssertTrue(project.waitForExistence(timeout: 30), app.debugDescription)
+            let projectName = URL(fileURLWithPath: fixture.workspace).lastPathComponent
+            let projectValue = project.value as? String ?? ""
+            XCTAssertTrue(project.label == "Project Settings" && projectValue.contains(projectName)
+                          && projectValue.contains("Settings in this project's .pi folder."),
+                          "the Project Settings card shows its value and subtext: \(project.label) / \(projectValue)")
+            // One card geometry: the same width and left edge as its Workspace neighbour.
+            let workspaceCard = app.buttons["new-session-card.Workspace"]
+            XCTAssertEqual(project.frame.minX, workspaceCard.frame.minX, accuracy: 1)
+            XCTAssertEqual(project.frame.width, workspaceCard.frame.width, accuracy: 1)
+            let modelCard = app.buttons["new-session-card.Model"]
+            XCTAssertTrue(self.waitUntil(timeout: 30) { sources.contains { modelCard.label.contains($0) } },
+                          "the Model card names its source in the Gateway's wording: \(modelCard.label)")
+            // Reveal the Model card under the medium detent for the evidence screenshot.
+            for _ in 0..<3 where !modelCard.isHittable || modelCard.frame.maxY > app.frame.maxY - 40 { app.swipeUp() }
+            self.keepScreenshot(app, name: "939-new-session")
+        }
+
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
+        gear.tap()
+        XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
+        // Accounts is the first group: Connections, then Push Notifications, then providers;
+        // the agent's own sections follow.
+        let order = ["settings-link-Connections", "settings-link-Push Notifications", "settings-link-Model Providers",
+                     "settings-section-model-open"].map { app.buttons[$0] }
+        XCTAssertTrue(order[3].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(order.allSatisfy(\.exists), app.debugDescription)
+        XCTAssertEqual(order.map(\.frame.minY), order.map(\.frame.minY).sorted(), "Settings must open with Accounts: \(order.map(\.frame))")
+        XCTAssertTrue(app.staticTexts["Paired Macs and authorized devices"].exists, "Connections no longer offers push")
+        keepScreenshot(app, name: "939-settings-root-order")
+
+        // Model: a layer pill in the Gateway's wording and the per-model pill by display name.
+        openSettingsSection(app, "model")
+        let thinking = settingRows(app, key: "model.thinking[role=chat]").firstMatch
+        XCTAssertTrue(thinking.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(waitUntil(timeout: 30) { self.badgeLabels(thinking).contains(where: sources.contains) },
+                      "the Thinking row must say where its value comes from: \(badgeLabels(thinking))")
+        // The pill reads "For <name>"; its accessible text appends the provider/id as detail.
+        let modelPill = badgeLabels(thinking).first { $0.hasPrefix("For ") }
+        let pillText = modelPill?.components(separatedBy: ", ").first ?? ""
+        XCTAssertNotNil(modelPill, "a per-model value names its model: \(badgeLabels(thinking))")
+        XCTAssertFalse(pillText.contains("/"), "the model pill uses the display name, not provider/id: \(modelPill ?? "")")
+        keepScreenshot(app, name: "939-model-pills")
+        dismissTopSheet(app)
+
+        // Context: Summary instructions commits on the keyboard's Done and the keyboard goes away.
+        openSettingsSection(app, "context")
+        keepScreenshot(app, name: "939-context-pills")
+        // The settings row combines its labels, so the field is found inside its row.
+        let instructionsRow = settingRow(app, key: "context.compaction.instructions")
+        XCTAssertTrue(instructionsRow.waitForExistence(timeout: 30), app.debugDescription)
+        let field: XCUIElement? = instructionsRow.textFields.firstMatch
+        for _ in 0..<10 where !(field?.isHittable ?? false) { app.swipeUp() }
+        XCTAssertTrue(field?.isHittable ?? false, "Summary instructions has no field: \(app.debugDescription)")
+        XCTAssertEqual(field?.placeholderValue, "Keep file paths and open decisions.", "the field shows the schema's example")
+        field?.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 10), "the field did not raise the keyboard")
+        field?.typeText("Keep file paths.")
+        let done = keyboard.buttons.matching(NSPredicate(format: "label ==[c] %@", "done")).firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "the return key must read Done: \(keyboard.debugDescription)")
+        keepScreenshot(app, name: "939-text-field-done-key")
+        done.tap()
+        XCTAssertTrue(waitForNonExistence(keyboard, timeout: 10), "Done must dismiss the keyboard")
+        XCTAssertTrue(waitUntil(timeout: 60) {
+            let compaction = (try? self.macSettingsDocument(fixture.agentDirectory))?["compaction"] as? [String: Any]
+            return compaction?["instructions"] as? String == "Keep file paths."
+        }, "Done must commit Summary instructions through the change path to the Mac settings.json")
+        XCTAssertTrue(waitForBadge(instructionsRow, schema.label(for: "mac"), timeout: 30),
+                      "the committed value is set on the Mac: \(badgeLabels(instructionsRow))")
+        keepScreenshot(app, name: "939-text-field-committed")
+        dismissTopSheet(app)
+
+        // MCP Servers: the server rows sit in the shared glass group.
+        let mcpLink = app.buttons["settings-link-MCP Servers"]
+        for _ in 0..<12 where !mcpLink.isHittable { app.swipeUp() }
+        mcpLink.tap()
+        let server = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "docs-server")).firstMatch
+        XCTAssertTrue(server.waitForExistence(timeout: 60), app.debugDescription)
+        keepScreenshot(app, name: "939-mcp-servers")
+        dismissTopSheet(app)
+
+        // Extensions: the npm command and a search path say what to enter, with an example.
+        let extensionsLink = app.buttons["settings-link-Extensions"]
+        for _ in 0..<12 where !extensionsLink.isHittable { app.swipeUp() }
+        extensionsLink.tap()
+        for (key, name) in [("sources.npmCommand", "npm"), ("sources.extensions", "search-path")] {
+            guard let row = hittableElement(app, identifier: settingRowToken(key), timeout: 60) else {
+                XCTFail("Extensions has no \(key) row: \(app.debugDescription)"); return
+            }
+            // The row's trailing value pill opens its editor sheet.
+            (row.buttons.allElementsBoundByIndex.last ?? row).tap()
+            // The add-value row combines its labels; its field is the one text field on the editor.
+            let value = app.textFields.matching(NSPredicate(format: "placeholderValue != nil AND placeholderValue != ''")).firstMatch
+            XCTAssertTrue(value.waitForExistence(timeout: 15), "the \(key) sheet has no add-value field: \(app.debugDescription)")
+            XCTAssertNotEqual(value.placeholderValue ?? "", "Value", "the placeholder must be a real example")
+            XCTAssertFalse((value.placeholderValue ?? "").isEmpty, "the add-value field shows the schema's example")
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "For example:")).firstMatch.exists,
+                          "the add-value row says what to enter: \(app.debugDescription)")
+            if key == "sources.npmCommand" {
+                XCTAssertEqual(value.placeholderValue, "pnpm")
+                value.tap()
+                value.typeText("pnpm")
+                let add = app.keyboards.buttons.matching(NSPredicate(format: "label ==[c] %@", "done")).firstMatch
+                XCTAssertTrue(add.waitForExistence(timeout: 5), "the add-value return key must read Done")
+                add.tap()
+                XCTAssertTrue(waitForNonExistence(app.keyboards.firstMatch, timeout: 10), "Done must dismiss the keyboard")
+                XCTAssertTrue(app.staticTexts["pnpm"].waitForExistence(timeout: 5), "Done must add the typed value to the list")
+            }
+            keepScreenshot(app, name: "939-add-value-\(name)")
+            dismissTopSheet(app)
+        }
+        dismissTopSheet(app) // Extensions
+
+        // Connections and the new Push Notifications sheet, in the Accounts accent.
+        for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Input needed", "push")] {
+            let link = app.buttons["settings-link-\(title)"]
+            for _ in 0..<20 where !link.isHittable { app.swipeDown() }
+            link.tap()
+            func labelled(_ text: String) -> XCUIElement {
+                app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
+            }
+            XCTAssertTrue(labelled(marker).waitForExistence(timeout: 30), "\(title) did not open: \(app.debugDescription)")
+            if title == "Connections" {
+                XCTAssertFalse(labelled("Input needed").exists, "push alerts moved to their own sheet")
+            }
+            keepScreenshot(app, name: "939-\(name)")
+            dismissTopSheet(app)
+        }
+    }
+
     @MainActor
     func testSettingsSurfacesServeEveryKeyAndEditAtItsLayer() throws {
         continueAfterFailure = false
@@ -1300,7 +1454,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// offers it. The setup step assigned that workspace to the model, so the
     /// sheet starts from it without waiting for any read.
     @MainActor
-    private func createSession(_ app: XCUIApplication, inWorkspace workspace: String) {
+    private func createSession(_ app: XCUIApplication, inWorkspace workspace: String,
+                               beforeCreate: (() -> Void)? = nil) {
         let menu = app.buttons["dashboard.menu"]
         XCTAssertTrue(waitForEnabled(menu, timeout: 90), "the dashboard menu never became usable: \(app.debugDescription)")
         menu.tap()
@@ -1320,6 +1475,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let create = app.buttons["Create"]
         XCTAssertTrue(create.waitForExistence(timeout: 60), app.debugDescription)
         XCTAssertTrue(waitForEnabled(create, timeout: 90), "session creation never became ready: \(app.debugDescription)")
+        beforeCreate?()
         create.tap()
     }
 

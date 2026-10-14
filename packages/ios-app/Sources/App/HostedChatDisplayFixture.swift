@@ -106,6 +106,7 @@ struct HostedHomeDashboardFixture: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var homeStatusCount = 0
     @State private var taskListReads = 0
+    @State private var sheetReadPeak = 0
     @State private var homeReads = ""
     @State private var reconnectRequested = false
     @State private var configuredModel = "none"
@@ -174,6 +175,8 @@ struct HostedHomeDashboardFixture: View {
                                 .accessibilityIdentifier("fixture.home-status-count")
                             Text("task-list-reads:\(taskListReads)")
                                 .accessibilityIdentifier("fixture.home-task-list-reads")
+                            Text("sheet-read-peak:\(sheetReadPeak)")
+                                .accessibilityIdentifier("fixture.home-sheet-read-peak")
                             Text("home-reads:\(homeReads)").accessibilityIdentifier("fixture.home-read-counts")
                             Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.capabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
                                 .accessibilityIdentifier("fixture.home-diagnostics")
@@ -233,6 +236,7 @@ struct HostedHomeDashboardFixture: View {
             while !Task.isCancelled {
                 homeStatusCount = await gateway.statusCount()
                 taskListReads = await gateway.taskListReadCount()
+                sheetReadPeak = await gateway.sheetReadPeakCount()
                 (controlCount, abortCount) = await gateway.controlCounts()
                 configuredModel = await gateway.configuredModelIdentity()
                 promptRoute = await gateway.lastPromptRoute()
@@ -282,6 +286,10 @@ private actor HostedHomeShellGateway {
     private let sheetState: String?
     private var browserReads = 0
     private var taskListReads = 0
+    // Sheet-only reads (never polled by the shell), so their overlap proves the
+    // Manage Home load sends independent reads together rather than in series.
+    private var sheetReadsInFlight = 0
+    private var sheetReadPeak = 0
     private var configuredModel: ModelRef?
     private var workerThinking = "sameAsHome"
     private var taskRedelivered = false
@@ -325,6 +333,47 @@ private actor HostedHomeShellGateway {
     }
     func statusCount() -> Int { homeStatusCount }
     func taskListReadCount() -> Int { taskListReads }
+    func sheetReadPeakCount() -> Int { sheetReadPeak }
+    private func chapterListFixture() -> JSONValue {
+        .object([
+            "homeId": .string("home-fixture"), "generation": .number(1), "enabled": .bool(designated),
+            "limits": .object(["softBytes": .number(25_165_824), "softEntries": .number(50_000),
+                                "hardBytes": .number(209_715_200), "hardEntries": .number(100_000)]),
+            "chapters": .array([
+                .object(["sessionId": .string("home-chapter-sealed"), "ordinal": .number(1), "state": .string("sealed"),
+                         "createdAt": .string(isoAgo(40 * 86_400)), "sealedAt": .string(isoAgo(10 * 86_400)),
+                         "activationStarted": .bool(true), "sessionPresent": .bool(true),
+                         "bytes": .number(25_165_824), "entries": .number(50_001),
+                         "contents": .object(["firstAt": .string(isoAgo(40 * 86_400)), "lastAt": .string(isoAgo(10 * 86_400)),
+                             "userMessages": .number(412), "homeReplies": .number(409), "tasksDelegated": .number(7),
+                             "topics": .array([
+                                 .string("""
+                                     Planned the spring garden: raised beds along the south fence and **Thursday reviews**, with a watering plan Home keeps current through the season.
+                                     - Order mulch and `drip-line` fittings
+                                     - Ask the neighbour about the *shared* compost bin
+                                     """),
+                                 .string("Booked the Lisbon trip for May and asked Home to watch for fare drops."),
+                                 .string("Reviewed the kitchen renovation quote and asked for a second countertop bid."),
+                                 .string("Settled the quarterly budget and moved savings into the travel fund."),
+                                 .string("Finished the settings model epic and delivered its report."),
+                             ])])]),
+                .object(["sessionId": .string("home-session"), "ordinal": .number(2), "state": .string("active"),
+                         "createdAt": .string(isoAgo(3 * 86_400)), "activationStarted": .bool(true),
+                         "sessionPresent": .bool(true), "bytes": .number(480), "entries": .number(12),
+                         "contents": .object(["firstAt": .string(isoAgo(3 * 86_400)), "lastAt": .string(isoAgo(3 * 60)),
+                             "userMessages": .number(6), "homeReplies": .number(6), "tasksDelegated": .number(1),
+                             "topics": .array([.string("Garden redesign")])])]),
+            ]),
+        ])
+    }
+    private func heldSheetRead<Value>(_ value: () -> Value) async throws -> Value {
+        guard sheetState == "presentation-loading" else { return value() }
+        sheetReadsInFlight += 1
+        sheetReadPeak = max(sheetReadPeak, sheetReadsInFlight)
+        defer { sheetReadsInFlight -= 1 }
+        try await Task.sleep(for: .seconds(1))
+        return value()
+    }
     func controlCounts() -> (Int, Int) { (controlCount, abortCount) }
     func configuredModelIdentity() -> String { configuredModel.map { "\($0.provider)/\($0.id)" } ?? "none" }
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
@@ -383,7 +432,7 @@ private actor HostedHomeShellGateway {
             taskListReads += 1
             // Hold the real sheet's read at the socket boundary, not its view state.
             // Both Manage Home and its nested Tasks sheet must lay out before data.
-            if sheetState == "presentation-loading" { try await Task.sleep(for: .seconds(8)) }
+            if sheetState == "presentation-loading" { try await Task.sleep(for: .seconds(12)) }
             if sheetState == "tasks-error", taskListReads == 2 {
                 return (nil, .object(["code": .string("busy"), "message": .string("Task list unavailable"), "retryable": .bool(true)]))
             }
@@ -423,32 +472,9 @@ private actor HostedHomeShellGateway {
             taskDecisions[id] = result; controlCount += 1
             return (result, nil)
         case "home.chapterList":
-            return (.object([
-                "homeId": .string("home-fixture"), "generation": .number(1), "enabled": .bool(designated),
-                "limits": .object(["softBytes": .number(25_165_824), "softEntries": .number(50_000),
-                                    "hardBytes": .number(209_715_200), "hardEntries": .number(100_000)]),
-                "chapters": .array([
-                    .object(["sessionId": .string("home-chapter-sealed"), "ordinal": .number(1), "state": .string("sealed"),
-                             "createdAt": .string(isoAgo(40 * 86_400)), "sealedAt": .string(isoAgo(10 * 86_400)),
-                             "activationStarted": .bool(true), "sessionPresent": .bool(true),
-                             "bytes": .number(25_165_824), "entries": .number(50_001),
-                             "contents": .object(["firstAt": .string(isoAgo(40 * 86_400)), "lastAt": .string(isoAgo(10 * 86_400)),
-                                 "userMessages": .number(412), "homeReplies": .number(409), "tasksDelegated": .number(7),
-                                 "topics": .array([
-                                     .string("Planned the spring garden: raised beds along the south fence and Thursday reviews."),
-                                     .string("Booked the Lisbon trip for May and asked Home to watch for fare drops."),
-                                     .string("Reviewed the kitchen renovation quote and asked for a second countertop bid."),
-                                     .string("Settled the quarterly budget and moved savings into the travel fund."),
-                                     .string("Finished the settings model epic and delivered its report."),
-                                 ])])]),
-                    .object(["sessionId": .string("home-session"), "ordinal": .number(2), "state": .string("active"),
-                             "createdAt": .string(isoAgo(3 * 86_400)), "activationStarted": .bool(true),
-                             "sessionPresent": .bool(true), "bytes": .number(480), "entries": .number(12),
-                             "contents": .object(["firstAt": .string(isoAgo(3 * 86_400)), "lastAt": .string(isoAgo(3 * 60)),
-                                 "userMessages": .number(6), "homeReplies": .number(6), "tasksDelegated": .number(1),
-                                 "topics": .array([.string("Garden redesign")])])]),
-                ]),
-            ]), nil)
+            return (try await heldSheetRead { chapterListFixture() }, nil)
+        case "home.context":
+            return (try await heldSheetRead { contextProjection() }, nil)
         case "home.memory.view":
             browserReads += 1
             if browserState == "loading", browserReads == 1 { try? await Task.sleep(for: .seconds(4)) }
@@ -486,8 +512,6 @@ private actor HostedHomeShellGateway {
         case "session.prompt":
             promptRoutes.append("session.prompt:\(params["sessionId"]?.stringValue ?? "none")")
             return (nil, .object(["code": .string("conflict"), "message": .string("Sealed chapter refused"), "retryable": .bool(false)]))
-        case "home.context":
-            return (contextProjection(), nil)
         case "home.status":
             homeStatusCount += 1
             // Hold the actual response across native back navigation so a transient
@@ -613,7 +637,7 @@ private actor HostedHomeShellGateway {
             "group": .string("model"), "subgroup": .string("Workers"),
             "value": workerThinking == "sameAsHome" ? .object(["sameAs": .string("home")]) : .string(workerThinking),
             "display": .string(thinkingLabel), "layer": .string(workerThinking == "sameAsHome" ? "builtin" : "profile"),
-            "applied": .bool(true), "badges": .array([.object(["kind": .string("source"), "label": .string(workerThinking == "sameAsHome" ? "Built-in" : "Profile: Home")])]),
+            "applied": .bool(true), "badges": .array([.object(["kind": .string("source"), "label": .string(workerThinking == "sameAsHome" ? "Tron default" : "Set in Home profile")])]),
             "layers": .array([.object(["layer": .string("profile")]), .object(["layer": .string("builtin")])]),
             "presentation": .object(["label": .string("Worker thinking"), "help": .string("Thinking level for Home task workers."),
                 "order": .number(45), "importance": .string("essential"), "control": .string("choice"),
@@ -633,7 +657,7 @@ private actor HostedHomeShellGateway {
             "key": .string("model.ref[role=memory]"), "qualifiers": .object(["role": .string("memory")]),
             "group": .string("model"), "subgroup": .string("Memory"), "value": configuredModel.flatMap { try? JSONValue.encode($0) } ?? .null,
             "display": .string(memoryName), "layer": .string("profile"), "applied": .bool(true),
-            "badges": .array([.object(["kind": .string("source"), "label": .string("Profile: Home")])]),
+            "badges": .array([.object(["kind": .string("source"), "label": .string("Set in Home profile")])]),
             "layers": .array([.object(["layer": .string("profile")])]),
             "presentation": .object(["label": .string("Memory model"), "help": .string("Choose a memory model before sending."),
                 "order": .number(50), "importance": .string("essential"), "control": .string("catalog"),
@@ -721,7 +745,17 @@ private actor HostedHomeShellGateway {
         record["reportRef"] = id == "terminal" ? .object(["resultId": .string("report-one"), "sessionId": .string("worker-session"),
             "entryId": .string("report-entry"), "digest": .string(String(repeating: "b", count: 64))]) : .null
         record["intent"] = .object(["text": .string(id == "active"
-            ? "Continue epic #758 (settings model) on its integration branch. Implement the next slice, keep draft PR 798 updated, and do not merge."
+            ? """
+              Continue epic #758 (settings model) on its integration branch. Implement the next slice, keep draft PR 798 updated, and **do not merge**.
+
+              Steps:
+              - Merge `origin/main` into the integration branch first.
+              - Land the *layer badge* slice behind the existing schema.
+              - Run `scripts/tron work verify` before every push.
+              - Report the PR head and the journeys you ran.
+
+              Keep the settings model doc in step with each slice.
+              """
             : "Draft the email that summarises Thursday's garden review and send it for approval.")])
         record["operationId"] = .string("task-operation")
         let terminal = id == "terminal"
@@ -805,7 +839,7 @@ private actor HostedHomeShellGateway {
         [(0, 16), (16, 8), (24, 4), (28, 4), (32, 2)] + (34..<40).map { ($0, 1) }
     private static let memoryMessages: [(kind: String, text: String)] = [
         ("user", "Move the garden planning to Thursday reviews."),
-        ("talk", "Scheduled the garden review for Thursday at 10:00."),
+        ("talk", "Scheduled the **garden review** for Thursday at `10:00`."),
         ("echo", "Created calendar event: Garden review, Thursday 10:00."),
         ("event", "Task result: settings model epic #758 finished."),
         ("user", "Email me the Thursday summary."),

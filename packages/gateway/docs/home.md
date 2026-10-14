@@ -1641,16 +1641,29 @@ refuses with retryable `busy`.
 
 Every read proves the complete frozen Home cut through the per-chapter index before
 it returns anything, then fences the exact ledger, binding and
-memory revision after its awaits. The evidence reader keeps only the selected
-bounded line and re-proves its chapter prefix at use. It never opens a
+memory revision after its awaits. The evidence reader proves its chapter, then
+reads only the selected bounded line at its proven position and checks that
+line's own digest at use. It never opens a
 writer-capable `SessionManager`. Missing, changed or malformed sources yield no
 partial page or evidence, even when an earlier chapter was readable
 (`busy`, `home-memory-source-unavailable`). Unknown fields and malformed bounds are
 `invalid_request`. Source details, references and content are never
 logged. Both endpoints use the shared disposable read deadline. Cancellation never
-cancels a prompt or an accepted mutation. Proof streams raw lines but
-traverses the compact index, so its cost scales with the Home history, not only with
-the page size. No persisted format and no client cache is introduced.
+cancels a prompt or an accepted mutation.
+
+Proof cost does not grow with Home's history per read (#940). The memory owner
+keeps one in-memory proof per chapter (`HomeSourceProofs` in
+`episodic/home-source.ts`): the prefix digest and leaf re-derived from bytes, the
+file stat it was read under, and each entry's line position. A proof is reused
+while its file's stat is identical (the test sealed chapters are held to). An
+appended active chapter is extended over its new bytes only, after the line
+ending at the proven boundary still hashes to the proven leaf (ingestion's own
+append test); navigation or any other change re-proves the whole chapter. A
+proof runs once per chapter at a time and a cancelled read abandons only its
+wait, so a cold proof slower than the read deadline still completes for the
+retry. Activation's cut lookup shares the same proofs. Only the first read after
+a Gateway start proves all history from its first byte. No persisted format and
+no client cache is introduced.
 
 ## The terminal client
 
@@ -1739,6 +1752,7 @@ without a retained artifact.
 | `src/sessions/home-profile.integration.test.ts` | learn through a real activation with its evidence and unconfirmed state; verbatim injection with a byte-stable prompt; refine, supersede and retire lifecycles; refusals of retired and superseded items; a native confirmation and correction keep the item; the over-bound refusal; a worker receives the brief; Home chapters unobserved; ordinary sessions without the profile tool | `test-results/home-profile/report.json` | `npx vitest run src/sessions/home-profile.integration.test.ts` |
 | `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; a Chat-layer `tools.active` change restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |
+| `src/sessions/home-memory-browser-scale.e2e.test.ts` | memory browser at a large Home's scale (3 chapters, 1,200+ messages, ~68 MB canonical JSONL): first page, paging, chapter scope, part and evidence answer within a fifth of the read deadline and at least ten times faster than proving all history per read, with identical answers; a cancelled cold proof completes for the retry; a live append extends the proof and navigation re-proves it | `test-results/home-memory-browser-scale/report.json` | `npx vitest run src/sessions/home-memory-browser-scale.e2e.test.ts` |
 | `src/episodic/home-source.e2e.test.ts` | cross-chapter replay, restart, navigation and frozen-cut proof | `test-results/home-memory/continuity.json` | `npx vitest run src/episodic/home-source.e2e.test.ts` |
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on explicit/profile/Home values; profile model and thinking resolve independently, unsupported thinking is clamped, provenance is captured in the brief and worker Chat, direct Home dispatch inherits the live Home choice, Home’s context names its identity, unknown tasks return not_found, and ordinary chats retain their own defaults; unavailable profile models fall through; invalid explicit choices are refused before any task or session; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries plus a deterministically held empty-PID publication interval (positive identity before cancellation, unchanged reaping and no-further-effects assertions); frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |

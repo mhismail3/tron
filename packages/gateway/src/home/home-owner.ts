@@ -7,7 +7,7 @@ import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
 import { HomeTaskDispatcher, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest } from "./home-task-dispatcher.js";
 import type { HomeTaskSubagents } from "./home-task-subagents.js";
-import { HOME_CHAPTER_TOPIC_COUNT, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
+import { HOME_CHAPTER_TOPIC_COUNT, HOME_CHAPTER_TOPIC_LIST_CHARACTERS, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { HomeChapterList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryView, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
@@ -19,7 +19,7 @@ import { GatewayError } from "../errors.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { EPISODIC_DEFAULTS, EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { EpisodicSourceChangedError } from "../episodic/episodic-source.js";
-import { readCanonicalHomeDeltas, readCanonicalHomeIndex, readCanonicalHomeEvidence, type HomeSourceChapter, type HomeSourceSnapshot } from "../episodic/home-source.js";
+import { HomeSourceProofs, readCanonicalHomeDeltas, readCanonicalHomeIndex, readCanonicalHomeEvidence, type HomeSourceChapter, type HomeSourceSnapshot } from "../episodic/home-source.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durablePublishBoundedJson, isDurablePublicationUncertain, syncDurably } from "../util/durable-json.js";
@@ -198,7 +198,8 @@ export class HomeOwner {
    * slot lane while a Home lifecycle mutation owns `mutex`. */
   private readonly recordMutex = new AsyncMutex();
   /** One memory per Home session id, replacing the previous session's. */
-  private memory: { sessionId: string; owner: HomeMemory } | undefined;
+  /** `proofs` belongs to this owner: its chapter proofs never outlive it (#940). */
+  private memory: { sessionId: string; owner: HomeMemory; proofs: HomeSourceProofs } | undefined;
   /** One request seam per Home session id, so a runtime replacement reuses the
    * open activation rather than dropping it. A fork is a new id, hence a new
    * seam and no activation. */
@@ -707,9 +708,21 @@ export class HomeOwner {
     const memory = this.memory?.sessionId === record.homeId ? this.memory.owner : undefined;
     if (!memory) return new Map();
     try {
-      return await memory.browserRead(async episodic => new Map([...episodic.recentSummaries(
-        record.chapters.map(chapter => chapter.sessionId), HOME_CHAPTER_TOPIC_COUNT * 3)]
-        .map(([sessionId, summaries]) => [sessionId, [...new Set(summaries.map(homeChapterTopic).filter(Boolean))].slice(0, HOME_CHAPTER_TOPIC_COUNT)])));
+      const recent = await memory.browserRead(async episodic => episodic.recentSummaries(
+        record.chapters.map(chapter => chapter.sessionId), HOME_CHAPTER_TOPIC_COUNT * 3));
+      // Newest chapters first until the list's topic budget is spent; older chapters
+      // then carry no topics rather than an unbounded frame.
+      let budget = HOME_CHAPTER_TOPIC_LIST_CHARACTERS;
+      const topics = new Map<string, string[]>();
+      for (const chapter of [...record.chapters].reverse()) {
+        const chosen = [...new Set((recent.get(chapter.sessionId) ?? []).map(homeChapterTopic).filter(Boolean))]
+          .slice(0, HOME_CHAPTER_TOPIC_COUNT);
+        const characters = chosen.reduce((sum, topic) => sum + topic.length, 0);
+        if (characters > budget) break;
+        budget -= characters;
+        topics.set(chapter.sessionId, chosen);
+      }
+      return topics;
     } catch (error) {
       if (error instanceof GatewayError || error instanceof EpisodicMemoryError || error instanceof HomeMemoryRefusal) return new Map();
       throw error;
@@ -1184,12 +1197,12 @@ export class HomeOwner {
   }
 
   async memoryEvidence(evidence: HomeMemoryEvidence, offset: number, signal?: AbortSignal): Promise<HomeMemoryEvidencePage> {
-    return this.browserRead(async (memory, source) => {
+    return this.browserRead(async (memory, source, proofs) => {
       // Refuse arbitrary/cross-chapter references before opening evidence.
       memory.assertBrowserEvidence(evidence);
       const cursor = memory.browserCursor();
       if (!cursor) throw homeMemorySourceUnavailable();
-      const entry = await readCanonicalHomeEvidence(source, cursor, evidence, EPISODIC_DEFAULTS, signal);
+      const entry = await readCanonicalHomeEvidence(source, cursor, evidence, EPISODIC_DEFAULTS, signal, proofs);
       signal?.throwIfAborted();
       const { runtimeGeneration: _generation, entryId: _entryId, ...content } = historyEntry(
         { getEntry: id => id === entry.id ? entry.raw as unknown as SessionEntry : undefined },
@@ -1201,7 +1214,7 @@ export class HomeOwner {
 
   /** One read boundary proves every admitted chapter and fences both ledger
    * and memory revisions. No partial success, cursor registry or transcript cache. */
-  private async browserRead<T>(read: (memory: EpisodicMemory, source: HomeSourceSnapshot) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  private async browserRead<T>(read: (memory: EpisodicMemory, source: HomeSourceSnapshot, proofs: HomeSourceProofs) => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.mutex.run(async () => {
       signal?.throwIfAborted();
       this.assertAvailable();
@@ -1209,6 +1222,7 @@ export class HomeOwner {
       const model = await this.memoryProfile.model();
       if (!record || !model) throw new GatewayError("conflict", "Home memory is not configured");
       const owner = this.ownerFor(record.homeId);
+      const proofs = this.memory!.proofs;
       try {
         await owner.configure({ ...record.memory, model });
         signal?.throwIfAborted();
@@ -1219,9 +1233,9 @@ export class HomeOwner {
           signal?.throwIfAborted();
           // Consume to completion: a late chapter failure cannot publish an
           // earlier chapter as a complete page or exact evidence.
-          for await (const _entry of readCanonicalHomeIndex(source, cursor, EPISODIC_DEFAULTS, signal)) { /* proof only */ }
+          for await (const _entry of readCanonicalHomeIndex(source, cursor, EPISODIC_DEFAULTS, signal, proofs)) { /* proof only */ }
           signal?.throwIfAborted();
-          const result = await read(memory, source);
+          const result = await read(memory, source, proofs);
           signal?.throwIfAborted();
           if (this.record !== record || this.memory?.owner !== owner) throw homeMemoryRevisionChanged();
           return result;
@@ -1377,6 +1391,7 @@ export class HomeOwner {
     if (current && current.sessionId === homeId) return current.owner;
     if (current) void current.owner.dispose();
     const source = () => this.readHomeSource();
+    const proofs = new HomeSourceProofs();
     const owner = new HomeMemory({
       workspace: this.options.workspace,
       sessionId: homeId,
@@ -1393,13 +1408,13 @@ export class HomeOwner {
       },
       sessionSource: {
         read: async function* (cursor, limits) { yield* readCanonicalHomeDeltas(await source(), cursor, limits); },
-        branchAtCursor: async function* (cursor, limits) { yield* readCanonicalHomeIndex(await source(), cursor, limits); },
+        branchAtCursor: async function* (cursor, limits) { yield* readCanonicalHomeIndex(await source(), cursor, limits, undefined, proofs); },
       },
       modelSummarizer: this.options.memorySummarizer,
       isPaused: () => Boolean(this.record?.memory?.paused),
       ...(this.options.memoryDiagnostic ? { diagnostic: this.options.memoryDiagnostic } : {}),
     });
-    this.memory = { sessionId: homeId, owner };
+    this.memory = { sessionId: homeId, owner, proofs };
     return owner;
   }
 

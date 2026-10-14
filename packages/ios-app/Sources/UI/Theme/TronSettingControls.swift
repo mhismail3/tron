@@ -11,7 +11,7 @@ struct TronSettingsCaption: View {
     init(_ text: String, inset: CGFloat = 4) { self.text = text; self.inset = inset }
     var body: some View {
         Text(text)
-            .font(TronTypography.settingsSubtext(adjustment: TronSettingsLayoutPolicy.metadataSizeAdjustment))
+            .font(TronTypography.settingsRowSubtext)
             .foregroundStyle(Color.tronTextSecondary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -152,7 +152,7 @@ struct TronChecklistPicker<ID: Hashable>: View {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if let help { TronSettingsCaption(help).padding(.bottom, 4) }
                 if choices == nil {
-                    TronLoadingState(label: "Loading…").frame(maxWidth: .infinity, alignment: .leading)
+                    TronSheetLoadingState(label: "Loading…")
                 }
                 ForEach(choices ?? []) { choice in
                     let isChosen = chosen.contains(choice.id)
@@ -328,7 +328,7 @@ struct TronNumberSettingRow: View {
                     .multilineTextAlignment(.trailing)
                     .frame(width: 118)
                     .accessibilityLabel(title)
-                    .focused($focused)
+                    .tronTextEntryDone(keyboardToolbar: true, focus: $focused)
             }
             if invalid {
                 Text(Self.invalidInputMessage)
@@ -384,6 +384,7 @@ struct TronTextSettingRow: View {
                 .multilineTextAlignment(.trailing)
                 .frame(minWidth: 100, maxWidth: 220)
                 .accessibilityLabel(title)
+                .tronTextEntryDone()
         }
     }
 }
