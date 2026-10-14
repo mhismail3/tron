@@ -1,7 +1,6 @@
 import CryptoKit
 import Foundation
 import MacTerminalSSH
-import NIOSSH
 
 // The Mac Terminal journey's client: the app's own MacTerminalSSH code, driven
 // from a test against a real sshd. It is a test tool, never shipped.
@@ -46,14 +45,14 @@ case "keygen":
     let key = P256.Signing.PrivateKey()
     emit([
         "privateKeyPEM": key.pemRepresentation,
-        "publicKey": String(openSSHPublicKey: NIOSSHPrivateKey(p256Key: key).publicKey),
+        "publicKey": MacTerminalPrivateKey.software(key).openSSHPublicKey,
     ])
 case "connect":
     let request = try JSONDecoder().decode(ConnectRequest.self, from: FileHandle.standardInput.readDataToEndOfFile())
     let key = try P256.Signing.PrivateKey(pemRepresentation: request.privateKeyPEM)
     do {
         let session = try await MacTerminalClient.connect(
-            endpoint: request.endpoint, privateKey: NIOSSHPrivateKey(p256Key: key), columns: 80, rows: 24)
+            endpoint: request.endpoint, privateKey: .software(key), columns: 80, rows: 24)
         if let resize = request.resize, resize.count == 2 {
             session.resize(columns: resize[0], rows: resize[1])
         }

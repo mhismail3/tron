@@ -66,6 +66,24 @@ public enum MacTerminalError: Error, Equatable, Sendable, LocalizedError {
     }
 }
 
+/// The iPhone's client key. On a device it lives in the Secure Enclave and
+/// never leaves it; a software key exists only for the Simulator and the
+/// journey probe, neither of which has one.
+public enum MacTerminalPrivateKey: Sendable {
+    case secureEnclave(SecureEnclave.P256.Signing.PrivateKey)
+    case software(P256.Signing.PrivateKey)
+
+    var sshKey: NIOSSHPrivateKey {
+        switch self {
+        case .secureEnclave(let key): NIOSSHPrivateKey(secureEnclaveP256Key: key)
+        case .software(let key): NIOSSHPrivateKey(p256Key: key)
+        }
+    }
+
+    /// The `ecdsa-sha2-nistp256 AAAA…` line the Gateway writes to authorized_keys.
+    public var openSSHPublicKey: String { String(openSSHPublicKey: sshKey.publicKey) }
+}
+
 /// What the shell produces.
 public enum MacTerminalEvent: Sendable, Equatable {
     case output([UInt8])
@@ -148,7 +166,7 @@ public enum MacTerminalClient {
     /// stops at once: another address of the same Mac would answer the same.
     public static func connect(
         endpoint: MacTerminalEndpoint,
-        privateKey: NIOSSHPrivateKey,
+        privateKey: MacTerminalPrivateKey,
         columns: Int,
         rows: Int,
         term: String = "xterm-256color",
@@ -161,7 +179,7 @@ public enum MacTerminalClient {
         for host in endpoint.hosts {
             do {
                 return try await open(
-                    host: host, endpoint: endpoint, pinned: pinned, privateKey: privateKey,
+                    host: host, endpoint: endpoint, pinned: pinned, privateKey: privateKey.sshKey,
                     columns: columns, rows: rows, term: term, connectTimeout: connectTimeout
                 )
             } catch let error as MacTerminalError {

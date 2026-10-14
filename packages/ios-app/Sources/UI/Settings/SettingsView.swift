@@ -36,6 +36,10 @@ struct SettingsView: View {
                             ConnectionsSettingsView()
                         }
                         TronSettingsDivider()
+                        settingsLink("Mac Terminal", summary: "A shell on your Mac, even without the Gateway", icon: "apple.terminal") {
+                            MacTerminalSheet()
+                        }
+                        TronSettingsDivider()
                         settingsLink("Model Providers", summary: "Provider accounts and sign-in", icon: "key") {
                             ProvidersSettingsView(sessionID: nil)
                         }
