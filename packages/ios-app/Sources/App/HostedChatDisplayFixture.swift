@@ -865,7 +865,7 @@ private actor HostedHomeShellGateway {
         let updated = id == "active" ? now - 6 * 60_000 : now - 3 * 3_600_000
         return .object(["taskId": .string(id), "createdAt": .number(created), "updatedAt": .number(updated),
             "title": .string(id == "active" ? "Settings model: continue epic #758" : "Garden review email draft"), "project": .string("tron"),
-            "workerSessionId": .string("worker-session"), "target": .string("/trusted/project"),
+            "sessionId": .string("worker-session"), "target": .string("/trusted/project"),
             "lifecycle": .string(terminal ? "terminal" : "active"), "outcome": terminal ? .string(id == "active" ? "interrupted" : "final") : .null,
             "spend": taskSpend(), "attention": .bool(false), "pendingGrant": .bool(false)])
     }
@@ -1265,7 +1265,7 @@ enum HostedHomeDashboardWorkers {
             let active = session.phase.isActive
             return .object(["taskId": .string("task-\(session.id)"), "createdAt": .number(created),
                 "updatedAt": .number(created + 30_000), "title": .string(session.title), "project": .string("tron"),
-                "workerSessionId": .string(session.id), "target": .string(session.cwd),
+                "sessionId": .string(session.id), "target": .string(session.cwd),
                 "lifecycle": .string(active ? "active" : "terminal"), "outcome": active ? .null : .string("final"),
                 "attention": .bool(false), "pendingGrant": .bool(false)])
         }
