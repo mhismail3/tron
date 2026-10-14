@@ -2563,7 +2563,7 @@ final class TronSmokeUITests: XCTestCase {
     /// Sessions, Logs and Setup. There is no Data & Diagnostics group.
     @MainActor
     private func assertSettingsTopLevelOrder(_ app: XCUIApplication) {
-        let accounts = app.staticTexts["Accounts"]
+        let accounts = app.staticTexts["Accounts"].firstMatch
         for _ in 0..<12 where !accounts.isHittable { app.swipeDown() }
         let connections = app.buttons["settings-link-Connections"]
         XCTAssertTrue(connections.waitForExistence(timeout: 5), app.debugDescription)
@@ -2571,7 +2571,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertLessThan(connections.frame.minY, app.buttons["settings-link-Model Providers"].frame.minY,
                           "Accounts starts with Connections")
         keepScreenshot(named: "settings-top-level-1")
-        let iphone = app.staticTexts["This iPhone"]
+        let iphone = app.staticTexts["This iPhone"].firstMatch
         let rows = ["Push Notifications", "Appearance", "Sessions", "Logs", "Setup"].map { app.buttons["settings-link-\($0)"] }
         for _ in 0..<12 where !rows.last!.isHittable { app.swipeUp() }
         keepScreenshot(named: "settings-top-level-2")
@@ -2581,8 +2581,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Data & Diagnostics"].exists, "Data & Diagnostics merged into This iPhone")
         XCTAssertFalse(app.staticTexts["Stored on this iPhone. Never changes what the agent does."].exists,
                        "Logs and Setup reach the Mac, so the group makes no device-only promise")
-        for group in ["Accounts", "Agent", "Tools & Extensions", "More"] where app.staticTexts[group].exists {
-            XCTAssertLessThan(app.staticTexts[group].frame.minY, iphone.frame.minY, "This iPhone is the last group, after \(group)")
+        for group in ["Accounts", "Agent", "Tools & Extensions", "More"] where app.staticTexts[group].firstMatch.exists {
+            XCTAssertLessThan(app.staticTexts[group].firstMatch.frame.minY, iphone.frame.minY, "This iPhone is the last group, after \(group)")
         }
     }
 

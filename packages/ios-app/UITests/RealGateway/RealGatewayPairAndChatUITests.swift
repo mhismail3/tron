@@ -760,7 +760,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     /// Settings clarity (#939) against the real Gateway: Accounts leads with
-    /// Connections and its own Push Notifications row; provenance pills carry the
+    /// Connections, and Push Notifications is its own row leading This iPhone,
+    /// the last group (#956); provenance pills carry the
     /// Gateway's wording and name a per-model value's model; a text setting's
     /// return key reads Done, commits through the change path and dismisses the
     /// keyboard; an add-value row shows the schema's example and format. The kept
@@ -803,11 +804,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
         gear.tap()
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
-        // Accounts is the first group: Connections, then Push Notifications, then providers;
-        // the agent's own sections follow.
-        let order = ["settings-link-Connections", "settings-link-Push Notifications", "settings-link-Model Providers",
-                     "settings-section-model-open"].map { app.buttons[$0] }
-        XCTAssertTrue(order[3].waitForExistence(timeout: 30), app.debugDescription)
+        // Accounts is the first group: Connections, then providers; the agent's own
+        // sections follow, and This iPhone, led by Push Notifications, comes last.
+        let order = ["settings-link-Connections", "settings-link-Model Providers", "settings-section-model-open",
+                     "settings-link-Hooks", "settings-link-Push Notifications", "settings-link-Appearance",
+                     "settings-link-Logs", "settings-link-Setup"].map { app.buttons[$0] }
+        XCTAssertTrue(order[2].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(order.allSatisfy(\.exists), app.debugDescription)
         XCTAssertEqual(order.map(\.frame.minY), order.map(\.frame.minY).sorted(), "Settings must open with Accounts: \(order.map(\.frame))")
         XCTAssertTrue(app.staticTexts["Paired Macs and authorized devices"].exists, "Connections no longer offers push")
@@ -896,10 +898,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         dismissTopSheet(app) // Extensions
 
-        // Connections and the new Push Notifications sheet, in the Accounts accent.
+        // Connections (Accounts) and the Push Notifications sheet (This iPhone).
         for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Input needed", "push")] {
             let link = app.buttons["settings-link-\(title)"]
-            for _ in 0..<20 where !link.isHittable { app.swipeDown() }
+            for _ in 0..<20 where !link.isHittable {
+                if title == "Connections" { app.swipeDown() } else { app.swipeUp() }
+            }
             link.tap()
             func labelled(_ text: String) -> XCUIElement {
                 app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
