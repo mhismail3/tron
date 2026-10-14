@@ -8,7 +8,7 @@ struct SessionTerminalToolbarButton: View {
     let enabled: Bool
     let identifier: String
     /// The presenting sheet's title tint.
-    var accent: Color = .tronEmerald
+    var accent: SwiftUI.Color = .tronEmerald
     let action: () -> Void
 
     var body: some View {
