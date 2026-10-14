@@ -49,6 +49,11 @@ packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
     exactVersion: 1.16.0
+  # Mac Terminal's SSH client (swift-nio-ssh), a local package so its
+  # real-sshd journey (packages/gateway `npm run test:mac-terminal`) builds
+  # the same code on macOS.
+  MacTerminalSSH:
+    path: MacTerminalSSH
 
 configFiles:
   Development: Configuration/Development.xcconfig
@@ -159,6 +164,8 @@ targets:
           codeSign: true
           removeHeadersOnCopy: true
       - package: SwiftTerm
+      - package: MacTerminalSSH
+        product: MacTerminalSSH
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist

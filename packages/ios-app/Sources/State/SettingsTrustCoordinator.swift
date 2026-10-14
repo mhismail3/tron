@@ -84,6 +84,40 @@ final class SettingsTrustCoordinator {
         return inspection
     }
 
+    /// What Mac Terminal enrollment pins and dials (`macTerminal.status`).
+    func macTerminalStatus() async throws -> MacTerminalStatus {
+        let admittedProfileGeneration = profileGeneration
+        let value = try await client.requestValue("macTerminal.status", JSONValue.object([:]))
+        try requireProfile(admittedProfileGeneration)
+        return try value.decode(MacTerminalStatus.self)
+    }
+
+    /// This iPhone's Mac Terminal key is the Mac-layer key
+    /// `permissions.macTerminalKey` qualified by its device; enrolling and
+    /// revoking are ordinary logged changes, and the maintainer's tap that
+    /// sends one is its approval.
+    func setMacTerminalKey(device: String, publicKey: String?) async throws {
+        let admittedProfileGeneration = profileGeneration
+        let commandID = uuidSource.next().uuidString
+        var change: [String: JSONValue] = [
+            "key": .string("permissions.macTerminalKey"), "layer": .string("mac"),
+            "qualifiers": .object(["device": .string(device)]),
+        ]
+        if let publicKey { change["op"] = .string("set"); change["value"] = .string(publicKey) } else { change["op"] = .string("unset") }
+        let params: JSONValue = .object([
+            "commandId": .string(commandID),
+            "target": .object(["kind": .string("mac")]),
+            "changes": .array([.object(change)]),
+        ])
+        let value = try await mutationExecutor.performValue(method: "settings.change", commandID: commandID) {
+            try await client.requestValue("settings.change", params)
+        }
+        try requireProfile(admittedProfileGeneration)
+        guard value.objectValue?["status"]?.stringValue == "applied" else {
+            throw GatewayFailure(code: "conflict", message: "The Mac did not apply the Mac Terminal key change.", retryable: false, details: nil)
+        }
+    }
+
     func noteSettingsChanged() {
         settingsInvalidationGeneration &+= 1
     }

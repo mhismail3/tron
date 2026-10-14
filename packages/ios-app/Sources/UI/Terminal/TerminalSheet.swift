@@ -26,73 +26,36 @@ struct SessionTerminalToolbarButton: View {
 struct TerminalSheet: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @State private var controller = TerminalController()
     @State private var keyboard = TerminalKeyboardController()
     @State private var confirmQuit = false
 
-    private var terminalAccent: SwiftUI.Color { settingsTheme?.accent ?? .tronEmerald }
-
     var body: some View {
-        NavigationStack {
-            Group {
-                if let error = controller.error, controller.terminal == nil {
-                    ScrollView {
-                        TronPlaceholderState(title: "Terminal unavailable", detail: error,
-                                             icon: "terminal", accent: terminalAccent)
-                    }
-                    .scrollEdgeEffectStyle(.soft, for: .all)
-                } else if let terminal = controller.terminal {
-                    let replay = model.terminalReplay(for: terminal.id)
-                    NativeTerminal(
-                        chunks: replay.chunks,
-                        isInteractive: controller.isRunning(model: model),
-                        keyboard: keyboard,
-                        onSend: { controller.send($0, model: model) },
-                        onResize: { controller.resize(columns: $0, rows: $1, model: model) }
-                    )
-                    .id(TerminalRendererIdentity(
-                        terminalID: terminal.id,
-                        replayRevision: replay.revision
-                    ))
-                    .padding(.horizontal, 8)
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        if keyboard.isKeyboardPresented {
-                            TerminalControlBar(keyboard: keyboard)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
-                        }
-                    }
-                } else {
-                    TronSheetLoadingState(label: "Connecting terminal…", accent: terminalAccent)
+        TerminalSheetChrome(title: "Terminal", phase: controller.connectionPhase, keyboard: keyboard) { accent in
+            if let error = controller.error, controller.terminal == nil {
+                ScrollView {
+                    TronPlaceholderState(title: "Terminal unavailable", detail: error,
+                                         icon: "terminal", accent: accent)
                 }
+                .scrollEdgeEffectStyle(.soft, for: .all)
+            } else if let terminal = controller.terminal {
+                let replay = model.terminalReplay(for: terminal.id)
+                TerminalSurface(
+                    chunks: replay.chunks,
+                    isInteractive: controller.isRunning(model: model),
+                    keyboard: keyboard,
+                    onSend: { controller.send($0, model: model) },
+                    onResize: { controller.resize(columns: $0, rows: $1, model: model) }
+                )
+                .id(TerminalRendererIdentity(
+                    terminalID: terminal.id,
+                    replayRevision: replay.revision
+                ))
+            } else {
+                TronSheetLoadingState(label: "Connecting terminal…", accent: accent)
             }
-            .tronTopBlurSurface()
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { terminalMenu }
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 7) {
-                        Circle().fill(controller.connectionPhase.color).frame(width: 7, height: 7)
-                        Text("Terminal")
-                            .font(TronTypography.button)
-                            .foregroundStyle(terminalAccent)
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Terminal")
-                    .accessibilityValue(controller.connectionPhase.label)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .tronToolbarAction()
-                    }
-                    .accessibilityLabel("Done")
-                }
-            }
+        } menu: {
+            terminalMenu
         }
         .task {
             controller.start(sessionID: sessionID, model: model)
@@ -108,11 +71,6 @@ struct TerminalSheet: View {
             isPresented: $confirmQuit,
             identity: "terminal.quit-confirmation"
         )
-        .tronTopBlur(.sheet)
-        .presentationDetents([.large])
-        .presentationDragIndicator(.hidden)
-        .tint(terminalAccent)
-        .animation(.easeOut(duration: 0.16), value: keyboard.isKeyboardPresented)
     }
 
     private var openTerminals: [TerminalSummary] {
@@ -123,8 +81,8 @@ struct TerminalSheet: View {
         controller.history.filter { $0.exitedAt != nil || model.terminalHasExited($0.id) }
     }
 
+    @ViewBuilder
     private var terminalMenu: some View {
-        Menu {
             if !controller.isRunning(model: model) {
                 Button("Open Live Terminal", systemImage: "terminal") {
                     controller.openLive(model: model)
@@ -154,11 +112,92 @@ struct TerminalSheet: View {
             }
             Button("Quit Terminal", role: .destructive) { confirmQuit = true }
                 .disabled(!controller.isRunning(model: model))
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(TronTypography.buttonSM)
-                .tronToolbarAction()
+    }
+}
+
+/// The one terminal sheet chrome: the session terminal (Manage Session and
+/// Manage Home) and Mac Terminal (Settings) share its title with the phase dot,
+/// options menu, Done button, top blur and detents, so the two read as one
+/// component. Content supplies the emulator or a placeholder.
+struct TerminalSheetChrome<Content: View, MenuContent: View>: View {
+    let title: String
+    let phase: TerminalConnectionPhase
+    let keyboard: TerminalKeyboardController
+    @ViewBuilder let content: (SwiftUI.Color) -> Content
+    @ViewBuilder let menu: () -> MenuContent
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    private var accent: SwiftUI.Color { settingsTheme?.accent ?? .tronEmerald }
+
+    var body: some View {
+        NavigationStack {
+            Group { content(accent) }
+                .tronTopBlurSurface()
+                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu { menu() } label: {
+                            Image(systemName: "ellipsis")
+                                .font(TronTypography.buttonSM)
+                                .tronToolbarAction()
+                        }
+                        .accessibilityLabel("\(title) options")
+                    }
+                    ToolbarItem(placement: .principal) {
+                        HStack(spacing: 7) {
+                            Circle().fill(phase.color).frame(width: 7, height: 7)
+                            Text(title)
+                                .font(TronTypography.button)
+                                .foregroundStyle(accent)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(title)
+                        .accessibilityValue(phase.label)
+                        .accessibilityIdentifier("terminal-sheet-title")
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button { dismiss() } label: {
+                            Image(systemName: "checkmark")
+                                .font(TronTypography.buttonSM)
+                                .tronToolbarAction()
+                        }
+                        .accessibilityLabel("Done")
+                    }
+                }
         }
-        .accessibilityLabel("Terminal options")
+        .tronTopBlur(.sheet)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.hidden)
+        .tint(accent)
+        .animation(.easeOut(duration: 0.16), value: keyboard.isKeyboardPresented)
+    }
+}
+
+/// The emulator with the session terminal's padding and keyboard control bar.
+struct TerminalSurface: View {
+    let chunks: [TerminalChunk]
+    let isInteractive: Bool
+    let keyboard: TerminalKeyboardController
+    let onSend: (ArraySlice<UInt8>) -> Void
+    let onResize: (Int, Int) -> Void
+
+    var body: some View {
+        NativeTerminal(
+            chunks: chunks,
+            isInteractive: isInteractive,
+            keyboard: keyboard,
+            onSend: onSend,
+            onResize: onResize
+        )
+        .padding(.horizontal, 8)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if keyboard.isKeyboardPresented {
+                TerminalControlBar(keyboard: keyboard)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
     }
 }
