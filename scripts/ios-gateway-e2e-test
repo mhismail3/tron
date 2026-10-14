@@ -523,7 +523,9 @@ const textOf = (message) => typeof message?.content === "string" ? message.conte
 const codemodeTurn = (context) => {
   const last = context.messages.at(-1);
   if (last?.role === "toolResult" && last.toolName === "codemode") {
-    return fauxAssistantMessage("Codemode question answered: " + textOf(last).replace(/[ \n\t]+/g, " ").slice(0, 200));
+    const output = textOf(last);
+    const choice = ["Approve it", "Hold it"].find((label) => output.includes('"' + label + '"'));
+    return fauxAssistantMessage("Codemode question answered: " + (choice ?? "no answer in: " + output.replace(/[ \n\t]+/g, " ").slice(-200)));
   }
   if (last?.role === "user" && textOf(last).includes(CODEMODE_MARKER)) {
     return fauxAssistantMessage([fauxToolCall("codemode", { code: 'text(await tools.ask_user({ title: "Codemode approval", questions: [{ header: "Approve", question: "Approve the codemode step?", options: [{ label: "Approve it" }, { label: "Hold it" }] }] }));' }, { id: "e2e-codemode-ask" })], { stopReason: "toolUse" });
