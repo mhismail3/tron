@@ -36,6 +36,8 @@ struct SettingsView: View {
                             ConnectionsSettingsView()
                         }
                         TronSettingsDivider()
+                        MacTerminalSettingsRow()
+                        TronSettingsDivider()
                         settingsLink("Model Providers", summary: "Provider accounts and sign-in", icon: "key") {
                             ProvidersSettingsView(sessionID: nil)
                         }

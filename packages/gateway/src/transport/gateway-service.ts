@@ -1,3 +1,4 @@
+import type { MacTerminalHost } from "../security/mac-terminal.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { offLoop, stage } from "./request-span.js";
 import { join } from "node:path";
@@ -386,6 +387,9 @@ export interface GatewayServiceDependencies {
   settingsModel: SettingsModel;
   /** The settings model's one change path, with its record. */
   settingsChanges: SettingsChangePath;
+  /** Mac Terminal's enrollment facts (security/mac-terminal.ts); absent in a
+   * Gateway that owns no ~/.ssh. */
+  macTerminal?: MacTerminalHost;
   modelConfig: ModelConfigService;
   packages: PackageService;
   /** Session-free hook listings for a scope; never opens or registers a session. */
@@ -1092,6 +1096,19 @@ export class GatewayService {
       case "device.revoke": {
         const deviceId = string(params.deviceId, "deviceId", { max: 100 });
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(deviceId, async () => {
+          // A revoked iPhone loses its Mac Terminal key too, through the same
+          // logged change path as a revocation from the Mac Terminal screen.
+          // The key goes first: if removing it fails, the device stays paired
+          // and the revoke can be retried, rather than a revoked iPhone keeping
+          // a working SSH key.
+          if ((await this.dependencies.settingsModel?.macTerminalKeys?.read())?.[deviceId] !== undefined) {
+            await this.dependencies.settingsChanges.change({ kind: "mac" }, [{
+              key: "permissions.macTerminalKey", qualifiers: { device: deviceId }, layer: "mac", op: "unset",
+            }], {
+              actor: { kind: "ui", id: client.identity }, reason: "The paired device was revoked",
+              commandId: `${string(params.commandId, "commandId", { min: 8, max: 120 })}:mac-terminal`,
+            });
+          }
           await this.dependencies.notifications?.removeDevice(deviceId);
           const revoked = await this.dependencies.devices.revoke(deviceId, () => client.revokeDevice(deviceId));
           if (revoked) await this.iosDeviceInstallService.removeDevice(deviceId);
@@ -2149,6 +2166,12 @@ export class GatewayService {
           return { loggedOut: true };
         });
 
+      case "macTerminal.status": {
+        rejectUnknownFields(params, [], method);
+        if (!this.dependencies.macTerminal) throw new GatewayError("unsupported", "Mac Terminal is not available on this Gateway");
+        if (client.isLocal) throw new GatewayError("invalid_request", "Mac Terminal enrolls a paired iPhone");
+        return safeJson(await this.dependencies.macTerminal.status(client.identity));
+      }
       case "settings.resolve": {
         rejectUnknownFields(params, ["target", "keys", "renderer"], method);
         const target = await this.canonicalSettingsTarget(params.target);
@@ -2174,6 +2197,12 @@ export class GatewayService {
           const target = await this.canonicalSettingsTarget(params.target);
           if (!Array.isArray(params.changes)) throw new GatewayError("invalid_request", "changes must be an array");
           const changes = params.changes.map((raw, index) => settingsChangeRequest(raw, `changes[${index}]`));
+          // An iPhone enrolls only its own Mac Terminal key, so revoking a
+          // device always finds and removes the key that device can use.
+          if (changes.some(change => change.key === "permissions.macTerminalKey" && change.op === "set"
+            && change.qualifiers?.device !== client.identity)) {
+            throw new GatewayError("invalid_request", "An iPhone can enroll only its own Mac Terminal key");
+          }
           const session = target.kind === "session"
             ? await this.settingsSession(await this.openedSlot(client, { sessionId: target.sessionId }), target.sessionId, params.fence, workToken)
             : undefined;

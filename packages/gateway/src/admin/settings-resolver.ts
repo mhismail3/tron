@@ -69,6 +69,8 @@ export interface SettingsStores {
   mac: Record<string, unknown>;
   /** Saved trust decisions by canonical project path. */
   trust: Record<string, boolean>;
+  /** Mac Terminal keys in ~/.ssh/authorized_keys, by paired device id. */
+  macTerminal: Record<string, string>;
   /** The maintainer's floor overrides (Mac policy, doc 5.4). */
   floors: FloorOverrides;
   /** Outside-change marks by layer and key instance (doc 5.6). */
@@ -173,6 +175,8 @@ export function readBinding(stores: SettingsStores, layer: LayerId, binding: Bin
       return qualifiedOnly ? undefined : stores.homeMemory;
     case "trust":
       return qualifiers.project === undefined ? undefined : nearestTrustDecision(stores.trust, qualifiers.project);
+    case "mac-terminal":
+      return qualifiers.device === undefined ? undefined : stores.macTerminal[qualifiers.device];
     case "floors":
       // A key with one floor keeps both directions equal, so widen reads it.
       return qualifiers.key === undefined ? undefined
@@ -264,6 +268,10 @@ function instances(key: KeyDeclaration, target: SettingsTarget, stores: Settings
   if (key.qualifier === "key") {
     // Floors are Mac policy only the maintainer's tap writes; they appear on the Mac target.
     return target.kind === "mac" ? floorInstances().map(instance => ({ ...fixed, ...instance })) : [];
+  }
+  if (key.qualifier === "device") {
+    // Mac policy: the enrolled iPhones appear on the Mac target only.
+    return target.kind === "mac" ? Object.keys(stores.macTerminal).sort().map(device => ({ ...fixed, device })) : [];
   }
   if (key.qualifier === "project") {
     if (target.kind === "project" || target.kind === "session") return stores.project ? [{ ...fixed, project: stores.project.root }] : [];

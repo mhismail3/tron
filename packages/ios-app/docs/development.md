@@ -1081,6 +1081,11 @@ The other real-boundary owners are:
 
 - `scripts/ios-gateway-e2e-test all` runs `TronMobileE2ETests`
   (`RealGatewayPiBoundaryTests`) against a real Gateway fixture.
+- `scripts/ios-mac-terminal-journey` runs `TronMacTerminalUITests` against a
+  real OpenSSH sshd on this Mac's Tailscale address (it needs the Mac on its
+  tailnet; build first with `scripts/tron-ios-test build`). Its Gateway side is
+  `npm run test:mac-terminal` in `packages/gateway`. See
+  [Mac Terminal](architecture.md#mac-terminal).
 - `scripts/ios-gateway-e2e-test run-ui` runs the real-app journeys in
   `UITests/RealGateway`, each against a fresh fixture. The focused
   `TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground`

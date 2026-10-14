@@ -71,6 +71,8 @@ export interface TailscaleStatus {
   readonly cli: string;
   /** `Self.TailscaleIPs`, as the status document reported them. */
   readonly self: readonly string[];
+  /** `Self.DNSName`, the MagicDNS name (with Tailscale's trailing dot). */
+  readonly selfDNSName?: string;
   readonly peers: readonly TailscalePeer[];
 }
 
@@ -109,15 +111,18 @@ export async function readTailscaleStatus(run: BoundedCommand, timeoutMs: number
       const parsed: unknown = JSON.parse(result.output);
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
       const document = parsed as { Self?: unknown; Peer?: unknown };
-      const selfValue = document.Self !== null && typeof document.Self === "object" && !Array.isArray(document.Self)
-        ? (document.Self as { TailscaleIPs?: unknown }).TailscaleIPs
+      const selfDocument = document.Self !== null && typeof document.Self === "object" && !Array.isArray(document.Self)
+        ? document.Self as { TailscaleIPs?: unknown; DNSName?: unknown }
         : undefined;
+      const selfValue = selfDocument?.TailscaleIPs;
+      const selfDNSName = typeof selfDocument?.DNSName === "string" && selfDocument.DNSName.length > 0 ? selfDocument.DNSName : undefined;
       const peerValue = document.Peer;
       return {
         ok: true,
         status: {
           cli: candidate,
           self: Array.isArray(selfValue) ? selfValue.filter((address): address is string => typeof address === "string") : [],
+          ...(selfDNSName ? { selfDNSName } : {}),
           peers: peerValue !== null && typeof peerValue === "object" && !Array.isArray(peerValue)
             ? Object.values(peerValue as Record<string, unknown>).filter(isPeer)
             : [],

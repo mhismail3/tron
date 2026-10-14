@@ -3588,6 +3588,46 @@ reordering a contributor does not leave stale fields behind or disturb built-in
 providers. Project-scoped package and settings changes do not reload or mutate the
 global provider runtime.
 
+### Mac Terminal
+
+Mac Terminal gives the iPhone a login shell on this Mac that does not depend on
+the Gateway: it connects with SSH to macOS Remote Login (the built-in sshd) over
+Tailscale, so it keeps working while Tron.app or the Gateway is quit, crashed or
+being replaced. The Gateway's only part is enrollment and revocation
+(`src/security/mac-terminal.ts`):
+
+- **`macTerminal.status`** (paired iPhones only, no parameters) returns the login
+  `username`, `port` (22), `hosts` (MagicDNS name, then Tailscale addresses, from
+  `tailscale status`), `hostKeys` (`/etc/ssh/ssh_host_{ed25519,ecdsa}_key.pub`),
+  `remoteLogin` (`on`/`off`/`unknown` from one bounded loopback connect to the
+  port; Tron never changes Remote Login) and whether this device is `enrolled`.
+- **The key** is the Mac-layer setting `permissions.macTerminalKey`, qualified
+  by `device`, stored as one line of `~/.ssh/authorized_keys`:
+  `from="100.64.0.0/10,fd7a:115c:a1e0::/48",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc ecdsa-sha2-nistp256 … tron-mac-terminal:<device> …`.
+  Only an `ecdsa-sha2-nistp256` key (the iPhone's Secure Enclave key) is
+  admitted. Adding one is a widening with an `approve` floor: the maintainer's
+  own tap applies it, any agent's request waits for his approval. Removing one
+  is `notify`. An iPhone may enroll only its own device id. Every change goes
+  through `settings.change` and the record, like any other setting.
+- **The file** is the store: Tron rewrites it atomically under its own lock,
+  keeps every other line byte for byte, writes mode 0600, and refuses a symlinked,
+  non-regular or oversized file. A line deleted by hand on the Mac is simply a
+  revoked key, with or without the Gateway.
+- **Revocation** is the key unset from the iPhone's Mac Terminal menu or by any
+  chat's `settings` tool on the Mac, deleting the line by hand, or revoking the
+  paired device: `device.revoke` removes the device's key first and refuses the
+  revoke if that fails, so a revoked iPhone never keeps a working key.
+
+The iPhone pins the reported host keys at enrollment and refuses any other key
+with its fingerprint; see the iOS architecture's
+[Mac Terminal](../ios-app/docs/architecture.md#mac-terminal). The journey
+`npm run test:mac-terminal` (it needs this Mac on its tailnet and Swift 6.2)
+enrolls through a real Gateway into a real sshd's `authorized_keys` and logs in
+with the app's own SSH client: success with PTY resize, login with the Gateway
+gone, host-key mismatch, the `from=` restriction, revocation from the iPhone and
+by device revoke, and Remote Login off. Its transcript is
+`test-results/mac-terminal.json`.
+
 ### Project root
 
 The Project layer is the `.pi/` of a chat's Project root, even for a chat started

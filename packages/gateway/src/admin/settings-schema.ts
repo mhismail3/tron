@@ -1,5 +1,6 @@
 import { GatewayError } from "../errors.js";
 import { COMPACTION_POLICY_INSTRUCTION_LIMIT } from "../runtime/compaction-policy.js";
+import { validateMacTerminalKey } from "../security/mac-terminal.js";
 import { boolean, integer, object, string, arrayOfStrings } from "../util/validation.js";
 import {
   type Control, type Direction, type Effect, type LayerId, type QualifierName, type Tier, type Timing, type ValueType, type Writer,
@@ -43,6 +44,9 @@ export type Binding =
   | { store: "profile"; path: readonly string[] }
   | { store: "home-memory" }
   | { store: "trust" }
+  /** `~/.ssh/authorized_keys`, the Tron lines only (security/mac-terminal.ts):
+   * one Mac Terminal key per paired iPhone, qualified by `device`. */
+  | { store: "mac-terminal" }
   /** `<tronHome>/gateway/settings/floors.json`: the maintainer's floor
    * overrides, `{ [keyId]: { widen?, narrow? } }` (doc 5.4). */
   | { store: "floors" };
@@ -370,6 +374,26 @@ export const KEYS: readonly KeyDeclaration[] = [
     layers: { mac: { store: "trust" } }, timing: "live", effect: "reload", floor: { widen: "approve", narrow: "notify" }, direction: grants,
     writers: ["ui", "home"], label: "Trust for this project", help: "Lets this project's extensions, hooks and settings load.",
     order: 10, importance: "essential", control: "toggle", confirm: "Trusting a project runs its extensions and hooks.",
+  },
+  {
+    // A paired iPhone's Mac Terminal key: its line in ~/.ssh/authorized_keys.
+    // Adding one lets that iPhone's Secure Enclave key log in over Tailscale,
+    // so it is a credential addition (approve); removing it is a revocation.
+    id: "permissions.macTerminalKey", group: "permissions", subgroup: "Mac Terminal", qualifier: "device",
+    type: {
+      kind: "text",
+      validate: (value: unknown, label: string) => validateMacTerminalKey(value, label),
+      format: (value: unknown) => {
+        const blob = String(value).split(" ")[1] ?? "";
+        return `ECDSA P-256 key …${blob.slice(-12)}`;
+      },
+    },
+    layers: { mac: { store: "mac-terminal" } }, timing: "live", effect: "next-change",
+    floor: { widen: "approve", narrow: "notify" }, direction: (_before, after) => after === undefined ? "narrow" : "widen",
+    writers: ANY_ACTOR, label: "Mac Terminal key",
+    help: "Lets this paired iPhone open a shell on the Mac over Tailscale through Remote Login, even when the Gateway is not running.",
+    order: 15, importance: "advanced", control: "readOnly",
+    confirm: "This iPhone's key will be added to ~/.ssh/authorized_keys and can log in to your Mac account over Tailscale.",
   },
   {
     id: "permissions.defaultProjectTrust", group: "permissions",

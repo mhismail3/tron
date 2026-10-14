@@ -551,6 +551,7 @@ Provenance is not a field. It is part of every resolved value
 | `tools.active` | tools | | chat → active tool set; profile; project/mac → `defaultTools` | fixed / next-turn | notify / quiet | ui, home, agent |
 | `tools.codemode.mode` | tools | | project/mac → `codemode.mode` | fixed / new-chat | notify / quiet | ui, home |
 | `permissions.projectTrust` | permissions | `project` | mac → `trust.json` | narrow live, widen live once approved | approve / notify | ui, home |
+| `permissions.macTerminalKey` | permissions | `device` | mac → `~/.ssh/authorized_keys` (the `tron-mac-terminal:<device>` line; [Mac Terminal](../README.md#mac-terminal)) | live | approve / notify | ui, home, agent, worker (an iPhone sets only its own device) |
 | `permissions.defaultProjectTrust` | permissions | | mac → `defaultProjectTrust` | live | approve / notify | ui |
 | `permissions.connectionWrite` | permissions | `connection` | mac → connections policy | narrow live | approve / quiet | ui |
 | `permissions.budget.task` | permissions | | profile | narrow live | approve / quiet | ui, home |
