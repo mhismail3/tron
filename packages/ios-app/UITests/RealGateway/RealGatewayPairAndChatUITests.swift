@@ -690,9 +690,13 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // Context: Summary instructions commits on the keyboard's Done and the keyboard goes away.
         openSettingsSection(app, "context")
         keepScreenshot(app, name: "939-context-pills")
-        let field = revealedElement(app, where: NSPredicate(format: "label == %@ AND elementType == %d",
-                                                             "Summary instructions", XCUIElement.ElementType.textField.rawValue))
-        XCTAssertNotNil(field, "Summary instructions has no field: \(app.debugDescription)")
+        // The settings row combines its labels, so the field is found inside its row.
+        let instructionsRow = settingRow(app, key: "context.compaction.instructions")
+        XCTAssertTrue(instructionsRow.waitForExistence(timeout: 30), app.debugDescription)
+        let field: XCUIElement? = instructionsRow.textFields.firstMatch
+        for _ in 0..<10 where !(field?.isHittable ?? false) { app.swipeUp() }
+        XCTAssertTrue(field?.isHittable ?? false, "Summary instructions has no field: \(app.debugDescription)")
+        XCTAssertEqual(field?.placeholderValue, "Keep file paths and open decisions.", "the field shows the schema's example")
         field?.tap()
         let keyboard = app.keyboards.firstMatch
         XCTAssertTrue(keyboard.waitForExistence(timeout: 10), "the field did not raise the keyboard")
@@ -706,9 +710,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             let compaction = (try? self.macSettingsDocument(fixture.agentDirectory))?["compaction"] as? [String: Any]
             return compaction?["instructions"] as? String == "Keep file paths."
         }, "Done must commit Summary instructions through the change path to the Mac settings.json")
-        let instructions = settingRow(app, key: "context.compaction.instructions")
-        XCTAssertTrue(waitForBadge(instructions, schema.label(for: "mac"), timeout: 30),
-                      "the committed value is set on the Mac: \(badgeLabels(instructions))")
+        XCTAssertTrue(waitForBadge(instructionsRow, schema.label(for: "mac"), timeout: 30),
+                      "the committed value is set on the Mac: \(badgeLabels(instructionsRow))")
         keepScreenshot(app, name: "939-text-field-committed")
         dismissTopSheet(app)
 
