@@ -738,19 +738,23 @@ run from the task result alone, so it carries none).
 
 Home keeps what the maintainer taught it as Knowledge notes (#731, epic #734). The
 Knowledge owner is the only store: there is no Home-side profile file, cache or
-timer. The `profile` tool is the only writer, and every change is one Knowledge note
-mutation.
+timer. Home's `profile` tool and the maintainer's `home.profileChange` are the two
+writers, and they share one implementation, `HomeProfileItems`
+(`home-profile.ts`). Both run through the settings change path, which records each
+change and makes it undoable ([settings-model.md 6.4](settings-model.md#64-learned-profile-changes)).
 
 - **Membership.** A personal-scope note is a profile item when it carries the
   `home-profile` label and exactly one `kind-<kind>` label, where kind is
   `preference`, `standing-decision`, `delegation-default` or `fact`. Provenance never
   decides membership: it changes when the maintainer edits a note natively.
-- **Writes.** `profile` takes `learn(kind, text)`, `refine(id, text)`,
-  `supersede(id, kind, text)` and `retire(id, reason)`, plus an optional `reason` on
-  refine and supersede. Every write carries provenance `actor: agent`, `source: home`,
-  the Home chapter session, and a `sessionEntry` citation of the last maintainer
-  message on the chat's branch, the message the turn answers. Items are always written
-  unconfirmed. Only Knowledge's native confirmation owner sets `confirmed`. The tool
+- **Writes.** `profile` takes `learn(kind, text)`, `refine(id, text?, kind?)` (at
+  least one of the two; a kind change keeps the note), `supersede(id, kind, text)` and
+  `retire(id, reason)`, plus an optional `reason` on refine and supersede. Every write
+  carries provenance `actor: agent`, `source: home`, the Home chapter session, and a
+  `sessionEntry` citation of the last maintainer message on the chat's branch, the
+  message the turn answers. Home's items are always written unconfirmed. The
+  maintainer's own changes (`confirm`, `refine`, `supersede`, `retire` from Manage
+  Home) are written confirmed, with provenance `actor: user`, `source: home-profile`. The tool
   result states what was saved, and the call is a visible transcript entry. Its details
   are `saved` (with the note `id`, `revisionId`, `kind`, `supersededId` and, for refine,
   supersede and retire, the replaced item's `previousText`), `refused` with its `reason`,
@@ -784,6 +788,12 @@ mutation.
 - **Read.** `home.profileList` answers every profile note through the same classifier
   (id, revision, kind, text, confirmed, status, timestamps, plus the `unclassified`
   count) for Manage Home's Profile row. It is read-only and needs a Knowledge owner.
+- **Maintainer changes.** `home.profileChange` takes typed ops, each with the
+  `expectedRevision` the maintainer read. A note Home changed since is refused with
+  `conflict`, and `details.current` holds the item as it now stands; nothing is
+  overwritten. Each change, Home's included, is a `home.profile.item` record entry in
+  Changes, and `settings.undo` reverts it. Changes apply from Home's next activation,
+  because the section is read from Knowledge then.
 - **Native edits.** iOS and the Mac dashboard save notes from typed drafts that do not
   model labels or retirement. The Knowledge owner keeps `tags` and `retired` when an
   update or correction omits them, so a native confirmation, edit or correction keeps
@@ -1532,7 +1542,9 @@ vocabulary.
 owner. `home-memory-view.v1`
 additionally gates the memory-browser reads below, and `home-chapter-list.v1`
 gates `home.chapterList`; `home.v1` alone promises neither. `home-profile-list.v1`
-gates `home.profileList` and is advertised only with a Knowledge owner. Parameter objects are
+gates `home.profileList`, and `home-profile-edit.v1` gates `home.profileChange` and the
+undo of profile entries; both are advertised only with a Knowledge owner. Without the
+edit capability, iOS keeps the Profile sheet read-only. Parameter objects are
 strict: unknown fields are `invalid_request`. **Receipted** mutations carry a
 `commandId` and use the bounded receipt
 described in [Logical route and receipts](#logical-route-and-receipts).
@@ -1544,6 +1556,7 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.open` | none | read | Logical route and binding. Creates no runtime and materializes no successor. |
 | `home.chapterList` | none | read | The whole chapter ledger in ledger order, each chapter with state, `createdAt`, `sealedAt?`, `activationStarted`, `sessionPresent` and metrics, plus the shared soft and hard rollover limits (`home-chapter-list.v1`, #740). Each chapter also carries `contents` ([Chapter contents](#chapter-contents)). Sealed chapters answer exactly their recorded seal metrics (a disable-sealed chapter has none); only the active chapter is measured live, and only while its session is present, so absent sizes mean unmeasured, never zero. Undesignated refuses `not_found`; an unavailable record refuses `conflict`, never a partial list. A disabled Home still lists its chapters. |
 | `home.profileList` | none | read | The learned profile ([The learned profile](#the-learned-profile)): every profile note with `id`, `revisionId`, `kind`, `text`, `confirmed`, `status` (`active`, `superseded`, `retired`), `createdAt` and `updatedAt` in Home's order, plus `unclassified` (`home-profile-list.v1`). A Gateway without Knowledge refuses `unsupported`. |
+| `home.profileChange` | `commandId`, `changes` (1–50 of `{ action: confirm\|refine\|supersede\|retire, id, expectedRevision, text?, kind?, reason? }`) | receipted | The maintainer's learned-profile changes ([The learned profile](#the-learned-profile)), applied in order through the settings change path as one undoable group. Refine needs `text` or `kind`; supersede needs both. Returns `{ status, tier, changes, saved, items }`: `changes` are the record entries (one per touched note, key `home.profile.item`, qualifier `note`), and `items` are the changed items as `home.profileList` lists them. A stale `expectedRevision`, or an item that is no longer active, refuses `conflict` with `details.current`; a failure part-way rolls back the ops already applied (`home-profile-edit.v1`). |
 | `home.prompt` | `commandId`, `text`, `uploadIds` (at most 10, into the resolved chapter), `behavior` (`steer` or `followUp` while a turn runs), `resourceInvocation` | receipted | The composer's whole prompt contract, admitted by the same code as `session.prompt`. Returns the physical session and operation. |
 | `home.designate` | `commandId`, `model?` | receipted | With no record: creates the working directory and its trust decision, a **new** session whose first runtime has the Home profile, applies the model, writes the record, and returns `{ homeId, sessionId, generation }`. An enabled record whose session still exists is idempotent when the model is absent or matches; a different model refuses with a conflict directing to `settings.change`. A disabled record re-enables the same session at `generation + 1`, preserving any `reserved` or `materializing` successor for the next `home.prompt`. A record whose session is **gone** is given a fresh session at `generation + 1`, enabled or not: the record is the only evidence of the designation, and the dangling ID is never re-enabled. |
 | `home.disable` | `commandId` | receipted | `enabled: false` at `generation + 1`. The session stays ordinary. A record whose session is gone is only marked disabled. |

@@ -59,6 +59,7 @@ import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProject
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import type { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import type { HomeProfileChangeAccess } from "../home/home-profile.js";
 import type { Actor } from "../admin/settings-record.js";
 import type { SettingsToolAccess } from "../admin/tron-settings-extension.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -1371,6 +1372,18 @@ export class RuntimeSlot {
     };
   }
 
+  /** Home's `profile` tool reaches the change path as Home (docs/settings-model.md 6.4). */
+  private homeProfileChangeAccess(): HomeProfileChangeAccess | undefined {
+    const owners = this.dependencies.settings();
+    if (!owners || this.liveProfile() !== "home") return undefined;
+    return {
+      change: (ops, input) => owners.changes.changeProfile(ops, {
+        actor: { kind: "home", id: this.id, sessionId: this.id, toolCallId: input.toolCallId },
+        author: input.author, commandId: input.commandId, web: input.web, ...(input.reason ? { reason: input.reason } : {}),
+      }),
+    };
+  }
+
   /** The tools this chat's selection may name: its registry, less hidden tools
    * (`setTools` refuses those). */
   settingsToolCatalog(): Array<{ name: string; description?: string; resource: Record<string, unknown> }> {
@@ -2195,6 +2208,7 @@ export class RuntimeSlot {
         },
         ...(this.dependencies.homeWebTransport ? { homeWebTransport: this.dependencies.homeWebTransport } : {}),
         settings: () => this.settingsToolAccess(),
+        homeProfileChanges: () => this.homeProfileChangeAccess(),
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept

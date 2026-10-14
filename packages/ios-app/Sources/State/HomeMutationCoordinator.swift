@@ -18,6 +18,10 @@ final class HomeMutationCoordinator {
         case decideGrant(requestID: String, approved: Bool, expiresAt: Int)
         case reconfirmPermissions
         case redeliver(taskID: String, homeID: String, routeGeneration: Int)
+        /// The maintainer's learned-profile changes, one request (gateway settings-model.md 6.4).
+        case changeProfile([HomeProfileChange])
+        /// Undo of a profile change is the settings path's own undo of its record entry.
+        case undoProfileChange(String)
 
         var method: String {
             switch self {
@@ -33,6 +37,8 @@ final class HomeMutationCoordinator {
             case .decideGrant: "home.decideTaskGrant"
             case .reconfirmPermissions: "home.reconfirmPermissions"
             case .redeliver: "home.redeliverTaskResult"
+            case .changeProfile: "home.profileChange"
+            case .undoProfileChange: "settings.undo"
             }
         }
     }
@@ -129,6 +135,10 @@ final class HomeMutationCoordinator {
         case .revokeGrant(let id): params["grantId"] = .string(id)
         case .decideGrant(let request, let approved, let expires):
             params["requestId"] = .string(request); params["approved"] = .bool(approved); params["expiresAt"] = .number(Double(expires))
+        case .changeProfile(let changes):
+            params["changes"] = try JSONValue.encode(changes)
+        case .undoProfileChange(let changeID):
+            params["changeId"] = .string(changeID)
         case .redeliver(let task, let home, let route):
             params["taskId"] = .string(task); params["homeId"] = .string(home); params["routeGeneration"] = .number(Double(route))
         default: break

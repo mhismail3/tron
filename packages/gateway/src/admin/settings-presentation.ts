@@ -1,6 +1,7 @@
-import { KEYS, SECTIONS, recordSubject, schemaKey, type EntryGuidance, type KeyDeclaration } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, KEYS, SECTIONS, recordSubject, schemaKey, type EntryGuidance, type KeyDeclaration } from "./settings-schema.js";
 import type { ResolvedKey, Resolution } from "./settings-resolver.js";
 import type { Actor, ChangeEntry } from "./settings-record.js";
+import { formatProfileValue } from "../home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, RENDERER_CONTRACT_VERSION, type Control, type ValueType } from "./settings-types.js";
 
 /**
@@ -99,6 +100,14 @@ function declaredKey(id: string): KeyDeclaration | undefined {
  * value store. Retired keys keep their recorded values; known keys reuse their
  * declared formatter. Neither labels nor formatted values are written to audit. */
 export function presentHistoryEntry(entry: ChangeEntry) {
+  if (entry.key === HOME_PROFILE_SUBJECT.id) {
+    // A profile item's recorded value is its note's text and state (doc 6.4).
+    return { ...entry, presentation: {
+      label: HOME_PROFILE_SUBJECT.label, section: HOME_PROFILE_SUBJECT.group,
+      actor: requesterLabel(entry.actor), layer: LAYER_LABELS[entry.layer],
+      display: { before: formatProfileValue(entry.before), after: formatProfileValue(entry.after) },
+    } };
+  }
   const key = declaredKey(entry.key);
   const subject = key ? undefined : recordSubject(entry.key);
   const redacted = entry.redacted || key?.redacted;

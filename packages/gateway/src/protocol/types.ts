@@ -1052,6 +1052,10 @@ export const HOME_MEMORY_VIEW_CAPABILITY = "home-memory-view.v1";
 export const HOME_CHAPTER_LIST_CAPABILITY = "home-chapter-list.v1";
 /** The learned-profile read (`home.profileList`); advertised only with a Knowledge owner. */
 export const HOME_PROFILE_LIST_CAPABILITY = "home-profile-list.v1";
+/** The maintainer's learned-profile changes (`home.profileChange`, profile entries in
+ * `settings.undo`); advertised with `home-profile-list.v1`. Older Gateways keep the
+ * Profile sheet read-only. */
+export const HOME_PROFILE_EDIT_CAPABILITY = "home-profile-edit.v1";
 
 /** One learned-profile item as `home.profileList` answers it: the Knowledge note's
  * identity, its kind label, its one-line text and whether the maintainer confirmed it.

@@ -221,8 +221,28 @@ read with the main sheet's load (a refused read reads "Unavailable" and never fa
 Manage Home). Its child sheet lists every active item grouped by kind
 (`HomeProfilePresentation`), then superseded and retired items under "No longer
 applied"; an item's detail (full Markdown text, kind, state, note ID, dates) comes
-from the row already loaded and never reads again. The sheet is read-only: Home
-changes the profile with its `profile` tool. The next-prompt preview and
+shows the row already loaded, then re-reads the profile, so a change made there shows at
+once. With `home-profile-edit.v1` the maintainer changes items here
+(`HomeProfileSheets.swift`). The list and the detail share these patterns:
+- **States.** An inferred item has a sparkle glyph and an Inferred pill. A confirmed
+  item has a filled seal and a Confirmed pill.
+- **Confirm.** An inferred row carries a one-tap Confirm beside it. Confirm all uses
+  the shared `TronConfirmationSheet`.
+- **Change group.** The detail's Change group has Confirm, Edit and Retire. Edit and
+  Retire are progressive sheets in the Settings value-editor pattern:
+  - Edit has Save (`tronSaveToolbar`), a text field, `TronChoiceRow` for the kind and
+    `TronToggleRow` for Replace (a supersede).
+  - Retire has an optional reason and a destructive Retire toolbar action.
+- **Undo.** After a change, a row offers Undo.
+- **Commands.** `home.profileChange` and the undo (`settings.undo`) run through
+  `HomeMutationCoordinator` under the sheet's admission. A child editor's Save runs
+  while the sheet presents it.
+- **Refresh.** A change re-reads the sheet, and `onChanged` makes the Profile sheet
+  and Manage Home re-read when they are uncovered.
+
+An older Gateway keeps the sheet read-only. Profile entries show in Home Settings ›
+Changes through the generic history row and detail. `TronHomeSheetsUITests/testProfileConfirmEditRetireAndUndo` drives the flow
+on the hosted fixture. The next-prompt preview and
 delivered-context viewing are follow-up Gateway reads.
 
 `HomeSheetReadOwner` owns one disposable manage/context/chapter/memory/task/evidence read

@@ -9,13 +9,14 @@ import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog
 import type { GatewayConfig } from "../config.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
-import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
+import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../home/home-memory-browser.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import type { ChatAppliers, ChangeOutcome, ChangeRequest, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import type { ApprovalRequest } from "../admin/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../admin/settings-record.js";
-import { SECTIONS, recordSubject, schemaKey } from "../admin/settings-schema.js";
+import { KEYS, SECTIONS, auditSubject, recordSubject, schemaKey } from "../admin/settings-schema.js";
+import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, type HomeProfileOp } from "../home/home-profile.js";
 import type { ObservedStore } from "../admin/settings-outside.js";
 import type { SettingsTarget } from "../admin/settings-resolver.js";
 import { actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
@@ -192,6 +193,35 @@ function settingsQualifiers(raw: unknown, label: string): Qualifiers {
   rejectUnknownFields(qualifiers, [...QUALIFIER_NAMES], label);
   for (const [name, value] of Object.entries(qualifiers)) string(value, `${label}.${name}`, { max: 4_096 });
   return qualifiers as Qualifiers;
+}
+
+/** One `home.profileChange` op, typed: only the maintainer's actions, each with the
+ * revision he read, and nothing an action does not take. */
+function profileChangeOp(raw: unknown, label: string): HomeProfileOp {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new GatewayError("invalid_request", `${label} must be an object`);
+  const value = raw as Record<string, unknown>;
+  const action = oneOf(value.action, `${label}.action`, HOME_PROFILE_MAINTAINER_ACTIONS);
+  const allowed: Record<typeof action, string[]> = {
+    confirm: ["action", "id", "expectedRevision"],
+    refine: ["action", "id", "expectedRevision", "text", "kind", "reason"],
+    supersede: ["action", "id", "expectedRevision", "text", "kind", "reason"],
+    retire: ["action", "id", "expectedRevision", "reason"],
+  };
+  rejectUnknownFields(value, allowed[action], label);
+  const id = string(value.id, `${label}.id`, { max: 200 });
+  const expectedRevision = string(value.expectedRevision, `${label}.expectedRevision`, { max: 80 });
+  const text = value.text === undefined ? undefined : string(value.text, `${label}.text`, { max: 512 });
+  const kind = value.kind === undefined ? undefined : oneOf(value.kind, `${label}.kind`, HOME_PROFILE_KINDS);
+  const reason = value.reason === undefined ? undefined : string(value.reason, `${label}.reason`, { max: 2_000 });
+  switch (action) {
+    case "confirm": return { action, id, expectedRevision };
+    case "retire": return { action, id, expectedRevision, ...(reason ? { reason } : {}) };
+    case "supersede":
+      if (text === undefined || kind === undefined) throw new GatewayError("invalid_request", `${label}: supersede requires text and kind`);
+      return { action, id, expectedRevision, text, kind, ...(reason ? { reason } : {}) };
+    default:
+      return { action, id, expectedRevision, ...(text === undefined ? {} : { text }), ...(kind ? { kind } : {}), ...(reason ? { reason } : {}) };
+  }
 }
 
 function settingsChangeRequest(raw: unknown, label: string): ChangeRequest {
@@ -602,7 +632,7 @@ export class GatewayService {
         ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1", "knowledge-library-rows.v1", "knowledge-curation.v1"] : []),
         ...(this.dependencies.connections ? ["connections.v1"] : []),
         ...(this.dependencies.home ? [HOME_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY] : []),
-        ...(this.dependencies.home && this.dependencies.knowledge ? [HOME_PROFILE_LIST_CAPABILITY] : []),
+        ...(this.dependencies.home && this.dependencies.knowledge ? [HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY] : []),
         ...(this.dependencies.sessionSearch ? ["session-search.v1"] : []),
       ],
     };
@@ -664,6 +694,19 @@ export class GatewayService {
           if (typeof params.approved !== "boolean" || !Number.isSafeInteger(params.expiresAt)) throw new GatewayError("invalid_request", "Decision requires approved and an integer expiresAt");
           return safeJson(await this.requireHome().decideTaskGrant(string(params.requestId, "requestId", { max: 160 }), {
             decisionId: string(params.commandId, "commandId", { max: 160 }), approved: params.approved, expiresAt: params.expiresAt as number,
+          }));
+        });
+      case "home.profileChange":
+        // The maintainer's learned-profile changes (docs/settings-model.md 6.4): typed ops
+        // through the one change path, as Home's profile tool, confirmed by his tap.
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "changes"], method);
+          if (!this.dependencies.home) throw new GatewayError("unsupported", "Tron Home is not available on this Gateway");
+          if (!Array.isArray(params.changes) || params.changes.length < 1 || params.changes.length > 50) throw new GatewayError("invalid_request", "changes holds 1 to 50 profile changes");
+          const ops = params.changes.map((raw, index) => profileChangeOp(raw, `changes[${index}]`));
+          return safeJson(await this.dependencies.settingsChanges.changeProfile(ops, {
+            actor: { kind: "ui", id: client.identity }, author: { kind: "maintainer" },
+            commandId: string(params.commandId, "commandId", { min: 8, max: 120 }),
           }));
         });
       case "home.reconfirmPermissions":
@@ -2457,12 +2500,12 @@ export class GatewayService {
       // whether it pushes (docs/settings-model.md 5.6, F3).
       const loud = changes.filter(change => change.tier !== "quiet");
       if (loud.length) {
-        const what = [...new Set(loud.map(change => schemaKey(change.key).label))].join(", ");
+        const what = [...new Set(loud.map(change => auditSubject(change.key)?.label ?? change.key))].join(", ");
         void this.settingsPush(context.actor, `settings-outside:${changes[0]!.changeId}`, "explicit", "Changed outside Tron",
           `${what} changed outside Tron in ${context.actor.id}. Review it in Tron.`);
       }
     } else if (context.tier === "notify" && context.actor.kind !== "ui" && !context.approved) {
-      const what = changes.map(change => schemaKey(change.key).label).join(", ");
+      const what = [...new Set(changes.map(change => auditSubject(change.key)?.label ?? change.key))].join(", ");
       void this.settingsPush(context.actor, `settings-applied:${changes[0]!.changeId}`, "explicit", "Setting changed",
         `${actorLabel(context.actor)} changed ${what}${context.reason ? `: ${context.reason}` : ""}. Undo it in Tron.`);
     }
@@ -2491,7 +2534,9 @@ export class GatewayService {
       }
     }
     for (const change of changes) {
-      const key = schemaKey(change.key);
+      // A record subject (a profile item) has no after-apply effect of its own.
+      const key = KEYS.find(candidate => candidate.id === change.key);
+      if (!key) continue;
       if (key.effect === "reload" && change.layer === "mac" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();
       if (key.effect === "next-compaction" && (change.layer === "mac" || projectDir)) {
         this.dependencies.sessions.refreshCompactionPolicies(change.layer === "mac" ? "global" : "project", projectDir ?? this.dependencies.config.tronHome);

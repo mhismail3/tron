@@ -11,7 +11,8 @@ enum HomeSheetDestination: Identifiable {
     case memoryItem(HomeMemoryItemDTO)
     case evidence(HomeMemoryEvidenceDTO, origin: HomeMemoryOrigin)
     case chapters
-    /// The learned profile, and one item from the row the Profile sheet already loaded.
+    /// The learned profile, and one item: shown from the row the Profile sheet already
+    /// loaded, then re-read with the profile so a change made here shows at once.
     case profile
     case profileItem(HomeProfileListDTO.Item)
     /// One chapter's detail, from the row the Chapters sheet already loaded.
@@ -57,10 +58,10 @@ enum HomeSheetDestination: Identifiable {
         case .memory(let sessionID, _): .memory(sessionID: sessionID, continuation: nil)
         case .memorySummary(let line, let sessionID): .memoryPart(sessionID: sessionID, line)
         // Carried by the destination and never loaded; see `loadsPage`.
-        case .memoryItem, .chapter, .profileItem: .chapters
+        case .memoryItem, .chapter: .chapters
         case .evidence(let source, _): .evidence(source, offset: 0)
         case .chapters: .chapters
-        case .profile: .profile
+        case .profile, .profileItem: .profile
         case .tasks: .tasks(nil)
         case .task(let id): .task(id)
         case .permissions, .grant: .permissions
@@ -72,7 +73,7 @@ enum HomeSheetDestination: Identifiable {
     }
 
     var loadsPage: Bool {
-        switch self { case .memoryItem, .chapter, .profileItem: false; default: true }
+        switch self { case .memoryItem, .chapter: false; default: true }
     }
 }
 
@@ -124,6 +125,9 @@ struct HomeSheet: View {
     /// Opens a chapter's transcript or a worker chat read-only: the chat's route
     /// owner stages the navigation and dismisses this sheet.
     var onOpenSession: ((String) -> Void)?
+    /// Tells the presenting sheet that this one changed Home's data (a profile edit),
+    /// so it re-reads when it is uncovered instead of keeping its installed page.
+    var onChanged: (() -> Void)?
     @Environment(AppModel.self) var model
     @Environment(\.dismiss) var dismiss
     @Environment(\.tronPresentationActivityCoordinator) var coordinator
@@ -151,13 +155,16 @@ struct HomeSheet: View {
     @State var confirmingDisable = false
     @State var disableAdmission: HomeControlAdmission?
     @State private var sliderPresentation = ConfigurationSliderPresentation()
+    /// The learned-profile edit state of a Profile or item sheet (HomeProfileSheets.swift).
+    @State var profileEdit = HomeProfileEditState()
 
     init(destination: HomeSheetDestination, profileID: String, sessionID: String? = nil,
-         onOpenSession: ((String) -> Void)? = nil) {
+         onOpenSession: ((String) -> Void)? = nil, onChanged: (() -> Void)? = nil) {
         self.destination = destination
         self.profileID = profileID
         self.sessionID = sessionID
         self.onOpenSession = onOpenSession
+        self.onChanged = onChanged
         _request = State(initialValue: HomeSheetRequest(query: destination.initialQuery))
     }
 
@@ -231,9 +238,10 @@ struct HomeSheet: View {
             let requestID = request.id
             // Uncovering a sheet keeps its installed page: returning from a child is not a
             // new request (#911). Manage Home refreshes behind its frame only after a child
-            // that can change Home (tasks, permissions, settings, terminal).
+            // that can change Home (tasks, permissions, settings, terminal, a profile edit);
+            // the Profile sheet only after its item sheet changed an item.
             if owner.holds(requestID: requestID, identity: identity) {
-                if case .manage = destination, !returnsFromBrowsing { /* refresh below */ } else {
+                if refreshesBehindChildren, !returnsFromBrowsing { /* refresh below */ } else {
                     returnsFromBrowsing = false
                     return
                 }
@@ -248,7 +256,8 @@ struct HomeSheet: View {
             if let sessionID { TerminalSheet(sessionID: sessionID) }
         }
         .tronManagedSheet(item: $childDestination, identity: { "home.\(profileID).\($0.id)" }) { child in
-            HomeSheet(destination: child, profileID: profileID, sessionID: sessionID, onOpenSession: onOpenSession)
+            HomeSheet(destination: child, profileID: profileID, sessionID: sessionID, onOpenSession: onOpenSession,
+                      onChanged: { returnsFromBrowsing = false; onChanged?() })
                 .tronSettingsVisualTheme(accent: childAccent ?? accent)
         }
         .tronManagedSheet(item: $reading, identity: { "home.\(profileID).reading.\($0.id)" }) { reading in
@@ -265,7 +274,7 @@ struct HomeSheet: View {
         switch destination {
         case .memoryItem(let item): memoryDetail(item)
         case .chapter(let chapter, let limits): chapterDetail(chapter, limits: limits)
-        case .profileItem(let item): profileItemDetail(item)
+        case .profileItem(let item): profileItemDetail(loadedProfileItem(item))
         default:
             loadedContent
         }
@@ -308,11 +317,15 @@ struct HomeSheet: View {
     /// this sheet's accent, so a whole Home branch shares its row's color.
     func present(_ child: HomeSheetDestination, rowAccent: Color? = nil) {
         switch child {
-        case .memory, .chapters, .profile: returnsFromBrowsing = true
+        case .memory, .chapters, .profile, .profileItem: returnsFromBrowsing = true
         default: returnsFromBrowsing = false
         }
         childAccent = rowAccent
         childDestination = child
+    }
+
+    private var refreshesBehindChildren: Bool {
+        switch destination { case .manage, .profile: true; default: false }
     }
 
     /// Reloads the destination's own read after a mutation changed it.
