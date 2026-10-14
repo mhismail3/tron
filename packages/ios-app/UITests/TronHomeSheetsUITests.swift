@@ -35,7 +35,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         let cacheHit = element(app, "home-context-breakdown").descendants(matching: .any)
             .matching(NSPredicate(format: "label BEGINSWITH 'Cache Hit'")).firstMatch
         XCTAssertTrue(cacheHit.exists)
-        XCTAssertLessThanOrEqual(element(app, "context-segment-free").frame.maxY, cacheHit.frame.minY, "The legend sits above the metrics")
+        XCTAssertLessThanOrEqual(element(app, "context-segment-input").frame.maxY, cacheHit.frame.minY, "The legend sits above the metrics")
 
         // Home Settings is its own container below the rows container.
         app.swipeUp()

@@ -66,7 +66,7 @@ struct HookEventDetailView: View {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: event.descriptor.title, accent: accent) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(accent)
+                        Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }

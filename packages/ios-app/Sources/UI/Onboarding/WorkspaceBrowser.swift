@@ -65,7 +65,7 @@ struct WorkspaceBrowser: View {
                     Button { selectCurrentPath() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(currentPath.isEmpty ? Color.tronTextDisabled : Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .disabled(currentPath.isEmpty)
                     .accessibilityLabel("Use current folder")

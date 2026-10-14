@@ -223,7 +223,7 @@ private struct QueueEditingUnavailableSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronAmber)
                     }
                     .accessibilityLabel("Done")
                 }

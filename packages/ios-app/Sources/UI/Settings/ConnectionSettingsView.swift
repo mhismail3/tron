@@ -614,7 +614,7 @@ struct GatewayConnectionDetailView: View {
                 Button { dismiss() } label: {
                     Image(systemName: "checkmark")
                         .font(TronTypography.buttonSM)
-                        .tronSettingsAccent()
+                        .tronToolbarAction()
                 }
                 .accessibilityLabel("Done")
             }
@@ -1113,7 +1113,7 @@ struct GatewayServerInfoSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronCyan)
+                            .tronToolbarAction(accent: .tronCyan)
                     }
                     .accessibilityLabel("Done")
                 }

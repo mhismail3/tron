@@ -310,10 +310,12 @@ extension View {
         ))
     }
 
-    /// A toolbar action takes `accent` when given, else its sheet's inherited
-    /// settings accent (the colour of its title), else emerald.
-    func tronToolbarAction(accent: Color? = nil) -> some View {
-        modifier(TronToolbarActionAccent(accent: accent))
+    /// Paints a sheet's toolbar action in its title's tint (#963): pass the same
+    /// `accent` the sheet gives `TronSheetTitle`, and `TronSheetTint` resolves both
+    /// identically. Destructive actions stay red and neutral Close/Cancel grey; a
+    /// disabled action greys itself. Never paint toolbar icons directly.
+    func tronToolbarAction(accent: Color? = nil, role: TronToolbarActionRole = .standard) -> some View {
+        modifier(TronToolbarActionAccent(accent: accent, role: role))
     }
 
     func tronNavigationTitle(_ title: String, accent: Color = .tronEmerald) -> some View {
@@ -616,7 +618,7 @@ private struct TronTextEntryDoneModifier: ViewModifier {
                             Spacer()
                             Button("Done") { onDone(); focus.wrappedValue = false }
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                                .tronToolbarAction()
                                 .accessibilityIdentifier("text-entry-done")
                         }
                     }
@@ -748,7 +750,7 @@ private struct TronSaveToolbarModifier: ViewModifier {
                 Button(action: action) {
                     Text("Save")
                         .font(TronTypography.buttonSM)
-                        .foregroundStyle(enabled ? theme?.accent ?? .tronEmerald : .tronTextMuted)
+                        .tronToolbarAction()
                 }
                 .disabled(!enabled)
                 .accessibilityIdentifier("tron-sheet-save")
@@ -902,7 +904,7 @@ struct TronSheetTitle: View {
     var truncationMode: Text.TruncationMode = .tail
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
-    private var resolvedAccent: Color { settingsTheme?.accent ?? accent }
+    private var resolvedAccent: Color { TronSheetTint.resolve(accent, theme: settingsTheme) }
 
     var body: some View {
         HStack(spacing: 7) {
@@ -957,7 +959,7 @@ struct TronDashboardFilterSheet<Content: View>: View {
                     Button(action: onDone) {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -1181,13 +1183,13 @@ struct TronConfirmationSheet: View {
                         } label: {
                             TronToolbarTextLabel(secondaryTitle ?? "Cancel", systemImage: "xmark")
                         }
-                        .tronToolbarAction(accent: .tronTextSecondary)
+                        .tronToolbarAction(role: .neutral)
                         .accessibilityIdentifier("confirmation-cancel")
                     }
                     if placement == .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
                             confirmButton
-                                .tronToolbarAction(accent: accent)
+                                .tronToolbarAction(accent: .tronEmerald, role: destructive ? .destructive : .standard)
                                 .accessibilityIdentifier("confirmation-primary-toolbar")
                         }
                     }
@@ -1214,12 +1216,42 @@ struct TronConfirmationSheet: View {
     private var accent: Color { destructive ? .tronError : .tronEmerald }
 }
 
+/// The one tint rule a sheet's title and its toolbar actions share (#963): the
+/// inherited Settings tint wins, else the sheet's own accent, else emerald. Both
+/// `TronSheetTitle` and `tronToolbarAction` resolve through it, so a sheet's
+/// icons cannot drift from its title.
+enum TronSheetTint {
+    static func resolve(_ accent: Color?, theme: TronSettingsVisualTheme?) -> Color {
+        theme?.accent ?? accent ?? .tronEmerald
+    }
+}
+
+enum TronToolbarActionRole {
+    /// Takes the sheet's tint.
+    case standard
+    /// Removes, stops or cancels a request: always the error red.
+    case destructive
+    /// Closes without acting (Cancel, Close keeping a draft): grey.
+    case neutral
+}
+
 private struct TronToolbarActionAccent: ViewModifier {
     let accent: Color?
+    let role: TronToolbarActionRole
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.isEnabled) private var isEnabled
 
     func body(content: Content) -> some View {
-        content.foregroundStyle(accent ?? settingsTheme?.accent ?? .tronEmerald)
+        content.foregroundStyle(color)
+    }
+
+    private var color: Color {
+        guard isEnabled else { return .tronTextMuted }
+        return switch role {
+        case .standard: TronSheetTint.resolve(accent, theme: settingsTheme)
+        case .destructive: .tronError
+        case .neutral: .tronTextSecondary
+        }
     }
 }
 
@@ -1262,7 +1294,7 @@ struct TronReloadToolbarButton: View {
             } else {
                 Image(systemName: "arrow.clockwise")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                    .tronToolbarAction()
             }
         }
         .disabled(isReloading)
