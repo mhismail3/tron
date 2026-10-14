@@ -532,6 +532,10 @@ private actor HostedHomeShellGateway {
             let workers = sheetState == "dashboard-workers" ? HostedHomeDashboardWorkers.sessions : []
             return (.object(["sessions": .array(([row] + workers).map { try! JSONValue.encode($0) }), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("home-shell-fixture:1"), "archivedCount": .number(0)]), nil)
+        // Read on every connection; an unknown-method failure would raise a
+        // notice over the dashboard journeys' screenshots.
+        case "device.list":
+            return (.object(["devices": .array([])]), nil)
         case "provider.list" where sheetState == "dashboard-workers":
             return (HostedHomeDashboardWorkers.providers, nil)
         case "session.search.policy.get":
