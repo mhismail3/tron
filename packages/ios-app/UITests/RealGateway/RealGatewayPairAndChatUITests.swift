@@ -456,13 +456,26 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         )
         createSession(firstRun, inWorkspace: fixture.workspace)
 
-        // The fixture model answers this marker with an ask_user call and waits.
+        // One completed turn persists the session, so the dashboard lists it
+        // while the next turn is still running (a session whose first turn is
+        // still running can be missing from the catalog: #944).
         let composer = firstRun.textViews["Message input"]
         XCTAssertTrue(composer.waitForExistence(timeout: 60), firstRun.debugDescription)
         composer.tap()
-        composer.typeText("Fixture ask journey: ask me where to deploy.")
+        composer.typeText("Start the conversation.")
         let send = firstRun.buttons["Send message"]
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "the composer never accepted the prompt: \(firstRun.debugDescription)")
+        send.tap()
+        XCTAssertTrue(
+            firstRun.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+                .waitForExistence(timeout: 120),
+            "the first turn never completed: \(firstRun.debugDescription)"
+        )
+
+        // The fixture model answers this marker with an ask_user call and waits.
+        composer.tap()
+        composer.typeText("Fixture ask journey: ask me where to deploy.")
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), "the composer never accepted the ask prompt: \(firstRun.debugDescription)")
         send.tap()
         XCTAssertTrue(firstRun.buttons["Submit all answers"].waitForExistence(timeout: 90),
                       "the running agent's ask_user form never appeared: \(firstRun.debugDescription)")
