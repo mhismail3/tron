@@ -974,7 +974,8 @@ struct SessionShellView: View {
             }
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, 38)
-            .contentMargins(.bottom, 92)
+            // The Home view stacks its floating Home button above the logo button.
+            .contentMargins(.bottom, serverFilter.sortMode == .home ? 92 + 56 + HomeDashboardLayout.floatingButtonSpacing : 92)
             .tronCollectionSurface()
             .tronScrollEdgeChrome()
             .tronDashboardScroll(dashboardHeader, topMargin: 6)

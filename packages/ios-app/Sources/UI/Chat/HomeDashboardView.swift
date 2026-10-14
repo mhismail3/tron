@@ -110,7 +110,8 @@ struct HomeUsageSummaryCard: View {
     }
 
     var body: some View {
-        Group {
+        // A container, not a Group: an empty Group drops the load task below.
+        VStack(spacing: 0) {
             if capabilityAvailable && !usageProviders.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(usageProviders, id: \.id) { provider in

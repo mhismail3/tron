@@ -27,7 +27,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         let viewMore = element(app, "home-completed-view-more")
         XCTAssertTrue(viewMore.waitForExistence(timeout: 5), app.debugDescription)
         keep("01-home-dashboard-scrolled")
-        viewMore.buttons.firstMatch.tap()
+        viewMore.tap()
         XCTAssertTrue(app.buttons["home-completed-sheet-row-home-shell-fixture:worker-done-7"].waitForExistence(timeout: 5), app.debugDescription)
         keep("02-recently-completed-sheet")
     }

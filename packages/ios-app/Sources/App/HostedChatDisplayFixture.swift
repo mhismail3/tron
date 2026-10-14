@@ -521,6 +521,9 @@ private actor HostedHomeShellGateway {
                 "listRevision": .number(1), "projectionToken": .string("home-shell-fixture:1"), "archivedCount": .number(0)]), nil)
         case "provider.list" where sheetState == "dashboard-workers":
             return (HostedHomeDashboardWorkers.providers, nil)
+        case "session.search.policy.get":
+            return (.object(["enabled": .bool(false), "perQueryMicroCents": .number(268_800),
+                "dailyMicroCents": .number(2_688_000), "policyRevision": .number(1)]), nil)
         case "provider.usage":
             return (HostedHomeDashboardWorkers.usage, nil)
         case "provider.list":
@@ -755,7 +758,7 @@ private actor HostedHomeShellGateway {
                 user("skill:wordcraft", "skill", "Create, edit, inspect, render and convert word-processor documents."),
             ])]), nil)
         case "session.attention.read": return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil)
-        default: return (nil, .object(["code": .string("not_found"), "message": .string("Not part of this fixture"), "retryable": .bool(false)]))
+        default: return (nil, .object(["code": .string("not_found"), "message": .string("Not part of this fixture: \(method)"), "retryable": .bool(false)]))
         }
     }
 
