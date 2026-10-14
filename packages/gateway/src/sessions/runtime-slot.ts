@@ -2130,7 +2130,11 @@ export class RuntimeSlot {
       this.resourceReloadOptions = {
         // Reload must re-read the canonical decision. Capturing the value from
         // runtime creation would leave project code loaded after trust changes.
-        resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
+        // Home's project layer is never trusted: its loader sees only user-level
+        // skills and prompt templates, never project `.pi/` or `.agents/` ones.
+        resolveProjectTrust: home
+          ? async () => false
+          : async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
       // One-shot: a brand-new Home session's first runtime carries the explicit
       // profile; every later runtime asks the record.
@@ -2226,9 +2230,12 @@ export class RuntimeSlot {
           ...(managedLoaderOptions ?? {}),
           ...(home ? {
             noExtensions: true,
-            noSkills: true,
-            noPromptTemplates: true,
             noContextFiles: true,
+            // User-level skills and prompt templates load only so the composer can
+            // offer them (`commands()`) and Pi can expand the one the user inserts
+            // into that user message. Each skill is user-invocable only, so none
+            // is listed in Home's system prompt; prompt templates never are.
+            skillsOverride: (base) => ({ ...base, skills: base.skills.map((skill) => ({ ...skill, disableModelInvocation: true })) }),
             // The agent directory's SYSTEM.md and APPEND_SYSTEM.md are not gated
             // by any `no*` option, so Home drops them at the two overrides the
             // loader exposes. Nothing from outside the curated profile reaches
@@ -2476,7 +2483,8 @@ export class RuntimeSlot {
 
   private effectiveResourceReloadOptions(): { resolveProjectTrust: () => Promise<boolean> } | undefined {
     const override = this.projectTrustReloadOverride;
-    return override === undefined
+    // A trust transition never admits project resources into Home.
+    return override === undefined || this.liveProfile() === "home"
       ? this.resourceReloadOptions
       : { resolveProjectTrust: async () => override };
   }
