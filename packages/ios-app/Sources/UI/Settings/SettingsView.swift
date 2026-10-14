@@ -25,7 +25,6 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        let _ = NSLog("TRON366 settings body sections=%@ unread=%d conn=%@", sections.map(\.id).joined(separator: ","), model.notificationInbox.unreadCount, String(describing: model.connectionState))
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
@@ -368,7 +367,6 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     }
 
     var body: some View {
-        let _ = identity == "settings.Connected Services" ? NSLog("TRON366 link body theme=%@", inheritedTheme == nil ? "nil" : "set") : ()
         Button { isPresented = true } label: { label }
             .buttonStyle(.plain)
             .accessibilityLabel(accessibilityLabel)
@@ -378,8 +376,6 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
             ) {
                 NavigationStack {
                     destinationContent
-                        .onAppear { NSLog("TRON366 link %@ destination appear theme=%@", identity, inheritedTheme == nil ? "nil" : "set") }
-                        .onDisappear { NSLog("TRON366 link %@ destination disappear theme=%@", identity, inheritedTheme == nil ? "nil" : "set") }
                         .toolbar {
                             ToolbarItem(placement: .confirmationAction) {
                                 Button { isPresented = false } label: {
@@ -391,8 +387,6 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
                             }
                         }
                 }
-                .onAppear { NSLog("TRON366 link %@ stack appear", identity) }
-                .onDisappear { NSLog("TRON366 link %@ stack disappear %@", identity, Thread.callStackSymbols.prefix(70).map { $0.split(separator: " ", omittingEmptySubsequences: true).dropFirst(3).prefix(1).joined() }.joined(separator: " < ")) }
                 .tronTopBlur(.sheet)
                 .tronPresentation()
                 .tronSettingsLayout()
