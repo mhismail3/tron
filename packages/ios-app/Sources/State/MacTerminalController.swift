@@ -56,7 +56,8 @@ final class MacTerminalController {
         switch stage {
         case .loading, .enrolling, .connecting: .connecting
         case .connected: .connected
-        case .setup, .ended, .failed: .unavailable
+        case .setup, .ended: .notConnected
+        case .failed: .unavailable
         }
     }
 

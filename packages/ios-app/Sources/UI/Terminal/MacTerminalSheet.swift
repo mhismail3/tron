@@ -1,6 +1,30 @@
 import SwiftUI
 import TronMobileCore
 
+/// The Settings › Accounts row. Mac Terminal is the terminal sheet itself,
+/// presented directly like Manage Session's terminal, not wrapped in a
+/// settings destination's navigation stack and Done.
+struct MacTerminalSettingsRow: View {
+    @State private var isPresented = false
+    @Environment(\.tronSettingsVisualTheme) private var theme
+
+    var body: some View {
+        Button { isPresented = true } label: {
+            TronSettingsRow(icon: "apple.terminal", title: "Mac Terminal",
+                            subtitle: "A shell on your Mac, even without the Gateway", subtitleColor: .tronTextSecondary)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Mac Terminal")
+        .accessibilityIdentifier("settings-link-Mac Terminal")
+        .tronManagedSheet(isPresented: $isPresented, identity: "settings.Mac Terminal") {
+            MacTerminalSheet()
+                .tronSettingsVisualTheme(accent: theme?.accent ?? .tronEmerald)
+                .tronPresentation()
+        }
+    }
+}
+
 /// Mac Terminal (Settings › Accounts): a login shell on the paired Mac over
 /// Tailscale through macOS Remote Login, in the session terminal's chrome and
 /// emulator. Only enabling and removing it use the Gateway; the shell itself
