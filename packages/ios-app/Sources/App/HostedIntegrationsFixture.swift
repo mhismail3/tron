@@ -43,6 +43,7 @@ struct HostedIntegrationsFixtureView: View {
     @State private var presentationTrace = HostedIntegrationPresentationTrace()
     @State private var productionXLogs = ""
     @State private var showingOllamaDetails = false
+    @State private var integrationRoutes = IntegrationSheetRoutes()
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
@@ -134,7 +135,7 @@ struct HostedIntegrationsFixtureView: View {
                                 Text(mcpOriginalCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-original")
                                 Text(mcpReplacementCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-replacement")
                                 Text(model.knowledgeDestinationIdentity.profileID ?? "none").font(.caption2).accessibilityIdentifier("fixture.destination")
-                            } else { IntegrationsSettingsView() }
+                            } else { IntegrationsSettingsView(routes: integrationRoutes) }
                             Text(oauthCounters).font(.caption2).lineLimit(2).frame(height: 32)
                                 .accessibilityIdentifier("fixture.oauth-counters")
                         }

@@ -11,6 +11,56 @@ enum IntegrationPolicySubmission {
     }
 }
 
+/// One opened account setup and everything typed into it. The setup sheet only
+/// renders this draft: the X client ID and callback, an accepted begin's consent
+/// step and an in-flight mutation must outlive the sheet's view state.
+@MainActor
+@Observable
+final class IntegrationSetupDraft {
+    let definition: IntegrationDefinition
+    let viewID = UUID().uuidString
+    var diagnosticContext: XSetupDiagnosticContext?
+    var method: String
+    var instanceID = "ios-\(UUID().uuidString.lowercased())"
+    var accountID = ""
+    var scope = ""
+    var credentialRef = ""
+    var xClientID = ""
+    var xRedirectURI = ""
+    var xCallbackURL = ""
+    var xAuthorizationCode = ""
+    var xOAuthState: String?
+    var xOAuthOperationID: String?
+    var xAuthorizationURL: URL?
+    var xOAuthCompleted = false
+    var unresolvedOAuth: GatewayFailure?
+    var paidBudgetDraft: String?
+    var policy = IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false)
+    var mutation: KnowledgeMutation?
+    var error: String?
+
+    init(definition: IntegrationDefinition) {
+        self.definition = definition
+        method = definition.setupMethods.first ?? "token"
+    }
+}
+
+/// The Connected Services sheet routes: the open setup draft or connection detail.
+/// Owned above the presented Connected Services content, which SwiftUI rebuilds
+/// while it stays presented when the app returns from the background (#932);
+/// the owner resets it once that sheet is actually dismissed.
+@MainActor
+@Observable
+final class IntegrationSheetRoutes {
+    var setup: IntegrationSetupDraft?
+    var selectedInstance: IntegrationInstance?
+
+    func reset() {
+        setup = nil
+        selectedInstance = nil
+    }
+}
+
 /// Unified presentation over the Gateway connection owner. This view never
 /// stores an authority or credential: every instance action carries its opaque
 /// connection ID to the owner and every read is fenced to the current Gateway
@@ -25,10 +75,8 @@ struct IntegrationsSettingsView: View {
     @State private var loadGeneration = 0
     @State private var isLoading = false
     @State private var error: String?
-    @State private var setupDefinition: IntegrationDefinition?
-    @State private var setupDiagnosticContext: XSetupDiagnosticContext?
-    @State private var selectedInstance: IntegrationInstance?
     @State private var credits = IntegrationCreditsReadController()
+    let routes: IntegrationSheetRoutes
 
     var body: some View {
         ScrollView {
@@ -56,8 +104,7 @@ struct IntegrationsSettingsView: View {
                                 IntegrationConfiguredRow(title: definition.displayName, account: "", status: "Not configured", usage: nil,
                                                          isLoadingUsage: false, configured: false, actionTitle: action,
                                                          accessibilityAction: "\(action) for \(definition.displayName)", accent: .tronCyan) {
-                                    setupDiagnosticContext = nil
-                                    setupDefinition = definition
+                                    routes.setup = IntegrationSetupDraft(definition: definition)
                                 }
                                 if index < available.count - 1 { TronSettingsDivider(accent: .tronCyan) }
                             }
@@ -90,16 +137,16 @@ struct IntegrationsSettingsView: View {
         }
         .onChange(of: model.knowledgePresentationIdentity) { oldIdentity, newIdentity in
             #if HOSTED_TEST
-            hostedTrace?.record("integrations.transport old=\(presentationToken(oldIdentity)) new=\(presentationToken(newIdentity)) setupOpen=\(setupDefinition != nil)")
+            hostedTrace?.record("integrations.transport old=\(presentationToken(oldIdentity)) new=\(presentationToken(newIdentity)) setupOpen=\(routes.setup != nil)")
             #endif
             loadGeneration &+= 1; isLoading = false
             credits.begin(clear: true); load()
         }
         .onChange(of: model.knowledgeDestinationIdentity) { oldIdentity, newIdentity in
             #if HOSTED_TEST
-            hostedTrace?.record("integrations.destination old=\(destinationToken(oldIdentity)) new=\(destinationToken(newIdentity)) setupOpen=\(setupDefinition != nil)")
+            hostedTrace?.record("integrations.destination old=\(destinationToken(oldIdentity)) new=\(destinationToken(newIdentity)) setupOpen=\(routes.setup != nil)")
             #endif
-            if setupDefinition != nil, let context = setupDiagnosticContext {
+            if let context = routes.setup?.diagnosticContext {
                 XSetupDiagnostic.record(
                     .destinationRetired, context: context, appLog: model.appLog,
                     outcome: .rejected, reason: .destinationChanged,
@@ -107,36 +154,36 @@ struct IntegrationsSettingsView: View {
                     currentConnectionID: model.knowledgePresentationIdentity.connectionID
                 )
             }
-            selectedInstance = nil; setupDefinition = nil; snapshot = nil
+            routes.selectedInstance = nil; routes.setup = nil; snapshot = nil
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in
             // Covered: retire reads in flight, keep what is shown (the Mac did not change).
             if !active { loadGeneration &+= 1; isLoading = false; credits.begin() }
         }
-        .tronManagedSheet(isPresented: Binding(get: { setupDefinition != nil }, set: { isPresented in
+        .tronManagedSheet(isPresented: Binding(get: { routes.setup != nil }, set: { isPresented in
             guard !isPresented else { return }
-            if let context = setupDiagnosticContext {
+            if let context = routes.setup?.diagnosticContext {
                 XSetupDiagnostic.record(
                     .bindingSetFalse, context: context, appLog: model.appLog,
                     reason: .unknownOrigin
                 )
             }
-            setupDefinition = nil; setupDiagnosticContext = nil
+            routes.setup = nil
         }), identity: "integrations.setup") {
-            if let definition = setupDefinition {
-                IntegrationSetupView(definition: definition, diagnosticContext: $setupDiagnosticContext) {
-                    self.setupDefinition = nil; load()
+            if let draft = routes.setup {
+                IntegrationSetupView(draft: draft) {
+                    routes.setup = nil; load()
                 }.environment(model)
             }
         }
-        .tronManagedSheet(isPresented: Binding(get: { selectedInstance != nil }, set: { if !$0 { selectedInstance = nil } }), identity: "integrations.instance") {
-            if let instance = selectedInstance {
+        .tronManagedSheet(isPresented: Binding(get: { routes.selectedInstance != nil }, set: { if !$0 { routes.selectedInstance = nil } }), identity: "integrations.instance") {
+            if let instance = routes.selectedInstance {
                 IntegrationInstanceView(
                     instance: instance,
                     definition: snapshot?.definitions.first { $0.id == instance.definitionId },
                     statuses: snapshot?.capabilities.filter { $0.connectionId == instance.id } ?? [],
                     addAccount: { addAccount(for: instance) }
-                ) { self.selectedInstance = nil; load() }.environment(model)
+                ) { routes.selectedInstance = nil; load() }.environment(model)
             }
         }
         #if HOSTED_TEST
@@ -152,7 +199,7 @@ struct IntegrationsSettingsView: View {
                                  status: connectionStatus(instance, snapshot: snapshot), usage: usage,
                                  isLoadingUsage: credits.loadingIDs.contains(instance.id), configured: true,
                                  actionTitle: "Details", accessibilityAction: "Details for \(definition.displayName)", accent: .tronCyan) {
-            selectedInstance = instance
+            routes.selectedInstance = instance
         }
     }
 
@@ -161,14 +208,13 @@ struct IntegrationsSettingsView: View {
               activity.allowsPresentationPublication else { return }
         let identity = model.knowledgePresentationIdentity
         let ticket = loadGeneration
-        selectedInstance = nil
+        routes.selectedInstance = nil
         Task { @MainActor in
             await Task.yield()
             guard activity.allowsPresentationPublication,
                   model.knowledgePresentationIdentity == identity,
                   loadGeneration == ticket else { return }
-            setupDiagnosticContext = nil
-            setupDefinition = definition
+            routes.setup = IntegrationSetupDraft(definition: definition)
         }
     }
 
@@ -381,46 +427,24 @@ private struct IntegrationSetupView: View {
     #if HOSTED_TEST
     @Environment(\.hostedIntegrationPresentationTrace) private var hostedTrace
     #endif
-    let definition: IntegrationDefinition
-    @Binding var diagnosticContext: XSetupDiagnosticContext?
+    /// Owned by the Connected Services routes, not this sheet: the sheet content
+    /// can be rebuilt while presented and must not lose the draft (#932).
+    @Bindable var draft: IntegrationSetupDraft
     let onFinished: () -> Void
-    @State private var method: String
-    @State private var instanceID = "ios-\(UUID().uuidString.lowercased())"
-    @State private var accountID = ""
-    @State private var scope = ""
-    @State private var credentialRef = ""
-    @State private var xClientID = ""
-    @State private var xRedirectURI = ""
-    @State private var xCallbackURL = ""
-    @State private var xAuthorizationCode = ""
-    @State private var xOAuthState: String?
-    @State private var xOAuthOperationID: String?
-    @State private var xAuthorizationURL: URL?
-    @State private var xOAuthCompleted = false
-    @State private var unresolvedOAuth: GatewayFailure?
-    @State private var paidBudgetDraft: String?
-    @State private var setupViewID = UUID().uuidString
-    @State private var policy = IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false)
-    @State private var mutation: KnowledgeMutation?
-    @State private var error: String?
 
-    init(definition: IntegrationDefinition, diagnosticContext: Binding<XSetupDiagnosticContext?>,
-         onFinished: @escaping () -> Void) {
-        self.definition = definition; self._diagnosticContext = diagnosticContext; self.onFinished = onFinished
-        _method = State(initialValue: definition.setupMethods.first ?? "token")
-    }
+    private var definition: IntegrationDefinition { draft.definition }
 
     var body: some View {
-        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: .tronCyan, actionTitle: usesXOAuth ? (unresolvedOAuth != nil ? "Check setup status" : (xOAuthOperationID == nil ? "Authorize X" : "Complete setup")) : "Save", isWorking: mutation != nil, actionDisabled: model.connectionState != .connected, onAction: complete) {
-            if mutation == nil {
+        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: .tronCyan, actionTitle: usesXOAuth ? (draft.unresolvedOAuth != nil ? "Check setup status" : (draft.xOAuthOperationID == nil ? "Authorize X" : "Complete setup")) : "Save", isWorking: draft.mutation != nil, actionDisabled: model.connectionState != .connected, onAction: complete) {
+            if draft.mutation == nil {
                 if usesXOAuth {
                     TronSettingsGroup("X developer app", accent: .tronBlue) {
-                        TronTextSettingRow(icon: "number", title: "Public client ID", value: $xClientID)
+                        TronTextSettingRow(icon: "number", title: "Public client ID", value: $draft.xClientID)
                         TronSettingsDivider(accent: .tronBlue)
-                        TronTextSettingRow(icon: "link", title: "Registered callback URL", value: $xRedirectURI)
+                        TronTextSettingRow(icon: "link", title: "Registered callback URL", value: $draft.xRedirectURI)
                     }
                     .tronSettingsCaption("Create a public OAuth 2.0 app in the X developer console, enable tweet.read, users.read, bookmark.read, and offline.access, and register this exact HTTPS callback. Tron does not ask for an app secret.")
-                    if let xAuthorizationURL {
+                    if let xAuthorizationURL = draft.xAuthorizationURL {
                         TronSettingsGroup("Authorize your X account", accent: .tronPurple) {
                             Button { openURL(xAuthorizationURL) } label: {
                                 TronSettingsRow(icon: "arrow.up.right.square", title: "Open X consent", accent: .tronPurple) {
@@ -432,28 +456,28 @@ private struct IntegrationSetupView: View {
                             }
                             .buttonStyle(.plain)
                             TronSettingsDivider(accent: .tronPurple)
-                            TronTextSettingRow(icon: "doc.on.clipboard", title: "Paste redirected URL", detail: "or enter the code below", value: $xCallbackURL)
+                            TronTextSettingRow(icon: "doc.on.clipboard", title: "Paste redirected URL", detail: "or enter the code below", value: $draft.xCallbackURL)
                             TronSettingsDivider(accent: .tronPurple)
-                            TronTextSettingRow(icon: "number", title: "Authorization code", detail: "Optional alternative", value: $xAuthorizationCode)
+                            TronTextSettingRow(icon: "number", title: "Authorization code", detail: "Optional alternative", value: $draft.xAuthorizationCode)
                         }
                         .tronSettingsCaption("After consent, copy the complete redirected URL from your browser or paste its one-time code. The selected Mac verifies the state and exchanges the code; tokens stay in its Keychain.")
                     }
                 } else {
                     TronSettingsGroup("Account", accent: .tronBlue) {
-                        TronTextSettingRow(icon: "number", title: "Instance ID", value: $instanceID)
+                        TronTextSettingRow(icon: "number", title: "Instance ID", value: $draft.instanceID)
                         TronSettingsDivider(accent: .tronBlue)
-                        TronTextSettingRow(icon: "person.crop.circle", title: "Account or server", value: $accountID)
+                        TronTextSettingRow(icon: "person.crop.circle", title: "Account or server", value: $draft.accountID)
                         TronSettingsDivider(accent: .tronBlue)
-                        TronTextSettingRow(icon: "scope", title: "Scope", detail: "Optional", value: $scope)
+                        TronTextSettingRow(icon: "scope", title: "Scope", detail: "Optional", value: $draft.scope)
                         if definition.setupMethods.count > 1 {
                             TronSettingsDivider(accent: .tronBlue)
-                            TronSelectionRow(icon: "slider.horizontal.3", title: "Setup method", value: method) {
-                                ForEach(definition.setupMethods, id: \.self) { value in Button(value) { method = value } }
+                            TronSelectionRow(icon: "slider.horizontal.3", title: "Setup method", value: draft.method) {
+                                ForEach(definition.setupMethods, id: \.self) { value in Button(value) { draft.method = value } }
                             }
                         }
                     }
                     TronSettingsGroup("Credential handoff", accent: .tronPurple) {
-                        TronTextSettingRow(icon: "key", title: "Credential reference", value: $credentialRef)
+                        TronTextSettingRow(icon: "key", title: "Credential reference", value: $draft.credentialRef)
                     }
                     .tronSettingsCaption("Use the credential reference supplied by the paired Mac. The secret stays in its secure credential store and is never sent to or retained by this device.")
                 }
@@ -465,15 +489,15 @@ private struct IntegrationSetupView: View {
             if model.connectionState != .connected {
                 TronSettingsCaption("Reconnecting to this Mac. Your setup inputs and accepted operation are kept.")
             }
-            if let error { TronSettingsNotice(message: error, accent: .tronError) }
+            if let error = draft.error { TronSettingsNotice(message: error, accent: .tronError) }
         }
-        .modifier(KnowledgeMutationObserver(mutation: $mutation, error: $error, failed: { failure in
+        .modifier(KnowledgeMutationObserver(mutation: $draft.mutation, error: $draft.error, failed: { failure in
             if let failure = failure as? GatewayFailure, failure.code == "outcome_unknown" {
-                unresolvedOAuth = failure
+                draft.unresolvedOAuth = failure
             }
         }) {
-            if !usesXOAuth || xOAuthCompleted {
-                if usesXOAuth, let context = diagnosticContext {
+            if !usesXOAuth || draft.xOAuthCompleted {
+                if usesXOAuth, let context = draft.diagnosticContext {
                     XSetupDiagnostic.record(.explicitFinish, context: context, appLog: model.appLog, outcome: .success)
                 }
                 onFinished(); dismiss()
@@ -482,24 +506,24 @@ private struct IntegrationSetupView: View {
         .onAppear {
             if usesXOAuth {
                 let context: XSetupDiagnosticContext
-                if let existing = diagnosticContext, existing.viewID == setupViewID {
+                if let existing = draft.diagnosticContext, existing.viewID == draft.viewID {
                     context = existing
                 } else {
                     context = currentDiagnosticContext()
                 }
-                diagnosticContext = context
+                draft.diagnosticContext = context
                 XSetupDiagnostic.record(.viewAppeared, context: context, appLog: model.appLog, outcome: .appeared)
             }
             #if HOSTED_TEST
-            hostedTrace?.record("xsetup.appear dest=\(destinationToken(model.knowledgeDestinationIdentity)) view=\(setupViewID)")
+            hostedTrace?.record("xsetup.appear dest=\(destinationToken(model.knowledgeDestinationIdentity)) view=\(draft.viewID)")
             #endif
         }
         .onDisappear {
-            if usesXOAuth, let context = diagnosticContext {
+            if usesXOAuth, let context = draft.diagnosticContext {
                 XSetupDiagnostic.record(.viewDisappeared, context: context, appLog: model.appLog, outcome: .disappeared)
             }
             #if HOSTED_TEST
-            hostedTrace?.record("xsetup.disappear dest=\(destinationToken(model.knowledgeDestinationIdentity)) view=\(setupViewID)")
+            hostedTrace?.record("xsetup.disappear dest=\(destinationToken(model.knowledgeDestinationIdentity)) view=\(draft.viewID)")
             #endif
         }
     }
@@ -512,7 +536,7 @@ private struct IntegrationSetupView: View {
 
     private func currentDiagnosticContext() -> XSetupDiagnosticContext {
         XSetupDiagnosticContext(
-            viewID: setupViewID, actionID: nil,
+            viewID: draft.viewID, actionID: nil,
             lifecycleGeneration: model.knowledgeDestinationIdentity.lifecycleGeneration,
             connectionID: model.knowledgePresentationIdentity.connectionID
         )
@@ -525,46 +549,46 @@ private struct IntegrationSetupView: View {
             lifecycleGeneration: viewContext.lifecycleGeneration,
             connectionID: viewContext.connectionID
         )
-        diagnosticContext = action
+        draft.diagnosticContext = action
         return action
     }
 
-    private var usesXOAuth: Bool { definition.id == "knowledge.x" && method == "oauth" }
+    private var usesXOAuth: Bool { definition.id == "knowledge.x" && draft.method == "oauth" }
 
     private var policySection: some View {
         TronSettingsGroup("Policy", accent: .tronPurple) {
-            TronToggleRow(icon: "power", title: "Enabled", isOn: $policy.enabled)
+            TronToggleRow(icon: "power", title: "Enabled", isOn: $draft.policy.enabled)
             TronSettingsDivider(accent: .tronPurple)
             if definition.id != "knowledge.x" {
-                TronToggleRow(icon: "arrow.right.arrow.left", title: "Allow writes", isOn: $policy.allowWrites)
+                TronToggleRow(icon: "arrow.right.arrow.left", title: "Allow writes", isOn: $draft.policy.allowWrites)
                 TronSettingsDivider(accent: .tronPurple)
             }
-            TronToggleRow(icon: "creditcard", title: "Paid access approved", isOn: $policy.paidAccessApproved)
-            if policy.paidAccessApproved {
+            TronToggleRow(icon: "creditcard", title: "Paid access approved", isOn: $draft.policy.paidAccessApproved)
+            if draft.policy.paidAccessApproved {
                 TronSettingsDivider(accent: .tronPurple)
-                TronNumberSettingRow(icon: "creditcard", title: "Paid budget", detail: "Cents; a positive budget is required", value: $policy.paidBudgetCents, accent: .tronPurple, stagedText: $paidBudgetDraft)
+                TronNumberSettingRow(icon: "creditcard", title: "Paid budget", detail: "Cents; a positive budget is required", value: $draft.policy.paidBudgetCents, accent: .tronPurple, stagedText: $draft.paidBudgetDraft)
             }
             TronSettingsDivider(accent: .tronPurple)
-            TronToggleRow(icon: "repeat", title: "Recurring runs approved", isOn: $policy.recurringApproved)
+            TronToggleRow(icon: "repeat", title: "Recurring runs approved", isOn: $draft.policy.recurringApproved)
         }
     }
 
     private func complete() {
-        guard mutation == nil, activity.allowsPresentationPublication else { return }
+        guard draft.mutation == nil, activity.allowsPresentationPublication else { return }
         if usesXOAuth {
-            if let unresolvedOAuth {
+            if let unresolvedOAuth = draft.unresolvedOAuth {
                 guard let commandID = unresolvedOAuth.details?.objectValue?["commandId"]?.stringValue,
-                      let method = unresolvedOAuth.details?.objectValue?["method"]?.stringValue else {
-                    error = "The original setup outcome is unknown. Do not start another authorization."
+                      let resumedMethod = unresolvedOAuth.details?.objectValue?["method"]?.stringValue else {
+                    draft.error = "The original setup outcome is unknown. Do not start another authorization."
                     return
                 }
                 let destination = model.knowledgeDestinationIdentity
-                let diagnostic = method == "knowledge.x.oauth.begin" ? newBeginDiagnosticContext() : nil
+                let diagnostic = resumedMethod == "knowledge.x.oauth.begin" ? newBeginDiagnosticContext() : nil
                 if let diagnostic {
                     XSetupDiagnostic.record(.beginAdmitted, context: diagnostic, appLog: model.appLog,
                                             outcome: .admitted)
                 }
-                mutation = KnowledgeMutation(identity: destination, task: Task { @MainActor in
+                draft.mutation = KnowledgeMutation(identity: destination, task: Task { @MainActor in
                     guard model.knowledgeDestinationIdentity == destination else {
                         if let diagnostic {
                             XSetupDiagnostic.record(.beginRejected, context: diagnostic, appLog: model.appLog,
@@ -574,14 +598,14 @@ private struct IntegrationSetupView: View {
                         }
                         throw CancellationError()
                     }
-                    if method == "knowledge.x.oauth.begin" {
+                    if resumedMethod == "knowledge.x.oauth.begin" {
                         do {
                             let started = try await model.integrations.resumeXOAuthBegin(commandID: commandID)
                             if let diagnostic {
                                 XSetupDiagnostic.record(.beginReturned, context: diagnostic, appLog: model.appLog,
                                                         outcome: .success, origin: .explicitStatusRecoveryReturn)
                             }
-                            guard model.knowledgeDestinationIdentity == destination, started.instanceId == self.instanceID else {
+                            guard model.knowledgeDestinationIdentity == destination, started.instanceId == draft.instanceID else {
                                 if let diagnostic {
                                     XSetupDiagnostic.record(.beginRejected, context: diagnostic, appLog: model.appLog,
                                                             outcome: .rejected,
@@ -591,8 +615,8 @@ private struct IntegrationSetupView: View {
                                 }
                                 throw CancellationError()
                             }
-                            xOAuthOperationID = started.operationId; xOAuthState = started.state
-                            xAuthorizationURL = URL(string: started.authorizationUrl)
+                            draft.xOAuthOperationID = started.operationId; draft.xOAuthState = started.state
+                            draft.xAuthorizationURL = URL(string: started.authorizationUrl)
                             if let diagnostic {
                                 XSetupDiagnostic.record(.beginStateAssigned, context: diagnostic, appLog: model.appLog,
                                                         outcome: .assigned)
@@ -606,48 +630,48 @@ private struct IntegrationSetupView: View {
                             }
                             throw error
                         }
-                    } else if method == "knowledge.x.oauth.complete" {
+                    } else if resumedMethod == "knowledge.x.oauth.complete" {
                         _ = try await model.integrations.resumeXOAuthComplete(commandID: commandID)
                         guard model.knowledgeDestinationIdentity == destination else { throw CancellationError() }
-                        xOAuthCompleted = true
+                        draft.xOAuthCompleted = true
                     } else { throw CancellationError() }
-                    self.unresolvedOAuth = nil
+                    draft.unresolvedOAuth = nil
                 }, xSetupDiagnostic: diagnostic)
                 return
             }
-            if let operationID = xOAuthOperationID {
-                guard !xCallbackURL.isEmpty || (!xAuthorizationCode.isEmpty && xOAuthState != nil) else { error = "Paste the redirected URL or its authorization code after consent."; return }
+            if let operationID = draft.xOAuthOperationID {
+                guard !draft.xCallbackURL.isEmpty || (!draft.xAuthorizationCode.isEmpty && draft.xOAuthState != nil) else { draft.error = "Paste the redirected URL or its authorization code after consent."; return }
                 let requestIdentity = model.knowledgeDestinationIdentity
-                let operationID = operationID, callbackURL = xCallbackURL.isEmpty ? nil : xCallbackURL
-                let code = callbackURL == nil && !xAuthorizationCode.isEmpty ? xAuthorizationCode : nil
-                let state = callbackURL == nil ? xOAuthState : nil
-                mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
+                let operationID = operationID, callbackURL = draft.xCallbackURL.isEmpty ? nil : draft.xCallbackURL
+                let code = callbackURL == nil && !draft.xAuthorizationCode.isEmpty ? draft.xAuthorizationCode : nil
+                let state = callbackURL == nil ? draft.xOAuthState : nil
+                draft.mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
                     guard model.knowledgeDestinationIdentity == requestIdentity,
                           model.knowledgePresentationIdentity.lifecycleGeneration != nil,
                           model.knowledgePresentationIdentity.connectionID != nil else { throw CancellationError() }
                     _ = try await model.integrations.completeXOAuth(operationID: operationID, callbackURL: callbackURL, code: code, state: state)
                     guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
-                    xOAuthCompleted = true
+                    draft.xOAuthCompleted = true
                 })
             } else {
                 let diagnostic = newBeginDiagnosticContext()
-                guard !instanceID.isEmpty, !xClientID.isEmpty, !xRedirectURI.isEmpty else {
+                guard !draft.instanceID.isEmpty, !draft.xClientID.isEmpty, !draft.xRedirectURI.isEmpty else {
                     XSetupDiagnostic.record(.beginRejected, context: diagnostic, appLog: model.appLog,
                                             outcome: .rejected, reason: .invalidInput)
-                    error = "Instance ID, public X client ID, and registered callback URL are required."
+                    draft.error = "Instance ID, public X client ID, and registered callback URL are required."
                     return
                 }
-                guard let submittedPolicy = IntegrationPolicySubmission.candidate(policy: policy, paidBudgetDraft: paidBudgetDraft) else {
+                guard let submittedPolicy = IntegrationPolicySubmission.candidate(policy: draft.policy, paidBudgetDraft: draft.paidBudgetDraft) else {
                     XSetupDiagnostic.record(.beginRejected, context: diagnostic, appLog: model.appLog,
                                             outcome: .rejected, reason: .invalidInput)
-                    error = TronNumberSettingRow.invalidInputMessage
+                    draft.error = TronNumberSettingRow.invalidInputMessage
                     return
                 }
-                error = nil
+                draft.error = nil
                 let requestIdentity = model.knowledgeDestinationIdentity
-                let instanceID = instanceID, clientID = xClientID, redirectURI = xRedirectURI, policy = submittedPolicy
+                let instanceID = draft.instanceID, clientID = draft.xClientID, redirectURI = draft.xRedirectURI, policy = submittedPolicy
                 XSetupDiagnostic.record(.beginAdmitted, context: diagnostic, appLog: model.appLog, outcome: .admitted)
-                mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
+                draft.mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
                     guard model.knowledgeDestinationIdentity == requestIdentity,
                           model.knowledgePresentationIdentity.lifecycleGeneration != nil,
                           model.knowledgePresentationIdentity.connectionID != nil else {
@@ -680,27 +704,27 @@ private struct IntegrationSetupView: View {
                         throw CancellationError()
                     }
                     #if HOSTED_TEST
-                    hostedTrace?.record("xsetup.begin-accepted dest=\(destinationToken(requestIdentity)) view=\(setupViewID)")
+                    hostedTrace?.record("xsetup.begin-accepted dest=\(destinationToken(requestIdentity)) view=\(draft.viewID)")
                     #endif
-                    xOAuthOperationID = started.operationId
-                    xOAuthState = started.state
-                    xAuthorizationURL = URL(string: started.authorizationUrl)
+                    draft.xOAuthOperationID = started.operationId
+                    draft.xOAuthState = started.state
+                    draft.xAuthorizationURL = URL(string: started.authorizationUrl)
                     XSetupDiagnostic.record(.beginStateAssigned, context: diagnostic, appLog: model.appLog,
                                             outcome: .assigned)
                 }, xSetupDiagnostic: diagnostic)
             }
             return
         }
-        guard !instanceID.isEmpty, !accountID.isEmpty, !credentialRef.isEmpty else { error = "Instance ID, account/server identity, and an opaque credential reference are required."; return }
-        guard let submittedPolicy = IntegrationPolicySubmission.candidate(policy: policy, paidBudgetDraft: paidBudgetDraft) else {
-            error = TronNumberSettingRow.invalidInputMessage
+        guard !draft.instanceID.isEmpty, !draft.accountID.isEmpty, !draft.credentialRef.isEmpty else { draft.error = "Instance ID, account/server identity, and an opaque credential reference are required."; return }
+        guard let submittedPolicy = IntegrationPolicySubmission.candidate(policy: draft.policy, paidBudgetDraft: draft.paidBudgetDraft) else {
+            draft.error = TronNumberSettingRow.invalidInputMessage
             return
         }
-        error = nil
+        draft.error = nil
         let requestIdentity = model.knowledgeDestinationIdentity
-        let instanceID = instanceID, accountID = accountID, scope = scope, credentialRef = credentialRef
-        let method = method, policy = submittedPolicy
-        mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
+        let instanceID = draft.instanceID, accountID = draft.accountID, scope = draft.scope, credentialRef = draft.credentialRef
+        let method = draft.method, policy = submittedPolicy
+        draft.mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
                 guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
                 let begun = try await model.integrations.beginSetup(instanceID: instanceID, definitionID: definition.id, method: method)
                 // Begin's receipt remains owned even after dismissal. Completion

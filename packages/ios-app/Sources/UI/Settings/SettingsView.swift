@@ -14,6 +14,9 @@ struct SettingsView: View {
     @Environment(\.hostedIntegrationPresentationTrace) private var hostedTrace
     #endif
     @State private var showsNotifications = false
+    /// Connected Services sheet routes live here, above its presented content,
+    /// which SwiftUI can rebuild while the sheet stays up (#932).
+    @State private var integrationRoutes = IntegrationSheetRoutes()
     @State private var hasRefreshedNotificationBadge = false
 
     init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
@@ -56,8 +59,9 @@ struct SettingsView: View {
                             CustomModelsSettingsView()
                         }
                         TronSettingsDivider()
-                        settingsLink("Connected Services", summary: "Service accounts and what they offer", icon: "link") {
-                            IntegrationsSettingsView()
+                        settingsLink("Connected Services", summary: "Service accounts and what they offer", icon: "link",
+                                     onDismiss: { integrationRoutes.reset() }) {
+                            IntegrationsSettingsView(routes: integrationRoutes)
                         }
                     }
                     SettingsGroupCard(.data) {
@@ -153,9 +157,10 @@ struct SettingsView: View {
         _ title: String,
         summary: String,
         icon: String,
+        onDismiss: (() -> Void)? = nil,
         @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
-        TronProgressiveSheetLink(accessibilityLabel: title, destination: destination) {
+        TronProgressiveSheetLink(accessibilityLabel: title, onDismiss: onDismiss, destination: destination) {
             TronSettingsRow(icon: icon, title: title, subtitle: summary, subtitleColor: .tronTextSecondary)
                 .contentShape(Rectangle())
         }
@@ -347,6 +352,8 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     /// Settings destinations open at medium and expand to large; a destination
     /// that publishes `TronSheetFitHeightKey` (the model picker) passes `.contentFit`.
     let detents: TronSheetDetentPolicy
+    /// Runs once the destination sheet has actually been dismissed.
+    let onDismiss: (() -> Void)?
     @State private var isPresented = false
     @Environment(\.tronSettingsVisualTheme) private var inheritedTheme
 
@@ -355,6 +362,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         identity: String? = nil,
         accent: Color? = nil,
         detents: TronSheetDetentPolicy = .fixed([.medium, .large]),
+        onDismiss: (() -> Void)? = nil,
         @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder label: () -> Label
     ) {
@@ -362,6 +370,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         self.identity = identity ?? "settings.\(accessibilityLabel)"
         self.accent = accent
         self.detents = detents
+        self.onDismiss = onDismiss
         self.destination = destination
         self.label = label()
     }
@@ -372,7 +381,8 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
             .accessibilityLabel(accessibilityLabel)
             .tronManagedSheet(
                 isPresented: $isPresented,
-                identity: identity
+                identity: identity,
+                onDismiss: onDismiss
             ) {
                 NavigationStack {
                     destinationContent
