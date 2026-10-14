@@ -379,7 +379,7 @@ private actor HostedHomeShellGateway {
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
     func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
-    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "context-window.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"] }
+    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "context-window.v1", "skill-prompt.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"] }
 
     /// Every Home read a sheet sent, so journeys can prove a return to a sheet re-reads nothing.
     private var homeReads: [String: Int] = [:]
@@ -494,6 +494,14 @@ private actor HostedHomeShellGateway {
             else { result["previousOffset"] = .number(0) }
             return (.object(result), nil)
         case "home.prompt":
+            // A composer resource rides the logical route as the Gateway's
+            // `resourceInvocation`; the route records exactly which one.
+            if let resource = params["resourceInvocation"]?.objectValue,
+               let source = resource["source"]?.stringValue, let name = resource["name"]?.stringValue {
+                promptRoutes.append("home.prompt:\(source):\(name):\(resource["arguments"]?.stringValue ?? "")")
+                return (.object(["logicalSessionId": .string("home"), "homeId": .string("home-fixture"), "bindingRevision": .number(1),
+                    "sessionId": .string("home-session"), "operationId": .string("resource-operation")]), nil)
+            }
             // The rollover journey: the logical route materializes the reserved
             // successor, and only the route's text is admitted.
             promptRoutes.append("home.prompt")
@@ -599,7 +607,20 @@ private actor HostedHomeShellGateway {
                 "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(0)]), nil)
         case "session.sync": return (.object(["synchronized": .bool(true)]), nil)
         case "session.close": return (.object(["closed": .bool(true)]), nil)
-        case "session.commands": return (.object(["commands": .array([])]), nil)
+        case "session.commands":
+            // Home's catalog as the Gateway serves it: user-level skills and
+            // prompt templates only, never project resources.
+            func user(_ name: String, _ source: String, _ description: String, hint: String? = nil) -> JSONValue {
+                var row: [String: JSONValue] = ["name": .string(name), "source": .string(source), "description": .string(description),
+                    "resourceSource": .string("auto"), "resourceScope": .string("user"), "resourceOrigin": .string("top-level")]
+                if let hint { row["argumentHint"] = .string(hint) }
+                return .object(row)
+            }
+            return (.object(["commands": .array([
+                user("daily-brief", "prompt", "Draft a short daily brief from my notes", hint: "<topic>"),
+                user("skill:tron-jev", "skill", "Use Tron's explicit typed Jev decision adapter for bounded workflow decisions."),
+                user("skill:wordcraft", "skill", "Create, edit, inspect, render and convert word-processor documents."),
+            ])]), nil)
         case "session.attention.read": return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil)
         default: return (nil, .object(["code": .string("not_found"), "message": .string("Not part of this fixture"), "retryable": .bool(false)]))
         }
