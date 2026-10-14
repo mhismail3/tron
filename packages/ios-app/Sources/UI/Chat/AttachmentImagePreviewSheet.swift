@@ -97,9 +97,7 @@ struct AttachmentImagePreviewSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityLabel(accessibilityLabel)
         } else {
-            TronLoadingState(label: "Loading photo…", accent: .tronEmerald)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityLabel(accessibilityLabel)
+            TronSheetLoadingState(label: "Loading photo…", accent: .tronEmerald)
         }
     }
 

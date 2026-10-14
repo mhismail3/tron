@@ -122,9 +122,11 @@ struct SettingsRendererView: View {
                     TronPlaceholderState(title: "Settings Unavailable", detail: failure, icon: "slider.horizontal.3",
                                          accent: .tronAmber, actionTitle: "Reload") { loadError = nil; retryTick &+= 1 }
                         .frame(maxWidth: .infinity)
-                } else {
+                } else if embedded {
+                    // A section of an already-visible sheet (Manage Home): a partial load.
                     TronLoadingState(label: "Loading settings…")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    TronSheetLoadingState(label: "Loading settings…")
                 }
             }
             .padding(embedded ? 0 : 20)

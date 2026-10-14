@@ -90,7 +90,10 @@ final class TronMCPServerSheetsUITests: XCTestCase {
         XCTAssertTrue(code.waitForExistence(timeout: 10)); code.tap(); code.typeText("fixture-only-code")
         app.buttons["Complete Login"].tap()
         XCTAssertTrue(counters(app, owner: "original", contain: "answers:1"))
-        XCTAssertTrue(app.staticTexts["Completing provider login…"].waitForExistence(timeout: 10), "Prompt consumption is not operation completion")
+        // The progress step is the shared sheet pulse, labelled with the operation.
+        let completing = app.descendants(matching: .any)["sheet-loading"]
+        XCTAssertTrue(completing.waitForExistence(timeout: 10), "Prompt consumption is not operation completion")
+        XCTAssertEqual(completing.label, "Completing provider login…")
         XCTAssertTrue(app.buttons["Cancel"].exists, "The operation is still presented while its completion event remains active")
         XCUIDevice.shared.press(.home); app.activate()
         XCTAssertTrue(counters(app, owner: "original", contain: "authResumes:2"))

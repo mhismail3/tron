@@ -4889,23 +4889,31 @@ final class AppModel {
         }
         switch query {
         case .manage:
-            let status = try HomeStatusDTO.decode(try await read("home.status"))
-            let context = try HomeContextDTO.decode(try await read("home.context"))
-            let chapters = chapterListCapable() ? try await readChapterList() : nil
+            // Independent reads share one round trip instead of queuing behind each
+            // other (each is individually fenced). Task reads still wait for status,
+            // which decides whether they may be attempted at all.
+            let readsChapters = chapterListCapable()
+            async let statusValue = read("home.status")
+            async let contextValue = read("home.context")
+            async let chapterValue: JSONValue? = readsChapters ? read("home.chapterList") : nil
+            let status = try HomeStatusDTO.decode(try await statusValue)
+            let context = try HomeContextDTO.decode(try await contextValue)
+            let chapterJSON = try await chapterValue
+            let chapters = try chapterJSON.map { try HomeChapterListDTO.decode($0) }
             // A refused task or permission read leaves its row "Unavailable"; the sheet still loads.
             var tasks: HomeTaskPageDTO?
             var permissions: HomeTaskPermissionsDTO?
             if status.admitsTaskReads {
-                tasks = try await optionalRead {
+                async let taskPage = optionalRead {
                     try HomeTaskPageDTO.decode(try await read("home.taskList", .object(["limit": .number(20)])))
                 }
-                permissions = try await optionalRead {
+                async let taskPermissions = optionalRead {
                     try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions"))
                 }
+                tasks = try await taskPage
+                permissions = try await taskPermissions
             }
             return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks, permissions: permissions))
-        case .context:
-            return .context(try HomeContextDTO.decode(try await read("home.context")))
         case .tasks(let cursor):
             let status = try await readTaskStatus()
             var params: [String: JSONValue] = ["limit": .number(20)]

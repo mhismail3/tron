@@ -248,6 +248,7 @@ struct TronPresentationSurface<Content: View>: View {
 
     var body: some View {
         content()
+            .modifier(TronSheetLoadingHostModifier())
             .environment(\.tronPresentationSurfaceToken, token)
             .environment(
                 \.tronPresentationActivity,

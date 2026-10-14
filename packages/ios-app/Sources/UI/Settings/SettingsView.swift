@@ -284,10 +284,10 @@ struct ChatSettingsView: View {
                     SettingsChangesLink(scope: changesScope, subtitle: "What agents changed, and approvals waiting for you",
                                         onOpenSession: onOpenSession)
                 }
-                TronSettingsGroup("Settings", detail: "Each value shows where it comes from: this chat, its project, this Mac, or built in.") {
-                    if sections.isEmpty {
-                        TronLoadingState(label: "Loading settings…").padding(16)
-                    } else {
+                if sections.isEmpty {
+                    TronSheetLoadingState(label: "Loading settings…")
+                } else {
+                    TronSettingsGroup("Settings", detail: "Each value shows where it comes from: this chat, its project, this Mac, or built in.") {
                         SettingsSectionLinks(ids: Self.chatSections + unplaced, sections: sections, target: target,
                                              writeLayer: nil, ownedLayers: ownedLayers, projectCWD: projectCWD)
                     }

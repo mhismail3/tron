@@ -1482,6 +1482,9 @@ struct TronSettingsRow<Trailing: View>: View {
     let title: String
     let subtitle: String?
     let subtitleLineLimit: Int?
+    /// Renders the subtitle's inline markdown (emphasis, code, links) with the
+    /// chat renderer's inline parser, for rows that preview canonical text.
+    let subtitleIsMarkdown: Bool
     let titleIsIdentifier: Bool
     let accent: Color
     let titleFont: Font
@@ -1503,6 +1506,7 @@ struct TronSettingsRow<Trailing: View>: View {
         title: String,
         subtitle: String? = nil,
         subtitleLineLimit: Int? = 2,
+        subtitleIsMarkdown: Bool = false,
         titleIsIdentifier: Bool = false,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
@@ -1515,6 +1519,7 @@ struct TronSettingsRow<Trailing: View>: View {
         self.title = title
         self.subtitle = subtitle
         self.subtitleLineLimit = subtitleLineLimit
+        self.subtitleIsMarkdown = subtitleIsMarkdown
         self.titleIsIdentifier = titleIsIdentifier
         self.accent = accent
         self.titleFont = titleFont
@@ -1573,7 +1578,9 @@ struct TronSettingsRow<Trailing: View>: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if let subtitle {
-                        Text(subtitle)
+                        Text(subtitleIsMarkdown
+                             ? MarkdownPresentation.Inline(source: subtitle).attributedString ?? AttributedString(subtitle)
+                             : AttributedString(subtitle))
                             .font(feedTrailing == nil
                                 ? TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment)
                                 : TronTypography.body)
@@ -1736,6 +1743,7 @@ extension TronSettingsRow where Trailing == EmptyView {
         title: String,
         subtitle: String? = nil,
         subtitleLineLimit: Int? = 2,
+        subtitleIsMarkdown: Bool = false,
         titleIsIdentifier: Bool = false,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
@@ -1748,6 +1756,7 @@ extension TronSettingsRow where Trailing == EmptyView {
             title: title,
             subtitle: subtitle,
             subtitleLineLimit: subtitleLineLimit,
+            subtitleIsMarkdown: subtitleIsMarkdown,
             titleIsIdentifier: titleIsIdentifier,
             accent: accent,
             titleFont: titleFont,
@@ -2270,20 +2279,98 @@ struct TronPlaceholderState: View {
     }
 }
 
+/// Whole-content loading for a sheet or sub-sheet. The placeholder takes no
+/// layout space; it asks the enclosing presentation surface to draw the
+/// chat-opening pulse centered over the whole visible sheet. Centering at the
+/// surface, not inside the sheet's scroll/stack, keeps it still across medium,
+/// large and in-flight detents and means arriving content never shifts layout.
+/// The accent resolves exactly like `TronSheetTitle`, so pass the title's accent.
+/// Partial, in-section loads use `TronLoadingState` instead.
+struct TronSheetLoadingState: View {
+    let label: String
+    var accent: Color = .tronEmerald
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .preference(
+                key: TronSheetLoadingPreferenceKey.self,
+                value: TronSheetLoadingRequest(label: label, accent: settingsTheme?.accent ?? accent)
+            )
+    }
+}
+
+struct TronSheetLoadingRequest: Equatable {
+    let label: String
+    let accent: Color
+}
+
+struct TronSheetLoadingPreferenceKey: PreferenceKey {
+    static let defaultValue: TronSheetLoadingRequest? = nil
+    // One pulse per sheet: the first (outermost/earliest) request wins.
+    static func reduce(value: inout TronSheetLoadingRequest?, nextValue: () -> TronSheetLoadingRequest?) {
+        if value == nil { value = nextValue() }
+    }
+}
+
+/// Owned by `TronPresentationSurface` (every managed sheet and the app shell):
+/// draws the one centered pulse a surface's content requests and consumes the
+/// request so an outer surface cannot repeat it.
+struct TronSheetLoadingHostModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .overlayPreferenceValue(TronSheetLoadingPreferenceKey.self) { request in
+                ZStack {
+                    if let request {
+                        // The same indicator and size the chat opening surface uses.
+                        TronPulseLoadingIndicator(accent: request.accent, size: 44)
+                            .padding(18)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(request.label)
+                            .accessibilityIdentifier("sheet-loading")
+                            .transition(.opacity)
+                    }
+                }
+                // No background: the native sheet material stays the only surface (#843).
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .animation(TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+                           value: request != nil)
+            }
+            #if HOSTED_TEST
+            // Exposes the exact area the pulse is centered in so UI journeys measure
+            // centering. Behind the content, so toolbar controls stay on top.
+            .backgroundPreferenceValue(TronSheetLoadingPreferenceKey.self) { request in
+                if request != nil {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .ignoresSafeArea()
+                        .accessibilityElement()
+                        .accessibilityIdentifier("sheet-loading-surface")
+                }
+            }
+            #endif
+            .transformPreference(TronSheetLoadingPreferenceKey.self) { $0 = nil }
+    }
+}
+
+/// A partial load inside an already-visible sheet section: the pulse alone, with
+/// its label kept for VoiceOver so it can never wrap or crowd the row.
 struct TronLoadingState: View {
     let label: String
     var accent: Color = .tronEmerald
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {
-        HStack(spacing: TronSpacing.md) {
-            TronPulseLoadingIndicator(accent: settingsTheme?.accent ?? accent)
-            Text(label)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(Color.tronTextSecondary)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(label)
+        TronPulseLoadingIndicator(accent: settingsTheme?.accent ?? accent)
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
     }
 }
 

@@ -192,11 +192,7 @@ struct SessionToolPickerSheet: View {
                         TronSettingsNotice(message: errorMessage, accent: .tronError)
                     }
                     if loading && groups.isEmpty {
-                        TronGlassCard(accent: .tronSessionTeal) {
-                            TronLoadingState(label: "Loading tools…", accent: .tronSessionTeal)
-                                .padding(18)
-                                .frame(maxWidth: .infinity)
-                        }
+                        TronLoadingState(label: "Loading tools…", accent: .tronSessionTeal)
                     } else if groups.isEmpty {
                         TronPlaceholderState(
                             title: "Tools Unavailable",

@@ -74,6 +74,9 @@ struct SettingsChangesView: View {
         let approved: Bool
     }
 
+    /// Empty filtered pages one load follows before it offers Load more.
+    private static let maximumPagesPerLoad = 10
+
     private struct LoadID: Hashable {
         let scope: SettingsChangesScope
         let actor: String
@@ -345,24 +348,37 @@ struct SettingsChangesView: View {
         let currentCursor = reset ? nil : cursor
         let request = loadID
         do {
-            async let pageTask = model.settingsHistory(cursor: currentCursor, actor: actorFilter.isEmpty ? nil : actorFilter,
-                                                       layer: layerFilter.isEmpty ? nil : layerFilter,
-                                                       section: sectionFilter.isEmpty ? nil : sectionFilter,
-                                                       key: keyFilter.isEmpty ? nil : keyFilter,
-                                                       status: statusFilter.isEmpty ? nil : statusFilter)
             async let approvalsTask = model.allSettingsApprovals()
-            let page = try await pageTask
+            // The Gateway filters within its record pages and this feed filters
+            // by scope, so a page can be empty yet not the end. Follow a bounded
+            // run of empty pages, so opening the sheet shows its first entries
+            // instead of a bare Load more.
+            var pageCursor = currentCursor
+            var visible: [SettingsChangeHistoryEntry] = []
+            var nextCursor: String?
+            var pagesRead = 0
+            repeat {
+                let page = try await model.settingsHistory(cursor: pageCursor, actor: actorFilter.isEmpty ? nil : actorFilter,
+                                                           layer: layerFilter.isEmpty ? nil : layerFilter,
+                                                           section: sectionFilter.isEmpty ? nil : sectionFilter,
+                                                           key: keyFilter.isEmpty ? nil : keyFilter,
+                                                           status: statusFilter.isEmpty ? nil : statusFilter)
+                guard request == loadID, admits(ticket, identity: identity, foreground: foreground, activity: activity) else { return }
+                visible += page.entries.filter { $0.belongs(to: scope) }
+                nextCursor = page.nextCursor
+                pageCursor = nextCursor
+                pagesRead += 1
+            } while visible.isEmpty && nextCursor != nil && pagesRead < Self.maximumPagesPerLoad
             let approvals = try await approvalsTask
             guard request == loadID, admits(ticket, identity: identity, foreground: foreground, activity: activity) else { return }
             installedLoadID = request
             UserDefaults.standard.set(ISO8601DateFormatter().string(from: visitStartedAt), forKey: lastLookStorageKey)
-            let visible = page.entries.filter { $0.belongs(to: scope) }
             if reset { entries = visible } else {
                 let known = Set(entries.map(\.changeId))
                 entries.append(contentsOf: visible.filter { !known.contains($0.changeId) })
             }
             pending = approvals.filter { $0.belongs(to: scope) }.sorted { $0.createdAt > $1.createdAt }
-            cursor = page.nextCursor
+            cursor = nextCursor
             errorMessage = nil
         } catch is CancellationError {
         } catch {
@@ -433,72 +449,74 @@ private struct SettingsChangeDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    detailValue("Before", entry.presentation?.display.before ?? (entry.redacted == true ? "Hidden" : entry.before.map(String.init(describing:)) ?? "—"))
-                    detailValue("After", entry.presentation?.display.after ?? (entry.redacted == true ? "Changed" : entry.after.map(String.init(describing:)) ?? "—"))
-                    if let undoConflict {
-                        detailValue("Current value", undoConflict.current)
-                        detailValue("Value when applied", undoConflict.after)
-                    }
-                    detailValue("Actor", entry.presentation?.actor ?? entry.actor.kind)
-                    detailValue("Layer", entry.presentation?.layer ?? entry.layer)
-                    if let reason = entry.reason, !reason.isEmpty { detailValue("Reason", reason) }
-                    detailValue("Tier and status", "\(entry.tier.capitalized) · \(entry.status.capitalized)")
-                    if let basis = entry.tierBasis {
-                        detailValue("How the tier was reached",
-                            "Floor: \(basis.floor) (\(basis.floorSource)); direction: \(basis.direction). Web/browser raise: \(basis.web ? "one step" : "none"). Risk model: \(basis.risk ?? "not used").")
-                        if let evaluation = basis.riskEvaluation {
-                            detailValue("Risk evaluation", "\(evaluation.status.capitalized): \(evaluation.rationale)")
-                        }
-                    }
-                    detailValue("Target", entry.target.sessionId ?? entry.target.cwd ?? entry.target.kind.capitalized)
-                    if let taskID = entry.actor.taskId { detailValue("Task", taskID) }
-                    if let sessionID = entry.actor.sessionId {
-                        detailValue("Requesting chat", sessionID)
-                        if onOpenSession != nil {
-                            Button { Task { await openSession(sessionID) } } label: {
-                                TronSettingsRow(icon: "bubble.left", title: "Open requesting chat", accent: .tronEmerald)
+                VStack(alignment: .leading, spacing: 18) {
+                    TronGlassCard(accent: statusAccent) {
+                        VStack(spacing: 0) {
+                            TronSettingsRow(icon: "circle.dashed", title: "Before",
+                                            subtitle: entry.presentation?.display.before ?? beforeValue,
+                                            subtitleLineLimit: nil, accent: statusAccent) {
+                                TronStatusPill(text: entry.status.capitalized, accent: statusAccent)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(openingSession || model.selectedGatewayProfileID() != profileID)
+                            .textSelection(.enabled)
+                            TronSettingsDivider(accent: statusAccent)
+                            TronSettingsRow(icon: "checkmark.circle", title: "After",
+                                            subtitle: entry.presentation?.display.after ?? afterValue,
+                                            subtitleLineLimit: nil, accent: statusAccent)
+                            .textSelection(.enabled)
+                            if let undoConflict {
+                                TronSettingsDivider(accent: statusAccent)
+                                detailRow("exclamationmark.triangle", "Current value", undoConflict.current)
+                                TronSettingsDivider(accent: statusAccent)
+                                detailRow("clock.arrow.circlepath", "Value when applied", undoConflict.after)
+                            }
                         }
                     }
-                    if entry.actor.taskId != nil {
-                        Button { showingTask = true } label: {
-                            TronSettingsRow(icon: "checklist", title: "Open task", accent: .tronEmerald)
+                    TronSettingsGroup("Details") {
+                        VStack(spacing: 0) {
+                            detailRow("person.crop.circle", "Changed by", entry.presentation?.actor ?? entry.actor.kind.capitalized)
+                            divider
+                            detailRow("square.3.layers.3d", "Layer", entry.presentation?.layer ?? entry.layer.capitalized)
+                            divider
+                            detailRow("clock", "When", whenText)
+                            if let reason = entry.reason, !reason.isEmpty { divider; detailRow("text.quote", "Reason", reason) }
+                            divider
+                            detailRow("shield.lefthalf.filled", "Tier", entry.tier.capitalized)
+                            if let basis = entry.tierBasis {
+                                divider
+                                detailRow("scalemass", "How the tier was reached",
+                                          "Floor: \(basis.floor) (\(basis.floorSource)); direction: \(basis.direction). Web/browser raise: \(basis.web ? "one step" : "none"). Risk model: \(basis.risk ?? "not used").")
+                                if let evaluation = basis.riskEvaluation {
+                                    divider
+                                    detailRow("gauge.with.needle", "Risk evaluation", "\(evaluation.status.capitalized): \(evaluation.rationale)")
+                                }
+                            }
+                            divider
+                            detailRow("scope", "Target", entry.target.sessionId ?? entry.target.cwd ?? entry.target.kind.capitalized)
+                            if let git = entry.git {
+                                divider
+                                if entry.status == "outside" || entry.status == "committed" {
+                                    if let head = git.head { detailRow("point.topleft.down.to.point.bottomright.curvepath", "Commit", String(head.prefix(12)) + (git.branch.map { " on \($0)" } ?? "")) }
+                                } else {
+                                    detailRow("tray.and.arrow.down", "When written", git.staged ? "Staged" : (git.reason ?? "Not staged"))
+                                }
+                                if let warning = git.warning { divider; detailRow("exclamationmark.triangle", "Staging warning", warning) }
+                            }
+                            if let failure = entry.failure { divider; detailRow("xmark.octagon", "Failure", failure) }
                         }
-                        .buttonStyle(.plain)
-                        .disabled(model.selectedGatewayProfileID() != profileID)
                     }
-                    detailValue("When", entry.at)
-                    if let git = entry.git {
-                        if entry.status == "outside" || entry.status == "committed" {
-                            if let head = git.head { detailValue("Commit", String(head.prefix(12)) + (git.branch.map { " on \($0)" } ?? "")) }
-                        } else {
-                            detailValue("When written", git.staged ? "Staged" : (git.reason ?? "Not staged"))
-                        }
-                        if let warning = git.warning { detailValue("Staging warning", warning) }
-                    }
-                    if let failure = entry.failure { detailValue("Failure", failure) }
-                    if entry.status == "outside", entry.redacted != true, entry.refersTo != nil {
-                        Button(undoing ? "Applying…" : "Apply again") { Task { await performApplyAgain() } }
-                            .buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronEmerald))
-                            .disabled(undoing)
-                            .accessibilityIdentifier("settings.change.applyAgain")
-                    } else if entry.redacted != true && entry.status == "applied" {
-                        Button(undoing ? "Undoing…" : "Undo") { showingUndo = true }
-                            .buttonStyle(TronActionButtonStyle(role: .standard, accent: .tronEmerald))
-                            .disabled(undoing)
-                    } else { Text("Not undoable").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
+                    actions
                     if let actionError { TronSettingsNotice(message: actionError, title: "Action unavailable") }
-                    Text("Key history").font(TronTypography.headline).accessibilityAddTraits(.isHeader)
-                    ForEach(history) { item in
-                        TronGlassCard(accent: .tronEmerald) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(item.at).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                                Text(item.presentation?.display.before ?? "—").font(TronTypography.secondaryCodeDescription)
-                                Text("→ \(item.presentation?.display.after ?? "—")").font(TronTypography.secondaryCodeDescription)
-                            }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                    TronSettingsGroup("Key history") {
+                        VStack(spacing: 0) {
+                            ForEach(Array(history.enumerated()), id: \.element.id) { index, item in
+                                if index > 0 { divider }
+                                TronSettingsRow(icon: nil,
+                                                title: "\(item.presentation?.display.before ?? "—") → \(item.presentation?.display.after ?? "—")",
+                                                subtitle: Self.relative(item), subtitleLineLimit: nil)
+                            }
+                            if history.isEmpty && !loading {
+                                TronSettingsRow(icon: nil, title: "No other changes to this key")
+                            }
                         }
                     }
                     if cursor != nil {
@@ -531,6 +549,7 @@ private struct SettingsChangeDetailView: View {
             Button("Cancel", role: .cancel) {}
         }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
         .task(id: PresentationActivityTaskID(source: readID, presentationActive: presentationActivity.allowsPresentationPublication)) {
             guard presentationActivity.allowsPresentationPublication else { return }
             if installedIdentity != readID {
@@ -545,11 +564,71 @@ private struct SettingsChangeDetailView: View {
         .onDisappear { generation &+= 1; loading = false }
     }
 
-    private func detailValue(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronTextSecondary)
-            Text(value).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+    private var beforeValue: String {
+        entry.redacted == true ? "Hidden" : entry.before.map(String.init(describing:)) ?? "—"
+    }
+    private var afterValue: String {
+        entry.redacted == true ? "Changed" : entry.after.map(String.init(describing:)) ?? "—"
+    }
+    private var statusAccent: Color { entry.status == "failed" ? .tronError : .tronEmerald }
+    private var divider: some View { TronSettingsDivider() }
+
+    /// A readable local time and how long ago, never the raw ISO timestamp.
+    private var whenText: String {
+        guard let date = entry.date else { return entry.at }
+        return "\(date.formatted(date: .abbreviated, time: .shortened)) · \(Self.relative(entry))"
+    }
+
+    static func relative(_ entry: SettingsChangeHistoryEntry) -> String {
+        guard let date = entry.date else { return entry.at }
+        return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: .now)
+    }
+
+    /// One labelled value in the standard row: the label as the title, the value
+    /// in the row's subtext.
+    private func detailRow(_ icon: String, _ title: String, _ value: String) -> some View {
+        TronSettingsRow(icon: icon, title: title, subtitle: value, subtitleLineLimit: nil)
+            .textSelection(.enabled)
+    }
+
+    /// The requesting chat, the owning task and Undo (or Apply again), as rows.
+    @ViewBuilder private var actions: some View {
+        TronGlassCard(accent: .tronEmerald) {
+            VStack(spacing: 0) {
+                if let sessionID = entry.actor.sessionId, onOpenSession != nil {
+                    Button { Task { await openSession(sessionID) } } label: {
+                        TronSettingsRow(icon: "bubble.left", title: "Open requesting chat")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(openingSession || model.selectedGatewayProfileID() != profileID)
+                    divider
+                }
+                if entry.actor.taskId != nil {
+                    Button { showingTask = true } label: {
+                        TronSettingsRow(icon: "checklist", title: "Open task")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.selectedGatewayProfileID() != profileID)
+                    divider
+                }
+                if entry.status == "outside", entry.redacted != true, entry.refersTo != nil {
+                    Button { Task { await performApplyAgain() } } label: {
+                        TronSettingsRow(icon: "arrow.clockwise", title: undoing ? "Applying…" : "Apply again")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(undoing)
+                    .accessibilityIdentifier("settings.change.applyAgain")
+                } else if entry.redacted != true && entry.status == "applied" {
+                    Button { showingUndo = true } label: {
+                        TronSettingsRow(icon: "arrow.uturn.backward", title: undoing ? "Undoing…" : "Undo")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(undoing)
+                } else {
+                    TronSettingsRow(icon: "arrow.uturn.backward", title: "Not undoable", titleColor: .tronTextSecondary)
+                }
+            }
+        }
     }
 
     private func openSession(_ sessionID: String) async {
