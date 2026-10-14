@@ -217,8 +217,11 @@ describe("Home learned profile in the breakdown", () => {
     const registry = await f.restartToReadiness();
     f.registry = registry;
     const store = new KnowledgeStore(registry.knowledgeWorkspace(), () => {});
-    registry.setKnowledgeService(new KnowledgeService(store, new KnowledgeObservationService(store, undefined, undefined, undefined,
-      homeChapterObservationExcluded(() => registry.homeOwner()))));
+    const knowledge = new KnowledgeService(store, new KnowledgeObservationService(store, undefined, undefined, undefined,
+      homeChapterObservationExcluded(() => registry.homeOwner())));
+    registry.setKnowledgeService(knowledge);
+    // Home's profile tool writes through the settings change path, as gateway-main wires it.
+    settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => registry.homeOwner(), registry, knowledge: () => knowledge });
     await registry.catalog("all");
     const home = await registry.acquire(f.home.sessionId);
     // The profile section is read once per activation, so the note is learned in one activation and counted in the next.
