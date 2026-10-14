@@ -2143,6 +2143,42 @@ enum TronDashboardContentMotion {
     static func transition(reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.985))
     }
+
+    /// The pause between consecutive sections of a dashboard view's first
+    /// appearance. Reduce Motion drops the stagger and keeps only the fade.
+    static let sectionStaggerStep: TimeInterval = 0.08
+
+    static func sectionReveal(order: Int, reduceMotion: Bool) -> Animation {
+        reduceMotion
+            ? animation(reduceMotion: true)
+            : animation(reduceMotion: false).delay(Double(max(order, 0)) * sectionStaggerStep)
+    }
+}
+
+/// Fades one dashboard section in at its place in the view's stagger, with the
+/// same opacity and scale as `TronDashboardContentMotion.transition`. The
+/// revealed flag belongs to the dashboard, not the row, so lazily mounted or
+/// recycled rows and live catalog refreshes render revealed content as is.
+struct TronDashboardSectionReveal: ViewModifier {
+    let order: Int
+    let isRevealed: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isRevealed ? 1 : 0)
+            .scaleEffect(isRevealed || reduceMotion ? 1 : 0.985)
+            .animation(
+                TronDashboardContentMotion.sectionReveal(order: order, reduceMotion: reduceMotion),
+                value: isRevealed
+            )
+    }
+}
+
+extension View {
+    func tronDashboardSectionReveal(order: Int, isRevealed: Bool) -> some View {
+        modifier(TronDashboardSectionReveal(order: order, isRevealed: isRevealed))
+    }
 }
 
 /// A dependency-free, concentric pulse inspired by the requested loading

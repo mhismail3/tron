@@ -531,6 +531,10 @@ private actor HostedHomeShellGateway {
             return (.object(["enabled": .bool(false), "perQueryMicroCents": .number(268_800),
                 "dailyMicroCents": .number(2_688_000), "policyRevision": .number(1)]), nil)
         case "provider.usage":
+            // Holds the usage card on its loading pulse long enough to see it.
+            if ProcessInfo.processInfo.arguments.contains("-home-dashboard-usage-delay") {
+                try await Task.sleep(for: .seconds(2))
+            }
             return (HostedHomeDashboardWorkers.usage, nil)
         case "provider.list":
             return (.object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),

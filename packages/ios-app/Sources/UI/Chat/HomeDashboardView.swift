@@ -26,6 +26,19 @@ struct HomeDashboardSections: Equatable {
         completed = sessions.filter { $0.isHomeWorker && settled($0) && !$0.isUnread }
         unviewed = sessions.filter { $0.isUnread && settled($0) }
     }
+
+    enum Section: Hashable { case inProgress, completed, unviewed }
+
+    /// Each present section's place in the view's first-appearance stagger.
+    /// The usage card above them is order 0; absent sections leave no gap.
+    var revealOrder: [Section: Int] {
+        var order: [Section: Int] = [:]
+        for (section, rows) in [(Section.inProgress, inProgress), (.completed, completed), (.unviewed, unviewed)]
+        where !rows.isEmpty {
+            order[section] = order.count + 1
+        }
+        return order
+    }
 }
 
 /// The floating Home button's indicator. It uses the same indicator swap as
@@ -91,7 +104,10 @@ struct HomeFloatingButton: View {
 struct HomeUsageSummaryCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var usageController = ProviderUsageReadController()
+    /// A failed catalog read hides the card instead of leaving its pulse up.
+    @State private var catalogReadFailed = false
 
     /// Observed from the model's provider catalog, so the card appears as soon
     /// as any owner (this card, Settings, the composer) publishes it.
@@ -109,20 +125,50 @@ struct HomeUsageSummaryCard: View {
         model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) == true
     }
 
+    /// The card shows while the provider catalog is still being read, so it
+    /// holds its place in the view, and stays for as long as a configured
+    /// provider supports usage.
+    private var showsCard: Bool {
+        guard capabilityAvailable else { return false }
+        if model.providerCatalog(for: .global) == nil { return !catalogReadFailed }
+        return !usageProviders.isEmpty
+    }
+
+    /// Only the card's first read shows the pulse: a refresh keeps the
+    /// published snapshots on screen until the new ones replace them.
+    private var isLoading: Bool {
+        model.providerCatalog(for: .global) == nil
+            || (usageController.snapshots.isEmpty && !usageController.hasResolved)
+    }
+
     var body: some View {
         // A container, not a Group: an empty Group drops the load task below.
         VStack(spacing: 0) {
-            if capabilityAvailable && !usageProviders.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(usageProviders, id: \.id) { provider in
-                        providerRow(provider)
+            if showsCard {
+                // Once the providers are known their rows lay out hidden under the
+                // pulse, so the card already has its final height when they fade in.
+                ZStack {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(usageProviders, id: \.id) { provider in
+                            providerRow(provider)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .opacity(isLoading ? 0 : 1)
+                    .accessibilityHidden(isLoading)
+                    if isLoading {
+                        TronLoadingState(label: "Loading account usage", accent: .tronEmerald)
+                            .accessibilityIdentifier("home-usage-loading")
+                            .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
                     }
                 }
                 .padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .tronGlassSurface(accent: .tronEmerald, cornerRadius: 12, tintOpacity: 0.14)
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home-usage-card")
+                .animation(TronDashboardContentMotion.animation(reduceMotion: reduceMotion), value: isLoading)
             }
         }
         .task(id: PresentationActivityTaskID(
@@ -151,7 +197,10 @@ struct HomeUsageSummaryCard: View {
                     usageLine(snapshot)
                 }
             }
-            if let snapshot {
+            if isLoading {
+                // Hidden layout stand-in for the usage bars.
+                ProviderUsageProgress(percent: 0, accent: .tronEmerald)
+            } else if let snapshot {
                 let percents = snapshot.windows.prefix(2).compactMap(\.usedPercent)
                 if !percents.isEmpty {
                     HStack(spacing: 8) {
@@ -175,7 +224,12 @@ struct HomeUsageSummaryCard: View {
 
     @ViewBuilder
     private func usageLine(_ snapshot: ProviderUsageSnapshot?) -> some View {
-        if let snapshot {
+        if isLoading {
+            // Static stand-in: the card's pulse is the loading indicator.
+            Text(verbatim: ProviderUsagePresentation.loadingPlaceholder)
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                .redacted(reason: .placeholder)
+        } else if let snapshot {
             Text(ProviderUsagePresentation.summary(snapshot))
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 .foregroundStyle(snapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted)
@@ -195,7 +249,8 @@ struct HomeUsageSummaryCard: View {
         // Read the catalog only when none is published; its arrival re-keys this
         // task (provider ids), which then reads usage.
         guard model.providerCatalog(for: .global) != nil else {
-            _ = await model.refreshProviders(target: .global)
+            let refreshed = await model.refreshProviders(target: .global)
+            if !Task.isCancelled { catalogReadFailed = !refreshed }
             return
         }
         guard capabilityAvailable, !usageProviders.isEmpty else { return }

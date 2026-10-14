@@ -114,6 +114,10 @@ struct SessionShellView: View {
     @State private var homeStatusSurfaceToken: PresentationSurfaceToken?
     @State private var mountedHomeChatRouteID: String?
     @State private var showingHomeCompletedSheet = false
+    /// The Home view's first-appearance stagger. False while the view's list is
+    /// unmounted or another view is selected, so each entry fades its sections
+    /// in once; live catalog refreshes leave it true and never re-fade content.
+    @State private var homeSectionsRevealed = false
 
     init() {
         let appSettings = AppLocalBehaviorSettings.shared
@@ -951,6 +955,7 @@ struct SessionShellView: View {
                 if serverFilter.sortMode == .home {
                     Section {
                         HomeUsageSummaryCard()
+                            .tronDashboardSectionReveal(order: 0, isRevealed: homeSectionsRevealed)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                             .listRowInsets(SessionDashboardLayout.rowInsets)
@@ -980,6 +985,12 @@ struct SessionShellView: View {
                 TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
                 value: filtered.map(\.dashboardID)
             )
+            // Runs after the list mounts, so the hidden first frame is committed
+            // before the stagger animates it in.
+            .task(id: serverFilter.sortMode == .home) {
+                homeSectionsRevealed = serverFilter.sortMode == .home
+            }
+            .onDisappear { homeSectionsRevealed = false }
         }
     }
 
@@ -1089,19 +1100,24 @@ struct SessionShellView: View {
     @ViewBuilder
     private func homeSections(_ filtered: [SessionSummary]) -> some View {
         let sections = homeDashboardSections(filtered)
-        if !sections.inProgress.isEmpty {
+        // The usage card is order 0; present sections follow it in order.
+        let order = sections.revealOrder
+        if let inProgressOrder = order[.inProgress] {
             Section {
                 ForEach(sections.inProgress, id: \.dashboardID) { session in
                     sessionButton(session, showsContext: true)
+                        .tronDashboardSectionReveal(order: inProgressOrder, isRevealed: homeSectionsRevealed)
                 }
             } header: {
                 dashboardSectionHeader("In Progress")
+                    .tronDashboardSectionReveal(order: inProgressOrder, isRevealed: homeSectionsRevealed)
             }
         }
-        if !sections.completed.isEmpty {
+        if let completedOrder = order[.completed] {
             Section {
                 ForEach(sections.completed.prefix(HomeDashboardLayout.recentlyCompletedLimit), id: \.dashboardID) { session in
                     sessionButton(session, showsContext: true)
+                        .tronDashboardSectionReveal(order: completedOrder, isRevealed: homeSectionsRevealed)
                 }
                 if sections.completed.count > HomeDashboardLayout.recentlyCompletedLimit {
                     SessionListExpansionControls(
@@ -1115,21 +1131,25 @@ struct SessionShellView: View {
                         showMoreHint: "Shows every recently completed Home worker"
                     )
                     .accessibilityIdentifier("home-completed-view-more")
+                    .tronDashboardSectionReveal(order: completedOrder, isRevealed: homeSectionsRevealed)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                     .listRowInsets(SessionDashboardLayout.rowInsets)
                 }
             } header: {
                 dashboardSectionHeader("Recently Completed")
+                    .tronDashboardSectionReveal(order: completedOrder, isRevealed: homeSectionsRevealed)
             }
         }
-        if !sections.unviewed.isEmpty {
+        if let unviewedOrder = order[.unviewed] {
             Section {
                 ForEach(sections.unviewed, id: \.dashboardID) { session in
                     sessionButton(session, showsContext: true)
+                        .tronDashboardSectionReveal(order: unviewedOrder, isRevealed: homeSectionsRevealed)
                 }
             } header: {
                 dashboardSectionHeader("Unviewed · \(sections.unviewed.count)")
+                    .tronDashboardSectionReveal(order: unviewedOrder, isRevealed: homeSectionsRevealed)
             }
         }
     }
