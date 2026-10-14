@@ -643,9 +643,14 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             let project = app.buttons["project-settings-link"]
             XCTAssertTrue(project.waitForExistence(timeout: 30), app.debugDescription)
             let projectName = URL(fileURLWithPath: fixture.workspace).lastPathComponent
-            XCTAssertTrue(project.label.contains("Project Settings") && project.label.contains(projectName)
-                          && project.label.contains("Settings in this project's .pi folder."),
-                          "the Project Settings card shows its value and subtext: \(project.label)")
+            let projectValue = project.value as? String ?? ""
+            XCTAssertTrue(project.label == "Project Settings" && projectValue.contains(projectName)
+                          && projectValue.contains("Settings in this project's .pi folder."),
+                          "the Project Settings card shows its value and subtext: \(project.label) / \(projectValue)")
+            // One card geometry: the same width and left edge as its Workspace neighbour.
+            let workspaceCard = app.buttons["new-session-card.Workspace"]
+            XCTAssertEqual(project.frame.minX, workspaceCard.frame.minX, accuracy: 1)
+            XCTAssertEqual(project.frame.width, workspaceCard.frame.width, accuracy: 1)
             let modelCard = app.buttons["new-session-card.Model"]
             XCTAssertTrue(self.waitUntil(timeout: 30) { sources.contains { modelCard.label.contains($0) } },
                           "the Model card names its source in the Gateway's wording: \(modelCard.label)")

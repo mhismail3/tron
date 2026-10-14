@@ -13,6 +13,7 @@ struct ProjectSettingsRoute: Identifiable {
 struct ProjectSettingsLink: View {
     /// A settings row in Manage Session; a setup card among New Session's choices.
     enum Style { case row, setupCard }
+    static let setupCardCaption = "Settings in this project's .pi folder."
     let cwd: String
     let profileID: String
     /// The row's glyph matches the rows around it.
@@ -33,9 +34,11 @@ struct ProjectSettingsLink: View {
             case .setupCard:
                 TronSetupCardLabel(icon: "folder.badge.gearshape", title: "Project Settings",
                                    value: URL(fileURLWithPath: cwd).lastPathComponent,
-                                   caption: "Settings in this project's .pi folder.", accent: accent)
+                                   caption: Self.setupCardCaption, accent: accent)
             }
         }
+        // The link's label is its title; the card's value and subtext stay readable.
+        .accessibilityValue(style == .setupCard ? "\(URL(fileURLWithPath: cwd).lastPathComponent), \(Self.setupCardCaption)" : "")
         .accessibilityIdentifier("project-settings-link")
     }
 }
