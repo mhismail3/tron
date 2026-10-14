@@ -28,6 +28,27 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
+                    SettingsGroupCard(.accounts) {
+                        settingsLink("Connections", summary: "Paired Macs and authorized devices", icon: "desktopcomputer") {
+                            ConnectionsSettingsView()
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Push Notifications", summary: "Agent alerts on this iPhone", icon: "bell.badge") {
+                            PushNotificationsSettingsView()
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Model Providers", summary: "Provider accounts and sign-in", icon: "key") {
+                            ProvidersSettingsView(sessionID: nil)
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Custom Models", summary: "Your own model definitions", icon: "slider.horizontal.3") {
+                            CustomModelsSettingsView()
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Connected Services", summary: "Service accounts and what they offer", icon: "link") {
+                            IntegrationsSettingsView()
+                        }
+                    }
                     SettingsGroupCard(.agent) {
                         SettingsSectionLinks(ids: ["model", "context", "run", "permissions"], sections: sections,
                                              target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
@@ -47,24 +68,7 @@ struct SettingsView: View {
                             HooksSettingsView(projectCWD: nil)
                         }
                     }
-                    SettingsGroupCard(.accounts) {
-                        settingsLink("Model Providers", summary: "Provider accounts and sign-in", icon: "key") {
-                            ProvidersSettingsView(sessionID: nil)
-                        }
-                        TronSettingsDivider()
-                        settingsLink("Custom Models", summary: "Your own model definitions", icon: "slider.horizontal.3") {
-                            CustomModelsSettingsView()
-                        }
-                        TronSettingsDivider()
-                        settingsLink("Connected Services", summary: "Service accounts and what they offer", icon: "link") {
-                            IntegrationsSettingsView()
-                        }
-                    }
                     SettingsGroupCard(.data) {
-                        settingsLink("Connections", summary: "Paired Macs, devices, and push", icon: "desktopcomputer") {
-                            ConnectionsSettingsView()
-                        }
-                        TronSettingsDivider()
                         settingsLink("Logs", summary: "Recent diagnostics from your Macs", icon: "text.alignleft") {
                             GatewayLogsSettingsView()
                         }
@@ -165,8 +169,8 @@ struct SettingsView: View {
 
 /// The settings palette: each group is one titled card with one accent, and every
 /// sheet a row opens keeps that accent. Groups follow what is being configured:
-/// the agent's behaviour, what it can use, the accounts it reaches, this Mac's
-/// maintenance, then this iPhone.
+/// the Macs and accounts Tron reaches, the agent's behaviour, what it can use,
+/// this Mac's maintenance, then this iPhone.
 enum SettingsGroupKind {
     case agent, tools, accounts, data, more, iphone
 

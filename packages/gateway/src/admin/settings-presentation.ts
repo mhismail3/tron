@@ -1,4 +1,4 @@
-import { KEYS, SECTIONS, recordSubject, schemaKey, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, SECTIONS, recordSubject, schemaKey, type EntryGuidance, type KeyDeclaration } from "./settings-schema.js";
 import type { ResolvedKey, Resolution } from "./settings-resolver.js";
 import type { Actor, ChangeEntry } from "./settings-record.js";
 import { formatStoredSetting, LAYER_LABELS, RENDERER_CONTRACT_VERSION, type Control, type ValueType } from "./settings-types.js";
@@ -36,6 +36,8 @@ export interface KeyPresentation {
   optionsSource?: { name: string; dependsOn: readonly string[] };
   confirm?: string;
   redacted?: true;
+  /** What to type into the key's text field or a list's new value, and a realistic example. */
+  entry?: EntryGuidance;
 }
 
 export function presentKey(key: KeyDeclaration, clientControls: readonly string[] | undefined): KeyPresentation {
@@ -53,6 +55,7 @@ export function presentKey(key: KeyDeclaration, clientControls: readonly string[
     ...(key.optionsSource ? { optionsSource: key.optionsSource } : {}),
     ...(key.confirm ? { confirm: key.confirm } : {}),
     ...(key.redacted ? { redacted: true as const } : {}),
+    ...(key.entry ? { entry: key.entry } : {}),
   };
 }
 

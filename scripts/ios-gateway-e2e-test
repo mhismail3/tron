@@ -122,6 +122,7 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSurfacesServeEveryKeyAndEditAtItsLayer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
 )
@@ -750,7 +751,8 @@ PY
 }
 
 # The fixture Gateway's own settings schema (its built settings-schema.ts), one row
-# per key with its section, layers, label and qualifier, plus the Gateway's layer labels.
+# per key with its section, layers, label and qualifier, plus the provenance pill wording
+# (LAYER_SOURCE_LABELS) each row's layer badge carries.
 settings_inventory_json() {
   "$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
@@ -759,7 +761,7 @@ settings_inventory_json() {
     const types = await import(pathToFileURL(`${dir}/settings-types.js`).href);
     const keys = schema.KEYS.map(key => ({ id: key.id, label: key.label, group: key.group, layers: Object.keys(key.layers),
       qualifier: key.qualifier ?? null }));
-    process.stdout.write(JSON.stringify({ layerLabels: types.LAYER_LABELS, keys }));
+    process.stdout.write(JSON.stringify({ layerLabels: types.LAYER_SOURCE_LABELS, keys }));
   ' "$gateway_dir/dist/admin"
 }
 

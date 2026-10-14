@@ -163,7 +163,7 @@ private actor ProjectTrustFixtureGateway {
             "group": .string("permissions"), "subgroup": .null, "value": .string(floor),
             "display": .string(labels[floor] ?? floor), "layer": .string(floorOverride == nil ? "builtin" : "mac"), "applied": .bool(true),
             "layers": .array([.object(["layer": .string("mac")])]),
-            "badges": .array([.object(["kind": .string("layer"), "label": .string(floorOverride == nil ? "Built-in" : "Mac")]),
+            "badges": .array([.object(["kind": .string("layer"), "label": .string(floorOverride == nil ? "Tron default" : "Set on Mac")]),
                               .object(["kind": .string("scope"), "label": .string("Project trust: loosening")])]),
             "presentation": .object(["label": .string("Project trust: loosening"),
                 "help": .string("Lowering this floor requires your confirmation."), "order": .number(10), "importance": .string("advanced"),

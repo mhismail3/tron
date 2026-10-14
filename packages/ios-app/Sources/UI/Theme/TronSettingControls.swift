@@ -11,7 +11,7 @@ struct TronSettingsCaption: View {
     init(_ text: String, inset: CGFloat = 4) { self.text = text; self.inset = inset }
     var body: some View {
         Text(text)
-            .font(TronTypography.settingsSubtext(adjustment: TronSettingsLayoutPolicy.metadataSizeAdjustment))
+            .font(TronTypography.settingsRowSubtext)
             .foregroundStyle(Color.tronTextSecondary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -328,7 +328,7 @@ struct TronNumberSettingRow: View {
                     .multilineTextAlignment(.trailing)
                     .frame(width: 118)
                     .accessibilityLabel(title)
-                    .focused($focused)
+                    .tronTextEntryDone(keyboardToolbar: true, focus: $focused)
             }
             if invalid {
                 Text(Self.invalidInputMessage)
@@ -384,6 +384,7 @@ struct TronTextSettingRow: View {
                 .multilineTextAlignment(.trailing)
                 .frame(minWidth: 100, maxWidth: 220)
                 .accessibilityLabel(title)
+                .tronTextEntryDone()
         }
     }
 }
