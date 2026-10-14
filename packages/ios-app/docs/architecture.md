@@ -1568,12 +1568,19 @@ keeps the keyboard visible. Menu selections enter one cancellation-aware queue a
 the active camera, photo, or file destination only after the native menu dismissal settles,
 preventing a competing presentation controller from dropping the selection on physical
 iOS. Camera, photo, and file importers share that enum-valued presentation state rather
-than independent Booleans. `CameraModel` owns only UI-facing state and depends on narrow
+than independent Booleans. `CameraModel` owns the sheet's feed phase (`starting`, `live`,
+`switching`, `captured`, `resuming`, `denied`, `unavailable`) and depends on narrow
 camera-authorization and capture-session providers; the system provider alone touches static
 AVFoundation authorization, device discovery, running sessions, and torch configuration.
-Capture configuration and photo request are the two explicitly unchecked Sendable envelopes
-required to move AVFoundation resources across the provider's serial queue boundary. Test providers
-exercise the same owner without camera hardware and do not model a second capture runtime.
+One `AVCaptureSession` serves the sheet: a camera switch swaps the device input inside
+`beginConfiguration`/`commitConfiguration` on the provider's session queue, and pause/resume only
+stop and start it, so the preview layer stays mounted on the same session throughout. A video data
+output keeps the latest frame and reports the first frame from the input a start, switch or retake
+waits for; events carry the model's request token so a superseded request is ignored. Only
+`starting` shows the shared sheet loading state; a switch or retake holds the outgoing frame (or the
+discarded photo), blurred, and cross-fades to the next feed, while the control row keeps its
+position and the torch control follows the live camera (#937). Test providers exercise the same
+owner without camera hardware and do not model a second capture runtime.
 Images become native image input. Other files remain agent-readable
 through a deterministic canonical path envelope, while the mobile projection
 removes that path and exposes only display-safe name/type/size metadata. Sent
