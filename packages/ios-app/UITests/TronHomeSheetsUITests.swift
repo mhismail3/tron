@@ -189,7 +189,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         composer.typeText("@")
         let skill = app.buttons.matching(NSPredicate(format: "label CONTAINS 'wordcraft' AND label CONTAINS 'User'")).firstMatch
         XCTAssertTrue(skill.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'tron-jev'")).firstMatch.exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'jev'")).firstMatch.exists)
         keep("10-home-composer-skills")
 
         composer.typeText(XCUIKeyboardKey.delete.rawValue + "/")

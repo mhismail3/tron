@@ -759,7 +759,7 @@ Source keeps exact referring POST/REPLY evidence, and synthesis must cite that
 Source separately from X author commentary.
 
 Private X bookmarks are discovered only through the explicitly invoked,
-paid-gated OAuth X connector. The global `tron-x` skill provides bounded
+paid-gated OAuth X connector. The global `x-posts` skill provides bounded
 newest-first queue discovery, page checkpoints, and identity/coverage
 validation. Browser state is never used to enumerate or sync private bookmarks;
 there is no cookie store, background sync, automatic browser login, or remote
