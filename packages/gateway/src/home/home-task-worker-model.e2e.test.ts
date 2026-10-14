@@ -103,6 +103,13 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(task.intent.text).toContain("Worker choice: model");
     expect(task.intent.text).toContain("Home profile");
     expect(task.intent.text).toContain("max clamped to high");
+    // The delegate tool's details carry the same resolved choice for its detail sheet (#957).
+    const home = await f.registry.acquire(f.home.sessionId);
+    const admission = home.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "toolResult"
+      && entry.message.toolName === "delegate" ? [entry.message] : [])[0];
+    expect(admission?.details).toMatchObject({ taskId: "profile-model", worker: {
+      model: `${f.model.provider}/${TASK_REASONING_MODEL_ID}`, thinking: "high", modelSource: "Home profile", thinkingSource: "Home profile",
+      note: "max clamped to high" } });
     const entries = await f.registry.readTaskEvidence(task.sessionId!);
     const settingsEntry = entries.findLast(entry => entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY);
     expect(settingsEntry?.type === "custom" ? settingsEntry.data : undefined).toMatchObject({ fixed: {

@@ -11,6 +11,9 @@ enum HomeSheetDestination: Identifiable {
     case memoryItem(HomeMemoryItemDTO)
     case evidence(HomeMemoryEvidenceDTO, origin: HomeMemoryOrigin)
     case chapters
+    /// The learned profile, and one item from the row the Profile sheet already loaded.
+    case profile
+    case profileItem(HomeProfileListDTO.Item)
     /// One chapter's detail, from the row the Chapters sheet already loaded.
     case chapter(HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits)
     case tasks
@@ -27,6 +30,8 @@ enum HomeSheetDestination: Identifiable {
         case .evidence: "evidence"
         case .chapters: "chapters"
         case .chapter: "chapter"
+        case .profile: "profile"
+        case .profileItem: "profile-item"
         case .tasks: "tasks"
         case .task: "task"
         case .permissions: "permissions"
@@ -40,6 +45,7 @@ enum HomeSheetDestination: Identifiable {
         case .memory, .memorySummary, .memoryItem: "Memory"
         case .evidence: "Exact Evidence"
         case .chapters, .chapter: "Chapters"
+        case .profile, .profileItem: "Profile"
         case .tasks, .task: "Tasks"
         case .permissions, .grant: "Permissions"
         }
@@ -51,9 +57,10 @@ enum HomeSheetDestination: Identifiable {
         case .memory(let sessionID, _): .memory(sessionID: sessionID, continuation: nil)
         case .memorySummary(let line, let sessionID): .memoryPart(sessionID: sessionID, line)
         // Carried by the destination and never loaded; see `loadsPage`.
-        case .memoryItem, .chapter: .chapters
+        case .memoryItem, .chapter, .profileItem: .chapters
         case .evidence(let source, _): .evidence(source, offset: 0)
         case .chapters: .chapters
+        case .profile: .profile
         case .tasks: .tasks(nil)
         case .task(let id): .task(id)
         case .permissions, .grant: .permissions
@@ -65,7 +72,7 @@ enum HomeSheetDestination: Identifiable {
     }
 
     var loadsPage: Bool {
-        switch self { case .memoryItem, .chapter: false; default: true }
+        switch self { case .memoryItem, .chapter, .profileItem: false; default: true }
     }
 }
 
@@ -257,6 +264,7 @@ struct HomeSheet: View {
         switch destination {
         case .memoryItem(let item): memoryDetail(item)
         case .chapter(let chapter, let limits): chapterDetail(chapter, limits: limits)
+        case .profileItem(let item): profileItemDetail(item)
         default:
             loadedContent
         }
@@ -274,6 +282,7 @@ struct HomeSheet: View {
                 switch content {
                 case .manage(let manage): manageSheet(manage)
                 case .chapters(let list): chapters(list)
+                case .profile(let list): profile(list)
                 case .memory(let view): memory(view)
                 case .evidence(let page):
                     if case .evidence(_, let origin) = destination { evidenceSheet(page, origin: origin) }
@@ -298,7 +307,7 @@ struct HomeSheet: View {
     /// this sheet's accent, so a whole Home branch shares its row's color.
     func present(_ child: HomeSheetDestination, rowAccent: Color? = nil) {
         switch child {
-        case .memory, .chapters: returnsFromBrowsing = true
+        case .memory, .chapters, .profile: returnsFromBrowsing = true
         default: returnsFromBrowsing = false
         }
         childAccent = rowAccent

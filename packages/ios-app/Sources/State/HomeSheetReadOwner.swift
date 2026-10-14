@@ -252,6 +252,43 @@ struct HomeManageDTO: Equatable, Sendable {
     let chapters: HomeChapterListDTO?
     let tasks: HomeTaskPageDTO?
     let permissions: HomeTaskPermissionsDTO?
+    /// Absent on a Gateway without `home-profile-list.v1` or when its read was refused.
+    var profile: HomeProfileListDTO? = nil
+}
+
+/// Typed projection of `home.profileList`: every learned-profile Knowledge note,
+/// classified by the Gateway the way Home's instructions apply them. Only an
+/// `active` item applies; decode fails closed on protocol drift.
+struct HomeProfileListDTO: Decodable, Equatable, Sendable {
+    struct Item: Decodable, Equatable, Hashable, Sendable, Identifiable {
+        enum Kind: String, Decodable, Sendable, CaseIterable {
+            case preference, standingDecision = "standing-decision", delegationDefault = "delegation-default", fact
+        }
+        enum Status: String, Decodable, Sendable { case active, superseded, retired }
+        let id: String
+        let revisionId: String
+        let kind: Kind
+        let text: String
+        let confirmed: Bool
+        let status: Status
+        let createdAt: String
+        let updatedAt: String
+        var valid: Bool {
+            !id.isEmpty && id.utf8.count <= 200 && !revisionId.isEmpty && revisionId.utf8.count <= 200
+                && text.utf16.count <= 4096 && [createdAt, updatedAt].allSatisfy { $0.utf8.count <= 64 }
+        }
+    }
+    let items: [Item]
+    let unclassified: Int
+
+    var active: [Item] { items.filter { $0.status == .active } }
+
+    static func decode(_ value: JSONValue) throws -> Self {
+        let list = try value.decode(Self.self)
+        guard list.unclassified >= 0, list.items.count <= 10_000, list.items.allSatisfy(\.valid),
+              Set(list.items.map(\.id)).count == list.items.count else { throw invalidHomeRead() }
+        return list
+    }
 }
 
 /// The Home context and memory text the sheets show, derived in one owner so the
@@ -399,6 +436,7 @@ enum HomeSheetReadQuery: Hashable, Sendable {
     case manage
     case tasks(String?), task(String), permissions
     case chapters
+    case profile
     /// One chapter's memory when `sessionID` is set; otherwise the whole memory view.
     case memory(sessionID: String?, continuation: HomeMemoryViewDTO.Continuation?)
     /// The two lines one summary line covers.
@@ -410,6 +448,7 @@ enum HomeSheetContent {
     case manage(HomeManageDTO)
     case tasks(HomeTaskPageDTO?, HomeStatusDTO), task(HomeTaskDTO?, HomeStatusDTO), permissions(HomeTaskPermissionsDTO?, HomeStatusDTO)
     case chapters(HomeChapterListDTO)
+    case profile(HomeProfileListDTO)
     case memory(HomeMemoryViewDTO)
     case evidence(HomeMemoryEvidencePageDTO)
 }

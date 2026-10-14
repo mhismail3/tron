@@ -4887,6 +4887,9 @@ final class AppModel {
         func readChapterList() async throws -> HomeChapterListDTO {
             try HomeChapterListDTO.decode(try await read("home.chapterList"))
         }
+        func profileListCapable() -> Bool {
+            lifecycle.gatewayInfo?.capabilities.contains("home-profile-list.v1") == true
+        }
         switch query {
         case .manage:
             // Independent reads share one round trip instead of queuing behind each
@@ -4896,6 +4899,10 @@ final class AppModel {
             async let statusValue = read("home.status")
             async let contextValue = read("home.context")
             async let chapterValue: JSONValue? = readsChapters ? read("home.chapterList") : nil
+            // The profile belongs to Knowledge, not the designation: a refused read leaves
+            // its row "Unavailable" and never fails Manage Home.
+            async let profileList: HomeProfileListDTO? = profileListCapable()
+                ? optionalRead { try HomeProfileListDTO.decode(try await read("home.profileList")) } : nil
             let status = try HomeStatusDTO.decode(try await statusValue)
             let context = try HomeContextDTO.decode(try await contextValue)
             let chapterJSON = try await chapterValue
@@ -4913,7 +4920,8 @@ final class AppModel {
                 tasks = try await taskPage
                 permissions = try await taskPermissions
             }
-            return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks, permissions: permissions))
+            return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks, permissions: permissions,
+                                         profile: try await profileList))
         case .tasks(let cursor):
             let status = try await readTaskStatus()
             var params: [String: JSONValue] = ["limit": .number(20)]
@@ -4930,6 +4938,11 @@ final class AppModel {
                 throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the chapter list.", retryable: false, details: nil)
             }
             return .chapters(try await readChapterList())
+        case .profile:
+            guard profileListCapable() else {
+                throw GatewayFailure(code: "unsupported", message: "This Gateway does not list the learned profile.", retryable: false, details: nil)
+            }
+            return .profile(try HomeProfileListDTO.decode(try await read("home.profileList")))
         case .memory(let sessionID, let continuation):
             try requireMemoryBrowser()
             var values: [String: JSONValue] = ["limit": .number(30)]

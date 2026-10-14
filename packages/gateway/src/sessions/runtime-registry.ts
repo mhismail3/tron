@@ -3113,11 +3113,13 @@ export class RuntimeRegistry {
     const choiceNotes = [clampNote].filter(Boolean).join("; ");
     const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.`;
     const { model: _model, thinking: _thinking, ...input } = request;
-    return this.home.dispatchTask(sessionId, { ...input, ...choice, intent: brief,
+    const worker = { model: modelText, thinking: thinkingText, modelSource, thinkingSource, ...(choiceNotes ? { note: choiceNotes } : {}) };
+    const handle = await this.home.dispatchTask(sessionId, { ...input, ...choice, intent: brief,
       provenance: {
         model: { via: fallback ? "home-fallback" : !fromProfileModel ? "home-explicit" : profileModel && "provider" in profileModel ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
         thinking: { via: !fromProfileThinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
       } }, signal);
+    return { ...handle, worker };
   }
 
   /** Admits a delegation's model and thinking level against the Gateway's own model

@@ -653,6 +653,11 @@ the actor read, so a stale change is refused instead of overwriting. With
 `dryRun: true` it validates and returns the tier without applying, so a row can
 say "Needs approval" before anyone commits to it.
 
+Each change's outcome names its key, layer, status and tier, and the value at that
+layer `before` and `after` the change (`null` when unset there); a redacted key
+reports only `redacted: true`, as its record does. The `settings` tool's result
+carries the outcome, so its transcript detail shows old → new without a second read.
+
 The steps:
 
 1. Validate against the schema: type, options, allowed layer and writer.

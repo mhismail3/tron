@@ -175,7 +175,9 @@ const PROFILE_PARAMETERS = Type.Object({
 
 /** Tool-result details: the saved revision, or the typed reason a change was refused. */
 export type HomeProfileToolDetails =
-  | { status: "saved"; action: HomeProfileAction; id: string; revisionId: string; kind?: HomeProfileKind; supersededId?: string; previousRevisionId?: string }
+  | { status: "saved"; action: HomeProfileAction; id: string; revisionId: string; kind?: HomeProfileKind; supersededId?: string; previousRevisionId?: string;
+      /** refine, supersede and retire: the changed item's text before this change, so a reader sees what was replaced. */
+      previousText?: string }
   | { status: "refused"; action: HomeProfileAction; reason: string }
   | { status: "unavailable"; action: HomeProfileAction };
 
@@ -300,7 +302,7 @@ async function apply(owner: KnowledgeService, request: ProfileRequest, citation:
       commandId: command, recordId: current.id, expectedRevision: current.revisionId,
       record: { kind: "note", scope: "personal", provenance: provenance(citation), relations: current.relations, content },
     } }) as KnowledgeMutationResult;
-    return answer({ status: "saved", action: "refine", id: record.id, revisionId: record.revisionId, previousRevisionId: current.revisionId, kind: item.kind },
+    return answer({ status: "saved", action: "refine", id: record.id, revisionId: record.revisionId, previousRevisionId: current.revisionId, kind: item.kind, previousText: item.text },
       `Refined profile item note ${record.id} (${item.kind}, inferred until you confirm it): ${text}. Revision ${current.revisionId} is kept in its history.`);
   }
 
@@ -311,7 +313,7 @@ async function apply(owner: KnowledgeService, request: ProfileRequest, citation:
     const { record } = await owner.invoke({ operation: "knowledge.note.create", request: {
       commandId: command, record: noteDraft(citation, kind, text, relations, request.reason?.trim()),
     } }) as KnowledgeMutationResult;
-    return answer({ status: "saved", action: "supersede", id: record.id, revisionId: record.revisionId, kind, supersededId: current.id },
+    return answer({ status: "saved", action: "supersede", id: record.id, revisionId: record.revisionId, kind, supersededId: current.id, previousText: item.text },
       `Superseded profile item note ${current.id} with note ${record.id} (${kind}, inferred until you confirm it): ${text}.`);
   }
 
@@ -321,7 +323,7 @@ async function apply(owner: KnowledgeService, request: ProfileRequest, citation:
     commandId: command, recordId: current.id, expectedRevision: current.revisionId,
     record: { kind: "note", scope: "personal", provenance: provenance(citation, reason), relations: current.relations, content },
   } }) as KnowledgeMutationResult;
-  return answer({ status: "saved", action: "retire", id: record.id, revisionId: record.revisionId, previousRevisionId: current.revisionId, kind: item.kind },
+  return answer({ status: "saved", action: "retire", id: record.id, revisionId: record.revisionId, previousRevisionId: current.revisionId, kind: item.kind, previousText: item.text },
     `Retired profile item note ${record.id}: ${item.text}. It no longer applies. Reason: ${reason}`);
 }
 

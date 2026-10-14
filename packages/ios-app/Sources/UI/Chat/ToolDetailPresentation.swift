@@ -691,8 +691,11 @@ struct ToolDetailPresentation: Hashable, Sendable {
     /// Codemode is identified by its invocation name; its display title is a
     /// presentation choice that may change.
     let isCodemode: Bool
+    /// A Home tool's purpose-built detail; nil keeps the generic sections.
+    let home: HomeToolDetailPresentation?
 
     init(tool: ChatToolPresentation) {
+        home = HomeToolDetailPresentation.make(tool: tool)
         let request = tool.request?.objectValue
         let rawToolName = tool.toolName ?? tool.title
         isCodemode = rawToolName == "codemode"

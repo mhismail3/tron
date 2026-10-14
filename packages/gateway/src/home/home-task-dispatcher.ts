@@ -91,7 +91,11 @@ function resumeBrief(previous: HomeTaskRecord, instructions: readonly string[], 
   return parts.join("\n\n");
 }
 /** A started task names its worker and operation; a queued one has neither yet and a 1-based position. */
-export interface HomeTaskHandle { taskId: string; sessionId: string | null; operationId: string | null; queuePosition: number | null; completion: Promise<HomeTaskRecord> }
+export interface HomeTaskHandle { taskId: string; sessionId: string | null; operationId: string | null; queuePosition: number | null; completion: Promise<HomeTaskRecord>;
+  /** The worker choice the delegate boundary resolved, as the brief states it; the `delegate` tool's details carry it. */
+  worker?: HomeTaskWorkerSummary }
+/** A delegation's resolved worker: display references and where each value came from. */
+export interface HomeTaskWorkerSummary { model: string; thinking: string; modelSource: string; thinkingSource: string; note?: string }
 /** The operation a queued task's Stop names: it has no worker operation yet. */
 export const HOME_TASK_QUEUED_OPERATION = "queued";
 /** Running Home workers at once (maintainer decision 2026-10-13, #915); further tasks queue. */
