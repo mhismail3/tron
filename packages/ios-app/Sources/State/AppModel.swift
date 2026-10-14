@@ -4852,41 +4852,6 @@ final class AppModel {
                                      lifecycleGeneration: lifecycle.currentLifecycleGeneration, surfaceToken: surfaceToken)
     }
 
-    /// The worker session ids of Home's tasks, newest first, read from bounded
-    /// `home.taskList` pages for the Home dashboard view. The task ledger is the
-    /// Gateway's authority for which sessions are Home workers; the dashboard
-    /// joins these ids against its own session catalog. Fenced like a sheet read.
-    func readHomeWorkerSessionIDs(identity: HomeSheetReadIdentity, maximumPages: Int, isCurrent: @escaping @MainActor () -> Bool) async throws -> [String]? {
-        func admitted() -> Bool {
-            homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity
-                && !Task.isCancelled && isCurrent()
-        }
-        func read(_ method: String, _ params: JSONValue = .object([:])) async throws -> JSONValue {
-            guard admitted() else { throw CancellationError() }
-            let value = try await lifecycle.client.requestValue(method, params,
-                expectedConnection: GatewayConnectionAdmission(connectionID: identity.connectionID))
-            guard admitted() else { throw CancellationError() }
-            return value
-        }
-        // The mounted status (polled with the dashboard) fences task reads; a
-        // refused ledger read still throws and leaves the worker set unchanged.
-        guard homeStatus.status?.admitsTaskReads != false else { return nil }
-        var ids: [String] = []
-        var seen = Set<String>()
-        var cursor: String?
-        for _ in 0..<maximumPages {
-            var params: [String: JSONValue] = ["limit": .number(50)]
-            if let cursor { params["cursor"] = .string(cursor) }
-            let page = try HomeTaskPageDTO.decode(try await read("home.taskList", .object(params)))
-            for row in page.items {
-                if let id = row.workerSessionId, seen.insert(id).inserted { ids.append(id) }
-            }
-            guard let next = page.nextCursor else { break }
-            cursor = next
-        }
-        return ids
-    }
-
     func readHomeSheet(_ query: HomeSheetReadQuery, identity: HomeSheetReadIdentity, isCurrent: @escaping @MainActor () -> Bool) async throws -> HomeSheetContent {
         guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
               !Task.isCancelled, isCurrent() else { throw CancellationError() }

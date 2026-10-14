@@ -113,12 +113,6 @@ struct SessionShellView: View {
     @State private var dashboardReconcileTask: Task<Void, Never>?
     @State private var homeStatusSurfaceToken: PresentationSurfaceToken?
     @State private var mountedHomeChatRouteID: String?
-    /// Home's worker session ids from its task ledger, read while the Home view
-    /// is visible. Nil until the first read for the current profile settles.
-    @State private var homeWorkerSessionIDs: Set<String>?
-    /// Active non-worker sessions already probed against the task ledger, so an
-    /// ordinary running chat never re-triggers a read.
-    @State private var homeCheckedSessionIDs: Set<String> = []
     @State private var showingHomeCompletedSheet = false
 
     init() {
@@ -210,21 +204,6 @@ struct SessionShellView: View {
                 identity: "dashboard.home-completed"
             ) {
                 homeCompletedSheet
-            }
-            .task(id: "home-workers:\(serverFilter.sortMode.rawValue):\(model.profiles.selected?.id ?? ""):\(activity):\(model.homeStatus.capabilityEnabled):\(homeStatusSurfaceToken != nil):\(model.connectionState == .connected)") {
-                await loadHomeWorkerSessionIDs(presentationActive: activity.allowsPresentationPublication, probe: [])
-            }
-            // A new worker's session starts running only after its task record
-            // names it (the dispatcher binds before the first prompt), so a
-            // newly active session the ledger hasn't named yet triggers one
-            // first-page read, never the whole ledger.
-            .task(id: homeWorkerProbeIDs) {
-                guard !homeWorkerProbeIDs.isEmpty else { return }
-                await loadHomeWorkerSessionIDs(presentationActive: activity.allowsPresentationPublication, probe: homeWorkerProbeIDs)
-            }
-            .onChange(of: model.profiles.selected?.id) { _, _ in
-                homeWorkerSessionIDs = nil
-                homeCheckedSessionIDs = []
             }
             .tronManagedSheet(
                 item: $sessionToDelete,
@@ -1103,60 +1082,54 @@ struct SessionShellView: View {
         serverFilter.sortMode == .home && model.homeStatus.capabilityEnabled && !showingSearch
     }
 
-    private func homeDashboardSections(_ filtered: [SessionSummary]) -> HomeDashboardSections? {
-        guard let homeWorkerSessionIDs else { return nil }
-        return HomeDashboardSections(
-            sessions: filtered,
-            workerSessionIDs: homeWorkerSessionIDs,
-            profileID: model.profiles.selected?.id
-        )
+    private func homeDashboardSections(_ filtered: [SessionSummary]) -> HomeDashboardSections {
+        HomeDashboardSections(sessions: filtered)
     }
 
     @ViewBuilder
     private func homeSections(_ filtered: [SessionSummary]) -> some View {
-        if let sections = homeDashboardSections(filtered) {
-            if !sections.inProgress.isEmpty {
-                Section {
-                    ForEach(sections.inProgress, id: \.dashboardID) { session in
-                        sessionButton(session, showsContext: true)
-                    }
-                } header: {
-                    dashboardSectionHeader("In Progress")
+        let sections = homeDashboardSections(filtered)
+        if !sections.inProgress.isEmpty {
+            Section {
+                ForEach(sections.inProgress, id: \.dashboardID) { session in
+                    sessionButton(session, showsContext: true)
                 }
+            } header: {
+                dashboardSectionHeader("In Progress")
             }
-            if !sections.completed.isEmpty {
-                Section {
-                    ForEach(sections.completed.prefix(HomeDashboardLayout.recentlyCompletedLimit), id: \.dashboardID) { session in
-                        sessionButton(session, showsContext: true)
-                    }
-                    if sections.completed.count > HomeDashboardLayout.recentlyCompletedLimit {
-                        SessionListExpansionControls(
-                            workspaceName: "Recently Completed",
-                            canShowLess: false,
-                            canShowMore: true,
-                            isEnabled: true,
-                            onShowLess: {},
-                            onShowMore: { showingHomeCompletedSheet = true },
-                            showMoreTitle: "View more",
-                            showMoreHint: "Shows every recently completed Home worker"
-                        )
-                        .accessibilityIdentifier("home-completed-view-more")
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(SessionDashboardLayout.rowInsets)
-                    }
-                } header: {
-                    dashboardSectionHeader("Recently Completed")
+        }
+        if !sections.completed.isEmpty {
+            Section {
+                ForEach(sections.completed.prefix(HomeDashboardLayout.recentlyCompletedLimit), id: \.dashboardID) { session in
+                    sessionButton(session, showsContext: true)
                 }
+                if sections.completed.count > HomeDashboardLayout.recentlyCompletedLimit {
+                    SessionListExpansionControls(
+                        workspaceName: "Recently Completed",
+                        canShowLess: false,
+                        canShowMore: true,
+                        isEnabled: true,
+                        onShowLess: {},
+                        onShowMore: { showingHomeCompletedSheet = true },
+                        showMoreTitle: "View more",
+                        showMoreHint: "Shows every recently completed Home worker"
+                    )
+                    .accessibilityIdentifier("home-completed-view-more")
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(SessionDashboardLayout.rowInsets)
+                }
+            } header: {
+                dashboardSectionHeader("Recently Completed")
             }
-            if !sections.unviewed.isEmpty {
-                Section {
-                    ForEach(sections.unviewed, id: \.dashboardID) { session in
-                        sessionButton(session, showsContext: true)
-                    }
-                } header: {
-                    dashboardSectionHeader("Unviewed · \(sections.unviewed.count)")
+        }
+        if !sections.unviewed.isEmpty {
+            Section {
+                ForEach(sections.unviewed, id: \.dashboardID) { session in
+                    sessionButton(session, showsContext: true)
                 }
+            } header: {
+                dashboardSectionHeader("Unviewed · \(sections.unviewed.count)")
             }
         }
     }
@@ -1168,7 +1141,7 @@ struct SessionShellView: View {
             detents: [.medium, .large],
             onDone: { showingHomeCompletedSheet = false }
         ) {
-            ForEach(homeDashboardSections(filteredSessions)?.completed ?? [], id: \.dashboardID) { session in
+            ForEach(homeDashboardSections(filteredSessions).completed, id: \.dashboardID) { session in
                 Button {
                     showingHomeCompletedSheet = false
                     openSession(session)
@@ -1190,47 +1163,6 @@ struct SessionShellView: View {
     /// The task is keyed by the surface's activity, so it reads that activity
     /// directly: `dashboardPresentationIsActive` is published by a sibling
     /// `onChange` that may run after this task starts.
-    /// Running or waiting sessions on the selected Gateway that the worker set
-    /// neither names nor has already ruled out.
-    private var homeWorkerProbeIDs: [String] {
-        guard serverFilter.sortMode == .home, let known = homeWorkerSessionIDs,
-              let profileID = model.profiles.selected?.id else { return [] }
-        return dashboardPresentation.sessions
-            .filter { ($0.phase.isActive || $0.waitingForUser) && $0.gatewayProfileID == profileID
-                && !known.contains($0.id) && !homeCheckedSessionIDs.contains($0.id) }
-            .map(\.id).sorted()
-    }
-
-    /// An empty `probe` reads the bounded ledger; a probe reads its newest page
-    /// and merges, then rules out the probed ids it did not name.
-    private func loadHomeWorkerSessionIDs(presentationActive: Bool, probe: [String]) async {
-        guard serverFilter.sortMode == .home,
-              presentationActive,
-              model.homeStatus.capabilityEnabled,
-              let profileID = model.profiles.selected?.id,
-              let identity = model.homeSheetReadIdentity(profileID: profileID, surfaceToken: homeStatusSurfaceToken) else { return }
-        do {
-            let ids = try await model.readHomeWorkerSessionIDs(
-                identity: identity,
-                maximumPages: probe.isEmpty ? HomeDashboardLayout.maximumTaskPages : 1
-            ) {
-                serverFilter.sortMode == .home && model.profiles.selected?.id == profileID
-            }
-            guard !Task.isCancelled, model.profiles.selected?.id == profileID else { return }
-            let named = Set(ids ?? [])
-            withAnimation(TronDashboardContentMotion.animation(reduceMotion: reduceMotion)) {
-                if probe.isEmpty {
-                    homeWorkerSessionIDs = named
-                } else {
-                    homeWorkerSessionIDs = (homeWorkerSessionIDs ?? []).union(named)
-                    homeCheckedSessionIDs.formUnion(Set(probe).subtracting(named))
-                }
-            }
-        } catch {
-            return
-        }
-    }
-
     /// One container row after every workspace group, owned by
     /// `ArchivedSessionsContainerSection`.
     private func archivedContainerSection(onRevealRows: @escaping () -> Void) -> some View {

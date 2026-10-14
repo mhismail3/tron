@@ -76,6 +76,9 @@ export interface SessionSummary {
   parentSessionId?: string;
   /** Immutable creation provenance derived from canonical session receipts. */
   creationOrigin?: SessionCreationOrigin;
+  /** The Home task that created this worker session, from the task ledger.
+   * Absent for every session no Home task dispatched. */
+  homeTaskId?: string;
   createdAt: string;
   updatedAt: string;
   /** Stable Gateway-observed start of the current active dashboard period. */

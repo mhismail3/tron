@@ -1,11 +1,10 @@
 import SwiftUI
 import TronMobileCore
 
-/// The Home dashboard view's bounds. The worker set comes from Home's task
-/// ledger (`home.taskList`), read in bounded pages and joined against the
-/// dashboard's own session catalog; it is never a second session store.
+/// The Home dashboard view's bounds. Every section is a projection of the
+/// dashboard's synced session catalog: the Gateway marks Home workers on their
+/// rows (`homeTaskId`), so the view issues no reads of its own.
 enum HomeDashboardLayout {
-    static let maximumTaskPages = 10
     static let recentlyCompletedLimit = 5
     static let floatingButtonSpacing: CGFloat = 12
 }
@@ -21,16 +20,11 @@ struct HomeDashboardSections: Equatable {
     let completed: [SessionSummary]
     let unviewed: [SessionSummary]
 
-    var isEmpty: Bool { inProgress.isEmpty && completed.isEmpty && unviewed.isEmpty }
-
-    init(sessions: [SessionSummary], workerSessionIDs: Set<String>, profileID: String?) {
-        let workers = sessions.filter { session in
-            workerSessionIDs.contains(session.id)
-                && (session.gatewayProfileID == nil || session.gatewayProfileID == profileID)
-        }
-        inProgress = workers.filter { $0.phase.isActive || $0.waitingForUser }
-        completed = workers.filter { !($0.phase.isActive || $0.waitingForUser) && !$0.isUnread }
-        unviewed = sessions.filter { $0.isUnread && !($0.phase.isActive || $0.waitingForUser) }
+    init(sessions: [SessionSummary]) {
+        let settled = { (session: SessionSummary) in !(session.phase.isActive || session.waitingForUser) }
+        inProgress = sessions.filter { $0.isHomeWorker && !settled($0) }
+        completed = sessions.filter { $0.isHomeWorker && settled($0) && !$0.isUnread }
+        unviewed = sessions.filter { $0.isUnread && settled($0) }
     }
 }
 
@@ -97,8 +91,13 @@ struct HomeFloatingButton: View {
 struct HomeUsageSummaryCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var providers: [ProviderSummary] = []
     @State private var usageController = ProviderUsageReadController()
+
+    /// Observed from the model's provider catalog, so the card appears as soon
+    /// as any owner (this card, Settings, the composer) publishes it.
+    private var providers: [ProviderSummary] {
+        model.providerCatalog(for: .global)?.providers ?? []
+    }
 
     private var usageProviders: [ProviderSummary] {
         ProviderUsageOrdering.sorted(
@@ -127,7 +126,7 @@ struct HomeUsageSummaryCard: View {
             }
         }
         .task(id: PresentationActivityTaskID(
-            source: "home-usage:\(model.connectionState == .connected):\(model.providerInvalidationGeneration):\(model.foregroundReconciliationGeneration):\(model.profileRevision):\(usageController.requestGeneration):\(capabilityAvailable)",
+            source: "home-usage:\(model.connectionState == .connected):\(usageProviders.map(\.id).joined(separator: ",")):\(model.providerInvalidationGeneration):\(model.foregroundReconciliationGeneration):\(model.profileRevision):\(usageController.requestGeneration):\(capabilityAvailable)",
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             await load()
@@ -193,10 +192,12 @@ struct HomeUsageSummaryCard: View {
         // the connection, so it reads again once connected.
         guard presentationActivity.allowsPresentationPublication, !Task.isCancelled,
               model.connectionState == .connected else { return }
-        if let existing = model.providerCatalog(for: .global)?.providers { providers = existing }
-        _ = await model.refreshProviders(target: .global)
-        guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
-        if let catalog = model.providerCatalog(for: .global) { providers = catalog.providers }
+        // Read the catalog only when none is published; its arrival re-keys this
+        // task (provider ids), which then reads usage.
+        guard model.providerCatalog(for: .global) != nil else {
+            _ = await model.refreshProviders(target: .global)
+            return
+        }
         guard capabilityAvailable, !usageProviders.isEmpty else { return }
         let identity = ProviderUsageReadIdentity(
             target: .global,
