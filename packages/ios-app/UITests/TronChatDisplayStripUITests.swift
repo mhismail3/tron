@@ -49,11 +49,13 @@ final class TronChatDisplayStripUITests: XCTestCase {
         let mixedTwo = chip(app, "Mixed photo two")
         XCTAssertTrue(mixedOne.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertEqual(mixedOne.frame.midY, mixedTwo.frame.midY, accuracy: 1)
-        let read = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Read'")).firstMatch
-        let bash = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Bash' OR label BEGINSWITH 'Ran'")).firstMatch
+        // Each generic stretch counts only its own call, not the group's four.
+        let read = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Read file, Completed'")).firstMatch
+        let bash = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Run command, Completed'")).firstMatch
         XCTAssertTrue(read.exists, app.debugDescription)
+        XCTAssertTrue(bash.exists, app.debugDescription)
         XCTAssertLessThan(read.frame.maxY, mixedOne.frame.minY, "The read call keeps its chip above the display row")
-        if bash.exists { XCTAssertGreaterThan(bash.frame.minY, mixedOne.frame.maxY, "The shell call keeps its chip below") }
+        XCTAssertGreaterThan(bash.frame.minY, mixedOne.frame.maxY, "The shell call keeps its chip below")
         keepScreenshot(app, "989-display-chip-row-mixed")
         mixedTwo.tap()
         XCTAssertTrue(app.images["Mixed two"].waitForExistence(timeout: 10), app.debugDescription)
