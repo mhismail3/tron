@@ -53,6 +53,9 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
     let actions: DashboardMenuActions
     let showingSearch: Bool
     let isRefreshing: Bool
+    /// An optional floating control stacked directly above the dashboard logo
+    /// button, sharing its circular glass chrome (the Home dashboard's Home button).
+    let floatingAccessory: AnyView?
     private let content: Content
     private let search: SearchContent
 
@@ -63,6 +66,7 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
         actions: DashboardMenuActions,
         showingSearch: Bool,
         isRefreshing: Bool = false,
+        floatingAccessory: AnyView? = nil,
         @ViewBuilder content: () -> Content,
         @ViewBuilder search: () -> SearchContent
     ) {
@@ -72,6 +76,7 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
         self.actions = actions
         self.showingSearch = showingSearch
         self.isRefreshing = isRefreshing
+        self.floatingAccessory = floatingAccessory
         self.content = content()
         self.search = search()
     }
@@ -81,14 +86,19 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
             ZStack(alignment: .bottomTrailing) {
                 content
                 DashboardBackdrop(state: header)
-                DashboardModeMenuButton(mode: mode, onSelect: onSelect, actions: actions)
-                    .frame(width: 56, height: 56)
-                    .contentShape(Circle())
-                    .glassEffect(.regular.tint(mode.accent.opacity(0.22)).interactive(), in: .circle)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 8)
-                    .accessibilityHidden(showingSearch)
-                    .allowsHitTesting(!showingSearch)
+                VStack(spacing: HomeDashboardLayout.floatingButtonSpacing) {
+                    if let floatingAccessory {
+                        floatingAccessory
+                            .transition(.scale(scale: 0.72).combined(with: .opacity))
+                    }
+                    DashboardModeMenuButton(mode: mode, onSelect: onSelect, actions: actions)
+                        .tronDashboardFloatingCircle(accent: mode.accent)
+                }
+                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: floatingAccessory != nil)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
+                .accessibilityHidden(showingSearch)
+                .allowsHitTesting(!showingSearch)
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
 
@@ -175,6 +185,14 @@ private struct DashboardInitialOffset: ViewModifier {
 }
 
 extension View {
+    /// The dashboard's one floating circular button chrome: the logo menu button
+    /// and any control stacked above it share this size and glass.
+    func tronDashboardFloatingCircle(accent: Color) -> some View {
+        frame(width: 56, height: 56)
+            .contentShape(Circle())
+            .glassEffect(.regular.tint(accent.opacity(0.22)).interactive(), in: .circle)
+    }
+
     /// Attach to the concrete List/ScrollView, not a parent containing several
     /// scroll owners. Normalize the resting offset by its real safe-area inset.
     func tronDashboardScroll(_ header: DashboardHeaderState, topMargin: CGFloat = 0) -> some View {

@@ -202,10 +202,12 @@ struct DashboardServerSource: Identifiable, Equatable, Sendable {
 enum DashboardSessionSortMode: String, CaseIterable, Identifiable, Sendable {
     case projectServer = "By Project / Server"
     case recent = "Recent Activity"
+    case home = "Home"
 
     var id: String { rawValue }
     var detail: String {
         switch self {
+        case .home: "Usage, then the workers Home is running, recently finished, and still unviewed."
         case .projectServer: "Group sessions by project folder and server."
         case .recent: "Show active sessions first, then the newest history across servers."
         }

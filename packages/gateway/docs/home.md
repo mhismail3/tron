@@ -1592,7 +1592,7 @@ HomeStatus {
   available, reason?, enabled,
   homeId?, sessionId?, openSessionId?, generation?, routeGeneration?, bindingRevision?, model?,
   chapter?: { count, currentBytes?, currentEntries?, recoveryDecision: "none" | "reserved" | "materializing" },
-  live, sessionPresent,
+  live, sessionPresent, waitingForUser?,
   memory: HomeMemoryStatus
 }
 HomeMemoryStatus {
@@ -1620,6 +1620,10 @@ HomeMemoryStatus {
   whether it exists, live or on disk. Before the
   first catalog cut completes, `sessionPresent` is `true`, because an unread catalog
   cannot prove absence.
+- `waitingForUser` is true while the live `openSessionId` runtime is blocked on a
+  semantic user interaction (a pending `ask_user` question); it is the same
+  interaction state a session row's `waitingForUser` projects. A designated Home
+  always reports it, `false` when nothing is openable or no runtime is live.
 - `taskRecovery` fences only task surfaces until the next Gateway start. It does not
   gate ordinary readiness or `ok`.
 - The memory projection carries counters and state only, never messages or view

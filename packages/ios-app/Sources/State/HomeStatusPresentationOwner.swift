@@ -92,6 +92,9 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     let openSessionId: String?
     let generation: Int?
     let sessionPresent: Bool
+    /// Home's live chapter is blocked on a pending user interaction (ask_user).
+    /// Absent on an older Gateway.
+    let waitingForUser: Bool?
     let memory: Memory
     /// The chat model Home's activations use; distinct from `memory.model`.
     let model: ModelRef?

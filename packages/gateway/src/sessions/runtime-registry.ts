@@ -851,6 +851,7 @@ export class RuntimeRegistry {
         },
         sessionFile: (sessionId) => this.homeSessionFile(sessionId),
         hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
+        waitingForUser: (sessionId) => this.slots.get(sessionId)?.catalogWaitingForUser ?? false,
         chapterMetrics: async (sessionId) => {
           const slot = this.slots.get(sessionId);
           if (!slot) return this.coldHomeChapterMetrics(sessionId);

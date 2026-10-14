@@ -1231,6 +1231,9 @@ export interface HomeStatus {
   };
   live: boolean;
   sessionPresent: boolean;
+  /** True while Home's live openable chapter is blocked on a semantic user
+   * interaction (a pending ask_user question). Absent on an undesignated Home. */
+  waitingForUser?: boolean;
   /** Home's memory, once a record names one. There are no memory defaults
    * (decision D4), so a Home whose memory is unconfigured refuses its
    * activations until the memory model is set (`model.ref[role=memory]`). */
