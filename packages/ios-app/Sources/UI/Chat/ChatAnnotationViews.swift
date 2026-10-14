@@ -197,7 +197,7 @@ struct ChatAnnotationSheet: View {
                         } label: {
                             Image(systemName: "trash")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronError)
+                                .tronToolbarAction(role: .destructive)
                         }
                         .accessibilityLabel("Delete annotation")
                     }
@@ -212,7 +212,7 @@ struct ChatAnnotationSheet: View {
                     } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel(editing == nil ? "Done" : "Save annotation")
                 }

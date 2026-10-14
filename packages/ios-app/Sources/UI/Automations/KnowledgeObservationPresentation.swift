@@ -339,7 +339,7 @@ struct KnowledgeDetailSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronKnowledge)
+                            .tronToolbarAction(accent: .tronKnowledge)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -388,7 +388,7 @@ struct KnowledgeObservationTechnicalDetailsSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronKnowledge)
+                            .tronToolbarAction(accent: .tronKnowledge)
                     }
                     .accessibilityLabel("Done")
                 }

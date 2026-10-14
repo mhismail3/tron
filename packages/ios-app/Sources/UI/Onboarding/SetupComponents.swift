@@ -330,7 +330,7 @@ struct ProviderConfigurationSheet: View {
                     Button { close() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .disabled(beginningMethod != nil || clearing)
                     .accessibilityLabel("Done")
@@ -953,7 +953,7 @@ struct ModelPicker: View {
                     Button { beginSearch() } label: {
                         Image(systemName: "magnifyingglass")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                            .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Search models")
                     #if HOSTED_TEST

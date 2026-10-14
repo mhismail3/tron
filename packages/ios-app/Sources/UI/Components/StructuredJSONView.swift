@@ -335,14 +335,14 @@ struct TechnicalJSONSheet: View {
                         } label: {
                             TronToolbarTextLabel("Edit", systemImage: "pencil")
                         }
-                        .foregroundStyle(resolvedAccent)
+                        .tronToolbarAction(accent: resolvedAccent)
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(resolvedAccent)
+                            .tronToolbarAction(accent: resolvedAccent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -408,7 +408,7 @@ struct JSONFieldSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronSettingsAccent(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }

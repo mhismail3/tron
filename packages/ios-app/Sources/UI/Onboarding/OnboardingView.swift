@@ -161,7 +161,7 @@ struct OnboardingView: View {
                         Button { showScanner = false } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
+                                .tronToolbarAction(accent: .tronEmerald)
                         }
                         .accessibilityLabel("Done")
                     }

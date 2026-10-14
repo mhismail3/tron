@@ -753,7 +753,7 @@ struct ComposerResourceDetailSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }

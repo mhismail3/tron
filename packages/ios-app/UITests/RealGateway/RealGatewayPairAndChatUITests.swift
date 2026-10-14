@@ -911,6 +911,19 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             XCTAssertTrue(labelled(marker).waitForExistence(timeout: 30), "\(title) did not open: \(app.debugDescription)")
             if title == "Connections" {
                 XCTAssertFalse(labelled("Input needed").exists, "push alerts moved to their own sheet")
+                assertToolbarTint(app, title: "Connections")
+                // An authorized device's detail sheet (its row reads "Details for
+                // <device> on <Mac>"): its pencil and Done take the
+                // Connections tint of its title, not a hard-coded green (#963).
+                let device = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Details for ' AND label CONTAINS ' on '")).firstMatch
+                XCTAssertTrue(device.waitForExistence(timeout: 30), app.debugDescription)
+                let label = device.label.dropFirst("Details for ".count)
+                let deviceName = String(label[..<(label.range(of: " on ", options: .backwards)?.lowerBound ?? label.endIndex)])
+                device.tap()
+                XCTAssertTrue(app.buttons["device-rename"].waitForExistence(timeout: 30), app.debugDescription)
+                assertToolbarTint(app, title: deviceName)
+                keepScreenshot(app, name: "963-device-detail")
+                dismissTopSheet(app)
             }
             keepScreenshot(app, name: "939-\(name)")
             dismissTopSheet(app)

@@ -309,7 +309,7 @@ struct HookExtensionDetailView: View {
                 }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: title ?? record.friendlyName, accent: accent) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(accent) }
+                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: accent) }
                         .accessibilityLabel("Done")
                 }
             }

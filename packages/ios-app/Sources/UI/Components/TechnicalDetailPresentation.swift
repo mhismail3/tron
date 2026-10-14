@@ -177,11 +177,7 @@ struct TronSheetInfoButton: View {
 
     var body: some View {
         Button(action: action) {
-            if let accent {
-                Image(systemName: "info.circle").font(TronTypography.buttonSM).foregroundStyle(accent)
-            } else {
-                Image(systemName: "info.circle").font(TronTypography.buttonSM).tronSettingsAccent()
-            }
+            Image(systemName: "info.circle").font(TronTypography.buttonSM).tronToolbarAction(accent: accent)
         }
         .accessibilityLabel(accessibilityLabel)
     }

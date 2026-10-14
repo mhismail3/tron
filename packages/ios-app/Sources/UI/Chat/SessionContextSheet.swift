@@ -260,7 +260,7 @@ struct SessionContextSheet: View {
                     } label: {
                         Image(systemName: "pencil")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .disabled(displayedPresentation == nil)
                     .accessibilityLabel("Rename Session")
@@ -277,7 +277,7 @@ struct SessionContextSheet: View {
                     } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }
