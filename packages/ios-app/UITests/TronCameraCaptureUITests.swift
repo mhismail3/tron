@@ -1,8 +1,9 @@
 import XCTest
 
 /// The Take Photo sheet (#937), opened from the real composer menu against
-/// scripted camera hardware (`HostedCameraFixture`): each feed becomes live
-/// 1.5 s after it is requested. `camera.phase-history` is the model's complete
+/// scripted camera hardware (`HostedCameraFixture`): the first feed becomes
+/// live 6 s after it is requested (long enough to observe the opening state),
+/// later ones after 1.5 s. `camera.phase-history` is the model's complete
 /// phase sequence, so "never shows loading again" is an exact assertion, not a
 /// sampled one.
 final class TronCameraCaptureUITests: XCTestCase {
@@ -13,7 +14,8 @@ final class TronCameraCaptureUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = [
-            "-tron-composer-upload-fixture", "-tron-camera-fixture", "-camera-fixture-latency-ms", "1500",
+            "-tron-composer-upload-fixture", "-tron-camera-fixture",
+            "-camera-fixture-start-latency-ms", "6000", "-camera-fixture-latency-ms", "1500",
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
         ]
         app.launch()
