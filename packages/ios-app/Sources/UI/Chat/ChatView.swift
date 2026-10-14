@@ -567,7 +567,7 @@ struct ChatView: View {
             viewportActivation &+= 1
             scrollCoordinator.viewportActivationChanged(viewportActivation)
             scrollCoordinator.viewportObservationChanged(isActive: false)
-            if sessionPresentation.openingTask != nil {
+            if sessionPresentation.ownsUnsettledOpening {
                 // A covered transcript cannot publish the native geometry
                 // needed to finish positioning. Cancel the exact opening and
                 // scroll leases now so uncovering resumes with a fresh epoch;
@@ -2468,6 +2468,9 @@ struct ChatView: View {
             // Publish leased interaction/editor routes only after chat opening
             // has crossed a real ready frame. Otherwise their sheet can cover
             // the parent, cancel opening, and create a present/dismiss loop.
+            // This frame settles the opening, so the sheet admitted next can
+            // cover it without cancelling it into a later re-reveal (#935).
+            sessionPresentation.markOpeningReady()
             sessionPresentation.permitsExtensionInteractionPresentation = true
             intakeLatestTranscriptProjectionIfNeeded()
             admitPendingFloatingDisplay()
