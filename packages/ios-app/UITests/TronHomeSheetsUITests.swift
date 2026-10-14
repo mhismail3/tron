@@ -129,6 +129,44 @@ final class TronHomeSheetsUITests: XCTestCase {
         add(report)
     }
 
+    /// Home's composer offers the user-level skills and prompt templates its Gateway
+    /// catalog lists, through the same `@` and `/` pickers as an ordinary chat, and an
+    /// inserted prompt is sent on the logical Home route as that message's resource (#936).
+    @MainActor
+    func testHomeComposerOffersUserSkillsAndPrompts() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-opened-session"], "label CONTAINS 'opened-session:home-session'"))
+        let composer = app.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 10))
+        composer.tap()
+
+        composer.typeText("@")
+        let skill = app.buttons.matching(NSPredicate(format: "label CONTAINS 'wordcraft' AND label CONTAINS 'User'")).firstMatch
+        XCTAssertTrue(skill.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'tron-jev'")).firstMatch.exists)
+        keep("10-home-composer-skills")
+
+        composer.typeText(XCUIKeyboardKey.delete.rawValue + "/")
+        let prompt = app.buttons.matching(NSPredicate(format: "label CONTAINS 'daily-brief' AND label CONTAINS 'User'")).firstMatch
+        XCTAssertTrue(prompt.waitForExistence(timeout: 5), app.debugDescription)
+        keep("11-home-composer-prompts")
+
+        prompt.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["composer.staged-chip"].waitForExistence(timeout: 5), app.debugDescription)
+        composer.typeText("inbox")
+        keep("12-home-composer-prompt-inserted")
+        let send = app.buttons["Send message"]
+        XCTAssertTrue(waitFor(send, "enabled == true", timeout: 5))
+        send.tap()
+        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-prompt-route"], "label CONTAINS 'prompt-route:home.prompt:prompt:daily-brief:inbox'"),
+                      app.staticTexts["fixture.home-prompt-route"].label)
+    }
+
     // MARK: - Helpers
 
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
