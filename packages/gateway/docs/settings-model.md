@@ -1188,6 +1188,44 @@ Changing Home's model later does not change running workers: the worker's
 values are fixed at start. Changing the profile key from `sameAs: home` to an
 explicit model is a profile change with a `notify` floor.
 
+### 6.4 Learned-profile changes
+
+The learned profile (6.1, second part) is not a key: its store is Knowledge, and an
+item never resolves as a setting. Its changes still take this document's one path,
+so they are logged, shown and undone like any other change.
+
+- **One implementation.** Home's `profile` tool and the maintainer's
+  `home.profileChange` both call `SettingsChangePath.changeProfile`, which applies
+  ops with `HomeProfileItems` (`home-profile.ts`) under the Home target's lock. The
+  actor decides only confirmation: Home writes inferred items, and the maintainer's
+  tap writes confirmed ones (`confirmedByUser`).
+- **The record.** Each note a change touches is one entry: key `home.profile.item`,
+  qualifier `note`, target `home`, layer `profile`. Its `before` and `after` are the
+  item's value `{ kind, text, confirmed, state, revisionId, supersedes?,
+  supersededBy? }`; a note that did not exist has none. The entries of one change share
+  `group: { id, size }`, for example both notes of a supersede or every item of a
+  Confirm all. The subject's floor is quiet. Home's run web mark raises it one step,
+  so a profile change after open-world content pushes "Undo it in Tron". The risk
+  model is not consulted, because an item stays inferred until the maintainer
+  confirms it.
+- **Undo.** `settings.undo` of a profile entry reverts its whole group, restoring
+  each note to its `before`: text, kind, confirmation, retirement and its
+  `supersedes` relation. A note that did not exist is retired. Undo is refused with
+  `conflict` and `{ current, after, display }` unless every note still equals its
+  recorded `after`. Clearing retirement uses Knowledge's `retired: false` draft
+  (knowledge.md), which is never stored.
+- **Concurrency.** Every maintainer op names the revision he read. A note Home changed
+  since is refused with the item as it now stands, never overwritten. Knowledge's
+  revision fence also covers the race between Home's read and its write.
+- **Not recorded.** A native Knowledge note edit stays the Knowledge owner's. It is
+  not a profile change, and no outside-change comparison runs for notes (F2's
+  outside detection covers settings files only).
+
+The real-Gateway journey is `src/sessions/home-profile.integration.test.ts`
+(F11–F13): maintainer confirm, refine with a kind change, supersede, retire and
+their undos over RPC, Changes entries, the stale-edit and stale-undo conflicts, and
+the next activation's profile section.
+
 ## 7. Presentation and the rendering contract
 
 ### 7.1 Posture: calm by default, everything on demand
