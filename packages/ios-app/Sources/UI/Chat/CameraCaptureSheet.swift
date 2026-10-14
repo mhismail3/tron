@@ -3,50 +3,43 @@ import UIKit
 import TronMobileCore
 @preconcurrency import AVFoundation
 
-private final class CameraPhotoDelegateProxy: NSObject, AVCapturePhotoCaptureDelegate {
-    weak var model: CameraModel?
-    let generation: Int
-
-    init(model: CameraModel, generation: Int) {
-        self.model = model
-        self.generation = generation
-    }
-
-    nonisolated func photoOutput(
-        _ output: AVCapturePhotoOutput,
-        didFinishProcessingPhoto photo: AVCapturePhoto,
-        error: Error?
-    ) {
-        let image = error == nil ? photo.fileDataRepresentation().flatMap(UIImage.init(data:)) : nil
-        let generation = self.generation
-        Task { @MainActor [weak model] in
-            model?.finishCapture(generation: generation, image: image)
-        }
-    }
+/// The camera sheet's feed state (#937). Only `starting` shows the shared
+/// sheet loading pulse: switching cameras and retaking hold the last frame,
+/// blurred, over the still-mounted preview until the next feed is live.
+enum CameraFeedPhase: String, Sendable {
+    case starting, live, switching, captured, resuming, denied, unavailable
 }
 
 @Observable
 @MainActor
-final class CameraModel: NSObject {
-    var isAuthorized = false
-    var permissionDenied = false
-    var cameraUnavailable = false
-    var isTorchOn = false
-    var hasTorch = false
-    var isCapturing = false
-    var session: AVCaptureSession?
-    var isReady: Bool {
-        isAuthorized && !permissionDenied && session != nil && !cameraUnavailable && !configuring
+final class CameraModel {
+    private(set) var phase: CameraFeedPhase = .starting
+    private(set) var device: CameraDevice?
+    private(set) var isTorchOn = false
+    private(set) var isCapturing = false
+    /// The captured photo, shown sharp while `captured`.
+    private(set) var capturedImage: UIImage?
+    /// The outgoing camera's last frame, or the discarded photo on retake.
+    private(set) var frozenFrame: UIImage?
+    #if HOSTED_TEST
+    private(set) var phaseHistory: [CameraFeedPhase] = [.starting]
+    #endif
+
+    var session: AVCaptureSession { sessions.session }
+    var hasTorch: Bool { device?.hasTorch ?? false }
+    var showsLoading: Bool { phase == .starting }
+    var showsFeed: Bool { phase != .denied && phase != .unavailable }
+    var canCapture: Bool { phase == .live && !isCapturing }
+    /// Controls keep their enabled look through a switch or retake so the row
+    /// does not dim and brighten; the model ignores taps until the feed is live.
+    var controlsLookEnabled: Bool {
+        [.live, .switching, .resuming].contains(phase) && !isCapturing
     }
 
-    private var photoOutput: AVCapturePhotoOutput?
     private var position: AVCaptureDevice.Position = .back
-    private var completion: ((UIImage?) -> Void)?
-    private var captureDelegate: CameraPhotoDelegateProxy?
-    private var captureGeneration = 0
-    private var lifecycleGeneration = 0
-    private var configurationGeneration = 0
-    private var configuring = false
+    private var token = 0
+    private var captureToken = 0
+    private var active = true
     private let authorization: any CameraAuthorizationProviding
     private let sessions: any CameraSessionProviding
 
@@ -58,147 +51,114 @@ final class CameraModel: NSObject {
         self.sessions = sessions
     }
 
+    /// The process's camera model: the hosted UI fixture substitutes scripted
+    /// camera hardware; every other build uses the system camera.
+    static func forCurrentProcess() -> CameraModel {
+        #if HOSTED_TEST
+        if let hosted = HostedCameraFixture.model() { return hosted }
+        #endif
+        return CameraModel()
+    }
+
     func requestPermissionAndSetup() async {
-        let lifecycle = lifecycleGeneration
-        do {
-            try Task.checkCancellation()
-            switch authorization.authorizationStatus() {
-            case .authorized:
-                try Task.checkCancellation()
-                guard lifecycle == lifecycleGeneration else { return }
-                isAuthorized = true
-                permissionDenied = false
-                setup()
-            case .notDetermined:
-                let granted = await authorization.requestAccess()
-                try Task.checkCancellation()
-                guard lifecycle == lifecycleGeneration else { return }
-                isAuthorized = granted
-                permissionDenied = !granted
-                if granted { setup() }
-            case .denied, .restricted:
-                try Task.checkCancellation()
-                guard lifecycle == lifecycleGeneration else { return }
-                isAuthorized = false
-                permissionDenied = true
-            @unknown default:
-                try Task.checkCancellation()
-                guard lifecycle == lifecycleGeneration else { return }
-                isAuthorized = false
-                permissionDenied = true
-            }
-        } catch is CancellationError {
-            // A dismissed sheet must not surface task cancellation as a camera
-            // failure or publish a partial permission state.
-            return
-        } catch {
-            return
+        switch authorization.authorizationStatus() {
+        case .authorized:
+            start()
+        case .notDetermined:
+            let granted = await authorization.requestAccess()
+            // A dismissed sheet must not publish a partial permission state.
+            guard active, !Task.isCancelled else { return }
+            if granted { start() } else { transition(to: .denied) }
+        case .denied, .restricted:
+            transition(to: .denied)
+        @unknown default:
+            transition(to: .denied)
         }
     }
 
-    private func setup() {
-        guard !Task.isCancelled, !configuring else { return }
-        configuring = true
-        configurationGeneration &+= 1
-        let generation = configurationGeneration
-        let lifecycle = lifecycleGeneration
-        let requestedPosition = position
-        sessions.configure(position: requestedPosition) { [weak self] configuration in
-            guard let self,
-                  !Task.isCancelled,
-                  lifecycle == self.lifecycleGeneration,
-                  generation == self.configurationGeneration,
-                  requestedPosition == self.position else { return }
-            configuring = false
-            guard let configuration else {
-                cameraUnavailable = true
-                return
-            }
-            session = configuration.session
-            photoOutput = configuration.photoOutput
-            hasTorch = configuration.hasTorch
-            cameraUnavailable = false
-            // Configuration is admitted above against every lifecycle and
-            // position generation before the session is allowed to run.
-            sessions.start(configuration.session)
-        }
+    private func start() {
+        guard active, phase == .starting else { return }
+        sessions.onEvent = { [weak self] token, event in self?.handle(token, event) }
+        token &+= 1
+        sessions.start(position: position, token: token)
     }
 
+    /// Sheet dismissal: ends the session and cancels an in-flight capture.
     func stopSession() {
-        // Sheet dismissal is also capture cancellation. Invalidate both
-        // callbacks before invoking client code to make reentrancy harmless.
-        lifecycleGeneration &+= 1
-        configurationGeneration &+= 1
-        configuring = false
-        cancelCapture()
-        if let session { sessions.stop(session) }
-    }
-
-    func startSession() {
-        guard let session else { setup(); return }
-        sessions.start(session)
+        active = false
+        isCapturing = false
+        captureToken &+= 1
+        sessions.stop()
     }
 
     func flipCamera() {
-        guard !isCapturing else { return }
-        configurationGeneration &+= 1
-        configuring = false
-        stopSession()
-        session = nil
-        photoOutput = nil
+        guard active, phase == .live, !isCapturing else { return }
         isTorchOn = false
-        position = position == .back ? .front : .back
-        setup()
+        transition(to: .switching)
+        token &+= 1
+        sessions.switchCamera(to: position == .back ? .front : .back, token: token)
     }
 
     func toggleTorch() {
-        guard !isCapturing, let session else { return }
-        let lifecycle = lifecycleGeneration
-        sessions.setTorch(on: !isTorchOn, session: session) { [weak self] enabled in
-            guard let self,
-                  lifecycle == self.lifecycleGeneration,
-                  !self.isCapturing else { return }
-            self.isTorchOn = enabled
+        guard active, phase == .live, !isCapturing, hasTorch else { return }
+        let token = token
+        sessions.setTorch(on: !isTorchOn) { [weak self] enabled in
+            guard let self, active, token == self.token, phase == .live else { return }
+            isTorchOn = enabled
         }
     }
 
-    func capturePhoto(completion: @escaping (UIImage?) -> Void) {
-        guard !isCapturing else { return }
-        captureGeneration &+= 1
-        let generation = captureGeneration
+    func capturePhoto() {
+        guard active, canCapture else { return }
+        captureToken &+= 1
+        let captureToken = captureToken
         isCapturing = true
-        self.completion = completion
-        guard let photoOutput else { finishCapture(generation: generation, image: nil); return }
-        let delegate = CameraPhotoDelegateProxy(model: self, generation: generation)
-        captureDelegate = delegate
-        sessions.capturePhoto(
-            CameraPhotoCaptureRequest(
-                output: photoOutput,
-                settings: AVCapturePhotoSettings(),
-                delegate: delegate
-            )
-        )
+        sessions.capturePhoto { [weak self] image in
+            guard let self, active, isCapturing, captureToken == self.captureToken else { return }
+            isCapturing = false
+            // A failed capture keeps the live feed, as before.
+            guard let image else { return }
+            capturedImage = image
+            isTorchOn = false
+            transition(to: .captured)
+            sessions.pause()
+        }
     }
 
-    func cancelCapture() {
-        guard isCapturing else { return }
-        captureGeneration &+= 1
-        settleCapture(image: nil)
+    func retake() {
+        guard active, phase == .captured else { return }
+        // The discarded photo stays on screen, blurred, until the feed is back.
+        frozenFrame = capturedImage
+        capturedImage = nil
+        transition(to: .resuming)
+        token &+= 1
+        sessions.resume(token: token)
     }
 
-    fileprivate func finishCapture(generation: Int, image: UIImage?) {
-        guard isCapturing, generation == captureGeneration else { return }
-        settleCapture(image: image)
+    private func handle(_ eventToken: Int, _ event: CameraSessionEvent) {
+        guard active, eventToken == token else { return }
+        switch event {
+        case .frozenFrame(let image):
+            if phase == .switching { frozenFrame = image }
+        case .live(let device):
+            self.device = device
+            position = device.position
+            frozenFrame = nil
+            transition(to: .live)
+        case .unavailable:
+            transition(to: .unavailable)
+        case .switchFailed:
+            frozenFrame = nil
+            transition(to: .live)
+        }
     }
 
-    private func settleCapture(image: UIImage?) {
-        let callback = completion
-        completion = nil
-        captureDelegate = nil
-        isCapturing = false
-        // Clear ownership before invoking client code so a callback can safely
-        // start the next capture without replacing this callback.
-        callback?(image)
+    private func transition(to next: CameraFeedPhase) {
+        guard next != phase else { return }
+        phase = next
+        #if HOSTED_TEST
+        phaseHistory.append(next)
+        #endif
     }
 }
 
@@ -210,7 +170,7 @@ private struct CameraPreviewView: UIViewRepresentable {
         return view
     }
     func updateUIView(_ uiView: CameraPreviewUIView, context: Context) {
-        uiView.previewLayer.session = session
+        if uiView.previewLayer.session !== session { uiView.previewLayer.session = session }
     }
 }
 
@@ -219,6 +179,7 @@ private final class CameraPreviewUIView: UIView {
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     override init(frame: CGRect) {
         super.init(frame: frame)
+        backgroundColor = .black
         previewLayer.videoGravity = .resizeAspectFill
     }
     required init?(coder: NSCoder) { nil }
@@ -226,21 +187,16 @@ private final class CameraPreviewUIView: UIView {
 
 /// Immersive camera capture restored from the pre-gateway app: the live camera
 /// owns the full sheet while flashlight, shutter/confirm, and flip/retake keep
-/// one stable morphing control row.
+/// one stable morphing control row. The preview layer stays mounted for the
+/// sheet's life; switches and retakes cross-fade from a blurred still (#937).
 struct CameraCaptureSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onImageCaptured: (UIImage) -> Void
 
-    @State private var cameraModel = CameraModel()
-    @State private var capturedImage: UIImage?
-    @State private var showingPreview = false
+    @State private var cameraModel = CameraModel.forCurrentProcess()
 
-    private var shouldShowCameraStatus: Bool {
-        cameraModel.permissionDenied
-            || cameraModel.cameraUnavailable
-            || !cameraModel.isAuthorized
-            || (!showingPreview && cameraModel.session == nil)
-    }
+    private var showingPreview: Bool { cameraModel.phase == .captured }
 
     var body: some View {
         GeometryReader { proxy in
@@ -252,9 +208,16 @@ struct CameraCaptureSheet: View {
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay {
-            if shouldShowCameraStatus { cameraStatus }
+        .overlay { cameraStatus }
+        #if HOSTED_TEST
+        .overlay(alignment: .topLeading) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityLabel(cameraModel.phaseHistory.map(\.rawValue).joined(separator: ">"))
+                .accessibilityIdentifier("camera.phase-history")
         }
+        #endif
         .ignoresSafeArea(.container, edges: .all)
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
         .task { await cameraModel.requestPermissionAndSetup() }
@@ -268,35 +231,55 @@ struct CameraCaptureSheet: View {
         }
     }
 
-    @ViewBuilder private var cameraSurface: some View {
-        if let image = capturedImage, showingPreview {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-        } else if cameraModel.isAuthorized, let session = cameraModel.session {
-            CameraPreviewView(session: session)
-        } else {
+    /// Black, then the one preview layer, then the held still. Only the still
+    /// and the preview's opacity change between phases; nothing is remounted.
+    private var cameraSurface: some View {
+        ZStack {
             Color.black
+            if cameraModel.showsFeed {
+                CameraPreviewView(session: cameraModel.session)
+                    .opacity(cameraModel.showsLoading ? 0 : 1)
+            }
+            if let still = cameraModel.capturedImage ?? cameraModel.frozenFrame {
+                // One identity for the captured photo and the frozen frame, so a
+                // retake animates the same image from sharp to blurred.
+                Image(uiImage: still)
+                    .resizable()
+                    .scaledToFill()
+                    .blur(radius: showingPreview ? 0 : CameraControlMetrics.stillBlurRadius, opaque: true)
+                    .transition(.opacity)
+            }
         }
+        .clipped()
+        .animation(CameraControlMetrics.feedAnimation(reduceMotion: reduceMotion), value: cameraModel.phase)
+        .animation(CameraControlMetrics.feedAnimation(reduceMotion: reduceMotion), value: cameraModel.frozenFrame != nil)
     }
 
     @ViewBuilder private var cameraStatus: some View {
-        if cameraModel.permissionDenied || cameraModel.cameraUnavailable {
+        switch cameraModel.phase {
+        case .denied, .unavailable:
+            let denied = cameraModel.phase == .denied
             VStack(spacing: 12) {
                 Image(systemName: "camera.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeDisplay))
                     .foregroundStyle(.white.opacity(0.45))
-                Text(cameraModel.permissionDenied ? "Camera Access Required" : "Camera Unavailable")
+                Text(denied ? "Camera Access Required" : "Camera Unavailable")
                     .font(TronTypography.subheadline)
                     .foregroundStyle(.white.opacity(0.9))
-                Text(cameraModel.permissionDenied ? "Enable in Settings" : "Try again later")
+                Text(denied ? "Enable in Settings" : "Try again later")
                     .font(TronTypography.caption)
                     .foregroundStyle(.white.opacity(0.62))
             }
             .multilineTextAlignment(.center)
             .padding(.horizontal, 32)
-        } else {
-            TronPulseLoadingIndicator(accent: .white, size: 20)
+        case .starting:
+            // The shared sheet loading state; when #890's surface-hosted
+            // `TronSheetLoadingState` lands this call site becomes that type.
+            TronLoadingState(label: "Opening camera")
+                .accessibilityIdentifier("sheet-loading")
+                .transition(.opacity)
+        case .live, .switching, .captured, .resuming:
+            EmptyView()
         }
     }
 
@@ -304,7 +287,9 @@ struct CameraCaptureSheet: View {
         HStack(alignment: .center, spacing: CameraControlMetrics.captureSpacing) {
             cameraIconButton(
                 systemImage: cameraModel.isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill",
-                isEnabled: !showingPreview && cameraModel.isReady && cameraModel.hasTorch && !cameraModel.isCapturing,
+                // Follows the camera actually feeding the preview: a switch to a
+                // camera without a torch disables it until that feed is live.
+                isEnabled: cameraModel.phase == .live && cameraModel.hasTorch && !cameraModel.isCapturing,
                 isActive: cameraModel.isTorchOn,
                 isVisible: !showingPreview,
                 accessibilityLabel: "Flashlight",
@@ -315,7 +300,7 @@ struct CameraCaptureSheet: View {
 
             cameraIconButton(
                 systemImage: showingPreview ? "arrow.counterclockwise" : "arrow.triangle.2.circlepath.camera",
-                isEnabled: showingPreview || (cameraModel.isReady && !cameraModel.isCapturing),
+                isEnabled: showingPreview || cameraModel.controlsLookEnabled,
                 accessibilityLabel: showingPreview ? "Go back to capture" : "Switch Camera",
                 action: {
                     if showingPreview { retake() }
@@ -323,14 +308,13 @@ struct CameraCaptureSheet: View {
                 }
             )
         }
-        .animation(CameraControlMetrics.controlAnimation, value: showingPreview)
-        .animation(CameraControlMetrics.controlAnimation, value: cameraModel.isReady)
+        .animation(CameraControlMetrics.controlAnimation, value: cameraModel.phase)
     }
 
     private var centerCameraButton: some View {
         Button {
             if showingPreview { usePhoto() }
-            else { capturePhoto() }
+            else { cameraModel.capturePhoto() }
         } label: {
             ZStack {
                 cameraGlassSurface(
@@ -357,12 +341,12 @@ struct CameraCaptureSheet: View {
     }
 
     private var centerCameraButtonIsEnabled: Bool {
-        showingPreview ? capturedImage != nil : cameraModel.isReady && !cameraModel.isCapturing
+        showingPreview ? cameraModel.capturedImage != nil : cameraModel.controlsLookEnabled
     }
 
     private var centerCameraButtonTint: Color {
         if showingPreview { return Color.tronEmerald.opacity(0.44) }
-        return .white.opacity(cameraModel.isReady && !cameraModel.isCapturing ? 0.44 : 0.14)
+        return .white.opacity(cameraModel.controlsLookEnabled ? 0.44 : 0.14)
     }
 
     private func cameraIconButton(
@@ -420,29 +404,14 @@ struct CameraCaptureSheet: View {
             }
     }
 
-    private func capturePhoto() {
-        cameraModel.capturePhoto { image in
-            guard let image else { return }
-            withAnimation(CameraControlMetrics.controlAnimation) {
-                capturedImage = image
-                showingPreview = true
-            }
-            cameraModel.stopSession()
-        }
-    }
-
     private func usePhoto() {
-        guard let capturedImage else { return }
+        guard let capturedImage = cameraModel.capturedImage else { return }
         onImageCaptured(capturedImage)
         dismiss()
     }
 
     private func retake() {
-        withAnimation(CameraControlMetrics.controlAnimation) {
-            capturedImage = nil
-            showingPreview = false
-        }
-        cameraModel.startSession()
+        withAnimation(CameraControlMetrics.controlAnimation) { cameraModel.retake() }
     }
 }
 
@@ -457,4 +426,9 @@ private enum CameraControlMetrics {
     static let iconFontSize: CGFloat = TronTypography.sizeTitle
     static let confirmationIconFontSize: CGFloat = TronTypography.sizeLargeTitle
     static let controlAnimation = ChatMotion.cameraControl
+    static let stillBlurRadius: CGFloat = 24
+
+    static func feedAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .linear(duration: 0.12) : controlAnimation
+    }
 }

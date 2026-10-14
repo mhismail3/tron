@@ -75,9 +75,22 @@ unchanged. There is no down-conversion. The refusal leaves the record's bytes un
 stays empty. Designation
 records an explicit **untrusted** decision for it through `TrustService`, so
 `requireResolved` never blocks
-on it and no project resource can load from it. The profile's `noExtensions`,
-`noSkills`,
-`noPromptTemplates` and `noContextFiles` are a second, independent guard.
+on it and no project resource can load from it. The profile's `noExtensions` and
+`noContextFiles`, and a resource-loader project trust that always resolves `false`
+(even across trust transitions), are a second, independent guard.
+
+### Composer skills and prompt templates
+
+Home's loader keeps the **user-level** skills and prompt templates (agent directory
+`skills/` and `prompts/`, `~/.agents/skills`, user settings entries and user
+packages) so `session.commands` lists them and the composer's `/` and `@` pickers
+offer them exactly as in an ordinary chat. They are never context: every Home skill
+is marked `disableModelInvocation`, so Pi lists none in Home's system prompt, and
+prompt templates never enter it. A resource reaches the model only when the user
+inserts it: `home.prompt` admits the `resourceInvocation` against the same catalog
+and Pi expands that skill or template into the user message itself. User
+extensions and their commands stay unloaded, so only Home's own module commands
+appear.
 
 ## Chapters
 
@@ -277,7 +290,7 @@ imported Registry target is ordinary unless the ledger names it.
 | | Home | Ordinary |
 | --- | --- | --- |
 | Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` | every Tron module, Pi built-ins (codemode, tool-search, MCP) and the Tron-pinned managed subagent provider |
-| Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles`; no subagent discovery | agent directory and trusted project resources; managed-provider settings exclude user pi-subagents declarations |
+| Discovery | `noExtensions`, `noContextFiles`, project layer untrusted; user-level skills (user-invocable only) and prompt templates for the composer; no subagent discovery | agent directory and trusted project resources; managed-provider settings exclude user pi-subagents declarations |
 | System prompt | agent-directory `SYSTEM.md` and `APPEND_SYSTEM.md` dropped (`systemPromptOverride`, `appendSystemPromptOverride`) | loaded |
 | Executable tools | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task`, `profile`, `web_search`, `web_fetch`, `session_search`, `knowledge`, `read_file`, `settings` (`HOME_TOOL_NAMES`) | SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
@@ -929,6 +942,18 @@ settles the task `unknown` with `admission-cancelled` (Stop) or
 `admission-timeout` (deadline), outside the Stop path, and like every terminal task
 its one result wake follows. A step that took 5 s or more, timed out or was cancelled
 logs `home.task.dispatch-stage` naming the stage.
+
+**Worker budget (#930, [host load](host-load.md#2-home-worker-admission-gateway)).** At
+most three tasks hold a worker slot (launching or running). An authorized task beyond
+the budget, behind an earlier waiting task, or admitted while host pressure is
+`critical` is not refused: its record stays `pending` with `queuedAt`, `delegate`
+returns a null session and operation with its 1-based `queuePosition`, and it starts in
+order when a slot frees (or, under pressure, on a 5 s re-check). `task status` shows
+`queuePosition`; `home.status.workers` shows `{ running, queued, limit }`. Stop with
+operation `queued` settles a waiting task `interrupted` (`stopped-before-start`)
+before any worker exists. The queue is in memory: a restart settles a waiting task
+`unknown` (`cold-queued-not-started`) and never replays it. Each decision logs
+`home.task.queue`.
 
 **Worker model and thinking.** At each `delegate` call the Gateway resolves `model.ref[role=worker]`
 and `model.thinking[role=worker]` from the typed Home profile. The built-in value for either

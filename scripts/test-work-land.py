@@ -144,7 +144,7 @@ def run() -> None:
             home, tmp = root / "home", root / "tmp"
             home.mkdir()
             tmp.mkdir()
-            env = {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "WORK_GH": str(Path(__file__).resolve()),
+            env = {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "TRON_HEAVY_DIR": str(tmp / "heavy"), "WORK_GH": str(Path(__file__).resolve()),
                    "WORK_SESSION_ID": "fixture-owner", "WORK_LAND_FIXTURE": str(root / "github.json"),
                    "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
             def run_git(*args):

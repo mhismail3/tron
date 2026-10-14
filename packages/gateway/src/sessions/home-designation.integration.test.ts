@@ -353,6 +353,9 @@ describe("Tron Home designation", () => {
       // Derived by HomeOwner.status (#505): an undesignated Home names its one recovery action.
       phase: "undesignated", activation: { available: false },
       readiness: { ready: false, gaps: ["not-designated"] }, recovery: { action: "designate" },
+      // Process facts shown in every phase (#930): no worker runs before designation.
+      hostPressure: expect.objectContaining({ level: expect.stringMatching(/^(normal|elevated|critical)$/u) }),
+      workers: { running: 0, queued: 0, limit: 3 },
     });
 
     // The default-model branch: no model named means this Gateway's default.

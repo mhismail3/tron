@@ -87,6 +87,14 @@ times. A refused merge after the base moved is retried the same way. A head that
 pull request already merged is refused, so a repeat run cannot open a second one.
 Other refusals stop `land` with nothing merged. Claim handoff serializes through a read-only descriptor on the pre-existing common Git directory (it creates no lock file), checks operation markers in the selected worktree's private Git directory (including linked-worktree merge/rebase/cherry-pick/revert state), and rechecks local and remote heads before changing a ref. An exact accepted transition commit can repair local ref state after a partial push; unrelated or malformed remote objects are never treated as proof. A local head that differs from the remote claim head is not accepted merely because it is unpushed or has the same tree: use the explicit candidate recovery path for a clean settled-owner descendant, or stop and preserve the conflicting state. Force confirmation does not bypass this expected-head fence.
 
+When the planned checks include a build or a `--tests` journey, `verify` first waits for
+a slot in the host-wide heavy-run queue (`tools/work/heavy.py`, `scripts/tron-heavy
+status`; [host load management](../../packages/gateway/docs/host-load.md#1-heavy-run-queue-work-tooling),
+#915) and prints its queue position while it waits. The checks hold the slot's
+descriptor and inherit it (`TRON_HEAVY_LEASE_HELD`), so a journey that runs
+`scripts/tron-ios-test` or `scripts/ios-gateway-e2e-test` does not wait on itself.
+Read-only checks alone take no slot.
+
 ## Candidate recovery
 
 Use only when the former owner and its children are authoritatively settled and
@@ -272,6 +280,11 @@ missing-worktree refusal without recreation. Evidence is written to
 `test-results/work-handoff.json`; build the Gateway first with the pinned Node runtime
 using `npm --prefix packages/gateway run build`. The fixture sets
 `TRON_GATEWAY_HOST=127.0.0.1` by default so it remains independent of host Tailscale.
+
+`python3 scripts/test-tron-heavy.py` runs the heavy-run queue with real concurrent
+processes: two slots with FIFO order and printed positions, a killed holder whose
+command tree keeps its slot, a dead waiter leaving the queue, the bounded load gate and
+an inherited slot. Evidence: `test-results/tron-heavy.json`.
 
 `python3 scripts/test-work-release.py` exercises `release` through the real CLI, Git, the
 built owner helper, a Gateway WebSocket fixture (with a seeded session root) and a gh

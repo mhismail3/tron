@@ -90,8 +90,10 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
       executionMode: "sequential", execute: async (_id, request, signal) => {
         // Stop ends this turn at every admission step (#919); the dispatcher settles
         // any task record it already created and refuses a late worker.
-        const { taskId, sessionId, operationId } = await abortableRead(signal, () => delegate(request, signal));
-        return { content: [{ type: "text", text: "Task admitted; a report is required for its result." }], details: { taskId, sessionId, operationId } };
+        const { taskId, sessionId, operationId, queuePosition } = await abortableRead(signal, () => delegate(request, signal));
+        const text = queuePosition === null ? "Task admitted; a report is required for its result."
+          : `Task admitted and queued at position ${queuePosition}: it starts when a worker slot frees. Stop it with task action stop and operationId "queued".`;
+        return { content: [{ type: "text", text }], details: { taskId, sessionId, operationId, queuePosition } };
       },
     });
     pi.registerTool({ name: "task", label: "Task", annotations: { openWorldHint: false }, description: "Read durable task status, spend and live subagent runs or immutable report UTF-8 byte pages (action report, offset, limit up to 4096), steer a shared active task, or Stop its exact operation. Status has no control effect. Mutations require the operation from status.",

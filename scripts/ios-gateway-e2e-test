@@ -8,6 +8,15 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+# Host-wide heavy-run queue (#915, tools/work/heavy.py): every real-Gateway run
+# waits for a slot unless it inherited one (for example from `work land`).
+case "${1:-all}" in
+  prepare|build|run|run-lan|run-ui|iterate|all)
+    if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
+      exec python3 "$repo_root/tools/work/heavy.py" run --owner "ios-gateway-e2e-test ${1:-all} in $(basename "$repo_root")" -- "$0" "$@"
+    fi
+    ;;
+esac
 gateway_dir="$repo_root/packages/gateway"
 ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091
@@ -114,6 +123,7 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSurfacesServeEveryKeyAndEditAtItsLayer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
 )
 
 ui_journey_is_owned() {
@@ -513,7 +523,10 @@ const faux = fauxProvider({
   models: [{ id: "e2e-model", name: "Tron E2E Model", reasoning: true, input: ["text", "image"], contextWindow: 32768, maxTokens: 4096 }],
   tokensPerSecond: 8,
 });
-faux.setResponses([
+// Ordinary prompts consume this script in order. A prompt carrying the ask
+// journey marker consumes its own script instead, so the real-UI ask journey
+// (#935) cannot shift the responses every other journey and boundary case expects.
+const ordinary = [
   async () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     return fauxAssistantMessage("Streaming response starts now and remains active until the phone disconnects. Detached response complete");
@@ -526,7 +539,39 @@ faux.setResponses([
     fauxToolCall("bash", { command: "printf third-output" }, { id: "e2e-tool-3" }),
   ], { stopReason: "toolUse" }),
   fauxAssistantMessage("Tool response complete after all three tools."),
-]);
+];
+const askJourneyMarker = "Fixture ask journey";
+const askJourney = [
+  fauxAssistantMessage([
+    fauxText("One decision is needed before continuing."),
+    fauxToolCall("ask_user", {
+      title: "Fixture deployment",
+      questions: [{
+        header: "Target",
+        question: "Where should the fixture deploy?",
+        options: [{ label: "Staging" }, { label: "Production" }],
+      }],
+    }, { id: "e2e-ask-1" }),
+  ], { stopReason: "toolUse" }),
+  fauxAssistantMessage("Ask journey answered: the fixture received the form answer."),
+];
+const latestUserText = (context) => {
+  for (let index = context.messages.length - 1; index >= 0; index -= 1) {
+    const message = context.messages[index];
+    if (message.role !== "user") continue;
+    if (typeof message.content === "string") return message.content;
+    return message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+  }
+  return "";
+};
+const scripted = (context, options, state, model) => {
+  const step = (latestUserText(context).includes(askJourneyMarker) ? askJourney : ordinary).shift();
+  if (step === undefined) {
+    return fauxAssistantMessage("", { stopReason: "error", errorMessage: "No more faux responses queued" });
+  }
+  return typeof step === "function" ? step(context, options, state, model) : step;
+};
+faux.setResponses(Array.from({ length: 64 }, () => scripted));
 export default function (pi) {
   pi.registerProvider(faux.provider);
   pi.on("tool_call", async (event, ctx) => {
