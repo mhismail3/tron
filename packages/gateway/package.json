@@ -37,7 +37,7 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.0.4",
     "@earendil-works/pi-ai": "1.0.4",
-    "@earendil-works/pi-coding-agent": "file:third_party/pi-coding-agent/pi-coding-agent-1.0.4-tron.1.tgz",
+    "@earendil-works/pi-coding-agent": "file:third_party/pi-coding-agent/pi-coding-agent-1.0.4-tron.2.tgz",
     "@earendil-works/pi-tui": "1.0.4",
     "node-pty": "1.1.0",
     "proper-lockfile": "4.1.2",
