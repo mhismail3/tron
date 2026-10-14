@@ -259,7 +259,7 @@ class Runner:
                 self.journal.progress(step, f'waiting: {blocker}')
                 reported = blocker
             if time.monotonic() > deadline:
-                raise Failure(f'Quit did not finish within {timeout // 60} minutes: {blocker}')
+                raise Failure(f'Quit did not finish within {timeout}s: {blocker}')
             time.sleep(2)
 
     def step_swap_app(self):
@@ -326,7 +326,7 @@ class Runner:
                     self.journal.progress(step, f'waiting for the Gateway: {error}')
                     last = str(error)
             time.sleep(3)
-        raise Failure(f'the Gateway did not answer within {timeout // 60} minutes ({last})')
+        raise Failure(f'the Gateway did not answer within {timeout}s ({last})')
 
     def step_verify(self):
         info = self.platform.system_info()

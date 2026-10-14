@@ -123,7 +123,11 @@ class Journal:
         self.note(f'{name}: started')
 
     def progress(self, name, detail):
-        self.step(name)['detail'] = detail
+        """Live detail on a step, or a narrative line for rollback, which is not a step."""
+        if any(step['name'] == name for step in self.data['steps']):
+            self.step(name)['detail'] = detail
+        elif self.data.get('rollback'):
+            self.data['rollback']['detail'] = detail
         self.save()
         self.note(f'{name}: {detail}')
 

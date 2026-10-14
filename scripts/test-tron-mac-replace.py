@@ -80,10 +80,13 @@ class FixturePlatform(MacPlatform):
             capture(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}/{self.gateway_label}'], timeout=30)
 
     def launch_app(self, log):
-        if self.launchd_state(self.gateway_label) == 'absent':
-            run(['/bin/launchctl', 'bootstrap', f'gui/{os.getuid()}', self.config['plist']], log, timeout=30)
-        else:
-            run(['/bin/launchctl', 'kickstart', f'gui/{os.getuid()}/{self.gateway_label}'], log, timeout=30)
+        # Reload the stopped (or crash-looping) job so RunAtLoad starts the installed bundle.
+        capture(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}/{self.gateway_label}'], timeout=30)
+        for _ in range(100):  # bootout completes asynchronously
+            if self.launchd_state(self.gateway_label) == 'absent':
+                break
+            time.sleep(0.2)
+        run(['/bin/launchctl', 'bootstrap', f'gui/{os.getuid()}', self.config['plist']], log, timeout=30)
 
     def helper_state(self):
         return self.launchd_state(self.gateway_label), 'stopped'
@@ -117,6 +120,9 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 revision="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sourceRevision"])' "$here/Resources/Gateway/manifest.json")"
 [[ -e "$FIXTURE_ROOT/fail-start-$revision" ]] && { echo "fixture: refusing to start $revision" >&2; exit 1; }
 export TRON_GATEWAY_SOURCE_REVISION="$revision"
+# The fixture payload root names this bundle; the Gateway runs from the
+# repository build, so the payload-runtime contract stays inactive.
+export TRON_GATEWAY_PAYLOAD_ROOT="$here/Resources/Gateway"
 exec "$FIXTURE_NODE" "$FIXTURE_GATEWAY/dist/index.js"
 """
 
@@ -136,6 +142,8 @@ def make_app(app, revision, lock, config):
     (gateway / 'manifest.json').write_text(json.dumps({'sourceRevision': revision, 'protocolVersion': str(protocol),
                                                        'minProtocolVersion': str(minimum)}))
     (gateway / 'app/package-lock.json').write_bytes(lock)
+    (gateway / 'app/dist').mkdir()
+    (gateway / 'app/dist/index.js').write_text('// fixture payload placeholder\n')
     shutil.copy2(repo / 'packages/gateway/package.json', gateway / 'app/package.json')
     subprocess.run(['/usr/bin/codesign', '-s', '-', '--force', '--deep', app], check=True, capture_output=True)
 
@@ -157,6 +165,9 @@ class Fixture:
         self.old_revision = capture(['git', '-C', self.source, 'rev-parse', 'HEAD~1'])[1].strip()
         (self.home / '.tron/gateway').mkdir(parents=True)
         (self.home / '.tron/gateway/gateway.json').write_text(json.dumps({'version': 1, 'machineId': 'tron-mac-replace-e2e', 'machineName': 'Replace E2E'}))
+        for path in (self.home, self.home / '.tron', self.home / '.tron/gateway'):
+            path.chmod(0o700)
+        (self.home / '.tron/gateway/gateway.json').chmod(0o600)
         self.installed = self.home / 'Applications/Tron.app'
         self.config_path = self.root / 'fixture.json'
         self.config = {'root': str(self.root), 'home': str(self.home), 'installed': str(self.installed), 'label': self.label,
@@ -182,15 +193,17 @@ class Fixture:
         self.wait_revision(self.old_revision)
 
     def wait_revision(self, revision, timeout=90):
-        deadline = time.monotonic() + timeout
+        deadline, last = time.monotonic() + timeout, None
         while time.monotonic() < deadline:
             try:
-                if self.platform.system_info().get('sourceRevision') == revision:
+                last = self.platform.system_info().get('sourceRevision')
+                if last == revision:
                     return
-            except Exception:  # noqa: BLE001 - not up yet
-                pass
+            except Exception as error:  # noqa: BLE001 - not up yet
+                last = error
             time.sleep(1)
-        raise AssertionError(f'fixture Gateway did not report {revision} (log {self.root / "gateway.log"})')
+        log = (self.root / 'gateway.log').read_text()[-2000:] if (self.root / 'gateway.log').exists() else ''
+        raise AssertionError(f'fixture Gateway did not report {revision} (last: {last})\n{log}')
 
     def start(self):
         journal, outcome = replace.start(self.platform, self.source, script_dir=HERE)
@@ -210,13 +223,15 @@ class Fixture:
                               capture_output=True, text=True).stdout
 
     def close(self):
-        labels = [self.label]
-        if self.platform.store.exists():
+        labels = [self.label] if hasattr(self, 'label') else []
+        if hasattr(self, 'platform') and self.platform.store.exists():
             labels += [replace.runner_label(entry.name) for entry in self.platform.store.iterdir() if (entry / 'journal.json').exists()]
         for label in labels:
             capture(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}/{label}'], timeout=30)
-        subprocess.run(['git', '-C', REPO, 'worktree', 'remove', '--force', self.source], capture_output=True)
-        shutil.rmtree(self.root, ignore_errors=True)
+        if hasattr(self, 'source'):
+            subprocess.run(['git', '-C', REPO, 'worktree', 'remove', '--force', self.source], capture_output=True)
+        if hasattr(self, 'root'):
+            shutil.rmtree(self.root, ignore_errors=True)
 
 
 def check(condition, message, evidence):
@@ -226,7 +241,12 @@ def check(condition, message, evidence):
 
 
 def journeys():
-    evidence, fixture = [], Fixture()
+    evidence, fixture = [], Fixture.__new__(Fixture)
+    try:
+        fixture.__init__()
+    except BaseException:
+        fixture.close()
+        raise
     report = REPO / 'test-results/mac-replace-e2e.json'
     started = time.time()
     try:
@@ -280,6 +300,8 @@ def journeys():
     except Exception as error:  # noqa: BLE001
         evidence.append({'check': 'error', 'pass': False, 'detail': f'{type(error).__name__}: {error}'})
         passed = False
+        if hasattr(fixture, 'platform') and (fixture.platform.store / 'current.json').exists():
+            data = replace.current_journal(fixture.platform).data; print(json.dumps({key: data.get(key) for key in ('state', 'error', 'rollback', 'swap')}, indent=1), file=sys.stderr)
         for path in sorted(fixture.platform.store.rglob('*.log')) if fixture.platform.store.exists() else []:
             print(f'--- {path}\n{path.read_text()[-3000:]}', file=sys.stderr)
         print(f'--- gateway.log\n{(fixture.root / "gateway.log").read_text()[-3000:] if (fixture.root / "gateway.log").exists() else ""}', file=sys.stderr)
