@@ -115,10 +115,10 @@ struct SessionShellView: View {
     @State private var mountedHomeChatRouteID: String?
     @State private var homeSectionSheet: HomeDashboardSections.Section?
     @State private var showingHomeUsageProviders = false
-    /// The Home view's first-appearance stagger. False while the view's list is
-    /// unmounted or another view is selected, so each entry fades its sections
-    /// in once; live catalog refreshes leave it true and never re-fade content.
-    @State private var homeSectionsRevealed = false
+    /// When the Home view's first-appearance stagger began. Nil while the view's
+    /// list is unmounted or another view is selected, so each entry fades its
+    /// sections in once; live catalog refreshes leave it alone.
+    @State private var homeRevealStart: Date?
 
     init() {
         let appSettings = AppLocalBehaviorSettings.shared
@@ -959,7 +959,7 @@ struct SessionShellView: View {
                 if serverFilter.sortMode == .home {
                     Section {
                         HomeUsageSummaryCard(onChooseProviders: { showingHomeUsageProviders = true })
-                            .tronDashboardSectionReveal(order: 0, isRevealed: homeSectionsRevealed)
+                            .tronDashboardSectionReveal(order: 0, revealStart: homeRevealStart)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                             .listRowInsets(SessionDashboardLayout.rowInsets)
@@ -992,9 +992,9 @@ struct SessionShellView: View {
             // Runs after the list mounts, so the hidden first frame is committed
             // before the stagger animates it in.
             .task(id: serverFilter.sortMode == .home) {
-                homeSectionsRevealed = serverFilter.sortMode == .home
+                homeRevealStart = serverFilter.sortMode == .home ? Date() : nil
             }
-            .onDisappear { homeSectionsRevealed = false }
+            .onDisappear { homeRevealStart = nil }
         }
     }
 
@@ -1110,11 +1110,11 @@ struct SessionShellView: View {
             Section {
                 ForEach(sections.inProgress, id: \.dashboardID) { session in
                     sessionButton(session, showsContext: true)
-                        .tronDashboardSectionReveal(order: inProgressOrder, isRevealed: homeSectionsRevealed)
+                        .tronDashboardSectionReveal(order: inProgressOrder, revealStart: homeRevealStart)
                 }
             } header: {
                 dashboardSectionHeader("In Progress")
-                    .tronDashboardSectionReveal(order: inProgressOrder, isRevealed: homeSectionsRevealed)
+                    .tronDashboardSectionReveal(order: inProgressOrder, revealStart: homeRevealStart)
             }
         }
         if let completedOrder = order[.completed] {
@@ -1142,7 +1142,7 @@ struct SessionShellView: View {
         Section {
             ForEach(rows.prefix(HomeDashboardLayout.sectionRowLimit), id: \.dashboardID) { session in
                 sessionButton(session, showsContext: true)
-                    .tronDashboardSectionReveal(order: order, isRevealed: homeSectionsRevealed)
+                    .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
             }
             if rows.count > HomeDashboardLayout.sectionRowLimit {
                 SessionListExpansionControls(
@@ -1156,14 +1156,14 @@ struct SessionShellView: View {
                     showMoreHint: hint
                 )
                 .accessibilityIdentifier("home-\(section.rawValue)-view-more")
-                .tronDashboardSectionReveal(order: order, isRevealed: homeSectionsRevealed)
+                .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
                 .listRowInsets(SessionDashboardLayout.rowInsets)
             }
         } header: {
             dashboardSectionHeader(header)
-                .tronDashboardSectionReveal(order: order, isRevealed: homeSectionsRevealed)
+                .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
         }
     }
 

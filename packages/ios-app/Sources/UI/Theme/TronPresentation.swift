@@ -2136,8 +2136,10 @@ struct TronCaption: View {
 }
 
 enum TronDashboardContentMotion {
+    static let duration: TimeInterval = 0.28
+
     static func animation(reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: 0.28)
+        reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: duration)
     }
 
     static func transition(reduceMotion: Bool) -> AnyTransition {
@@ -2148,35 +2150,57 @@ enum TronDashboardContentMotion {
     /// appearance. Reduce Motion drops the stagger and keeps only the fade.
     static let sectionStaggerStep: TimeInterval = 0.08
 
-    static func sectionReveal(order: Int, reduceMotion: Bool) -> Animation {
-        reduceMotion
-            ? animation(reduceMotion: true)
-            : animation(reduceMotion: false).delay(Double(max(order, 0)) * sectionStaggerStep)
+    /// When a section's reveal has finished, measured from the view's reveal
+    /// start; a row created after it renders without fading.
+    static func sectionRevealEnd(order: Int) -> TimeInterval {
+        Double(max(order, 0)) * sectionStaggerStep + duration
     }
 }
 
 /// Fades one dashboard section in at its place in the view's stagger, with the
-/// same opacity and scale as `TronDashboardContentMotion.transition`. The
-/// revealed flag belongs to the dashboard, not the row, so lazily mounted or
-/// recycled rows and live catalog refreshes render revealed content as is.
+/// same opacity and scale as `TronDashboardContentMotion.transition`.
+///
+/// The dashboard owns one reveal start per entry into its view (nil while the
+/// view is not on screen). A list mounts its rows lazily, often after that start
+/// is published, so each row decides once, when it is created: a row created
+/// before its section's reveal has finished fades in on the shared schedule; a
+/// row created later (scrolled into view, recycled, or a live catalog insert,
+/// which the list's own insertion animates) renders as is. Refreshes therefore
+/// never re-fade content.
 struct TronDashboardSectionReveal: ViewModifier {
     let order: Int
-    let isRevealed: Bool
+    let revealStart: Date?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown: Bool
+
+    init(order: Int, revealStart: Date?) {
+        self.order = order
+        self.revealStart = revealStart
+        _shown = State(initialValue: revealStart.map {
+            Date().timeIntervalSince($0) > TronDashboardContentMotion.sectionRevealEnd(order: order)
+        } ?? false)
+    }
 
     func body(content: Content) -> some View {
         content
-            .opacity(isRevealed ? 1 : 0)
-            .scaleEffect(isRevealed || reduceMotion ? 1 : 0.985)
-            .animation(
-                TronDashboardContentMotion.sectionReveal(order: order, reduceMotion: reduceMotion),
-                value: isRevealed
-            )
-            #if HOSTED_TEST
-            .onChange(of: isRevealed) { _, revealed in
-                if revealed { TronDashboardRevealProbe.shared.reveals.append(order) }
-            }
-            #endif
+            .opacity(shown ? 1 : 0)
+            .scaleEffect(shown || reduceMotion ? 1 : 0.985)
+            .onAppear { reveal() }
+            .onChange(of: revealStart) { _, _ in reveal() }
+    }
+
+    private func reveal() {
+        guard !shown, let revealStart else { return }
+        // Keep the section's place in the schedule however late the row mounts.
+        let elapsed = max(0, Date().timeIntervalSince(revealStart))
+        let animation = reduceMotion
+            ? TronDashboardContentMotion.animation(reduceMotion: true)
+            : TronDashboardContentMotion.animation(reduceMotion: false)
+                .delay(max(0, Double(order) * TronDashboardContentMotion.sectionStaggerStep - elapsed))
+        withAnimation(animation) { shown = true }
+        #if HOSTED_TEST
+        TronDashboardRevealProbe.shared.reveals.append(order)
+        #endif
     }
 }
 
@@ -2196,8 +2220,8 @@ final class TronDashboardRevealProbe {
 #endif
 
 extension View {
-    func tronDashboardSectionReveal(order: Int, isRevealed: Bool) -> some View {
-        modifier(TronDashboardSectionReveal(order: order, isRevealed: isRevealed))
+    func tronDashboardSectionReveal(order: Int, revealStart: Date?) -> some View {
+        modifier(TronDashboardSectionReveal(order: order, revealStart: revealStart))
     }
 }
 
