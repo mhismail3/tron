@@ -213,6 +213,62 @@ struct ToolDisplayHandoff {
     }
 }
 
+/// One visual segment of a tool run. A run's calls stay one transcript row (its
+/// identity, patch sites and sheet ownership belong to the projection kernel),
+/// but display calls never hide behind the grouped tool sheet: each maximal
+/// stretch of consecutive display calls renders its own preview chips side by
+/// side, and the other calls between them keep their grouped tool chip.
+enum ToolRunSegment: Identifiable, Equatable {
+    /// Consecutive generic calls, shown as one grouped tool chip.
+    case tools(ChatToolRunPresentation)
+    /// Consecutive display calls, shown as one horizontally scrolling chip row.
+    case displays([ChatToolDescriptor])
+    /// A completed inline display whose card spans the transcript width, as it
+    /// does when shown alone; it cannot sit inside a chip row.
+    case wideDisplay(ChatToolDescriptor)
+
+    var id: String {
+        switch self {
+        case .tools(let run): "tools:" + (run.tools.first?.id ?? run.anchorID)
+        case .displays(let tools): "displays:" + (tools.first?.id ?? "")
+        case .wideDisplay(let tool): "display:" + tool.id
+        }
+    }
+
+    static func segments(of run: ChatToolRunPresentation) -> [ToolRunSegment] {
+        guard run.tools.contains(where: { $0.toolName == "display" }) else { return [.tools(run)] }
+        var segments: [ToolRunSegment] = []
+        var generic: [ChatToolDescriptor] = []
+        var displays: [ChatToolDescriptor] = []
+        func flushGeneric() {
+            guard let first = generic.first else { return }
+            // A generic stretch is a sub-run of the row: its sheet route needs an
+            // identity distinct from the row's and from any sibling stretch.
+            segments.append(.tools(ChatToolRunPresentation(tools: generic, anchorID: "\(run.anchorID)~\(first.id)")))
+            generic.removeAll()
+        }
+        func flushDisplays() {
+            guard !displays.isEmpty else { return }
+            segments.append(.displays(displays))
+            displays.removeAll()
+        }
+        for tool in run.tools {
+            if tool.toolName != "display" {
+                flushDisplays()
+                generic.append(tool)
+            } else if DisplayToolView.rendersFullWidth(tool) {
+                flushGeneric(); flushDisplays()
+                segments.append(.wideDisplay(tool))
+            } else {
+                flushGeneric()
+                displays.append(tool)
+            }
+        }
+        flushGeneric(); flushDisplays()
+        return segments
+    }
+}
+
 struct ToolRunView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.canonicalResourceSessionID) private var sessionID
@@ -223,45 +279,67 @@ struct ToolRunView: View {
     let installationTag: ChatTranscriptProjectionTag
     let resolveDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
     let recordChip: (ToolChipInstrumentationSample) -> Void
-    /// Supplied by the transcript's row installation; a host that renders a run
-    /// outside a transcript shows the default expanded card.
-    var inlineDisclosurePhase: DisplayInlineDisclosureState = DisplayInlineDisclosureState()
+    /// Supplied by the transcript's row installation, keyed by display identity;
+    /// a host that renders a run outside a transcript shows default expanded cards.
+    var inlineDisclosurePhases: [String: DisplayInlineDisclosureState] = [:]
 
     var body: some View {
-        Group {
-            if run.tools.count == 1, let tool = run.tools.first, tool.toolName == "display" {
-                DisplayToolView(
-                    tool: tool,
-                    disclosure: inlineDisclosurePhase,
-                    onOpenTechnicalDetails: openDetails
-                )
-            } else {
-                ToolActivityChip(
-                    run: run,
-                    installationTag: installationTag,
-                    recordChip: recordChip,
-                    action: activateRun
-                )
+        if run.tools.count == 1, let tool = run.tools.first, tool.toolName == "display" {
+            displayView(tool)
+        } else {
+            let segments = ToolRunSegment.segments(of: run)
+            // A stable stack keeps each segment's identity while streaming calls
+            // join the run, so a new chip appends without remounting its siblings.
+            VStack(alignment: .leading, spacing: ChatTranscriptLayoutConstants.rowSpacing) {
+                ForEach(segments) { segment in
+                    switch segment {
+                    case .tools(let subrun):
+                        ToolActivityChip(
+                            run: subrun,
+                            installationTag: installationTag,
+                            recordChip: recordChip,
+                            action: { activate(subrun) }
+                        )
+                    case .displays(let tools):
+                        ChatChipStrip {
+                            ForEach(tools, id: \.id) { tool in displayView(tool) }
+                        }
+                        .accessibilityIdentifier("tool-run-display-strip")
+                    case .wideDisplay(let tool):
+                        displayView(tool)
+                    }
+                }
             }
         }
     }
 
-    private func activateRun() {
+    private func displayView(_ tool: ChatToolDescriptor) -> some View {
+        DisplayToolView(
+            tool: tool,
+            disclosure: tool.display.flatMap { inlineDisclosurePhases[$0.disclosureIdentity] }
+                ?? DisplayInlineDisclosureState(),
+            onOpenTechnicalDetails: { openDetails(displayRun(tool)) }
+        )
+    }
+
+    /// A display's technical details open as that call alone, never as the
+    /// grouped run it shares a row with.
+    private func displayRun(_ tool: ChatToolDescriptor) -> ChatToolRunPresentation {
+        run.tools.count == 1 ? run : ChatToolRunPresentation(tools: [tool], anchorID: "\(run.anchorID)~\(tool.id)")
+    }
+
+    private func activate(_ run: ChatToolRunPresentation) {
         if run.tools.count == 1, let tool = run.tools.first,
            let presentDisplay, let command = ToolDisplayActivation.command(for: tool, sessionID: sessionID) {
             presentDisplay(command)
-        } else { openDetails() }
-    }
-
-    private var detailToolIDs: [String] {
-        ChatToolInvocationOrdering.reverseChronological(run.tools).map(\.id)
+        } else { openDetails(run) }
     }
 
     /// The detail sheet belongs to the transcript, not to this row: streaming
     /// pushes the row out of lazy realization, and the sheet — with its deferred
     /// display handoff — must outlive it. The row resolves the run it just asked
     /// for and hands the route to the transcript's host.
-    private func openDetails() {
+    private func openDetails(_ run: ChatToolRunPresentation) {
         if let sessionID,
            let presentPendingInteraction,
            let interaction = PendingExtensionInteractionToolPresentation.interaction(
@@ -272,6 +350,7 @@ struct ToolRunView: View {
             presentPendingInteraction(interaction)
             return
         }
+        let detailToolIDs = ChatToolInvocationOrdering.reverseChronological(run.tools).map(\.id)
         guard let sheetRoutes,
               let details = resolveDetails(detailToolIDs, installationTag), !details.isEmpty else { return }
         sheetRoutes.present(.toolRun(ChatToolRunSheetRoute(

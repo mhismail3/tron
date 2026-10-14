@@ -340,23 +340,22 @@ private extension ChatPhysicalTranscriptRow {
 }
 
 extension ChatTranscriptScrollView {
-    /// The disclosure phase of the inline display card this row hosts, read from
-    /// the store that owns it. The row installation passes it down because the
-    /// row is `.equatable()` and an observable read below that boundary would be
-    /// skipped.
-    func inlineDisclosurePhase(of item: ChatTranscriptRenderItem) -> DisplayInlineDisclosureState {
-        guard let display = item.displayPresentation else { return DisplayInlineDisclosureState() }
-        return transcriptPresentation.inlineDisclosurePhase(for: display.disclosureIdentity)
+    /// The disclosure phases of the inline display cards this row hosts, keyed
+    /// by display identity and read from the store that owns them. The row
+    /// installation passes them down because the row is `.equatable()` and an
+    /// observable read below that boundary would be skipped. A grouped run can
+    /// host several displays side by side, so every one needs its own phase.
+    func inlineDisclosurePhases(of item: ChatTranscriptRenderItem) -> [String: DisplayInlineDisclosureState] {
+        guard case .toolRun(let run) = item else { return [:] }
+        var phases: [String: DisplayInlineDisclosureState] = [:]
+        for display in run.tools.compactMap(\.display) {
+            phases[display.disclosureIdentity] = transcriptPresentation.inlineDisclosurePhase(for: display.disclosureIdentity)
+        }
+        return phases
     }
 }
 
 private extension ChatTranscriptRenderItem {
-    /// The display projection this row presents, if any.
-    var displayPresentation: DisplayProjection? {
-        guard case .toolRun(let run) = self else { return nil }
-        return run.tools.compactMap(\.display).first
-    }
-
     var isCanonicalUserPrompt: Bool {
         switch self {
         case .transcript(let item): item.role == .user
@@ -1246,7 +1245,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             // A row rendered inside `.equatable()` must receive everything it
             // renders: a display card's disclosure phase is transcript state, so
             // the row installation reads it and passes it down.
-            inlineDisclosurePhase: inlineDisclosurePhase(of: item),
+            inlineDisclosurePhases: inlineDisclosurePhases(of: item),
             installationTag: installed.tag,
             toolPayloadRevision: installed.toolPayloadRevision(for: item),
             resolveToolDetails: { callIDs in
