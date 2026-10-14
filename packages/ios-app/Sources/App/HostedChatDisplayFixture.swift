@@ -253,7 +253,7 @@ struct HostedHomeDashboardFixture: View {
                 // and settled, so a journey observes the live update separately.
                 if firstRevealAt == nil, !TronDashboardRevealProbe.shared.reveals.isEmpty { firstRevealAt = Date() }
                 let newWorkerDue = !arguments.contains("-home-dashboard-new-worker-late")
-                    || firstRevealAt.map { Date().timeIntervalSince($0) > 3 } == true
+                    || firstRevealAt.map { Date().timeIntervalSince($0) > 9 } == true
                 if arguments.contains("-home-dashboard-new-worker"), !newWorkerAdded, newWorkerDue,
                    model.sessions.contains(where: \.isHomeWorker) {
                     newWorkerAdded = true
@@ -540,7 +540,7 @@ private actor HostedHomeShellGateway {
         case "provider.usage":
             // Holds the usage card on its loading pulse long enough to see it.
             if ProcessInfo.processInfo.arguments.contains("-home-dashboard-usage-delay") {
-                try await Task.sleep(for: .seconds(2))
+                try await Task.sleep(for: .seconds(6))
             }
             return (HostedHomeDashboardWorkers.usage, nil)
         case "provider.list":
