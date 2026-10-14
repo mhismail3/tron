@@ -104,7 +104,7 @@ final class MacTerminalController {
             stage = .setup(Self.notice(for: status))
         } catch {
             guard case .loading = stage else { return }
-            stage = .failed(error.localizedDescription)
+            stage = .failed(Self.describe(error))
         }
     }
 
@@ -133,8 +133,18 @@ final class MacTerminalController {
             self.enrollment = enrollment
             open(enrollment)
         } catch {
-            stage = .failed(error.localizedDescription)
+            stage = .failed(Self.describe(error))
         }
+    }
+
+    /// An older Gateway has no `macTerminal.status`: say what to do, not
+    /// "Unknown gateway method".
+    private static func describe(_ error: Error) -> String {
+        if let failure = error as? GatewayFailure, failure.code == "not_found",
+           failure.message.contains("macTerminal") {
+            return "This Mac's Tron does not support Mac Terminal yet. Update Tron on the Mac, then try again."
+        }
+        return error.localizedDescription
     }
 
     /// Revokes this iPhone's key on the Mac, then forgets it here. The Mac
