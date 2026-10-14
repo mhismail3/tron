@@ -279,12 +279,31 @@ def journeys():
         check('rolled-back' in status and 'logs/start.log' in status, 'terminal status shows the failure and its log', evidence)
         check((fixture.root / 'build-count').read_text() == '1', 'built once', evidence)
 
-        # 3. Resumed retry: the verified build is reused and the replacement succeeds.
+        # 3. The runner dies after the swap (crash or reboot); the resumed retry first restores
+        # the previous app, then reuses the verified build and succeeds.
+        retry_operation, outcome = fixture.start()
+        check(retry_operation == operation and outcome == 'retrying', 'the second retry reuses the operation', evidence)
+        journal = replace.Journal(platform.store / operation)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            data = journal.load().data
+            if data['currentStep'] == 'start' and data['swap'].get('previousApp'):
+                break
+            time.sleep(0.5)
+        check(data['currentStep'] == 'start', 'the retry reached the new app start', evidence)
+        capture(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}/{replace.runner_label(operation)}'], timeout=30)
+        for _ in range(50):
+            if platform.launchd_state(replace.runner_label(operation)) == 'absent':
+                break
+            time.sleep(0.2)
+        check(journal.load().data['state'] == 'running', 'a killed runner leaves the attempt unsettled', evidence)
         (fixture.root / f'fail-start-{fixture.revision}').unlink()
         retry_operation, outcome = fixture.start()
-        check(retry_operation == operation, 'the second retry reuses the operation', evidence)
+        check(retry_operation == operation and outcome == 'resuming interrupted', 'start resumes the interrupted operation', evidence)
         data = fixture.wait_settled(operation)
-        check(data['state'] == 'succeeded' and data['attempt'] == 3, 'the retry succeeds', evidence)
+        log = journal.log_path.read_text()
+        check('restoring the previous app first' in log, 'the resumed runner restored the previous app before retrying', evidence)
+        check(data['state'] == 'succeeded' and data['attempt'] == 4, 'the resumed retry succeeds', evidence)
         check((fixture.root / 'build-count').read_text() == '1', 'the verified build was reused, not rebuilt', evidence)
         check(platform.system_info()['sourceRevision'] == fixture.revision, 'the new Gateway runs the source revision', evidence)
         check(platform.codesign_identity(platform.installed)['cdhash'] == data['artifact']['cdhash'], 'the installed app is the verified artifact', evidence)

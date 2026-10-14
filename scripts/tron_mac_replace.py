@@ -116,6 +116,13 @@ class Runner:
         return self.journal.step_log(step)
 
     def run(self):
+        if self.data['swap'].get('previousApp') and self.data['state'] not in ('succeeded',):
+            # A runner that died after the swap (crash, reboot) left no verdict:
+            # restore the previous app before trying again.
+            self.journal.note('the previous attempt stopped after the swap; restoring the previous app first')
+            self.rollback()
+            if self.data['state'] == 'rollback-failed':
+                return 1
         self.journal.begin_attempt({'pid': os.getpid(), 'startedAt': now()})
         step = None
         try:
@@ -279,16 +286,18 @@ class Runner:
                 raise Failure(f'could not snapshot {platform.tron_home}: {os.strerror(ctypes.get_errno())}')
             swap['snapshot'] = str(snapshot)
             self.journal.save()
+            # Each move is journaled before it happens; rollback restores by what exists,
+            # so a runner that dies between journal and rename still recovers.
             channel = platform.stable_channel()
             if channel.exists():
                 retired = operation / f'retired-stable-payloads-{self.data["attempt"]}'
-                os.rename(channel, retired)
                 swap['retiredChannel'] = str(retired)
                 self.journal.save()
+                os.rename(channel, retired)
             previous = private_mkdir(operation / f'previous-app-{self.data["attempt"]}') / 'Tron.app'
-            os.rename(platform.installed, previous)
             swap['previousApp'] = str(previous)
             self.journal.save()
+            os.rename(platform.installed, previous)
             staging = platform.installed.with_name('.Tron.app.replacing')
             if staging.exists():
                 shutil.rmtree(staging)
@@ -403,15 +412,19 @@ class Runner:
                 self.wait_offline('rollback', 10 * 60)
             lock = self.maintenance_lock()
             try:
-                if swap.get('installed') or platform.installed.exists():
+                previous = Path(swap['previousApp'])
+                if previous.exists():
                     if platform.installed.exists():
                         os.rename(platform.installed, operation / f'failed-app-{attempt}.app')
-                os.rename(swap['previousApp'], platform.installed)
-                if swap.get('retiredChannel'):
+                    os.rename(previous, platform.installed)
+                elif not platform.installed.exists():
+                    raise Failure(f'neither the previous app ({previous}) nor an installed app exists')
+                retired = Path(swap['retiredChannel']) if swap.get('retiredChannel') else None
+                if retired is not None and retired.exists():
                     channel = platform.stable_channel()
                     if channel.exists():
                         os.rename(channel, operation / f'failed-stable-payloads-{attempt}')
-                    os.rename(swap['retiredChannel'], channel)
+                    os.rename(retired, channel)
             finally:
                 os.close(lock)
             self.data['swap'] = {'snapshot': swap.get('snapshot')}
@@ -497,16 +510,20 @@ def start(platform, root, client_protocol=None, allow_protocol_change=False, scr
     private_mkdir(platform.store)
     with store_lock(platform):
         journal = current_journal(platform)
-        if journal and journal.data['state'] not in TERMINAL_STATES and runner_alive(platform, journal):
-            return journal, 'already running'
+        if journal and journal.data['state'] not in TERMINAL_STATES:
+            if runner_alive(platform, journal):
+                return journal, 'already running'
+            # Its runner died (crash, reboot): rerun the same operation, which
+            # first restores the previous app if it had already swapped.
+            journal.data['source'].update(clientProtocol=client_protocol, allowProtocolChange=allow_protocol_change)
+            journal.save()
+            launch_runner(platform, journal, script_dir or Path(__file__).resolve().parent)
+            return journal, 'resuming interrupted'
         decided = plan(platform, root)
         if decided['path'] == 'none':
             raise Failure(decided['reason'])
         retry = (journal is not None and journal.data['state'] in ('failed', 'rolled-back')
                  and journal.data['source']['revision'] == decided['revision'] and journal.data['path'] == decided['path'])
-        if not retry and journal is not None and journal.data['state'] not in TERMINAL_STATES:
-            raise Failure(f'operation {journal.data["id"]} is {journal.data["state"]} without a live runner; '
-                          'inspect it with --status before starting another')
         if journal and journal.data['state'] == 'rollback-failed':
             raise Failure(f'operation {journal.data["id"]} could not roll back; restore Tron by hand from its journal first')
         if not retry:
