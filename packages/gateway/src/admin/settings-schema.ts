@@ -83,7 +83,21 @@ export interface KeyDeclaration {
   control: Control;
   fallback?: Control;
   confirm?: string;
+  /** What to type into a text field or a list's new value (#939): the format in
+   * a short sentence, and a realistic example shown as the field's placeholder.
+   * Every editable text and string-list key has one. */
+  entry?: EntryGuidance;
 }
+
+export interface EntryGuidance { hint: string; example: string }
+
+/** Search-path entries, as pi resolves them (pi docs/settings.md "Resources"). */
+const SEARCH_PATH_ENTRY: Record<"extensions" | "skills" | "prompts" | "themes", EntryGuidance> = {
+  extensions: { hint: "An extension file or folder on the Mac. Start with ~ or /.", example: "~/Code/pi-extensions" },
+  skills: { hint: "A skill file or folder on the Mac. Start with ~ or /.", example: "~/Code/skills" },
+  prompts: { hint: "A prompt-template file or folder on the Mac. Start with ~ or /.", example: "~/Code/prompts" },
+  themes: { hint: "A theme file or folder on the Mac. Start with ~ or /.", example: "~/Code/themes/dusk.json" },
+};
 
 /** The maintainer, Home, an ordinary chat's agent and a task worker. A key an
  * agent may change, a task worker may change too (decision 34). */
@@ -239,6 +253,8 @@ export const KEYS: readonly KeyDeclaration[] = [
     layers: both(pi("enabledModels")), timing: "live", effect: "next-turn", floor: "quiet", writers: ["ui", "home"],
     label: "Offered models", help: "Models offered in the picker. Empty offers every model.", order: 70,
     importance: "advanced", control: "list",
+    // pi matches each pattern against `provider/id` and the bare id (pi model-resolver).
+    entry: { hint: "A provider/model ID, or a pattern where * matches any text.", example: "anthropic/claude-sonnet-*" },
   },
   {
     id: "model.thinking[role=summarizer]", group: "model", fixed: { role: "summarizer" }, subgroup: "Compaction",
@@ -294,6 +310,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "context.compaction.instructions", group: "context", subgroup: "Compaction", type: types.text(COMPACTION_POLICY_INSTRUCTION_LIMIT, { raw: true }),
     layers: chatPi("compaction", "instructions"), timing: "live", effect: "next-compaction", floor: "notify", writers: ["ui", "home"],
     label: "Summary instructions", help: "Extra instructions for compaction summaries.", order: 40, importance: "advanced", control: "text",
+    entry: { hint: "Plain sentences added to the summary prompt.", example: "Keep file paths and open decisions." },
   },
   {
     id: "context.branchSummary.reserveTokens", group: "context", subgroup: "Compaction", type: types.integer(1_024, 1_000_000, "tokens"),
@@ -339,11 +356,13 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "tools.shell.path", group: "tools", subgroup: "Shell", type: types.text(4_096),
     layers: both(pi("shellPath")), timing: "fixed", effect: "new-chat", floor: "notify", writers: ["ui", "home"],
     label: "Shell", help: "The shell the bash tool runs.", order: 40, importance: "advanced", control: "text",
+    entry: { hint: "The path to a Bash executable on the Mac. ~ is allowed.", example: "/opt/homebrew/bin/bash" },
   },
   {
     id: "tools.shell.commandPrefix", group: "tools", subgroup: "Shell", type: types.text(4_096),
     layers: both(pi("shellCommandPrefix")), timing: "fixed", effect: "new-chat", floor: "notify", writers: ["ui", "home"],
     label: "Command prefix", help: "Text run before every shell command.", order: 50, importance: "advanced", control: "text",
+    entry: { hint: "Shell code run before each command, on one line.", example: "shopt -s expand_aliases" },
   },
   // Permissions ---------------------------------------------------------
   {
@@ -469,7 +488,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: `sources.${name}`, group: "sources", subgroup: "Search paths", type: types.stringList(500),
     layers: both(pi(name)), timing: "fixed", effect: "reload", floor: { widen: "notify", narrow: "quiet" }, direction: toolsDirection,
     writers: ["ui", "home"], label: name[0]!.toUpperCase() + name.slice(1), help: `Paths searched for ${name}.`,
-    order: 10 + index * 10, importance: "advanced", control: "list",
+    order: 10 + index * 10, importance: "advanced", control: "list", entry: SEARCH_PATH_ENTRY[name],
   })),
   {
     id: "sources.packages", group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
@@ -479,6 +498,8 @@ export const KEYS: readonly KeyDeclaration[] = [
   {
     id: "sources.npmCommand", group: "sources", type: types.stringList(20), layers: { mac: pi("npmCommand") }, timing: "live", effect: "next-change",
     floor: "notify", writers: ["ui"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
+    // pi runs the first value as the program and passes the rest before its own npm arguments.
+    entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
   },
   // Setup ---------------------------------------------------------------
   {
@@ -487,6 +508,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "setup.sessionDir", group: "setup", type: types.text(4_096), layers: { mac: pi("sessionDir") }, timing: "live", effect: "restart",
     floor: "notify", writers: [], label: "Session folder", help: "Where chats are stored. Applies after a restart.",
     order: 10, importance: "advanced", control: "text",
+    entry: { hint: "A folder path on the Mac. Start with ~ or /.", example: "~/Documents/Tron Sessions" },
   },
   {
     id: "setup.installTelemetry", group: "setup", type: types.boolean(), layers: { mac: pi("enableInstallTelemetry") }, builtin: true,

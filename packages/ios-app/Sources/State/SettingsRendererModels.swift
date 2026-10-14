@@ -41,6 +41,15 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
     let optionsSource: SettingsOptionsSource?
     let confirm: String?
     let redacted: Bool?
+    /// What to type into the key's text field or a list's new value (#939).
+    let entry: SettingsEntryGuidance?
+}
+
+/// The schema's entry guidance: the format in one sentence and a realistic
+/// example, shown as the field's placeholder. iOS never writes its own.
+struct SettingsEntryGuidance: Decodable, Equatable, Sendable {
+    let hint: String
+    let example: String
 }
 
 struct SettingsChoice: Decodable, Equatable, Sendable {

@@ -9,6 +9,7 @@ struct PackageSourceField: View {
         TextField("Package source", text: $source)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
+            .tronTextEntryDone()
             .tronField(
                 monospaced: true,
                 compact: true,

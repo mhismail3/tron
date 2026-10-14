@@ -595,7 +595,7 @@ describe("outside changes", () => {
     expect(label(await transport(), "Staged")).toBeDefined();
     git(project, "commit", "-q", "-m", "transport");
     const committedRow = await transport();
-    expect(committedRow.badges.map(badge => badge.label)).toEqual(["Project"]);
+    expect(committedRow.badges.map(badge => badge.label)).toEqual(["Set in project"]);
     const committed = (await f.history()).find(entry => entry.status === "committed")!;
     expect(committed).toMatchObject({ refersTo: written.changes[0]!.changeId, git: { head: git(project, "rev-parse", "HEAD").trim() } });
 

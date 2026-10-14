@@ -1763,7 +1763,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Release terminal settlement"].waitForExistence(timeout: 5))
         app.buttons["Release terminal settlement"].tap()
         let source = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", "From default at start: High (Mac)")).firstMatch
+            .matching(NSPredicate(format: "label CONTAINS %@", "From Mac default at start: High")).firstMatch
         // Manage Session › Chat Settings › Model › Thinking: the key's own sheet holds its reset.
         openChatThinking(app)
         let reset = app.buttons["settings-row-model.thinking_role_chat_-useCurrentDefault"]

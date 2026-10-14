@@ -84,8 +84,7 @@ struct NewSessionSheet: View {
                     ) { showBrowser = true }
 
                     if !workspace.isEmpty, let profileID = activeProfileID {
-                        ProjectSettingsLink(cwd: workspace, profileID: profileID)
-                            .tronGlassSurface(accent: .tronEmerald)
+                        ProjectSettingsLink(cwd: workspace, profileID: profileID, style: .setupCard)
                     }
 
                     setupCard(
@@ -380,38 +379,11 @@ struct NewSessionSheet: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Image(systemName: icon)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .frame(width: 16)
-                    Text(title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                    Spacer(minLength: 10)
-                    Text(value)
-                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.55)
-                        .truncationMode(.middle)
-                }
-                .foregroundStyle(accent)
-                if let badge { TronTag(TronTagModel(badge)) }
-                HStack(alignment: .top, spacing: 8) {
-                    Color.clear.frame(width: 16, height: 1)
-                    Text(caption)
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            TronSetupCardLabel(icon: icon, title: title, value: value, caption: caption, accent: accent,
+                               tags: badge.map { [TronTagModel($0)] } ?? [])
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("new-session-card.\(title)")
-        .tronGlassSurface(accent: accent, cornerRadius: 12, tintOpacity: 0.15, interactive: true)
     }
 
     private var pairedServers: [GatewayProfile] {
