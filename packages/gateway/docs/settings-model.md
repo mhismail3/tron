@@ -1207,10 +1207,13 @@ has a key for the target as `{ id, title, description, order, note? }`; the
 `description` is the one line a client shows beside the title.
 
 On iOS (#876) the gear's **Settings** is this Mac and this iPhone, one row per
-destination in five titled cards that share an accent: **Agent** (Model, Context,
-Run, Permissions), **Tools & Extensions** (Tools, MCP Servers, Extensions, Hooks),
-**Accounts** (Model Providers, Custom Models, Connected Services), **Data &
-Diagnostics** (Connections, Logs, Setup) and **This iPhone**. Sources' keys show
+destination in titled cards that share an accent: **Accounts** (Connections, Model
+Providers, Custom Models, Connected Services), **Agent** (Model, Context, Run,
+Permissions), **Tools & Extensions** (Tools, MCP Servers, Extensions, Hooks) and,
+last, **This iPhone** (Push Notifications, Appearance, Sessions, Logs, Setup; #956).
+The iOS This iPhone card gathers the phone's own surfaces by the maintainer's
+choice; Push Notifications' policy and Setup's keys stay Gateway-stored as above,
+so the card carries no device-only caption. Sources' keys show
 in Extensions and Setup's beside Import; a section the app does not place joins
 **More**. A chat's own settings are one row in **Manage Session** (Home's in Manage
 Home), beside its Project Settings row: Chat Settings opens the chat's Changes,
