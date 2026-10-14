@@ -1227,7 +1227,6 @@ private actor HostedChatDisplaySocket: GatewaySocketConnection {
         receiver = nil
     }
 }
-#endif
 
 /// Home's workers for the Home dashboard view journeys: running, waiting,
 /// recently completed (more than the section shows) and unviewed rows, each
@@ -1297,3 +1296,4 @@ enum HostedHomeDashboardWorkers {
         ])])
     }
 }
+#endif
