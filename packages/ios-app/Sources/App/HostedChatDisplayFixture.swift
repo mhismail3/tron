@@ -117,6 +117,7 @@ struct HostedHomeDashboardFixture: View {
     @State private var openedSession = "none"
     @State private var settingsDecisionState = "none"
     @State private var newWorkerAdded = false
+    @State private var firstRevealAt: Date?
     private let actionProbe = HostedHomeActionProbe()
     private let arguments = ProcessInfo.processInfo.arguments
     private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
@@ -179,6 +180,7 @@ struct HostedHomeDashboardFixture: View {
                             Text("sheet-read-peak:\(sheetReadPeak)")
                                 .accessibilityIdentifier("fixture.home-sheet-read-peak")
                             Text("home-reads:\(homeReads)").accessibilityIdentifier("fixture.home-read-counts")
+                            Text(TronDashboardRevealProbe.shared.summary).accessibilityIdentifier("fixture.dashboard-reveals")
                             Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.capabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
                                 .accessibilityIdentifier("fixture.home-diagnostics")
                         }
@@ -247,7 +249,12 @@ struct HostedHomeDashboardFixture: View {
                 settingsDecisionState = await gateway.settingsDecisionSummary()
                 // Home dispatches a worker after the view loaded: its catalog row
                 // arrives carrying `homeTaskId`, as the Gateway projects it.
-                if arguments.contains("-home-dashboard-new-worker"), !newWorkerAdded,
+                // `-late` holds the new worker until the view's sections revealed
+                // and settled, so a journey observes the live update separately.
+                if firstRevealAt == nil, !TronDashboardRevealProbe.shared.reveals.isEmpty { firstRevealAt = Date() }
+                let newWorkerDue = !arguments.contains("-home-dashboard-new-worker-late")
+                    || firstRevealAt.map { Date().timeIntervalSince($0) > 9 } == true
+                if arguments.contains("-home-dashboard-new-worker"), !newWorkerAdded, newWorkerDue,
                    model.sessions.contains(where: \.isHomeWorker) {
                     newWorkerAdded = true
                     model.sessions = model.sessions + [HostedHomeDashboardWorkers.newWorker.withGatewaySource(id: profile.id, label: profile.label)]
@@ -525,12 +532,20 @@ private actor HostedHomeShellGateway {
             let workers = sheetState == "dashboard-workers" ? HostedHomeDashboardWorkers.sessions : []
             return (.object(["sessions": .array(([row] + workers).map { try! JSONValue.encode($0) }), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("home-shell-fixture:1"), "archivedCount": .number(0)]), nil)
+        // Read on every connection; an unknown-method failure would raise a
+        // notice over the dashboard journeys' screenshots.
+        case "device.list":
+            return (.object(["devices": .array([])]), nil)
         case "provider.list" where sheetState == "dashboard-workers":
             return (HostedHomeDashboardWorkers.providers, nil)
         case "session.search.policy.get":
             return (.object(["enabled": .bool(false), "perQueryMicroCents": .number(268_800),
                 "dailyMicroCents": .number(2_688_000), "policyRevision": .number(1)]), nil)
         case "provider.usage":
+            // Holds the usage card on its loading pulse long enough to see it.
+            if ProcessInfo.processInfo.arguments.contains("-home-dashboard-usage-delay") {
+                try await Task.sleep(for: .seconds(6))
+            }
             return (HostedHomeDashboardWorkers.usage, nil)
         case "provider.list":
             return (.object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),
@@ -1234,7 +1249,7 @@ private actor HostedChatDisplaySocket: GatewaySocketConnection {
 }
 
 /// Home's workers for the Home dashboard view journeys: running, waiting,
-/// recently completed (more than the section shows) and unviewed rows, each
+/// recently completed and unread rows (each more than its section shows), each
 /// carrying the Gateway's `homeTaskId`, plus usage-capable providers.
 enum HostedHomeDashboardWorkers {
     private static func iso(_ secondsAgo: TimeInterval) -> String {
@@ -1263,7 +1278,9 @@ enum HostedHomeDashboardWorkers {
         worker("worker-unread-1", "Weekly reading digest", cwd: "/work/knowledge", ago: 5_400, unread: true),
         worker("worker-unread-2", "Mac reinstall preflight", cwd: "/work/tron", ago: 604_800, unread: true),
         worker("worker-unread-3", "Photo library dedupe plan", cwd: "/work/home", ago: 1_209_600, unread: true),
-        // An ordinary unread chat: no Home task names it, yet it joins the Unviewed queue.
+        worker("worker-unread-4", "Insurance renewal comparison", cwd: "/work/finance", ago: 1_500_000, unread: true),
+        worker("worker-unread-5", "Router firmware notes", cwd: "/work/home", ago: 1_600_000, unread: true),
+        // An ordinary unread chat: no Home task names it, yet it joins the Unread queue.
         worker("chat-unread", "Apple Watch app", cwd: "/work/tron", ago: 1_814_400, unread: true),
     ]
 

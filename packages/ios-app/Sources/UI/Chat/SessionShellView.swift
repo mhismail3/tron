@@ -113,7 +113,12 @@ struct SessionShellView: View {
     @State private var dashboardReconcileTask: Task<Void, Never>?
     @State private var homeStatusSurfaceToken: PresentationSurfaceToken?
     @State private var mountedHomeChatRouteID: String?
-    @State private var showingHomeCompletedSheet = false
+    @State private var homeSectionSheet: HomeDashboardSections.Section?
+    @State private var showingHomeUsageProviders = false
+    /// When the Home view's first-appearance stagger began. Nil while the view's
+    /// list is unmounted or another view is selected, so each entry fades its
+    /// sections in once; live catalog refreshes leave it alone.
+    @State private var homeRevealStart: Date?
 
     init() {
         let appSettings = AppLocalBehaviorSettings.shared
@@ -199,11 +204,14 @@ struct SessionShellView: View {
             ) {
                 serverFilterSheet
             }
+            .tronManagedSheet(item: $homeSectionSheet, identity: { "dashboard.home-section.\($0.id)" }) { section in
+                homeSectionRowsSheet(section)
+            }
             .tronManagedSheet(
-                isPresented: $showingHomeCompletedSheet,
-                identity: "dashboard.home-completed"
+                isPresented: $showingHomeUsageProviders,
+                identity: "dashboard.home-usage-providers"
             ) {
-                homeCompletedSheet
+                HomeUsageProvidersSheet(onDone: { showingHomeUsageProviders = false })
             }
             .tronManagedSheet(
                 item: $sessionToDelete,
@@ -950,7 +958,8 @@ struct SessionShellView: View {
             List {
                 if serverFilter.sortMode == .home {
                     Section {
-                        HomeUsageSummaryCard()
+                        HomeUsageSummaryCard(onChooseProviders: { showingHomeUsageProviders = true })
+                            .tronDashboardSectionReveal(order: 0, revealStart: homeRevealStart)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                             .listRowInsets(SessionDashboardLayout.rowInsets)
@@ -980,6 +989,12 @@ struct SessionShellView: View {
                 TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
                 value: filtered.map(\.dashboardID)
             )
+            // Runs after the list mounts, so the hidden first frame is committed
+            // before the stagger animates it in.
+            .task(id: serverFilter.sortMode == .home) {
+                homeRevealStart = serverFilter.sortMode == .home ? Date() : nil
+            }
+            .onDisappear { homeRevealStart = nil }
         }
     }
 
@@ -1089,61 +1104,80 @@ struct SessionShellView: View {
     @ViewBuilder
     private func homeSections(_ filtered: [SessionSummary]) -> some View {
         let sections = homeDashboardSections(filtered)
-        if !sections.inProgress.isEmpty {
+        // The usage card is order 0; present sections follow it in order.
+        let order = sections.revealOrder
+        if let inProgressOrder = order[.inProgress] {
             Section {
                 ForEach(sections.inProgress, id: \.dashboardID) { session in
                     sessionButton(session, showsContext: true)
+                        .tronDashboardSectionReveal(order: inProgressOrder, revealStart: homeRevealStart)
                 }
             } header: {
                 dashboardSectionHeader("In Progress")
+                    .tronDashboardSectionReveal(order: inProgressOrder, revealStart: homeRevealStart)
             }
         }
-        if !sections.completed.isEmpty {
-            Section {
-                ForEach(sections.completed.prefix(HomeDashboardLayout.recentlyCompletedLimit), id: \.dashboardID) { session in
-                    sessionButton(session, showsContext: true)
-                }
-                if sections.completed.count > HomeDashboardLayout.recentlyCompletedLimit {
-                    SessionListExpansionControls(
-                        workspaceName: "Recently Completed",
-                        canShowLess: false,
-                        canShowMore: true,
-                        isEnabled: true,
-                        onShowLess: {},
-                        onShowMore: { showingHomeCompletedSheet = true },
-                        showMoreTitle: "View more",
-                        showMoreHint: "Shows every recently completed Home worker"
-                    )
-                    .accessibilityIdentifier("home-completed-view-more")
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(SessionDashboardLayout.rowInsets)
-                }
-            } header: {
-                dashboardSectionHeader("Recently Completed")
-            }
+        if let completedOrder = order[.completed] {
+            cappedHomeSection(.completed, title: "Recently Completed", header: "Recently Completed",
+                              rows: sections.completed, order: completedOrder,
+                              hint: "Shows every recently completed Home worker")
         }
-        if !sections.unviewed.isEmpty {
-            Section {
-                ForEach(sections.unviewed, id: \.dashboardID) { session in
-                    sessionButton(session, showsContext: true)
-                }
-            } header: {
-                dashboardSectionHeader("Unviewed · \(sections.unviewed.count)")
-            }
+        if let unreadOrder = order[.unread] {
+            cappedHomeSection(.unread, title: "Unread", header: "Unread · \(sections.unread.count)",
+                              rows: sections.unread, order: unreadOrder,
+                              hint: "Shows every unread session")
         }
     }
 
-    private var homeCompletedSheet: some View {
+    /// Recently Completed and Unread: the first rows, then View more opening
+    /// the shared sheet of every row in the section.
+    private func cappedHomeSection(
+        _ section: HomeDashboardSections.Section,
+        title: String,
+        header: String,
+        rows: [SessionSummary],
+        order: Int,
+        hint: String
+    ) -> some View {
+        Section {
+            ForEach(rows.prefix(HomeDashboardLayout.sectionRowLimit), id: \.dashboardID) { session in
+                sessionButton(session, showsContext: true)
+                    .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
+            }
+            if rows.count > HomeDashboardLayout.sectionRowLimit {
+                SessionListExpansionControls(
+                    workspaceName: title,
+                    canShowLess: false,
+                    canShowMore: true,
+                    isEnabled: true,
+                    onShowLess: {},
+                    onShowMore: { homeSectionSheet = section },
+                    showMoreTitle: "View more",
+                    showMoreHint: hint
+                )
+                .accessibilityIdentifier("home-\(section.rawValue)-view-more")
+                .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(SessionDashboardLayout.rowInsets)
+            }
+        } header: {
+            dashboardSectionHeader(header)
+                .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
+        }
+    }
+
+    /// The View more sheet of a capped Home section.
+    private func homeSectionRowsSheet(_ section: HomeDashboardSections.Section) -> some View {
         TronDashboardFilterSheet(
-            title: "Recently Completed",
+            title: section == .unread ? "Unread" : "Recently Completed",
             accent: .tronEmerald,
             detents: [.medium, .large],
-            onDone: { showingHomeCompletedSheet = false }
+            onDone: { homeSectionSheet = nil }
         ) {
-            ForEach(homeDashboardSections(filteredSessions).completed, id: \.dashboardID) { session in
+            ForEach(homeDashboardSections(filteredSessions).sheetRows(section), id: \.dashboardID) { session in
                 Button {
-                    showingHomeCompletedSheet = false
+                    homeSectionSheet = nil
                     openSession(session)
                 } label: {
                     HistoricalSessionRow(
@@ -1153,7 +1187,7 @@ struct SessionShellView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("home-completed-sheet-row-\(session.dashboardID)")
+                .accessibilityIdentifier("home-\(section.rawValue)-sheet-row-\(session.dashboardID)")
             }
         }
     }
