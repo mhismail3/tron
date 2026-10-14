@@ -66,6 +66,13 @@ struct ChatView: View {
     /// is rebased exactly once for the replacement tree.
     @State private var viewportActivation = 0
     @State private var homeSheet: HomeSheetRoute?
+    #if HOSTED_TEST
+    /// Test-only lifecycle evidence for real-UI journeys: how many opening
+    /// attempts this mounted route began, and how often its transcript left
+    /// the ready phase (hidden, unscrollable, then revealed again).
+    @State private var hostedOpeningAttempts = 0
+    @State private var hostedReadyExits = 0
+    #endif
 
     #if HOSTED_TEST
     init(
@@ -158,6 +165,19 @@ struct ChatView: View {
             // Same usable region as the floating display: the bubble stays
             // above the composer and keyboard without measuring either.
             .overlay { ChatAnnotationBubbleHost(presenter: annotationPresenter) }
+            #if HOSTED_TEST
+            .overlay(alignment: .topLeading) {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityLabel("Hosted presentation lifecycle")
+                    .accessibilityIdentifier("chat.hosted.presentation-lifecycle")
+                    .accessibilityValue("attempts=\(hostedOpeningAttempts) ready-exits=\(hostedReadyExits)")
+            }
+            .onChange(of: sessionPresentation.open.phase) { previous, current in
+                if previous == .ready, current != .ready { hostedReadyExits += 1 }
+            }
+            #endif
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // The complete composer is the sole structural inset owner, so
                 // the keyboard, multiline text, and attachment chips push the
@@ -547,7 +567,7 @@ struct ChatView: View {
             viewportActivation &+= 1
             scrollCoordinator.viewportActivationChanged(viewportActivation)
             scrollCoordinator.viewportObservationChanged(isActive: false)
-            if sessionPresentation.openingTask != nil {
+            if sessionPresentation.ownsUnsettledOpening {
                 // A covered transcript cannot publish the native geometry
                 // needed to finish positioning. Cancel the exact opening and
                 // scroll leases now so uncovering resumes with a fresh epoch;
@@ -2078,6 +2098,7 @@ struct ChatView: View {
             )
         }
         #if HOSTED_TEST
+        hostedOpeningAttempts += 1
         defer { hostedProbe?.recordReadyFrameCompletion() }
         #endif
         performanceTracker.discardScroll()
@@ -2447,10 +2468,22 @@ struct ChatView: View {
             // Publish leased interaction/editor routes only after chat opening
             // has crossed a real ready frame. Otherwise their sheet can cover
             // the parent, cancel opening, and create a present/dismiss loop.
+            // This frame settles the opening, so the sheet admitted next can
+            // cover it without cancelling it into a later re-reveal (#935).
+            sessionPresentation.markOpeningReady()
             sessionPresentation.permitsExtensionInteractionPresentation = true
             intakeLatestTranscriptProjectionIfNeeded()
             admitPendingFloatingDisplay()
             #if HOSTED_TEST
+            // #935 journey: keep this opening's tail alive for a bounded number
+            // of frames so the parent-covering form the line above admits lands
+            // while the opening task still exists, the order a loaded device
+            // produces. Cover cancellation ends the hold early.
+            if ProcessInfo.processInfo.arguments.contains("--tron-hosted-hold-opening-tail") {
+                for _ in 0..<120 where !Task.isCancelled {
+                    try? await displayFrameScheduler.nextFrame()
+                }
+            }
             hostedProbe?.markReady()
             let geometry = scrollCoordinator.latestGeometry
             if geometry.isAtCatchUpBoundary {
