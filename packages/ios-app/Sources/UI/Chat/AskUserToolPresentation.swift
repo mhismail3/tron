@@ -304,15 +304,26 @@ struct AskUserCompletedFormView: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 if let context = question.context, !context.isEmpty {
-                    Text(context)
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    TronMarkdownView(
+                        text: context,
+                        streaming: false,
+                        textStyle: ChatSelectableTextStyle(
+                            size: TronTypography.sizeBodySM,
+                            color: .tronTextSecondary
+                        ),
+                        selectableText: true
+                    )
                 }
-                Text(question.question)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
+                TronMarkdownView(
+                    text: question.question,
+                    streaming: false,
+                    textStyle: ChatSelectableTextStyle(
+                        size: TronTypography.sizeBodyLG,
+                        weight: .semibold,
+                        color: .tronTextPrimary
+                    ),
+                    selectableText: true
+                )
                 VStack(spacing: 10) {
                     ForEach(question.options) { option in
                         readOnlyOption(option, question: question, selected: answer?.optionIds.contains(option.id) == true)

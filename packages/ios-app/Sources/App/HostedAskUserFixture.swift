@@ -169,6 +169,8 @@ private struct HostedAskUserFixture {
         self.receipt = receipt
         let allowCancel = !ProcessInfo.processInfo.arguments.contains("-tron-ask-user-no-cancel")
         let styled = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-styled")
+        // Agent-authored URL, inline code and a fenced command (#941).
+        let copyable = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-copyable")
         let optionA = ExtensionFormOption(id: "environment-a", label: "Staging", description: styled ? "A pre-release environment for validation." : nil)
         let optionB = ExtensionFormOption(id: "environment-b", label: "Production", description: styled ? "The live environment used by customers." : nil)
         let form = ExtensionFormDescriptor(
@@ -177,8 +179,12 @@ private struct HostedAskUserFixture {
             questions: [ExtensionFormQuestion(
                 id: "environment",
                 header: "Environment",
-                question: "Which environments should receive the change?",
-                context: styled ? "Choose the environment for this change. Your answers are kept if you close and reopen this form." : nil,
+                question: copyable
+                    ? "Which environment should get the build from https://build.example.ts.net:8443/ (commit `1955237`)?"
+                    : "Which environments should receive the change?",
+                context: copyable
+                    ? "After choosing, publish it with:\n\n```sh\nscripts/tron-ios-device share --commit 1955237\n```"
+                    : styled ? "Choose the environment for this change. Your answers are kept if you close and reopen this form." : nil,
                 options: [optionA, optionB],
                 multiSelect: !styled,
                 allowOther: true
