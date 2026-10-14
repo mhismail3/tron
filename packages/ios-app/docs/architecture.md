@@ -1793,7 +1793,13 @@ Permissions), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks) a
 phone's own surfaces; Push Notifications' policy, Logs' Gateway records and export, and Setup's session
 folder and telemetry still live on the Mac, so the group makes no device-only caption. Schema sections the
 app does not place join More, above This iPhone. Every sheet a row opens inherits its card's accent
-through `TronProgressiveSheetLink`, and a sheet's toolbar actions (`tronToolbarAction`) take the same accent as its title. A chat's settings are one row away in Manage Session and
+through `TronProgressiveSheetLink`, and a sheet's toolbar icons take the same tint as its title: every toolbar
+action uses `tronToolbarAction(accent:role:)` with the accent the sheet gives `TronSheetTitle`,
+and both resolve through `TronSheetTint` (inherited Settings tint, else the sheet's accent, else
+emerald). Only a `.destructive` action (red) and a `.neutral` Close/Cancel (grey) differ, and a
+disabled action greys itself; never paint toolbar icons directly. `TronSheetTintUITests` and the
+real-Gateway paired-device step of `testSettingsClarityPillsTextDoneAndAccountsFirst` compare
+each enabled toolbar icon's rendered ink with its title's (`assertToolbarTint`). A chat's settings are one row away in Manage Session and
 Manage Home (`ChatSettingsView`): Changes for that chat, then every section for
 the chat's target with each value's source tag. The Project
 card shows the project's sections and its MCP Servers, Extensions and Hooks.
@@ -1919,7 +1925,8 @@ No budget or authorization semantics are inferred by the renderer. The Home Cont
 sheet reads `home.context` into one `SessionContextUsageCard`: the activation's
 state pill and start as its header, a bar split by the breakdown sections
 (instructions, about you, memory, this chapter, task results, input) in their dot
-colors, a compact two-column legend with the free remainder, then the Home chat's
+colors, a compact two-column legend of those sections (the header already states
+the tokens left, so the free remainder has no line), then the Home chat's
 cache, input, output and cost metrics (`SessionContextSegments` is the card's only
 extension; Manage Session passes none). It shows no entry IDs or byte counts, and
 falls back to the plain request sizes when the Gateway omits `breakdown`. The
