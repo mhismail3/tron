@@ -335,23 +335,34 @@ final class TronHomeSheetsUITests: XCTestCase {
         open(app, element(app, "home-manage-profile"), ready: "home-profile-group-preference", name: "profile")
         expand(app, done: "home-sheet-done-profile")
 
-        // Inferred and confirmed items differ: only an inferred item carries Confirm.
+        // Rows only open their item (#971): no row carries its own Confirm, and each row
+        // spans its group so the text keeps the full width. Rows still say Inferred or Confirmed.
         let inferred = "9a364c45-34fe-4f0a-93e6-fc507e2b0bdc", confirmed = "6a26bfb7-f0d1-44ce-b0ae-9da01da3e55c"
-        XCTAssertTrue(element(app, "home-profile-confirm-\(inferred)").exists)
-        XCTAssertFalse(element(app, "home-profile-confirm-\(confirmed)").exists, "A confirmed item has nothing to confirm")
+        let rowActions = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'home-profile-confirm-' AND identifier != 'home-profile-confirm-all'"))
+        XCTAssertEqual(rowActions.count, 0, "Profile rows carry no inline Confirm")
+        let inferredRow = element(app, "home-profile-item-\(inferred)")
+        XCTAssertTrue(inferredRow.label.contains("Inferred"), inferredRow.label)
         XCTAssertTrue(element(app, "home-profile-item-\(confirmed)").label.contains("Confirmed"))
+        let group = element(app, "home-profile-group-preference")
+        XCTAssertLessThan(abs(inferredRow.frame.width - group.frame.width), 2, "The row spans its group: \(inferredRow.frame) in \(group.frame)")
         XCTAssertTrue(element(app, "home-profile-confirm-all").label.contains("3 items"))
         keep("profile-edit-00-list")
 
-        // One tap confirms; the last change offers Undo, which restores it.
-        element(app, "home-profile-confirm-\(inferred)").tap()
+        // An item is confirmed from its detail; the last change offers Undo, which restores it.
+        open(app, inferredRow, ready: "home-profile-item-detail", name: "profile-item")
+        expand(app, done: "home-sheet-done-profile-item")
+        XCTAssertTrue(element(app, "home-profile-item-state").label.hasSuffix("Inferred"))
+        element(app, "home-profile-item-confirm").tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Confirmed'"))
         XCTAssertTrue(element(app, "home-profile-last-change").waitForExistence(timeout: 5))
-        XCTAssertTrue(waitFor(element(app, "home-profile-item-\(inferred)"), "label CONTAINS 'Confirmed'"))
-        XCTAssertFalse(element(app, "home-profile-confirm-\(inferred)").exists)
+        XCTAssertFalse(element(app, "home-profile-item-confirm").exists, "A confirmed item has nothing to confirm")
         keep("profile-edit-01-confirmed-undo")
         element(app, "home-profile-undo").tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Inferred'"))
+        XCTAssertTrue(element(app, "home-profile-item-confirm").waitForExistence(timeout: 5))
+        app.buttons["home-sheet-done-profile-item"].tap()
         XCTAssertTrue(waitFor(element(app, "home-profile-item-\(inferred)"), "label CONTAINS 'Inferred'"))
-        XCTAssertFalse(element(app, "home-profile-last-change").exists)
 
         // Confirm all asks first, then confirms every inferred item at once.
         element(app, "home-profile-confirm-all").tap()
