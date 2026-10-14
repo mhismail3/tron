@@ -56,6 +56,13 @@ grep -Fq 'tron-notification.caf' "$generated_project" \
 /usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" "$ROOT/Sources" \
   || fail "raw native sheet escaped its managed owner"
 
+# Sheet loading is one shared, centered pulse (#890): no ad-hoc spinners or
+# visible "Loading…" placeholders, and only the presentation surface hosts it.
+/usr/bin/python3 "$ROOT/scripts/sheet-loading-source-policy.py" --self-test \
+  || fail "sheet loading policy regressions failed"
+/usr/bin/python3 "$ROOT/scripts/sheet-loading-source-policy.py" "$ROOT/Sources" \
+  || fail "ad-hoc sheet loading UI escaped the shared pulse"
+
 # TronMobileCore is the app's Foundation-only lowest module (docs/architecture.md#modules):
 # UI frameworks belong to the app target, so Core must never import them.
 core_ui_imports() {
@@ -67,4 +74,4 @@ core_ui_imports "$core_probe" >/dev/null || { rm -rf "$core_probe"; fail "Core U
 rm -rf "$core_probe"
 ! core_ui_imports "$ROOT/Core" || fail "TronMobileCore imports a UI framework"
 
-echo "iOS source policy passed (orientation/resources, managed presentation and Foundation-only Core)"
+echo "iOS source policy passed (orientation/resources, managed presentation, shared sheet loading and Foundation-only Core)"

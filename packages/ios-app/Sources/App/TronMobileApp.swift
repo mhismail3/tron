@@ -33,6 +33,9 @@ struct TronMobileApp: App {
 
     var body: some Scene {
         WindowGroup {
+            // Fixtures mount sheet content directly, without `SceneRootView`, so
+            // they host the shared sheet-loading pulse at their own root.
+            Group {
             if ProcessInfo.processInfo.arguments.contains("-tron-home-dashboard-fixture") {
                 HostedHomeDashboardFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-configuration-fixture") {
@@ -47,6 +50,8 @@ struct TronMobileApp: App {
                 HostedNewSessionFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-composer-upload-fixture") {
                 HostedComposerUploadFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-notification-inbox-fixture") {
+                HostedNotificationInboxFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-readonly-attachment-fixture") {
                 HostedReadonlyAttachmentFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-chat-display-fixture") {
@@ -86,6 +91,8 @@ struct TronMobileApp: App {
             } else {
                 HostedProductionScene(model: hostedModel)
             }
+            }
+            .modifier(TronSheetLoadingHostModifier())
         }
     }
     #else
@@ -120,6 +127,9 @@ struct SceneRootView: View {
 
     var body: some View {
         RootView()
+            // The outermost host of the shared sheet-loading pulse: managed sheets
+            // and registered surfaces host their own first.
+            .modifier(TronSheetLoadingHostModifier())
             .background {
                 InAppNoticeWindowInstaller(
                     model: model,

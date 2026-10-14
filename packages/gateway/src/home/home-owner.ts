@@ -7,7 +7,7 @@ import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
 import { HomeTaskDispatcher, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest } from "./home-task-dispatcher.js";
 import type { HomeTaskSubagents } from "./home-task-subagents.js";
-import { HOME_CHAPTER_TOPIC_COUNT, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
+import { HOME_CHAPTER_TOPIC_COUNT, HOME_CHAPTER_TOPIC_LIST_CHARACTERS, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { HomeChapterList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryView, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
@@ -708,9 +708,21 @@ export class HomeOwner {
     const memory = this.memory?.sessionId === record.homeId ? this.memory.owner : undefined;
     if (!memory) return new Map();
     try {
-      return await memory.browserRead(async episodic => new Map([...episodic.recentSummaries(
-        record.chapters.map(chapter => chapter.sessionId), HOME_CHAPTER_TOPIC_COUNT * 3)]
-        .map(([sessionId, summaries]) => [sessionId, [...new Set(summaries.map(homeChapterTopic).filter(Boolean))].slice(0, HOME_CHAPTER_TOPIC_COUNT)])));
+      const recent = await memory.browserRead(async episodic => episodic.recentSummaries(
+        record.chapters.map(chapter => chapter.sessionId), HOME_CHAPTER_TOPIC_COUNT * 3));
+      // Newest chapters first until the list's topic budget is spent; older chapters
+      // then carry no topics rather than an unbounded frame.
+      let budget = HOME_CHAPTER_TOPIC_LIST_CHARACTERS;
+      const topics = new Map<string, string[]>();
+      for (const chapter of [...record.chapters].reverse()) {
+        const chosen = [...new Set((recent.get(chapter.sessionId) ?? []).map(homeChapterTopic).filter(Boolean))]
+          .slice(0, HOME_CHAPTER_TOPIC_COUNT);
+        const characters = chosen.reduce((sum, topic) => sum + topic.length, 0);
+        if (characters > budget) break;
+        budget -= characters;
+        topics.set(chapter.sessionId, chosen);
+      }
+      return topics;
     } catch (error) {
       if (error instanceof GatewayError || error instanceof EpisodicMemoryError || error instanceof HomeMemoryRefusal) return new Map();
       throw error;

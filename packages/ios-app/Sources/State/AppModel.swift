@@ -3228,6 +3228,16 @@ final class AppModel {
         for profile in enabled { await scheduleNotificationInboxRefresh(profile: profile).value }
     }
 
+    /// The chat a notification belongs to, named as the dashboard names it; nil
+    /// when that chat is not in the profile's loaded catalog (Home, archived, or
+    /// not loaded yet).
+    func notificationSessionTitle(profileID: String, sessionID: String) -> String? {
+        dashboardSessionsByProfile[profileID]?.first { $0.id == sessionID }?.title
+    }
+
+    /// Inbox rows name their Gateway only when more than one Mac feeds the inbox.
+    var notificationInboxSpansMultipleGateways: Bool { notificationInboxProfiles().count > 1 }
+
     func loadMoreNotificationHistory(profileID: String, filter: NotificationInboxFilter) async {
         guard let profile = notificationInboxProfiles().first(where: { $0.id == profileID }) else { return }
         let selectedProfileID = profiles.selected?.id
@@ -3235,7 +3245,7 @@ final class AppModel {
         func connectionID() async -> Int? {
             usesSelectedClient ? await client.activeConnectionID() : await dashboardConnections.connectionID(for: profileID)
         }
-        await notificationInbox.loadNextPage(profileID: profileID, filter: filter) { [weak self] cursor, expectedConnectionID in
+        let needsRefresh = await notificationInbox.loadNextPage(profileID: profileID, filter: filter) { [weak self] cursor, expectedConnectionID in
             guard let self, !Task.isCancelled else { throw CancellationError() }
             let before = await connectionID()
             guard before == expectedConnectionID,
@@ -3263,6 +3273,8 @@ final class AppModel {
             }
             return page
         }
+        // The history moved under the loaded window; the refresh merge owns repair.
+        if needsRefresh { scheduleNotificationInboxRefresh(profile: profile) }
     }
 
     func markNotificationRead(_ item: NotificationInboxItem) async {
@@ -3383,29 +3395,11 @@ final class AppModel {
                 unread: unreadPage,
                 generation: generation
             )
-        } catch let failure as GatewayFailure where failure.code == "unsupported" {
-            let currentConnectionID = await connectionID()
-            guard currentConnectionID == initialConnectionID,
-                  profiles.selected?.id == selectedProfileID,
-                  profiles.profiles.first(where: { $0.id == profile.id }) == profile else { return }
-            notificationInbox.fail(
-                profileID: profile.id,
-                generation: generation,
-                message: "Update the Gateway to view notifications."
-            )
-        } catch is CancellationError {
-            // Retirement invalidates the coordinator generation; cancellation is
-            // not a failed remote read and cannot publish into a successor.
         } catch {
-            let currentConnectionID = await connectionID()
-            guard currentConnectionID == initialConnectionID,
-                  profiles.selected?.id == selectedProfileID,
-                  profiles.profiles.first(where: { $0.id == profile.id }) == profile else { return }
-            notificationInbox.fail(
-                profileID: profile.id,
-                generation: generation,
-                message: (error as? GatewayFailure)?.message ?? "Unable to load notifications."
-            )
+            // The inbox keeps its last rows. An offline Gateway is the app-global
+            // reconnect notice's to present, and its reconnect (or the next
+            // `notification.inbox.changed`) schedules the next read; the
+            // refresh owner clears this generation's loading flag.
         }
     }
 
@@ -4895,23 +4889,31 @@ final class AppModel {
         }
         switch query {
         case .manage:
-            let status = try HomeStatusDTO.decode(try await read("home.status"))
-            let context = try HomeContextDTO.decode(try await read("home.context"))
-            let chapters = chapterListCapable() ? try await readChapterList() : nil
+            // Independent reads share one round trip instead of queuing behind each
+            // other (each is individually fenced). Task reads still wait for status,
+            // which decides whether they may be attempted at all.
+            let readsChapters = chapterListCapable()
+            async let statusValue = read("home.status")
+            async let contextValue = read("home.context")
+            async let chapterValue: JSONValue? = readsChapters ? read("home.chapterList") : nil
+            let status = try HomeStatusDTO.decode(try await statusValue)
+            let context = try HomeContextDTO.decode(try await contextValue)
+            let chapterJSON = try await chapterValue
+            let chapters = try chapterJSON.map { try HomeChapterListDTO.decode($0) }
             // A refused task or permission read leaves its row "Unavailable"; the sheet still loads.
             var tasks: HomeTaskPageDTO?
             var permissions: HomeTaskPermissionsDTO?
             if status.admitsTaskReads {
-                tasks = try await optionalRead {
+                async let taskPage = optionalRead {
                     try HomeTaskPageDTO.decode(try await read("home.taskList", .object(["limit": .number(20)])))
                 }
-                permissions = try await optionalRead {
+                async let taskPermissions = optionalRead {
                     try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions"))
                 }
+                tasks = try await taskPage
+                permissions = try await taskPermissions
             }
             return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks, permissions: permissions))
-        case .context:
-            return .context(try HomeContextDTO.decode(try await read("home.context")))
         case .tasks(let cursor):
             let status = try await readTaskStatus()
             var params: [String: JSONValue] = ["limit": .number(20)]
@@ -5588,6 +5590,12 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         }
         if dashboardStatesByProfile[profileID] != state {
             automationCatalog.invalidate(profileID: profileID)
+        }
+        // Inbox changes published while this Gateway was unreachable never
+        // reached this device, so its reconnect is a real inbox demand.
+        if state == .connected, previousState != .connected,
+           let profile = notificationInboxProfiles().first(where: { $0.id == profileID }) {
+            scheduleNotificationInboxRefresh(profile: profile)
         }
         let existingCount = dashboardSessionsByProfile[profileID]?.count ?? 0
         if DashboardProjectionRetentionPolicy.retainsExistingBucket(

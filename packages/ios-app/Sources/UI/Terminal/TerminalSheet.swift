@@ -62,7 +62,7 @@ struct TerminalSheet: View {
                         }
                     }
                 } else {
-                    TronLoadingState(label: "Connecting terminal…")
+                    TronSheetLoadingState(label: "Connecting terminal…", accent: terminalAccent)
                 }
             }
             .tronTopBlurSurface()

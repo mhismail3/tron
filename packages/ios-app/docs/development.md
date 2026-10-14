@@ -483,7 +483,7 @@ scripts/tron-ios-simulator install
 ```
 
 The generated Xcode project is not architectural truth; edit `project.yml` and
-source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `packages/ios-app/scripts/test-source-policy.sh` from the repository root to guard this boundary, the bundled notification sound, and the rule that app-owned sheets use the activity-managed presentation modifiers.
+source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `packages/ios-app/scripts/test-source-policy.sh` from the repository root to guard this boundary, the bundled notification sound, the rule that app-owned sheets use the activity-managed presentation modifiers, and the shared sheet-loading pulse.
 
 ### Module layout
 
@@ -1489,8 +1489,16 @@ wrapping secondary details, a decorative category-colored icon, and an independe
 button when the owner supplies one. An explicit category accent wins over the inherited settings theme;
 otherwise the sheet theme supplies the hue. Terminal and Project Resources do not use native
 `ContentUnavailableView`. Notifications/history, Automations, Extensions, queue editing, and subagent
-placeholders share this composition; subagents retain their owning glass surface. Loading stays with
-`TronLoadingState`/the Tron pulse. Compact picker misses, inline resource/file notices, and camera/media
+placeholders share this composition; subagents retain their owning glass surface. Loading never shows
+text. A sheet, sub-sheet or settings page whose content is not yet available uses
+`TronSheetLoadingState(label:accent:)` with its title's accent: it takes no layout space and its
+`TronPresentationSurface` draws the one chat-opening pulse (size 44) centered over the visible sheet, so
+it stays put across medium, large and in-flight detents, paints no background, and arriving content never
+shifts layout. A partial load inside an already-visible section uses `TronLoadingState` (the pulse alone,
+labelled for VoiceOver). Labels are VoiceOver-only. `packages/ios-app/scripts/test-source-policy.sh`
+rejects indeterminate `ProgressView`, `Text("Loading…")`-style placeholders and any other host of the
+sheet pulse; `TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth` proves centering at both
+detents, content arrival without chrome movement, and the shared pulse in light and dark. Compact picker misses, inline resource/file notices, and camera/media
 overlays retain their existing themed geometry and contrast rather than expanding into full-page states.
 and mounted placeholder previews; recovery ownership and loading/error transitions remain unchanged.
 
@@ -1892,6 +1900,16 @@ and the fixture counts every staging the Gateway receives. One journey asserts t
 reconnect and a reopened chat each photo is staged exactly once (`restaged:0`) and the prompt
 carries all four; the other loses staging while backgrounded and asserts the rejected send
 re-uploads every photo and the retried send carries all four (#916).
+
+`TronNotificationInboxUITests` launches `-tron-notification-inbox-fixture`: the real Settings
+sheet, bell, inbox coordinator, `GatewayClient` and event intake against a scripted Gateway
+inbox (`notification.inbox.list/read/readAll`, a `notification.inbox.changed` after every
+commit), with a second paired Mac unreachable. The test changes the Gateway's inbox while the
+sheet is open by posting Darwin notifications the fixture observes (a new alert; a read from
+another device). It asserts no sheet-owned offline row, that a pull starts no refresh, that a
+new alert appears and a read clears its row live, Mark Read, chat-titled rows with the Gateway
+name, and read rows clear/unread rows tinted by sampling the row against the sheet margin (#938).
+Set `TEST_RUNNER_TRON_INBOX_CAPTURE_DIR` to keep its screenshots as PNGs.
 
 `TronCameraCaptureUITests` launches the same fixture with `-tron-camera-fixture`, which gives the
 real Take Photo sheet and `CameraModel` a granted permission and scripted camera hardware
@@ -2572,7 +2590,7 @@ added backdrop.
 
 Gateway RuntimeSlot owns automatic agent-terminal alerts after Pi's `agent_settled` and the canonical terminal receipt, including final errors, aborts, output limits, and stops without final prose. Admitted no-agent failures and orderly shutdown interruptions use their exact invocation ownership instead of inventing assistant content. Separately, every Gateway-admitted semantic interaction owns one fixed input-needed alert; the Gateway suppresses it when the exact session already has a current token-bound visible-presentation lease, matching terminal-alert foreground behavior. Both flows carry the exact machine/session route, while terminal alerts additionally use the bounded session title and fixed outcome-specific body. The existing `agent_finished` wire category is neutral and appears as “Agent finished” with a stop icon, not a success checkmark. A notification tap resolves the paired owner and joins an existing same-profile foreground reconnect once its exact event-enabled transport is active; it never replaces that reconnect or waits for provider, settings, device, terminal, mounted-chat, or paginated dashboard reconciliation. The admitted payload routes directly to canonical `session.open`, which owns existence and authorization. The mounted chat remains visible during preparation, an exact same-route tap stays mounted, and only a different target performs the smooth dashboard pop and chat push. Reduce Motion removes the spatial transition. Background and cold-launch taps remain in memory until the SwiftUI navigation owner is installed, and activation/lifecycle generations prevent stale work from committing after a newer transition.
 
-Settings owns the notification entry point: verify the leading bell changes to `bell.badge.fill` when any paired Gateway reports unread inbox rows and VoiceOver announces the aggregate count. The Notifications sheet defaults to Unread while All and View More retain notification history. It must retain standard title/Done chrome, top blur, medium/large detents, pull-to-refresh, a directly mounted All/Unread control with no redundant outer card or Inbox label, Tron-typography empty states for both filters, newest-first glass cards, mark-one/mark-all read behavior, profile labels, and detail-to-chat routing. The Unread filter must render the Gateway's own `unread` page: a profile whose newest `all` rows are read but which still reports an older unread row must show that row in Unread and must keep the bell and the list agreeing. Reconnect or relaunch may show the bounded v2 cached projection, but Gateway list/read truth must replace it; never infer unread state from APNs timestamps, titles, or session text. Test whole- and fractional-second ordering, profile aggregation, keyset paging per window, refresh merge that preserves loaded older pages, malformed-row rejection, optimistic read rollback through refresh, and APNs request-ID tap admission. Mark Read must send each profile a cut at its newest shown row and leave newer alerts unread. Open a chat from the dashboard, a push, an Automation route, and a restored foreground route; all pre-existing notifications for that exact Gateway/session must become read without blocking chat. Leave immediately or disconnect during persistence and verify background settlement still clears the captured rows. Newer alerts and other sessions/Gateways must remain unread; a visibility heartbeat must not mark newer alerts read, while leaving and reopening must. Opening technical/background session subscriptions must not clear notifications.
+Settings owns the notification entry point: verify the leading bell changes to `bell.badge.fill` when any paired Gateway reports unread inbox rows and VoiceOver announces the aggregate count. The Notifications sheet defaults to Unread while All and View More retain notification history. It must retain standard title/Done chrome, top blur, medium/large detents, no pull-to-refresh and no sheet-owned offline row (even with a paired Mac offline), live rows that follow `notification.inbox.changed`, a directly mounted All/Unread control with no redundant outer card or Inbox label, Tron-typography empty states for both filters, newest-first shared feed rows (unread tinted, read clear), mark-one/mark-all read behavior, the Gateway name beside the time only with more than one Mac paired, and detail-to-chat routing. The Unread filter must render the Gateway's own `unread` page: a profile whose newest `all` rows are read but which still reports an older unread row must show that row in Unread and must keep the bell and the list agreeing. Reconnect or relaunch may show the bounded v2 cached projection, but Gateway list/read truth must replace it; never infer unread state from APNs timestamps, titles, or session text. Test whole- and fractional-second ordering, profile aggregation, keyset paging per window, refresh merge that preserves loaded older pages, malformed-row rejection, optimistic read rollback through refresh, and APNs request-ID tap admission. Mark Read must send each profile a cut at its newest shown row and leave newer alerts unread. Open a chat from the dashboard, a push, an Automation route, and a restored foreground route; all pre-existing notifications for that exact Gateway/session must become read without blocking chat. Leave immediately or disconnect during persistence and verify background settlement still clears the captured rows. Newer alerts and other sessions/Gateways must remain unread; a visibility heartbeat must not mark newer alerts read, while leaving and reopening must. Opening technical/background session subscriptions must not clear notifications.
 
 The checked-in build contains no push credential and no user-configurable relay.
 The `Test` configuration retains the beta relay route only for hosted fixture

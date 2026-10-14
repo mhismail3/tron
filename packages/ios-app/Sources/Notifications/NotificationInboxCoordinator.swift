@@ -230,7 +230,6 @@ final class NotificationInboxCoordinator {
     private(set) var buckets: [String: Bucket] = [:]
     private(set) var loadingProfileIDs = Set<String>()
     private(set) var isMarkingAllRead = false
-    private var failuresByProfile: [String: String] = [:]
     // One coordinator-wide counter makes every admission unique without
     // retaining historical generations for removed profiles.
     private var nextRefreshGeneration = 0
@@ -239,12 +238,6 @@ final class NotificationInboxCoordinator {
     private var pendingRefreshProfiles: [String: GatewayProfile] = [:]
     private var loadingOlderWindows = Set<NotificationInboxWindowID>()
     private var windowRequestGenerations: [NotificationInboxWindowID: Int] = [:]
-
-    var failure: String? {
-        let values = Array(Set(failuresByProfile.values)).sorted()
-        guard !values.isEmpty else { return nil }
-        return values.count == 1 ? values[0] : "Some paired Gateways could not load notifications."
-    }
 
     init(defaults: UserDefaults? = nil) {
         self.defaults = defaults
@@ -324,7 +317,6 @@ final class NotificationInboxCoordinator {
         nextRefreshGeneration &+= 1
         requestGenerationByProfile[profileID] = nextRefreshGeneration
         loadingProfileIDs.insert(profileID)
-        failuresByProfile.removeValue(forKey: profileID)
         return nextRefreshGeneration
     }
 
@@ -359,7 +351,6 @@ final class NotificationInboxCoordinator {
             connectionID: all.connectionID
         )
         loadingProfileIDs.remove(profile.id)
-        failuresByProfile.removeValue(forKey: profile.id)
         persist()
     }
 
@@ -401,15 +392,20 @@ final class NotificationInboxCoordinator {
         return change.revision != bucket.revision
     }
 
+    /// Append one older page to a loaded window. Answers whether the page no
+    /// longer fits the window (the history changed under it), which the caller
+    /// repairs with a refresh. A failed read is optional presentation work: the
+    /// window keeps its rows and its trigger re-arms with the presentation.
+    @discardableResult
     func loadNextPage(
         profileID: String,
         filter: NotificationInboxFilter,
         operation: @MainActor (String, Int?) async throws -> NotificationInboxGatewayClient.Snapshot
-    ) async {
+    ) async -> Bool {
         let windowID = NotificationInboxWindowID(profileID: profileID, filter: filter)
         guard !loadingOlderWindows.contains(windowID),
               let initial = buckets[profileID],
-              let cursor = initial.window(filter).nextCursor else { return }
+              let cursor = initial.window(filter).nextCursor else { return false }
         nextRefreshGeneration &+= 1
         let generation = nextRefreshGeneration
         windowRequestGenerations[windowID] = generation
@@ -427,13 +423,12 @@ final class NotificationInboxCoordinator {
                   var current = buckets[profileID],
                   current.window(filter).nextCursor == cursor,
                   snapshot.connectionID == initial.connectionID,
-                  snapshot.notifications.allSatisfy(NotificationInboxAdmissionPolicy.admits) else { return }
+                  snapshot.notifications.allSatisfy(NotificationInboxAdmissionPolicy.admits) else { return false }
             var window = current.window(filter)
             let existing = Set(window.rows.map(\.id))
             guard snapshot.notifications.allSatisfy({ !existing.contains($0.id) }),
                   window.rows.count + snapshot.notifications.count <= NotificationInboxAdmissionPolicy.maximumRetainedCount else {
-                failuresByProfile[profileID] = "Notification history changed. Refresh to try again."
-                return
+                return true
             }
             window.rows.append(contentsOf: snapshot.notifications)
             window.nextCursor = snapshot.nextCursor
@@ -443,22 +438,11 @@ final class NotificationInboxCoordinator {
             // did not cover the newest rows.
             current.unreadCount = snapshot.unreadCount
             buckets[profileID] = current
-            failuresByProfile.removeValue(forKey: profileID)
             persist()
-        } catch is CancellationError {
-            return
+            return false
         } catch {
-            guard !Task.isCancelled, windowRequestGenerations[windowID] == generation else { return }
-            // An older-page read is optional presentation work; errors remain in
-            // the owning inbox surface and never become a global mutation toast.
-            failuresByProfile[profileID] = (error as? GatewayFailure)?.message ?? "Notification history is unavailable."
+            return false
         }
-    }
-
-    func fail(profileID: String, generation: Int, message: String) {
-        guard requestGenerationByProfile[profileID] == generation else { return }
-        loadingProfileIDs.remove(profileID)
-        failuresByProfile[profileID] = message
     }
 
     @discardableResult
@@ -524,7 +508,6 @@ final class NotificationInboxCoordinator {
         buckets = buckets.filter { profileIDs.contains($0.key) }
         loadingProfileIDs.formIntersection(profileIDs)
         requestGenerationByProfile = requestGenerationByProfile.filter { profileIDs.contains($0.key) }
-        failuresByProfile = failuresByProfile.filter { profileIDs.contains($0.key) }
         persist()
     }
 

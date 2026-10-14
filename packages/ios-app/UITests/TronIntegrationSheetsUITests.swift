@@ -144,7 +144,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         app.buttons["Authorize X"].tap()
         XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), oauthCountersLabel(app))
         XCTAssertTrue(oauthCounters(app, contain: "client=true redirect=true"), oauthCountersLabel(app))
-        XCTAssertTrue(app.staticTexts["Completing setup…"].waitForExistence(timeout: 5), presentationTrace(app))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Completing setup…")).firstMatch.waitForExistence(timeout: 5), presentationTrace(app))
         XCUIDevice.shared.press(.home)
         app.activate()
 
@@ -171,7 +171,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         openXSetupThroughDashboardSettings(app)
         enterXClientAndCallback(app)
         app.buttons["Authorize X"].tap()
-        XCTAssertTrue(app.staticTexts["Completing setup…"].waitForExistence(timeout: 5), presentationTrace(app))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Completing setup…")).firstMatch.waitForExistence(timeout: 5), presentationTrace(app))
         XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1"), oauthCountersLabel(app))
 
         XCUIDevice.shared.press(.home); app.activate()
@@ -442,7 +442,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         app.textFields.element(boundBy: 1).tap()
         app.textFields.element(boundBy: 1).typeText("https://example.test/callback")
         app.buttons["Authorize X"].tap()
-        XCTAssertTrue(app.staticTexts["Completing setup…"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Completing setup…")).firstMatch.waitForExistence(timeout: 5))
         XCUIDevice.shared.press(.home)
         app.activate()
         XCTAssertTrue(app.buttons["Complete setup"].waitForExistence(timeout: 15), app.debugDescription)

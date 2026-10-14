@@ -240,9 +240,7 @@ struct SessionContextSheet: View {
                         settingsSection(snapshot)
                         exportSection
                     } else {
-                        TronLoadingState(label: "Loading session…")
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 40)
+                        TronSheetLoadingState(label: "Loading session…", accent: .tronEmerald)
                     }
                 }
                 .padding(18)
