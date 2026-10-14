@@ -761,9 +761,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             let link = app.buttons["settings-link-\(title)"]
             for _ in 0..<20 where !link.isHittable { app.swipeDown() }
             link.tap()
-            XCTAssertTrue(app.staticTexts[marker].waitForExistence(timeout: 30), "\(title) did not open: \(app.debugDescription)")
+            func labelled(_ text: String) -> XCUIElement {
+                app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
+            }
+            XCTAssertTrue(labelled(marker).waitForExistence(timeout: 30), "\(title) did not open: \(app.debugDescription)")
             if title == "Connections" {
-                XCTAssertFalse(app.staticTexts["Input needed"].exists, "push alerts moved to their own sheet")
+                XCTAssertFalse(labelled("Input needed").exists, "push alerts moved to their own sheet")
             }
             keepScreenshot(app, name: "939-\(name)")
             dismissTopSheet(app)
