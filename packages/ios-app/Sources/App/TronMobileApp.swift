@@ -65,6 +65,8 @@ struct TronMobileApp: App {
                 HostedAutomationFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-archive-fixture") {
                 HostedSessionArchiveFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-session-row-clock-fixture") {
+                HostedSessionRowClockFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-knowledge-detail-fixture") {
                 HostedKnowledgeDetailFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-integrations-fixture") {
