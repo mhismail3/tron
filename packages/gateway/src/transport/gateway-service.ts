@@ -1062,7 +1062,7 @@ export class GatewayService {
           // The key goes first: if removing it fails, the device stays paired
           // and the revoke can be retried, rather than a revoked iPhone keeping
           // a working SSH key.
-          if ((await this.dependencies.settingsModel.macTerminalKeys?.read())?.[deviceId] !== undefined) {
+          if ((await this.dependencies.settingsModel?.macTerminalKeys?.read())?.[deviceId] !== undefined) {
             await this.dependencies.settingsChanges.change({ kind: "mac" }, [{
               key: "permissions.macTerminalKey", qualifiers: { device: deviceId }, layer: "mac", op: "unset",
             }], {

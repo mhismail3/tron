@@ -50,6 +50,9 @@ afterEach(async () => {
 const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe", env: GIT_ENV }).toString();
 
+/** The paired iPhone whose Mac Terminal key the every-key case changes. */
+const ENROLLED_IPHONE = "00000000-0000-4000-8000-000000000001";
+
 /** A fresh OpenSSH ecdsa-sha2-nistp256 public key, as the iPhone's Secure Enclave key enrolls. */
 function macTerminalSampleKey(): string {
   const point = generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey.export({ format: "der", type: "spki" }).subarray(-65);
@@ -830,7 +833,7 @@ describe("every key at every allowed layer", () => {
     const project = await gitProject(f.root, "every");
     await f.trust.set(project, true);
     // An enrolled iPhone gives the Mac Terminal key its one Mac instance.
-    await f.macTerminalKeys.set("00000000-0000-4000-8000-000000000001", macTerminalSampleKey());
+    await f.macTerminalKeys.set(ENROLLED_IPHONE, macTerminalSampleKey());
     const slot = await f.registry.create(project);
     await slot.setModel(first.provider, first.id);
     const controls = [...CONTROLS];
@@ -909,7 +912,10 @@ describe("every key at every allowed layer", () => {
         }
         let applied: Awaited<ReturnType<typeof f.change>>;
         try {
-          applied = await f.change(targets[layer]!, request, extra, client([slot.id]));
+          // An iPhone enrolls only its own Mac Terminal key, so that key is changed as its device.
+          const actor = key.id === "permissions.macTerminalKey"
+            ? { ...client([slot.id]), identity: ENROLLED_IPHONE } as ClientContext : client([slot.id]);
+          applied = await f.change(targets[layer]!, request, extra, actor);
         } catch (error) {
           report.push({ ...instance, result: `refused: ${(error as Error).message}` });
           continue;
