@@ -457,7 +457,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-context"].exists, "Home's context is Manage Home's top card, not a sub-sheet")
-        for row in ["home-manage-memory-browser", "home-manage-chapters", "home-manage-tasks", "home-manage-permissions"] {
+        for row in ["home-manage-profile", "home-manage-memory-browser", "home-manage-chapters", "home-manage-tasks", "home-manage-permissions"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
         }
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-pause"].exists)
@@ -518,7 +518,7 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
         let windowHeight = app.windows.firstMatch.frame.height
-        for (row, done) in [("home-manage-memory-browser", "home-sheet-done-memory"),
+        for (row, done) in [("home-manage-profile", "home-sheet-done-profile"), ("home-manage-memory-browser", "home-sheet-done-memory"),
                             ("home-manage-chapters", "home-sheet-done-chapters"), ("home-manage-tasks", "home-sheet-done-tasks"),
                             ("home-manage-permissions", "home-sheet-done-permissions")] {
             tapManageRow(app, row)
