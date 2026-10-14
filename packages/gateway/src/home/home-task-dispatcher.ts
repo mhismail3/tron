@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import { clampThinkingLevel } from "@earendil-works/pi-ai";
 import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import type { GatewayWorkHandle } from "../sessions/gateway-work-registry.js";
@@ -12,12 +13,13 @@ import { HomeTaskAuthorization, HomeTaskAuthorizationError, type HomeTaskAuthori
 import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
 import { homeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
-import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
+import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, homeTaskOperationSpan, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
 import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
 import type { FixedSetting } from "../admin/settings-resolver.js";
 import { HOME_TASK_SUBAGENTS, HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, parseHomeTaskSubagentsEntry, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "./home-task-subagents.js";
 import type { HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
 import { basename } from "node:path";
+import { TRON_ASK_USER_INTERRUPTED } from "../extensions/tron-ask-user-contract.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { HostPressure, type HostPressureDiagnostic, type HostPressureLevel } from "./host-pressure.js";
 
@@ -54,6 +56,38 @@ export interface HomeTaskOwnerSettlement {
 }
 export type HomeTaskStatus = HomeTaskRecord & HomeTaskDisplay & { queuePosition: number | null; workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns; ownerSettlement: HomeTaskOwnerSettlement | null };
 export interface HomeTaskControlRequest { taskId: string; operationId: string }
+/** Resume a settled task in place: `taskId`/`operationId` name the stopped task's exact operation. */
+export interface HomeTaskResumeRequest extends HomeTaskControlRequest { text?: string }
+
+/** The one successor of a task: `<base>.resume-<n+1>` for `<base>.resume-<n>`, else `<id>.resume-1`. */
+export function successorTaskId(taskId: string): string {
+  const match = /^(.*)\.resume-([1-9][0-9]{0,5})$/u.exec(taskId);
+  const next = match ? `${match[1]}.resume-${Number(match[2]) + 1}` : `${taskId}.resume-1`;
+  if (next.length > 160) throw new GatewayError("conflict", "Task lineage is too long to resume again");
+  return next;
+}
+
+interface InterruptedQuestion { title: string; questions: unknown[] }
+/** The newest question the operation was stopped before it was answered, from the
+ * ask_user tool's own canonical record (it covers questions asked inside codemode). */
+function interruptedQuestion(run: readonly FileEntry[]): InterruptedQuestion | undefined {
+  const entry = run.findLast(candidate => candidate.type === "custom" && candidate.customType === TRON_ASK_USER_INTERRUPTED);
+  const data = entry?.type === "custom" ? entry.data as { title?: unknown; questions?: unknown } : undefined;
+  return data && typeof data.title === "string" && Array.isArray(data.questions) && data.questions.length > 0
+    ? { title: data.title, questions: data.questions } : undefined;
+}
+
+/** The resumed operation's brief. The authorized intent is this exact text. */
+function resumeBrief(previous: HomeTaskRecord, text: string | undefined, pending: InterruptedQuestion | undefined): string {
+  const parts = [`Continue Home task ${previous.taskId} in place. It stopped (${previous.terminalEvidence?.outcome ?? "unknown"}: ${previous.terminalEvidence?.reason ?? "unknown"}); this is the same worker session, so its worktree, branch and work claim are still yours. Pick up exactly where it stopped: re-check the state you were in before acting.`];
+  if (text) parts.push(`Instruction:\n${text}`);
+  if (pending) {
+    let question = JSON.stringify({ title: pending.title, questions: pending.questions }, null, 2);
+    if (Buffer.byteLength(question) > 24 * 1024) question = `${question.slice(0, 24 * 1024)}\n(truncated)`;
+    parts.push(`Your last ask_user question was interrupted before it was answered. Unless the instruction above already answers it, ask it again with ask_user, unchanged, before you continue:\n${question}`);
+  }
+  return parts.join("\n\n");
+}
 /** A started task names its worker and operation; a queued one has neither yet and a 1-based position. */
 export interface HomeTaskHandle { taskId: string; sessionId: string | null; operationId: string | null; queuePosition: number | null; completion: Promise<HomeTaskRecord> }
 /** The operation a queued task's Stop names: it has no worker operation yet. */
@@ -66,6 +100,9 @@ interface HomeTaskLaunch {
   task: HomeTaskRecord; authority: Awaited<ReturnType<HomeTaskAuthorization["authorize"]>>;
   input: HomeTaskDispatchRequest; title: string | undefined;
   choice: Awaited<ReturnType<RuntimeRegistry["admitTaskWorkerChoice"]>>; deferredThinking: HomeTaskDispatchRequest["thinking"];
+  /** A settled task continued in place (#929): its predecessor's worker session is rebound, not
+   * created or configured, and the maintainer's attachments go with the first prompt. */
+  resume?: { sessionId: string; images: ImageContent[]; exceptWorkToken?: string };
 }
 const reportDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
@@ -155,8 +192,7 @@ export class HomeTaskDispatcher {
             const entries = await this.sessions.readTaskEvidence(task.sessionId);
             const evidence = await this.reportEvidence(task, entries);
             report = evidence?.report; entryId = evidence?.entryId;
-            const marker = entries.findIndex(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
-            const runEntries = entries.slice(marker + 1);
+            const runEntries = homeTaskOperationSpan(entries, task.operationId).run;
             const observed = homeTaskSpend(runEntries);
             if (spend && (observed.inputTokens < spend.inputTokens || observed.outputTokens < spend.outputTokens)) throw new Error("Canonical spend regressed");
             spend = observed;
@@ -191,10 +227,12 @@ export class HomeTaskDispatcher {
   }
 
   private async reportEvidence(task: HomeTaskRecord, entries: readonly FileEntry[]): Promise<{ report: HomeTaskReport; entryId: string } | undefined> {
-    const markers = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
+    // A resumed task shares its predecessor's session: each operation owns exactly one marker and at most one report.
+    const ofOperation = (entry: FileEntry) => entry.type === "custom" && (entry.data as { operationId?: unknown } | null)?.operationId === task.operationId;
+    const markers = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER && ofOperation(entry));
     if (markers.length !== 1 || markers[0]?.type !== "custom" || !task.sessionId) throw new GatewayError("conflict", "Task marker is missing or contradictory");
     await this.validateMarkerEvidence(task.sessionId, markers[0].data);
-    const reports = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_REPORT);
+    const reports = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_REPORT && ofOperation(entry));
     if (reports.length > 1) throw new GatewayError("conflict", "Conflicting canonical task reports");
     const entry = reports[0];
     if (!entry || entry.type !== "custom") return undefined;
@@ -262,6 +300,68 @@ export class HomeTaskDispatcher {
       terminalEvidence: { outcome: "unknown", sessionId: current.sessionId, entryIds: [], reason } });
     this.transition(final, reason);
     await this.inbox.publish(final.taskId);
+  }
+
+  /** Continues a settled task in place (#929): a successor task bound to the same worker
+   * session, so its worktree and work claim stay with it. The stopped task's record stays
+   * immutable; each task has at most one successor, so a lineage never forks. `text` is the
+   * maintainer's or Home's instruction; the brief restates any question the run was
+   * stopped before it was answered. A resume takes a running-worker reservation but never
+   * waits in the queue: the maintainer or Home continues a worker that already exists. */
+  async resume(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest,
+    options: { signal?: AbortSignal; exceptWorkToken?: string; images?: ImageContent[] } = {}): Promise<HomeTaskHandle> {
+    const { signal } = options;
+    if (signal?.aborted) throw new HomeTaskDispatchStageError("choice", "cancelled");
+    await this.assertAvailable();
+    const registry = this.sessions.administrativeWorkRegistry;
+    const work = registry.begin({ kind: "queued-mutation", hostEpoch: registry.runtimeEpoch });
+    try {
+      const handle = await this.resumeOwned(identity, request, work, options);
+      const completion = handle.completion.finally(() => work.settle());
+      void completion.catch(() => {});
+      return { ...handle, completion };
+    } catch (error) { work.settle(); throw error; }
+  }
+
+  private async resumeOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest, work: GatewayWorkHandle,
+    options: { signal?: AbortSignal; exceptWorkToken?: string; images?: ImageContent[] }): Promise<HomeTaskHandle> {
+    const { signal } = options;
+    const text = request.text?.trim();
+    if (typeof request.taskId !== "string" || typeof request.operationId !== "string"
+      || (request.text !== undefined && (typeof request.text !== "string" || Buffer.byteLength(request.text) > 32768))) throw new GatewayError("invalid_request", "Invalid task resume");
+    const previous = await this.store.read(request.taskId).catch(error => {
+      if (error instanceof HomeTaskStoreError && error.code === "not-initialized") return undefined;
+      throw error;
+    });
+    if (!previous) throw new GatewayError("not_found", "No task with this id");
+    if (previous.homeId !== identity.homeId) throw new GatewayError("conflict", "Home task identity changed");
+    if (previous.lifecycle !== "terminal" || previous.operationId !== request.operationId || !previous.sessionId)
+      throw new GatewayError("conflict", "Only a settled task with a worker session can be resumed in place");
+    const sessionId = previous.sessionId;
+    const taskId = successorTaskId(previous.taskId);
+    if (await this.stage("lookup", taskId, signal, () => this.store.read(taskId))) throw new GatewayError("conflict", `Task was already resumed as ${taskId}`);
+    const epoch = await this.stage("setup", taskId, signal, () => this.store.restoreEpoch());
+    const budget = await this.stage("budget", taskId, signal, () => this.sessions.homeTaskBudget());
+    const entries = await this.sessions.readTaskEvidence(sessionId);
+    const brief = resumeBrief(previous, text, interruptedQuestion(homeTaskOperationSpan(entries, previous.operationId!).run));
+    const task = await this.stage("create", taskId, signal, () => this.store.put({
+      version: 1, taskId, revision: 1, homeId: identity.homeId, generation: identity.generation, routeGeneration: identity.routeGeneration, wake: null,
+      intent: { text: brief }, intentDigest: taskIntentDigest(brief), target: previous.target,
+      grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
+      stopIntent: null, spend: null, reportRef: null, terminalEvidence: null,
+      resumes: { taskId: previous.taskId, operationId: previous.operationId! },
+      ...(budget && Object.keys(budget).length ? { budget } : {}),
+    }, null), created => { this.transition(created, "created"); void this.refuseAdmission(created, "admission-cancelled").catch(() => {}); });
+    this.transition(task, "created");
+    let authority: Awaited<ReturnType<HomeTaskAuthorization["authorize"]>>;
+    try {
+      authority = await this.stage("authorize", taskId, signal, () => this.authorization.authorize({ intentDigest: task.intentDigest,
+        target: task.target, authorizationScope: "full-work", restoreEpoch: epoch }));
+      if (epoch !== await this.stage("restore-epoch", taskId, signal, () => this.store.restoreEpoch())) throw new GatewayError("conflict", "Task namespace identity changed during admission");
+    } catch (error) { await this.admissionFailed(task, error); throw error; }
+    this.reserved.add(taskId);
+    return this.launch({ task, authority, input: { taskId, intent: brief, target: task.target }, title: undefined, choice: {}, deferredThinking: undefined,
+      resume: { sessionId, images: options.images ?? [], ...(options.exceptWorkToken ? { exceptWorkToken: options.exceptWorkToken } : {}) } }, work, signal);
   }
 
   private async startOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle, signal: AbortSignal | undefined): Promise<HomeTaskHandle> {
@@ -350,19 +450,23 @@ export class HomeTaskDispatcher {
         const current = await this.sessions.homeTaskBudget().catch(() => undefined);
         const limit = (field: "inputTokens" | "outputTokens") => Math.min(task.budget?.[field] ?? Infinity, current?.[field] ?? Infinity);
         if (limit("inputTokens") === Infinity && limit("outputTokens") === Infinity) return false;
-        const marker = entries.findIndex(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER
-          && (entry.data as { operationId?: string }).operationId === operationId);
-        if (marker < 0) return false;
+        const span = homeTaskOperationSpan(entries, operationId);
+        if (span.index < 0) return false;
         // The same canonical projection the record publishes; never a second counter.
         let spend: ReturnType<typeof homeTaskSpend>;
-        try { spend = homeTaskSpend(entries.slice(marker + 1)); } catch { return false; }
+        try { spend = homeTaskSpend(span.run); } catch { return false; }
         return spend.inputTokens >= limit("inputTokens") || spend.outputTokens >= limit("outputTokens");
       });
       const dispatch = new OwnedSessionDispatch(this.sessions);
       // Trust is rechecked by the neutral creation/admission boundary too.
       // A worker created after admission was refused is released, never prompted.
-      lease = await this.stage("create-worker", taskId, signal, () => dispatch.createWorker(task.target, reports), late => late.release());
+      const resume = launch.resume;
+      lease = resume
+        // A resumed task rebinds its predecessor's worker session in place (#929).
+        ? await this.stage("create-worker", taskId, signal, () => dispatch.resumeWorker(resume.sessionId, reports, resume.exceptWorkToken), late => late.release())
+        : await this.stage("create-worker", taskId, signal, () => dispatch.createWorker(task.target, reports), late => late.release());
       const { slot } = lease;
+      const appliedChoice = resume ? "" : await (async () => {
       const configured = await this.stage("configure-worker", taskId, signal, async () => {
       // Name the worker before its first prompt; the slot persists the canonical transcript entry.
       if (title) await slot.rename(title);
@@ -389,6 +493,8 @@ export class HomeTaskDispatcher {
       const appliedChoice = input.provenance
         ? `\n\nWorker at start: ${model ? `${model.provider}/${model.id}` : "worker default"}; thinking ${slot.snapshot().thinkingLevel}${clamped ? `; ${clamped}` : ""}.`
         : "";
+      return appliedChoice;
+      })();
       task = { ...task, revision: task.revision + 1, lifecycle: "active", sessionId: slot.id, operationId,
         grantRef: authority.kind === "one-use-grant" ? authority.grantId : null,
         scopeRef: authority.kind === "standing-scope" ? authority.scopeId : null };
@@ -410,7 +516,7 @@ export class HomeTaskDispatcher {
       deadline = dispatch.armDeadline();
       const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation }, deadline);
       work.transition("foreground-agent-operation");
-      const admitted = dispatch.admit(slot, `${task.intent.text}${appliedChoice}\n\nThis is a finite Home task. Use report with explicit evidence to finish. A normal reply is not a task result.`, [], undefined, undefined, undefined,
+      const admitted = dispatch.admit(slot, `${task.intent.text}${appliedChoice}\n\nThis is a finite Home task. Use report with explicit evidence to finish. A normal reply is not a task result.`, launch.resume?.images ?? [], undefined, undefined, undefined,
         { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
       void admitted.catch(async () => {
         await cancellation("admission-refused").catch(() => {});
@@ -435,9 +541,7 @@ export class HomeTaskDispatcher {
         // Spend and last-reply evidence remain selected-branch projections;
         // immutable report addresses are qualified across the durable file.
         const entries = cut.state === "present" ? cut.branch : [];
-        const markerIndex = entries.findIndex(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER
-          && (entry.data as { operationId?: string }).operationId === operationId);
-        const runEntries = markerIndex < 0 ? [] : entries.slice(markerIndex + 1);
+        const runEntries = homeTaskOperationSpan(entries, operationId).run;
         const evidence = cut.state === "present" ? await this.reportEvidence(active, cut.entries) : undefined;
         const report = evidence?.report;
         const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
@@ -613,6 +717,18 @@ export class HomeTaskDispatcher {
     await slot.steerHomeTask(control, control.text);
   }
 
+  /** The current task of a worker session: the newest bound to it. Tasks resumed in place
+   * share their predecessor's session, and each task has at most one successor. */
+  async latestTaskForSession(sessionId: string): Promise<HomeTaskRecord | undefined> {
+    await this.assertAvailable();
+    let latest: HomeTaskRecord | undefined;
+    for await (const task of this.store.records()) {
+      if (task.sessionId !== sessionId) continue;
+      if (!latest || task.createdAt > latest.createdAt || (task.createdAt === latest.createdAt && task.resumes?.taskId === latest.taskId)) latest = task;
+    }
+    return latest;
+  }
+
   async stop(control: HomeTaskControlRequest): Promise<void> {
     await this.assertAvailable();
     if (control.operationId === HOME_TASK_QUEUED_OPERATION && await this.stopQueued(control.taskId)) return;
@@ -654,10 +770,14 @@ export class HomeTaskDispatcher {
       || task.terminalEvidence.sessionId !== task.sessionId) return null;
     try {
       const entries = await this.sessions.readTaskEvidence(task.sessionId);
-      const markers = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
-      const terminals = entries.filter(entry => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
+      // The operation's own span: a resumed successor appends its operation after it.
+      const span = homeTaskOperationSpan(entries, task.operationId);
+      if (span.index < 0) return null;
+      const operation = [entries[span.index]!, ...span.run];
+      const markers = operation.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
+      const terminals = operation.filter(entry => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
         && (entry.data as { receiptKind?: unknown } | null)?.receiptKind === "terminal");
-      const settlements = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_SUBAGENTS);
+      const settlements = operation.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_SUBAGENTS);
       if (markers.length !== 1 || terminals.length !== 1 || settlements.length !== 1) return null;
       const marker = markers[0]!, terminal = terminals[0]!, settlement = settlements[0]!;
       if (marker.type !== "custom" || terminal.type !== "custom" || settlement.type !== "custom") return null;
@@ -670,7 +790,7 @@ export class HomeTaskDispatcher {
         || receipt.sessionId !== task.sessionId || receipt.source !== "plain" || receipt.lifecycle === "outcomeUnknown"
         || receipt.receiptId !== `terminal:${receipt.invocationId}` || receipt.origin?.kind !== "gateway"
         || receipt.origin.ownerId !== task.taskId || receipt.origin.confidence !== "boundary") return null;
-      const starts = entries.filter(entry => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
+      const starts = operation.filter(entry => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
         && (entry.data as { receiptKind?: unknown } | null)?.receiptKind === "start");
       if (starts.length !== 1 || starts[0]?.type !== "custom") return null;
       const start = parseInvocationReceipt(starts[0].data);
@@ -681,7 +801,7 @@ export class HomeTaskDispatcher {
       const fact = parseHomeTaskSubagentsEntry(settlement.data, task.operationId);
       if (fact.stoppedAtEnd === null || entries.indexOf(marker) >= entries.indexOf(terminal)
         || entries.indexOf(starts[0]) >= entries.indexOf(terminal) || entries.indexOf(terminal) >= entries.indexOf(settlement)
-        || entries.at(-1)?.id !== settlement.id) return null;
+        || operation.at(-1)?.id !== settlement.id) return null;
       const counts = homeTaskSubagentsProjection(entries, task.operationId);
       if (fact.stoppedAtEnd > counts.started) return null;
       return { taskId: task.taskId, sessionId: task.sessionId, operationId: task.operationId,
@@ -770,10 +890,7 @@ export class HomeTaskDispatcher {
         if (current.lifecycle !== "active") return current;
         // Read canonical deltas while this publication owns the store mutex;
         // an older status read cannot replace a newer usage projection.
-        const entries = slot.canonicalSessionEntries();
-        const marker = entries.findIndex(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER
-          && (entry.data as { operationId?: string }).operationId === current.operationId);
-        const spend = homeTaskSpend(marker < 0 ? [] : entries.slice(marker + 1));
+        const spend = homeTaskSpend(homeTaskOperationSpan(slot.canonicalSessionEntries(), current.operationId!).run);
         return JSON.stringify(current.spend) === JSON.stringify(spend) ? current : { ...current, spend };
       });
       this.diagnostic?.({ event: "home.task.spend", taskHash: hash(task.taskId), spendReference: `${hash(task.taskId)}:${task.revision}`,

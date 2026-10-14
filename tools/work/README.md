@@ -185,6 +185,24 @@ within a 20-second overall budget; every request gets only what remains of it:
   owner-status deadline`.
 
 Only `release` accepts `absent`; `handoff` and `recover` still require `settled`.
+
+The tooling builds the helper it runs: the build is stamped with the Git tree of
+`packages/gateway/src` it came from, and a missing, stale or uncommitted-source build is
+rebuilt under a lock before use (#924), so a stale helper is never read as an
+indeterminate owner. `work-owner-status.js --home-task <session>` prints `{state: "live",
+reason, taskId}` when a non-terminal Home task is bound to the session, else
+`{state: "none", reason}`.
+
+**Settled-owner successors (#929).** `start` on an issue claimed by another session hands
+the claim over automatically, with the ordinary audited `handoff` (claim trailer and issue
+comment), when the owner is `settled` and the caller runs a live Home task. Any other owner
+state refuses with its verdict; a settled owner and a caller that runs no Home task refuse
+with the `handoff` command to use. A task resumed in place keeps its session, so it keeps
+its claim with no transfer. Claim identity comes from `--session`, `WORK_SESSION_ID` or
+`PI_SESSION_ID`; a terminal opened from a chat inherits that chat's `PI_SESSION_ID`, so a
+maintainer running `handoff` from Home's terminal once claimed for Home's own chapter
+session. `handoff --force-maintainer` therefore requires `--session` (or `WORK_SESSION_ID`)
+and refuses an identity inherited only from `PI_SESSION_ID`.
 `home.taskList` used to cost O(catalog) per row (#905): live rows built a whole session
 snapshot to read the worker name, and settled rows rebuilt the catalog acquisition. On
 the Stable Gateway a 50-row page took 6.3 s against the helper's old 4 s per-request cap,

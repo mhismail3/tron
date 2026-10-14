@@ -1356,7 +1356,19 @@ the host-wide heavy-run queue and the host-pressure signal (#915).
 - **Task control.** `home.taskList`, `home.taskStatus`, `home.steerTask` and `home.stopTask` expose durable spend
   and shared control. A list row reads its worker's name without building a session snapshot or a catalog
   acquisition, so a page stays cheap however large the catalog or the live transcripts are. Terminal `/home task`, `/home steer` and `/home stop` target one task. Steering shares the
-  session lane; Stop persists exact intent and cancels outside blocked admission. Canonical usage identities dedupe
+  session lane; Stop persists exact intent and cancels outside blocked admission. The maintainer's chat messages to a
+  running worker join that same ordered steering lane (a follow-up becomes steering), and Home's steering or the
+  maintainer's message also starts the held task's next turn while it waits between turns for its subagent runs.
+- **Resume in place (#929).** A settled task (stopped, interrupted, limited or reported) continues as its one
+  successor task `<id>.resume-<n>`, bound to the same worker session, so its worktree and work claim (claims name
+  the session) stay with it. Home's `task` tool action `resume` and a maintainer message sent in the stopped
+  worker's chat both resume it; the message becomes the resume instruction. The stopped record stays immutable and
+  each task has at most one successor. The worker slot is rebound to the new operation's report owner in place,
+  so viewers keep their subscription. Each operation owns the canonical span from its marker to the next marker,
+  so reports, spend, subagent counts and settlement proof never mix operations. A question `ask_user` was asking
+  when its run stopped (also inside codemode) is recorded as a `tron.ask-user.interrupted.v1` custom entry, and
+  the resume brief restates it so the worker asks it again. Journeys: `src/home/home-task-continuity.e2e.test.ts`.
+  Canonical usage identities dedupe
   tokens before display. Task results never trigger an automatic Home call: terminal tasks co-commit a durable inbox
   event, delivered on the next maintainer Home message, and make one advisory push decision at most.
 - **Protocol.** `home.v1` is advertised in `hello` and `system.info`. `home-memory-view.v1` additionally gates the

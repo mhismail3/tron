@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import claim as claims
+import handoff
 from gh import Gh
 import warm
 
@@ -92,6 +93,29 @@ def session_of(explicit: Optional[str]) -> str:
     raise claims.ClaimError("no session identity: pass --session or set WORK_SESSION_ID")
 
 
+def _take_over_settled_claim(gh: Gh, cwd: Path, config: dict, number: int, session: str, others: list) -> bool:
+    """A Home task successor takes over the claim of a provably settled owner (#929).
+
+    The Gateway's durable task state is the proof: the old owner's Home task is settled and
+    this session runs a live Home task, so no maintainer `--force-maintainer` is needed.
+    The transfer is the ordinary audited `handoff` (claim trailer and issue comment). Live,
+    unknown and indeterminate owners still refuse, naming the verdict.
+    """
+    owners = ", ".join(f"{c.branch} (session {c.session or 'unknown: no claim commit'})" for c in others)
+    if len(others) != 1 or not others[0].session:
+        raise claims.ClaimError(f"#{number} is already claimed: {owners}")
+    old = others[0].session
+    state, why = handoff.owner_status(old)
+    if state != "settled":
+        raise claims.ClaimError(f"#{number} is already claimed: {owners}; owner is {state} ({why})")
+    task, reason = handoff.home_task(session)
+    if task is None:
+        raise claims.ClaimError(f"#{number} is claimed by settled owner {old}; this session runs no live Home task ({reason}), "
+                                f"so take it over with `scripts/tron work handoff {number} --reason TEXT`")
+    handoff.run(gh, cwd, config, number, session, False, f"successor Home task {task} takes over from settled owner: {why}"[:500])
+    return True
+
+
 def load_issue(gh: Gh, owner: str, name: str, number: int, rules: dict, project_title: str) -> dict:
     query = _ISSUE.replace("__FIELD__", rules["statusField"])
     raw = gh.graphql(query, owner=owner, name=name, number=number)["repository"]["issue"]
@@ -161,8 +185,11 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
     mine = [c for c in existing if c.session == session]
     others = [c for c in existing if c.session != session]
     if others and not mine:
-        owners = ", ".join(f"{c.branch} (session {c.session or 'unknown: no claim commit'})" for c in others)
-        raise claims.ClaimError(f"#{number} is already claimed: {owners}")
+        if _take_over_settled_claim(gh, cwd, config, number, session, others):
+            existing = claims.existing_claims(cwd, remote, default_base, number)
+            mine = [c for c in existing if c.session == session]
+        if not mine:
+            raise claims.ClaimError(f"#{number} was handed off but its claim does not name {session}")
 
     primary = primary_checkout(cwd)
     root = (primary / rules["worktreeRoot"]).resolve()

@@ -940,6 +940,9 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let outputTruncated: Bool
     let nestedCallCount: Int
     let nestedFailureCount: Int
+    /// A nested `ask_user` call (for example from codemode) is still running inside this
+    /// call, so its pending question opens from this row (#929).
+    let hostsRunningNestedAskUser: Bool
     let display: DisplayProjection?
     let requestedDisplaySurface: DisplaySurface?
     let extensionOrigin: ExtensionToolOrigin?
@@ -966,6 +969,9 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         // The Gateway bounds the list; the chip counts the calls the sheet lists.
         nestedCallCount = nested.count
         nestedFailureCount = nested.filter { $0.objectValue?["status"]?.stringValue == "failed" }.count
+        hostsRunningNestedAskUser = nested.contains {
+            $0.objectValue?["toolName"]?.stringValue == "ask_user" && $0.objectValue?["status"]?.stringValue == "running"
+        }
         display = tool.display
         requestedDisplaySurface = tool.display.map(DisplayPresentationPolicy.effectiveSurface)
             ?? DisplayPresentationPolicy.invocationSurface(toolName: tool.toolName, request: tool.request)

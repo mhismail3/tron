@@ -1,3 +1,4 @@
+import type { ImageContent } from "@earendil-works/pi-ai";
 import { HOME_TASK_RESULT_MESSAGE, HOME_WAKE_CEILING, isWakeEvidence, WakeInboxOwner, type HomeWakeDelivery, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
 import { visitCanonicalSessionEntries } from "../episodic/episodic-source.js";
 import type { NotificationService } from "../notifications/notification-service.js";
@@ -5,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
-import { HomeTaskDispatcher, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest } from "./home-task-dispatcher.js";
+import { HomeTaskDispatcher, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
 import type { HomeTaskSubagents } from "./home-task-subagents.js";
 import { HOME_CHAPTER_TOPIC_COUNT, HOME_CHAPTER_TOPIC_LIST_CHARACTERS, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
@@ -330,11 +331,37 @@ export class HomeOwner {
       if (end === request.offset && end < bytes.length) throw new GatewayError("invalid_request", "Report page is too small for the next UTF-8 character");
       return { taskId: task.taskId, offset: request.offset, bytes: bytes.length, text: bytes.subarray(request.offset, end).toString("utf8"), nextOffset: end < bytes.length ? end : null };
     }
+    if (request.action === "resume") {
+      const resumed = await this.resumeTask({ taskId: request.taskId, operationId: request.operationId, ...(request.text === undefined ? {} : { text: request.text }) }, sessionId);
+      return { accepted: true, taskId: resumed.taskId, sessionId: resumed.sessionId, operationId: resumed.operationId };
+    }
     if (request.action !== "steer" && request.action !== "stop") throw new GatewayError("invalid_request", "Unknown Home task action");
     if (task.generation !== record.generation) throw new GatewayError("conflict", "Home task generation changed");
     if (request.action === "steer") await this.steerTask(sessionId, request);
     else await this.stopTask(request);
     return { accepted: true };
+  }
+
+  /** Resumes a settled task in place as its successor (#929): from Home's task tool or the
+   * maintainer's Continue. The result wakes this Home like any task's. */
+  async resumeTask(request: HomeTaskResumeRequest, sessionId?: string, workToken?: string, images: ImageContent[] = []) {
+    await this.taskOwner();
+    const record = this.record;
+    if (this.unavailable || !record?.enabled || (sessionId !== undefined && homeSessionId(record) !== sessionId)) {
+      throw new GatewayError("conflict", "Task resume is unavailable for this Home");
+    }
+    return this.tasks.resume({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, request, { ...(workToken ? { exceptWorkToken: workToken } : {}), images });
+  }
+
+  /** A maintainer message to a Home worker whose task has settled continues that task in
+   * place with the message as its instruction, instead of being refused (#929). */
+  async resumeWorkerSession(workerSessionId: string, text: string, workToken?: string, images: ImageContent[] = []) {
+    const task = await (await this.taskOwner()).latestTaskForSession(workerSessionId);
+    if (!task) throw new GatewayError("conflict", "This session runs no Home task");
+    if (task.lifecycle !== "terminal" || !task.operationId) {
+      throw new GatewayError("busy", "The worker's task is still settling; send the message again in a moment", true);
+    }
+    return this.resumeTask({ taskId: task.taskId, operationId: task.operationId, text }, undefined, workToken, images);
   }
 
   async maintainTask(control: HomeTaskControlRequest & { text: string }): Promise<void> {
