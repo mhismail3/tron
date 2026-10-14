@@ -333,8 +333,11 @@ commands, or promote/restart a Gateway as part of this process.
 ### Tron-patched `pi-coding-agent`
 
 The Gateway needs the SDK's `projectDir` option (the Project layer is the
-worktree root's `.pi/`, see [Project root](#project-root)), which no published
-release has. Until one does, `pi-coding-agent` comes from a Tron-built tarball
+worktree root's `.pi/`, see [Project root](#project-root)) and an `AgentSession`
+that dequeues a delivered image-only steer or follow-up (upstream removes a
+delivered queue entry only when its text is non-empty, so a photo-only queued
+message stayed in Pi's queue and in every snapshot's `queuedItems`, #974). No
+published release has either. Until one does, `pi-coding-agent` comes from a Tron-built tarball
 instead of the registry, at the same version as the rest of the family.
 `pi-coding-agent-patch.json` is its only owner. It records the upstream tag and
 commit, the published tarball's integrity, the upstream proposal commit the patch
@@ -368,7 +371,7 @@ the declaration's `version`, `upstream`, `modelData` and artifact path, rebasing
 the patch onto that tag, and running `--write`.
 
 `npm run update:pi-sdk` refuses while the declaration exists. When a release
-ships `projectDir` (the declaration's `removeWhen`), remove the patch in one
+ships both changes (the declaration's `removeWhen`), remove the patch in one
 change: set `pi-coding-agent` in `package.json` back to the exact release
 version, delete `pi-coding-agent-patch.json`, `third_party/pi-coding-agent/`,
 `scripts/build-pi-coding-agent-patch.mjs` and its `reproduce:pi-coding-agent`

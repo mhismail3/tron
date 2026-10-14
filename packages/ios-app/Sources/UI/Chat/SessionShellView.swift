@@ -1781,10 +1781,7 @@ struct HistoricalSessionRow: View {
                         .foregroundStyle(Color.tronEmerald)
                         .accessibilityHidden(true)
                 }
-                Text(trailingStatus)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(activity == .waitingForUser ? Color.tronAmber : Color.tronTextMuted)
-                    .lineLimit(1)
+                SessionRowRelativeTime(text: trailingStatus, isWaiting: activity == .waitingForUser)
             }
         }
         .padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)

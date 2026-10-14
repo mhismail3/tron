@@ -3,12 +3,12 @@
   "package": "@earendil-works/pi-coding-agent",
   "version": "1.0.4",
   "artifact": {
-    "path": "third_party/pi-coding-agent/pi-coding-agent-1.0.4-tron.1.tgz",
-    "integrity": "sha512-aMe99yFsaVWWgLbMCuEVOKqxCnxh5O2PK+x2j/1cvTwyb0ypbhsI3sEbGmIjtZubZOy3gWlxpJcFpGuVTVtqdw=="
+    "path": "third_party/pi-coding-agent/pi-coding-agent-1.0.4-tron.2.tgz",
+    "integrity": "sha512-Bnm51bcqEZrs5NLxANu08gRgWpSjStVV0xPSgWxC+PsCG7b8t9qxzJm6VdjtQajYtkVssvGUUcVl1PYdQ9uZ9w=="
   },
   "patch": {
-    "path": "third_party/pi-coding-agent/project-dir.patch",
-    "sha256": "2e8a5b21dacc3ceb6b85d3d84fb9c5ce2c822cc81c9d0b7c7d747c5eac98e32b"
+    "path": "third_party/pi-coding-agent/tron.patch",
+    "sha256": "fb715c9f748669852b635d5e6d046065fb1592640af5359b1b8601a7317025cf"
   },
   "license": {
     "path": "third_party/pi-coding-agent/LICENSE",
@@ -31,5 +31,5 @@
     "node": "22.22.0",
     "npm": "10.9.4"
   },
-  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
+  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts) and dequeues delivered image-only (empty-text) queued messages, remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
 }
