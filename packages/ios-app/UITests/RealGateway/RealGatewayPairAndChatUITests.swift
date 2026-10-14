@@ -433,6 +433,96 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         )], timeout: 90), .completed, "the large-text route did not reconnect on its own")
     }
 
+    /// #935: reopening a running session whose agent waits on `ask_user`
+    /// presents the form as soon as the transcript crosses its first ready
+    /// frame. Sending the answers must leave that mounted transcript alone: no
+    /// second opening attempt, no hidden-then-revealed transcript (the reported
+    /// flicker and reload), the same rows, and the newest reply visible at the
+    /// tail. A loaded phone can commit the form's cover before the opening
+    /// task has drained; the hosted hold argument keeps that tail alive for a
+    /// bounded number of frames so the journey always takes that order. The
+    /// hosted lifecycle element is a monotonic per-route counter, so a
+    /// transient reopen cannot slip between two polls.
+    @MainActor
+    func testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let firstRun = launchApp()
+        open(fixture.invitationLink())
+        completeFirstRunSetup(firstRun, inWorkspace: fixture.workspace)
+        XCTAssertTrue(
+            waitForHittable(firstRun.buttons["dashboard.menu"], timeout: 90),
+            "the invitation link and setup did not reach the dashboard: \(firstRun.debugDescription)"
+        )
+        createSession(firstRun, inWorkspace: fixture.workspace)
+
+        // One completed turn persists the session, so the dashboard lists it
+        // while the next turn is still running (a session whose first turn is
+        // still running can be missing from the catalog: #944).
+        let composer = firstRun.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60), firstRun.debugDescription)
+        composer.tap()
+        composer.typeText("Start the conversation.")
+        let send = firstRun.buttons["Send message"]
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), "the composer never accepted the prompt: \(firstRun.debugDescription)")
+        send.tap()
+        XCTAssertTrue(
+            firstRun.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+                .waitForExistence(timeout: 120),
+            "the first turn never completed: \(firstRun.debugDescription)"
+        )
+
+        // The fixture model answers this marker with an ask_user call and waits.
+        composer.tap()
+        composer.typeText("Fixture ask journey: ask me where to deploy.")
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), "the composer never accepted the ask prompt: \(firstRun.debugDescription)")
+        send.tap()
+        XCTAssertTrue(firstRun.buttons["Submit all answers"].waitForExistence(timeout: 90),
+                      "the running agent's ask_user form never appeared: \(firstRun.debugDescription)")
+
+        // Leave the question pending and the agent running, then open the
+        // running session again from the dashboard of the relaunched,
+        // still-paired app. The hold argument applies to this launch only.
+        firstRun.terminate()
+        let app = launchApp(resettingState: false, additionalArguments: ["--tron-hosted-hold-opening-tail"])
+        defer { app.terminate() }
+        let sessionRow = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")
+        ).firstMatch
+        XCTAssertTrue(waitForHittable(sessionRow, timeout: 90), app.debugDescription)
+        sessionRow.tap()
+        let submit = app.buttons["Submit all answers"]
+        XCTAssertTrue(waitForHittable(submit, timeout: 90),
+                      "the reopened running session did not present its pending form: \(app.debugDescription)")
+
+        let lifecycle = app.descendants(matching: .any)["chat.hosted.presentation-lifecycle"]
+        XCTAssertTrue(lifecycle.waitForExistence(timeout: 30), app.debugDescription)
+        let openedLifecycle = lifecycle.value as? String
+        XCTAssertEqual(openedLifecycle, "attempts=1 ready-exits=0",
+                       "the reopened route must reach ready in one opening before the form covers it")
+        let prompt = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fixture ask journey")).firstMatch
+        XCTAssertTrue(prompt.exists, "the reopened transcript does not show the prompt: \(app.debugDescription)")
+        keepScreenshot(app, name: "935-reopened-running-session-ask-user-form")
+
+        app.buttons["Staging"].tap()
+        XCTAssertTrue(waitForEnabled(submit, timeout: 30), "the form never admitted the answer: \(app.debugDescription)")
+        submit.tap()
+        XCTAssertTrue(waitForAbsence(submit, timeout: 60), "the answered form did not dismiss: \(app.debugDescription)")
+        let reply = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Ask journey answered")
+        ).firstMatch
+        XCTAssertTrue(reply.waitForExistence(timeout: 90),
+                      "the agent's reply to the answer never reached the transcript: \(app.debugDescription)")
+        // Still pinned to the newest content, without any user scroll.
+        XCTAssertTrue(waitForHittable(reply, timeout: 30),
+                      "the transcript left the tail after the answer: \(app.debugDescription)")
+        keepScreenshot(app, name: "935-answered-ask-user-transcript-mounted")
+        XCTAssertEqual(lifecycle.value as? String, openedLifecycle,
+                       "answering the form reopened or re-revealed the mounted transcript")
+        XCTAssertTrue(prompt.exists, "answering the form dropped the earlier transcript rows")
+        XCTAssertFalse(app.otherElements["Opening conversation"].exists)
+    }
+
     @MainActor
     func testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs() throws {
         continueAfterFailure = false
@@ -1284,13 +1374,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// a user's first launch has, which the journey then drives through the
     /// production scene.
     @MainActor
-    private func launchApp() -> XCUIApplication {
+    private func launchApp(resettingState: Bool = true, additionalArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = [
-            "--tron-reset-ui-test-state",
+        app.launchArguments = (resettingState ? ["--tron-reset-ui-test-state"] : []) + [
             "-ApplePersistenceIgnoreState",
             "YES",
-        ]
+        ] + additionalArguments
         app.launch()
         return app
     }
@@ -1429,6 +1518,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             object: app
         )
         return XCTWaiter().wait(for: [foreground], timeout: timeout) == .completed
+    }
+
+    private func waitForAbsence(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let absent = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
+        return XCTWaiter().wait(for: [absent], timeout: timeout) == .completed
     }
 
     private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
