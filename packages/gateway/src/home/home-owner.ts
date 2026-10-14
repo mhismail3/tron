@@ -343,7 +343,7 @@ export class HomeOwner {
     if (action === "status") return { control: await owner.controlRow(named, await this.continuation(named)), ...await this.taskStatus(taskId) };
     if (action === "report") {
       const offset = request.offset ?? 0, limit = request.limit ?? 4096;
-      if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 4096) throw new GatewayError("invalid_request", "task report: offset must be 0 or more and limit 1 to 4096 bytes");
+      if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 4096) throw new GatewayError("invalid_request", "task report: invalid page: offset must be 0 or more and limit 1 to 4096 bytes");
       if (named.lifecycle !== "terminal") throw new GatewayError("conflict", `task report: "${taskId}" is ${named.lifecycle === "active" ? "still running" : "not started yet"}; it has no report until it settles`);
       const { text } = await this.immutableTaskReport(taskId);
       const bytes = Buffer.from(text);
