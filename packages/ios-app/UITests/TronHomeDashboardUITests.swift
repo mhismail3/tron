@@ -24,6 +24,8 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertFalse(app.buttons["home-pinned-row"].exists, "The floating button replaces the pinned row")
 
         app.swipeUp()
+        // Unviewed is every settled unread session, including an ordinary chat.
+        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:chat-unread"].waitForExistence(timeout: 5), app.debugDescription)
         let viewMore = element(app, "home-completed-view-more")
         XCTAssertTrue(viewMore.waitForExistence(timeout: 5), app.debugDescription)
         keep("01-home-dashboard-scrolled")

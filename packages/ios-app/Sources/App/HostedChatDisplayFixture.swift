@@ -1257,10 +1257,12 @@ enum HostedHomeDashboardWorkers {
         worker("worker-unread-1", "Weekly reading digest", cwd: "/work/knowledge", ago: 5_400, unread: true),
         worker("worker-unread-2", "Mac reinstall preflight", cwd: "/work/tron", ago: 604_800, unread: true),
         worker("worker-unread-3", "Photo library dedupe plan", cwd: "/work/home", ago: 1_209_600, unread: true),
+        // An ordinary unread chat: no Home task names it, yet it joins the Unviewed queue.
+        worker("chat-unread", "Apple Watch app", cwd: "/work/tron", ago: 1_814_400, unread: true),
     ]
 
     static func taskPage(now: Double) -> JSONValue {
-        let rows: [JSONValue] = sessions.enumerated().map { index, session in
+        let rows: [JSONValue] = sessions.filter { !$0.id.hasPrefix("chat-") }.enumerated().map { index, session in
             let created = now - Double(index + 1) * 60_000
             let active = session.phase.isActive
             return .object(["taskId": .string("task-\(session.id)"), "createdAt": .number(created),

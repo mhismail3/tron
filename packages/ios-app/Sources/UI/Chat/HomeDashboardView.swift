@@ -10,10 +10,12 @@ enum HomeDashboardLayout {
     static let floatingButtonSpacing: CGFloat = 12
 }
 
-/// One projection of Home's worker sessions into the view's three sections.
-/// Unread state is the Gateway's cross-client attention projection
-/// (`SessionSummary.isUnread`), cleared when a session is opened; a completed
-/// worker is either still unviewed or recently completed, never both.
+/// One projection of the dashboard catalog into the view's three sections.
+/// In Progress and Recently Completed hold Home's workers. Unviewed is the
+/// viewing queue of every settled unread session, worker or ordinary chat:
+/// unread is the Gateway's cross-client attention projection
+/// (`SessionSummary.isUnread`), cleared when a session is opened, so a
+/// completed worker is either still unviewed or recently completed, never both.
 struct HomeDashboardSections: Equatable {
     let inProgress: [SessionSummary]
     let completed: [SessionSummary]
@@ -27,9 +29,8 @@ struct HomeDashboardSections: Equatable {
                 && (session.gatewayProfileID == nil || session.gatewayProfileID == profileID)
         }
         inProgress = workers.filter { $0.phase.isActive || $0.waitingForUser }
-        let settled = workers.filter { !($0.phase.isActive || $0.waitingForUser) }
-        unviewed = settled.filter(\.isUnread)
-        completed = settled.filter { !$0.isUnread }
+        completed = workers.filter { !($0.phase.isActive || $0.waitingForUser) && !$0.isUnread }
+        unviewed = sessions.filter { $0.isUnread && !($0.phase.isActive || $0.waitingForUser) }
     }
 }
 
@@ -146,7 +147,7 @@ struct HomeUsageSummaryCard: View {
                 Spacer(minLength: 8)
                 if let snapshot {
                     Text(ProviderUsagePresentation.summary(snapshot))
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                        .font(TronTypography.sans(size: TronTypography.sizeSecondary, weight: .medium))
                         .foregroundStyle(snapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
