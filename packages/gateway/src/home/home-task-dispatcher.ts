@@ -1013,5 +1013,11 @@ export class HomeTaskDispatcher {
   private transition(task: HomeTaskRecord, reason: string, errorCode?: string): void {
     this.diagnostic?.({ event: "home.task.transition", taskHash: hash(task.taskId), revision: task.revision,
       transition: task.lifecycle, reason, operationHash: task.operationId ? hash(task.operationId) : null, ...(errorCode ? { errorCode } : {}) });
+    // Every terminal write reaches here once; attention is presentation state,
+    // so a failed mark never affects the task's own settlement.
+    if (task.lifecycle === "terminal" && task.sessionId) {
+      const sessionId = task.sessionId;
+      void Promise.resolve().then(() => this.sessions.taskWorkerSettled(sessionId, task.taskId)).catch(() => {});
+    }
   }
 }

@@ -4863,6 +4863,26 @@ export class RuntimeRegistry {
     return change?.type === "model_change" ? { provider: change.provider, id: change.modelId } : undefined;
   }
 
+  /** A Home task settled: its worker session gains one attention completion,
+   * keyed by the task, so an unopened worker reads as unread exactly like a
+   * chat that finished. A worker ends through its `report` tool call, which is
+   * never a successful final assistant reply, so the ordinary completion path
+   * cannot see it. Observed (read) when the worker chat is presented now. */
+  taskWorkerSettled(sessionId: string, taskId: string): Promise<void> {
+    return this.attentionLane.run(async () => {
+      const result = await this.attention.complete(sessionId, `task:${taskId}`, this.isSessionPresented(sessionId));
+      if (!result.changed) return;
+      const latest = this.latestSummaries.get(sessionId);
+      if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
+      else {
+        // A cold worker has no retained summary: invalidate catalogs, as
+        // `session.attention.set` does, rather than fabricating one.
+        this.catalogProjectionGeneration += 1;
+        this.options.sessionListChanged();
+      }
+    });
+  }
+
   /** A worker's display name: the live session's own name, else its catalog row.
    * A list shows it for every row, so it is never a session snapshot build (#905, #906). */
   async taskWorkerName(sessionId: string): Promise<string | undefined> {
