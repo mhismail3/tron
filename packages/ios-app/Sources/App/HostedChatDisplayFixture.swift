@@ -774,7 +774,7 @@ private actor HostedHomeShellGateway {
             }
             return (.object(["commands": .array([
                 user("daily-brief", "prompt", "Draft a short daily brief from my notes", hint: "<topic>"),
-                user("skill:tron-jev", "skill", "Use Tron's explicit typed Jev decision adapter for bounded workflow decisions."),
+                user("skill:jev", "skill", "Use Tron's explicit typed Jev decision adapter for bounded workflow decisions."),
                 user("skill:wordcraft", "skill", "Create, edit, inspect, render and convert word-processor documents."),
             ])]), nil)
         case "session.attention.read": return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil)
