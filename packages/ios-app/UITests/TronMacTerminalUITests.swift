@@ -48,7 +48,8 @@ final class TronMacTerminalUITests: XCTestCase {
         try capture(app, "connected")
 
         // The Gateway goes away; a new shell still opens straight to the Mac.
-        app.buttons["fixture.stop-gateway"].tap()
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.tron.mobile.fixture.mac-terminal.stop-gateway" as CFString), nil, nil, true)
         app.buttons["Mac Terminal options"].tap()
         app.buttons["New Shell"].tap()
         waitForPhase(app, "Connected")

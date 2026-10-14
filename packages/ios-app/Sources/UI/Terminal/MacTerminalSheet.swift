@@ -41,6 +41,14 @@ struct MacTerminalSheet: View {
     var body: some View {
         TerminalSheetChrome(title: "Mac Terminal", phase: controller.phase, keyboard: keyboard) { accent in
             content(accent: accent)
+                // A second alert on the chrome would collide with the
+                // confirmation's; this one hangs off the content instead.
+                .alert("Mac Terminal", isPresented: removalErrorPresented) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(removalError ?? "")
+                }
+                .tronManagedSystemPresentation(isPresented: removalErrorPresented, identity: "mac-terminal.remove-error")
         } menu: {
             menu
         }
@@ -64,11 +72,10 @@ struct MacTerminalSheet: View {
             Text("This iPhone's key is removed from ~/.ssh/authorized_keys on the Mac and deleted here. You can enable Mac Terminal again while the Gateway is running.")
         }
         .tronManagedSystemPresentation(isPresented: $confirmRemove, identity: "mac-terminal.remove-confirmation")
-        .alert("Mac Terminal", isPresented: Binding(get: { removalError != nil }, set: { if !$0 { removalError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(removalError ?? "")
-        }
+    }
+
+    private var removalErrorPresented: Binding<Bool> {
+        Binding(get: { removalError != nil }, set: { if !$0 { removalError = nil } })
     }
 
     @ViewBuilder

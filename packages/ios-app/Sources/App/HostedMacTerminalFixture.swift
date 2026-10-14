@@ -1,5 +1,6 @@
 #if HOSTED_TEST
 import Foundation
+import os
 import SwiftUI
 import TronMobileCore
 
@@ -11,10 +12,13 @@ import TronMobileCore
 /// JSON file named by `TRON_MAC_TERMINAL_FIXTURE`. The synthetic Gateway writes
 /// the enrolled key into that sshd's authorized_keys, as the real Gateway's
 /// `MacTerminalKeys` does (proved by packages/gateway `npm run test:mac-terminal`),
-/// and can stop answering to prove the shell does not need it.
+/// and stops for good on the `…mac-terminal.stop-gateway` Darwin notification
+/// to prove the shell does not need it.
 struct HostedMacTerminalFixture: View {
+    // SwiftUI re-runs this initializer whenever the App body re-evaluates;
+    // the model and its Gateway are kept from the first run only.
     @State private var model: AppModel
-    private let gateway: MacTerminalFixtureGateway
+    @State private var gateway: MacTerminalFixtureGateway
     private let profile = GatewayProfile(id: "mac-terminal", label: "Fixture Mac", host: "mac-terminal.example.test",
                                          port: 9847, machineId: "mac-terminal-machine", deviceId: "fixture-iphone")
 
@@ -25,32 +29,33 @@ struct HostedMacTerminalFixture: View {
             .flatMap { try? Data(contentsOf: URL(fileURLWithPath: $0)) }
             .flatMap { try? JSONDecoder().decode(MacTerminalFixtureConfiguration.self, from: $0) }
         let gateway = MacTerminalFixtureGateway(scenario: scenario, configuration: configuration)
-        self.gateway = gateway
-        // Each launch starts unenrolled: no key and no cached enrollment.
-        try? MacTerminalEnrollmentStore().remove(machineID: "mac-terminal-machine")
+        _gateway = State(initialValue: gateway)
+        _ = Self.startUnenrolled
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(profile, token: "fixture-token")
-        let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in MacTerminalFixtureSocket(gateway: gateway) })
+        let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in
+            MacTerminalFixtureSocket(gateway: gateway, answers: !gateway.isStopped)
+        })
         _model = State(initialValue: AppModel(client: client, profiles: profiles,
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "mac-terminal-fixture"))))
     }
 
+    /// Each launch starts unenrolled (no key, no cached enrollment), once.
+    @MainActor private static let startUnenrolled: Void = {
+        try? MacTerminalEnrollmentStore().remove(machineID: "mac-terminal-machine")
+    }()
+
     var body: some View {
-        VStack(spacing: 0) {
-            SettingsView()
-            HStack {
-                Button("Stop Gateway") { Task { await gateway.stop() } }
-                    .accessibilityIdentifier("fixture.stop-gateway")
-                Text("\(model.connectionState)").accessibilityIdentifier("fixture.connection")
-            }
-            .font(.caption).padding(6)
-        }
+        SettingsView()
         .environment(model)
         .tronPresentation()
         .tronSettingsLayout()
         .preferredColorScheme(.dark)
         .task {
+            // The test posts this while the Mac Terminal sheet covers the screen.
+            let gateway = gateway
+            DarwinTrigger.observe("com.tron.mobile.fixture.mac-terminal.stop-gateway") { Task { await gateway.stop() } }
             try? await model.connectHostedGateway(profile: profile, token: "fixture-token")
         }
     }
@@ -70,7 +75,10 @@ private actor MacTerminalFixtureGateway {
     private let scenario: String
     private let configuration: MacTerminalFixtureConfiguration?
     private var sockets: [MacTerminalFixtureSocket] = []
-    private var stopped = false
+    /// Read synchronously by each new socket, so once stopped no socket ever
+    /// says hello again: the Gateway is gone, not flapping.
+    private let stopped = OSAllocatedUnfairLock(initialState: false)
+    nonisolated var isStopped: Bool { stopped.withLock { $0 } }
     private var remoteLoginChecks = 0
 
     init(scenario: String, configuration: MacTerminalFixtureConfiguration?) {
@@ -78,20 +86,17 @@ private actor MacTerminalFixtureGateway {
         self.configuration = configuration
     }
 
-    func attach(_ socket: MacTerminalFixtureSocket) -> Bool {
-        guard !stopped else { return false }
-        sockets.append(socket)
-        return true
-    }
+    func attach(_ socket: MacTerminalFixtureSocket) { sockets.append(socket) }
 
     /// The Gateway goes away: open sockets close and new ones are refused.
     func stop() async {
-        stopped = true
+        stopped.withLock { $0 = true }
         for socket in sockets { await socket.close() }
         sockets.removeAll()
     }
 
     func handle(_ method: String, params: [String: JSONValue]) -> (result: JSONValue?, error: JSONValue?) {
+        if isStopped { return (nil, failure("The Gateway is stopped")) }
         switch method {
         case "macTerminal.status":
             guard let configuration else { return (nil, failure("The journey harness did not describe its sshd")) }
@@ -137,10 +142,11 @@ private actor MacTerminalFixtureSocket: GatewaySocketConnection {
     private var receivers: [CheckedContinuation<Data, Error>] = []
     private var closed = false
 
-    init(gateway: MacTerminalFixtureGateway) {
+    init(gateway: MacTerminalFixtureGateway, answers: Bool) {
         self.gateway = gateway
-        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":8,\"minProtocolVersion\":8,\"machineId\":\"mac-terminal-machine\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
-        Task { if await !gateway.attach(self) { await self.close() } }
+        closed = !answers
+        inbound = !answers ? [] : [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":8,\"minProtocolVersion\":8,\"machineId\":\"mac-terminal-machine\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
+        if answers { Task { await gateway.attach(self) } }
     }
 
     func send(_ data: Data) async throws {
