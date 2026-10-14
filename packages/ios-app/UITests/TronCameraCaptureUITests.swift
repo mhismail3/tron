@@ -35,6 +35,7 @@ final class TronCameraCaptureUITests: XCTestCase {
         XCTAssertTrue(loading.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertEqual(loading.label, "Opening camera")
         XCTAssertEqual(loading.frame.midX, app.windows.firstMatch.frame.midX, accuracy: 1)
+        keepScreenshot(app, "937-camera-opening")
         let history = app.descendants(matching: .any)["camera.phase-history"]
         waitFor(history, "label == 'starting>live'", "the back camera never went live")
         XCTAssertFalse(loading.exists, "the loading state outlived the first frame")
@@ -49,6 +50,7 @@ final class TronCameraCaptureUITests: XCTestCase {
         flip.tap()
         waitFor(history, "label BEGINSWITH 'starting>live>switching'", "the switch did not start")
         XCTAssertFalse(loading.exists, "switching cameras showed the loading state")
+        keepScreenshot(app, "937-camera-switching")
         XCTAssertFalse(flash.isEnabled, "the torch stays off while the next camera starts")
         XCTAssertEqual([flash.frame, shutter.frame, flip.frame], controlFrames, "controls moved during the switch")
         waitFor(history, "label == 'starting>live>switching>live'", "the front camera never went live")
@@ -77,8 +79,12 @@ final class TronCameraCaptureUITests: XCTestCase {
         waitFor(app.staticTexts["fixture.upload-counts"], "label CONTAINS 'camera:1'", "the photo was not attached")
         XCTAssertTrue(app.buttons["Remove photo.jpg"].waitForExistence(timeout: 10), app.debugDescription)
 
+        keepScreenshot(app, "937-camera-photo-attached")
+    }
+
+    @MainActor private func keepScreenshot(_ app: XCUIApplication, _ name: String) {
         let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "937-camera-photo-attached"
+        shot.name = name
         shot.lifetime = .keepAlways
         add(shot)
     }
