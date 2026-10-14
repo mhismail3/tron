@@ -117,6 +117,7 @@ struct HostedHomeDashboardFixture: View {
     @State private var openedSession = "none"
     @State private var settingsDecisionState = "none"
     @State private var newWorkerAdded = false
+    @State private var firstRevealAt: Date?
     private let actionProbe = HostedHomeActionProbe()
     private let arguments = ProcessInfo.processInfo.arguments
     private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
@@ -179,6 +180,7 @@ struct HostedHomeDashboardFixture: View {
                             Text("sheet-read-peak:\(sheetReadPeak)")
                                 .accessibilityIdentifier("fixture.home-sheet-read-peak")
                             Text("home-reads:\(homeReads)").accessibilityIdentifier("fixture.home-read-counts")
+                            Text(TronDashboardRevealProbe.shared.summary).accessibilityIdentifier("fixture.dashboard-reveals")
                             Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.capabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
                                 .accessibilityIdentifier("fixture.home-diagnostics")
                         }
@@ -247,7 +249,12 @@ struct HostedHomeDashboardFixture: View {
                 settingsDecisionState = await gateway.settingsDecisionSummary()
                 // Home dispatches a worker after the view loaded: its catalog row
                 // arrives carrying `homeTaskId`, as the Gateway projects it.
-                if arguments.contains("-home-dashboard-new-worker"), !newWorkerAdded,
+                // `-late` holds the new worker until the view's sections revealed
+                // and settled, so a journey observes the live update separately.
+                if firstRevealAt == nil, !TronDashboardRevealProbe.shared.reveals.isEmpty { firstRevealAt = Date() }
+                let newWorkerDue = !arguments.contains("-home-dashboard-new-worker-late")
+                    || firstRevealAt.map { Date().timeIntervalSince($0) > 3 } == true
+                if arguments.contains("-home-dashboard-new-worker"), !newWorkerAdded, newWorkerDue,
                    model.sessions.contains(where: \.isHomeWorker) {
                     newWorkerAdded = true
                     model.sessions = model.sessions + [HostedHomeDashboardWorkers.newWorker.withGatewaySource(id: profile.id, label: profile.label)]

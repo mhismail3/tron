@@ -2172,8 +2172,28 @@ struct TronDashboardSectionReveal: ViewModifier {
                 TronDashboardContentMotion.sectionReveal(order: order, reduceMotion: reduceMotion),
                 value: isRevealed
             )
+            #if HOSTED_TEST
+            .onChange(of: isRevealed) { _, revealed in
+                if revealed { TronDashboardRevealProbe.shared.reveals.append(order) }
+            }
+            #endif
     }
 }
+
+#if HOSTED_TEST
+/// Every reveal animation a mounted section view started, by stagger order, so
+/// UI journeys prove the order and that live refreshes start none.
+@MainActor @Observable
+final class TronDashboardRevealProbe {
+    static let shared = TronDashboardRevealProbe()
+    var reveals: [Int] = []
+
+    /// The distinct stagger orders revealed and the total reveal count.
+    var summary: String {
+        "orders:\(Set(reveals).sorted().map(String.init).joined(separator: ",")) reveals:\(reveals.count)"
+    }
+}
+#endif
 
 extension View {
     func tronDashboardSectionReveal(order: Int, isRevealed: Bool) -> some View {

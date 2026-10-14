@@ -47,6 +47,49 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["fixture.home-task-list-reads"].label, "task-list-reads:0")
     }
 
+    /// #982: the view's sections fade in once, in stagger order, while the usage
+    /// card holds the shared pulse at its final height; its rows then fade in
+    /// without a layout jump, and a live new worker re-fades nothing.
+    @MainActor
+    func testSectionsRevealInOrderAndLiveUpdatesDoNotRefade() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home",
+                               "-home-dashboard-usage-delay", "-home-dashboard-new-worker", "-home-dashboard-new-worker-late"]
+        app.launch(); defer { app.terminate() }
+
+        let card = element(app, "home-usage-card")
+        let loading = element(app, "home-usage-loading")
+        let reveals = app.staticTexts["fixture.dashboard-reveals"]
+        XCTAssertTrue(loading.waitForExistence(timeout: 10), app.debugDescription)
+        // The card (order 0), In Progress (1) and Recently Completed (2) reveal
+        // while the card still shows its pulse.
+        XCTAssertTrue(waitFor(reveals, "label BEGINSWITH 'orders:0,1,2'"), reveals.label)
+        XCTAssertTrue(loading.exists, "The usage read is still in flight")
+        let anthropic = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Anthropic, '")).firstMatch
+        XCTAssertFalse(anthropic.exists, "Usage rows stay hidden under the pulse")
+        let inProgress = app.staticTexts["In Progress"], completed = app.staticTexts["Recently Completed"]
+        XCTAssertTrue(inProgress.exists && completed.exists, app.debugDescription)
+        XCTAssertLessThan(card.frame.maxY, inProgress.frame.minY)
+        XCTAssertLessThan(inProgress.frame.minY, completed.frame.minY)
+        let loadingHeight = card.frame.height
+        keep("05-usage-loading")
+
+        // Loader to content at the same height.
+        XCTAssertTrue(waitFor(loading, "exists == false"), app.debugDescription)
+        XCTAssertTrue(anthropic.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(card.frame.height, loadingHeight, accuracy: 1, "The card keeps its height when usage arrives")
+        let settled = reveals.label
+        keep("06-usage-content")
+
+        // A live catalog update inserts its row without re-revealing anything.
+        XCTAssertFalse(app.buttons["session-row-home-shell-fixture:worker-new"].exists)
+        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-new"].waitForExistence(timeout: 10), app.debugDescription)
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        XCTAssertEqual(reveals.label, settled, "Refreshes never re-fade existing content")
+        XCTAssertFalse(loading.exists, "Refreshes keep the usage content")
+    }
+
     @MainActor
     func testHomeButtonShowsWaitingForUser() {
         continueAfterFailure = false
