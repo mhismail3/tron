@@ -912,9 +912,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             if title == "Connections" {
                 XCTAssertFalse(labelled("Input needed").exists, "push alerts moved to their own sheet")
                 assertToolbarTint(app, title: "Connections")
-                // This paired iPhone's detail sheet: its pencil and Done take the
+                // An authorized device's detail sheet (its row reads "Details for
+                // <device> on <Mac>"): its pencil and Done take the
                 // Connections tint of its title, not a hard-coded green (#963).
-                let device = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Details for '")).firstMatch
+                let device = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Details for ' AND label CONTAINS ' on '")).firstMatch
                 XCTAssertTrue(device.waitForExistence(timeout: 30), app.debugDescription)
                 let label = device.label.dropFirst("Details for ".count)
                 let deviceName = String(label[..<(label.range(of: " on ", options: .backwards)?.lowerBound ?? label.endIndex)])
