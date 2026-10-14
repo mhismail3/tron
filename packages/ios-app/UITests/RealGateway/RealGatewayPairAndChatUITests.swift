@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import XCTest
 
 /// Real-UI journeys against the real Gateway fixture.
@@ -521,6 +522,97 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                        "answering the form reopened or re-revealed the mounted transcript")
         XCTAssertTrue(prompt.exists, "answering the form dropped the earlier transcript rows")
         XCTAssertFalse(app.otherElements["Opening conversation"].exists)
+    }
+
+    /// A photo-only message sent while a turn runs is queued as a steer, and
+    /// once Pi delivers it the "Steer next" card leaves the composer, also
+    /// after the session is reopened (#974). Failure mode: Pi dequeued a
+    /// delivered message only when it had text, so the Gateway kept projecting
+    /// the delivered photo as queued forever.
+    @MainActor
+    func testImageOnlySteerLeavesTheQueueOnceDelivered() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let firstRun = launchApp()
+        open(fixture.invitationLink())
+        completeFirstRunSetup(firstRun, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(firstRun.buttons["dashboard.menu"], timeout: 90), firstRun.debugDescription)
+        createSession(firstRun, inWorkspace: fixture.workspace)
+
+        // One completed turn persists the session, so the relaunched dashboard
+        // lists it (a session created by a held first turn can be missing: #944).
+        let composer = firstRun.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60), firstRun.debugDescription)
+        composer.tap()
+        composer.typeText("Start the conversation.")
+        let send = firstRun.buttons["Send message"]
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), firstRun.debugDescription)
+        send.tap()
+        XCTAssertTrue(
+            firstRun.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+                .waitForExistence(timeout: 120),
+            "the first turn never completed: \(firstRun.debugDescription)"
+        )
+
+        // The fixture model holds this turn until the phone queues a message.
+        composer.tap()
+        composer.typeText("Fixture steer journey: wait for my photo.")
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), firstRun.debugDescription)
+        send.tap()
+        XCTAssertTrue(firstRun.buttons["Stop Tron"].waitForExistence(timeout: 60),
+                      "the held turn never started: \(firstRun.debugDescription)")
+
+        // A photo with no text, pasted into the composer and sent as the default steer.
+        UIPasteboard.general.image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64)).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+        }
+        composer.tap()
+        let paste = firstRun.menuItems["Paste"]
+        for _ in 0..<3 where !paste.exists {
+            composer.press(forDuration: 1.0)
+            if paste.waitForExistence(timeout: 3) { break }
+        }
+        XCTAssertTrue(paste.exists, "the composer edit menu offers Paste: \(firstRun.debugDescription)")
+        paste.tap()
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), "the pasted photo never became sendable: \(firstRun.debugDescription)")
+        send.tap()
+
+        // The queued card's delivery detail, "After the current turn · 1 of 1".
+        let queuedSteer = firstRun.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "After the current turn")
+        ).firstMatch
+        XCTAssertTrue(queuedSteer.waitForExistence(timeout: 30),
+                      "the photo was not queued as a steer: \(firstRun.debugDescription)")
+        keepScreenshot(firstRun, name: "974-image-only-steer-queued")
+        let delivered = firstRun.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Steer journey saw the photo")
+        ).firstMatch
+        XCTAssertTrue(delivered.waitForExistence(timeout: 120),
+                      "the model never received the steered photo: \(firstRun.debugDescription)")
+        XCTAssertTrue(waitForAbsence(queuedSteer, timeout: 30),
+                      "the delivered photo is still shown as a queued steer: \(firstRun.debugDescription)")
+        keepScreenshot(firstRun, name: "974-image-only-steer-delivered")
+
+        // Reopen the session in a relaunched, still-paired app: the Gateway's
+        // snapshot must not bring the delivered steer back.
+        firstRun.terminate()
+        let app = launchApp(resettingState: false)
+        defer { app.terminate() }
+        let sessionRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")).firstMatch
+        XCTAssertTrue(waitForHittable(sessionRow, timeout: 90), app.debugDescription)
+        sessionRow.tap()
+        let reopenedReply = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Steer journey saw the photo")
+        ).firstMatch
+        XCTAssertTrue(reopenedReply.waitForExistence(timeout: 90),
+                      "the reopened session does not show the delivered reply: \(app.debugDescription)")
+        XCTAssertFalse(
+            app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "After the current turn")).firstMatch
+                .waitForExistence(timeout: 5),
+            "the reopened session shows the delivered photo as a queued steer: \(app.debugDescription)"
+        )
+        keepScreenshot(app, name: "974-image-only-steer-reopened")
     }
 
     @MainActor
