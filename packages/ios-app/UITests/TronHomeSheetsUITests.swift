@@ -208,6 +208,164 @@ final class TronHomeSheetsUITests: XCTestCase {
                       app.staticTexts["fixture.home-prompt-route"].label)
     }
 
+    /// Every Home tool call opens its purpose-built detail from the Home transcript, and
+    /// the learned profile opens from Manage Home's Profile row (#957). Failure modes: a
+    /// Home tool's detail fell back to raw JSON; a schema-rejected or refused call did not
+    /// state its error; the brief, report or memory line was not readable Markdown; the
+    /// Profile row was missing, below Memory, or its sheet did not list each item by kind.
+    @MainActor
+    func testHomeToolDetailSheetsAndProfile() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-tool-transcript"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-opened-session"], "label CONTAINS 'opened-session:home-session'"))
+
+        // Newest first, so each chip is revealed by scrolling toward older messages.
+        toolSheet(app, "memory-search", chip: "Memory search, Completed", index: 0, outcome: "2 matches") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Range").label.contains("1100–1131"))
+            self.assertReads(app, self.element(app, "home-tool-line-1110+0"), contains: "feat/890-sheets")
+        }
+        toolSheet(app, "date", chip: "Date, Completed", index: 0, outcome: "Found") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Date").label.contains("2026"))
+            XCTAssertTrue(self.element(app, "home-tool-row-Time").exists)
+        }
+        toolSheet(app, "zoom-invalid", chip: "Zoom, Completed", index: 0, outcome: "Not found") {
+            XCTAssertTrue(self.allText(self.element(app, "home-tool-failure")).contains("No line 7+3"))
+        }
+        toolSheet(app, "zoom", chip: "Zoom, Completed", index: 1, outcome: "Opened") {
+            XCTAssertTrue(self.element(app, "home-tool-line-1122+2").exists)
+            self.assertReads(app, self.element(app, "home-tool-line-1120+2"), contains: "handoff")
+        }
+        toolSheet(app, "profile-refused", chip: "Profile, Completed", index: 0, outcome: "Refused") {
+            XCTAssertTrue(self.allText(self.element(app, "home-tool-failure")).contains("retire requires reason"))
+        }
+        toolSheet(app, "profile-supersede", chip: "Profile, Completed", index: 1, outcome: "Saved · Inferred") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Supersedes note").label.contains("3f3264c8"))
+            XCTAssertTrue(self.allText(self.element(app, "home-tool-text-previous")).contains("Chat over Project"))
+        }
+        toolSheet(app, "profile-learn", chip: "Profile, Completed", index: 2, outcome: "Saved · Inferred") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Kind").label.contains("Preference"))
+            self.assertMarkdown(self.element(app, "home-tool-text-text"), contains: "screenshots")
+        }
+        toolSheet(app, "settings-change", chip: "Settings, Completed", index: 0, outcome: "Pending approval") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Set").label.contains("3 → 6"), self.element(app, "home-tool-row-Set").label)
+            XCTAssertTrue(self.element(app, "home-tool-row-Layer").label.contains("Home profile"))
+            XCTAssertTrue(self.element(app, "home-tool-row-Tier").label.contains("Approve"))
+        }
+        toolSheet(app, "settings-resolve", chip: "Settings, Completed", index: 1, outcome: "Read") {
+            XCTAssertTrue(self.element(app, "home-tool-row-model.ref[role=worker]").label.contains("Claude Opus 5.5 · Home profile"))
+        }
+        toolSheet(app, "task-rejected", chip: "Task, Failed", index: 0, outcome: "Rejected") {
+            let failure = self.allText(self.element(app, "home-tool-failure"))
+            XCTAssertTrue(failure.contains("Rejected before it ran"), failure)
+            XCTAssertTrue(failure.contains("root: must not have additional properties"), failure)
+            XCTAssertFalse(failure.contains("Received arguments"), "The schema issues, not the raw arguments: \(failure)")
+        }
+        toolSheet(app, "task-steer", chip: "Task, Completed", index: 0, outcome: "Accepted") {
+            self.assertMarkdown(self.element(app, "home-tool-text-message"), contains: "Profile")
+        }
+        toolSheet(app, "task-report", chip: "Task, Completed", index: 1, outcome: "Final") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Page").label.contains("Bytes 0"))
+            self.assertMarkdown(self.element(app, "home-tool-text-report"), contains: "PR #773")
+        }
+        toolSheet(app, "task-status", chip: "Task, Completed", index: 2, outcome: "Active") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Tokens").label.contains("in"))
+            XCTAssertTrue(self.element(app, "home-tool-row-Subagents").label.contains("3 started"))
+            XCTAssertTrue(self.element(app, "home-tool-row-Model").label.contains("Claude Opus 5.5"))
+        }
+        toolSheet(app, "delegate-refused", chip: "Delegate, Failed", index: 0, outcome: "Refused") {
+            XCTAssertTrue(self.allText(self.element(app, "home-tool-failure")).contains("thinking needs a model"))
+        }
+        toolSheet(app, "delegate", chip: "Delegate, Completed", index: 0, outcome: "Admitted") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Model").label.contains("Claude Opus 5.5 · Home profile"))
+            self.assertMarkdown(self.element(app, "home-tool-text-brief"), contains: "Home tool detail sheets")
+            self.open(app, self.element(app, "home-tool-text-brief-view-all"), ready: "home-reading-text", name: "delegate-brief")
+            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Ask every decision'")).firstMatch.exists, "View All shows the whole brief")
+            self.keep("tool-delegate-brief")
+            self.closeTop(app)
+        }
+
+        // Manage Home's Profile row sits directly above Memory and opens the learned profile.
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        open(app, ring, ready: "home-manage-state", name: "manage")
+        expand(app, done: "home-sheet-done-manage")
+        let profileRow = element(app, "home-manage-profile"), memoryRow = element(app, "home-manage-memory-browser")
+        XCTAssertTrue(profileRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(profileRow.label.contains("5 items · 2 confirmed · 3 inferred"), profileRow.label)
+        XCTAssertLessThan(abs(profileRow.frame.maxY - memoryRow.frame.minY), 4, "Profile sits directly above Memory")
+        keep("profile-00-manage-row")
+        let rowTint = ink(app, profileRow, leading: 56)
+        let manageTint = ink(app, app.navigationBars.staticTexts["Manage Home"].firstMatch)
+        open(app, profileRow, ready: "home-profile-group-preference", name: "profile")
+        expand(app, done: "home-sheet-done-profile")
+        assertTitleTint(app, "Profile", matches: rowTint, not: manageTint)
+        for kind in ["standing-decision", "delegation-default", "fact"] { XCTAssertTrue(element(app, "home-profile-group-\(kind)").exists, kind) }
+        let item = element(app, "home-profile-item-9a364c45-34fe-4f0a-93e6-fc507e2b0bdc")
+        XCTAssertTrue(item.label.contains("screenshots") && !item.label.contains("**"), item.label)
+        XCTAssertTrue(item.label.contains("Inferred"), item.label)
+        keep("profile-01-sheet")
+        app.swipeUp()
+        XCTAssertTrue(element(app, "home-profile-inactive").waitForExistence(timeout: 3))
+        keep("profile-02-sheet-bottom")
+        app.swipeDown()
+        open(app, item, ready: "home-profile-item-detail", name: "profile-item")
+        XCTAssertTrue(element(app, "home-profile-item-note-id").label.contains("9a364c45-34fe-4f0a-93e6-fc507e2b0bdc"))
+        keep("profile-03-item")
+    }
+
+    /// Opens one Home tool call's detail from its transcript chip, checks the shared
+    /// header's outcome, keeps both detents and closes it again.
+    @MainActor private func toolSheet(_ app: XCUIApplication, _ name: String, chip label: String, index: Int, outcome: String,
+                                      _ checks: () -> Void) {
+        // Chips read "<Tool>, <Completed|Failed>, <duration>"; the transcript lists the newest first.
+        let chips = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label + ","))
+        let chip = chips.element(boundBy: index)
+        for _ in 0..<12 where !(chip.exists && chip.isHittable) { app.swipeDown() }
+        open(app, chip, ready: "home-tool-detail", name: "tool-\(name)")
+        let pill = element(app, "home-tool-outcome")
+        XCTAssertTrue(pill.label.hasSuffix(outcome), "\(name): outcome \(pill.label)")
+        keep("tool-\(name)")
+        let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)
+        if let done, done.frame.minY > 120 {
+            let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: 60, dy: done.frame.midY))
+                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
+            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: done)], timeout: 3)
+        }
+        checks()
+        keep("tool-\(name)-large")
+        closeTop(app)
+        XCTAssertTrue(waitFor(element(app, "home-tool-detail"), "exists == false", timeout: 5), name)
+    }
+
+    /// A container's own label and every text inside it.
+    @MainActor private func allText(_ element: XCUIElement) -> String {
+        XCTAssertTrue(element.waitForExistence(timeout: 3), element.debugDescription)
+        return ([element.label] + element.descendants(matching: .any).allElementsBoundByIndex.map(\.label)).joined(separator: " ")
+    }
+
+    /// Markdown is rendered: a text shows the words without the marks.
+    @MainActor private func assertMarkdown(_ element: XCUIElement, contains text: String) {
+        XCTAssertTrue(element.waitForExistence(timeout: 3), text)
+        let rendered = element.descendants(matching: .staticText).allElementsBoundByIndex.map(\.label)
+            .contains { $0.contains(text) && !$0.contains("**") && !$0.contains("`") }
+        XCTAssertTrue(rendered, "Markdown renders: \(allText(element))")
+    }
+
+    /// A memory line previews rendered Markdown and opens whole in the shared reader.
+    @MainActor private func assertReads(_ app: XCUIApplication, _ line: XCUIElement, contains text: String) {
+        XCTAssertTrue(line.waitForExistence(timeout: 3), text)
+        XCTAssertFalse(line.label.contains("**"), line.label)
+        open(app, line, ready: "home-reading-text", name: "line")
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists, app.debugDescription)
+        closeTop(app)
+        XCTAssertTrue(element(app, "home-tool-detail").waitForExistence(timeout: 3))
+    }
+
     // MARK: - Helpers
 
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {

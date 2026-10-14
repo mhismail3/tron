@@ -379,7 +379,7 @@ private actor HostedHomeShellGateway {
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
     func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
-    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "context-window.v1", "skill-prompt.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"] }
+    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "context-window.v1", "skill-prompt.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"] }
 
     /// Every Home read a sheet sent, so journeys can prove a return to a sheet re-reads nothing.
     private var homeReads: [String: Int] = [:]
@@ -471,6 +471,8 @@ private actor HostedHomeShellGateway {
             let result: JSONValue = .object(["decision": decision, "grant": approved ? .object(grant) : .null])
             taskDecisions[id] = result; controlCount += 1
             return (result, nil)
+        case "home.profileList":
+            return (HostedHomeToolFixture.profileList, nil)
         case "home.chapterList":
             return (try await heldSheetRead { chapterListFixture() }, nil)
         case "home.context":
@@ -603,6 +605,11 @@ private actor HostedHomeShellGateway {
                     semanticState: .init(statuses: [:], working: .init(message: nil, visible: false), hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
                     surfaces: [], pendingInteractions: []), diagnostics: [])
             if sessionID.hasPrefix("home-") { applyHomeChatConfiguration(to: &snapshot) }
+            if sessionID == "home-session", ProcessInfo.processInfo.arguments.contains("-home-tool-transcript") {
+                snapshot.transcript = HostedHomeToolFixture.transcript
+                snapshot.transcriptStart = 0
+                snapshot.transcriptTotal = snapshot.transcript.count
+            }
             return (.object(["session": try! JSONValue.encode(snapshot), "syncToken": .string("fixture-sync"),
                 "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(0)]), nil)
         case "session.sync": return (.object(["synchronized": .bool(true)]), nil)
