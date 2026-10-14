@@ -208,8 +208,8 @@ struct SessionShellView: View {
             ) {
                 homeCompletedSheet
             }
-            .task(id: "home-workers:\(serverFilter.sortMode.rawValue):\(model.profiles.selected?.id ?? ""):\(activity):\(dashboardPresentation.sessions.count):\(model.homeStatus.capabilityEnabled)") {
-                await loadHomeWorkerSessionIDs()
+            .task(id: "home-workers:\(serverFilter.sortMode.rawValue):\(model.profiles.selected?.id ?? ""):\(activity):\(dashboardPresentation.sessions.count):\(model.homeStatus.capabilityEnabled):\(homeStatusSurfaceToken != nil)") {
+                await loadHomeWorkerSessionIDs(presentationActive: activity.allowsPresentationPublication)
             }
             .onChange(of: model.profiles.selected?.id) { _, _ in homeWorkerSessionIDs = nil }
             .tronManagedSheet(
@@ -1173,16 +1173,18 @@ struct SessionShellView: View {
 
     /// Reads Home's worker ids from its task ledger for the Home view. A new
     /// worker appears as a new catalog row, so the catalog size keys a re-read.
-    private func loadHomeWorkerSessionIDs() async {
+    /// The task is keyed by the surface's activity, so it reads that activity
+    /// directly: `dashboardPresentationIsActive` is published by a sibling
+    /// `onChange` that may run after this task starts.
+    private func loadHomeWorkerSessionIDs(presentationActive: Bool) async {
         guard serverFilter.sortMode == .home,
-              dashboardPresentationIsActive,
+              presentationActive,
               model.homeStatus.capabilityEnabled,
               let profileID = model.profiles.selected?.id,
               let identity = model.homeSheetReadIdentity(profileID: profileID, surfaceToken: homeStatusSurfaceToken) else { return }
         do {
             let ids = try await model.readHomeWorkerSessionIDs(identity: identity) {
-                serverFilter.sortMode == .home && dashboardPresentationIsActive
-                    && model.profiles.selected?.id == profileID
+                serverFilter.sortMode == .home && model.profiles.selected?.id == profileID
             }
             guard !Task.isCancelled, model.profiles.selected?.id == profileID else { return }
             withAnimation(TronDashboardContentMotion.animation(reduceMotion: reduceMotion)) {
