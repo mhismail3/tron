@@ -89,12 +89,16 @@ struct ChatSelectableTextStyle: Hashable {
 /// A completed assistant Markdown block rendered by a non-editable UITextView,
 /// which gives native range selection with drag handles (SwiftUI `Text` on
 /// iOS 26 only selects whole views). Links keep UIKit's default open action.
-/// The edit menu adds Annotate ahead of the system actions.
+/// The edit menu adds Annotate ahead of the system actions when the surface
+/// admits annotation; otherwise it keeps only the system actions (Copy).
+/// `detectsLinks` turns bare URLs into links for surfaces whose authored text
+/// is not Markdown-linked (Ask Question); the transcript keeps them literal.
 struct ChatSelectableInlineText: UIViewRepresentable {
     let inline: MarkdownPresentation.Inline
     let style: ChatSelectableTextStyle
-    let highlights: [NSRange]
-    let onAnnotate: (String, NSRange, CGRect) -> Void
+    var highlights: [NSRange] = []
+    var detectsLinks = false
+    let onAnnotate: ((String, NSRange, CGRect) -> Void)?
 
     @Environment(\.sizeCategory) private var sizeCategory
     @Environment(\.colorScheme) private var colorScheme
@@ -108,6 +112,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         let inline: MarkdownPresentation.Inline
         let style: ChatSelectableTextStyle
         let highlights: [NSRange]
+        let detectsLinks: Bool
         let sizeCategory: ContentSizeCategory
         let colorScheme: ColorScheme
         let fontRevision: String
@@ -123,7 +128,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
             editMenuForTextIn range: NSRange,
             suggestedActions: [UIMenuElement]
         ) -> UIMenu? {
-            guard range.length > 0 else { return nil }
+            guard range.length > 0, onAnnotate != nil else { return nil }
             let annotate = UIAction(
                 title: "Annotate",
                 image: UIImage(systemName: "text.quote")
@@ -194,12 +199,14 @@ struct ChatSelectableInlineText: UIViewRepresentable {
             inline: inline,
             style: style,
             highlights: highlights,
+            detectsLinks: detectsLinks,
             sizeCategory: sizeCategory,
             colorScheme: colorScheme,
             fontRevision: "\(family.rawValue):\(fontSettings.axisValue(for: family, axis: .weight)):\(fontSettings.axisValue(for: family, axis: .casual)):\(fontSettings.selectedMonoFamily.rawValue)"
         )
         guard coordinator.key != key else { return }
         coordinator.key = key
+        view.dataDetectorTypes = detectsLinks ? [.link] : []
         let traits = UITraitCollection(traitsFrom: [
             view.traitCollection,
             UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(sizeCategory)),

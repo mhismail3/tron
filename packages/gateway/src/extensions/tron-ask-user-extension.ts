@@ -70,6 +70,7 @@ export function createTronAskUserExtension(): ExtensionFactory {
       promptGuidelines: [
         "Use ask_user only when the user's answer is required to continue; do not use it for ordinary conversational questions.",
         "Provide two to four concrete options per question and keep the form to four questions or fewer.",
+        "Put any command, URL, path, ID or other text the user may need to copy in a normal assistant message before asking (or in the question's context as a fenced code block), not only in the question sentence.",
       ],
       parameters,
       executionMode: "sequential",

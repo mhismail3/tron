@@ -238,7 +238,7 @@ struct AttachmentFilePreviewSheet: View {
 
     var body: some View {
         TronDocumentSheet(title: title ?? name, leadingAction: runAction) { content }
-        .sheet(item: $swiftApp) { launch in SwiftAppRunnerSheet(launch: launch) }
+        .tronManagedSheet(item: $swiftApp, identity: { "attachment.swift-app.\($0.id)" }) { launch in SwiftAppRunnerSheet(launch: launch) }
         .task(id: PresentationActivityTaskID(
             source: "\(source.loadID)-\(model.knowledgePresentationIdentity)-ready:\(model.connectionState == .connected)",
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -265,8 +265,7 @@ struct AttachmentFilePreviewSheet: View {
     private var content: some View {
         switch phase {
         case .loading:
-            TronLoadingState(label: "Preparing file preview…", accent: .tronBlue)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            TronSheetLoadingState(label: "Preparing file preview…", accent: .tronBlue)
         case .unavailable(let message):
             TronInfoCard(icon: "doc.text.magnifyingglass", text: fallbackText ?? message, accent: .tronBlue)
                 .padding(TronSpacing.xlarge)

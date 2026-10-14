@@ -43,6 +43,8 @@ export interface HomeTaskRecord {
   budget?: { inputTokens?: number; outputTokens?: number };
   /** The stopped task this one continues in place, in that task's own worker session (#929). */
   resumes?: { taskId: string; operationId: string };
+  /** When an authorized task began waiting for a running-worker slot (#915); kept once set. */
+  queuedAt?: string;
   /** The one canonical report this task sealed, pinned by entry ID and payload digest. */
   reportRef: { resultId: string; sessionId: string; entryId: string; digest: string } | null;
   terminalEvidence: {
@@ -501,7 +503,7 @@ function validateAuthorityReferences(task: HomeTaskRecord, authorization: HomeTa
 
 function validateTask(value: unknown): HomeTaskRecord {
   if (!keys(value, ["version", "taskId", "revision", "createdAt", "updatedAt", "homeId", "generation", "intent", "intentDigest", "target",
-    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"], ["budget", "resumes"])
+    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"], ["budget", "resumes", "queuedAt"])
     || value.version !== 1 || !identifier(value.taskId) || value.taskId === "authorization" || !positive(value.revision)
     || !timestamp(value.createdAt) || (value.createdAt as number) > 9_999_999_999_999
     || !timestamp(value.updatedAt) || (value.updatedAt as number) < (value.createdAt as number)
@@ -519,6 +521,7 @@ function validateTask(value: unknown): HomeTaskRecord {
   if (value.spend !== null && (!keys(value.spend, ["sourceDigest", "inputTokens", "outputTokens"])
     || typeof value.spend.sourceDigest !== "string" || !/^[a-f0-9]{64}$/u.test(value.spend.sourceDigest)
     || !count(value.spend.inputTokens) || !count(value.spend.outputTokens))) invalid();
+  if (value.queuedAt !== undefined && (!text(value.queuedAt, 64) || !Number.isFinite(Date.parse(value.queuedAt as string)))) invalid();
   if (value.budget !== undefined && (!keys(value.budget, [], ["inputTokens", "outputTokens"]) || Object.keys(value.budget).length === 0
     || Object.values(value.budget).some(tokens => !positive(tokens)))) invalid();
   if (value.resumes !== undefined && (!keys(value.resumes, ["taskId", "operationId"]) || !identifier(value.resumes.taskId)

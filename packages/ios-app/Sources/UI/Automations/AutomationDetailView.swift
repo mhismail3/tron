@@ -80,7 +80,7 @@ struct AutomationDetailView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    if isLoading { TronLoadingState(label: "Loading Automation…", accent: .tronAutomation).frame(minHeight: 220) }
+                    if isLoading { TronSheetLoadingState(label: "Loading Automation…", accent: .tronAutomation) }
                     else if let errorMessage { errorState(errorMessage) }
                     else if let record { detail(record) }
                 }

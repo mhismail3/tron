@@ -300,9 +300,6 @@ struct ToolDetailSheet: View {
                         Text([call.status.displayLabel, call.durationMs.map(ToolTiming.format(milliseconds:))].compactMap { $0 }.joined(separator: " · "))
                             .font(TronTypography.code(size: TronTypography.sizeSecondary))
                             .foregroundStyle(Color.tronTextSecondary)
-                        Image(systemName: "chevron.right")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                            .foregroundStyle(Color.tronTextMuted)
                     }
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -1322,6 +1322,8 @@ future managed-state contract are owned by
 Tron Home is one opt-in persistent conversation per Gateway installation. It is created only by an explicit
 `home.designate`; until then every session is ordinary. [`docs/home.md`](docs/home.md) owns its designation
 record, RPC shapes, chapters, runtime profile, memory, task delegation and terminal client.
+[`docs/host-load.md`](docs/host-load.md) owns the host-load design: the Home worker budget,
+the host-wide heavy-run queue and the host-pressure signal (#915).
 
 - **Memory.** There is no memory default: Home refuses activations until its memory model
   (`model.ref[role=memory]`, changed through `settings.change`) names a physical model. Memory spend is bounded by construction and reported; there is no budget to manage. Each
@@ -2176,7 +2178,9 @@ Pi's prompt path. Tron registers its release-owned `ask_user` capability as one 
 semantic form tool (`tron:ask-user.v1`). Its title, descriptions, multi-select/Other policy,
 question and option order, and bounded answer details are retained in one canonical result
 shape; native Cancel is admitted only when `allowCancel` is true, while closing the native
-sheet preserves the draft and leaves the interaction pending. A same-name foreign registration
+sheet preserves the draft and leaves the interaction pending. Its prompt guideline tells agents to
+put commands, URLs, paths and IDs the user may need to copy in normal assistant text before asking
+(or in `context` as a fenced code block), not only in the question sentence. A same-name foreign registration
 fails closed with an actionable destination-only settings migration message. Historical
 `@zhushanwen/pi-ask-user` results remain readable through the audited adapter below.
 The explicit extension adapter registry identifies only the pinned

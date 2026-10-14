@@ -2589,6 +2589,8 @@ export class GatewayService {
       // This request's own work entry must not count as the session being busy.
       const resumed = await this.requireHome().resumeWorkerSession(slot.id,
         [text, attachments.envelope].filter(Boolean).join("\n\n"), workToken, attachments.images);
+      // A resume never queues, so it always names its worker operation.
+      if (!resumed.operationId) throw new GatewayError("internal", "Resumed task has no operation");
       return { operationId: resumed.operationId };
     }
     const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);

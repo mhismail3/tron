@@ -136,7 +136,7 @@ struct SessionModelSummaryCard<Controls: View, Footer: View>: View {
 }
 
 /// A context window divided into named sections: the bar's segments and the
-/// compact legend under it. Home Context supplies it from `home.context`.
+/// compact legend under it. Manage Home supplies it from `home.context`.
 struct SessionContextSegments: Equatable {
     struct Segment: Identifiable, Equatable {
         let id: String
@@ -151,10 +151,10 @@ struct SessionContextSegments: Equatable {
     let segments: [Segment]
 }
 
-/// The stats card Manage Session, Manage Home and Home Context show. Manage Home
-/// and Home Context supply an accessory (a state pill), placed on a header row above
-/// the usage; Home Context also supplies segments, which replace the plain bar with
-/// one segment per section and a compact legend above the metrics.
+/// The stats card Manage Session and Manage Home show. Manage Home supplies an
+/// accessory (its state pill and last activation), placed on a header row above
+/// the usage, and segments, which replace the plain bar with one segment per
+/// section and a compact legend above the metrics.
 struct SessionContextUsageCard<Accessory: View>: View {
     let snapshot: SessionContextPresentation
     let accessory: Accessory?

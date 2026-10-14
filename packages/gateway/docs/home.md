@@ -75,9 +75,22 @@ unchanged. There is no down-conversion. The refusal leaves the record's bytes un
 stays empty. Designation
 records an explicit **untrusted** decision for it through `TrustService`, so
 `requireResolved` never blocks
-on it and no project resource can load from it. The profile's `noExtensions`,
-`noSkills`,
-`noPromptTemplates` and `noContextFiles` are a second, independent guard.
+on it and no project resource can load from it. The profile's `noExtensions` and
+`noContextFiles`, and a resource-loader project trust that always resolves `false`
+(even across trust transitions), are a second, independent guard.
+
+### Composer skills and prompt templates
+
+Home's loader keeps the **user-level** skills and prompt templates (agent directory
+`skills/` and `prompts/`, `~/.agents/skills`, user settings entries and user
+packages) so `session.commands` lists them and the composer's `/` and `@` pickers
+offer them exactly as in an ordinary chat. They are never context: every Home skill
+is marked `disableModelInvocation`, so Pi lists none in Home's system prompt, and
+prompt templates never enter it. A resource reaches the model only when the user
+inserts it: `home.prompt` admits the `resourceInvocation` against the same catalog
+and Pi expands that skill or template into the user message itself. User
+extensions and their commands stay unloaded, so only Home's own module commands
+appear.
 
 ## Chapters
 
@@ -277,7 +290,7 @@ imported Registry target is ordinary unless the ledger names it.
 | | Home | Ordinary |
 | --- | --- | --- |
 | Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` | every Tron module, Pi built-ins (codemode, tool-search, MCP) and the Tron-pinned managed subagent provider |
-| Discovery | `noExtensions`, `noSkills`, `noPromptTemplates`, `noContextFiles`; no subagent discovery | agent directory and trusted project resources; managed-provider settings exclude user pi-subagents declarations |
+| Discovery | `noExtensions`, `noContextFiles`, project layer untrusted; user-level skills (user-invocable only) and prompt templates for the composer; no subagent discovery | agent directory and trusted project resources; managed-provider settings exclude user pi-subagents declarations |
 | System prompt | agent-directory `SYSTEM.md` and `APPEND_SYSTEM.md` dropped (`systemPromptOverride`, `appendSystemPromptOverride`) | loaded |
 | Executable tools | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task`, `profile`, `web_search`, `web_fetch`, `session_search`, `knowledge`, `read_file`, `settings` (`HOME_TOOL_NAMES`) | SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
@@ -929,6 +942,18 @@ settles the task `unknown` with `admission-cancelled` (Stop) or
 `admission-timeout` (deadline), outside the Stop path, and like every terminal task
 its one result wake follows. A step that took 5 s or more, timed out or was cancelled
 logs `home.task.dispatch-stage` naming the stage.
+
+**Worker budget (#930, [host load](host-load.md#2-home-worker-admission-gateway)).** At
+most three tasks hold a worker slot (launching or running). An authorized task beyond
+the budget, behind an earlier waiting task, or admitted while host pressure is
+`critical` is not refused: its record stays `pending` with `queuedAt`, `delegate`
+returns a null session and operation with its 1-based `queuePosition`, and it starts in
+order when a slot frees (or, under pressure, on a 5 s re-check). `task status` shows
+`queuePosition`; `home.status.workers` shows `{ running, queued, limit }`. Stop with
+operation `queued` settles a waiting task `interrupted` (`stopped-before-start`)
+before any worker exists. The queue is in memory: a restart settles a waiting task
+`unknown` (`cold-queued-not-started`) and never replays it. Each decision logs
+`home.task.queue`.
 
 **Worker model and thinking.** At each `delegate` call the Gateway resolves `model.ref[role=worker]`
 and `model.thinking[role=worker]` from the typed Home profile. The built-in value for either
@@ -1616,16 +1641,29 @@ refuses with retryable `busy`.
 
 Every read proves the complete frozen Home cut through the per-chapter index before
 it returns anything, then fences the exact ledger, binding and
-memory revision after its awaits. The evidence reader keeps only the selected
-bounded line and re-proves its chapter prefix at use. It never opens a
+memory revision after its awaits. The evidence reader proves its chapter, then
+reads only the selected bounded line at its proven position and checks that
+line's own digest at use. It never opens a
 writer-capable `SessionManager`. Missing, changed or malformed sources yield no
 partial page or evidence, even when an earlier chapter was readable
 (`busy`, `home-memory-source-unavailable`). Unknown fields and malformed bounds are
 `invalid_request`. Source details, references and content are never
 logged. Both endpoints use the shared disposable read deadline. Cancellation never
-cancels a prompt or an accepted mutation. Proof streams raw lines but
-traverses the compact index, so its cost scales with the Home history, not only with
-the page size. No persisted format and no client cache is introduced.
+cancels a prompt or an accepted mutation.
+
+Proof cost does not grow with Home's history per read (#940). The memory owner
+keeps one in-memory proof per chapter (`HomeSourceProofs` in
+`episodic/home-source.ts`): the prefix digest and leaf re-derived from bytes, the
+file stat it was read under, and each entry's line position. A proof is reused
+while its file's stat is identical (the test sealed chapters are held to). An
+appended active chapter is extended over its new bytes only, after the line
+ending at the proven boundary still hashes to the proven leaf (ingestion's own
+append test); navigation or any other change re-proves the whole chapter. A
+proof runs once per chapter at a time and a cancelled read abandons only its
+wait, so a cold proof slower than the read deadline still completes for the
+retry. Activation's cut lookup shares the same proofs. Only the first read after
+a Gateway start proves all history from its first byte. No persisted format and
+no client cache is introduced.
 
 ## The terminal client
 
@@ -1714,6 +1752,7 @@ without a retained artifact.
 | `src/sessions/home-profile.integration.test.ts` | learn through a real activation with its evidence and unconfirmed state; verbatim injection with a byte-stable prompt; refine, supersede and retire lifecycles; refusals of retired and superseded items; a native confirmation and correction keep the item; the over-bound refusal; a worker receives the brief; Home chapters unobserved; ordinary sessions without the profile tool | `test-results/home-profile/report.json` | `npx vitest run src/sessions/home-profile.integration.test.ts` |
 | `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; a Chat-layer `tools.active` change restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |
+| `src/sessions/home-memory-browser-scale.e2e.test.ts` | memory browser at a large Home's scale (3 chapters, 1,200+ messages, ~68 MB canonical JSONL): first page, paging, chapter scope, part and evidence answer within a fifth of the read deadline and at least ten times faster than proving all history per read, with identical answers; a cancelled cold proof completes for the retry; a live append extends the proof and navigation re-proves it | `test-results/home-memory-browser-scale/report.json` | `npx vitest run src/sessions/home-memory-browser-scale.e2e.test.ts` |
 | `src/episodic/home-source.e2e.test.ts` | cross-chapter replay, restart, navigation and frozen-cut proof | `test-results/home-memory/continuity.json` | `npx vitest run src/episodic/home-source.e2e.test.ts` |
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on explicit/profile/Home values; profile model and thinking resolve independently, unsupported thinking is clamped, provenance is captured in the brief and worker Chat, direct Home dispatch inherits the live Home choice, Home’s context names its identity, unknown tasks return not_found, and ordinary chats retain their own defaults; unavailable profile models fall through; invalid explicit choices are refused before any task or session; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries plus a deterministically held empty-PID publication interval (positive identity before cancellation, unchanged reaping and no-further-effects assertions); frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
