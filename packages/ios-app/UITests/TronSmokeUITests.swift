@@ -3065,8 +3065,8 @@ final class TronSmokeUITests: XCTestCase {
         let staging = app.buttons["Staging, A pre-release environment for validation."]
         XCTAssertTrue(staging.waitForExistence(timeout: 5), app.debugDescription)
         staging.tap()
-        app.staticTexts["Which environments should receive the change?"].swipeLeft()
-        XCTAssertTrue(app.staticTexts["When should the change happen?"].waitForExistence(timeout: 3), app.debugDescription)
+        app.textViews["Which environments should receive the change?"].swipeLeft()
+        XCTAssertTrue(app.textViews["When should the change happen?"].waitForExistence(timeout: 3), app.debugDescription)
         let other = app.buttons.matching(NSPredicate(format: "label == %@", "Other"))
             .allElementsBoundByIndex.first { $0.isHittable }
         XCTAssertNotNil(other, app.debugDescription)
@@ -3160,10 +3160,64 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "ask-user-completed-read-only-fixture")
     }
 
+    /// #941: agent-authored question text is selectable with Copy, its URL is
+    /// a tappable link, and a fenced command's shared Copy control copies the
+    /// exact command (proved by pasting it into Other and submitting it with an
+    /// option through the real response path).
+    @MainActor
+    func testAskUserQuestionTextIsSelectableWithLinksAndCopyableCode() {
+        let command = "scripts/tron-ios-device share --commit 1955237"
+        let url = "https://build.example.ts.net:8443/"
+        let app = launchAskUser(copyable: true)
+        waitForAskUserForm(in: app)
+        let question = app.textViews.matching(NSPredicate(format: "label CONTAINS %@", url)).firstMatch
+        XCTAssertTrue(question.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(question.links[url].exists, "The bare URL is a link: \(app.debugDescription)")
+        XCTAssertTrue(app.staticTexts[command].exists, "The fenced command renders as a code block")
+        keepScreenshot(named: "941-1-question-url-command")
+
+        // Native range selection on the question offers the system Copy.
+        question.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.2)).press(forDuration: 1.0)
+        let copyMenu = app.descendants(matching: .menuItem).matching(NSPredicate(format: "label == 'Copy'")).firstMatch
+        XCTAssertTrue(copyMenu.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "941-2-question-selection-copy-menu")
+        copyMenu.tap()
+
+        // The code block's shared Copy control copies the exact command.
+        let copyCode = app.buttons.matching(NSPredicate(format: "label == 'Copy'")).firstMatch
+        XCTAssertTrue(copyCode.waitForExistence(timeout: 3), app.debugDescription)
+        copyCode.tap()
+
+        app.buttons["Staging"].tap()
+        app.buttons["Other"].tap()
+        let other = app.textViews["Other response for Environment"]
+        XCTAssertTrue(other.waitForExistence(timeout: 3), app.debugDescription)
+        other.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        other.press(forDuration: 1.0)
+        let paste = app.descendants(matching: .menuItem).matching(NSPredicate(format: "label == 'Paste'")).firstMatch
+        XCTAssertTrue(paste.waitForExistence(timeout: 5), app.debugDescription)
+        paste.tap()
+        XCTAssertEqual(other.value as? String, command)
+        app.buttons["Submit all answers"].tap()
+        XCTAssertTrue(app.staticTexts["Mutation count: 1"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["extension.respond cancelled=false selected=environment-a other=\(command)"].exists, app.debugDescription)
+
+        // The completed review renders the same link; tapping it opens Safari.
+        let reviewed = app.textViews.matching(NSPredicate(format: "label CONTAINS %@", url)).firstMatch
+        XCTAssertTrue(reviewed.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "941-4-completed-review-link")
+        reviewed.links[url].tap()
+        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+        XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 10), "The question link opens in Safari")
+        keepScreenshot(named: "941-5-link-opened")
+        app.activate()
+    }
+
     @MainActor
     func testAskUserInstructionAndSeparateToolbarLayout() {
         let app = launchAskUser(styled: true)
-        let question = app.staticTexts["Which environments should receive the change?"]
+        let question = app.textViews["Which environments should receive the change?"]
         XCTAssertTrue(question.waitForExistence(timeout: 5))
         let instruction = app.staticTexts["Select one. Question 1 of 1"]
         let option = app.buttons["Staging, A pre-release environment for validation."]
@@ -3185,12 +3239,13 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchAskUser(noCancel: Bool = false, styled: Bool = false, multiple: Bool = false) -> XCUIApplication {
+    private func launchAskUser(noCancel: Bool = false, styled: Bool = false, multiple: Bool = false, copyable: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-ask-user-fixture"]
         if noCancel { app.launchArguments.append("-tron-ask-user-no-cancel") }
         if styled { app.launchArguments.append("-tron-ask-user-styled") }
         if multiple { app.launchArguments.append("-tron-ask-user-multiple") }
+        if copyable { app.launchArguments.append("-tron-ask-user-copyable") }
         app.launch()
         return app
     }
