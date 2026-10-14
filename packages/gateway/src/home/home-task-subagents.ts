@@ -5,7 +5,7 @@ import { GatewayError } from "../errors.js";
 import type { ExtensionRunLifecycleState } from "../protocol/types.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../sessions/context-delivery-receipts.js";
 import { delegatedArtifactPathAllowed, DELEGATED_PROVIDER_TOOL_NAME } from "../sessions/delegated-provider.js";
-import { HOME_TASK_MARKER } from "./home-task-report.js";
+import { homeTaskOperationSpan } from "./home-task-report.js";
 import { HOME_TASK_PRODUCER_REFUSAL_REASON, HOME_TASK_SEALED_REASON } from "./home-task-worker-extension.js";
 
 /** The worker's canonical settlement fact: the Gateway's own task-end stops of its
@@ -119,9 +119,7 @@ export function parseHomeTaskSubagentsEntry(data: unknown, operationId: string):
 /** The operation's subagent facts from one canonical cut. Entries after the
  * operation's marker are the only ones that belong to it. */
 export function homeTaskSubagentsProjection(entries: readonly FileEntry[], operationId: string): HomeTaskSubagents {
-  const marker = entries.findIndex(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER
-    && (entry.data as { operationId?: unknown } | undefined)?.operationId === operationId);
-  const runEntries = marker < 0 ? [] : entries.slice(marker + 1);
+  const runEntries = homeTaskOperationSpan(entries, operationId).run;
   const launches = homeTaskSubagentLaunches(runEntries);
   const facts = runEntries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_SUBAGENTS);
   if (facts.length > 1) throw new GatewayError("conflict", "Conflicting task subagent evidence");

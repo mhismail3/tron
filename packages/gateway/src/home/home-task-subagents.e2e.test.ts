@@ -770,6 +770,39 @@ describe("Home task subagents", () => {
     expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
   }, 60_000);
 
+  it("continues the waiting task from Home's steering and the maintainer's message in one ordered lane (#929)", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    const turns: string[] = [];
+    const lastUser = (context: FauxContext) => {
+      const content = context.messages.findLast(message => message.role === "user")?.content;
+      return typeof content === "string" ? content : (content ?? []).map((part: { type: string; text?: string }) => part.text ?? "").join("");
+    };
+    f.faux.setResponses([
+      holdingAsyncLaunch("async-launch"),
+      fauxAssistantMessage("Launched the background check; waiting for it."),
+      (context: FauxContext) => { turns.push(lastUser(context)); return fauxAssistantMessage("Noted Home's instruction."); },
+      (context: FauxContext) => { turns.push(lastUser(context)); return fauxAssistantMessage("Noted the maintainer's message."); },
+      async () => fauxAssistantMessage([reportCall("report-after-shared-lane")], { stopReason: "toolUse" }),
+    ]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    await waitFor(() => child.heldRequests() === 1, "async child live", bound);
+    await waitBetweenTurns(slot);
+    await f.registry.homeOwner().steerTask(f.home.sessionId, { taskId: run.taskId, operationId: run.operationId, text: "Home between turns" });
+    await waitFor(() => turns.length === 1, "Home's steering starts the task's next turn", bound);
+    await waitFor(() => (slot as unknown as { taskWait?: { wakeOperationId?: string } }).taskWait?.wakeOperationId === undefined
+      && (slot as unknown as { taskWait?: unknown }).taskWait !== undefined, "task waits again", bound);
+    // The maintainer's composer sends an ordinary prompt; it joins the same lane, not refused.
+    await slot.prompt("Maintainer between turns");
+    await waitFor(() => turns.length === 2, "the maintainer's message starts the task's next turn", bound);
+    await waitBetweenTurns(slot);
+    child.releaseHeld();
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    expect(turns).toEqual(["Home between turns", "Maintainer between turns"]);
+  }, 60_000);
+
   it("stops the turn a provider wake starts when the task is stopped during that turn", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);

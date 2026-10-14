@@ -1757,10 +1757,10 @@ export class GatewayService {
         // an existing receipt remains readable without a live subscription.
         const releaseSession = typeof params.sessionId === "string" && client.isSubscribed(params.sessionId)
           ? this.dependencies.sessions.retainLiveSession(params.sessionId) : undefined;
-        return this.mutation(client, method, params, async () => {
+        return this.mutation(client, method, params, async (workToken) => {
           this.requireRetainedSession(client, params, releaseSession);
           const slot = await this.openedSlot(client, params);
-          return safeJson(await this.admitPrompt(slot, params));
+          return safeJson(await this.admitPrompt(slot, params, workToken));
         }, false, true).finally(releaseSession);
       }
       case "session.abort":
@@ -2543,7 +2543,7 @@ export class GatewayService {
    * contract: text, attachments, resource invocations and steering behavior are
    * all validated against the slot the prompt will run in, before any attachment
    * is materialized. */
-  private async admitPrompt(slot: RuntimeSlot, params: Record<string, unknown>): Promise<{ operationId: string }> {
+  private async admitPrompt(slot: RuntimeSlot, params: Record<string, unknown>, workToken?: string): Promise<{ operationId: string }> {
     if (params.text !== undefined && typeof params.text !== "string") {
       throw new GatewayError("invalid_request", "text must be a string");
     }
@@ -2576,6 +2576,22 @@ export class GatewayService {
       if (matches.length !== 1 || shadowed) {
         throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
       }
+    }
+    if (slot.homeTaskWorkerState === "settled") {
+      // A message to a Home worker whose task stopped or settled continues that task in place
+      // (#929): same session, worktree and claim, with this message as its instruction.
+      if (resourceInvocation !== undefined) {
+        throw new GatewayError("invalid_request", "A stopped Home worker continues from a message, not a command");
+      }
+      // Attachments (for example the screenshots a stopped worker asked for) go with the
+      // resume instruction; the brief carries their text envelope, the first turn their images.
+      const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
+      // This request's own work entry must not count as the session being busy.
+      const resumed = await this.requireHome().resumeWorkerSession(slot.id,
+        [text, attachments.envelope].filter(Boolean).join("\n\n"), workToken, attachments.images);
+      // A resume never queues, so it always names its worker operation.
+      if (!resumed.operationId) throw new GatewayError("internal", "Resumed task has no operation");
+      return { operationId: resumed.operationId };
     }
     const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
     const visiblePrompt = [resourceArguments ?? text, attachments.envelope].filter(Boolean).join("\n\n");

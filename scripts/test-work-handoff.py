@@ -396,6 +396,11 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         fixture(); before=refuse_snapshot(); r=call("handoff","41","--session","new-owner","--reason","legacy recovery")
         after=refuse_snapshot(); evidence.append({"case":"missing owner refuses automatically without writes","exit":r.returncode,"stderr":r.stderr.strip()})
         assert r.returncode and "unknown" in r.stderr and before[:2]==after[:2] and before[2]["writes"]==after[2]["writes"] and before[3:]==after[3:]
+        # A terminal opened from a chat inherits that chat's PI_SESSION_ID; a forced handoff must name its receiver (#929).
+        inherited={k:v for k,v in env.items() if k!="WORK_SESSION_ID"}; inherited["PI_SESSION_ID"]="home-chapter-session"
+        r=subprocess.run([sys.executable,str(cli),"handoff","41","--reason","legacy recovery","--force-maintainer"],cwd=worktree,env=inherited,capture_output=True,text=True,timeout=30)
+        evidence.append({"case":"forced handoff refuses an inherited PI_SESSION_ID","exit":r.returncode,"stderr":r.stderr.strip()})
+        assert r.returncode and "--session" in r.stderr and refuse_snapshot()[2]["writes"]==after[2]["writes"]
         r=call("handoff","41","--session","new-owner","--reason","legacy recovery","--force-maintainer")
         evidence.append({"case":"missing owner force requires TTY","exit":r.returncode,"stderr":r.stderr.strip()}); assert r.returncode and "interactive terminal" in r.stderr
         fixture(); pid,terminal_fd=pty.fork()
