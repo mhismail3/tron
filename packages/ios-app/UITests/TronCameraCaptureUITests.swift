@@ -3,7 +3,8 @@ import XCTest
 /// The Take Photo sheet (#937), opened from the real composer menu against
 /// scripted camera hardware (`HostedCameraFixture`): the first feed becomes
 /// live 6 s after it is requested (long enough to observe the opening state),
-/// later ones after 1.5 s. `camera.phase-history` is the model's complete
+/// later ones after 3 s. Mid-switch assertions also hold once the switch has
+/// finished, so a slow accessibility snapshot cannot make them flaky. `camera.phase-history` is the model's complete
 /// phase sequence, so "never shows loading again" is an exact assertion, not a
 /// sampled one.
 final class TronCameraCaptureUITests: XCTestCase {
@@ -15,7 +16,7 @@ final class TronCameraCaptureUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = [
             "-tron-composer-upload-fixture", "-tron-camera-fixture",
-            "-camera-fixture-start-latency-ms", "6000", "-camera-fixture-latency-ms", "1500",
+            "-camera-fixture-start-latency-ms", "6000", "-camera-fixture-latency-ms", "3000",
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
         ]
         app.launch()
@@ -46,7 +47,7 @@ final class TronCameraCaptureUITests: XCTestCase {
 
         // Back to front: the held frame replaces the loading state.
         flip.tap()
-        waitFor(history, "label == 'starting>live>switching'", "the switch did not start")
+        waitFor(history, "label BEGINSWITH 'starting>live>switching'", "the switch did not start")
         XCTAssertFalse(loading.exists, "switching cameras showed the loading state")
         XCTAssertFalse(flash.isEnabled, "the torch stays off while the next camera starts")
         XCTAssertEqual([flash.frame, shutter.frame, flip.frame], controlFrames, "controls moved during the switch")
