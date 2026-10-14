@@ -126,6 +126,7 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered"
 )
 
 ui_journey_is_owned() {
@@ -574,6 +575,24 @@ const askJourney = [
   ], { stopReason: "toolUse" }),
   fauxAssistantMessage("Ask journey answered: the fixture received the form answer."),
 ];
+// A prompt carrying the steer journey marker holds its turn until the phone
+// has queued a message, then ends it, so Pi delivers the queued steer (#974).
+// The steered photo has no text; its turn is recognised by its image.
+const steerJourneyMarker = "Fixture steer journey";
+let steerContext;
+const holdUntilSteerQueued = async () => {
+  const deadline = Date.now() + 180000;
+  while (!steerContext?.hasPendingMessages() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  // Keep the run going briefly so the phone presents the queued steer.
+  await new Promise((resolve) => setTimeout(resolve, 4000));
+  return fauxAssistantMessage("Steer journey turn finished.");
+};
+const lastUserHasImage = (context) => {
+  const last = context.messages.at(-1);
+  return last?.role === "user" && Array.isArray(last.content) && last.content.some((part) => part.type === "image");
+};
 const latestUserText = (context) => {
   for (let index = context.messages.length - 1; index >= 0; index -= 1) {
     const message = context.messages[index];
@@ -585,6 +604,8 @@ const latestUserText = (context) => {
 };
 const scripted = (context, options, state, model) => {
   if (latestUserText(context).includes(CODEMODE_MARKER)) return codemodeTurn(context) ?? fauxAssistantMessage("", { stopReason: "error", errorMessage: "Unexpected codemode journey turn" });
+  if (lastUserHasImage(context)) return fauxAssistantMessage("Steer journey saw the photo.");
+  if (latestUserText(context).includes(steerJourneyMarker)) return holdUntilSteerQueued();
   const step = (latestUserText(context).includes(askJourneyMarker) ? askJourney : ordinary).shift();
   if (step === undefined) {
     return fauxAssistantMessage("", { stopReason: "error", errorMessage: "No more faux responses queued" });
@@ -594,6 +615,7 @@ const scripted = (context, options, state, model) => {
 faux.setResponses(Array.from({ length: 64 }, () => scripted));
 export default function (pi) {
   pi.registerProvider(faux.provider);
+  pi.on("agent_start", (_event, ctx) => { steerContext = ctx; });
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
     const choice = await ctx.ui.select("Allow this test command?", ["Yes", "No"]);
