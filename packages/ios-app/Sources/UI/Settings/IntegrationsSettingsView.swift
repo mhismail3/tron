@@ -19,7 +19,6 @@ enum IntegrationPolicySubmission {
 final class IntegrationSetupDraft {
     let definition: IntegrationDefinition
     let viewID = UUID().uuidString
-    var diagnosticContext: XSetupDiagnosticContext?
     var method: String
     var instanceID = "ios-\(UUID().uuidString.lowercased())"
     var accountID = ""
@@ -53,10 +52,19 @@ final class IntegrationSetupDraft {
 @Observable
 final class IntegrationSheetRoutes {
     var setup: IntegrationSetupDraft?
+    /// Kept beside the draft so a dismissal that already cleared `setup` still
+    /// records its X setup diagnostics.
+    var setupDiagnosticContext: XSetupDiagnosticContext?
     var selectedInstance: IntegrationInstance?
+
+    func presentSetup(_ definition: IntegrationDefinition) {
+        setupDiagnosticContext = nil
+        setup = IntegrationSetupDraft(definition: definition)
+    }
 
     func reset() {
         setup = nil
+        setupDiagnosticContext = nil
         selectedInstance = nil
     }
 }
@@ -104,7 +112,7 @@ struct IntegrationsSettingsView: View {
                                 IntegrationConfiguredRow(title: definition.displayName, account: "", status: "Not configured", usage: nil,
                                                          isLoadingUsage: false, configured: false, actionTitle: action,
                                                          accessibilityAction: "\(action) for \(definition.displayName)", accent: .tronCyan) {
-                                    routes.setup = IntegrationSetupDraft(definition: definition)
+                                    routes.presentSetup(definition)
                                 }
                                 if index < available.count - 1 { TronSettingsDivider(accent: .tronCyan) }
                             }
@@ -146,7 +154,7 @@ struct IntegrationsSettingsView: View {
             #if HOSTED_TEST
             hostedTrace?.record("integrations.destination old=\(destinationToken(oldIdentity)) new=\(destinationToken(newIdentity)) setupOpen=\(routes.setup != nil)")
             #endif
-            if let context = routes.setup?.diagnosticContext {
+            if routes.setup != nil, let context = routes.setupDiagnosticContext {
                 XSetupDiagnostic.record(
                     .destinationRetired, context: context, appLog: model.appLog,
                     outcome: .rejected, reason: .destinationChanged,
@@ -162,16 +170,16 @@ struct IntegrationsSettingsView: View {
         }
         .tronManagedSheet(isPresented: Binding(get: { routes.setup != nil }, set: { isPresented in
             guard !isPresented else { return }
-            if let context = routes.setup?.diagnosticContext {
+            if let context = routes.setupDiagnosticContext {
                 XSetupDiagnostic.record(
                     .bindingSetFalse, context: context, appLog: model.appLog,
                     reason: .unknownOrigin
                 )
             }
-            routes.setup = nil
+            routes.setup = nil; routes.setupDiagnosticContext = nil
         }), identity: "integrations.setup") {
             if let draft = routes.setup {
-                IntegrationSetupView(draft: draft) {
+                IntegrationSetupView(draft: draft, diagnosticContext: Bindable(routes).setupDiagnosticContext) {
                     routes.setup = nil; load()
                 }.environment(model)
             }
@@ -214,7 +222,7 @@ struct IntegrationsSettingsView: View {
             guard activity.allowsPresentationPublication,
                   model.knowledgePresentationIdentity == identity,
                   loadGeneration == ticket else { return }
-            routes.setup = IntegrationSetupDraft(definition: definition)
+            routes.presentSetup(definition)
         }
     }
 
@@ -430,6 +438,7 @@ private struct IntegrationSetupView: View {
     /// Owned by the Connected Services routes, not this sheet: the sheet content
     /// can be rebuilt while presented and must not lose the draft (#932).
     @Bindable var draft: IntegrationSetupDraft
+    @Binding var diagnosticContext: XSetupDiagnosticContext?
     let onFinished: () -> Void
 
     private var definition: IntegrationDefinition { draft.definition }
@@ -497,7 +506,7 @@ private struct IntegrationSetupView: View {
             }
         }) {
             if !usesXOAuth || draft.xOAuthCompleted {
-                if usesXOAuth, let context = draft.diagnosticContext {
+                if usesXOAuth, let context = diagnosticContext {
                     XSetupDiagnostic.record(.explicitFinish, context: context, appLog: model.appLog, outcome: .success)
                 }
                 onFinished(); dismiss()
@@ -506,12 +515,12 @@ private struct IntegrationSetupView: View {
         .onAppear {
             if usesXOAuth {
                 let context: XSetupDiagnosticContext
-                if let existing = draft.diagnosticContext, existing.viewID == draft.viewID {
+                if let existing = diagnosticContext, existing.viewID == draft.viewID {
                     context = existing
                 } else {
                     context = currentDiagnosticContext()
                 }
-                draft.diagnosticContext = context
+                diagnosticContext = context
                 XSetupDiagnostic.record(.viewAppeared, context: context, appLog: model.appLog, outcome: .appeared)
             }
             #if HOSTED_TEST
@@ -519,7 +528,7 @@ private struct IntegrationSetupView: View {
             #endif
         }
         .onDisappear {
-            if usesXOAuth, let context = draft.diagnosticContext {
+            if usesXOAuth, let context = diagnosticContext {
                 XSetupDiagnostic.record(.viewDisappeared, context: context, appLog: model.appLog, outcome: .disappeared)
             }
             #if HOSTED_TEST
@@ -549,7 +558,7 @@ private struct IntegrationSetupView: View {
             lifecycleGeneration: viewContext.lifecycleGeneration,
             connectionID: viewContext.connectionID
         )
-        draft.diagnosticContext = action
+        diagnosticContext = action
         return action
     }
 
