@@ -301,6 +301,28 @@ private actor HostedHomeShellGateway {
     private var openedSessions: [String] = []
     private var approvals: [JSONValue] = []
     private var settingsDecisions: [String] = []
+    /// The learned profile as the fixture Gateway holds it, changed by `home.profileChange`
+    /// and restored by `settings.undo`, with its record entries for Changes.
+    private var profileItems: [HostedProfileItem] = HostedHomeToolFixture.profileItems
+    private var profileEntries: [JSONValue] = []
+    private var profileUndo: [String: (before: [HostedProfileItem], after: [HostedProfileItem])] = [:]
+    private var profileChangeCount = 0
+    /// Home's own learn of the first item, recorded as the Gateway records Home's
+    /// profile tool: undoing it retires the item.
+    private func seedHomeProfileEntry() {
+        guard profileEntries.isEmpty, let index = profileItems.firstIndex(where: { $0.id == "9a364c45-34fe-4f0a-93e6-fc507e2b0bdc" }) else { return }
+        var retired = profileItems
+        retired[index].status = "retired"
+        var entry = profileEntry(id: profileItems[index].id, before: [], after: profileItems, undoOf: nil).objectValue!
+        entry["actor"] = .object(["kind": .string("home"), "sessionId": .string("home-session")])
+        entry["presentation"] = .object(["label": .string("Profile item"), "section": .string("context"), "actor": .string("Home"),
+            "layer": .string("Home profile"), "display": .object(["before": .string("Not in the profile"),
+                "after": .string("Inferred preference: \(profileItems[index].text)")])])
+        entry["reason"] = .string("You asked for screenshots before testing on every UI change")
+        let changeID = entry["changeId"]!.stringValue!
+        profileEntries.append(.object(entry))
+        profileUndo[changeID] = (retired, profileItems)
+    }
     init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, settingsApprovals: Bool = false, terminalEnabled: Bool = true) {
         self.terminalEnabled = terminalEnabled
         self.sheetState = sheetState
@@ -379,7 +401,7 @@ private actor HostedHomeShellGateway {
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
     func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
-    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "context-window.v1", "skill-prompt.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"] }
+    func capabilities() -> [String] { capabilityEnabled ? ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (terminalEnabled ? ["terminal.v1"] : []) + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"] }
 
     /// Every Home read a sheet sent, so journeys can prove a return to a sheet re-reads nothing.
     private var homeReads: [String: Int] = [:]
@@ -390,6 +412,88 @@ private actor HostedHomeShellGateway {
     func homeReadSummary() -> String {
         ["home.status", "home.context", "home.chapterList", "home.memory.view", "home.taskList", "home.taskStatus"]
             .map { "\($0)=\(homeReads[$0, default: 0])" }.joined(separator: ",")
+    }
+
+    /// The Gateway's profile change semantics on fixture data: the maintainer's edits are
+    /// confirmed, a stale revision is a conflict, and each request is one undoable group.
+    private func profileChange(_ params: [String: JSONValue]) -> (JSONValue?, JSONValue?) {
+        guard params["commandId"]?.stringValue != nil, case .array(let changes)? = params["changes"], !changes.isEmpty else { return taskRefusal() }
+        profileChangeCount += 1
+        if ProcessInfo.processInfo.arguments.contains("-home-profile-conflict"), profileChangeCount == 1 {
+            return (nil, .object(["code": .string("conflict"), "message": .string("This profile item changed since it was read; review it and try again"),
+                "retryable": .bool(false)]))
+        }
+        let before = profileItems
+        var touched: [String] = []
+        let now = ISO8601DateFormatter().string(from: Date())
+        for change in changes {
+            guard let object = change.objectValue, let action = object["action"]?.stringValue, let id = object["id"]?.stringValue,
+                  let index = profileItems.firstIndex(where: { $0.id == id && $0.status == "active" }),
+                  object["expectedRevision"]?.stringValue == profileItems[index].revisionId else {
+                profileItems = before
+                return (nil, .object(["code": .string("conflict"), "message": .string("This profile item changed since it was read; review it and try again"), "retryable": .bool(false)]))
+            }
+            var item = profileItems[index]
+            item.revisionId = UUID().uuidString.lowercased(); item.updatedAt = now
+            switch action {
+            case "confirm": item.confirmed = true
+            case "refine":
+                item.text = object["text"]?.stringValue ?? item.text; item.kind = object["kind"]?.stringValue ?? item.kind; item.confirmed = true
+            case "retire": item.status = "retired"
+            case "supersede":
+                let next = HostedProfileItem(id: UUID().uuidString.lowercased(), revisionId: UUID().uuidString.lowercased(),
+                    kind: object["kind"]?.stringValue ?? item.kind, text: object["text"]?.stringValue ?? item.text,
+                    confirmed: true, status: "active", createdAt: now, updatedAt: now)
+                item = profileItems[index]; item.status = "superseded"
+                profileItems.append(next); touched.append(next.id)
+            default: return taskRefusal()
+            }
+            profileItems[index] = item
+            touched.insert(id, at: 0)
+        }
+        let entries = touched.map { profileEntry(id: $0, before: before, after: profileItems, undoOf: nil) }
+        profileEntries.append(contentsOf: entries)
+        let changeIDs = entries.compactMap { $0.objectValue?["changeId"]?.stringValue }
+        for id in changeIDs { profileUndo[id] = (before, profileItems) }
+        return (.object(["status": .string("applied"), "tier": .string("quiet"),
+            "changes": .array(changeIDs.map { .object(["changeId": .string($0)]) }),
+            "items": try! JSONValue.encode(profileItems.filter { touched.contains($0.id) })]), nil)
+    }
+
+    private func profileUndo(_ params: [String: JSONValue]) -> (JSONValue?, JSONValue?) {
+        guard let changeID = params["changeId"]?.stringValue, let recorded = profileUndo[changeID] else { return taskRefusal() }
+        let touched = Set(recorded.after.map(\.id) + recorded.before.map(\.id)).filter { id in
+            recorded.after.first { $0.id == id } != recorded.before.first { $0.id == id }
+        }
+        let current = profileItems
+        profileItems = recorded.before
+        let entries = touched.sorted().map { profileEntry(id: $0, before: current, after: profileItems, undoOf: changeID) }
+        profileEntries.append(contentsOf: entries)
+        for (key, value) in profileUndo where value.after == recorded.after { profileUndo.removeValue(forKey: key) }
+        return (.object(["status": .string("applied"), "tier": .string("quiet"), "changes": .array([])]), nil)
+    }
+
+    private func profileEntry(id: String, before: [HostedProfileItem], after: [HostedProfileItem], undoOf: String?) -> JSONValue {
+        func display(_ item: HostedProfileItem?) -> String {
+            guard let item else { return "Not in the profile" }
+            switch item.status {
+            case "retired": return "Retired: \(item.text)"
+            case "superseded": return "Superseded: \(item.text)"
+            default: return "\(item.confirmed ? "Confirmed" : "Inferred") \(item.kind.replacingOccurrences(of: "-", with: " ")): \(item.text)"
+            }
+        }
+        let old = before.first { $0.id == id }, new = after.first { $0.id == id }
+        var entry: [String: JSONValue] = [
+            "changeId": .string(UUID().uuidString.lowercased()), "at": .string(ISO8601DateFormatter().string(from: Date())),
+            "actor": .object(["kind": .string("ui")]), "target": .object(["kind": .string("home")]), "layer": .string("profile"),
+            "key": .string("home.profile.item"), "qualifiers": .object(["note": .string(id)]), "op": .string("set"),
+            "before": old.map { try! JSONValue.encode($0) } ?? .null, "after": new.map { try! JSONValue.encode($0) } ?? .null,
+            "tier": .string("quiet"), "status": .string("applied"),
+            "presentation": .object(["label": .string("Profile item"), "section": .string("context"), "actor": .string("You"),
+                "layer": .string("Home profile"), "display": .object(["before": .string(display(old)), "after": .string(display(new))])]),
+        ]
+        if let undoOf { entry["undoOf"] = .string(undoOf) }
+        return .object(entry)
     }
 
     func handle(_ method: String, _ params: [String: JSONValue]) async throws -> (JSONValue?, JSONValue?) {
@@ -418,6 +522,7 @@ private actor HostedHomeShellGateway {
                 model("memory-b", name: "Memory Model B"), model("virtual", name: "Virtual model", virtual: true)]), "nextCursor": .null]), nil)
         case "model.recent": return (.object(["models": .array([])]), nil)
         case "settings.history":
+            seedHomeProfileEntry()
             let entries: [JSONValue] = ProcessInfo.processInfo.arguments.contains("-home-settings-history") ? [
                 .object(["changeId": .string("worker-setting"), "at": .string("2026-10-11T12:00:00Z"),
                     "actor": .object(["kind": .string("worker"), "sessionId": .string("worker-session"), "taskId": .string("active")]),
@@ -427,7 +532,16 @@ private actor HostedHomeShellGateway {
                         "actor": .string("Worker"), "layer": .string("Home profile"), "section": .string("model"),
                         "display": .object(["before": .string("Off"), "after": .string("High")])])])
             ] : []
-            return (.object(["entries": .array(entries)]), nil)
+            // The feed's default filter is agents and outside, as the Gateway's is.
+            let profile = profileEntries.reversed().filter { entry in
+                params["actor"]?.stringValue != "agents" || entry.objectValue?["actor"]?.objectValue?["kind"]?.stringValue != "ui"
+            }
+            return (.object(["entries": .array(profile + entries)]), nil)
+        case "home.profileChange":
+            seedHomeProfileEntry()
+            return profileChange(params)
+        case "settings.undo":
+            return profileUndo(params)
         case "home.taskList":
             taskListReads += 1
             // Hold the real sheet's read at the socket boundary, not its view state.
@@ -472,7 +586,8 @@ private actor HostedHomeShellGateway {
             taskDecisions[id] = result; controlCount += 1
             return (result, nil)
         case "home.profileList":
-            return (HostedHomeToolFixture.profileList, nil)
+            seedHomeProfileEntry()
+            return (.object(["items": try JSONValue.encode(profileItems), "unclassified": .number(0)]), nil)
         case "home.chapterList":
             return (try await heldSheetRead { chapterListFixture() }, nil)
         case "home.context":

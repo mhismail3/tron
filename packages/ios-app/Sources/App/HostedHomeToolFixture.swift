@@ -2,6 +2,18 @@
 import Foundation
 import TronMobileCore
 
+/// One learned-profile item as the fixture Gateway stores it (the `home.profileList` row).
+struct HostedProfileItem: Codable, Equatable, Sendable {
+    var id: String
+    var revisionId: String
+    var kind: String
+    var text: String
+    var confirmed: Bool
+    var status: String
+    var createdAt: String
+    var updatedAt: String
+}
+
 /// The Home fixture's chat transcript of every Home tool call (`-home-tool-transcript`),
 /// with each result's text and typed details as the Gateway's tools return them, and
 /// the learned profile `home.profileList` answers. Synthetic data only.
@@ -10,8 +22,10 @@ enum HostedHomeToolFixture {
         try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Data(transcriptJSON.utf8))
     }
 
-    static var profileList: JSONValue {
-        try! JSONDecoder.gateway.decode(JSONValue.self, from: Data(profileJSON.utf8))
+    /// The same profile as mutable rows, for the fixture Gateway's `home.profileChange`.
+    static var profileItems: [HostedProfileItem] {
+        struct List: Decodable { let items: [HostedProfileItem] }
+        return try! JSONDecoder.gateway.decode(List.self, from: Data(profileJSON.utf8)).items
     }
 
     private static let profileJSON = #"""

@@ -317,6 +317,109 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("profile-03-item")
     }
 
+    /// The maintainer confirms, edits, replaces, retires and undoes learned-profile items
+    /// from Manage Home › Profile (#966), and Home's own profile change shows in Changes
+    /// with its detail and Undo. Every sheet keeps the shared rows, editors and toolbar tint.
+    @MainActor
+    func testProfileConfirmEditRetireAndUndo() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        open(app, ring, ready: "home-manage-state", name: "manage")
+        expand(app, done: "home-sheet-done-manage")
+        open(app, element(app, "home-manage-profile"), ready: "home-profile-group-preference", name: "profile")
+        expand(app, done: "home-sheet-done-profile")
+
+        // Inferred and confirmed items differ: only an inferred item carries Confirm.
+        let inferred = "9a364c45-34fe-4f0a-93e6-fc507e2b0bdc", confirmed = "6a26bfb7-f0d1-44ce-b0ae-9da01da3e55c"
+        XCTAssertTrue(element(app, "home-profile-confirm-\(inferred)").exists)
+        XCTAssertFalse(element(app, "home-profile-confirm-\(confirmed)").exists, "A confirmed item has nothing to confirm")
+        XCTAssertTrue(element(app, "home-profile-item-\(confirmed)").label.contains("Confirmed"))
+        XCTAssertTrue(element(app, "home-profile-confirm-all").label.contains("3 items"))
+        keep("profile-edit-00-list")
+
+        // One tap confirms; the last change offers Undo, which restores it.
+        element(app, "home-profile-confirm-\(inferred)").tap()
+        XCTAssertTrue(element(app, "home-profile-last-change").waitForExistence(timeout: 5))
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-\(inferred)"), "label CONTAINS 'Confirmed'"))
+        XCTAssertFalse(element(app, "home-profile-confirm-\(inferred)").exists)
+        keep("profile-edit-01-confirmed-undo")
+        element(app, "home-profile-undo").tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-\(inferred)"), "label CONTAINS 'Inferred'"))
+        XCTAssertFalse(element(app, "home-profile-last-change").exists)
+
+        // Confirm all asks first, then confirms every inferred item at once.
+        element(app, "home-profile-confirm-all").tap()
+        let confirmAll = app.buttons["Confirm all"].firstMatch
+        XCTAssertTrue(confirmAll.waitForExistence(timeout: 5))
+        keep("profile-edit-02-confirm-all")
+        confirmAll.tap()
+        XCTAssertTrue(app.staticTexts["Confirmed 3 items"].waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "home-profile-confirm-all").exists)
+        element(app, "home-profile-undo").tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-confirm-all"), "exists == true"))
+
+        // An item's detail: Edit is the Settings value editor with Save, and an edit is confirmed.
+        let decision = "00a809ef-ca94-49ec-938d-1a11444c657b"
+        open(app, element(app, "home-profile-item-\(decision)"), ready: "home-profile-item-detail", name: "profile-item")
+        expand(app, done: "home-sheet-done-profile-item")
+        XCTAssertTrue(element(app, "home-profile-item-state").label.hasSuffix("Inferred"))
+        assertToolbarTint(app, title: "Profile")
+        keep("profile-edit-03-item")
+        open(app, element(app, "home-profile-item-edit"), ready: "home-profile-editor-text", name: "profile-editor")
+        let field = element(app, "home-profile-editor-text")
+        field.tap()
+        field.press(forDuration: 1.2)
+        if app.menuItems["Select All"].waitForExistence(timeout: 2) { app.menuItems["Select All"].tap() }
+        field.typeText("Settings layers, top wins: Chat > Home profile > Project > Mac.")
+        XCTAssertTrue(app.buttons["tron-sheet-save"].isEnabled)
+        keep("profile-edit-04-editor")
+        assertToolbarTint(app, title: "Edit item")
+        app.buttons["tron-sheet-save"].tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Confirmed'"))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'top wins: Chat > Home profile > Project > Mac.'")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Edited: '")).firstMatch.exists)
+        keep("profile-edit-05-edited")
+
+        // Retire takes an optional reason, sits in the destructive role, and is undoable.
+        open(app, element(app, "home-profile-item-retire"), ready: "home-profile-retire-reason", name: "profile-retire")
+        element(app, "home-profile-retire-reason").tap()
+        element(app, "home-profile-retire-reason").typeText("Covered by the settings design doc")
+        assertToolbarTint(app, title: "Retire item", excluding: ["Retire"])
+        keep("profile-edit-06-retire")
+        app.buttons["home-profile-retire-confirm"].tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Retired'"))
+        XCTAssertFalse(element(app, "home-profile-item-edit").exists, "A retired item no longer changes")
+        keep("profile-edit-07-retired")
+        element(app, "home-profile-undo").tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Confirmed'"))
+        app.buttons["home-sheet-done-profile-item"].tap()
+        // The Profile sheet re-read behind its item: the edited text is listed.
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-\(decision)"), "label CONTAINS 'top wins'"))
+        app.buttons["home-sheet-done-profile"].tap()
+
+        // Changes: Home's own learn is in the default feed, with its detail and Undo.
+        let settings = element(app, "home-manage-settings")
+        for _ in 0..<6 where !settings.isHittable { app.swipeUp() }
+        settings.tap()
+        let changes = app.buttons["Changes"].firstMatch
+        XCTAssertTrue(changes.waitForExistence(timeout: 8))
+        changes.tap()
+        let entry = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-change-' AND label CONTAINS 'Profile item'")).firstMatch
+        XCTAssertTrue(entry.waitForExistence(timeout: 8), app.debugDescription)
+        XCTAssertTrue(entry.label.contains("Inferred preference"), entry.label)
+        keep("profile-edit-08-changes")
+        entry.tap()
+        let undo = app.buttons["Undo"].firstMatch
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        keep("profile-edit-09-change-detail")
+    }
+
     /// Opens one Home tool call's detail from its transcript chip, checks the shared
     /// header's outcome, keeps both detents and closes it again.
     @MainActor private func toolSheet(_ app: XCUIApplication, _ name: String, chip label: String, index: Int, outcome: String,

@@ -5026,6 +5026,29 @@ final class AppModel {
         await homeStatus.refreshMounted()
     }
 
+    /// Whether this Gateway takes the maintainer's learned-profile changes. Without it
+    /// the Profile sheet stays read-only (an older Gateway).
+    var homeProfileEditable: Bool {
+        lifecycle.gatewayInfo?.capabilities.contains("home-profile-edit.v1") == true
+    }
+
+    /// The maintainer's learned-profile change through the Home command owner; the
+    /// answer names the record entries `undoHomeProfileChange` reverts.
+    func changeHomeProfile(_ changes: [HomeProfileChange], authority: HomeMutationCoordinator.Authority) async throws -> HomeProfileChangeResultDTO {
+        let value = try await homeMutations.perform(.changeProfile(changes), authority: authority)
+        await homeStatus.refreshMounted()
+        return try value.decode(HomeProfileChangeResultDTO.self)
+    }
+
+    /// Undo of a profile change is the settings path's own undo: it reverts the change's
+    /// whole group, refused with a conflict when Home changed an item since.
+    func undoHomeProfileChange(_ changeID: String, authority: HomeMutationCoordinator.Authority) async throws {
+        let value = try await homeMutations.perform(.undoProfileChange(changeID), authority: authority)
+        try value.decode(SettingsChangeResult.self).throwIfRefused()
+        settingsTrust.noteSettingsChanged()
+        await homeStatus.refreshMounted()
+    }
+
     func checkHomeControlCompletion(authority: HomeMutationCoordinator.Authority) async throws {
         _ = try await refreshingHomeStatusIfNotApplied {
             try await homeMutations.checkCompletion(authority: authority)
