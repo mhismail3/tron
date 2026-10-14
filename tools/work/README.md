@@ -294,7 +294,8 @@ access, acceptance of a locally assigned interface IP when one is available, act
 refusal without status reads, pagination to a finished matching owner, malformed
 evidence, settled no-report proof with stopped or naturally completed children, task/session/operation mismatches, missing or failed settlement, excluded unknown reasons, status races, natural completion with zero stopped subagents, refusal preservation of
 refs/index/dirty bytes, ordinary and TTY-confirmed takeover, idempotent audit, and
-missing-worktree refusal without recreation. Evidence is written to
+missing-worktree refusal without recreation, and a legacy bare-verdict helper with a stale
+source stamp is rebuilt before a settled-owner handoff succeeds. Evidence is written to
 `test-results/work-handoff.json`; build the Gateway first with the pinned Node runtime
 using `npm --prefix packages/gateway run build`. The fixture sets
 `TRON_GATEWAY_HOST=127.0.0.1` by default so it remains independent of host Tailscale.
