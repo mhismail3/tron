@@ -432,6 +432,12 @@ export class HomeOwner {
     return this.resumeTask({ taskId: task.taskId, operationId: task.operationId, text }, undefined, workToken, images);
   }
 
+  /** The newest task on a worker session: the task itself, or the in-place continuation that resumed it. */
+  async latestWorkerTask(sessionId: string): Promise<{ taskId: string; lifecycle: string; operationId: string | null } | undefined> {
+    const task = await (await this.taskOwner()).latestTaskForSession(sessionId);
+    return task ? { taskId: task.taskId, lifecycle: task.lifecycle, operationId: task.operationId } : undefined;
+  }
+
   async maintainTask(control: HomeTaskControlRequest & { text: string }): Promise<void> {
     await (await this.taskOwner()).steer(control);
   }
