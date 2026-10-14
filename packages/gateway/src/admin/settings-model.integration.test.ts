@@ -57,7 +57,7 @@ async function fixture() {
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(join(project, ".pi"), { recursive: true })]);
   const faux = fauxProvider({
     provider: "tron-settings-model", tokensPerSecond: 10_000,
-    models: [{ id: "reasoner", reasoning: true, contextWindow: 200_000 }, { id: "plain", reasoning: false }],
+    models: [{ id: "reasoner", name: "Reasoner Pro", reasoning: true, contextWindow: 200_000 }, { id: "plain", reasoning: false }],
   });
   const model = faux.getModel();
   const modelKey = `${model.provider}/${model.id}`;
@@ -237,12 +237,20 @@ describe("settings.resolve", () => {
     }
     expect(row(trusted, "tools.active").value).toEqual(["read", "bash", "write"]);
     expect(row(trusted, "context.compaction.reserveTokens", { model: modelKey })).toMatchObject({ value: 30_000, layer: "project" });
+    // Provenance pills say where a value comes from (#939); a per-model value
+    // names its model as the picker does, with the raw qualifier as detail.
+    expect(row(trusted, "context.compaction.reserveTokens", { model: modelKey }).badges.slice(0, 2)).toEqual([
+      { kind: "layer", label: "Set in project" },
+      { kind: "scope", label: "For Reasoner Pro", detail: modelKey },
+    ]);
 
     // Mac target: Mac and Built-in only.
     const mac = await resolve({ kind: "mac" });
     expect(mac.layers).toEqual(["mac", "builtin"]);
     expect(row(mac, "run.retry.maxRetries")).toMatchObject({ value: 5, layer: "mac" });
     expect(row(mac, "run.retry.baseDelayMs")).toMatchObject({ value: 2_000, layer: "builtin" });
+    expect(row(mac, "run.retry.maxRetries").badges[0]).toEqual({ kind: "layer", label: "Set on Mac" });
+    expect(row(mac, "run.retry.baseDelayMs").badges[0]).toEqual({ kind: "layer", label: "Tron default" });
 
     // Session target: a live chat in the project. Its Chat layer is what the
     // runtime actually uses, and a fresh runtime used the resolver's values.
@@ -252,6 +260,7 @@ describe("settings.resolve", () => {
     const context = await slot.context() as { activeTools: string[] };
     const snapshot = slot.snapshot();
     expect(row(session, "model.ref[role=chat]")).toMatchObject({ value: { provider: model.provider, id: model.id }, layer: "chat" });
+    expect(row(session, "model.ref[role=chat]").badges[0]).toEqual({ kind: "layer", label: "Set in this chat" });
     expect(snapshot.model).toEqual(row(trusted, "model.ref[role=chat]").value);
     expect(row(session, "model.thinking[role=chat]", { model: modelKey }).value).toBe(snapshot.thinkingLevel);
     expect(snapshot.thinkingLevel).toBe(row(trusted, "model.thinking[role=chat]", { model: modelKey }).value);
@@ -268,7 +277,7 @@ describe("settings.resolve", () => {
     const home = await resolve({ kind: "home" });
     expect(home.layers).toEqual(["profile", "mac", "builtin"]);
     expect(row(home, "model.ref[role=worker]")).toMatchObject({ value: { sameAs: "home" }, layer: "builtin", display: "Same as Home" });
-    expect(row(home, "model.thinking[role=worker]")).toMatchObject({ value: "low", layer: "profile", badges: expect.arrayContaining([{ kind: "layer", label: "Profile: Home" }]) });
+    expect(row(home, "model.thinking[role=worker]")).toMatchObject({ value: "low", layer: "profile", badges: expect.arrayContaining([{ kind: "layer", label: "Set in Home profile" }]) });
     expect(row(home, "model.ref[role=memory]")).toMatchObject({ layer: "profile", value: { provider: model.provider, id: model.id } });
 
     // Removing stored values must reveal the SDK defaults at the real read

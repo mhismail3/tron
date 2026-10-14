@@ -1076,7 +1076,7 @@ no change to the resolver (F4). The Home profile has two parts.
 
 - **Typed values.** Schema keys whose allowed layers include `profile`: the
   worker model and thinking, the memory model, task budgets and scopes. They
-  resolve like any layer value, show a **"Profile: Home"** badge, and go through
+  resolve like any layer value, show a **"Set in Home profile"** badge, and go through
   the change path.
 - **Instructions and learned notes.** The Knowledge-backed learned profile owned
   by #734 (`packages/gateway/src/home/home-profile.ts`). Notes may explain *why*
@@ -1233,9 +1233,9 @@ kind renders as a neutral badge with its label.
 
 | Kind | Labels |
 |---|---|
-| Layer | Chat, Profile: Home, Project, Mac, Built-in |
-| Source | From default at start, From Home at start, Follows default |
-| Scope | The qualifier: a provider, model, tool or project |
+| Layer | Where the value comes from: Set in this chat, Set in Home profile, Set in project, Set on Mac, Tron default (`LAYER_SOURCE_LABELS`; `LAYER_LABELS` names the layer itself in sentences and the Changes feed) |
+| Source | Chosen for this chat; From Mac default / project default / Home profile / Tron default at start; From Home at start |
+| Scope | The qualifier: a provider, tool or project; a per-model value reads "For <model display name>" with the `provider/id` as its detail |
 | Authority | Who last changed it: You, Home, a named chat or worker, Outside Tron |
 | State | Staged, Uncommitted, Local only, Changed outside Tron, Pending approval, Not undoable, Not applied (untrusted), Clamped, Applies after restart |
 

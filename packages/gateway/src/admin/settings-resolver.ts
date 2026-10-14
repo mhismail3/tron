@@ -1,6 +1,6 @@
 import { dirname } from "node:path";
 import { KEYS, SECTIONS, builtinValue, chatLayerApplies, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
-import { LAYER_LABELS, type FormatContext, type LayerId, type Qualifiers } from "./settings-types.js";
+import { LAYER_DEFAULT_LABELS, LAYER_LABELS, LAYER_SOURCE_LABELS, type FormatContext, type LayerId, type Qualifiers } from "./settings-types.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
 import { instanceId } from "./settings-outside.js";
 
@@ -330,8 +330,9 @@ function resolveInstance(
       : { layer: layerId, applied: true });
   }
 
-  const badges: Badge[] = [{ kind: "layer", label: LAYER_LABELS[layer] }];
-  if (qualifiers.model && key.qualifier === "model") badges.push({ kind: "scope", label: qualifiers.model });
+  const badges: Badge[] = [{ kind: "layer", label: LAYER_SOURCE_LABELS[layer] }];
+  // A per-model value is the one for this chat's model, named as the picker names it.
+  if (qualifiers.model && key.qualifier === "model") badges.push({ kind: "scope", label: `For ${modelDisplayName(qualifiers.model, options.format)}`, detail: qualifiers.model });
   if (qualifiers.project && key.qualifier === "project") badges.push({ kind: "scope", label: qualifiers.project });
   if (qualifiers.key && key.qualifier === "key") {
     // A directional approval level names what the agent's change does to the setting.
@@ -365,9 +366,9 @@ function resolveInstance(
     if (requested !== undefined && JSON.stringify(requested) !== JSON.stringify(value)) {
       badges.push({ kind: "state", label: "Applies to a new chat", detail: `Requested: ${format(requested)}` });
     }
-    badges.push({ kind: "source", label: fixedAt.from === "chat" ? "Explicit choice" : fixedAt.from === "delegate"
+    badges.push({ kind: "source", label: fixedAt.from === "chat" ? "Chosen for this chat" : fixedAt.from === "delegate"
       ? `From Home at start: ${fixedAt.via === "home-profile:sameAs:home" ? "same as Home" : fixedAt.via === "home-profile" ? "Home profile" : fixedAt.via === "home-fallback" ? "worker default" : "chosen for this task"} (${format(fixedAt.value)})`
-      : `From default at start: ${format(fixedAt.value)} (${LAYER_LABELS[fixedAt.from]})`,
+      : `From ${LAYER_DEFAULT_LABELS[fixedAt.from]} at start: ${format(fixedAt.value)}`,
       ...(fixedAt.reason ? { detail: fixedAt.reason } : {}),
       action: { kind: "useCurrentDefault", label: "Use the current default" } });
   }
@@ -386,6 +387,12 @@ function resolveInstance(
     ...(fixedAt ? { fixedAt } : {}),
     layers: key.redacted ? layerValues.map(({ value: _value, ...rest }) => rest) : layerValues,
   };
+}
+
+/** A `provider/id` model qualifier's display name, or the qualifier itself. */
+function modelDisplayName(qualifier: string, format: FormatContext): string {
+  const slash = qualifier.indexOf("/");
+  return (slash > 0 ? format.modelName({ provider: qualifier.slice(0, slash), id: qualifier.slice(slash + 1) }) : undefined) ?? qualifier;
 }
 
 /** Store-state badges (doc 5.6, 5.7): a Project value's git state, and a value
