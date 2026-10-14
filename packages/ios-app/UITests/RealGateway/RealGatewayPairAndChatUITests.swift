@@ -490,18 +490,19 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForEnabled(send, timeout: 60), app.debugDescription)
         send.tap()
 
-        // Tap only once the codemode call is executing: its nested ask_user is then running
-        // and its question pending. A declared ("Invocation") row has no question yet.
-        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@ AND label CONTAINS %@", "Codemode", "Running")).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 90), "the codemode row never ran: \(app.debugDescription)")
+        // A question arriving while the chat is open presents itself. Closing it keeps it
+        // pending; from then on the codemode row that asked it is the way back to it, as
+        // when the maintainer opens a worker whose question is already waiting.
         let submit = app.buttons["Submit all answers"]
-        XCTAssertFalse(submit.exists, "the question must not open before the row is tapped")
-        Thread.sleep(forTimeInterval: 2)
-        XCTAssertTrue(waitForHittable(row, timeout: 10), app.debugDescription)
+        XCTAssertTrue(submit.waitForExistence(timeout: 90), "the codemode question was never presented: \(app.debugDescription)")
+        app.buttons["Close form and keep answers"].tap()
+        XCTAssertTrue(waitForNonExistence(submit, timeout: 10), app.debugDescription)
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Codemode,")).firstMatch
+        XCTAssertTrue(waitForHittable(row, timeout: 30), "the running codemode row is not tappable: \(app.debugDescription)")
         row.tap()
-        // The tap opens the pending question itself, not the row's details sheet.
+        // The tap reopens the pending question itself, not the row's details sheet.
         XCTAssertTrue(submit.waitForExistence(timeout: 10),
-                      "tapping the running codemode row did not open its pending question: \(app.debugDescription)")
+                      "tapping the running codemode row did not reopen its pending question: \(app.debugDescription)")
         XCTAssertTrue(app.staticTexts["Approve the codemode step?"].exists, app.debugDescription)
         keepScreenshot(app, name: "929-codemode-ask-user-opened-from-row")
         app.buttons["Approve it"].tap()
