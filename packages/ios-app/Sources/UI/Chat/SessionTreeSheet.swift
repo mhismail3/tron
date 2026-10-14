@@ -163,7 +163,7 @@ struct SessionTreeSheet: View {
                                 if let initialEntryID, !initialEntryResolved, !page.nodes.contains(where: { $0.id == initialEntryID }) {
                                     if initialEntryStore.loading { TronLoadingState(label: "Opening cited entry…") }
                                     else if initialEntryStore.error != nil { TronSettingsNotice(message: "The cited history entry is unavailable; no evidence was substituted.", accent: .tronAmber) }
-                                    else { TronSettingsNotice(message: "Opening the exact cited entry…", accent: .tronSessionTeal) }
+                                    else { TronLoadingState(label: "Opening cited entry…", accent: .tronSessionTeal) }
                                 }
                                 pagingControls(page, location: "top")
                                 ForEach(page.nodes) { node in
@@ -515,7 +515,7 @@ struct HistoryEntryDetailsSheet: View {
                         .disabled(store.loading)
                         .padding(12)
                     }
-                } else if store.error == nil { TronLoadingState(label: "Loading entry…") }
+                } else if store.error == nil { TronSheetLoadingState(label: "Loading entry…", accent: .tronSessionTeal) }
                 if current, let error = store.error { TronSettingsNotice(message: error, retry: { revision &+= 1 }).padding(12) }
             }
             .tronDocumentTopBlurSurface()

@@ -167,11 +167,12 @@ struct HomeChapterListDTO: Decodable, Equatable, Sendable {
         let userMessages: Int?
         let homeReplies: Int?
         let tasksDelegated: Int?
-        /// At most eight of the chapter's newest memory summaries, each at most 200 characters.
+        /// At most eight of the chapter's newest memory summaries, each at most 1000
+        /// characters with its markdown lines kept; a row previews one, a sheet shows it whole.
         let topics: [String]?
         var valid: Bool {
             [userMessages, homeReplies, tasksDelegated].allSatisfy { ($0 ?? 0) >= 0 }
-                && (topics?.count ?? 0) <= 8 && (topics ?? []).allSatisfy { $0.count <= 200 }
+                && (topics?.count ?? 0) <= 8 && (topics ?? []).allSatisfy { $0.count <= 1000 }
         }
     }
     struct Limits: Decodable, Equatable, Sendable {
@@ -291,6 +292,19 @@ enum HomeContextPresentation {
 /// One owner of the chapter rows' derived text, so the sheet and its tests
 /// describe the same ledger identically.
 enum HomeChapterPresentation {
+    /// A topic's row preview: one line of plain text (markdown marks dropped),
+    /// ended at a word boundary. Tapping the row opens the topic whole.
+    static func topicPreview(_ topic: String, limit: Int = 140) -> String {
+        let line = topic.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: #"^(?:[-*+]|\d+[.)]|#{1,6})\s+"#, with: "", options: .regularExpression) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        let plain = MarkdownPresentation.Inline(source: line).attributedString.map { String($0.characters) } ?? line
+        guard plain.count > limit else { return plain }
+        let prefix = String(plain.prefix(limit))
+        let cut = prefix.lastIndex(of: " ").map { String(prefix[..<$0]) } ?? prefix
+        return cut.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces)) + "…"
+    }
+
     static func manageSubtitle(_ chapter: HomeStatusDTO.Chapter) -> String {
         let count = chapter.count == 1 ? "1 chapter" : "\(chapter.count.formatted()) chapters"
         switch chapter.recoveryDecision {
@@ -383,7 +397,6 @@ struct HomeSheetReadIdentity: Hashable {
 
 enum HomeSheetReadQuery: Hashable, Sendable {
     case manage
-    case context
     case tasks(String?), task(String), permissions
     case chapters
     /// One chapter's memory when `sessionID` is set; otherwise the whole memory view.
@@ -395,7 +408,6 @@ enum HomeSheetReadQuery: Hashable, Sendable {
 
 enum HomeSheetContent {
     case manage(HomeManageDTO)
-    case context(HomeContextDTO)
     case tasks(HomeTaskPageDTO?, HomeStatusDTO), task(HomeTaskDTO?, HomeStatusDTO), permissions(HomeTaskPermissionsDTO?, HomeStatusDTO)
     case chapters(HomeChapterListDTO)
     case memory(HomeMemoryViewDTO)

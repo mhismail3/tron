@@ -1774,8 +1774,14 @@ same grouped tool rows and resource-detail surface; Settings edits the complete
 selected-name array through the renderer mutation path, while Manage Session
 continues to own live per-chat toggles. Its options carry the Gateway's tool
 record so settings details do not require a live session.
-Manage Home's Context section opens the existing next-request/delivered Home Context view; memory,
-chapters, tasks and permission requests retain their established domain owners.
+Manage Home's top card is Home's context (state pill, last activation, the section-segmented
+window); there is no separate Home Context sheet. Memory, chapters, tasks and permission requests
+retain their established domain owners. A Home sub-sheet takes the tint of the Manage Home row that
+opened it through the shared settings visual theme (`HomeSheet.present(_:rowAccent:)`), so its
+title, Done, loading pulse and its own children share that row's color
+(`TronHomeSheetsUITests` samples the drawn title against the row's icon). A long Home text (a task
+brief, a chapter topic) previews its opening lines and opens whole from a row into
+`HomeTextReader`, the shared `TronDocumentSheet` with the chat's markdown renderer.
 
 An interrupted initial chat open has a distinct `waitingForConnection` phase.
 The opening owner starts no open lease or timeout without lifecycle admission;
@@ -1890,6 +1896,11 @@ chapter (the current chapter is the chat itself). A Home sheet uncovered by its
 child keeps its installed page (`HomeSheetReadOwner.holds`); only Manage Home
 refreshes behind its frame. Loading, empty, blocked and retryable error states use
 shared presentation owners.
+Whole-content sheet loading is a `TronSheetLoadingState` preference that the enclosing
+`TronPresentationSurface` (every managed sheet and registered surface, else the app root) draws as one centered
+pulse and consumes, so nested surfaces never repeat it. Manage Home sends its independent
+`home.status`, `home.context` and `home.chapterList` reads together, then task and permission
+reads together once status admits them.
 The shared `tronTopBlurSurface` establishes full available width **before** attaching
 edge chrome. `tronScrollEdgeChrome` and document underlap delegate to that same
 owner: a native scroll viewport can fill a sheet while SwiftUI otherwise sizes its

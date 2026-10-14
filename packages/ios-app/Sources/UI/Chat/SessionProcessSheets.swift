@@ -16,7 +16,9 @@ struct ProcessHistorySheet: View {
         NavigationStack {
             Group {
                 if let store { history(store) }
-                else { TronLoadingState(label: "Preparing subagent history…", accent: .tronSubagent) }
+                else { TronSheetLoadingState(label: "Preparing subagent history…", accent: .tronSessionTeal)
+                    // Match the title, which sits outside the subagent content theme.
+                    .tronSettingsVisualTheme(accent: .tronSessionTeal) }
             }
             // The history header inherits Manage Session; only its content is subagent themed.
             .tronSettingsVisualTheme(accent: .tronSubagent)
@@ -118,7 +120,8 @@ struct ProcessHistorySheet: View {
                     unavailable("Unable to load history", detail: message, icon: "exclamationmark.triangle")
                 case .idle where earlier.isEmpty && !hasMounted,
                      .loading where earlier.isEmpty && !hasMounted:
-                    TronLoadingState(label: "Loading subagent history…")
+                    TronSheetLoadingState(label: "Loading subagent history…", accent: .tronSessionTeal)
+                        .tronSettingsVisualTheme(accent: .tronSessionTeal)
                 case .loaded where earlier.isEmpty && !hasMounted:
                     SessionProcessPlaceholder(
                         title: "No recorded subagents",
@@ -572,7 +575,7 @@ struct ReadOnlySubagentSessionSheet: View {
         NavigationStack {
             Group {
                 if let store { content(store) }
-                else { TronLoadingState(label: "Preparing subagent session…") }
+                else { TronSheetLoadingState(label: "Preparing subagent session…", accent: .tronSubagent) }
             }
             .tronNavigationTitle(process.title)
             .toolbar {
@@ -704,7 +707,7 @@ struct ReadOnlySubagentSessionSheet: View {
         } else {
             switch store.status {
             case .idle, .opening:
-                TronLoadingState(label: "Opening read-only session…")
+                TronSheetLoadingState(label: "Opening read-only session…", accent: .tronSubagent)
             case .waiting:
                 SessionProcessPlaceholder(
                     title: "Session starting",

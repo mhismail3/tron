@@ -90,7 +90,9 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     /// A delayed socket response must not shrink the scroll viewport (and its
-    /// edge material) to the loading row's intrinsic width. Exercise the real
+    /// edge material) to the loading row's intrinsic width, and the one shared
+    /// sheet pulse stays centered in the visible sheet at medium and large detents
+    /// and leaves chrome still when content arrives (#890). Exercise the real
     /// managed parent/child sheet stack, not a replica of its layout.
     @MainActor
     func testHomeSheetLoadingSurfaceRemainsFullWidth() {
@@ -111,14 +113,17 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(done.waitForExistence(timeout: 5))
             let mediumY = done.frame.midY
             XCTAssertGreaterThan(mediumY, app.windows.firstMatch.frame.height * 0.4)
-            assertHomeLoadingSurface(app, name: "\(appearance)-manage-medium")
-            XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 10))
+            let manageMediumTop = assertHomeLoadingSurface(app, name: "\(appearance)-manage-medium", done: done)
+            XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 20))
+            XCTAssertFalse(app.descendants(matching: .any)["sheet-loading"].exists, "Arrived content retires the pulse")
+            // Independent Manage Home reads travel together, not one round trip each.
+            XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-sheet-read-peak"], containing: "sheet-read-peak:2", timeout: 2))
             XCTAssertEqual(done.frame.midY, mediumY, accuracy: 2, "Loading must not move sheet chrome")
             keepScreenshot(named: "sheet-\(appearance)-manage-loaded")
             tapManageRow(app, "home-manage-tasks")
             let taskDone = app.buttons["home-sheet-done-tasks"]
             XCTAssertTrue(taskDone.waitForExistence(timeout: 5))
-            assertHomeLoadingSurface(app, name: "\(appearance)-tasks-medium")
+            let tasksMediumTop = assertHomeLoadingSurface(app, name: "\(appearance)-tasks-medium", done: taskDone)
             let title = app.staticTexts["Tasks"].firstMatch
             title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
                 thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
@@ -126,8 +131,11 @@ final class TronSmokeUITests: XCTestCase {
                 taskDone.frame.midY < mediumY - 100
             }, object: nil)
             XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 3), .completed)
-            assertHomeLoadingSurface(app, name: "\(appearance)-tasks-large")
-            XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 10))
+            XCTAssertLessThan(assertHomeLoadingSurface(app, name: "\(appearance)-tasks-large", done: taskDone), tasksMediumTop - 100,
+                              "The pulse re-centers in the larger visible sheet")
+            let largeDoneY = taskDone.frame.midY
+            XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 20))
+            XCTAssertEqual(taskDone.frame.midY, largeDoneY, accuracy: 2, "Arriving content must not move sheet chrome")
             keepScreenshot(named: "sheet-\(appearance)-tasks-loaded-large")
             taskDone.tap()
             XCTAssertTrue(done.waitForExistence(timeout: 5))
@@ -135,14 +143,15 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(ring.waitForExistence(timeout: 5))
             ring.tap()
             XCTAssertTrue(done.waitForExistence(timeout: 5))
-            assertHomeLoadingSurface(app, name: "\(appearance)-manage-reopened")
+            XCTAssertEqual(assertHomeLoadingSurface(app, name: "\(appearance)-manage-reopened", done: done), manageMediumTop, accuracy: 2)
             app.staticTexts["Manage Home"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
             let manageExpanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 done.frame.midY < mediumY - 100
             }, object: nil)
             XCTAssertEqual(XCTWaiter.wait(for: [manageExpanded], timeout: 3), .completed)
-            assertHomeLoadingSurface(app, name: "\(appearance)-manage-large")
+            XCTAssertLessThan(assertHomeLoadingSurface(app, name: "\(appearance)-manage-large", done: done), manageMediumTop - 100,
+                              "The pulse re-centers in the larger visible sheet")
             done.tap()
             XCTAssertTrue(ring.waitForExistence(timeout: 5))
             app.terminate()
@@ -177,13 +186,78 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// Asserts the one shared sheet pulse is exactly centered in the visible sheet
+    /// and returns that sheet's top, so callers can prove a detent change moved it.
     @MainActor
-    private func assertHomeLoadingSurface(_ app: XCUIApplication, name: String) {
-        let loading = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Loading Home…")).firstMatch
+    @discardableResult
+    private func assertHomeLoadingSurface(_ app: XCUIApplication, name: String, done: XCUIElement) -> CGFloat {
+        let loading = app.descendants(matching: .any)["sheet-loading"]
+        let surface = app.descendants(matching: .any)["sheet-loading-surface"]
         XCTAssertTrue(loading.waitForExistence(timeout: 3))
+        XCTAssertEqual(loading.label, "Loading Home…")
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "sheet-loading").count, 1, "One pulse per sheet stack")
+        XCTAssertFalse(app.staticTexts["Loading Home…"].exists, "Sheet loading never shows wrapping text")
+        let window = app.windows.firstMatch.frame
+        // The surface is the whole visible sheet: its full (inset, at the medium
+        // detent) width, down to its bottom edge, and from its top above the toolbar.
+        let sheet = surface.frame
+        XCTAssertEqual(sheet.midX, window.midX, accuracy: 1, name)
+        XCTAssertGreaterThan(sheet.width, window.width - 24, name)
+        XCTAssertGreaterThan(sheet.maxY, window.maxY - 16, name)
+        XCTAssertLessThanOrEqual(sheet.maxY, window.maxY, name)
+        XCTAssertLessThan(sheet.minY, done.frame.minY, name)
+        XCTAssertGreaterThan(sheet.minY, done.frame.midY - 60, name)
+        XCTAssertEqual(loading.frame.midX, sheet.midX, accuracy: 1, "The pulse is centered in the visible sheet (\(name))")
+        XCTAssertEqual(loading.frame.midY, sheet.midY, accuracy: 1, "The pulse is centered in the visible sheet (\(name))")
         keepScreenshot(named: "sheet-\(name)-loading")
+        // The drawn pulse (not just its accessibility frame) sits there too, is
+        // small (no label), and is drawn in the title's color. It fades in and its waves
+        // breathe, so sample a few frames rather than trusting one instant.
+        let probe = CGRect(x: sheet.midX - 80, y: sheet.midY - 80, width: 160, height: 160)
+        var drawn: (center: CGPoint, extent: CGFloat)?
+        for _ in 0..<5 where drawn == nil {
+            drawn = accentCentroid(XCUIScreen.main.screenshot().image, in: probe, windowWidth: window.width)
+            if drawn == nil { Thread.sleep(forTimeInterval: 0.15) }
+        }
+        guard let pulse = drawn else {
+            XCTFail("No pulse drawn in the visible sheet (\(name))")
+            return sheet.minY
+        }
+        XCTAssertEqual(pulse.center.x, sheet.midX, accuracy: 2, "The drawn pulse is centered (\(name))")
+        XCTAssertEqual(pulse.center.y, sheet.midY, accuracy: 2, "The drawn pulse is centered (\(name))")
+        XCTAssertLessThan(pulse.extent, 60, "The chat-opening pulse alone, no label (\(name))")
         assertManagedSheetSurface(app, title: app.staticTexts["Tasks"].exists ? "Tasks" : "Manage Home", name: name)
-        XCTAssertLessThan(loading.frame.height, 40, "The short loading label must not wrap at normal Dynamic Type")
+        return sheet.minY
+    }
+
+    /// Centroid and extent (points) of saturated pixels, the title-colored pulse, in `area`.
+    private func accentCentroid(_ image: UIImage, in area: CGRect, windowWidth: CGFloat) -> (center: CGPoint, extent: CGFloat)? {
+        guard let source = image.cgImage else { return nil }
+        let scale = CGFloat(source.width) / windowWidth
+        let width = Int(area.width), height = Int(area.height)
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let context = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        guard let crop = source.cropping(to: CGRect(x: area.minX * scale, y: area.minY * scale,
+                                                    width: area.width * scale, height: area.height * scale)) else { return nil }
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var sumX = 0.0, sumY = 0.0, count = 0.0, minX = Int.max, maxX = Int.min, minY = Int.max, maxY = Int.min
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = (y * width + x) * 4
+                let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
+                // The pulse is the sheet title's color (green for Manage Home, its
+                // row's teal for a sub-sheet): any saturated ink, never the gray material.
+                guard max(r, g, b) - min(r, g, b) > 24 else { continue }
+                // CGContext rows run bottom-up.
+                let row = height - 1 - y
+                sumX += Double(x); sumY += Double(row); count += 1
+                minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, row); maxY = max(maxY, row)
+            }
+        }
+        guard count > 20 else { return nil }
+        return (CGPoint(x: area.minX + sumX / count + 0.5, y: area.minY + sumY / count + 0.5),
+                CGFloat(max(maxX - minX, maxY - minY)))
     }
 
     @MainActor
@@ -243,7 +317,7 @@ final class TronSmokeUITests: XCTestCase {
             }
             tapManageRow(app, "home-manage-memory-browser")
             if state == "loading" {
-                XCTAssertTrue(app.descendants(matching: .any)["home-sheet-loading"].waitForExistence(timeout: 2))
+                XCTAssertTrue(app.descendants(matching: .any)["sheet-loading"].waitForExistence(timeout: 2))
                 keepScreenshot(named: "home-memory-loading")
                 XCTAssertTrue(app.descendants(matching: .any)["home-memory-row-39"].waitForExistence(timeout: 10))
             } else if state == "empty" {
@@ -264,13 +338,14 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(empty.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         empty.buttons["home-pinned-row"].tap()
         openManageHome(empty)
-        tapManageRow(empty, "home-manage-context")
-        XCTAssertTrue(empty.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "No activation context yet")).firstMatch.waitForExistence(timeout: 5))
+        // Before Home's first activation, Manage Home's context card has no activation line.
+        XCTAssertTrue(empty.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5), empty.debugDescription)
+        XCTAssertFalse(empty.descendants(matching: .any)["home-context-activation"].exists)
         keepScreenshot(named: "home-context-empty")
     }
 
-    /// The Home Context sheet explains where the next request's context goes: one stacked
-    /// bar of the window with a meaning per section, and no entry IDs or byte counts.
+    /// Manage Home's context card explains where the next request's context goes: one
+    /// stacked bar of the window with a meaning per section, and no entry IDs or byte counts.
     @MainActor
     func testHomeContextShowsBreakdownWithoutRawIdentifiers() {
         continueAfterFailure = false
@@ -280,7 +355,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        tapManageRow(app, "home-manage-context")
         XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.descendants(matching: .any)["context-segmented-bar"].exists)
         for (id, label) in [("instructions", "Instructions"), ("profile", "About you"), ("memory", "Memory"),
@@ -377,12 +451,13 @@ final class TronSmokeUITests: XCTestCase {
         openManageHome(app)
         let state = app.descendants(matching: .any)["home-manage-state"]
         XCTAssertEqual(state.label, "Ready")
-        XCTAssertTrue(app.descendants(matching: .any)["session-usage-summary"].exists, "The stats card comes from the Home chat's session")
+        XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].exists, "The stats card comes from the Home chat's session")
         XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].exists)
         XCTAssertTrue(app.buttons["Memory model"].firstMatch.waitForExistence(timeout: 5), "The memory model row is on Manage Home\n\(app.debugDescription)")
         XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
-        for row in ["home-manage-context", "home-manage-memory-browser", "home-manage-chapters", "home-manage-tasks", "home-manage-permissions"] {
+        XCTAssertFalse(app.descendants(matching: .any)["home-manage-context"].exists, "Home's context is Manage Home's top card, not a sub-sheet")
+        for row in ["home-manage-memory-browser", "home-manage-chapters", "home-manage-tasks", "home-manage-permissions"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
         }
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-pause"].exists)
@@ -443,7 +518,7 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
         let windowHeight = app.windows.firstMatch.frame.height
-        for (row, done) in [("home-manage-context", "home-sheet-done-context"), ("home-manage-memory-browser", "home-sheet-done-memory"),
+        for (row, done) in [("home-manage-memory-browser", "home-sheet-done-memory"),
                             ("home-manage-chapters", "home-sheet-done-chapters"), ("home-manage-tasks", "home-sheet-done-tasks"),
                             ("home-manage-permissions", "home-sheet-done-permissions")] {
             tapManageRow(app, row)
@@ -473,10 +548,6 @@ final class TronSmokeUITests: XCTestCase {
             title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
             XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5))
             keepScreenshot(named: "home-\(appearance)-manage-large")
-            tapManageRow(app, "home-manage-context")
-            XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5))
-            keepScreenshot(named: "home-\(appearance)-context")
-            app.buttons["home-sheet-done-context"].tap()
             tapManageRow(app, "home-manage-memory-browser")
             XCTAssertTrue(app.descendants(matching: .any)["home-memory-row-39"].waitForExistence(timeout: 5))
             keepScreenshot(named: "home-\(appearance)-memory")
@@ -522,7 +593,6 @@ final class TronSmokeUITests: XCTestCase {
     func testHomeCrossSurfaceProofMatrix() {
         continueAfterFailure = false
         let sheets: [(row: String, doneID: String, content: String, name: String)] = [
-            ("home-manage-context", "context", "home-context-breakdown", "context"),
             ("home-manage-memory-browser", "memory", "home-memory-row-39", "memory-browser"),
             ("home-manage-chapters", "chapters", "home-chapter-2", "chapters"),
             ("home-manage-tasks", "tasks", "home-task-active", "tasks"),
@@ -632,7 +702,7 @@ final class TronSmokeUITests: XCTestCase {
             openManageHome(app)
             if state == "browser-unsupported" {
                 XCTAssertFalse(app.descendants(matching: .any)["home-manage-memory-browser"].exists)
-                XCTAssertTrue(app.descendants(matching: .any)["home-manage-context"].exists)
+                XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].exists)
             }
             if state == "empty-models" {
                 revealHomeSetting(app, "Memory model")
@@ -831,7 +901,7 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "manage-home-large")
         XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-chapters"].exists)
-        for row in ["home-manage-context", "home-manage-memory-browser", "home-manage-tasks",
+        for row in ["home-manage-memory-browser", "home-manage-tasks",
                     "home-manage-permissions", "home-manage-pause", "home-manage-disable"] {
             XCTAssertTrue(app.descendants(matching: .any)[row].exists, row)
         }
@@ -1848,12 +1918,17 @@ final class TronSmokeUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
         app.launch(); defer { app.terminate() }
-        let more = app.buttons["settings-changes-load-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 10))
-        more.tap()
+        // The Gateway's first filtered page is empty but not the end: opening
+        // Changes still shows the one entry, without tapping Load more.
         let row = app.buttons["settings-change-fixture-change"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.buttons["settings-changes-load-more"].exists, "The feed's end needs no Load more")
+        keepScreenshot(named: "925-changes-first-page")
         row.tap()
+        XCTAssertTrue(app.staticTexts["Key history"].waitForExistence(timeout: 5), app.debugDescription)
+        let iso = NSPredicate(format: "label MATCHES %@", ".*[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:.*")
+        XCTAssertEqual(app.descendants(matching: .any).matching(iso).count, 0, "Change detail shows readable dates, never raw ISO timestamps")
+        keepScreenshot(named: "925-change-detail")
         tapScrolling(app.buttons["Open requesting chat"], in: app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-route"],
                                   containing: "owned:true:fixture-chat", timeout: 5))
@@ -1894,21 +1969,29 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(decline, in: app)
         app.buttons["Decline change"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:2 approved:1", timeout: 5))
-        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        drainChanges(app)
         XCTAssertTrue(app.buttons["settings-change-project-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
         // Filters are their own sheet: each is one choice row with a picker.
         chooseChangesFilter(app, row: "settings-changes-actor", option: "Everyone")
-        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        drainChanges(app)
         XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
         chooseChangesFilter(app, row: "settings-changes-status", option: "Failed")
-        tapScrolling(app.buttons["settings-changes-load-more"], in: app)
+        drainChanges(app)
         XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-fixture-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-project-change"].exists)
         keepScreenshot(named: "758-changes-scoped-filter-intersection")
+    }
+
+    /// Changes follows empty filtered pages on its own and offers Load more only
+    /// for further history; follow every offered page so absence is meaningful.
+    @MainActor
+    private func drainChanges(_ app: XCUIApplication) {
+        let more = app.buttons["settings-changes-load-more"]
+        for _ in 0..<6 where more.waitForExistence(timeout: 2) { tapScrolling(more, in: app) }
     }
 
     /// Opens Changes' Filters sheet, picks `option` on one filter row, and returns to the feed.
@@ -1933,10 +2016,7 @@ final class TronSmokeUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
         app.launch(); defer { app.terminate() }
-        let more = app.buttons["settings-changes-load-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 5))
-        tapScrolling(more, in: app)
-        XCTAssertTrue(app.buttons["settings-change-fixture-change"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["settings-change-fixture-change"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Since you last looked"].exists)
         keepScreenshot(named: "758-changes-since-last-visit")
     }
@@ -1949,11 +2029,8 @@ final class TronSmokeUITests: XCTestCase {
             app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-undo-refused"]
             if outcomeFailure { app.launchArguments.append("-settings-undo-outcome-refused") }
             app.launch(); defer { app.terminate() }
-            let more = app.buttons["settings-changes-load-more"]
-            XCTAssertTrue(more.waitForExistence(timeout: 5))
-            tapScrolling(more, in: app)
             let entry = app.buttons["settings-change-fixture-change"]
-            XCTAssertTrue(entry.waitForExistence(timeout: 5))
+            XCTAssertTrue(entry.waitForExistence(timeout: 10), app.debugDescription)
             tapScrolling(entry, in: app)
             tapScrolling(app.buttons["Undo"], in: app)
             app.buttons["Undo change"].tap()
@@ -1974,11 +2051,8 @@ final class TronSmokeUITests: XCTestCase {
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-redacted"]
         app.launch()
         defer { app.terminate() }
-        let more = app.buttons["settings-changes-load-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 10), app.debugDescription)
-        tapScrolling(more, in: app)
         let entry = app.buttons["settings-change-fixture-change"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(entry.waitForExistence(timeout: 10), app.debugDescription)
         tapScrolling(entry, in: app)
         XCTAssertTrue(app.staticTexts["Not undoable"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(showsText("Hidden", in: app))
@@ -1995,11 +2069,10 @@ final class TronSmokeUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
 
-        let more = app.buttons["settings-changes-load-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 10), app.debugDescription)
-        more.tap()
+        // The first filtered page is empty but has a cursor: it is not EOF, and
+        // opening Changes follows it without a Load more tap.
         let row = app.buttons["settings-change-fixture-change"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "An empty history page with a cursor is not EOF: \(app.debugDescription)")
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "An empty history page with a cursor is not EOF: \(app.debugDescription)")
         XCTAssertTrue(showsText("6 retries", in: app))
         row.tap()
         XCTAssertTrue(showsText("Key history", in: app))

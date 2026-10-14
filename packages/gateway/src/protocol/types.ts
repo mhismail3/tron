@@ -1081,8 +1081,8 @@ export interface HomeChapterContents {
   userMessages: number;
   homeReplies: number;
   tasksDelegated: number;
-  /** At most 8 useful recent merged memory summaries, each at most 200 characters.
-   * Empty when Home's memory is not open. */
+  /** At most 8 useful recent merged memory summaries, each at most 1000 characters
+   * with its lines kept (markdown). Empty when Home's memory is not open. */
   topics: string[];
 }
 

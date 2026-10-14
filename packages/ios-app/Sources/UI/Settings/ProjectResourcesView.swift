@@ -362,11 +362,7 @@ struct ProjectResourcesView: View {
                             .environment(\.tronSettingsVisualTheme, nil)
                         }
                     } else if loading {
-                        TronGlassCard(accent: .tronSessionTeal) {
-                            TronLoadingState(label: "Loading project resources…", accent: .tronSessionTeal)
-                                .padding(18)
-                                .frame(maxWidth: .infinity)
-                        }
+                        TronSheetLoadingState(label: "Loading project resources…", accent: .tronSessionTeal)
                     } else {
                         TronPlaceholderState(
                             title: "Resources Unavailable",

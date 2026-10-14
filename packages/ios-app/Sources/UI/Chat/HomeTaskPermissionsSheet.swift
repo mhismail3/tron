@@ -62,11 +62,7 @@ extension HomeTaskSheet {
                 } else {
                     rowGroup(permissions.pendingRequests) { request in
                         Button { child = .grant(request) } label: {
-                            permissionRow(title: request.request.target, detail: "Awaiting your decision", pill: ("Pending", Color.tronWarning)) {
-                                Image(systemName: "chevron.right")
-                                    .font(TronTypography.caption)
-                                    .foregroundStyle(Color.tronSessionTeal)
-                            }
+                            permissionRow(title: request.request.target, detail: "Awaiting your decision", pill: ("Pending", Color.tronWarning)) { EmptyView() }
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Review request \(request.id)")
