@@ -16,26 +16,26 @@ final class TronSessionRowClockUITests: XCTestCase {
 
         // Rows at a gateway clock 3s ahead, just now, 12s and 47m ago.
         let rows = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label BEGINSWITH %@", "Refactor the gateway reconnect handshake"))
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Refactor the gateway reconnect handshake so phones resume cleanly, "))
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 10))
-        let rowTimes = rows.allElementsBoundByIndex.map { $0.label.components(separatedBy: ", ").last ?? "" }
-        XCTAssertEqual(rowTimes, ["now", "now", "12s ago", "47m ago"])
-
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "975-session-row-clock"
         shot.lifetime = .keepAlways
         add(shot)
+        let rowTimes = rows.allElementsBoundByIndex.map { $0.label.components(separatedBy: ", ").last ?? "" }
+        XCTAssertEqual(rowTimes, ["now", "now", "12s ago", "47m ago"])
 
         // Step the real label through future, zero and past values.
         let label = app.descendants(matching: .any)["row-clock-label"]
         XCTAssertTrue(label.waitForExistence(timeout: 5))
-        let width = label.frame.width
-        XCTAssertGreaterThan(width, 0)
+        let width = app.staticTexts["row-clock-label-width"]
+        let laidOut = width.label
+        XCTAssertGreaterThan(Double(laidOut) ?? 0, 0)
         var labels = [label.label]
         for _ in 1..<8 {
             app.buttons["row-clock-next"].tap()
             labels.append(label.label)
-            XCTAssertEqual(label.frame.width, width, accuracy: 0.5, "width changed at \(label.label)")
+            XCTAssertEqual(width.label, laidOut, "laid-out width changed at \(label.label)")
         }
         XCTAssertEqual(labels, ["now", "now", "now", "5s ago", "59s ago", "1m ago", "12m ago", "3h ago"])
     }

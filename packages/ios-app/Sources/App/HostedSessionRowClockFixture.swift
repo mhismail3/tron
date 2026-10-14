@@ -15,6 +15,7 @@ struct HostedSessionRowClockFixture: View {
 
     @State private var launchedAt = Date()
     @State private var probeIndex = 0
+    @State private var probeWidth: CGFloat = 0
 
     var body: some View {
         List {
@@ -39,7 +40,12 @@ struct HostedSessionRowClockFixture: View {
                     Spacer()
                     SessionRowRelativeTime(text: probeLabel, isWaiting: false)
                         .accessibilityIdentifier("row-clock-label")
+                        // The accessibility frame covers only the visible text;
+                        // the laid-out width is what the title competes with.
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { probeWidth = $0 }
                 }
+                Text(String(format: "%.2f", probeWidth))
+                    .accessibilityIdentifier("row-clock-label-width")
                 .listRowBackground(Color.clear)
             }
         }
