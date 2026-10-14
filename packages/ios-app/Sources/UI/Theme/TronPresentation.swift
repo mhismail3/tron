@@ -1422,12 +1422,10 @@ struct TronSettingsRow<Trailing: View>: View {
     let titleFont: Font
     let titleColor: Color
     let subtitleColor: Color
-    /// A short value on the title's own line, trailing (a feed row's time).
-    let titleTrailing: String?
-    /// Nil keeps the title wrapping; a feed row keeps its title to one line.
-    let titleLineLimit: Int?
-    /// Nil keeps the settings subtext; a feed row's subtitle is its body text.
-    let subtitleFont: Font?
+    /// Non-nil makes this a feed row (an inbox entry): a one-line title with
+    /// this short value trailing on its line, the subtitle in body type, and
+    /// tighter vertical insets.
+    let feedTrailing: String?
     let trailing: Trailing
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
@@ -1445,9 +1443,7 @@ struct TronSettingsRow<Trailing: View>: View {
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
         titleColor: Color = .tronTextPrimary,
         subtitleColor: Color = .tronTextPrimary,
-        titleTrailing: String? = nil,
-        titleLineLimit: Int? = nil,
-        subtitleFont: Font? = nil,
+        feedTrailing: String? = nil,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
@@ -1459,9 +1455,7 @@ struct TronSettingsRow<Trailing: View>: View {
         self.titleFont = titleFont
         self.titleColor = titleColor
         self.subtitleColor = subtitleColor
-        self.titleTrailing = titleTrailing
-        self.titleLineLimit = titleLineLimit
-        self.subtitleFont = subtitleFont
+        self.feedTrailing = feedTrailing
         self.trailing = trailing()
     }
 
@@ -1498,12 +1492,12 @@ struct TronSettingsRow<Trailing: View>: View {
                         }
                         .scrollBounceBehavior(.basedOnSize)
                         .accessibilityLabel(title)
-                    } else if let titleTrailing {
+                    } else if let feedTrailing {
                         HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
                             Text(title).font(titleFont).foregroundStyle(titleColor)
-                                .lineLimit(titleLineLimit)
+                                .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(titleTrailing)
+                            Text(feedTrailing)
                                 .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
                                 .foregroundStyle(Color.tronTextMuted)
                                 .lineLimit(1)
@@ -1511,12 +1505,13 @@ struct TronSettingsRow<Trailing: View>: View {
                         }
                     } else {
                         Text(title).font(titleFont).foregroundStyle(titleColor)
-                            .lineLimit(titleLineLimit)
-                            .fixedSize(horizontal: false, vertical: titleLineLimit == nil)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     if let subtitle {
                         Text(subtitle)
-                            .font(subtitleFont ?? TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
+                            .font(feedTrailing == nil
+                                ? TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment)
+                                : TronTypography.body)
                             .foregroundStyle(subtitleColor)
                             .lineLimit(subtitleLineLimit)
                             .truncationMode(.tail)
@@ -1533,7 +1528,7 @@ struct TronSettingsRow<Trailing: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-        .padding(.vertical, labelsOwnInsets ? 0 : TronSpacing.xl)
+        .padding(.vertical, labelsOwnInsets ? 0 : feedTrailing == nil ? TronSpacing.xl : TronSpacing.md)
         .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -1626,9 +1621,7 @@ extension TronSettingsRow where Trailing == EmptyView {
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
         titleColor: Color = .tronTextPrimary,
         subtitleColor: Color = .tronTextPrimary,
-        titleTrailing: String? = nil,
-        titleLineLimit: Int? = nil,
-        subtitleFont: Font? = nil
+        feedTrailing: String? = nil
     ) {
         self.init(
             icon: icon,
@@ -1640,9 +1633,7 @@ extension TronSettingsRow where Trailing == EmptyView {
             titleFont: titleFont,
             titleColor: titleColor,
             subtitleColor: subtitleColor,
-            titleTrailing: titleTrailing,
-            titleLineLimit: titleLineLimit,
-            subtitleFont: subtitleFont
+            feedTrailing: feedTrailing
         ) { EmptyView() }
     }
 }

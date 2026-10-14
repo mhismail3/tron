@@ -391,9 +391,9 @@ enum NotificationInboxRelativeTime {
     }
 }
 
-/// One inbox row on the shared settings row: the chat and time on the title
-/// line, the message below, the kind as the icon, and the Gateway only when
-/// more than one is paired. Unread rows carry the accent tint; read rows sit
+/// One inbox row on the shared settings row's feed variant: the chat and time
+/// on the title line (the Gateway beside the time only when more than one is
+/// paired), one line of message below, and the kind as the icon. Unread rows carry the accent tint; read rows sit
 /// clear on the sheet surface.
 private struct NotificationInboxRow: View {
     let item: NotificationInboxItem
@@ -410,18 +410,13 @@ private struct NotificationInboxRow: View {
                 icon: item.notification.kind.icon,
                 title: title,
                 subtitle: item.notification.message,
-                subtitleLineLimit: 2,
+                subtitleLineLimit: 1,
                 accent: isUnread ? .tronEmerald : .tronTextMuted,
                 titleFont: TronTypography.sans(size: TronTypography.sizeBodyLG, weight: isUnread ? .semibold : .medium),
                 titleColor: isUnread ? .tronTextPrimary : .tronTextSecondary,
                 subtitleColor: isUnread ? .tronTextSecondary : .tronTextMuted,
-                titleTrailing: relativeTime,
-                titleLineLimit: 1,
-                subtitleFont: TronTypography.body
+                feedTrailing: showsGateway ? "\(item.profileLabel) · \(relativeTime)" : relativeTime
             )
-            .tronSettingsRowTags(showsGateway
-                ? [TronTagModel(label: item.profileLabel, tint: .tronTextSecondary)]
-                : [])
             .tronListRowHighlight(isUnread)
         }
         .buttonStyle(.plain)
