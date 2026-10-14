@@ -271,7 +271,7 @@ struct DisplayToolView: View {
     /// width; every other display state is a compact chip that can share a row.
     static func rendersFullWidth(_ tool: ChatToolDescriptor) -> Bool {
         guard let display = tool.display, !tool.error, !tool.isRunning else { return false }
-        return DisplayPresentationPolicy.effectiveSurface(display) == .inline && display.kind != .image
+        return DisplayPresentationPolicy.effectiveSurface(for: display) == .inline && display.kind != .image
     }
 
     private var disclosureFadeAnimation: Animation? {

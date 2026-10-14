@@ -244,7 +244,9 @@ enum ToolRunSegment: Identifiable, Equatable {
             guard let first = generic.first else { return }
             // A generic stretch is a sub-run of the row: its sheet route needs an
             // identity distinct from the row's and from any sibling stretch.
-            segments.append(.tools(ChatToolRunPresentation(tools: generic, anchorID: "\(run.anchorID)~\(first.id)")))
+            segments.append(.tools(ChatToolRunPresentation(
+                tools: generic, anchorID: "\(run.anchorID)~\(first.id)", visibleCallsOnly: true
+            )))
             generic.removeAll()
         }
         func flushDisplays() {
@@ -325,7 +327,7 @@ struct ToolRunView: View {
     /// A display's technical details open as that call alone, never as the
     /// grouped run it shares a row with.
     private func displayRun(_ tool: ChatToolDescriptor) -> ChatToolRunPresentation {
-        run.tools.count == 1 ? run : ChatToolRunPresentation(tools: [tool], anchorID: "\(run.anchorID)~\(tool.id)")
+        run.tools.count == 1 ? run : ChatToolRunPresentation(tools: [tool], anchorID: "\(run.anchorID)~\(tool.id)", visibleCallsOnly: true)
     }
 
     private func activate(_ run: ChatToolRunPresentation) {
@@ -382,7 +384,9 @@ struct LiveToolRunDetails: View {
 
     var body: some View {
         let tools = currentTools ?? initial.tools
-        let run = ChatToolRunPresentation(tools: tools.map(\.descriptor), anchorID: initial.run.anchorID)
+        let run = ChatToolRunPresentation(
+            tools: tools.map(\.descriptor), anchorID: initial.run.anchorID, visibleCallsOnly: initial.run.visibleCallsOnly
+        )
         Group {
             if run.displayCount == 1, let tool = tools.first {
                 NavigationStack {
