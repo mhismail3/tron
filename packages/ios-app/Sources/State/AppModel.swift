@@ -2782,6 +2782,92 @@ final class AppModel {
         }
     }
 
+    nonisolated static func supportsMacReplacement(capabilities: [String]) -> Bool {
+        capabilities.contains("mac-replace.v1")
+    }
+
+    /// Disposable read of the Mac replacement journal (#984); nil when this
+    /// Gateway cannot project one or the focused profile changed.
+    func loadMacReplacementStatus(for profile: GatewayProfile) async -> MacReplacementStatus? {
+        guard profiles.selected?.id == profile.id, connectionState == .connected,
+              Self.supportsMacReplacement(capabilities: gatewayInfo?.capabilities ?? []),
+              let admission = lifecycle.generationAdmission else { return nil }
+        do {
+            try requireLifecycle(admission)
+            let status: MacReplacementStatus = try await client.request("mac.replace.status", EmptyParams())
+            try requireLifecycle(admission)
+            return status
+        } catch {
+            return nil
+        }
+    }
+
+    /// The path a replacement would take now, and why. Errors (no source
+    /// repository, unreadable checkout) come back as the unavailable reason.
+    func loadMacReplacementPlan(for profile: GatewayProfile) async -> Result<MacReplacementPlan, GatewayFailure>? {
+        guard profiles.selected?.id == profile.id, connectionState == .connected,
+              Self.supportsMacReplacement(capabilities: gatewayInfo?.capabilities ?? []),
+              let admission = lifecycle.generationAdmission else { return nil }
+        do {
+            try requireLifecycle(admission)
+            let plan: MacReplacementPlan = try await client.request("mac.replace.plan", EmptyParams())
+            try requireLifecycle(admission)
+            return .success(plan)
+        } catch let failure as GatewayFailure {
+            guard admitsLifecycle(admission) else { return nil }
+            return .failure(failure)
+        } catch {
+            return nil
+        }
+    }
+
+    func startMacReplacement(for profile: GatewayProfile) async -> MacReplacementStartAcknowledgement? {
+        guard profiles.selected?.id == profile.id,
+              let admission = lifecycle.generationAdmission else { return nil }
+        do {
+            try requireLifecycle(admission)
+            struct Params: Codable { let commandId: String }
+            let commandID = uuidSource.next().uuidString
+            let acknowledgement: MacReplacementStartAcknowledgement = try await mutationExecutor.perform(
+                method: "mac.replace.start",
+                commandID: commandID
+            ) {
+                try await self.client.request("mac.replace.start", Params(commandId: commandID), as: MacReplacementStartAcknowledgement.self)
+            }
+            try requireLifecycle(admission)
+            return acknowledgement
+        } catch {
+            guard admitsLifecycle(admission) else { return nil }
+            surface(error)
+            return nil
+        }
+    }
+
+    /// Resume one worker the replacement stopped, in place on its own session.
+    func resumeMacReplacementWorker(for profile: GatewayProfile, operationID: String, taskID: String) async -> Bool {
+        guard profiles.selected?.id == profile.id,
+              let admission = lifecycle.generationAdmission else { return false }
+        do {
+            try requireLifecycle(admission)
+            struct Params: Codable { let commandId: String; let operationId: String; let taskId: String }
+            struct Acknowledgement: Codable { let taskId: String }
+            let commandID = uuidSource.next().uuidString
+            _ = try await mutationExecutor.perform(method: "mac.replace.resumeWorker", commandID: commandID) {
+                try await self.client.request(
+                    "mac.replace.resumeWorker",
+                    Params(commandId: commandID, operationId: operationID, taskId: taskID),
+                    as: Acknowledgement.self
+                )
+            }
+            try requireLifecycle(admission)
+            return true
+        } catch {
+            guard admitsLifecycle(admission) else { return false }
+            surface(error)
+            return false
+        }
+    }
+
     func gatewayLogs(for profileID: String, limit: Int = 1_000) async throws -> [GatewayLogRecord] {
         guard limit >= 0 else { throw GatewayFailure(code: "invalid_request", message: "Log limit is invalid.", retryable: false, details: nil) }
         if profiles.selected?.id == profileID {
