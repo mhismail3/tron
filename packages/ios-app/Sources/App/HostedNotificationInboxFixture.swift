@@ -60,6 +60,9 @@ struct HostedNotificationInboxFixture: View {
             DarwinTrigger.observe(Self.readNewestNotification) { Task { await gateway.readNewestUnread() } }
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-only-token")
+                // The hosted connect skips the connected callback's catalog read;
+                // rows are titled from this catalog.
+                _ = await model.refreshSessions()
                 ready = true
             } catch { status = "fixture-error:\(error.localizedDescription)" }
         }
@@ -205,9 +208,11 @@ private actor NotificationInboxGateway {
             let now = GatewayTimestamp.string(from: Date())
             let summaries = Self.sessions.map {
                 SessionSummary(id: $0.id, name: $0.name, cwd: "/workspace/tron", parentSessionId: nil,
-                               createdAt: now, updatedAt: now, messageCount: 4, firstMessage: $0.name, phase: .idle)
+                               createdAt: now, updatedAt: now, messageCount: 4, firstMessage: $0.name, phase: .idle,
+                               summaryRevision: 1)
             }
-            return .success(.object(["sessions": try! JSONValue.encode(summaries)]))
+            return .success(.object(["sessions": try! JSONValue.encode(summaries), "nextCursor": .null,
+                "listRevision": .number(1), "projectionToken": .string("inbox-fixture:1"), "archivedCount": .number(0)]))
         default:
             return nil
         }

@@ -141,8 +141,6 @@ struct NotificationInboxView: View {
             options: NotificationInboxFilter.allCases.map { ($0.label, $0) },
             selection: $filter
         )
-        .accessibilityLabel("Notification filter")
-        .accessibilityValue(filter.label)
     }
 
     private var viewMoreRow: some View {
@@ -308,8 +306,6 @@ private struct NotificationInboxHistoryView: View {
                         options: NotificationInboxFilter.allCases.map { ($0.label, $0) },
                         selection: $filter
                     )
-                    .accessibilityLabel("Notification history filter")
-                    .accessibilityValue(filter.label)
 
                     NotificationInboxRowList(
                         notifications: model.notificationInbox.notifications(filter: filter),

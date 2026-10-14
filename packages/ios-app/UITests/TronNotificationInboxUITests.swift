@@ -25,7 +25,7 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertEqual(ask.value as? String, "Unread")
         XCTAssertTrue(finished.exists)
         // Titled by its chat from the catalog; the kind is the icon, said once.
-        XCTAssertTrue(ask.label.hasPrefix("Release checklist, Input needed, "), ask.label)
+        XCTAssertTrue(waitFor(ask, label: "Release checklist, Input needed, "), ask.label)
         // Two Macs are paired, so each row names its Gateway once.
         XCTAssertTrue(ask.label.hasSuffix(", Studio Mac"), ask.label)
         assertNoConnectionRow(app)
@@ -43,7 +43,7 @@ final class TronNotificationInboxUITests: XCTestCase {
         try capture(app, "all")
 
         // A pull is not a refresh: no spinner, no list read, the sheet stays.
-        let filter = app.descendants(matching: .any)["Notification filter"]
+        let filter = app.buttons["Unread"]
         let start = home.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 120)))
         XCTAssertEqual(app.activityIndicators.count, 0, "a pull starts no refresh spinner: \(app.debugDescription)")
@@ -56,6 +56,7 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertEqual(live.value as? String, "Unread")
         XCTAssertTrue(waitFor(live, value: "Unread"))
         XCTAssertTrue(isTinted(app, live))
+        try capture(app, "all-live-delivered")
 
         // Read on another device: the same row turns read and clear in place.
         post(readNewest)
@@ -105,7 +106,11 @@ final class TronNotificationInboxUITests: XCTestCase {
         let bell = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open notifications'")).firstMatch
         XCTAssertTrue(bell.waitForExistence(timeout: 30), "the Settings bell never appeared: \(app.debugDescription)")
         bell.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["Notification filter"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.buttons["Unread"].waitForExistence(timeout: 10), app.debugDescription)
+        // Expand to the large detent so every seeded row is on screen.
+        let title = app.staticTexts["Notifications"]
+        let start = title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.05)))
     }
 
     @MainActor private func selectFilter(_ app: XCUIApplication, _ label: String) {
@@ -125,6 +130,13 @@ final class TronNotificationInboxUITests: XCTestCase {
         ) == .completed
     }
 
+    @MainActor private func waitFor(_ element: XCUIElement, label prefix: String) -> Bool {
+        XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@", prefix), object: element)],
+            timeout: 20
+        ) == .completed
+    }
+
     /// The sheet never renders its own connection treatment, however long the
     /// offline Mac's inbox read has been failing.
     @MainActor private func assertNoConnectionRow(_ app: XCUIApplication) {
@@ -133,15 +145,14 @@ final class TronNotificationInboxUITests: XCTestCase {
     }
 
     /// Whether a row's own background differs from the sheet surface beside it:
-    /// one pixel inside the row's bottom padding against one in the sheet's
-    /// horizontal margin on the same line.
+    /// one pixel inside the row's trailing padding against one just outside it,
+    /// close enough that the blurred surface behind both is the same.
     @MainActor private func isTinted(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
         guard let image = XCUIScreen.main.screenshot().image.cgImage else { return false }
         let scale = CGFloat(image.width) / app.frame.width
         let frame = element.frame
-        let y = frame.maxY - 3
-        guard let inside = pixel(image, CGPoint(x: frame.midX * scale, y: y * scale)),
-              let outside = pixel(image, CGPoint(x: (frame.minX - 8) * scale, y: y * scale)) else { return false }
+        guard let inside = pixel(image, CGPoint(x: (frame.maxX - 4) * scale, y: frame.midY * scale)),
+              let outside = pixel(image, CGPoint(x: (frame.maxX + 4) * scale, y: frame.midY * scale)) else { return false }
         return zip(inside, outside).map { abs($0 - $1) }.max() ?? 0 > 6
     }
 
