@@ -1057,12 +1057,12 @@ export class GatewayService {
       case "device.revoke": {
         const deviceId = string(params.deviceId, "deviceId", { max: 100 });
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(deviceId, async () => {
-          await this.dependencies.notifications?.removeDevice(deviceId);
-          const revoked = await this.dependencies.devices.revoke(deviceId, () => client.revokeDevice(deviceId));
-          if (revoked) await this.iosDeviceInstallService.removeDevice(deviceId);
           // A revoked iPhone loses its Mac Terminal key too, through the same
           // logged change path as a revocation from the Mac Terminal screen.
-          if (revoked && (await this.dependencies.settingsModel.macTerminalKeys?.read())?.[deviceId] !== undefined) {
+          // The key goes first: if removing it fails, the device stays paired
+          // and the revoke can be retried, rather than a revoked iPhone keeping
+          // a working SSH key.
+          if ((await this.dependencies.settingsModel.macTerminalKeys?.read())?.[deviceId] !== undefined) {
             await this.dependencies.settingsChanges.change({ kind: "mac" }, [{
               key: "permissions.macTerminalKey", qualifiers: { device: deviceId }, layer: "mac", op: "unset",
             }], {
@@ -1070,6 +1070,9 @@ export class GatewayService {
               commandId: `${string(params.commandId, "commandId", { min: 8, max: 120 })}:mac-terminal`,
             });
           }
+          await this.dependencies.notifications?.removeDevice(deviceId);
+          const revoked = await this.dependencies.devices.revoke(deviceId, () => client.revokeDevice(deviceId));
+          if (revoked) await this.iosDeviceInstallService.removeDevice(deviceId);
           return { revoked };
         }));
       }
@@ -2155,6 +2158,12 @@ export class GatewayService {
           const target = await this.canonicalSettingsTarget(params.target);
           if (!Array.isArray(params.changes)) throw new GatewayError("invalid_request", "changes must be an array");
           const changes = params.changes.map((raw, index) => settingsChangeRequest(raw, `changes[${index}]`));
+          // An iPhone enrolls only its own Mac Terminal key, so revoking a
+          // device always finds and removes the key that device can use.
+          if (changes.some(change => change.key === "permissions.macTerminalKey" && change.op === "set"
+            && change.qualifiers?.device !== client.identity)) {
+            throw new GatewayError("invalid_request", "An iPhone can enroll only its own Mac Terminal key");
+          }
           const session = target.kind === "session"
             ? await this.settingsSession(await this.openedSlot(client, { sessionId: target.sessionId }), target.sessionId, params.fence, workToken)
             : undefined;

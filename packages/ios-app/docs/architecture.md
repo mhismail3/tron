@@ -19,7 +19,8 @@ implementation detail; all user-facing language calls the agent Tron.
 | `Sources/UI/Automations` | dashboard selector, chronological agenda, inventory, detail/run presentations, and schedule editor |
 | `Sources/UI/Onboarding` | pairing/setup flow, reusable onboarding chrome, workspace, provider, and default setup |
 | `Sources/UI/Settings` | settings shell plus appearance, connection, provider, agent-default, on-demand package/resource, trust, custom-model, and diagnostic presentations |
-| `Sources/UI/Terminal` | sheet composition, presentation lifecycle, and SwiftTerm renderer |
+| `Sources/UI/Terminal` | sheet composition (the shared `TerminalSheetChrome`/`TerminalSurface` for the session terminal and Mac Terminal), presentation lifecycle, and SwiftTerm renderer |
+| `MacTerminalSSH` | local Swift package: Mac Terminal's SSH client on swift-nio-ssh, and the `mac-terminal-probe` the real-sshd journey drives |
 | `Sources/UI/Theme` | historical Tron colors and descriptor-based bundled typography |
 | `ShareExtension` | app-group share handoff |
 
@@ -1743,6 +1744,43 @@ the canonical document is replaced.
 Project trust UI states explicitly that trust controls project resource loading
 and is not a sandbox. Device settings list gateway-authorized devices and support
 immediate revocation; revoking this iPhone also removes its local profile.
+
+### Mac Terminal
+
+Settings › Accounts › **Mac Terminal** opens the session terminal's own chrome and
+emulator (`TerminalSheetChrome`, `TerminalSurface`, the control bar and extended
+keys) on a login shell on the paired Mac, reached with SSH through macOS Remote
+Login over Tailscale. Only enrollment and removal use the Gateway (its contract is
+the Gateway README's
+[Mac Terminal](../../gateway/README.md#mac-terminal)); the shell never does, so it
+works while Tron.app or the Gateway is quit, crashed or being replaced.
+
+- **Key.** `MacTerminalEnrollmentStore` creates one Secure Enclave P-256 key per
+  paired Mac and keeps only its Secure Enclave-wrapped `dataRepresentation` in this
+  device's Keychain (`AfterFirstUnlockThisDeviceOnly`); the private key is never
+  exported. The Simulator, which has no Secure Enclave, uses a software key in the
+  same item; device builds cannot.
+- **Enrollment** (`MacTerminalController.enroll`) reads `macTerminal.status`,
+  sends the public key as `permissions.macTerminalKey[device]` through
+  `settings.change` (the tap is the approval), and caches the MagicDNS name,
+  Tailscale addresses, login user and **pinned host keys** in defaults. Host keys
+  are never replaced silently; a Mac with none is refused before anything is written.
+- **Connection** (`MacTerminalSSH`) refuses early and specifically: no Tailscale
+  address on this device, the Mac unreachable, Remote Login off (connection
+  refused), a host key that is not pinned (with its `SHA256:` fingerprint), the key
+  refused (revoked or removed), or a handshake that never completes. Resize sends
+  SSH window-change; output is decoded on whole UTF-8 sequences and its retained
+  replay is bounded. A dropped or ended shell keeps its output, says so in the
+  terminal, offers ⋯ › Reconnect, and reconnects by itself when the app returns to
+  the foreground. Closing the sheet ends the shell.
+- **Removal** unsets the key on the Mac first and only then deletes it here; without
+  the Gateway it refuses and names the `tron-mac-terminal` line to delete by hand.
+
+`scripts/ios-mac-terminal-journey` runs `TronMacTerminalUITests` against a real
+sshd on this Mac's Tailscale address (synthetic Gateway, real key, client, PTY and
+shell): enrollment, typed input and Ctrl-C proved by the Mac, PTY resize, a new
+shell with the Gateway stopped, removal, Remote Login off and host-key mismatch.
+Screenshots land in `packages/ios-app/test-results/mac-terminal/`.
 
 ## Presentation parity
 

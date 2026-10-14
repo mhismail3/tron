@@ -95,7 +95,7 @@ export class MacTerminalKeys {
   async read(): Promise<Record<string, string>> {
     const keys: Record<string, string> = {};
     for (const line of (await this.readLines()).lines) {
-      const parsed = parseLine(line);
+      const parsed = parseLine(line.toString("latin1"));
       if (parsed) keys[parsed.device] = parsed.key;
     }
     return keys;
@@ -108,16 +108,20 @@ export class MacTerminalKeys {
     const admitted = key === null ? null : validateMacTerminalKey(key);
     await this.lock.run(async () => {
       const { lines, trailingNewline, exists } = await this.readLines();
-      const kept = lines.filter(line => parseLine(line)?.device !== device);
-      if (admitted !== null) kept.push(macTerminalLine(device, admitted));
+      const kept = lines.filter(line => parseLine(line.toString("latin1"))?.device !== device);
+      if (admitted !== null) kept.push(Buffer.from(macTerminalLine(device, admitted), "utf8"));
       if (!exists && admitted === null) return;
-      const text = kept.length === 0 ? "" : `${kept.join("\n")}${trailingNewline || admitted !== null ? "\n" : ""}`;
-      await this.publish(text);
+      const newline = Buffer.from("\n");
+      const joined = kept.flatMap((line, index) => index === 0 ? [line] : [newline, line]);
+      if (kept.length > 0 && (trailingNewline || admitted !== null)) joined.push(newline);
+      await this.publish(Buffer.concat(joined));
     });
   }
 
-  private async readLines(): Promise<{ lines: string[]; trailingNewline: boolean; exists: boolean }> {
-    let text: string;
+  /** The file as raw lines: every line Tron does not own is written back with
+   * exactly the bytes it had, whatever its encoding. */
+  private async readLines(): Promise<{ lines: Buffer[]; trailingNewline: boolean; exists: boolean }> {
+    let bytes: Buffer;
     try {
       const stat = await lstat(this.path);
       // Replacing a symlink with a file would silently move the user's keys.
@@ -125,23 +129,30 @@ export class MacTerminalKeys {
         throw new GatewayError("conflict", `${this.path} is not a regular file; Tron does not edit it`);
       }
       if (stat.size > MAXIMUM_AUTHORIZED_KEYS_BYTES) throw new GatewayError("conflict", `${this.path} is too large to edit safely`);
-      text = await readFile(this.path, "utf8");
+      bytes = await readFile(this.path);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return { lines: [], trailingNewline: true, exists: false };
       throw error;
     }
-    const trailingNewline = text.endsWith("\n");
-    const lines = text.length === 0 ? [] : (trailingNewline ? text.slice(0, -1) : text).split("\n");
+    const trailingNewline = bytes.length > 0 && bytes[bytes.length - 1] === 0x0a;
+    const body = trailingNewline ? bytes.subarray(0, -1) : bytes;
+    const lines: Buffer[] = [];
+    if (bytes.length > 0) {
+      let start = 0;
+      for (let index = 0; index <= body.length; index += 1) {
+        if (index === body.length || body[index] === 0x0a) { lines.push(body.subarray(start, index)); start = index + 1; }
+      }
+    }
     return { lines, trailingNewline, exists: true };
   }
 
-  private async publish(text: string): Promise<void> {
+  private async publish(bytes: Buffer): Promise<void> {
     await mkdir(this.sshDirectory, { recursive: true, mode: 0o700 });
     const temporary = `${this.path}.tron-${process.pid}-${randomBytes(6).toString("hex")}.tmp`;
     try {
       const handle = await open(temporary, "wx", 0o600);
       try {
-        await handle.writeFile(text, "utf8");
+        await handle.writeFile(bytes);
         await syncDurably(handle);
       } finally {
         await handle.close();

@@ -202,7 +202,8 @@ public enum MacTerminalClient {
         columns: Int,
         rows: Int,
         term: String,
-        connectTimeout: TimeAmount
+        connectTimeout: TimeAmount,
+        handshakeTimeout: TimeAmount = .seconds(15)
     ) async throws -> MacTerminalSession {
         let outcome = HandshakeOutcome()
         let group = NIOTSEventLoopGroup.singleton
@@ -235,6 +236,13 @@ public enum MacTerminalClient {
         }
 
         let (events, continuation) = AsyncStream.makeStream(of: MacTerminalEvent.self, bufferingPolicy: .unbounded)
+        // The dial timeout ends at TCP; an sshd that accepts and then never
+        // answers the handshake or the shell request must not hang the sheet.
+        let deadline = connection.eventLoop.scheduleTask(in: handshakeTimeout) {
+            outcome.record(.disconnected("The Mac accepted the connection but did not complete the SSH handshake."))
+            connection.close(promise: nil)
+        }
+        defer { deadline.cancel() }
         do {
             let shell = try await connection.eventLoop.flatSubmit {
                 let promise = connection.eventLoop.makePromise(of: Channel.self)

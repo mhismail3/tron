@@ -41,6 +41,7 @@ final class MacTerminalController {
         case remoteLoginOff
         case needsGateway
         case macNotOnTailnet
+        case noHostKeys
         case unpaired
     }
 
@@ -257,7 +258,8 @@ final class MacTerminalController {
         pendingUTF8.removeFirst(end)
         sequence += 1
         chunks.append(TerminalChunk(sequence: sequence, data: text))
-        retainedBytes += end
+        // Counted as retained text, the same measure removal subtracts.
+        retainedBytes += text.utf8.count
         while retainedBytes > Self.retainedByteLimit, chunks.count > 1 {
             retainedBytes -= chunks.removeFirst().data.utf8.count
         }
@@ -266,6 +268,8 @@ final class MacTerminalController {
     private static func notice(for status: MacTerminalStatus) -> SetupNotice {
         if status.hosts.isEmpty { return .macNotOnTailnet }
         if status.remoteLogin == "off" { return .remoteLoginOff }
+        // Nothing to pin means nothing to verify: never enroll without it.
+        if status.hostKeys.isEmpty { return .noHostKeys }
         return .ready(username: status.username)
     }
 }

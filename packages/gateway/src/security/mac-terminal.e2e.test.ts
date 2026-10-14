@@ -1,6 +1,6 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { Socket, createServer } from "node:net";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -128,7 +128,7 @@ async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory:
     broadcast: () => {},
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
-  return { service, settingsChanges, pair };
+  return { service, settingsChanges, pair, devices };
 }
 
 beforeAll(async () => {
@@ -155,14 +155,17 @@ describe("Mac Terminal", () => {
     const sshDirectory = join(root, "home", ".ssh");
     const hostDirectory = join(root, "sshd");
     await mkdir(sshDirectory, { recursive: true });
-    // A key the user added by hand: every Tron write must leave it exactly.
+    // A key the user added by hand, with a comment that is not UTF-8: every
+    // Tron write must leave those bytes exactly.
     const own = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwnUserKeyOwnUserKeyOwnUserKeyOwnUser00 user@laptop";
-    await writeFile(join(sshDirectory, "authorized_keys"), `# hand-written\n${own}\n`);
+    const handWritten = Buffer.concat([Buffer.from("# hand-written caf"), Buffer.from([0xe9]), Buffer.from(`\n${own}\n`)]);
+    const authorizedKeys = join(sshDirectory, "authorized_keys");
+    await writeFile(authorizedKeys, handWritten);
     const port = await freePort();
     const sshd = await startSshd(hostDirectory, sshDirectory, port);
     try {
       const tronHome = join(root, "tron");
-      let { service, pair } = await gateway(tronHome, sshDirectory, hostDirectory, port);
+      let { service, pair, devices } = await gateway(tronHome, sshDirectory, hostDirectory, port);
       const phone = await pair("Fixture iPhone");
       const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
 
@@ -183,9 +186,9 @@ describe("Mac Terminal", () => {
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "set", value: key.publicKey }],
       }) as unknown as { status: string; changes: Array<{ tier: string; status: string }> };
       expect(enrolled).toMatchObject({ status: "applied", changes: [{ status: "applied", tier: "approve" }] });
-      const file = await readFile(join(sshDirectory, "authorized_keys"), "utf8");
-      expect(file.startsWith(`# hand-written\n${own}\n`)).toBe(true);
-      const line = file.split("\n")[2]!;
+      const bytes = await readFile(authorizedKeys);
+      expect(bytes.subarray(0, handWritten.length).equals(handWritten)).toBe(true);
+      const line = bytes.subarray(handWritten.length).toString("utf8").trimEnd();
       expect(line).toBe(`from="${MAC_TERMINAL_SOURCES}",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc ${key.publicKey} tron-mac-terminal:${phone} Tron Mac Terminal key for one paired iPhone; delete this line to revoke it`);
       const history = await service.invoke(client(phone), "settings.history", { limit: 10 }) as unknown as { entries: Array<Record<string, unknown>> };
       expect(history.entries[0]).toMatchObject({ key: "permissions.macTerminalKey", qualifiers: { device: phone }, status: "applied", tier: "approve", actor: { kind: "ui", id: phone } });
@@ -225,21 +228,37 @@ describe("Mac Terminal", () => {
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "unset" }],
       }) as unknown as { status: string; changes: Array<{ tier: string }> };
       expect(revoked).toMatchObject({ status: "applied", changes: [{ tier: "notify" }] });
-      expect(await readFile(join(sshDirectory, "authorized_keys"), "utf8")).toBe(`# hand-written\n${own}\n`);
+      expect((await readFile(authorizedKeys)).equals(handWritten)).toBe(true);
       const refused = await connect(endpoint, key.privateKeyPEM);
       expect(refused).toMatchObject({ outcome: "error", error: "authenticationRefused" });
       transcript.push({ case: "revoked-from-iphone", detail: refused });
 
       // Revoking the paired device removes its key as a logged change.
-      ({ service } = await gateway(tronHome, sshDirectory, hostDirectory, port));
+      ({ service, devices } = await gateway(tronHome, sshDirectory, hostDirectory, port));
       await service.invoke(client(phone), "settings.change", {
         commandId: commandId(), target: { kind: "mac" },
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "set", value: key.publicKey }],
       });
       expect((await connect(endpoint, key.privateKeyPEM)).outcome).toBe("ok");
       const otherPhone = await pair("Second iPhone");
+      // An iPhone enrolls only its own key, so a device revoke always finds it.
+      await expect(service.invoke(client(otherPhone), "settings.change", {
+        commandId: commandId(), target: { kind: "mac" },
+        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "set", value: key.publicKey }],
+      })).rejects.toMatchObject({ code: "invalid_request" });
+      // A key that cannot be removed (authorized_keys made a symlink) fails the
+      // revoke and leaves the device paired, so it can be retried; a revoked
+      // iPhone never keeps a working key.
+      await rename(authorizedKeys, `${authorizedKeys}.real`);
+      await symlink(`${authorizedKeys}.real`, authorizedKeys);
+      await expect(service.invoke(client(otherPhone), "device.revoke", { commandId: commandId(), deviceId: phone }))
+        .rejects.toMatchObject({ code: "conflict" });
+      expect((await devices.listDevices()).map(device => device.id)).toContain(phone);
+      await rm(authorizedKeys);
+      await rename(`${authorizedKeys}.real`, authorizedKeys);
       await service.invoke(client(otherPhone), "device.revoke", { commandId: commandId(), deviceId: phone });
-      expect(await readFile(join(sshDirectory, "authorized_keys"), "utf8")).toBe(`# hand-written\n${own}\n`);
+      expect((await devices.listDevices()).map(device => device.id)).not.toContain(phone);
+      expect((await readFile(authorizedKeys)).equals(handWritten)).toBe(true);
       expect(await connect(endpoint, key.privateKeyPEM)).toMatchObject({ outcome: "error", error: "authenticationRefused" });
       const deviceHistory = await service.invoke(client(otherPhone), "settings.history", { limit: 1 }) as unknown as { entries: Array<Record<string, unknown>> };
       expect(deviceHistory.entries[0]).toMatchObject({ key: "permissions.macTerminalKey", status: "applied", reason: "The paired device was revoked" });

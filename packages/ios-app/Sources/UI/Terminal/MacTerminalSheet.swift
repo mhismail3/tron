@@ -151,6 +151,13 @@ struct MacTerminalSheet: View {
                 detail: "Mac Terminal connects over your tailnet. Open Tailscale on the Mac, sign in to the same tailnet as this iPhone, then check again.",
                 actionTitle: "Check Again"
             ) { Task { await controller.refreshSetup(model: model) } }
+        case .noHostKeys:
+            Placeholder(
+                icon: "lock.trianglebadge.exclamationmark",
+                title: "The Mac has no SSH host key",
+                detail: "Mac Terminal pins the Mac's host key so it can never connect to an impostor, and the Mac reported none in /etc/ssh. Turn Remote Login off and on again on the Mac, then check again.",
+                actionTitle: "Check Again"
+            ) { Task { await controller.refreshSetup(model: model) } }
         case .unpaired:
             Placeholder(
                 icon: "iphone.slash",
