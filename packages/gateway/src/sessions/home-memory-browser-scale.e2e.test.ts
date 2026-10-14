@@ -76,7 +76,7 @@ function openGateway(root: string, runtime: ModelRuntime): Gateway {
 }
 
 async function closeGateway(gateway: Gateway): Promise<void> {
-  gateway.service.dispose();
+  await gateway.service.dispose();
   await gateway.receipts.dispose();
   await gateway.registry.dispose();
 }
@@ -117,7 +117,7 @@ describe("Home memory browser at scale", () => {
     const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     runtime.registerNativeProvider(memoryFaux.provider);
-    const g = openGateway(root, runtime);
+    let g = openGateway(root, runtime);
     try {
       await g.registry.initialize();
       const buildStarted = performance.now();
@@ -188,31 +188,33 @@ describe("Home memory browser at scale", () => {
       const again = await reads(g);         // Repeat: identical answers, steady-state timings.
       expect(again.values).toEqual(warm.values);
 
-      // The same persisted catalog revision can be rendered by a different part
-      // decomposition after reopening. Cursor identity must therefore include the
-      // exact view layout, not only the ledger/source revisions.
-      const memory = (g.registry.homeOwner() as unknown as {
-        memory: { owner: { binding: { memory: { browserRevision(): string; view: Array<{ level: number; index: number; start: number; span: number }> } } } };
-      }).memory.owner.binding.memory;
-      {
-        const original = memory.view;
-        const before = memory.browserRevision();
-        const part = original.find(candidate => candidate.span >= 2)!;
-        memory.view = original.flatMap(candidate => candidate === part
-          ? [
-            { level: part.level - 1, index: part.index * 2, start: part.start, span: part.span / 2 },
-            { level: part.level - 1, index: part.index * 2 + 1, start: part.start + part.span / 2, span: part.span / 2 },
-          ]
-          : [candidate]);
-        expect(memory.browserRevision()).not.toBe(before);
-        try {
-          await expect(view(g, { limit: 30, cursor: warm.values.pages[0]!.nextCursor })).rejects.toMatchObject({ code: "conflict" });
-        } finally {
-          memory.view = original;
-        }
+      const beforeRestart = warm.values.pages;
+      expect(beforeRestart).toHaveLength(6);
+      expect(beforeRestart.flatMap(page => page.lines).some(line => line.start === 1120 && line.span === 2)).toBe(true);
+
+      // A real Gateway close/reopen reloads the durable episodic journal and
+      // folds the persisted summaries into its view again. Keep the old cursor
+      // and compare all six pages, including the known 1120+2 decomposition.
+      await closeGateway(g);
+      g = openGateway(root, runtime);
+      await g.registry.initialize();
+      const afterRestart = await reads(g);
+      const afterPages = afterRestart.values.pages;
+      expect(afterPages).toHaveLength(6);
+      const beforeParts = beforeRestart.flatMap(page => page.lines).map(({ start, span }) => [start, span]);
+      const afterParts = afterPages.flatMap(page => page.lines).map(({ start, span }) => [start, span]);
+      const decompositionChanged = JSON.stringify(beforeParts) !== JSON.stringify(afterParts);
+      expect(afterPages.flatMap(page => page.lines).some(line => line.start === 1120 && line.span === 1)).toBe(true);
+      expect(afterPages.flatMap(page => page.lines).some(line => line.start === 1121 && line.span === 1)).toBe(true);
+      expect(afterPages[0]!.revision === beforeRestart[0]!.revision).toBe(!decompositionChanged);
+      if (decompositionChanged) {
+        await expect(view(g, { limit: 30, cursor: beforeRestart[0]!.nextCursor })).rejects.toMatchObject({ code: "conflict" });
+      } else {
+        const continued = await view(g, { limit: 30, cursor: beforeRestart[0]!.nextCursor });
+        expect(continued).toEqual(beforeRestart[1]);
       }
 
-      const first = warm.values.pages[0]!;
+      const first = afterRestart.values.pages[0]!;
       expect(first.totalMessages).toBeGreaterThanOrEqual(1200);
       expect(first.lines.length).toBeGreaterThan(0);
       expect(first.lines.map(line => line.start)).toEqual([...first.lines.map(line => line.start)].sort((a, b) => b - a));
@@ -223,7 +225,7 @@ describe("Home memory browser at scale", () => {
 
       // ---- old path: every read proves all chapters from their first byte ------
       const full = await reads(g, true);
-      expect(full.values).toEqual(warm.values);
+      expect(full.values).toEqual(afterRestart.values);
 
       // A cold proof the deadline cancels still completes for the retry (Reload).
       (g.registry.homeOwner() as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs();
