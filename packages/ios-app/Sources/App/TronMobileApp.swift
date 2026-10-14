@@ -28,7 +28,6 @@ struct TronMobileApp: App {
         // model; the no-fixture arm renders the production scene with the same
         // owner the shipping app builds (`ProductionSceneRoot`).
         _hostedModel = State(initialValue: AppModel())
-        TRON366DismissProbe.install()
     }
 
     var body: some Scene {
@@ -191,40 +190,3 @@ enum OnboardingPresentationPolicy {
             || !setupComplete
     }
 }
-
-#if HOSTED_TEST
-import UIKit
-
-
-// TEMPORARY TRON366 diagnostic: never commit.
-enum TRON366DismissProbe {
-    static func install() {
-        let cls: AnyClass = UIViewController.self
-        for (a, b) in [(#selector(UIViewController.dismiss(animated:completion:)), #selector(UIViewController.tron366_dismiss(animated:completion:))),
-                       (#selector(UIViewController.present(_:animated:completion:)), #selector(UIViewController.tron366_present(_:animated:completion:)))] {
-            guard let m1 = class_getInstanceMethod(cls, a), let m2 = class_getInstanceMethod(cls, b) else { continue }
-            method_exchangeImplementations(m1, m2)
-        }
-    }
-    static func stack() -> String {
-        Thread.callStackSymbols.prefix(45).compactMap { line -> String? in
-            let parts = line.split(separator: " ", omittingEmptySubsequences: true)
-            guard parts.count > 3 else { return nil }
-            return String(String(parts[1]).prefix(10)) + ":" + String(String(parts[3]).prefix(90))
-        }.joined(separator: " < ")
-    }
-}
-
-extension UIViewController {
-    @objc func tron366_dismiss(animated: Bool, completion: (() -> Void)?) {
-        let me = String(describing: type(of: self)).prefix(60)
-        let child = presentedViewController.map { String(String(describing: type(of: $0)).prefix(60)) } ?? "nil"
-        NSLog("TRON366 UIKit dismiss on %@ presented=%@ stack=%@", String(me), child, TRON366DismissProbe.stack())
-        tron366_dismiss(animated: animated, completion: completion)
-    }
-    @objc func tron366_present(_ vc: UIViewController, animated: Bool, completion: (() -> Void)?) {
-        NSLog("TRON366 UIKit present %@ from %@", String(String(describing: type(of: vc)).prefix(60)), String(String(describing: type(of: self)).prefix(60)))
-        tron366_present(vc, animated: animated, completion: completion)
-    }
-}
-#endif
