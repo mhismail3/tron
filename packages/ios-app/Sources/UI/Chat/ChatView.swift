@@ -72,6 +72,7 @@ struct ChatView: View {
     /// the ready phase (hidden, unscrollable, then revealed again).
     @State private var hostedOpeningAttempts = 0
     @State private var hostedReadyExits = 0
+    @State private var hostedCoverCancels = 0
     #endif
 
     #if HOSTED_TEST
@@ -172,7 +173,7 @@ struct ChatView: View {
                     .accessibilityElement()
                     .accessibilityLabel("Hosted presentation lifecycle")
                     .accessibilityIdentifier("chat.hosted.presentation-lifecycle")
-                    .accessibilityValue("attempts=\(hostedOpeningAttempts) ready-exits=\(hostedReadyExits)")
+                    .accessibilityValue("attempts=\(hostedOpeningAttempts) ready-exits=\(hostedReadyExits) cover-cancels=\(hostedCoverCancels)")
             }
             .onChange(of: sessionPresentation.open.phase) { previous, current in
                 if previous == .ready, current != .ready { hostedReadyExits += 1 }
@@ -568,6 +569,9 @@ struct ChatView: View {
             scrollCoordinator.viewportActivationChanged(viewportActivation)
             scrollCoordinator.viewportObservationChanged(isActive: false)
             if sessionPresentation.openingTask != nil {
+                #if HOSTED_TEST
+                hostedCoverCancels += 1
+                #endif
                 // A covered transcript cannot publish the native geometry
                 // needed to finish positioning. Cancel the exact opening and
                 // scroll leases now so uncovering resumes with a fresh epoch;
