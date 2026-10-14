@@ -17,7 +17,7 @@ import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, homeTaskOperat
 import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
 import type { FixedSetting } from "../admin/settings-resolver.js";
 import { HOME_TASK_SUBAGENTS, HOME_TASK_STATUS_RUN_LIMIT, homeTaskSubagentLaunches, homeTaskSubagentsProjection, parseHomeTaskSubagentsEntry, type HomeTaskSubagentRuns, type HomeTaskSubagents } from "./home-task-subagents.js";
-import type { HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
+import type { HomeTaskCounts, HomeTaskDisplay, HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
 import { basename } from "node:path";
 import { TRON_ASK_USER_INTERRUPTED } from "../extensions/tron-ask-user-contract.js";
 import { abortableRead } from "../util/abortable-read.js";
@@ -56,6 +56,33 @@ export interface HomeTaskOwnerSettlement {
 }
 export type HomeTaskStatus = HomeTaskRecord & HomeTaskDisplay & { queuePosition: number | null; workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns; ownerSettlement: HomeTaskOwnerSettlement | null };
 export interface HomeTaskControlRequest { taskId: string; operationId: string }
+/** A task as Home's `task` tool lists it: enough to choose and send the next control. */
+export interface HomeTaskControlRow {
+  taskId: string;
+  title: string;
+  state: "starting" | "queued" | "running" | "settled";
+  outcome: string | null;
+  reason?: string;
+  detail?: string;
+  sessionId: string | null;
+  operationId: string | null;
+  queuePosition?: number;
+  resumes?: string;
+  continuedAs?: string;
+  updatedAt: string;
+  actions: Array<"status" | "report" | "steer" | "stop" | "resume">;
+}
+
+/** Levenshtein distance, for suggesting a task ID close to a mistyped one. */
+function editDistance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j += 1) current[j] = Math.min(previous[j]! + 1, current[j - 1]! + 1, previous[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    previous = current;
+  }
+  return previous[b.length]!;
+}
 /** Resume a settled task in place: `taskId`/`operationId` name the stopped task's exact operation. */
 export interface HomeTaskResumeRequest extends HomeTaskControlRequest { text?: string }
 
@@ -768,6 +795,50 @@ export class HomeTaskDispatcher {
     const task = await this.activeControl(control);
     // No session mutation lane here: Stop must be able to cancel its admission.
     await (await this.sessions.acquire(task.sessionId!)).stopHomeTask(control);
+  }
+
+  /** One task as Home's `task` tool shows it: its state, the operation a control would act on and
+   * the actions it allows now. `continuedAs` names a later in-place resume of the same worker. */
+  async controlRow(task: HomeTaskRecord, continuedAs?: string): Promise<HomeTaskControlRow> {
+    const queuePosition = this.queuePosition(task.taskId);
+    const state: HomeTaskControlRow["state"] = task.lifecycle === "active" ? "running" : task.lifecycle === "terminal" ? "settled"
+      : queuePosition !== null ? "queued" : "starting";
+    const actions: HomeTaskControlRow["actions"] = continuedAs ? ["status", "report"]
+      : state === "running" ? ["status", "steer", "stop"] : state === "queued" ? ["status", "stop"]
+      : state === "settled" ? ["status", "report", ...(task.sessionId ? ["resume" as const] : [])] : ["status"];
+    const evidence = task.terminalEvidence;
+    return { taskId: task.taskId, title: (await this.display(task)).title, state, outcome: evidence?.outcome ?? null,
+      ...(evidence ? { reason: evidence.reason } : {}), ...(evidence?.detail ? { detail: evidence.detail } : {}),
+      sessionId: task.sessionId, operationId: state === "queued" ? HOME_TASK_QUEUED_OPERATION : task.operationId,
+      ...(queuePosition !== null ? { queuePosition } : {}), ...(task.resumes ? { resumes: task.resumes.taskId } : {}),
+      ...(continuedAs ? { continuedAs } : {}), updatedAt: new Date(task.updatedAt).toISOString(), actions };
+  }
+
+  /** Home's newest tasks as control rows, newest first. A settled task whose worker a newer task
+   * in the page continues names it, so a control is sent to the current one. */
+  async controlCatalog(limit: number): Promise<{ tasks: HomeTaskControlRow[]; counts: HomeTaskCounts; more: boolean }> {
+    await this.assertAvailable();
+    const page = await this.store.page({ limit });
+    const newestBySession = new Map<string, string>();
+    const tasks: HomeTaskControlRow[] = [];
+    for (const { task } of page.items) {
+      const newer = task.sessionId ? newestBySession.get(task.sessionId) : undefined;
+      if (task.sessionId && !newer) newestBySession.set(task.sessionId, task.taskId);
+      tasks.push(await this.controlRow(task, newer));
+    }
+    return { tasks, counts: page.counts, more: page.nextCursor !== undefined };
+  }
+
+  /** Up to five task IDs close to one that does not exist, newest first, for an actionable miss. */
+  async similarTaskIds(taskId: string): Promise<string[]> {
+    const wanted = taskId.toLowerCase();
+    const scored: Array<{ taskId: string; createdAt: number; score: number }> = [];
+    for await (const task of this.store.records()) {
+      const id = task.taskId.toLowerCase();
+      const score = id.includes(wanted) || wanted.includes(id) ? 0 : editDistance(id, wanted);
+      if (score <= Math.max(2, Math.floor(Math.max(id.length, wanted.length) / 3))) scored.push({ taskId: task.taskId, createdAt: task.createdAt, score });
+    }
+    return scored.sort((a, b) => a.score - b.score || b.createdAt - a.createdAt).slice(0, 5).map(item => item.taskId);
   }
 
   private async activeControl(control: HomeTaskControlRequest): Promise<HomeTaskRecord> {

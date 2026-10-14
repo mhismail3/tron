@@ -50,7 +50,7 @@ export interface TronModuleHost {
    * here is what keeps the wiring honest: the only Home runtime is built by a
    * slot that answers this. */
   homeMemoryTools: (sessionId: string) => HomeMemoryToolAccess | undefined;
-  homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
+  homeTask: (sessionId: string, request: unknown) => Promise<unknown>;
   homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
   /** Session search for Home's research tools, late-bound: the service is
    * installed after the registry exists, and may be absent on this Gateway. */

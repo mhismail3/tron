@@ -44,6 +44,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
+import { boundToolCancellation } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { HomeRequestPolicy } from "../home/home-request-policy.js";
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
@@ -521,7 +522,7 @@ type PromptOwnership = AutomationPromptOwnership | HomeWakeOwnership | {
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
-  homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
+  homeTask: (sessionId: string, request: unknown) => Promise<unknown>;
   homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
@@ -2654,6 +2655,8 @@ export class RuntimeSlot {
     const session = this.runtime.session;
     const nextManager = session.sessionManager;
     const nextId = nextManager.getSessionId();
+    // Stop must settle even when a tool ignores cancellation (#961).
+    boundToolCancellation(session);
     await session.bindExtensions({
       uiContext: this.extensionHost.context(),
       mode: "rpc",
