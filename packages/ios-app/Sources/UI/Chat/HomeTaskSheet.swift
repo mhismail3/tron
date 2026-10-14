@@ -19,7 +19,9 @@ struct HomeTaskSheet: View {
     @State var child: HomeSheetDestination?
     @State var failure: String?
     @State var expiry = Date.now
-    @State var briefExpanded = false
+    /// The brief opened whole in the shared document sheet.
+    @State private var reading: HomeTextReading?
+    @Environment(\.tronSettingsVisualTheme) private var visualTheme
     @State var revoking: PendingRevocation?
 
     /// A standing scope or one-use grant the user is about to revoke, with the
@@ -46,6 +48,8 @@ struct HomeTaskSheet: View {
     }
 
     var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
+    /// The family accent of the Manage Home row that opened this branch (#925).
+    private var accent: Color { visualTheme?.accent ?? .tronEmerald }
     private var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
     var canMutate: Bool {
         guard active, !model.homeMutations.isRunning(profileID: profileID),
@@ -83,15 +87,15 @@ struct HomeTaskSheet: View {
                         Button { onOpenSession?(worker) } label: {
                             TronToolbarTextLabel("Open Session", systemImage: "arrow.up.right.square")
                         }
-                        .tronToolbarAction(accent: .tronEmerald)
+                        .tronToolbarAction(accent: accent)
                         .accessibilityLabel("Open session")
                         .accessibilityIdentifier("home-task-open-session")
                     }
                 }
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: destination.title, accent: .tronEmerald) }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: destination.title, accent: accent) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(Color.tronEmerald)
+                        Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(accent)
                     }
                     .accessibilityLabel("Done")
                     .accessibilityIdentifier("home-sheet-done-\(destination.id)")
@@ -111,6 +115,10 @@ struct HomeTaskSheet: View {
         }
         .tronManagedSheet(item: $child, identity: { "home.\(profileID).\($0.id)" }) {
             HomeSheet(destination: $0, profileID: profileID, onOpenSession: onOpenSession)
+                .tronSettingsVisualTheme(accent: accent)
+        }
+        .tronManagedSheet(item: $reading, identity: { "home.\(profileID).reading.\($0.id)" }) { reading in
+            HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent)
         }
         .tronManagedSheet(item: $revoking, identity: { "home.\(profileID).revoke.\($0.id)" }) { pending in
             TronConfirmationSheet(
@@ -128,7 +136,7 @@ struct HomeTaskSheet: View {
     @ViewBuilder private var content: some View {
         switch owner.state {
         case .idle, .loading:
-            TronSheetLoadingState(label: "Loading Home…", accent: .tronEmerald)
+            TronSheetLoadingState(label: "Loading Home…", accent: accent)
         case .failed(_, let message):
             TronPlaceholderState(title: "Home could not be read", detail: message, icon: "exclamationmark.triangle", actionTitle: "Reload") { reload() }
         case .loaded(let read, let content):
@@ -149,7 +157,7 @@ struct HomeTaskSheet: View {
                 default: EmptyView()
                 }
             } else {
-                TronSheetLoadingState(label: "Waiting for Home…", accent: .tronEmerald)
+                TronSheetLoadingState(label: "Waiting for Home…", accent: accent)
             }
         }
     }
@@ -235,27 +243,25 @@ struct HomeTaskSheet: View {
         .accessibilityIdentifier("home-task-detail")
     }
 
-    /// The brief, collapsed to six lines until the user asks for all of it.
+    /// The brief's opening lines, markdown rendered; a long brief opens whole
+    /// from a View All row, as a tool's script or result does.
     private func briefCard(_ text: String) -> some View {
-        let long = text.count > 320 || text.split(whereSeparator: \.isNewline).count > 6
+        let preview = ToolTextHeadPreview.make(text)
         return TronSettingsGroup("Brief", accent: .tronSessionTeal) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(text)
-                    .font(TronTypography.body)
-                    .lineSpacing(4)
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(briefExpanded ? nil : 6)
+                TronMarkdownView(text: preview.isTruncated ? preview.text : text, streaming: false)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
-                if long {
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("home-task-brief")
+                if preview.isTruncated {
                     TronSettingsDivider(accent: .tronSessionTeal)
-                    Button { briefExpanded.toggle() } label: {
-                        TronSettingsRow(icon: briefExpanded ? "arrow.up.and.line.horizontal.and.arrow.down" : "arrow.down.and.line.horizontal.and.arrow.up",
-                                        title: briefExpanded ? "Show less" : "Show all", accent: .tronSessionTeal)
+                    Button { reading = HomeTextReading(id: "brief", title: "Brief", text: text) } label: {
+                        TronSettingsRow(icon: "text.alignleft", title: "View All", accent: .tronSessionTeal)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("home-task-brief-toggle")
+                    .accessibilityIdentifier("home-task-brief-view-all")
                 }
             }
         }
@@ -270,7 +276,9 @@ struct HomeTaskSheet: View {
                     let rows = workerRows(task)
                     ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                         if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
-                        TronValueRow(icon: row.icon, title: row.title, value: row.value, accent: .tronSessionTeal)
+                        // Title over value, as every other Home detail row reads.
+                        TronSettingsRow(icon: row.icon, title: row.title, subtitle: row.value, accent: .tronSessionTeal)
+                            .accessibilityElement(children: .combine)
                             .accessibilityIdentifier(row.id)
                     }
                     if let runs {

@@ -2,9 +2,13 @@ import { createHash } from "node:crypto";
 import { open, stat } from "node:fs/promises";
 import type { HomeChapterContents } from "../protocol/types.js";
 
-/** Bounds of a chapter's topics (`home.chapterList`). */
+/** Bounds of a chapter's topics (`home.chapterList`). A topic is a whole memory
+ * summary the phone previews in a row and opens in full, so it keeps its lines. */
 export const HOME_CHAPTER_TOPIC_COUNT = 8;
-export const HOME_CHAPTER_TOPIC_CHARACTERS = 200;
+export const HOME_CHAPTER_TOPIC_CHARACTERS = 1000;
+/** Topic characters one chapter list carries, newest chapters first: whole topics
+ * keep the list a bounded frame however many chapters the ledger holds. */
+export const HOME_CHAPTER_TOPIC_LIST_CHARACTERS = 96_000;
 
 /** Bytes read per chunk while a chapter's canonical file is scanned. */
 const CHUNK_BYTES = 1024 * 1024;
@@ -13,16 +17,17 @@ const PREFIX_WINDOW_BYTES = 4096;
 const NEWLINE = 0x0a;
 
 /** One memory summary as a topic: its user and Home lines without kind prefixes
- * (tool and event lines are noise), one line, ended only at a word boundary. */
+ * (tool and event lines are noise), in their own lines so markdown survives, and
+ * past the bound ended only at a word boundary. */
 export function homeChapterTopic(summary: string): string {
   const text = summary.split("\n")
     .filter(line => !/^(?:echo|event):/u.test(line.trim()))
-    .map(line => line.trim().replace(/^(?:user|talk|summary):\s*/u, ""))
-    .join(" ").replace(/\s+/gu, " ").trim();
+    .map(line => line.trimEnd().replace(/^(\s*)(?:user|talk|summary):\s*/u, "$1"))
+    .join("\n").replace(/\n{3,}/gu, "\n\n").trim();
   if (!text || /^\[call\b/iu.test(text)) return "";
   if ([...text].length <= HOME_CHAPTER_TOPIC_CHARACTERS) return text;
   const prefix = [...text].slice(0, HOME_CHAPTER_TOPIC_CHARACTERS - 1).join("");
-  const boundary = prefix.lastIndexOf(" ");
+  const boundary = Math.max(prefix.lastIndexOf(" "), prefix.lastIndexOf("\n"));
   return boundary > 0 ? `${prefix.slice(0, boundary).replace(/[\s,;:.–-]+$/u, "")}…` : "";
 }
 

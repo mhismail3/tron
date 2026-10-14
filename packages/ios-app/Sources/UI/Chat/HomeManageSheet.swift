@@ -212,7 +212,7 @@ extension HomeSheet {
     /// A row that presents a managed child sheet.
     func navigationRow(icon: String, title: String, subtitle: String? = nil,
                        destination: HomeSheetDestination, id: String) -> some View {
-        Button { present(destination) } label: {
+        Button { present(destination, rowAccent: .tronSessionTeal) } label: {
             TronSettingsRow(icon: icon, title: title, subtitle: subtitle, accent: .tronSessionTeal)
         }
         .buttonStyle(.plain)

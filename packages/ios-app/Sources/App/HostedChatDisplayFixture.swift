@@ -347,7 +347,11 @@ private actor HostedHomeShellGateway {
                          "contents": .object(["firstAt": .string(isoAgo(40 * 86_400)), "lastAt": .string(isoAgo(10 * 86_400)),
                              "userMessages": .number(412), "homeReplies": .number(409), "tasksDelegated": .number(7),
                              "topics": .array([
-                                 .string("Planned the spring garden: raised beds along the south fence and Thursday reviews."),
+                                 .string("""
+                                     Planned the spring garden: raised beds along the south fence and **Thursday reviews**, with a watering plan Home keeps current through the season.
+                                     - Order mulch and `drip-line` fittings
+                                     - Ask the neighbour about the *shared* compost bin
+                                     """),
                                  .string("Booked the Lisbon trip for May and asked Home to watch for fare drops."),
                                  .string("Reviewed the kitchen renovation quote and asked for a second countertop bid."),
                                  .string("Settled the quarterly budget and moved savings into the travel fund."),
@@ -720,7 +724,17 @@ private actor HostedHomeShellGateway {
         record["reportRef"] = id == "terminal" ? .object(["resultId": .string("report-one"), "sessionId": .string("worker-session"),
             "entryId": .string("report-entry"), "digest": .string(String(repeating: "b", count: 64))]) : .null
         record["intent"] = .object(["text": .string(id == "active"
-            ? "Continue epic #758 (settings model) on its integration branch. Implement the next slice, keep draft PR 798 updated, and do not merge."
+            ? """
+              Continue epic #758 (settings model) on its integration branch. Implement the next slice, keep draft PR 798 updated, and **do not merge**.
+
+              Steps:
+              - Merge `origin/main` into the integration branch first.
+              - Land the *layer badge* slice behind the existing schema.
+              - Run `scripts/tron work verify` before every push.
+              - Report the PR head and the journeys you ran.
+
+              Keep the settings model doc in step with each slice.
+              """
             : "Draft the email that summarises Thursday's garden review and send it for approval.")])
         record["operationId"] = .string("task-operation")
         let terminal = id == "terminal"

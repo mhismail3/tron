@@ -211,7 +211,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(loading.frame.midY, sheet.midY, accuracy: 1, "The pulse is centered in the visible sheet (\(name))")
         keepScreenshot(named: "sheet-\(name)-loading")
         // The drawn pulse (not just its accessibility frame) sits there too, is
-        // small (no label), and is the title's green. It fades in and its waves
+        // small (no label), and is drawn in the title's color. It fades in and its waves
         // breathe, so sample a few frames rather than trusting one instant.
         let probe = CGRect(x: sheet.midX - 80, y: sheet.midY - 80, width: 160, height: 160)
         var drawn: (center: CGPoint, extent: CGFloat)?
@@ -230,7 +230,7 @@ final class TronSmokeUITests: XCTestCase {
         return sheet.minY
     }
 
-    /// Centroid and extent (points) of green-dominant pixels, the emerald pulse, in `area`.
+    /// Centroid and extent (points) of saturated pixels, the title-colored pulse, in `area`.
     private func accentCentroid(_ image: UIImage, in area: CGRect, windowWidth: CGFloat) -> (center: CGPoint, extent: CGFloat)? {
         guard let source = image.cgImage else { return nil }
         let scale = CGFloat(source.width) / windowWidth
@@ -246,7 +246,9 @@ final class TronSmokeUITests: XCTestCase {
             for x in 0..<width {
                 let i = (y * width + x) * 4
                 let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
-                guard g - max(r, b) > 8 else { continue }
+                // The pulse is the sheet title's color (green for Manage Home, its
+                // row's teal for a sub-sheet): any saturated ink, never the gray material.
+                guard max(r, g, b) - min(r, g, b) > 24 else { continue }
                 // CGContext rows run bottom-up.
                 let row = height - 1 - y
                 sumX += Double(x); sumY += Double(row); count += 1

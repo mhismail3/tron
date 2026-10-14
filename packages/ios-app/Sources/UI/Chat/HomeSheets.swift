@@ -130,6 +130,12 @@ struct HomeSheet: View {
     /// Rows present an existing Home sheet as a managed child, so each child keeps
     /// its own read owner and lifetime.
     @State var childDestination: HomeSheetDestination?
+    /// The accent of the row that opened the child: its sheet title, Done and
+    /// loading pulse take it through the shared settings visual theme (#925).
+    @State private var childAccent: Color?
+    /// A Home text opened whole (a chapter topic) in the shared document sheet.
+    @State var reading: HomeTextReading?
+    @Environment(\.tronSettingsVisualTheme) private var visualTheme
     /// Manage Home's open child only reads (Context, Memory, Chapters), so its return
     /// keeps the installed page instead of re-reading every row.
     @State private var returnsFromBrowsing = false
@@ -149,6 +155,8 @@ struct HomeSheet: View {
     }
 
     var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
+    /// This sheet's family accent: the row that opened it, else Home's own green.
+    var accent: Color { visualTheme?.accent ?? .tronEmerald }
     var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
     var body: some View {
         Group {
@@ -163,7 +171,7 @@ struct HomeSheet: View {
         // Session's sub-sheets do (#799, #811).
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(Color.tronEmerald)
+        .tint(accent)
         .onDisappear { owner.retire() }
     }
 
@@ -190,7 +198,7 @@ struct HomeSheet: View {
                     ) { showsTerminal = true }
                 }
             }
-            ToolbarItem(placement: .principal) { TronSheetTitle(title: destination.title, accent: .tronEmerald) }
+            ToolbarItem(placement: .principal) { TronSheetTitle(title: destination.title, accent: accent) }
             ToolbarItem(placement: .confirmationAction) {
                 Button {
                     if let editor = sliderPresentation.session {
@@ -199,7 +207,7 @@ struct HomeSheet: View {
                         dismiss()
                     }
                 } label: {
-                    Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(Color.tronEmerald)
+                    Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(accent)
                 }
                 .accessibilityLabel("Done")
                 .accessibilityIdentifier("home-sheet-done-\(destination.id)")
@@ -233,6 +241,10 @@ struct HomeSheet: View {
         }
         .tronManagedSheet(item: $childDestination, identity: { "home.\(profileID).\($0.id)" }) { child in
             HomeSheet(destination: child, profileID: profileID, sessionID: sessionID, onOpenSession: onOpenSession)
+                .tronSettingsVisualTheme(accent: childAccent ?? accent)
+        }
+        .tronManagedSheet(item: $reading, identity: { "home.\(profileID).reading.\($0.id)" }) { reading in
+            HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent)
         }
         #if HOSTED_TEST
         // Retains the mounted pause action so hosted journeys can invoke it after
@@ -253,7 +265,7 @@ struct HomeSheet: View {
     @ViewBuilder private var loadedContent: some View {
         switch owner.state {
         case .idle, .loading(_, nil):
-            TronSheetLoadingState(label: "Loading Home…", accent: .tronEmerald)
+            TronSheetLoadingState(label: "Loading Home…", accent: accent)
         case .failed(_, let error):
             TronPlaceholderState(title: "Home could not be read", detail: error, icon: "exclamationmark.triangle",
                                  actionTitle: "Reload") { reload() }
@@ -268,7 +280,7 @@ struct HomeSheet: View {
                 case .tasks, .task, .permissions: EmptyView()
                 }
             } else {
-                TronSheetLoadingState(label: "Waiting for Home…", accent: .tronEmerald)
+                TronSheetLoadingState(label: "Waiting for Home…", accent: accent)
             }
         }
     }
@@ -282,11 +294,14 @@ struct HomeSheet: View {
     }
 
     /// Presents a managed child sheet; rows use this, not their own navigation.
-    func present(_ child: HomeSheetDestination) {
+    /// `rowAccent` is the presenting row's tint; without one the child keeps
+    /// this sheet's accent, so a whole Home branch shares its row's color.
+    func present(_ child: HomeSheetDestination, rowAccent: Color? = nil) {
         switch child {
         case .memory, .chapters: returnsFromBrowsing = true
         default: returnsFromBrowsing = false
         }
+        childAccent = rowAccent
         childDestination = child
     }
 
@@ -339,6 +354,33 @@ struct HomeSheet: View {
                       !(error is CancellationError) else { return }
                 mutationFailure = error.localizedDescription
             }
+        }
+    }
+}
+
+/// A Home text opened whole: a task brief or a chapter topic. It reuses the
+/// shared document sheet the instructions readers use, with the chat's markdown
+/// renderer, and takes the presenting sheet's accent.
+struct HomeTextReading: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let text: String
+}
+
+struct HomeTextReader: View {
+    let reading: HomeTextReading
+
+    var body: some View {
+        TronDocumentSheet(title: reading.title, detents: [.medium, .large]) {
+            ScrollView {
+                TronMarkdownView(text: reading.text, streaming: false)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(18)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("home-reading-text")
+            }
+            .tronScrollEdgeChrome()
         }
     }
 }
