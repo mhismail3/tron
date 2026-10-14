@@ -272,7 +272,8 @@ describe("Tron Home learned profile", () => {
       profileCall({ action: "refine", id: original!.id, text: "Use metric units everywhere." }, "call-life-2"),
       say("refined"),
     ]);
-    expect(profileResults(refine.last.messages)).toEqual([expect.objectContaining({ status: "saved", action: "refine", id: original!.id })]);
+    // Each change names the text it replaced, so its tool detail can show it (#957).
+    expect(profileResults(refine.last.messages)).toEqual([expect.objectContaining({ status: "saved", action: "refine", id: original!.id, previousText: "Use metric units." })]);
     const refined = await noteAt(f, original!.id);
     expect(refined.revisionId).not.toBe(originalRevision);
     expect(refined.content.title).toBe("Use metric units everywhere.");
@@ -289,7 +290,7 @@ describe("Tron Home learned profile", () => {
       say("superseded"),
     ]);
     const [replaced] = profileResults(supersede.last.messages);
-    expect(replaced).toMatchObject({ status: "saved", action: "supersede" });
+    expect(replaced).toMatchObject({ status: "saved", action: "supersede", supersededId: original!.id, previousText: "Use metric units everywhere." });
     const afterSupersede = await homeActivation(f, "after supersede", [say("ok")]);
     expect(afterSupersede.first.systemPrompt).not.toContain(`note ${original!.id}`);
     expect(afterSupersede.first.systemPrompt).toContain("Use metric units, and state conversions.");
@@ -302,7 +303,15 @@ describe("Tron Home learned profile", () => {
       profileCall({ action: "retire", id: replacement.id, reason: "The maintainer changed topic." }, "call-life-4"),
       say("retired"),
     ]);
-    expect(profileResults(retire.last.messages)).toEqual([expect.objectContaining({ status: "saved", action: "retire", id: replacement.id })]);
+    expect(profileResults(retire.last.messages)).toEqual([expect.objectContaining({ status: "saved", action: "retire", id: replacement.id,
+      previousText: "Use metric units, and state conversions." })]);
+    // `home.profileList` (Manage Home's Profile row) classifies the notes as the instructions do.
+    const listed = await f.registry.homeOwner().profileList();
+    expect(listed.unclassified).toBe(0);
+    expect(listed.items.map(({ id, kind, text, confirmed, status }) => ({ id, kind, text, confirmed, status }))).toEqual([
+      { id: original!.id, kind: "preference", text: "Use metric units everywhere.", confirmed: false, status: "superseded" },
+      { id: replacement.id, kind: "preference", text: "Use metric units, and state conversions.", confirmed: false, status: "retired" },
+    ]);
     const afterRetire = await homeActivation(f, "after retire", [say("ok")]);
     expect(afterRetire.first.systemPrompt).not.toContain(`note ${replacement.id}`);
     const retired = await noteAt(f, replacement.id);
@@ -440,7 +449,9 @@ describe("Tron Home learned profile", () => {
     const admission = f.slot.canonicalSessionEntries().flatMap(entry => entry.type === "message"
       && entry.message.role === "toolResult" && entry.message.toolCallId === "delegate-call-0001" ? [entry.message] : [])[0];
     expect(admission, JSON.stringify(admission)).toMatchObject({ isError: false, details: { taskId: "profile-task-0001",
-      sessionId: expect.any(String), operationId: expect.any(String) } });
+      sessionId: expect.any(String), operationId: expect.any(String),
+      // The resolved worker choice, as the brief states it, for the delegate tool's detail (#957).
+      worker: { model: expect.any(String), thinking: expect.any(String), modelSource: expect.any(String), thinkingSource: expect.any(String) } } });
     await waitFor(() => f.captured.some((request) => !request.home && request.blob.includes("Preferences applied")) || undefined, "the worker's first request", { boundMs: 60_000 });
     const worker = f.captured.find((request) => !request.home && request.blob.includes("Preferences applied"))!;
     expect(worker.blob).toContain(`note ${item!.id}`);

@@ -778,7 +778,7 @@ enum HostedHomeToolFixture {
     "id": "home-tool-zoom-result-text",
     "ordinal": 0,
     "type": "text",
-    "text": "1120+2|**Mohsin** asked for the #890 handoff; Home sent the exact command.\n1122+2|The worker took the claim and pushed `feat/890` with a checkpoint."
+    "text": "1120+2|summary: **Mohsin** asked for the #890 handoff; Home sent the exact command.\n1122+2|summary: The worker took the claim and pushed `feat/890` with a checkpoint."
    }
   ],
   "toolCallId": "home-tool-zoom",

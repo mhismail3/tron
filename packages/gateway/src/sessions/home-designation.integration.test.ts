@@ -256,6 +256,16 @@ const HOME_TOOLS = [
 ];
 
 describe("Tron Home designation", () => {
+  homeCase("refuses home.profileList and omits its capability on a Gateway without a Knowledge owner", async () => {
+    const f = await fixture("profile-list-without-knowledge");
+    await designate(f, "home-designate-profile-list");
+    const info = await f.service.invoke(client, "system.info", {}) as unknown as { capabilities: string[] };
+    expect(info.capabilities).toContain("home-chapter-list.v1");
+    expect(info.capabilities).not.toContain("home-profile-list.v1");
+    await expect(f.service.invoke(client, "home.profileList", { extra: true })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(f.service.invoke(client, "home.profileList", {})).rejects.toMatchObject({ code: "unsupported" });
+  });
+
   homeCase("refuses a different model for an enabled Home and keeps matching designations idempotent", async () => {
     const f = await fixture("enabled-model-designate");
     const original = await designate(f, "home-designate-enabled-model");

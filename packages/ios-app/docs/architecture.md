@@ -215,8 +215,15 @@ lists one row per chapter, and its detail shows the chapter's contents, size
 against the shared soft limit, Browse this chapter's memory, and — for a sealed
 chapter only — the read-only transcript, staged as a profile-fenced ordinary
 route on sheet dismissal (`ChatRoutes.completeStagedNavigationAfterDismissal`).
-The next-prompt preview, delivered-context viewing and the learned-profile view
-are follow-up Gateway reads.
+The Profile row sits directly above Memory (gated on `home-profile-list.v1`); its
+subtitle counts the active items and how many are confirmed, from `home.profileList`
+read with the main sheet's load (a refused read reads "Unavailable" and never fails
+Manage Home). Its child sheet lists every active item grouped by kind
+(`HomeProfilePresentation`), then superseded and retired items under "No longer
+applied"; an item's detail (full Markdown text, kind, state, note ID, dates) comes
+from the row already loaded and never reads again. The sheet is read-only: Home
+changes the profile with its `profile` tool. The next-prompt preview and
+delivered-context viewing are follow-up Gateway reads.
 
 `HomeSheetReadOwner` owns one disposable manage/context/chapter/memory/task/evidence read
 per managed sheet; the main sheet's load carries status, context, chapters, the first
@@ -1341,7 +1348,15 @@ virtual model names are marked in the model and session selectors without replac
 Pi's empty result empty rather than inventing `(no output)`. Bash commands wrap to the available width
 using word-preserving line breaks while outputs and other string metadata wrap; all previews bound pathological
 line count, total characters, and per-line length with explicit head/tail omission markers. Small numeric
-and boolean metadata remains unchanged. Every tool detail sheet opens Technical details from the top-leading info
+and boolean metadata remains unchanged. Home's own tools (`delegate`, `task`, `settings`, `profile`, `zoom`,
+`date`, `memory_search`, from a Tron inline module only) replace the generic sections with a purpose-built body:
+`HomeToolDetailPresentation` reads the call's arguments and typed result details into a header (the call's
+outcome pill), a failure section (a schema rejection lists its issues; a refusal states its reason), rows,
+Markdown texts and memory lines, and `HomeToolDetailSections` renders them with the shared settings group, row,
+pill and Markdown views in the tool sheet's accent. A long brief, report, message or memory line opens whole in
+the shared `HomeTextReader`, as a Manage Home brief does. A shape the builder does not recognize keeps the generic
+detail. `TronHomeSheetsUITests/testHomeToolDetailSheetsAndProfile` opens each call, success and error, from the
+hosted Home transcript. Every tool detail sheet opens Technical details from the top-leading info
 button (`TronSheetInfoButton`, the one info affordance every sheet with technical or metadata details uses); the
 sub-sheet starts with larger, compact selectable
 execution metadata, then exposes bounded Request JSON and Result JSON containers in that order. Tapping either
@@ -1927,7 +1942,7 @@ shared presentation owners.
 Whole-content sheet loading is a `TronSheetLoadingState` preference that the enclosing
 `TronPresentationSurface` (every managed sheet and registered surface, else the app root) draws as one centered
 pulse and consumes, so nested surfaces never repeat it. Manage Home sends its independent
-`home.status`, `home.context` and `home.chapterList` reads together, then task and permission
+`home.status`, `home.context`, `home.chapterList` and `home.profileList` reads together, then task and permission
 reads together once status admits them.
 The shared `tronTopBlurSurface` establishes full available width **before** attaching
 edge chrome. `tronScrollEdgeChrome` and document underlap delegate to that same

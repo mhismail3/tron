@@ -597,9 +597,11 @@ extension HomeToolDetailPresentation {
             return ["user", "talk", "echo", "event"].first { text.hasPrefix("\($0): ") }.flatMap(HomeMemoryItemDTO.Kind.init)
         }
 
+        /// The line's text without its view tag: `user:`/`talk:`/`echo:`/`event:` for a
+        /// message, `summary:` for a merged range.
         var body: String {
-            guard let kind else { return HomeMemoryPresentation.strip(text) }
-            return String(text.dropFirst(kind.rawValue.count + 2))
+            if let kind { return String(text.dropFirst(kind.rawValue.count + 2)) }
+            return text.hasPrefix("summary: ") ? String(text.dropFirst("summary: ".count)) : text
         }
 
         var line: Line {
