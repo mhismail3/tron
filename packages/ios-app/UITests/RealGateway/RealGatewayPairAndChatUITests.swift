@@ -497,7 +497,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(submit.waitForExistence(timeout: 90), "the codemode question was never presented: \(app.debugDescription)")
         app.buttons["Close form and keep answers"].tap()
         XCTAssertTrue(waitForNonExistence(submit, timeout: 10), app.debugDescription)
-        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Codemode,")).firstMatch
+        // The chip reads "Codemode, Invocation" until it runs, then "Builtin Codemode · Codemode, 1 nested, …".
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "Codemode,", "Builtin Codemode")).firstMatch
         XCTAssertTrue(waitForHittable(row, timeout: 30), "the running codemode row is not tappable: \(app.debugDescription)")
         row.tap()
         // The tap reopens the pending question itself, not the row's details sheet.
