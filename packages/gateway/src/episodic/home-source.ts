@@ -335,7 +335,9 @@ async function proveChapter(chapter: HomeSourceChapter, admitted: EpisodicChapte
       if (base) appended.push(entry.id); else parents.set(entry.id, entry.parentId);
       leaf = entry.id; leafDigest = episodicDigest(line);
     }
-    if (diverged) {
+    // A base the admitted cut does not extend (navigation, or a rewrite that a
+    // full ingestion read) is stale, not a refusal: prove from the first byte.
+    if (diverged || (base && (prefix !== admitted.completePrefixDigest || leaf !== admitted.leafEntryId))) {
       await handle.close();
       return await proveChapter(chapter, admitted, limits, undefined);
     }
