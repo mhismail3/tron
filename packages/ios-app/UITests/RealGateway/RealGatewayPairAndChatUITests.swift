@@ -654,6 +654,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             let modelCard = app.buttons["new-session-card.Model"]
             XCTAssertTrue(self.waitUntil(timeout: 30) { sources.contains { modelCard.label.contains($0) } },
                           "the Model card names its source in the Gateway's wording: \(modelCard.label)")
+            // Reveal the Model card under the medium detent for the evidence screenshot.
+            for _ in 0..<3 where !modelCard.isHittable || modelCard.frame.maxY > app.frame.maxY - 40 { app.swipeUp() }
             self.keepScreenshot(app, name: "939-new-session")
         }
 
@@ -677,9 +679,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(thinking.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(waitUntil(timeout: 30) { self.badgeLabels(thinking).contains(where: sources.contains) },
                       "the Thinking row must say where its value comes from: \(badgeLabels(thinking))")
+        // The pill reads "For <name>"; its accessible text appends the provider/id as detail.
         let modelPill = badgeLabels(thinking).first { $0.hasPrefix("For ") }
+        let pillText = modelPill?.components(separatedBy: ", ").first ?? ""
         XCTAssertNotNil(modelPill, "a per-model value names its model: \(badgeLabels(thinking))")
-        XCTAssertFalse(modelPill?.contains("/") ?? true, "the model pill uses the display name, not provider/id: \(modelPill ?? "")")
+        XCTAssertFalse(pillText.contains("/"), "the model pill uses the display name, not provider/id: \(modelPill ?? "")")
         keepScreenshot(app, name: "939-model-pills")
         dismissTopSheet(app)
 
