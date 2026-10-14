@@ -214,17 +214,30 @@ struct ExtensionFormSheet: View {
     private func questionPage(_ question: ExtensionFormQuestion, index: Int) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
+                // Agent-authored text may carry URLs, commands and IDs the user
+                // must act on: shared Markdown with native selection and Copy.
                 if let context = question.context, !context.isEmpty {
-                    Text(context)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM + 0.3))
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    TronMarkdownView(
+                        text: context,
+                        streaming: false,
+                        textStyle: ChatSelectableTextStyle(
+                            size: TronTypography.sizeBodySM + 0.3,
+                            color: .tronTextSecondary
+                        ),
+                        selectableText: true
+                    )
                 }
 
-                Text(question.question)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
+                TronMarkdownView(
+                    text: question.question,
+                    streaming: false,
+                    textStyle: ChatSelectableTextStyle(
+                        size: TronTypography.sizeBodyLG,
+                        weight: .semibold,
+                        color: .tronTextPrimary
+                    ),
+                    selectableText: true
+                )
 
                 VStack(spacing: 10) {
                     ForEach(question.options) { option in
