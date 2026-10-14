@@ -259,6 +259,8 @@ describe("Home memory browser at scale", () => {
       const steady = [again.ms.firstPage, ...again.ms.pages, again.ms.chapter, again.ms.part, again.ms.evidence, afterRetry.ms, appended.ms];
       Object.assign(report, {
         chapters: CHAPTERS, totalMessages: first.totalMessages, sourceBytes, buildMs,
+        restart: { beforeRevision: beforeRestart[0]!.revision, afterRevision: afterPages[0]!.revision,
+          decompositionChanged, pagesCompared: beforeRestart.length, oldCursorRejected: decompositionChanged },
         budgetMs: BUDGET_MS, deadlineMs: DEADLINE_MS,
         firstReads: warm.ms, steady: again.ms, fullProofPerRead: full.ms, retryAfterCancelledColdProof: retry.ms, afterLiveAppend: appended.ms, steadyMaxMs: Math.max(...steady),
       });
