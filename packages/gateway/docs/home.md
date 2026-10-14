@@ -1319,13 +1319,29 @@ work. One per-process result is shared by every task surface.
   state, startedAt, lastActivityAt }`; `total` counts every live run. A settled task lists none,
   and nothing is persisted: the task record stays strict v1. The field is additive, so released
   iOS decodes the status without it. A run's `state` is its own lifecycle, or a live workflow
-  child's when the run's own work has ended. Viewing never changes control. Home's
-  `task` tool exposes `status`, `steer` and `stop`, only for tasks bound to the
-  enabled Home's identity and generation; it can never reconfirm, revoke or decide.
-  Status follows Home across disable and re-enable but never transfers control.
-- **Steer and Stop** read status, then send the exact fenced command; an intervening
-  change refuses rather than targeting a successor. Stop receipts can be repeated
-  after settlement without repeating cancellation.
+  child's when the run's own work has ended. Viewing never changes control.
+- **Home's `task` tool (#961)** is one flat object schema, `action` (`list`, `status`,
+  `report`, `steer`, `stop`, `resume`) plus optional `taskId`, `text`, `operationId`,
+  `offset` and `limit`, each described. Providers keep only a tool's top-level
+  `properties`, so a top-level union reached the model as an empty schema; per-action
+  requirements are checked by `admitHomeTaskToolRequest`, whose refusals name the field,
+  what the action takes and, for an unknown task, up to five close task IDs. `list` (or
+  `status` without `taskId`) returns control rows: `taskId`, title, `state` (`starting`,
+  `queued`, `running`, `settled`), outcome and refusal reason/detail, worker `sessionId`,
+  the `operationId` a control would act on, and the `actions` that apply now. The tool acts
+  only on tasks bound to the enabled Home's identity and generation; it can never
+  reconfirm, revoke or decide. Status follows Home across disable and re-enable but never
+  transfers control.
+- **Steer, Stop and Resume** need only `taskId` (and `text` to steer). The Gateway acts on
+  the worker's current task: the last resume successor of the named task that is pending,
+  running or bound a worker (refused-before-start successors are skipped, as resume skips
+  them), with that task's current operation (`queued` for a queued task). The reply names
+  the task acted on and `resolvedFrom` when it differs. An explicit `operationId` is a race
+  guard: a mismatch is refused with the current task, state and operation. An action that
+  does not apply (steer a settled task, resume a running one) is refused with the state and
+  the action to use instead; a refusal from the owner carries its code and reason and the
+  task's state after it. Stop receipts can be repeated after settlement without repeating
+  cancellation.
 - Home and maintainer steering share RuntimeSlot's session lane; accepted lane order
   is authoritative. Steering cannot start a successor, and a report that races a
   delayed steer prevents it. There is no takeover state and no transfer command.

@@ -156,7 +156,7 @@ describe("resuming a stopped Home worker in place", () => {
     // The stopped task stays immutable and has exactly one successor.
     expect(await f.registry.homeOwner().taskStatus(stopped.taskId)).toMatchObject({ terminalEvidence: { outcome: "interrupted" } });
     await expect(f.registry.homeOwner().taskTool(f.home.sessionId, { action: "resume", taskId: stopped.taskId, operationId: stopped.operationId }))
-      .rejects.toThrow(/already resumed as ios-worker\.resume-1/u);
+      .rejects.toThrow(/operationId guard .* does not match "ios-worker\.resume-1"/u);
     evidence.push({ case: "resume-in-place", stopped: stopped.taskId, resumed: resumed.taskId, sessionId: stopped.sessionId, reAsked: APPROVAL.questions[0]!.question, outcome: "final" });
   }, 60_000);
 
@@ -443,7 +443,7 @@ describe("maintainer messages to Home workers (#959)", () => {
       terminalEvidence: { outcome: "final" } });
     expect(seen[0]).toMatch(/I did a vertical stroke[\s\S]*Then a horizontal one/u);
     await expect(f.registry.homeOwner().taskTool(f.home.sessionId, { action: "resume", taskId: stopped.taskId, operationId: stopped.operationId }))
-      .rejects.toThrow(/already resumed as refused-worker\.resume-2/u);
+      .rejects.toThrow(/operationId guard .* does not match "refused-worker\.resume-2"/u);
     evidence.push({ case: "959-refused-resume-stays-resumable", refused: "refused-worker.resume-1", resumed: resumed.taskId, carried: true });
   }, 60_000);
 });

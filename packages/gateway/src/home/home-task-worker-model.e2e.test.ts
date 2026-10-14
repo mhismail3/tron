@@ -261,7 +261,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
   it("distinguishes an unknown task from a changed identity", async () => {
     const f = await fixture();
     await expect(f.registry.homeOwner().taskTool(f.home.sessionId, { action: "status", taskId: "unknown-task" }))
-      .rejects.toMatchObject({ code: "not_found", message: "No task with this id" });
+      .rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/^task status: no task "unknown-task"\./u) });
   });
 
   it("refuses each invalid choice before any task record or worker session exists", async () => {

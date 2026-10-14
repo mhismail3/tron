@@ -54,6 +54,17 @@ run settlement and canonical receipt persistence, with the repeatable artifact
 `test-results/failed-stop-natural-completion.json`, alongside actual fast-abort
 and already-completed controls.
 
+Every tool call's life after cancellation is bounded (#961,
+`sessions/bounded-tool-cancellation.ts`). Pi's loop awaits a tool's `execute`
+and its abort waits for the loop to go idle, so one tool that ignored its abort
+signal made Stop hang and left a worker running. Two seconds after cancellation
+the call resolves as an error result naming the abandoned tool; the run ends and
+Stop settles within its grace. Built-in bash kills its process group on abort
+and settles first. The abandoned call's late result is discarded.
+`src/home/home-task-tool.e2e.test.ts` stops a Home worker blocked in such a tool
+and resumes it in place, and stops one in a SIGTERM-ignoring 10-minute command,
+with the repeatable artifact `test-results/home-task-tool.json`.
+
 An invocation's receipts all belong to the session it started in. An extension
 command that replaces its own session (`ctx.switchSession`, `ctx.newSession`,
 `ctx.fork`) is settled there when Pi commits the replacement: at
@@ -1361,7 +1372,7 @@ the host-wide heavy-run queue and the host-pressure signal (#915).
   maintainer's message also starts the held task's next turn while it waits between turns for its subagent runs.
 - **Resume in place (#929).** A settled task (stopped, interrupted, limited or reported) continues as its one
   successor task `<id>.resume-<n>`, bound to the same worker session, so its worktree and work claim (claims name
-  the session) stay with it. Home's `task` tool action `resume` and a maintainer message sent in the stopped
+  the session) stay with it. Home's `task` tool action `resume` (only `taskId`; naming any task of the lineage reaches its current one, #961) and a maintainer message sent in the stopped
   worker's chat both resume it; the message becomes the resume instruction. The stopped record stays immutable and
   each task has at most one started successor. A resume admits like any task: beyond the running-worker budget it
   queues, its worker operation already fixed so the maintainer's message names it (#959). A successor refused or
