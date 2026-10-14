@@ -102,8 +102,16 @@ extension HomeSheet {
         let summaries = read.context.breakdown?.sections.first { $0.id == .memory }?.count
         let memoryBrowser = model.gatewayInfo?.capabilities.contains("home-memory-view.v1") == true
         let chapterList = model.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
+        let profileList = model.gatewayInfo?.capabilities.contains("home-profile-list.v1") == true
         return TronGlassCard(accent: .tronSessionTeal) {
             VStack(spacing: 0) {
+                // What Home has learned about you sits above what it remembers.
+                if profileList {
+                    navigationRow(icon: "person.text.rectangle", title: "Profile",
+                                  subtitle: HomeManageRowPresentation.profile(read.profile),
+                                  destination: .profile, id: "home-manage-profile")
+                    if memoryBrowser || (status.chapter != nil && chapterList) || status.taskRecovery != nil { divider() }
+                }
                 if memoryBrowser {
                     navigationRow(icon: "brain", title: "Memory",
                                   subtitle: HomeStatusLinePresentation.memory(status, summaries: summaries, unresolvedCommand: unresolved),

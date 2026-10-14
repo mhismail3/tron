@@ -214,7 +214,7 @@ extension HomeSheet {
         }
     }
 
-    static func attributionIcon(_ attribution: HomeMemoryItemDTO.Attribution) -> String {
+    nonisolated static func attributionIcon(_ attribution: HomeMemoryItemDTO.Attribution) -> String {
         switch attribution {
         case .user: "person.fill"
         case .assistant: "house.fill"
@@ -223,7 +223,7 @@ extension HomeSheet {
         }
     }
 
-    static func attributionLabel(_ attribution: HomeMemoryItemDTO.Attribution) -> String {
+    nonisolated static func attributionLabel(_ attribution: HomeMemoryItemDTO.Attribution) -> String {
         switch attribution {
         case .user: "You"
         case .assistant: "Home"
@@ -277,6 +277,13 @@ enum HomeSheetTime {
     static func relative(_ timestamp: String?, now: Date = .now) -> String? {
         guard let timestamp, let date = HomeChapterPresentation.parse(timestamp) else { return nil }
         return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: now)
+    }
+
+    /// "Oct 13, 2026 at 10:30 PM · 2 days ago", for a detail row that names one instant.
+    static func absolute(_ timestamp: String, now: Date = .now) -> String {
+        guard let date = HomeChapterPresentation.parse(timestamp) else { return timestamp }
+        let when = date.formatted(date: .abbreviated, time: .shortened)
+        return "\(when) · \(RelativeDateTimeFormatter().localizedString(for: date, relativeTo: now))"
     }
 
     /// "Mar 3 – Mar 9", or one date when the range is a single day.

@@ -156,6 +156,8 @@ describe("settings.change", () => {
       { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6 },
     ], { actor: { kind: "home", id: "home-fixture" }, reason: "Retry a bounded failure" });
     expect(result.status).toBe("pending");
+    // A held change still names its values, so the agent's settings tool detail shows old → new (#957).
+    expect(result.changes[0]).toMatchObject({ key: "run.retry.maxRetries", status: "pending", before: 4, after: 6 });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     expect((await f.history())[0]).toMatchObject({ tier: "approve", tierBasis: { floor: "quiet", risk: "approve" } });
     transcript.push({ case: "risk-raise-held", detail: { result, history: await f.history() } });
@@ -223,6 +225,7 @@ describe("settings.change", () => {
     const f = await fixture();
     const applied = await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6, expected: 4 }]);
     expect(applied.status).toBe("applied");
+    expect(applied.changes[0]).toMatchObject({ before: 4, after: 6 });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
     expect(f.broadcasts).toContainEqual({ topic: "settings.changed", payload: expect.objectContaining({ keys: ["run.retry.maxRetries"], layer: "mac" }) });
     const [entry] = await f.history({ key: "run.retry.maxRetries" });
@@ -250,6 +253,10 @@ describe("settings.change", () => {
 
     // A redacted key records only "changed", and its change is not undoable.
     const proxy = await f.change({ kind: "mac" }, [{ key: "run.httpProxy", layer: "mac", op: "set", value: "http://proxy.invalid:3128" }]);
+    // A redacted key's outcome withholds both values, as its record does.
+    expect(proxy.changes[0]).toMatchObject({ redacted: true });
+    expect(proxy.changes[0]).not.toHaveProperty("after");
+    expect(JSON.stringify(proxy)).not.toContain("proxy.invalid");
     const proxyEntry = (await f.history({ key: "run.httpProxy" }))[0]!;
     expect(proxyEntry).toMatchObject({ changed: true, redacted: true, tier: "notify",
       presentation: { label: "HTTP proxy", display: { before: "Hidden", after: "Changed" } } });

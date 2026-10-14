@@ -5,6 +5,7 @@ import { capText } from "../episodic/episodic-tree.js";
 import {
   homeMemoryToolUnavailable,
   type HomeMemoryToolAccess,
+  type HomeMemoryToolFacts,
   type HomeMemoryToolResult,
   type HomeMemoryUnavailableReason,
 } from "./home-memory.js";
@@ -61,7 +62,7 @@ const RESULT_TAIL_CHARS = EPISODIC_CAP_TAIL_CHARS;
 /** Tool-result details: small, typed and durable in the transcript, so a reader
  * can tell an answer from a refusal without parsing the text. */
 export type HomeMemoryToolDetails =
-  | { status: "ok" }
+  | ({ status: "ok" } & HomeMemoryToolFacts)
   | { status: "invalid-arguments" }
   | { status: "unavailable"; reason: HomeMemoryUnavailableReason };
 
@@ -73,7 +74,8 @@ export type HomeMemoryToolDetails =
 export function homeMemoryTools(memoryTools: () => HomeMemoryToolAccess | undefined): Array<ToolDefinition<TSchema, HomeMemoryToolDetails>> {
   const answer = (result: HomeMemoryToolResult) => ({
     content: [{ type: "text" as const, text: bounded(result.text) }],
-    details: result.outcome === "unavailable" ? { status: "unavailable" as const, reason: result.reason } : { status: result.outcome },
+    details: result.outcome === "unavailable" ? { status: "unavailable" as const, reason: result.reason }
+      : result.outcome === "ok" ? { status: "ok" as const, ...result.facts } : { status: result.outcome },
   });
   const missing = () => answer(homeMemoryToolUnavailable("not-home-session"));
 

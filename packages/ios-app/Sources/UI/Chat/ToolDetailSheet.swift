@@ -8,6 +8,8 @@ struct ToolDetailSheet: View {
     @State private var fullText: ToolFullText?
     @State private var showingChanges = false
     @State private var selectedNestedCall: NestedToolCallPresentation?
+    /// A Home tool's text opened whole in the shared reader.
+    @State private var reading: HomeTextReading?
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @Environment(\.displayPresentationHandler) private var presentDisplay
 
@@ -37,6 +39,8 @@ struct ToolDetailSheet: View {
                     callsSection(presentation)
                     attachmentSection(presentation)
                     classifyCostSection(presentation)
+                } else if let home = presentation.home {
+                    HomeToolDetailSections(presentation: home, accent: accent) { reading = $0 }
                 } else {
                     primarySection(presentation)
                     resultSection(presentation)
@@ -75,6 +79,9 @@ struct ToolDetailSheet: View {
             identity: "chat.tool.technical.\(tool.id)"
         ) {
             ToolTechnicalDetailsSheet(tool: tool, presentation: presentation)
+        }
+        .tronManagedSheet(item: $reading, identity: { "chat.tool.reading.\(tool.id).\($0.id)" }) { reading in
+            HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent)
         }
         .tronManagedSheet(item: $selectedNestedCall, identity: { "chat.tool.nested.\(tool.id).\($0.id)" }) { nested in
             NestedToolCallDetailSheet(call: nested, accent: accent)
