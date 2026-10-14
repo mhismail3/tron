@@ -127,7 +127,7 @@ struct HomeUsageSummaryCard: View {
             }
         }
         .task(id: PresentationActivityTaskID(
-            source: "home-usage:\(model.providerInvalidationGeneration):\(model.foregroundReconciliationGeneration):\(model.profileRevision):\(usageController.requestGeneration):\(capabilityAvailable)",
+            source: "home-usage:\(model.connectionState == .connected):\(model.providerInvalidationGeneration):\(model.foregroundReconciliationGeneration):\(model.profileRevision):\(usageController.requestGeneration):\(capabilityAvailable)",
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             await load()
@@ -139,24 +139,17 @@ struct HomeUsageSummaryCard: View {
     private func providerRow(_ provider: ProviderSummary) -> some View {
         let snapshot = usageController.snapshots[provider.id]
         return VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(provider.displayName)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                if let snapshot {
-                    Text(ProviderUsagePresentation.summary(snapshot))
-                        .font(TronTypography.sans(size: TronTypography.sizeSecondary, weight: .medium))
-                        .foregroundStyle(snapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .monospacedDigit()
-                        .transition(.opacity)
-                } else if !usageController.hasResolved {
-                    ProviderUsageLoadingLine()
-                        .lineLimit(1)
-                        .transition(.opacity)
+            // The usage line keeps its full size: it trails the name when both
+            // fit, else it wraps below the name rather than shrinking.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    providerName(provider)
+                    Spacer(minLength: 8)
+                    usageLine(snapshot).fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    providerName(provider)
+                    usageLine(snapshot)
                 }
             }
             if let snapshot {
@@ -174,8 +167,32 @@ struct HomeUsageSummaryCard: View {
         .accessibilityLabel("\(provider.displayName), \(snapshot.map(ProviderUsagePresentation.summary) ?? "usage loading")")
     }
 
+    private func providerName(_ provider: ProviderSummary) -> some View {
+        Text(provider.displayName)
+            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+            .foregroundStyle(Color.tronTextPrimary)
+            .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private func usageLine(_ snapshot: ProviderUsageSnapshot?) -> some View {
+        if let snapshot {
+            Text(ProviderUsagePresentation.summary(snapshot))
+                .font(TronTypography.sans(size: TronTypography.sizeSecondary, weight: .medium))
+                .foregroundStyle(snapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted)
+                .monospacedDigit()
+                .transition(.opacity)
+        } else if !usageController.hasResolved {
+            ProviderUsageLoadingLine()
+                .transition(.opacity)
+        }
+    }
+
     private func load() async {
-        guard presentationActivity.allowsPresentationPublication, !Task.isCancelled else { return }
+        // A cold launch mounts before the Gateway connects; the task is keyed on
+        // the connection, so it reads again once connected.
+        guard presentationActivity.allowsPresentationPublication, !Task.isCancelled,
+              model.connectionState == .connected else { return }
         if let existing = model.providerCatalog(for: .global)?.providers { providers = existing }
         _ = await model.refreshProviders(target: .global)
         guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }

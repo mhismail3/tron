@@ -34,6 +34,20 @@ final class TronHomeDashboardUITests: XCTestCase {
         keep("02-recently-completed-sheet")
     }
 
+    /// A worker Home dispatches while the view is open appears in In Progress
+    /// without relaunching: the newly running session triggers a ledger probe.
+    @MainActor
+    func testNewWorkerAppearsWithoutRelaunch() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-home-dashboard-new-worker"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-new"].waitForExistence(timeout: 10), app.debugDescription)
+        // The probe reads one page after the initial ledger load, then never again for the same session.
+        let reads = app.staticTexts["fixture.home-task-list-reads"]
+        XCTAssertTrue(waitFor(reads, "label == 'task-list-reads:2'"), reads.label)
+    }
+
     @MainActor
     func testHomeButtonShowsWaitingForUser() {
         continueAfterFailure = false

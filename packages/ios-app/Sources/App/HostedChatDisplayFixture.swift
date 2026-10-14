@@ -116,6 +116,7 @@ struct HostedHomeDashboardFixture: View {
     @State private var promptRoute = "none"
     @State private var openedSession = "none"
     @State private var settingsDecisionState = "none"
+    @State private var newWorkerAdded = false
     private let actionProbe = HostedHomeActionProbe()
     private let arguments = ProcessInfo.processInfo.arguments
     private let profile = GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture")
@@ -247,6 +248,11 @@ struct HostedHomeDashboardFixture: View {
                 promptRoute = await gateway.lastPromptRoute()
                 openedSession = await gateway.lastOpenedSession()
                 settingsDecisionState = await gateway.settingsDecisionSummary()
+                if arguments.contains("-home-dashboard-new-worker"), !newWorkerAdded, taskListReads >= 1 {
+                    newWorkerAdded = true
+                    await gateway.publishNewWorker()
+                    model.sessions = model.sessions + [HostedHomeDashboardWorkers.newWorker.withGatewaySource(id: profile.id, label: profile.label)]
+                }
                 // Requested once. A hosted reconnect is a new connection identity, which the mounted
                 // sheet must observe by re-reading, so it fires after the second read (Manage Home's,
                 // then the Tasks sheet's). A profile switch fires after the third (its reload), so a
@@ -360,6 +366,10 @@ private actor HostedHomeShellGateway {
     }
     func statusCount() -> Int { homeStatusCount }
     func taskListReadCount() -> Int { taskListReads }
+    /// Home dispatches a worker after the dashboard loaded: the ledger names it
+    /// before its session starts running, as the dispatcher binds first.
+    private var newWorkerPublished = false
+    func publishNewWorker() { newWorkerPublished = true }
     func sheetReadPeakCount() -> Int { sheetReadPeak }
     private func chapterListFixture() -> JSONValue {
         .object([
@@ -563,7 +573,9 @@ private actor HostedHomeShellGateway {
             if sheetState == "tasks-error", taskListReads == 2 {
                 return (nil, .object(["code": .string("busy"), "message": .string("Task list unavailable"), "retryable": .bool(true)]))
             }
-            if sheetState == "dashboard-workers" { return (HostedHomeDashboardWorkers.taskPage(now: nowMilliseconds()), nil) }
+            if sheetState == "dashboard-workers" {
+                return (HostedHomeDashboardWorkers.taskPage(now: nowMilliseconds(), includesNewWorker: newWorkerPublished), nil)
+            }
             return (.object(["items": .array(sheetState == "tasks-empty" ? [] : [taskSummary("active"), taskSummary("terminal")])]), nil)
         case "home.taskStatus":
             guard let id = params["taskId"]?.stringValue, ["active", "terminal"].contains(id) else { return taskRefusal() }
@@ -1261,8 +1273,11 @@ enum HostedHomeDashboardWorkers {
         worker("chat-unread", "Apple Watch app", cwd: "/work/tron", ago: 1_814_400, unread: true),
     ]
 
-    static func taskPage(now: Double) -> JSONValue {
-        let rows: [JSONValue] = sessions.filter { !$0.id.hasPrefix("chat-") }.enumerated().map { index, session in
+    static let newWorker = worker("worker-new", "Freshly dispatched worker", cwd: "/work/tron", ago: 5, phase: .running)
+
+    static func taskPage(now: Double, includesNewWorker: Bool = false) -> JSONValue {
+        let named = (includesNewWorker ? [newWorker] : []) + sessions.filter { !$0.id.hasPrefix("chat-") }
+        let rows: [JSONValue] = named.enumerated().map { index, session in
             let created = now - Double(index + 1) * 60_000
             let active = session.phase.isActive
             return .object(["taskId": .string("task-\(session.id)"), "createdAt": .number(created),

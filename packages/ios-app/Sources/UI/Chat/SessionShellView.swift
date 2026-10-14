@@ -116,6 +116,9 @@ struct SessionShellView: View {
     /// Home's worker session ids from its task ledger, read while the Home view
     /// is visible. Nil until the first read for the current profile settles.
     @State private var homeWorkerSessionIDs: Set<String>?
+    /// Active non-worker sessions already probed against the task ledger, so an
+    /// ordinary running chat never re-triggers a read.
+    @State private var homeCheckedSessionIDs: Set<String> = []
     @State private var showingHomeCompletedSheet = false
 
     init() {
@@ -208,10 +211,21 @@ struct SessionShellView: View {
             ) {
                 homeCompletedSheet
             }
-            .task(id: "home-workers:\(serverFilter.sortMode.rawValue):\(model.profiles.selected?.id ?? ""):\(activity):\(dashboardPresentation.sessions.count):\(model.homeStatus.capabilityEnabled):\(homeStatusSurfaceToken != nil)") {
-                await loadHomeWorkerSessionIDs(presentationActive: activity.allowsPresentationPublication)
+            .task(id: "home-workers:\(serverFilter.sortMode.rawValue):\(model.profiles.selected?.id ?? ""):\(activity):\(model.homeStatus.capabilityEnabled):\(homeStatusSurfaceToken != nil):\(model.connectionState == .connected)") {
+                await loadHomeWorkerSessionIDs(presentationActive: activity.allowsPresentationPublication, probe: [])
             }
-            .onChange(of: model.profiles.selected?.id) { _, _ in homeWorkerSessionIDs = nil }
+            // A new worker's session starts running only after its task record
+            // names it (the dispatcher binds before the first prompt), so a
+            // newly active session the ledger hasn't named yet triggers one
+            // first-page read, never the whole ledger.
+            .task(id: homeWorkerProbeIDs) {
+                guard !homeWorkerProbeIDs.isEmpty else { return }
+                await loadHomeWorkerSessionIDs(presentationActive: activity.allowsPresentationPublication, probe: homeWorkerProbeIDs)
+            }
+            .onChange(of: model.profiles.selected?.id) { _, _ in
+                homeWorkerSessionIDs = nil
+                homeCheckedSessionIDs = []
+            }
             .tronManagedSheet(
                 item: $sessionToDelete,
                 identity: { "dashboard.delete.\($0.id)" }
@@ -1176,19 +1190,41 @@ struct SessionShellView: View {
     /// The task is keyed by the surface's activity, so it reads that activity
     /// directly: `dashboardPresentationIsActive` is published by a sibling
     /// `onChange` that may run after this task starts.
-    private func loadHomeWorkerSessionIDs(presentationActive: Bool) async {
+    /// Running or waiting sessions on the selected Gateway that the worker set
+    /// neither names nor has already ruled out.
+    private var homeWorkerProbeIDs: [String] {
+        guard serverFilter.sortMode == .home, let known = homeWorkerSessionIDs,
+              let profileID = model.profiles.selected?.id else { return [] }
+        return dashboardPresentation.sessions
+            .filter { ($0.phase.isActive || $0.waitingForUser) && $0.gatewayProfileID == profileID
+                && !known.contains($0.id) && !homeCheckedSessionIDs.contains($0.id) }
+            .map(\.id).sorted()
+    }
+
+    /// An empty `probe` reads the bounded ledger; a probe reads its newest page
+    /// and merges, then rules out the probed ids it did not name.
+    private func loadHomeWorkerSessionIDs(presentationActive: Bool, probe: [String]) async {
         guard serverFilter.sortMode == .home,
               presentationActive,
               model.homeStatus.capabilityEnabled,
               let profileID = model.profiles.selected?.id,
               let identity = model.homeSheetReadIdentity(profileID: profileID, surfaceToken: homeStatusSurfaceToken) else { return }
         do {
-            let ids = try await model.readHomeWorkerSessionIDs(identity: identity) {
+            let ids = try await model.readHomeWorkerSessionIDs(
+                identity: identity,
+                maximumPages: probe.isEmpty ? HomeDashboardLayout.maximumTaskPages : 1
+            ) {
                 serverFilter.sortMode == .home && model.profiles.selected?.id == profileID
             }
             guard !Task.isCancelled, model.profiles.selected?.id == profileID else { return }
+            let named = Set(ids ?? [])
             withAnimation(TronDashboardContentMotion.animation(reduceMotion: reduceMotion)) {
-                homeWorkerSessionIDs = Set(ids ?? [])
+                if probe.isEmpty {
+                    homeWorkerSessionIDs = named
+                } else {
+                    homeWorkerSessionIDs = (homeWorkerSessionIDs ?? []).union(named)
+                    homeCheckedSessionIDs.formUnion(Set(probe).subtracting(named))
+                }
             }
         } catch {
             return

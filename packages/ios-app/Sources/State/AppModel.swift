@@ -4856,7 +4856,7 @@ final class AppModel {
     /// `home.taskList` pages for the Home dashboard view. The task ledger is the
     /// Gateway's authority for which sessions are Home workers; the dashboard
     /// joins these ids against its own session catalog. Fenced like a sheet read.
-    func readHomeWorkerSessionIDs(identity: HomeSheetReadIdentity, isCurrent: @escaping @MainActor () -> Bool) async throws -> [String]? {
+    func readHomeWorkerSessionIDs(identity: HomeSheetReadIdentity, maximumPages: Int, isCurrent: @escaping @MainActor () -> Bool) async throws -> [String]? {
         func admitted() -> Bool {
             homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity
                 && !Task.isCancelled && isCurrent()
@@ -4868,12 +4868,13 @@ final class AppModel {
             guard admitted() else { throw CancellationError() }
             return value
         }
-        let status = try HomeStatusDTO.decode(try await read("home.status"))
-        guard status.admitsTaskReads else { return nil }
+        // The mounted status (polled with the dashboard) fences task reads; a
+        // refused ledger read still throws and leaves the worker set unchanged.
+        guard homeStatus.status?.admitsTaskReads != false else { return nil }
         var ids: [String] = []
         var seen = Set<String>()
         var cursor: String?
-        for _ in 0..<HomeDashboardLayout.maximumTaskPages {
+        for _ in 0..<maximumPages {
             var params: [String: JSONValue] = ["limit": .number(50)]
             if let cursor { params["cursor"] = .string(cursor) }
             let page = try HomeTaskPageDTO.decode(try await read("home.taskList", .object(params)))
