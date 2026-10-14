@@ -429,10 +429,10 @@ describe("maintainer messages to Home workers (#959)", () => {
     // Other live work in the worker session (an export) genuinely refuses the rebind.
     const registry = f.registry.administrativeWorkRegistry;
     const work = registry.begin({ kind: "compaction-export", sessionId: stopped.sessionId, hostEpoch: registry.runtimeEpoch });
-    await expect(app.send(stopped.sessionId, "I did a vertical stroke")).rejects.toThrow(/idle/u);
+    await expect(app.send(stopped.sessionId, "I did a vertical stroke")).rejects.toThrow(/worker session is busy \(compaction-export\)/u);
     const refused = await f.registry.homeOwner().taskStatus("refused-worker.resume-1");
     expect(refused).toMatchObject({ lifecycle: "terminal", sessionId: null, operationId: null,
-      terminalEvidence: { outcome: "unknown", reason: "admission-refused", detail: expect.stringMatching(/idle/u) } });
+      terminalEvidence: { outcome: "unknown", reason: "admission-refused", detail: expect.stringMatching(/busy \(compaction-export\)/u) } });
     work.settle();
     // The stopped task is still resumable; the refused message reaches the worker with the new one.
     const resumed = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "resume", taskId: stopped.taskId, operationId: stopped.operationId, text: "Then a horizontal one" }) as

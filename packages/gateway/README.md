@@ -1363,7 +1363,12 @@ the host-wide heavy-run queue and the host-pressure signal (#915).
   successor task `<id>.resume-<n>`, bound to the same worker session, so its worktree and work claim (claims name
   the session) stay with it. Home's `task` tool action `resume` and a maintainer message sent in the stopped
   worker's chat both resume it; the message becomes the resume instruction. The stopped record stays immutable and
-  each task has at most one successor. The worker slot is rebound to the new operation's report owner in place,
+  each task has at most one started successor. A resume admits like any task: beyond the running-worker budget it
+  queues, its worker operation already fixed so the maintainer's message names it (#959). A successor refused or
+  settled before it started is not one: the stopped task stays resumable, the refusal's message is kept as
+  `terminalEvidence.detail` (and in Home's wake), and its instruction (`resumes.instruction`) is re-delivered,
+  oldest first, by the next resume. The rebind refuses while other work runs in the session, but not for Knowledge
+  observation, which only reads the settled turn. The worker slot is rebound to the new operation's report owner in place,
   so viewers keep their subscription. Each operation owns the canonical span from its marker to the next marker,
   so reports, spend, subagent counts and settlement proof never mix operations. A question `ask_user` was asking
   when its run stopped (also inside codemode) is recorded as a `tron.ask-user.interrupted.v1` custom entry, and

@@ -2774,7 +2774,16 @@ export class RuntimeSlot {
    * tools and producer gates belong to the new operation. */
   async bindTaskWorker(report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<void> {
     await this.lane.run(async () => {
-      this.assertIdle(false, exceptWorkToken);
+      this.assertUsable();
+      this.assertChapterWritable();
+      // Knowledge observation of the stopped turn only reads its already-settled cut, so it
+      // never blocks the rebind (#959). Any other live work refuses it, named.
+      const blocking = this.dependencies.workRegistry.sessionWorkKinds(this.id, exceptWorkToken)
+        .filter(kind => kind !== "knowledge-observation");
+      const drain = this.administrativeDrainBlockers().map(fact => fact.category);
+      if (this.runtime.session.isStreaming || blocking.length || drain.length) {
+        throw new GatewayError("busy", `The worker session is busy (${[...new Set([...blocking, ...drain])].join(", ") || "streaming"}); resume it when that finishes`, true);
+      }
       if (this.liveProfile() === "home" || this.dependencies.homeChapterState(this.id).homeId) {
         throw new GatewayError("conflict", "A Home chapter cannot run a task");
       }
