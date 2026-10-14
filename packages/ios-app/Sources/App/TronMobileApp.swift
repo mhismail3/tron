@@ -34,6 +34,8 @@ struct TronMobileApp: App {
         DashboardServerFilterPreferences.save(DashboardServerFilterState(
             sortMode: ProcessInfo.processInfo.arguments.contains("-dashboard-view-home") ? .home : .projectServer
         ))
+        // Every journey starts with the usage card showing all its providers.
+        UserDefaults.standard.removeObject(forKey: HomeUsageCardPreferences.hiddenProvidersKey)
     }
 
     var body: some Scene {

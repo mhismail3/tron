@@ -208,7 +208,7 @@ enum DashboardSessionSortMode: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
     var detail: String {
         switch self {
-        case .home: "Usage, then the workers Home is running, recently finished, and still unviewed."
+        case .home: "Usage, then the workers Home is running, recently finished, and still unread."
         case .projectServer: "Group sessions by project folder and server."
         case .recent: "Show active sessions first, then the newest history across servers."
         }
