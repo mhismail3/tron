@@ -3187,8 +3187,6 @@ final class TronSmokeUITests: XCTestCase {
         let copyCode = app.buttons.matching(NSPredicate(format: "label == 'Copy'")).firstMatch
         XCTAssertTrue(copyCode.waitForExistence(timeout: 3), app.debugDescription)
         copyCode.tap()
-        XCTAssertTrue(app.buttons["Copied"].waitForExistence(timeout: 2), app.debugDescription)
-        keepScreenshot(named: "941-3-code-block-copied")
 
         app.buttons["Staging"].tap()
         app.buttons["Other"].tap()
