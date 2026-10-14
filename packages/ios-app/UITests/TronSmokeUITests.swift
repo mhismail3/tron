@@ -2555,10 +2555,35 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
         XCTAssertFalse(app.buttons["Settings Scope"].exists)
         closeTopSheet(app) // Model
-        for _ in 0..<12 where !app.staticTexts["This iPhone"].isHittable { app.swipeUp() }
-        XCTAssertTrue(app.staticTexts["This iPhone"].exists)
-        XCTAssertTrue(app.staticTexts["Stored on this iPhone. Never changes what the agent does."].exists)
-        keepScreenshot(named: "mac-settings-this-iphone")
+        assertSettingsTopLevelOrder(app)
+    }
+
+    /// Settings top level (#956): Accounts opens with Connections, and the last
+    /// group, This iPhone, holds Push Notifications first, then Appearance,
+    /// Sessions, Logs and Setup. There is no Data & Diagnostics group.
+    @MainActor
+    private func assertSettingsTopLevelOrder(_ app: XCUIApplication) {
+        let accounts = app.staticTexts["Accounts"]
+        for _ in 0..<12 where !accounts.isHittable { app.swipeDown() }
+        let connections = app.buttons["settings-link-Connections"]
+        XCTAssertTrue(connections.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertLessThan(accounts.frame.minY, connections.frame.minY)
+        XCTAssertLessThan(connections.frame.minY, app.buttons["settings-link-Model Providers"].frame.minY,
+                          "Accounts starts with Connections")
+        keepScreenshot(named: "settings-top-level-1")
+        let iphone = app.staticTexts["This iPhone"]
+        let rows = ["Push Notifications", "Appearance", "Sessions", "Logs", "Setup"].map { app.buttons["settings-link-\($0)"] }
+        for _ in 0..<12 where !rows.last!.isHittable { app.swipeUp() }
+        keepScreenshot(named: "settings-top-level-2")
+        XCTAssertTrue(iphone.isHittable, app.debugDescription)
+        let tops = [iphone.frame.minY] + rows.map(\.frame.minY)
+        XCTAssertEqual(tops, tops.sorted(), "This iPhone lists Push Notifications, Appearance, Sessions, Logs, Setup: \(tops)")
+        XCTAssertFalse(app.staticTexts["Data & Diagnostics"].exists, "Data & Diagnostics merged into This iPhone")
+        XCTAssertFalse(app.staticTexts["Stored on this iPhone. Never changes what the agent does."].exists,
+                       "Logs and Setup reach the Mac, so the group makes no device-only promise")
+        for group in ["Accounts", "Agent", "Tools & Extensions", "More"] where app.staticTexts[group].exists {
+            XCTAssertLessThan(app.staticTexts[group].frame.minY, iphone.frame.minY, "This iPhone is the last group, after \(group)")
+        }
     }
 
     @MainActor

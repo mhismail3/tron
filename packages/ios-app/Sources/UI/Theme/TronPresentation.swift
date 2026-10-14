@@ -230,21 +230,6 @@ private struct TronScrollSurfaceModifier: ViewModifier {
     }
 }
 
-private struct TronListRowHighlightModifier: ViewModifier {
-    let isHighlighted: Bool
-    let accent: Color
-    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
-
-    func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
-        content
-            .contentShape(shape)
-            .background {
-                shape.fill((settingsTheme?.accent ?? accent).opacity(isHighlighted ? 0.10 : 0))
-            }
-    }
-}
-
 extension View {
     /// Required at the app root so controls created by system containers inherit
     /// Tron's selected family and emerald interaction color.
@@ -323,13 +308,6 @@ extension View {
             cornerRadius: cornerRadius,
             tintOpacity: tintOpacity
         ))
-    }
-
-    /// A row in a plain list on the sheet surface (no card): clear at rest and
-    /// lightly tinted with the accent while it needs attention, such as an
-    /// unread notification.
-    func tronListRowHighlight(_ isHighlighted: Bool, accent: Color = .tronEmerald) -> some View {
-        modifier(TronListRowHighlightModifier(isHighlighted: isHighlighted, accent: accent))
     }
 
     /// A toolbar action takes `accent` when given, else its sheet's inherited

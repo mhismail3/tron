@@ -12,8 +12,8 @@ final class TronNotificationInboxUITests: XCTestCase {
 
     /// With a paired Mac offline the sheet has no connection row of its own;
     /// a pull neither refreshes nor shows a spinner; a new alert and a read on
-    /// another device change the open sheet live; read rows sit clear on the
-    /// sheet surface while unread rows carry the accent tint.
+    /// another device change the open sheet live; every row sits on the shared
+    /// Liquid Glass row surface, clear when read and accent-tinted when unread.
     @MainActor func testSheetFollowsGatewayLiveWithoutOfflineRowOrPullToRefresh() throws {
         continueAfterFailure = false
         let app = launch("mixed"); defer { app.terminate() }
@@ -31,14 +31,16 @@ final class TronNotificationInboxUITests: XCTestCase {
         assertNoConnectionRow(app)
         try capture(app, "unread")
 
-        // All mixes read and unread rows: read rows are clear, unread tinted.
+        // All mixes read and unread rows: each is its own glass row (#956),
+        // clear when read and tinted when unread.
         selectFilter(app, "All")
         let home = row(app, "inbox-row-home")
         XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertEqual(home.value as? String, "Read")
         XCTAssertTrue(home.label.hasPrefix("Home, Agent finished, "), home.label)
-        XCTAssertTrue(isTinted(app, finished), "an unread row carries the accent tint")
-        XCTAssertFalse(isTinted(app, home), "a read row is clear on the sheet surface")
+        XCTAssertTrue(hasSurface(app, home), "a read row sits on its glass surface, not bare on the sheet")
+        XCTAssertTrue(hasSurface(app, finished), "an unread row sits on its glass surface")
+        XCTAssertTrue(isTinted(app, finished, comparedWith: home), "an unread row carries the accent tint on its glass")
         assertNoConnectionRow(app)
         try capture(app, "all")
 
@@ -55,13 +57,15 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertTrue(live.waitForExistence(timeout: 20), "the new notification never appeared: \(app.debugDescription)")
         XCTAssertEqual(live.value as? String, "Unread")
         XCTAssertTrue(waitFor(live, value: "Unread"))
-        XCTAssertTrue(isTinted(app, live))
+        XCTAssertTrue(hasSurface(app, live))
+        XCTAssertTrue(isTinted(app, live, comparedWith: home))
         try capture(app, "all-live-delivered")
 
         // Read on another device: the same row turns read and clear in place.
         post(readNewest)
         XCTAssertTrue(waitFor(live, value: "Read"), "the read never reached the open sheet: \(live.debugDescription)")
-        XCTAssertFalse(isTinted(app, live), "the read row lost its tint")
+        XCTAssertTrue(hasSurface(app, live), "the read row keeps its glass surface")
+        XCTAssertFalse(isTinted(app, live, comparedWith: home), "the read row lost its tint")
 
         // Mark Read clears every remaining unread row in place.
         let markRead = app.buttons["Mark all notifications read"]
@@ -69,7 +73,8 @@ final class TronNotificationInboxUITests: XCTestCase {
         markRead.tap()
         XCTAssertTrue(waitFor(ask, value: "Read"), ask.debugDescription)
         XCTAssertTrue(waitFor(finished, value: "Read"), finished.debugDescription)
-        XCTAssertFalse(isTinted(app, finished))
+        XCTAssertTrue(hasSurface(app, finished))
+        XCTAssertFalse(isTinted(app, finished, comparedWith: home))
         assertNoConnectionRow(app)
     }
 
@@ -144,16 +149,31 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertEqual(app.descendants(matching: .any).matching(offline).count, 0, app.debugDescription)
     }
 
-    /// Whether a row's own background differs from the sheet surface beside it:
-    /// one pixel inside the row's trailing padding against one just outside it,
-    /// close enough that the blurred surface behind both is the same.
-    @MainActor private func isTinted(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
+    /// Whether a row has its own surface: one pixel inside the row's trailing
+    /// padding against one just outside it, close enough that the blurred
+    /// sheet behind both is the same. A bare row on the sheet matches.
+    @MainActor private func hasSurface(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
         guard let image = XCUIScreen.main.screenshot().image.cgImage else { return false }
         let scale = CGFloat(image.width) / app.frame.width
         let frame = element.frame
-        guard let inside = pixel(image, CGPoint(x: (frame.maxX - 4) * scale, y: frame.midY * scale)),
+        guard let inside = pixel(image, CGPoint(x: (frame.maxX - 8) * scale, y: frame.midY * scale)),
               let outside = pixel(image, CGPoint(x: (frame.maxX + 4) * scale, y: frame.midY * scale)) else { return false }
-        return zip(inside, outside).map { abs($0 - $1) }.max() ?? 0 > 6
+        return distance(inside, outside) > 6
+    }
+
+    /// Whether a row's surface carries the accent tint: the same point in its
+    /// trailing padding against a read (clear glass) row's.
+    @MainActor private func isTinted(_ app: XCUIApplication, _ element: XCUIElement, comparedWith clear: XCUIElement) -> Bool {
+        guard let image = XCUIScreen.main.screenshot().image.cgImage else { return false }
+        let scale = CGFloat(image.width) / app.frame.width
+        guard let row = pixel(image, CGPoint(x: (element.frame.maxX - 8) * scale, y: element.frame.midY * scale)),
+              let reference = pixel(image, CGPoint(x: (clear.frame.maxX - 8) * scale, y: clear.frame.midY * scale))
+        else { return false }
+        return distance(row, reference) > 6
+    }
+
+    private func distance(_ a: [Int], _ b: [Int]) -> Int {
+        zip(a, b).map { abs($0 - $1) }.max() ?? 0
     }
 
     private func pixel(_ image: CGImage, _ point: CGPoint) -> [Int]? {
