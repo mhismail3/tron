@@ -3821,7 +3821,9 @@ exec "{real_node}" "$@"
         repository resolver refuses it and prefers what the harness prefers.
         """
         resolved = subprocess.run(
-            [str(ROOT / "scripts/tron-node")], env=environment,
+            # This host's nvm install, not the fixture's home.
+            [str(ROOT / "scripts/tron-node")],
+            env={**environment, "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))},
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         self.assertEqual(resolved.returncode, 0, f"the pinned Node runtime is required by the E2E runner: {resolved.stderr}")
