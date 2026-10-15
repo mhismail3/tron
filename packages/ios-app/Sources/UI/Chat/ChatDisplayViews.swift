@@ -267,6 +267,13 @@ struct DisplayToolView: View {
         display != nil && !tool.error && !tool.isRunning && effectiveSurface == .inline
     }
 
+    /// A completed inline card other than the photo chip spans the transcript
+    /// width; every other display state is a compact chip that can share a row.
+    static func rendersFullWidth(_ tool: ChatToolDescriptor) -> Bool {
+        guard let display = tool.display, !tool.error, !tool.isRunning else { return false }
+        return DisplayPresentationPolicy.effectiveSurface(for: display) == .inline && display.kind != .image
+    }
+
     private var disclosureFadeAnimation: Animation? {
         ChatMotion.disclosureFade(reduceMotion: reduceMotion)
     }
