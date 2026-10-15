@@ -207,7 +207,8 @@ enum SettingsGroupKind {
         case .agent: .tronPurple
         case .tools: .tronCyan
         case .accounts: .tronIndigo
-        case .more, .iphone, .diagnostics: .tronEmerald
+        case .more, .iphone: .tronEmerald
+        case .diagnostics: .tronSlate
         }
     }
 
