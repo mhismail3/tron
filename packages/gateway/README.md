@@ -188,9 +188,8 @@ projections, not persisted child authority. See [Connection management](docs/con
 ### Knowledge connector authority
 
 A legacy catalog with provider-keyed connector rows is not upgraded by startup.
-The resolver obtains the Knowledge workspace from `TronWorkspace` and the
-ConnectionOwner path from `connectionStatePath`; it never derives one from the
-other. Owner schema and preserved catalog state are documented in
+The resolver obtains the Knowledge workspace from `TronWorkspace` and connection
+authority from the one `ConnectionOwner`; it never derives one from the other. Owner schema and preserved catalog state are documented in
 [Connection management](docs/connections.md).
 
 ## Knowledge boundaries

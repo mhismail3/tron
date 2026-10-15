@@ -181,8 +181,6 @@ function unavailableSection(reason: string): string {
 // maintainer confirms them, and the maintainer's own edits are confirmed by definition.
 
 /** The record subject of a profile change: one instance per note, qualified by `note`. */
-export const HOME_PROFILE_ITEM_KEY = "home.profile.item";
-
 export const HOME_PROFILE_ACTIONS = ["learn", "refine", "supersede", "retire"] as const;
 export type HomeProfileAction = (typeof HOME_PROFILE_ACTIONS)[number];
 /** The maintainer's actions; `confirm` is his alone. */
