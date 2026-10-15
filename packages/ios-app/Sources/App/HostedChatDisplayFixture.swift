@@ -29,12 +29,58 @@ struct HostedChatDisplayFixture: View {
           {"id":"mix-bash-result","parentId":"mixed-request","presentationId":"mix-bash-result","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"toolResult","content":[{"id":"mix-bash-result-text","ordinal":0,"type":"text","text":"ok"}],"toolCallId":"mix-bash","toolName":"bash","isError":false}
         ]
         """#.utf8)
+    /// A finalized parallel group of inline image displays, the shape an agent
+    /// produces when it shows several screenshots at once. Each completed
+    /// inline image keeps its collapse disclosure inside the grouped row.
+    static let inlineGroupTitles = [
+        "Home dashboard after the fix", "Usage sheet with rounded rows",
+        "Settings: This iPhone switch", "Worker list scrolled to the end",
+    ]
+
+    static func inlineGroupCall() -> [String: Any] {
+        let calls: [[String: Any]] = inlineGroupTitles.indices.map { index in
+            ["id": "inline-\(index)-content", "ordinal": index, "type": "toolCall", "toolCallId": "inline-\(index)",
+             "name": "display", "arguments": ["presentation": ["surface": "inline"]],
+             "groupId": "inline-group", "groupIndex": index, "groupCount": inlineGroupTitles.count, "groupFinalized": true]
+        }
+        return ["id": "inline-request", "parentId": NSNull(), "presentationId": "inline-request",
+                "timestamp": "2026-01-01T00:00:05Z", "kind": "message", "role": "assistant", "content": calls]
+    }
+
+    static func inlineGroupResults() -> [[String: Any]] {
+        inlineGroupTitles.enumerated().map { index, title in
+            ["id": "inline-\(index)-result", "parentId": "inline-request", "presentationId": "inline-\(index)-result",
+             "timestamp": "2026-01-01T00:00:06Z", "kind": "message", "role": "toolResult",
+             "content": [["id": "inline-\(index)-result-text", "ordinal": 0, "type": "text", "text": "Displayed \(title)."]],
+             "toolCallId": "inline-\(index)", "toolName": "display", "isError": false,
+             "display": ["schema": "tron.display.v1", "displayId": "display-inline-\(index)", "revision": 1, "title": title,
+                         "altText": "Inline \(index + 1)", "kind": "image",
+                         "presentation": ["requestedSurface": "inline", "inlineTapAction": "sheet"],
+                         "eligibleSurfaces": ["sheet", "inline", "floating"], "fallbackText": title,
+                         "artifact": ["id": "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc6\(index)", "name": "inline-\(index).png",
+                                      "mimeType": "image/png", "size": 1024, "kind": "image"]]]
+        }
+    }
+
+    private static func items(_ objects: [[String: Any]]) -> [TranscriptItem] {
+        try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: objects))
+    }
+
     @State private var model: AppModel
     @State private var ready = false
     @State private var error: String?
     private let profile: GatewayProfile
     private let snapshot: SessionSnapshot
+    private let socket: HostedChatDisplaySocket
     private let probe = ChatHostedProbe()
+    /// `-chat-display-inline-group` reopens a chat whose grouped inline displays
+    /// are already in history; `-chat-display-inline-group-live` opens the chat
+    /// without them and delivers the call, then its results, as live
+    /// `session.snapshot` events on the same mounted transcript.
+    private static var inlineGroupLive: Bool { ProcessInfo.processInfo.arguments.contains("-chat-display-inline-group-live") }
+    private static var inlineGroup: Bool {
+        inlineGroupLive || ProcessInfo.processInfo.arguments.contains("-chat-display-inline-group")
+    }
 
     init() {
         let defaults = UserDefaults(suiteName: "chat-display-fixture")!
@@ -44,6 +90,7 @@ struct HostedChatDisplayFixture: View {
         defaults.set(try! JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
         defaults.set(profile.id, forKey: "selectedGateway.v1")
         let socket = HostedChatDisplaySocket()
+        self.socket = socket
         let image = UIGraphicsImageRenderer(size: CGSize(width: 160, height: 160)).image { context in
             UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 160, height: 80))
             UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 80, width: 160, height: 80))
@@ -76,9 +123,13 @@ struct HostedChatDisplayFixture: View {
              "type": "text", "text": index == 0 ? "Oldest loaded history" : "History row \(index). A bounded fixture paragraph for the reader."]]] as [String: Any]
         }
         snapshot.transcript = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: history))
-        let fixtureTranscript = ProcessInfo.processInfo.arguments.contains("-chat-display-grouped")
-            ? Self.groupedDisplayTranscriptData : Self.imageTranscriptData
-        snapshot.transcript += try! JSONDecoder.gateway.decode([TranscriptItem].self, from: fixtureTranscript)
+        if Self.inlineGroup {
+            if !Self.inlineGroupLive { snapshot.transcript += Self.items([Self.inlineGroupCall()] + Self.inlineGroupResults()) }
+        } else {
+            let fixtureTranscript = ProcessInfo.processInfo.arguments.contains("-chat-display-grouped")
+                ? Self.groupedDisplayTranscriptData : Self.imageTranscriptData
+            snapshot.transcript += try! JSONDecoder.gateway.decode([TranscriptItem].self, from: fixtureTranscript)
+        }
         snapshot.transcriptStart = 0
         snapshot.transcriptTotal = snapshot.transcript.count
         self.snapshot = snapshot
@@ -103,7 +154,24 @@ struct HostedChatDisplayFixture: View {
                     return target.generation
                 }
                 ready = true
+                if Self.inlineGroupLive { try await deliverInlineGroupLive() }
             } catch { self.error = String(describing: error) }
+        }
+    }
+
+    /// The call arrives first (its displays still preparing), then every result,
+    /// each as the Gateway's live snapshot event for the open session.
+    private func deliverInlineGroupLive() async throws {
+        var live = snapshot
+        for appended in [[Self.inlineGroupCall()], Self.inlineGroupResults()] {
+            try await Task.sleep(for: .seconds(1))
+            live.transcript += Self.items(appended)
+            live.transcriptTotal = live.transcript.count
+            live.revision += 1
+            live.eventSequence += 1
+            await socket.deliver(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("event"), "topic": .string("session.snapshot"), "sessionId": .string(live.sessionId),
+                "payload": try JSONValue.encode(live)])))
         }
     }
 }
@@ -1250,7 +1318,12 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
 private actor HostedChatDisplaySocket: GatewaySocketConnection {
     private var hello = true
     private var receiver: CheckedContinuation<Data, Error>?
+    private var inbound: [Data] = []
     private var closed = false
+    func deliver(_ data: Data) {
+        guard !closed else { return }
+        if let receiver { self.receiver = nil; receiver.resume(returning: data) } else { inbound.append(data) }
+    }
     func resume() async { }
     func send(_ data: Data) async throws { }
     func ping() async throws { }
@@ -1260,6 +1333,7 @@ private actor HostedChatDisplaySocket: GatewaySocketConnection {
             hello = false
             return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
         }
+        if !inbound.isEmpty { return inbound.removeFirst() }
         return try await withCheckedThrowingContinuation { receiver = $0 }
     }
     func close() async {
