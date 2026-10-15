@@ -73,6 +73,8 @@ export interface SettingsStores {
   macTerminal: Record<string, string>;
   /** The maintainer's floor overrides (Mac policy, doc 5.4). */
   floors: FloorOverrides;
+  /** The Gateway-owned settings document (`gateway/settings/gateway.json`). */
+  gateway: Record<string, unknown>;
   /** Outside-change marks by layer and key instance (doc 5.6). */
   outside?: Partial<Record<"mac" | "project", Record<string, OutsideMark>>>;
 }
@@ -177,6 +179,8 @@ export function readBinding(stores: SettingsStores, layer: LayerId, binding: Bin
       return qualifiers.project === undefined ? undefined : nearestTrustDecision(stores.trust, qualifiers.project);
     case "mac-terminal":
       return qualifiers.device === undefined ? undefined : stores.macTerminal[qualifiers.device];
+    case "gateway":
+      return qualifiedOnly || layer !== "mac" ? undefined : readPath(stores.gateway, binding.path);
     case "floors":
       // A key with one floor keeps both directions equal, so widen reads it.
       return qualifiers.key === undefined ? undefined

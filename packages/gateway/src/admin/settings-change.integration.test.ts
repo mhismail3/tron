@@ -882,6 +882,7 @@ describe("every key at every allowed layer", () => {
         trust: await json(join(f.agentDir, "trust.json")) as Record<string, boolean>,
         macTerminal: await f.macTerminalKeys.read(),
         floors: await json(join(f.tronHome, "gateway", "settings", "floors.json")),
+        gateway: await json(join(f.tronHome, "gateway", "settings", "gateway.json")),
         chat: slot.settingsChatLayer(),
       } as unknown as SettingsStores;
       const qualified = binding.store === "pi" && binding.qualified !== undefined && qualifiers.model !== undefined;

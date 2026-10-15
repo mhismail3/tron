@@ -3234,6 +3234,23 @@ request explicitly includes `restartNow: true`, shutdown uses the existing exact
 cancellation, bounded grace, and runtime disposal path. Still-marked runs recover as
 interrupted or `outcomeUnknown`; shutdown never claims a non-durable receipt succeeded.
 Unexpected signal/error shutdown uses the same bounded cleanup grace.
+
+App terminals (#479) are owned by `machine/terminal-service.ts`. A live PTY
+is busy while a device has it open, while its shell has any child process
+(a foreground program or a background job), or while its last input left a
+half-typed line (input not ending in Enter, Ctrl-C or Ctrl-D). Output alone is
+not use. `gateway.restart` and `gateway.stop` close every live terminal that is
+not busy, with the reason "Closed for a Gateway restart", and refuse only when a
+busy terminal remains, naming how many and why ("1 running a program"). An idle
+pass every 30 seconds also closes a terminal that is not busy once no input or
+attachment has touched it for `setup.terminalIdleMinutes` (Mac layer, default
+60 minutes, Off keeps them; read at every pass, so a change applies without a
+restart). A closed terminal keeps its `closedReason` in `terminal.list` and on
+`terminal.exit`, and its replay ends with the bracketed reason, so a client that
+shows it reads why it ended. A terminal is never closed while busy.
+`terminal-idle.e2e.test.ts` drives a real supervised Gateway (report:
+`test-results/terminal-idle.e2e.json`); `terminal-service.integration.test.ts`
+covers the idle pass with an injected clock.
 `GatewayWorkRegistry` is a
 bounded, process-local registry with separate normal and derived-settlement capacity. It
 never persists or expires work by age and does not duplicate Pi's runtime, JSONL, or run

@@ -1216,9 +1216,7 @@ export class GatewayService {
               this.dependencies.requestRestart(true);
               return safeJson({ restarting: false, scheduled: true, restartNow: true, drain: currentDrain });
             }
-            if (!this.dependencies.terminals.beginRestartDrain()) {
-              throw new GatewayError("busy", "Close active terminal sessions before restarting the Gateway", true);
-            }
+            await this.admitTerminalsForDrain("restarting");
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
             const drain = this.dependencies.sessions.beginAdministrativeDrain();
@@ -1264,9 +1262,7 @@ export class GatewayService {
               && (currentDrain.phase === "preparing" || currentDrain.phase === "waiting")) {
               throw new GatewayError("busy", "Gateway is already draining accepted work; inspect gateway.drain.status or command.status", true);
             }
-            if (!this.dependencies.terminals.beginRestartDrain()) {
-              throw new GatewayError("busy", "Close active terminal sessions before stopping the Gateway", true);
-            }
+            await this.admitTerminalsForDrain("stopping");
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
             const drain = this.dependencies.sessions.beginAdministrativeDrain();
@@ -2440,6 +2436,23 @@ export class GatewayService {
 
   terminalBelongsToSession(terminalId: string, sessionId: string): boolean {
     return this.dependencies.terminals.belongsToSession(terminalId, sessionId);
+  }
+
+  /** Terminal admission for a restart or stop drain (#479): abandoned prompts
+   * close, busy terminals refuse and are named by why. The terminal check reads
+   * the process table, so a drain another request started meanwhile wins. */
+  private async admitTerminalsForDrain(action: "restarting" | "stopping"): Promise<void> {
+    const admission = await this.dependencies.terminals.beginRestartDrain();
+    if (!admission.admitted) {
+      const reasons = ([
+        ["attached", "open on a device"], ["running", "running a program"], ["input", "with typed input"],
+      ] as const).filter(([reason]) => admission.busy[reason] > 0).map(([reason, label]) => `${admission.busy[reason]} ${label}`);
+      throw new GatewayError("busy", `Close active terminal sessions before ${action} the Gateway: ${reasons.join(", ")}`, true);
+    }
+    const drain = this.dependencies.sessions.administrativeDrainSnapshot();
+    if (this.dependencies.sessions.isAdministrativeDrainStarted && (drain.phase === "preparing" || drain.phase === "waiting")) {
+      throw new GatewayError("busy", "Gateway is already draining accepted work; inspect gateway.drain.status or command.status", true);
+    }
   }
 
   private requireOwnedTerminal(client: ClientContext, terminalId: string): void {

@@ -91,6 +91,11 @@ export class SettingsModel {
     return join(this.dependencies.tronHome, "gateway", "settings", "floors.json");
   }
 
+  /** Gateway-owned keys no pi file holds (Binding `gateway`); only the change path writes it. */
+  get gatewaySettingsPath(): string {
+    return join(this.dependencies.tronHome, "gateway", "settings", "gateway.json");
+  }
+
   async resolve(target: SettingsTarget, session?: SessionSettingsSource, keys?: readonly string[], options: { storeState?: boolean } = {}): Promise<Resolution> {
     const stores = await this.stores(target, session, options);
     const runtime = session?.modelRuntime ?? this.dependencies.modelRuntime;
@@ -243,6 +248,7 @@ export class SettingsModel {
       trust,
       macTerminal: await this.dependencies.macTerminalKeys?.read() ?? {},
       floors: await this.floorOverrides(),
+      gateway: await this.gatewaySettings(),
       ...(outside ? { outside } : {}),
       ...(project ? { project } : {}),
       ...(session ? { chat: session.chat } : {}),
@@ -285,6 +291,22 @@ export class SettingsModel {
       project: cwd === this.dependencies.agentDir || projectUnreadable ? {} : manager.getProjectSettings() as Record<string, unknown>,
       ...(projectUnreadable ? { projectUnreadable: true as const } : {}),
     };
+  }
+
+  private async gatewaySettings(): Promise<Record<string, unknown>> {
+    const document = await readJsonObject(this.gatewaySettingsPath);
+    for (const key of KEYS) {
+      const binding = key.layers.mac;
+      if (binding?.store !== "gateway") continue;
+      const value = readPath(document, binding.path);
+      if (value === undefined) continue;
+      try {
+        setPath(document, binding.path, await key.type.validate(value, key.id));
+      } catch {
+        throw new GatewayError("conflict", `The Gateway settings value for ${key.id} is invalid`);
+      }
+    }
+    return document;
   }
 
   private async floorOverrides(): Promise<FloorOverrides> {
@@ -561,7 +583,7 @@ const deepEqual = (left: unknown, right: unknown) => JSON.stringify(left ?? null
 
 /** Applier order across stores (doc 5.2): fixed, so rollback is the reverse. */
 const STORE_ORDER: Record<Binding["store"], number> = {
-  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "home-memory": 2, "profile": 3, "floors": 4, "chat": 5, "chat-settings": 5,
+  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "home-memory": 2, "profile": 3, "floors": 4, "gateway": 4, "chat": 5, "chat-settings": 5,
 };
 
 const DECIDED = new Set<ChangeStatus>(["approved", "declined", "expired", "superseded", "failed"]);
@@ -1166,6 +1188,12 @@ export class SettingsChangePath {
             if (unset) delete entry[direction]; else entry[direction] = value as Tier;
           }
           if (Object.keys(entry).length === 0) delete document[qualifiers.key!]; else document[qualifiers.key!] = entry;
+          return document;
+        });
+        return {};
+      case "gateway":
+        await updateJsonLocked<Record<string, unknown>>(this.model.gatewaySettingsPath, {}, document => {
+          if (unset) unsetPath(document, binding.path); else setPath(document, binding.path, value);
           return document;
         });
         return {};
