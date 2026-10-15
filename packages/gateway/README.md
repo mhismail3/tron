@@ -1882,10 +1882,8 @@ renamed into `versions/` inside the store-locked publication transaction. Every
 publication seals the staged tree but keeps its root writable across that rename,
 because macOS 15 refuses to rename a directory its owner cannot write; the root is
 sealed in `versions/` before any candidate state names the version. The trusted
-source checkout must already have its lockfile-pinned Gateway development dependencies
-installed (prepare them with `cd packages/gateway && npm ci`
-before requesting a source rebuild); the helper never installs dependencies or contacts the
-registry during an update. Before compiling, it compares applicable npm hidden-lock package
+source checkout's lockfile-pinned Gateway development dependencies are the compiler's
+input. Before compiling, the builder compares applicable npm hidden-lock package
 records with the source lock, then walks the actual install to require every locked package for
 this platform/mode at its locked name and version, with no missing or extra package directories.
 Unsupported package-directory symlinks are rejected before their nested dependency trees are
@@ -1898,8 +1896,17 @@ provider helpers, provider pin metadata, configuration, and toolchain inputs use
 payload. The provider pin checker separately binds copied archive bytes to their hashes. Dirty
 development builds are allowed, but the receipt must match those exact bytes; returning to a clean
 checkout at the same `sourceRevision` therefore cannot reuse output built from reverted edits.
-Unrelated untracked files are not build inputs. If installed inputs are stale or cannot be proved,
-source rebuild refuses before compilation and names `npm ci` as the remedy. Source-only updates
+Unrelated untracked files are not build inputs. A checkout's install drifts whenever `main` moves
+its lock without a reinstall, so when that check fails the builder repairs the checkout's
+`packages/gateway/node_modules` itself (#1010). It runs `npm ci` there with the active payload's
+pinned Node and npm, under the source-build lock and only after the lock is proved equal to the
+running payload's. It then requires `package.json` and `package-lock.json` to be byte-identical
+and the install to verify. npm ci replaces only `node_modules`, so tracked files and other
+untracked files are untouched. The deploy log records `deploy.source-install-repair` and
+`deploy.source-install-repaired`. If the repair fails (for example, offline with a cold npm cache),
+the rebuild fails before compilation. Its Settings error then names the exact command to run. A
+symlinked or otherwise unsafe install is refused, not repaired. This repair touches only the
+checkout's compile-only install. Source-only updates
 require the package lock and dependency declarations
 to match the selected validated payload exactly and reuse that payload's complete fingerprinted
 `node_modules` tree. They never invoke npm or depend on registry availability, package-manager

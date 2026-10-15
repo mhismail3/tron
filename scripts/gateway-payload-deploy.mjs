@@ -2617,10 +2617,24 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
       // the clean revision after those edits are reverted.
       sourceRevision = await gitRevision(config.sourceRoot);
       const installVerifierPath = join(config.sourceRoot, "scripts", "gateway-install-inputs.mjs");
-      const { gatewayBuildInputFingerprint, verifyGatewayInstallInputs } = await import(pathToFileURL(installVerifierPath).href);
+      const { gatewayBuildInputFingerprint, ensureGatewayInstallInputs } = await import(pathToFileURL(installVerifierPath).href);
       sourceInputFingerprint = await gatewayBuildInputFingerprint(config.sourceRoot);
+      // A changed lock needs a newly signed build; refuse that before repairing
+      // anything, so npm ci only ever restores the lock the payload already runs.
       source = await captureReusableSourcePackage(active.root, gatewayRoot);
-      await verifyGatewayInstallInputs(gatewayRoot);
+      // The checkout's compile-only install drifts whenever main moves its lock
+      // without a reinstall; repair it with the active payload's pinned npm (#1010).
+      const startedAt = Date.now();
+      const install = await ensureGatewayInstallInputs(gatewayRoot, {
+        runtimeBin: join(active.root, "runtime", `bin-${process.arch}`),
+        onRepair: ({ drift }) => paths.timeline?.mark("deploy.source-install-repair",
+          "Source checkout install drifted from package-lock; running npm ci", "warning", { drift }),
+      });
+      if (install.repaired) {
+        paths.timeline?.mark("deploy.source-install-repaired", "Source checkout install restored with npm ci", "info", {
+          durationMs: Date.now() - startedAt,
+        });
+      }
       await runCommand(process.execPath, [
         join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"),
         "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput,
