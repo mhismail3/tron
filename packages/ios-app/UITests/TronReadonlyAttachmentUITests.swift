@@ -219,6 +219,9 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let total = app.staticTexts["budget.total"]
         XCTAssertTrue(total.waitForExistence(timeout: 5), "The TabView switches to the second tab")
         assertToolbarTint(app, title: "Summary")
+        // Optional.map: applied to a value, and nil stays nil for `??`.
+        XCTAssertTrue(app.staticTexts["Latest: New food"].exists, "Optional.map applies its closure to a value")
+        XCTAssertTrue(app.staticTexts["No big expense"].exists, "Optional.map on nil is nil")
         XCTAssertEqual(total.label, "Total $72.75 across 3 expenses", "The other tab reads the same environment object")
         XCTAssertEqual(app.staticTexts["budget.food"].label, "54.75")
         XCTAssertEqual(app.staticTexts["budget.travel"].label, "18.00")
