@@ -1220,6 +1220,9 @@ shutil.copytree(source, clone)
     ) -> subprocess.CompletedProcess[str]:
         environment = self.contained_environment(self.root)
         environment.update(self.reader_environment())
+        # Ordinary runner calls exercise the copied heavy owner too. Only crash
+        # fixtures inherit the suite lease so their PID is the iOS lane holder.
+        environment.pop("TRON_HEAVY_LEASE_HELD", None)
         environment.update({
             "PATH": f"{self.bin}:{environment['PATH']}",
             **self.tools_environment,
@@ -3683,8 +3686,10 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         if arguments == ("run-ui",):
             arguments = (*arguments, *(arg for journey in self.owned_ui_journeys()
                                        for arg in ("--only-testing", journey)))
+        environment = dict(environment or self.environment)
+        environment.pop("TRON_HEAVY_LEASE_HELD", None)
         return subprocess.run(
-            [str(harness), *arguments], env=environment or self.environment,
+            [str(harness), *arguments], env=environment,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
         )
 
@@ -5211,6 +5216,8 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
         for relative in ("scripts", "config", ".github/workflows"):
             shutil.copytree(ROOT / relative, self.primary / relative, ignore=ignore)
         shutil.copy2(ROOT / ".node-version", self.primary / ".node-version")
+        (self.primary / "tools/work").mkdir(parents=True)
+        shutil.copy2(ROOT / "tools/work/heavy.py", self.primary / "tools/work/heavy.py")
         self.git(self.primary, "init", "-q")
         self.git(self.primary, "add", "-A")
         self.git(self.primary, "-c", "user.name=Tron Tests", "-c", "user.email=tests@tron.invalid",
