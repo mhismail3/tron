@@ -37,6 +37,15 @@ Commands:
                                     Resumable preparation or archive-only recovery
                                     registration (manual path)
   version                           Print the canonical Tron version
+  gate plan [--tests "<command>"]... [--json]
+                                    Print the ordered gate steps this change needs
+                                    (tools/work/gate-catalog.json)
+  gate run [<step>...] [--tests "<command>"]... [--force]
+                                    Run the plan (or named steps) with live progress;
+                                    stops at the first failure; reuses valid passes
+  gate next                         Run only the next step without a valid pass
+  gate report [--json] | gate catalog
+                                    Measured wall time and peak RSS per step; the catalog
   work bootstrap [--apply [--prune]] [--report <path>]
                                     Plan or converge GitHub labels and the tracking
                                     Project to .github/work.json (tools/work); reports
@@ -137,6 +146,7 @@ case "$cmd" in
     fi
     exec node "$GATEWAY/dist/admin/diagnose.js" "$@"
     ;;
+  gate) exec python3 "$ROOT/tools/work/gate.py" "$@" ;;
   work)
     exec python3 "$ROOT/tools/work/cli.py" "$@"
     ;;
