@@ -731,7 +731,8 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
     usage = result.get("usage")
     # Reaped children are in rusage; sampling adds what detached or ran in a simulator.
     cpu = round(max(usage.ru_utime + usage.ru_stime if usage else 0.0, tree.cpu_seconds), 1)
-    cores = round(tree.peak_cores, 1)
+    # A step shorter than half a CPU window has no window peak; its average is its peak.
+    cores = round(tree.peak_cores or cpu / max(seconds, 0.1), 1)
     # Sampling misses very short steps; the largest single process (bytes on macOS) is a floor.
     peak = max(peak, (usage.ru_maxrss // 1024) if usage else 0, host_peak * 1024)
     status = result.get("status", -1)
@@ -972,7 +973,7 @@ def catalog_table() -> int:
         runs = "\n".join(f"    run{(' [' + label + ']') if label else ''}:  {command}" for label, command in commands.items())
         print(f"{step['id']:<26} {step['class']:<5} budget {step['budgetSeconds']:>3}s limit {step['timeoutSeconds']:>3}s "
               f"rss~{step['expectedRssMb']:>5} MB {step.get('expectedCores', '-')} cores"
-              f"{(' (min ' + str(step['coresMin']) + ')') if 'coresMin' in step else ''}{' xcode' if step.get('pool') else ''}"
+              f"{(' (min ' + str(step['coresMin']) + ')') if 'coresMin' in step else ''}{(' pool ' + step['pool']) if step.get('pool') else ''}"
               f"{shards}  unlocks {step['unlocks']}\n    when: {when}\n{runs}")
     return 0
 

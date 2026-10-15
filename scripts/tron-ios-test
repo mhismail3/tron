@@ -9,9 +9,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 case "${1:-checkpoint}" in
   checkpoint|prepare|build|run|diagnose)
     if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
-      # The same measured cost as the ios.journeys gate step (tools/work/gate-catalog.json).
+      # The measured cost of the ios.build and ios.journeys gate steps (tools/work/gate-catalog.json).
       exec python3 "$ROOT/tools/work/heavy.py" run --owner "tron-ios-test ${1:-checkpoint} in $(basename "$ROOT")" \
-        --pool xcode --need-mb 9000 --cores 12 --cores-min 6 -- "$0" "$@"
+        --pool xcode --need-mb 9000 --cores 16 --cores-min 7 -- "$0" "$@"
     fi
     ;;
 esac

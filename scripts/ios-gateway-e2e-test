@@ -15,7 +15,7 @@ case "${1:-all}" in
     if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
       # The same measured cost as the ios.gateway-boundary gate step (tools/work/gate-catalog.json).
       exec python3 "$repo_root/tools/work/heavy.py" run --owner "ios-gateway-e2e-test ${1:-all} in $(basename "$repo_root")" \
-        --pool xcode --need-mb 9000 --cores 12 --cores-min 6 -- "$0" "$@"
+        --pool xcode --need-mb 9000 --cores 16 --cores-min 7 -- "$0" "$@"
     fi
     ;;
 esac

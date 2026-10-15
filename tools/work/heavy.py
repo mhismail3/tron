@@ -10,8 +10,10 @@ host-wide step slot, admitted only when its measured cost fits:
 - CPU: its cores within the heavy CPU budget (core count minus headroom, with what
   running steps claimed), and within the cores the host has idle right now (measured
   from kernel CPU ticks, so booted simulators and unqueued builds count too);
-- the Xcode pool: at most TRON_HEAVY_XCODE_SLOTS steps that run xcodebuild or a
-  simulator at once, counting every booted simulator the iOS tooling has not released;
+- pools: at most TRON_HEAVY_XCODE_SLOTS steps that run xcodebuild or a simulator at
+  once (`xcode`), counting every booted simulator the iOS tooling has not released, and
+  at most TRON_HEAVY_SERIAL_SLOTS timing-sensitive real-process suites (`serial`): they
+  slow each other through process spawning and file churn, not CPU (#1083);
 - gate jobs: at most TRON_HEAVY_JOBS gate runs with heavy work in flight. A gate run
   (Job) takes a job slot at its first heavy step and keeps it until the run ends, so
   admitted runs finish instead of every worker holding half-finished work.
@@ -27,7 +29,7 @@ behind); a job slot is held by the gate runner process.
 
 Waiters hold tickets (enqueue time, owner, PID, worktree, command, needs). Tickets of
 jobs that already hold a job slot go first, then FIFO. A ticket may pass earlier tickets
-that wait only for a count limit (job or Xcode slots), never one that waits for CPU or
+that wait only for a count limit (a job or pool slot), never one that waits for CPU or
 memory, so a large step is never starved by smaller ones. Admission decisions serialize
 on one lock. A ticket whose PID has ended is removed by the next reader. A waiter prints
 its position, what it waits for and the host's current CPU and memory whenever that
@@ -63,6 +65,8 @@ DEFAULT_NEED_MB = 4000
 DEFAULT_CORES = 4.0
 POLL_SECONDS = 1.0
 XCODE = "xcode"
+SERIAL = "serial"
+POOLS = (XCODE, SERIAL)
 
 
 def _env_number(name: str, default: float) -> float:
@@ -89,8 +93,16 @@ def _job_slots() -> int:
     return max(1, int(_env_number("TRON_HEAVY_JOBS", max(2, _cpus() // 6))))
 
 
-def _xcode_slots() -> int:
-    return max(1, int(_env_number("TRON_HEAVY_XCODE_SLOTS", 2)))
+def _pool_slots(pool: str) -> int:
+    """Steps of one pool that may run at once.
+
+    `serial` suites (gateway.scripts, gateway.nested) passed alone in 158 s but took 336 s
+    two at a time and timed out at 420 s four at a time, with the host's CPU half idle
+    (#1083), so they run one at a time host-wide.
+    """
+    if pool == XCODE:
+        return max(1, int(_env_number("TRON_HEAVY_XCODE_SLOTS", 2)))
+    return max(1, int(_env_number("TRON_HEAVY_SERIAL_SLOTS", 1)))
 
 
 def _cpu_budget() -> float:
@@ -356,9 +368,11 @@ class Host:
     def claimed_cores(self) -> float:
         return sum(float(item.get("cores") or DEFAULT_CORES) for item in self.holding)
 
-    def xcode_in_use(self) -> int:
-        held = sum(1 for item in self.holding if item.get("pool") == XCODE)
-        return max(held, self.booted())
+    def held(self, pool: str) -> int:
+        return sum(1 for item in self.holding if item.get("pool") == pool)
+
+    def in_use(self, pool: str) -> int:
+        return max(self.held(pool), self.booted()) if pool == XCODE else self.held(pool)
 
     def summary(self) -> str:
         return (f"host cpu {self.busy:.1f}/{_cpus()} cores busy (load {os.getloadavg()[0]:.1f}), "
@@ -377,12 +391,14 @@ def blocked(ticket: dict, host: Host) -> tuple:
     minimum = float(ticket.get("coresMin") or cores)
     if ticket.get("job") not in host.active_jobs and len(host.active_jobs) >= _job_slots():
         return "count", f"a gate job slot ({len(host.active_jobs)} of {_job_slots()} gate jobs have heavy work in flight)"
-    held_xcode = sum(1 for item in host.holding if item.get("pool") == XCODE)
+    pool = ticket.get("pool")
     # Like the first heavy step, the first xcode step always starts: simulators booted
     # outside the queue (or orphans the iOS tooling has yet to sweep) limit concurrency, never progress.
-    if ticket.get("pool") == XCODE and held_xcode and host.xcode_in_use() >= _xcode_slots():
-        return "count", (f"an Xcode slot ({host.xcode_in_use()} of {_xcode_slots()} in use: {held_xcode} xcode steps, "
-                         f"{host.booted()} booted simulators)")
+    if pool in POOLS and host.held(pool) and host.in_use(pool) >= _pool_slots(pool):
+        if pool == XCODE:
+            return "count", (f"an Xcode slot ({host.in_use(pool)} of {_pool_slots(pool)} in use: {host.held(pool)} xcode steps, "
+                             f"{host.booted()} booted simulators)")
+        return "count", f"a {pool} slot ({host.held(pool)} of {_pool_slots(pool)} running)"
     if not host.holding:
         return "", min(cores, float(_cpus()))
     if len(host.holding) >= _slots():
@@ -539,13 +555,14 @@ def status() -> int:
     host = Host(holders(directory), {item.get("job") for item in held_jobs}, CpuMeter().busy(), available_mb(),
                 booted_simulators)
     print(f"heavy runs: {host.summary()}; {_reserve_mb()} MB reserve; up to {_slots()} steps, {_job_slots()} gate jobs, "
-          f"{_xcode_slots()} Xcode steps ({host.xcode_in_use()} in use, {host.booted()} booted simulators)")
+          f"{_pool_slots(XCODE)} Xcode steps ({host.in_use(XCODE)} in use, {host.booted()} booted simulators), "
+          f"{_pool_slots(SERIAL)} serial ({host.in_use(SERIAL)} running)")
     for item in held_jobs:
         print(f"  job      slot {item['jobSlot'] + 1}: {item.get('owner', '?')} pid {item.get('pid', '?')} "
               f"since {item.get('startedAt', '?')}")
     for item in host.holding:
         print(f"  running  slot {item['slot'] + 1}: {item.get('owner', '?')} {float(item.get('cores') or 0):g} cores "
-              f"{item.get('needMb', '?')} MB{' xcode' if item.get('pool') == XCODE else ''} pid {item.get('pid', '?')} "
+              f"{item.get('needMb', '?')} MB{' ' + item['pool'] if item.get('pool') else ''} pid {item.get('pid', '?')} "
               f"since {item.get('startedAt', '?')} in {item.get('worktree', '?')}")
     queued = waiters(directory, host.active_jobs)
     _, _, reasons = decide(queued, host)
@@ -564,7 +581,7 @@ def main(arguments: Optional[List[str]] = None) -> int:
     runner.add_argument("--need-mb", type=int, default=DEFAULT_NEED_MB, help="expected peak RSS of the command")
     runner.add_argument("--cores", type=float, default=DEFAULT_CORES, help="cores the command uses at full parallelism")
     runner.add_argument("--cores-min", type=float, help="fewest cores it can start with (it reads TRON_HEAVY_CORES)")
-    runner.add_argument("--pool", choices=[XCODE], help="xcode: the command runs xcodebuild or a simulator")
+    runner.add_argument("--pool", choices=POOLS, help="xcode: runs xcodebuild or a simulator; serial: a timing-sensitive suite")
     runner.add_argument("argv", nargs=argparse.REMAINDER)
     commands.add_parser("status", help="print running and queued heavy runs")
     parsed = parser.parse_args(arguments)

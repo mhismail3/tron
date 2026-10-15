@@ -263,8 +263,9 @@ def case_cpu_admission(root: Path) -> dict:
         fixture.close()
 
 
-def case_xcode_pool_counts_booted_simulators(root: Path) -> dict:
-    """At most TRON_HEAVY_XCODE_SLOTS xcode steps, counting simulators still booted (#1083).
+def case_pools_xcode_counts_booted_simulators(root: Path) -> dict:
+    """At most TRON_HEAVY_XCODE_SLOTS xcode steps, counting simulators still booted, and one
+    serial suite at a time (#1083).
 
     A step waiting only for an Xcode slot does not hold back a Gateway step behind it, and
     booted simulators never stop the first xcode step.
@@ -284,6 +285,15 @@ def case_xcode_pool_counts_booted_simulators(root: Path) -> dict:
         wait_until(lambda: "x3" in fixture.running(), "x3 joins x2 once the tooling released a simulator")
         for name in ("g", "x2", "x3"):
             fixture.release(name)
+        wait_until(lambda: not fixture.running(), "all done")
+        # Timing-sensitive real-process suites run one at a time host-wide.
+        fixture.start("s1", pool="serial")
+        wait_until(lambda: "s1" in fixture.running(), "s1 starts")
+        fixture.start("s2", pool="serial")
+        wait_until(lambda: "for a serial slot (1 of 1 running)" in fixture.output("s2"), "s2 waits for the serial slot")
+        fixture.release("s1")
+        wait_until(lambda: "s2" in fixture.running(), "s2 starts once s1 ends")
+        fixture.release("s2")
         return {"started": fixture.started()}
     finally:
         fixture.close()
@@ -420,7 +430,7 @@ def case_memory_admission(root: Path) -> dict:
 
 
 def main() -> int:
-    cases = [case_memory_admission, case_cpu_admission, case_xcode_pool_counts_booted_simulators, case_gate_jobs_fair_and_bounded,
+    cases = [case_memory_admission, case_cpu_admission, case_pools_xcode_counts_booted_simulators, case_gate_jobs_fair_and_bounded,
              case_dead_holder_slot_reclaimed, case_queue_wait_is_not_step_time, case_slots_fifo_and_positions,
              case_holder_killed_slot_follows_command_tree, case_dead_waiter_leaves_queue, case_inherited_slot_never_waits]
     evidence = []
