@@ -499,8 +499,8 @@ export class HomeOwner {
   }
 
   /** A wake whose trigger never reached the canonical session goes back to pending. */
-  async releaseWakeTrigger(taskId: string, operationId: string): Promise<void> {
-    await this.inbox.releaseTrigger(taskId, operationId);
+  async releaseWakeTrigger(taskId: string, operationId: string, eventId: string): Promise<void> {
+    await this.inbox.releaseTrigger(taskId, operationId, eventId);
   }
 
   async settleTaskResults(sessionId: string, operationId: string): Promise<void> {

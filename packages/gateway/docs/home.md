@@ -943,6 +943,39 @@ admission. The scope binds to the restore epoch.
 - Maintainer RPCs and terminal controls list, revoke and decide. Home's model tools
   cannot approve grants.
 
+### Worker progress check-ins
+
+`checkin` is available beside `report` only on the current task-worker operation.
+It never seals, pauses or ends work, and is allowed while task-owned subagents run.
+Workers send one at meaningful milestones and about every 30 minutes, not per tool:
+`step` (256 UTF-8 bytes), `done` and `next` (512 each), optional `blocker` (512),
+optional `refs` (`branch`, `commit`, `issue`, 256 each), and optional `needsAttention`.
+The request is at most 4 KiB. Empty/invalid/oversized requests are refused without
+writing. A sealed, stopping, retired or different operation cannot check in.
+
+The task record is canonical: a durable atomic update adds the Gateway-assigned
+ID, timestamp, task/session/operation identity and attention disposition. It retains
+12 entries; `task status`, `task list`, `home.taskStatus` and `home.taskList` expose
+only the latest three in chronological order. Stop and cold reads preserve them;
+a resumed successor carries the bounded history unchanged, so old entries retain
+their original operation attribution. No transcript scan or native timer owns progress.
+
+Routine check-ins cause no wake or push. `needsAttention: true` requires a blocker
+and may request a wake at most once per 30 minutes for that worker lineage, including
+resumes. A pending/in-flight blocker outbox cannot be replaced. The saved entry says
+`requested`, `rate-limited`, `pending`, or `none`; requested is not proof Home replied.
+One separate task-owned attention outbox pins the blocker snapshot and shares the
+existing Home wake admission, route, ceiling, canonical proof and acknowledgement
+owner. Final-result settlement cannot overwrite it. Unavailable/paused Home keeps
+it for the next eligible activation, without a fallback push; an admitted Home reply
+keeps the ordinary Home reply notification policy. Progress is never success evidence.
+
+`home-task-continuity.e2e.test.ts` covers the real worker tool, socket status/list,
+Home tool listing, stop/resume attribution and cold read. `home-wake.e2e.test.ts`
+covers nonterminal blocker wake, rate limiting across resume and independent final
+results; repeatable evidence is in `test-results/home-task-continuity.json` and
+`test-results/home-task-checkin-wake.json` under the Gateway package.
+
 ### Dispatch and workers
 
 Only the enabled Home's active chapter may call `delegate` with a stable `taskId`, a

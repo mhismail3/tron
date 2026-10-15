@@ -2789,7 +2789,10 @@ The Tasks sheet consumes `home.taskList`, `home.taskStatus`, and
 Hosted journeys use real DTO shapes in the isolated Home dashboard fixture;
 controls refuse incorrect execution/route/request bindings and require command
 IDs and a future selected grant expiry. Screenshots are xcresult attachments
-(list, stopped task, redelivery, permission decision, empty and recovery fence).
+(list with latest check-in, task detail with the shared check-in row, stopped task,
+redelivery, permission decision, empty and recovery fence). `TronHomeSheetsUITests/testHomeSheetsJourney`
+asserts the Gateway-shaped progress text appears in list and detail without adding
+another read owner or custom presentation styling.
 They prove native wiring/presentation, not durable task/grant/inbox semantics or
 physical-device acceptance. Gateway `home-task-store.integration.test.ts` and
 `home-task-dispatch.e2e.test.ts` own creation-order paging, restore cursor refusal,

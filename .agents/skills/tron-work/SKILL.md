@@ -68,7 +68,9 @@ what it lists:
 3. **Implement.** Ship the code, its owning docs, and the integration or E2E test
    that proves it. For a bug, add or extend a test that reproduces it and show it
    failing before the fix. Commit on the task branch; merge `origin/main` rather
-   than rebasing.
+   than rebasing. Home workers use `checkin` at milestones and about every 30 minutes
+   (step, done, next, optional blocker and issue/branch/commit refs), then keep working;
+   reserve `needsAttention` for blockers Home can resolve. Check-ins are not reports.
 4. **Verify and land.** Write a short Markdown summary (what changed, what was
    verified, residual risks) and run:
 

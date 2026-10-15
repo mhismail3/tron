@@ -3232,10 +3232,11 @@ an unknown outcome nor a last assistant reply is labeled success.
 `HomeTaskSheet` uses the same managed chrome, glass cards, typography, loading,
 placeholder and action owners as the other Home sheets. Task rows are standard
 rows: a state glyph, a title (the worker's name, else the brief's first line,
-else the project), the project and relative update time, and a state pill, with
-no spend. The task detail shows a header card (title, state pill, project and
+else the project), the project and relative update time, the latest check-in step
+and its own relative timestamp when present, and a state pill, with no spend. The task detail shows a header card (title, state pill, project and
 relative dates), the Brief group (six lines, then Show all), the result, the
-Worker group (model, subagent launches, token spend when reported, and live runs
+Worker group (latest durable check-in with timestamp, step/done/next and optional
+blocker using the shared multiline settings row; model, subagent launches, token spend when reported, and live runs
 with their state pills), and Redeliver when offered. Its toolbar's Open Session
 opens the worker's own chat, where the task is stopped or steered (#911); the
 detail has no Stop, Steer or Reload. Task

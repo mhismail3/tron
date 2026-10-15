@@ -1,5 +1,5 @@
-import { fauxAssistantMessage, type FauxResponseFactory } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fauxAssistantMessage, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { BlobStore } from "../sessions/blob-store.js";
 import { projectTranscript } from "../sessions/projection.js";
 import { disposeFixtures, dispatch, fixture, reportCall } from "../../test-support/home-task-fixture.js";
@@ -14,6 +14,12 @@ type Fixture = Awaited<ReturnType<typeof fixture>>;
 type Entry = { type: string; id: string; customType?: string; message?: { role: string }; details?: { operationId?: string; eventId?: string } };
 
 const RESULT = "tron.home-task-result.v1";
+const checkinEvidence: unknown[] = [];
+afterAll(async () => {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  await mkdir("test-results", { recursive: true });
+  await writeFile("test-results/home-task-checkin-wake.json", JSON.stringify(checkinEvidence, null, 2));
+});
 /** An inbox notice. A wake reply sends none: its turn's own terminal push is the only push for it. */
 const isWakePush = (input: { sourceId: string }) => input.sourceId.startsWith("home-wake:");
 const isWaitingPush = (input: { sourceId: string }) => input.sourceId.startsWith("home-waiting:");
@@ -51,6 +57,59 @@ function operationsWithResults(entries: readonly Entry[]): string[] {
 }
 
 describe("Home wakes on its own task results (#749)", () => {
+  it("wakes for a worker blocker without ending it, rate limits across resume, and preserves the separate final result", async () => {
+    const f = await fixture();
+    await configure(f);
+    const owner = f.registry.homeOwner();
+    const home = await f.registry.acquire(f.home.sessionId);
+    let workerTurns = 0;
+    let homeTurns = 0;
+    const alert = { step: "Validation", done: "Reproduced failure", next: "Continue independent checks", blocker: "Need Home to coordinate the shared test lane", needsAttention: true };
+    const respond: FauxResponseFactory = (context, options) => {
+      if (context.messages.some(message => message.role === "system" && JSON.stringify(message).includes("This is a finite Home task."))) {
+        workerTurns++;
+        if (workerTurns <= 2) return fauxAssistantMessage([fauxToolCall("checkin", alert)], { stopReason: "toolUse" });
+        return untilStopped("worker stopped")(context, options);
+      }
+      homeTurns++;
+      return fauxAssistantMessage("I will coordinate the lane; continue independent checks.");
+    };
+    f.faux.setResponses(Array.from({ length: 20 }, () => respond));
+    const run = await dispatch(f, "attention-worker");
+    await waitFor(async () => (await settledTask(f, run.taskId)).attention?.wake.state === "acknowledged" && workerTurns >= 3, "blocker wake acknowledged while worker continues").catch(async error => { throw new Error(`${error.message}; worker=${workerTurns}; home=${homeTurns}; task=${JSON.stringify(await settledTask(f, run.taskId))}; signals=${JSON.stringify(f.signals.slice(-20))}`); });
+    const active = await owner.taskStatus(run.taskId);
+    expect(active.lifecycle).toBe("active");
+    expect(active.reportRef).toBeNull();
+    expect(active.checkins?.map(row => row.attention)).toEqual(["requested", "rate-limited"]);
+    expect(homeTurns).toBe(1);
+    expect(results(home.canonicalSessionEntries() as Entry[])).toHaveLength(1);
+    expect(JSON.stringify(results(home.canonicalSessionEntries() as Entry[]))).toContain("not a final report");
+    await owner.stopTask({ taskId: run.taskId, operationId: run.operationId });
+    await run.completion;
+    await waitAcknowledged(f, run.taskId);
+    expect((await settledTask(f, run.taskId)).attention?.wake.state).toBe("acknowledged");
+    const beforeResume = homeTurns;
+    let resumedTurns = 0;
+    const resumedResponse: FauxResponseFactory = (context, options) => {
+      if (context.messages.some(message => message.role === "system" && JSON.stringify(message).includes("This is a finite Home task."))) {
+        if (++resumedTurns === 1) return fauxAssistantMessage([fauxToolCall("checkin", alert)], { stopReason: "toolUse" });
+        return untilStopped("resumed stopped")(context, options);
+      }
+      homeTurns++;
+      return fauxAssistantMessage("Stopped result acknowledged.");
+    };
+    f.faux.setResponses(Array.from({ length: 20 }, () => resumedResponse));
+    const resumed = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: run.taskId }) as { taskId: string; operationId: string };
+    await waitFor(() => resumedTurns === 2, "resumed worker continues after limited checkin");
+    const resumedStatus = await owner.taskStatus(resumed.taskId);
+    expect(resumedStatus.checkins?.at(-1)).toMatchObject({ attention: "rate-limited", operationId: resumed.operationId });
+    expect(resumedStatus.lastAttentionAt).toBe(active.lastAttentionAt);
+    expect(homeTurns).toBe(beforeResume);
+    await owner.stopTask(resumed);
+    await waitAcknowledged(f, resumed.taskId);
+    checkinEvidence.push({ case: "attention-wake-rate-limit-resume", active, resumed: resumedStatus, delivered: results(home.canonicalSessionEntries() as Entry[]) });
+  }, 30_000);
+
   it("wakes an idle Home on a settled result, and Home replies with no user message", async () => {
     const f = await fixture();
     await configure(f);

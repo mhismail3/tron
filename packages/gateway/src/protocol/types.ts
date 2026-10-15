@@ -1368,6 +1368,7 @@ export interface HomeTaskSummary extends HomeTaskDisplay {
   outcome: "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown" | null;
   spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
   attention: boolean;
+  checkins: import("../home/home-task-checkin.js").HomeTaskCheckin[];
   pendingGrant: boolean;
 }
 export interface HomeTaskPage {

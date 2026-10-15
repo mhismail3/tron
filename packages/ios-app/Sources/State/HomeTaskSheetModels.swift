@@ -13,6 +13,28 @@ struct HomeTaskSpendDTO: Decodable, Equatable, Sendable {
     }
 }
 
+/// Last-known progress, with the original operation retained across an in-place resume.
+struct HomeTaskCheckinDTO: Decodable, Equatable, Sendable {
+    let id: String
+    let taskId: String
+    let sessionId: String
+    let operationId: String
+    let at: String
+    let step: String
+    let done: String
+    let next: String
+    let blocker: String?
+    var valid: Bool {
+        [id, taskId, sessionId, operationId].allSatisfy(homeID)
+            && HomeChapterPresentation.parse(at) != nil && homeText(step, bytes: 256)
+            && homeText(done, bytes: 512) && homeText(next, bytes: 512)
+            && (blocker.map { homeText($0, bytes: 512) } ?? true)
+    }
+    static func valid(_ values: [Self]) -> Bool {
+        values.count <= 3 && values.allSatisfy(\.valid) && Set(values.map(\.id)).count == values.count
+    }
+}
+
 struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
     struct Row: Decodable, Equatable, Sendable, Identifiable {
         let taskId: String
@@ -29,10 +51,11 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
         let spend: HomeTaskSpendDTO?
         let attention: Bool
         let pendingGrant: Bool
+        let checkins: [HomeTaskCheckinDTO]
         var id: String { taskId }
         /// The Gateway names the dispatched worker `sessionId` (HomeTaskSummary).
         private enum CodingKeys: String, CodingKey {
-            case taskId, createdAt, updatedAt, title, project, target, lifecycle, outcome, spend, attention, pendingGrant
+            case taskId, createdAt, updatedAt, title, project, target, lifecycle, outcome, spend, attention, pendingGrant, checkins
             case workerSessionId = "sessionId"
         }
         var valid: Bool {
@@ -40,6 +63,7 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
                 && (title.map { $0.unicodeScalars.count <= 160 && homeText($0, bytes: 640) } ?? true)
                 && (project.map { homeText($0, bytes: 512) } ?? true)
                 && (workerSessionId.map(homeID) ?? true)
+                && HomeTaskCheckinDTO.valid(checkins)
                 && homeText(target, bytes: 4096)
                 && target.hasPrefix("/") && ((lifecycle == .terminal) == (outcome != nil)) && (spend?.valid ?? true)
         }
@@ -96,11 +120,12 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
     let workerModel: ModelRef?
     let subagents: Subagents?
     let subagentRuns: SubagentRuns?
+    let checkins: [HomeTaskCheckinDTO]
 
     /// The Gateway's task record names the dispatched worker `sessionId`.
     private enum CodingKeys: String, CodingKey {
         case taskId, homeId, createdAt, updatedAt, intent, title, project, target, lifecycle, operationId, spend
-        case terminalEvidence, wake, workerModel, subagents, subagentRuns
+        case terminalEvidence, wake, workerModel, subagents, subagentRuns, checkins
         case workerSessionId = "sessionId"
     }
 
@@ -132,6 +157,7 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
               task.target.hasPrefix("/"), task.spend?.valid ?? true,
               task.title.map({ $0.unicodeScalars.count <= 160 && homeText($0, bytes: 640) }) ?? true,
               task.project.map({ homeText($0, bytes: 512) }) ?? true,
+              HomeTaskCheckinDTO.valid(task.checkins),
               task.workerSessionId.map(homeID) ?? true,
               (task.lifecycle == .terminal) == (task.terminalEvidence != nil),
               (task.lifecycle == .terminal) == (task.wake != nil),
