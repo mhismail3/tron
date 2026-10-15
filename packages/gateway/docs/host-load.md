@@ -42,8 +42,9 @@ one while its command still runs.
   Measured on this Mac (#1022): the unsharded Gateway vitest suite peaks at 2.9 GB,
   the nested suite at 2.1 GB, a type check at 1 GB. Xcode and simulator work runs in
   launchd-owned services outside the run's process tree, so `work verify` claims a
-  conservative 6 GB when its plan includes a native build. Three 4 GB runs fit the
-  default budget together; a fourth waits.
+  conservative 6 GB when its plan includes a native build. Four 4 GB runs fit the
+  default budget, which is also the default slot count; with less memory available
+  beyond the reserve, fewer start.
 - **Queue.** Waiters hold FIFO tickets (owner, worktree, PID, command, need,
   enqueue time); a waiter prints its position and why it waits (memory, load)
   whenever that changes. `scripts/tron-heavy status` prints the budget, claimed
