@@ -251,7 +251,9 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
     /// restores this and `annotations` separately, never the composed envelope.
     let draftText: String
     let annotations: [ChatAnnotation]
-    let resourceInvocation: ComposerResourceInvocation?
+    /// Ordered skills and prompts (no arguments), or one extension command
+    /// whose arguments are `outgoingText`. Empty for an ordinary message.
+    let resourceInvocations: [ComposerResourceInvocation]
     let attachmentIDs: [String]
     let behavior: String?
     let route: ComposerSubmissionRoute
@@ -263,7 +265,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         outgoingText: String,
         draftText: String? = nil,
         annotations: [ChatAnnotation] = [],
-        resourceInvocation: ComposerResourceInvocation? = nil,
+        resourceInvocations: [ComposerResourceInvocation] = [],
         attachmentIDs: [String],
         behavior: String?,
         route: ComposerSubmissionRoute = .session,
@@ -276,12 +278,14 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         self.outgoingText = outgoingText
         self.draftText = draftText ?? outgoingText
         self.annotations = annotations
-        self.resourceInvocation = resourceInvocation
+        self.resourceInvocations = resourceInvocations
         self.attachmentIDs = attachmentIDs
         self.behavior = behavior
         self.route = route
         self.baselineQueuedMessageIDs = baselineQueuedMessageIDs
     }
+
+    var isExtensionCommand: Bool { resourceInvocations.first?.isExtensionCommand == true }
 
     /// Stable only for the owning presentation and admitted submission. This
     /// is a presentation identity, never a transcript/event ID.
@@ -370,7 +374,7 @@ typealias ComposerSendOperation = @MainActor @Sendable (
     _ sessionID: String,
     _ uploadIDs: [String],
     _ behavior: String?,
-    _ resourceInvocation: ComposerResourceInvocation?,
+    _ resourceInvocations: [ComposerResourceInvocation],
     _ route: ComposerSubmissionRoute
 ) async throws -> String
 
@@ -437,9 +441,9 @@ final class ComposerDraftCoordinator {
         let snapshot: ComposerSubmissionSnapshot
         let submittedAttachments: [PendingAttachment]
         let scope: ComposerDraftScope
-        let submittedResource: CommandInfo?
+        let submittedResources: [CommandInfo]
         let resourceMutationRevision: Int
-        var canRestoreSubmittedResource: Bool
+        var canRestoreSubmittedResources: Bool
         let baselineTranscriptIDs: Set<String>
         let lifecycleGeneration: Int
         let runtimeGeneration: String?
@@ -464,7 +468,7 @@ final class ComposerDraftCoordinator {
         let operationID: String
         let snapshot: ComposerSubmissionSnapshot
         let submittedAttachments: [PendingAttachment]
-        let submittedResource: CommandInfo?
+        let submittedResources: [CommandInfo]
         let resourceMutationRevision: Int
         let baselineTranscriptIDs: Set<String>
         let runtimeGeneration: String?
@@ -480,8 +484,9 @@ final class ComposerDraftCoordinator {
     @ObservationIgnored private let admitsLifecycleGeneration: @MainActor (Int) -> Bool
 
     private var drafts: [ComposerDraftScope: Draft] = [:]
-    private var selectedResourceByScope: [ComposerDraftScope: CommandInfo] = [:]
-    /// Staged quote+comment annotations. Like the selected resource they are
+    /// Staged skill/prompt chips in pick order, or one exclusive extension command (#311).
+    private var selectedResourcesByScope: [ComposerDraftScope: [CommandInfo]] = [:]
+    /// Staged quote+comment annotations. Like the selected resources they are
     /// presentation-lifetime draft state, not persisted with the text draft.
     private var annotationsByScope: [ComposerDraftScope: [ChatAnnotation]] = [:]
     private var resourceMutationRevisionByScope: [ComposerDraftScope: Int] = [:]
@@ -593,8 +598,8 @@ final class ComposerDraftCoordinator {
         evictInactiveDraftsIfNeeded()
     }
 
-    func selectedResource(for scope: ComposerDraftScope) -> CommandInfo? {
-        selectedResourceByScope[scope]
+    func selectedResources(for scope: ComposerDraftScope) -> [CommandInfo] {
+        selectedResourcesByScope[scope] ?? []
     }
 
     func annotations(for scope: ComposerDraftScope) -> [ChatAnnotation] {
@@ -617,41 +622,58 @@ final class ComposerDraftCoordinator {
         if annotationsByScope[scope]?.isEmpty == true { annotationsByScope[scope] = nil }
     }
 
+    /// Picking a skill or prompt appends its chip; existing chips stay and a
+    /// resource already staged is not added twice. An extension command runs
+    /// instead of a message, so it replaces every chip and is replaced by the
+    /// next skill or prompt picked (#311).
     func selectResource(_ command: CommandInfo, for scope: ComposerDraftScope) {
         guard !command.name.isEmpty else { return }
-        selectedResourceByScope[scope] = command
+        let current = selectedResourcesByScope[scope] ?? []
+        let next: [CommandInfo]
+        if command.source == .extension {
+            next = [command]
+        } else {
+            let messageResources = current.filter { $0.source != .extension }
+            guard !messageResources.contains(where: { Self.sameResource($0, command) }),
+                  messageResources.count < ComposerResourceInvocation.maximumMessageResources else {
+                return
+            }
+            next = messageResources + [command]
+        }
+        selectedResourcesByScope[scope] = next
         resourceMutationRevisionByScope[scope, default: 0] &+= 1
         touch(scope, installing: nil)
     }
 
-    func removeSelectedResource(for scope: ComposerDraftScope) {
-        selectedResourceByScope[scope] = nil
+    func removeSelectedResource(_ command: CommandInfo, for scope: ComposerDraftScope) {
+        let remaining = (selectedResourcesByScope[scope] ?? []).filter { !Self.sameResource($0, command) }
+        selectedResourcesByScope[scope] = remaining.isEmpty ? nil : remaining
         resourceMutationRevisionByScope[scope, default: 0] &+= 1
+    }
+
+    private static func sameResource(_ left: CommandInfo, _ right: CommandInfo) -> Bool {
+        left.source == right.source && left.name == right.name
     }
 
     /// Catalog replacement is authoritative. A retired or shadowed resource
     /// cannot remain staged or be resurrected by a late transport failure;
-    /// metadata-only refreshes preserve the stable source/name selection.
-    func reconcileSelectedResource(for scope: ComposerDraftScope, commands: [CommandInfo]) {
-        if let selected = selectedResourceByScope[scope] {
-            let matches = commands.filter {
-                $0.source == selected.source && $0.name == selected.name
+    /// metadata-only refreshes preserve the stable source/name selection of
+    /// every other chip.
+    func reconcileSelectedResources(for scope: ComposerDraftScope, commands: [CommandInfo]) {
+        if let selected = selectedResourcesByScope[scope] {
+            let reconciled = selected.compactMap { resource in
+                Self.resourceIsUnambiguous(resource, in: commands)
+                    ? commands.first { Self.sameResource($0, resource) } : nil
             }
-            let shadowed = selected.source != .extension && commands.contains {
-                $0.source == .extension && $0.name == selected.name
-            }
-            if matches.count == 1, !shadowed {
-                selectedResourceByScope[scope] = matches[0]
-            } else {
-                selectedResourceByScope[scope] = nil
+            if reconciled.count != selected.count {
                 resourceMutationRevisionByScope[scope, default: 0] &+= 1
             }
+            selectedResourcesByScope[scope] = reconciled.isEmpty ? nil : reconciled
         }
         guard let scope = lease?.scope,
               var admission = submissionByScope[scope],
-              let submitted = admission.submittedResource,
-              !Self.resourceIsUnambiguous(submitted, in: commands) else { return }
-        admission.canRestoreSubmittedResource = false
+              !admission.submittedResources.allSatisfy({ Self.resourceIsUnambiguous($0, in: commands) }) else { return }
+        admission.canRestoreSubmittedResources = false
         submissionByScope[scope] = admission
     }
 
@@ -860,7 +882,7 @@ final class ComposerDraftCoordinator {
         guard admission.snapshot.outgoingText == pending.text,
               admission.snapshot.attachmentIDs.count == pending.attachmentCount,
               admission.snapshot.behavior == pending.behavior?.rawValue,
-              admission.snapshot.resourceInvocation == pending.resourceInvocation else {
+              admission.snapshot.resourceInvocations == (pending.resourceInvocations ?? []) else {
             return false
         }
         let photoCount = admission.submittedAttachments.reduce(into: 0) { count, attachment in
@@ -1053,7 +1075,7 @@ final class ComposerDraftCoordinator {
             return message.behavior.rawValue == behavior
                 && message.text == admission.snapshot.outgoingText
                 && message.attachmentCount == admission.submittedAttachments.count
-                && message.resourceInvocation == admission.snapshot.resourceInvocation
+                && (message.resourceInvocations ?? []) == admission.snapshot.resourceInvocations
         }
         admission.provisionalQueuedCandidateID = if admission.operationID == nil,
                                                     queuedCandidates.count == 1 {
@@ -1489,7 +1511,7 @@ final class ComposerDraftCoordinator {
     func beginSubmission(
         target: SessionPresentationIdentity,
         behavior: String?,
-        resourceInvocation: ComposerResourceInvocation? = nil,
+        typedInvocation: ComposerResourceInvocation? = nil,
         route: ComposerSubmissionRoute = .session,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
@@ -1498,7 +1520,7 @@ final class ComposerDraftCoordinator {
         try beginSubmissionAdmission(
             target: target,
             behavior: behavior,
-            resourceInvocation: resourceInvocation,
+            typedInvocation: typedInvocation,
             route: route,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages,
@@ -1531,7 +1553,7 @@ final class ComposerDraftCoordinator {
                 submission.target.sessionID,
                 admission.snapshot.attachmentIDs,
                 admission.snapshot.behavior,
-                admission.snapshot.resourceInvocation,
+                admission.snapshot.resourceInvocations,
                 admission.snapshot.route
             )
         } catch {
@@ -1556,7 +1578,7 @@ final class ComposerDraftCoordinator {
         // there is no canonical user message to reconcile. Retire only this
         // composer admission while the Gateway command receipt owns transcript
         // lifecycle and any downstream turns independently.
-        if admission.snapshot.resourceInvocation?.isExtensionCommand == true,
+        if admission.snapshot.isExtensionCommand,
            let accepted = submissionByScope[admission.scope],
            accepted.id == admission.id {
             retireSubmissionForLifecycleReset(accepted)
@@ -1613,7 +1635,7 @@ final class ComposerDraftCoordinator {
         textMutationRevisionByScope[scope] = nil
         restoreTasks[scope]?.cancel()
         restoreTasks[scope] = nil
-        selectedResourceByScope[scope] = nil
+        selectedResourcesByScope[scope] = nil
         annotationsByScope[scope] = nil
         resourceMutationRevisionByScope[scope] = nil
         preparedOpenBySession[sessionID] = nil
@@ -1642,7 +1664,7 @@ final class ComposerDraftCoordinator {
             $0.key.profileID != profileID
         }
         restoreTasks = restoreTasks.filter { $0.key.profileID != profileID }
-        selectedResourceByScope = selectedResourceByScope.filter { $0.key.profileID != profileID }
+        selectedResourcesByScope = selectedResourcesByScope.filter { $0.key.profileID != profileID }
         annotationsByScope = annotationsByScope.filter { $0.key.profileID != profileID }
         resourceMutationRevisionByScope = resourceMutationRevisionByScope.filter { $0.key.profileID != profileID }
         preparedOpenBySession = preparedOpenBySession.filter { $0.value.scope.profileID != profileID }
@@ -1966,7 +1988,7 @@ final class ComposerDraftCoordinator {
     private func beginSubmissionAdmission(
         target: SessionPresentationIdentity,
         behavior: String?,
-        resourceInvocation: ComposerResourceInvocation?,
+        typedInvocation: ComposerResourceInvocation?,
         route: ComposerSubmissionRoute,
         canonicalTranscript: [TranscriptItem],
         queuedMessages: [SessionSnapshot.QueuedMessage],
@@ -1994,32 +2016,40 @@ final class ComposerDraftCoordinator {
         let draft = drafts[scope] ?? Draft(text: "", revision: 0)
         let rawOutgoing = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachmentsByScope[scope] ?? []
-        let submittedResource = selectedResourceByScope[scope]
+        // Staged chips are the sole invocation authority; a typed leading
+        // invocation applies only when no chip is staged.
+        let submittedResources = selectedResourcesByScope[scope] ?? []
+        let typedInvocation = submittedResources.isEmpty ? typedInvocation : nil
         let submittedAnnotations = annotationsByScope[scope] ?? []
         // A manually typed leading invocation is normalized at the ChatView
         // boundary. Its arguments become the sole visible/executed prompt text.
-        let draftOutgoing = resourceInvocation?.arguments ?? rawOutgoing
-        // Annotations travel as prompt text ahead of the message (and of a
-        // resource's arguments), so the model and canonical transcript see
-        // exactly what was sent.
+        let draftOutgoing = typedInvocation?.arguments ?? rawOutgoing
+        // Annotations travel as prompt text ahead of the message, so the model
+        // and canonical transcript see exactly what was sent.
         let outgoing = ChatAnnotationEnvelope.compose(annotations: submittedAnnotations, body: draftOutgoing)
-        let selectedResource = resourceInvocation.map {
-            ComposerResourceInvocation(source: $0.source, name: $0.name, arguments: outgoing)
-        } ?? submittedResource.map {
-            let source: ComposerResourceInvocation.Source = switch $0.source {
-            case .skill: .skill
-            case .prompt: .prompt
-            case .extension: .extension
+        // Skills and prompts expand ahead of the message text, which follows them
+        // once; an extension command's arguments are the message text (#311).
+        let invocations: [(source: ComposerResourceInvocation.Source, name: String)] = if let typedInvocation {
+            [(typedInvocation.source, typedInvocation.name)]
+        } else {
+            submittedResources.map {
+                let source: ComposerResourceInvocation.Source = switch $0.source {
+                case .skill: .skill
+                case .prompt: .prompt
+                case .extension: .extension
+                }
+                return (source, source == .skill && $0.name.hasPrefix("skill:")
+                    ? String($0.name.dropFirst("skill:".count)) : $0.name)
             }
-            return ComposerResourceInvocation(
-                source: source,
-                name: source == .skill && $0.name.hasPrefix("skill:")
-                    ? String($0.name.dropFirst("skill:".count))
-                    : $0.name,
-                arguments: outgoing
-            )
         }
-        if let selectedResource, !selectedResource.isTransportValid {
+        let selectedResources = invocations.map {
+            ComposerResourceInvocation(source: $0.source, name: $0.name, arguments: $0.source == .extension ? outgoing : "")
+        }
+        let isExtensionCommand = selectedResources.first?.isExtensionCommand == true
+        if !selectedResources.isEmpty,
+           !(isExtensionCommand
+               ? selectedResources.count == 1 && selectedResources[0].isTransportValid
+               : ComposerResourceInvocation.admitsMessageResources(selectedResources)) {
             throw GatewayFailure(
                 code: "invalid_request",
                 message: "Resource names and arguments must fit the bounded Gateway invocation contract.",
@@ -2036,7 +2066,7 @@ final class ComposerDraftCoordinator {
             )
         }
         let attachmentIDs = submittedAttachments.compactMap(\.gatewayUploadID)
-        if selectedResource?.isExtensionCommand == true, !submittedAnnotations.isEmpty {
+        if isExtensionCommand, !submittedAnnotations.isEmpty {
             throw GatewayFailure(
                 code: "command_annotations_unsupported",
                 message: "Extension commands cannot include annotations.",
@@ -2044,7 +2074,7 @@ final class ComposerDraftCoordinator {
                 details: nil
             )
         }
-        if selectedResource?.isExtensionCommand == true, !attachmentIDs.isEmpty {
+        if isExtensionCommand, !attachmentIDs.isEmpty {
             throw GatewayFailure(
                 code: "command_attachments_unsupported",
                 message: "Extension commands cannot include attachments.",
@@ -2052,13 +2082,13 @@ final class ComposerDraftCoordinator {
                 details: nil
             )
         }
-        guard !outgoing.isEmpty || !attachmentIDs.isEmpty || selectedResource != nil else {
+        guard !outgoing.isEmpty || !attachmentIDs.isEmpty || !selectedResources.isEmpty else {
             throw CancellationError()
         }
         // Ordinary prompt admission must match the Gateway's exact UTF-8
         // boundary before clearing the draft or installing an optimistic row.
-        // Resource invocations retain their narrower transport contract above.
-        if selectedResource == nil,
+        // An extension command retains its narrower transport contract above.
+        if !isExtensionCommand,
            !SharedContentAdmissionPolicy.admitsPrompt(outgoing) {
             throw GatewayFailure(
                 code: "invalid_request",
@@ -2074,7 +2104,7 @@ final class ComposerDraftCoordinator {
             outgoingText: outgoing,
             draftText: draftOutgoing,
             annotations: submittedAnnotations,
-            resourceInvocation: selectedResource,
+            resourceInvocations: selectedResources,
             attachmentIDs: attachmentIDs,
             behavior: behavior,
             route: route,
@@ -2086,9 +2116,9 @@ final class ComposerDraftCoordinator {
             snapshot: snapshot,
             submittedAttachments: submittedAttachments,
             scope: scope,
-            submittedResource: submittedResource,
+            submittedResources: submittedResources,
             resourceMutationRevision: resourceMutationRevisionByScope[scope, default: 0],
-            canRestoreSubmittedResource: true,
+            canRestoreSubmittedResources: true,
             baselineTranscriptIDs: Set(canonicalTranscript.map(\.id)),
             lifecycleGeneration: lease.lifecycleGeneration,
             runtimeGeneration: runtimeGeneration,
@@ -2106,7 +2136,7 @@ final class ComposerDraftCoordinator {
         settledQueueHandoffs[scope] = nil
         submissionByScope[scope] = admission
         setText("", for: scope)
-        selectedResourceByScope[scope] = nil
+        selectedResourcesByScope[scope] = nil
         annotationsByScope[scope] = nil
         return admission
     }
@@ -2152,10 +2182,10 @@ final class ComposerDraftCoordinator {
             )
             schedulePersistence(for: scope)
         }
-        if currentAdmission.canRestoreSubmittedResource,
+        if currentAdmission.canRestoreSubmittedResources,
            resourceMutationRevisionByScope[scope, default: 0] == currentAdmission.resourceMutationRevision,
-           selectedResourceByScope[scope] == nil {
-            selectedResourceByScope[scope] = currentAdmission.submittedResource
+           selectedResourcesByScope[scope] == nil, !currentAdmission.submittedResources.isEmpty {
+            selectedResourcesByScope[scope] = currentAdmission.submittedResources
         }
         if lease?.scope == scope {
             submissionByScope[scope] = nil
@@ -2290,7 +2320,7 @@ final class ComposerDraftCoordinator {
                     operationID: operationID,
                     snapshot: current.snapshot,
                     submittedAttachments: current.submittedAttachments.map { $0.frozenForHandoff() },
-                    submittedResource: current.submittedResource,
+                    submittedResources: current.submittedResources,
                     resourceMutationRevision: current.resourceMutationRevision,
                     baselineTranscriptIDs: current.baselineTranscriptIDs,
                     runtimeGeneration: current.runtimeGeneration
@@ -2373,8 +2403,8 @@ final class ComposerDraftCoordinator {
             attachmentsByScope[scope] = nil
         }
         if resourceMutationRevisionByScope[scope, default: 0] == handoff.resourceMutationRevision,
-           selectedResourceByScope[scope] == nil {
-            selectedResourceByScope[scope] = handoff.submittedResource
+           selectedResourcesByScope[scope] == nil, !handoff.submittedResources.isEmpty {
+            selectedResourcesByScope[scope] = handoff.submittedResources
         }
         settledQueueHandoffs[scope] = nil
         settledQueueAliases[target]?[handoff.operationID] = nil
@@ -2429,11 +2459,7 @@ final class ComposerDraftCoordinator {
     ) -> Bool {
         guard item.kind == .message, item.role == .user,
               !baselineTranscriptIDs.contains(item.id) else { return false }
-        if let expectedResource = snapshot.resourceInvocation {
-            guard item.semantic?.resourceInvocation == expectedResource else { return false }
-        } else if item.semantic?.resourceInvocation != nil {
-            return false
-        }
+        guard (item.semantic?.resourceInvocations ?? []) == snapshot.resourceInvocations else { return false }
         let text = (item.content ?? []).compactMap { part -> String? in
             guard part.type == .text, part.attachment == nil else { return nil }
             return part.text
@@ -2551,7 +2577,7 @@ final class ComposerDraftCoordinator {
             textMutationRevisionByScope[scope] = nil
             dirtyScopes.remove(scope)
             enqueuePersistence { store in await store.remove(scope) }
-            selectedResourceByScope[scope] = nil
+            selectedResourcesByScope[scope] = nil
             annotationsByScope[scope] = nil
             resourceMutationRevisionByScope[scope] = nil
             settledQueueHandoffs[scope] = nil

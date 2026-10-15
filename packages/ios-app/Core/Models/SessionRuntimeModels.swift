@@ -523,6 +523,17 @@ package struct ComposerResourceInvocation: Codable, Equatable, Hashable, Sendabl
 
     package var isExtensionCommand: Bool { source == .extension }
 
+    /// One message may combine at most this many skills and prompts (Gateway contract, #311).
+    package static let maximumMessageResources = 16
+
+    /// A message's skills and prompts: each at most once, none with arguments
+    /// (the message text follows every expansion once), never an extension command.
+    package static func admitsMessageResources(_ resources: [ComposerResourceInvocation]) -> Bool {
+        !resources.isEmpty && resources.count <= maximumMessageResources
+            && resources.allSatisfy { $0.source != .extension && $0.arguments.isEmpty && $0.isTransportValid }
+            && Set(resources.map { "\($0.source.rawValue):\($0.name)" }).count == resources.count
+    }
+
     package init(source: Source, name: String, arguments: String) {
         self.source = source
         self.name = name
@@ -726,13 +737,13 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         package var fileAttachmentCount: Int? = nil
         /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
         package var attachments: [PromptAttachment]? = nil
-        package var resourceInvocation: ComposerResourceInvocation? = nil
+        package var resourceInvocations: [ComposerResourceInvocation]? = nil
         package var semantic: ChatSemanticMetadata? = nil
 
         package init(
             id: String, behavior: Behavior, text: String, attachmentCount: Int,
             photoCount: Int? = nil, fileAttachmentCount: Int? = nil, attachments: [PromptAttachment]? = nil,
-            resourceInvocation: ComposerResourceInvocation? = nil, semantic: ChatSemanticMetadata? = nil
+            resourceInvocations: [ComposerResourceInvocation]? = nil, semantic: ChatSemanticMetadata? = nil
         ) {
             self.id = id
             self.behavior = behavior
@@ -741,7 +752,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
             self.photoCount = photoCount
             self.fileAttachmentCount = fileAttachmentCount
             self.attachments = attachments
-            self.resourceInvocation = resourceInvocation
+            self.resourceInvocations = resourceInvocations
             self.semantic = semantic
         }
     }
@@ -756,13 +767,13 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         package var fileAttachmentCount: Int? = nil
         /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
         package var attachments: [PromptAttachment]? = nil
-        package var resourceInvocation: ComposerResourceInvocation? = nil
+        package var resourceInvocations: [ComposerResourceInvocation]? = nil
         package var semantic: ChatSemanticMetadata? = nil
 
         package init(
             id: String, createdAt: String?, behavior: QueuedMessage.Behavior?, text: String,
             attachmentCount: Int, photoCount: Int? = nil, fileAttachmentCount: Int? = nil,
-            attachments: [PromptAttachment]? = nil, resourceInvocation: ComposerResourceInvocation? = nil,
+            attachments: [PromptAttachment]? = nil, resourceInvocations: [ComposerResourceInvocation]? = nil,
             semantic: ChatSemanticMetadata? = nil
         ) {
             self.id = id
@@ -773,7 +784,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
             self.photoCount = photoCount
             self.fileAttachmentCount = fileAttachmentCount
             self.attachments = attachments
-            self.resourceInvocation = resourceInvocation
+            self.resourceInvocations = resourceInvocations
             self.semantic = semantic
         }
     }
@@ -869,29 +880,29 @@ package enum SessionSnapshotQueueAdmissionPolicy {
         guard ids.allSatisfy({ !$0.isEmpty }), Set(ids).count == ids.count else { return false }
         guard queued.allSatisfy({ message in
             admits(
-                message.resourceInvocation,
+                message.resourceInvocations,
                 text: message.text,
                 attachmentCount: message.attachmentCount
             )
         }) else { return false }
         guard let pending = snapshot.pendingPrompt else { return true }
         return admits(
-            pending.resourceInvocation,
+            pending.resourceInvocations,
             text: pending.text,
             attachmentCount: pending.attachmentCount
         )
     }
 
     private static func admits(
-        _ resource: ComposerResourceInvocation?,
+        _ resources: [ComposerResourceInvocation]?,
         text: String,
         attachmentCount: Int
     ) -> Bool {
         guard attachmentCount >= 0 else { return false }
-        guard let resource else { return true }
-        guard resource.arguments == text, resource.isTransportValid else { return false }
-        // Extension commands execute immediately and never belong to prompt queue state.
-        return resource.source != .extension
+        guard let resources else { return true }
+        // Extension commands execute immediately and never belong to prompt
+        // queue state; queued skills and prompts carry no arguments of their own.
+        return ComposerResourceInvocation.admitsMessageResources(resources)
     }
 }
 
