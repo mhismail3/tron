@@ -15,6 +15,7 @@ import { GatewayServer } from "./server.js";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { chatSettingChange, changedRevision, type ChatSetting } from "../../test-support/chat-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { TerminalService } from "../machine/terminal-service.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which RPCs the session idle
@@ -140,7 +141,8 @@ async function fixture(options: {
     broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
     receipts: new CommandReceiptStore(root),
     uploads,
-    terminals: { belongsToSession: () => false, beginRestartDrain: () => true, activeTerminalIds: () => [] },
+    // The real owner with no PTYs: restart admission reads its true state.
+    terminals: new TerminalService(64_000, () => {}),
     logger: diagnosticLogger,
     ...(options.authRuntime ? { modelRuntime: options.authRuntime } : {}),
     ...(auth ? { auth } : {}),

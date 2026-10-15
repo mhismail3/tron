@@ -12,6 +12,7 @@ import { TrustService } from "./admin/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
+import { terminalIdleLimitMs } from "./admin/settings-schema.js";
 import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
 import { SettingsRiskEvaluator } from "./admin/settings-risk.js";
 import { SettingsChangeRecord } from "./admin/settings-record.js";
@@ -529,6 +530,15 @@ sessions.setKnowledgeService(knowledge);
 const terminal = new TerminalService(
   config.terminalReplayBytes,
   (terminalId, topic, payload) => transport?.broadcastTerminal(terminalId, topic, payload),
+  {
+    // The Mac-layer setting is read at every idle pass, so a change applies
+    // without a restart (#479, docs/settings-model.md).
+    idle: {
+      idleLimitMs: () => terminalIdleLimitMs(settingsModel),
+      isAttached: (terminalId) => transport?.terminalAttached(terminalId) ?? false,
+    },
+    log: (level, message, metadata) => logger.log(level, message, { ...metadata, source: "terminal" }),
+  },
 );
 const packages = new PackageService(
   config.agentDir,

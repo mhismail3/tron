@@ -49,7 +49,10 @@ export type Binding =
   | { store: "mac-terminal" }
   /** `<tronHome>/gateway/settings/floors.json`: the maintainer's floor
    * overrides, `{ [keyId]: { widen?, narrow? } }` (doc 5.4). */
-  | { store: "floors" };
+  | { store: "floors" }
+  /** `<tronHome>/gateway/settings/gateway.json`: Gateway-owned behaviour no pi
+   * file holds, by path (Mac layer only; only the change path writes it). */
+  | { store: "gateway"; path: readonly string[] };
 
 export type Floor = Tier | { widen: Tier; narrow: Tier };
 export type TimingDeclaration = Timing | { widen: Timing; narrow: Timing };
@@ -201,6 +204,27 @@ function packagesType(): ValueType {
 }
 
 const pi = (...path: string[]): Binding => ({ store: "pi", path });
+
+export const TERMINAL_IDLE_DEFAULT_MINUTES = 60;
+const TERMINAL_IDLE_CHOICES = [0, 15, 30, 60, 120, 240, 480, 1_440] as const;
+/** Minutes, with 0 as Off: a bounded choice, so every client offers the same periods. */
+function terminalIdleType(): ValueType {
+  const label = (minutes: number) => minutes === 0 ? "Off" : minutes < 60 ? `${minutes} minutes`
+    : minutes === 60 ? "1 hour" : `${minutes / 60} hours`;
+  return {
+    kind: "choice",
+    validate: (value, name) => {
+      const minutes = integer(value, name, 0, 1_440);
+      if (!(TERMINAL_IDLE_CHOICES as readonly number[]).includes(minutes)) throw new GatewayError("invalid_request", `${name} must be one of the offered periods`);
+      return minutes;
+    },
+    format: value => label(value as number),
+    options: TERMINAL_IDLE_CHOICES.map(minutes => ({
+      value: minutes, label: label(minutes),
+      ...(minutes === 0 ? { detail: "Idle terminals stay open and can block a restart" } : {}),
+    })),
+  };
+}
 const both = (binding: Binding) => ({ project: binding, mac: binding });
 const chatPi = (...path: string[]) => ({ chat: { store: "chat-settings", path } as Binding, ...both(pi(...path)) });
 
@@ -539,9 +563,32 @@ export const KEYS: readonly KeyDeclaration[] = [
     timing: "live", effect: "next-request", floor: "quiet", writers: ["ui"], label: "Install telemetry",
     help: "Send pi's anonymous install attribution header.", order: 20, importance: "advanced", control: "toggle",
   },
+  {
+    // #479: an app terminal left detached at an empty shell prompt is closed
+    // after this period, so it stops blocking Gateway restarts. Busy terminals
+    // (open on a device, running a program, holding typed input) never close.
+    // TerminalService reads it at every idle pass, so a change applies live.
+    id: "setup.terminalIdleMinutes", group: "setup", type: terminalIdleType(),
+    layers: { mac: { store: "gateway", path: ["terminal", "idleMinutes"] } }, builtin: TERMINAL_IDLE_DEFAULT_MINUTES,
+    timing: "live", effect: "next-change", floor: "notify", writers: ANY_ACTOR,
+    label: "Close idle terminals",
+    help: "Closes an app terminal no device has open, sitting at an empty prompt with nothing typed, after this long.",
+    order: 30, importance: "advanced", control: "choice",
+  },
 ];
 
 const byId = new Map(KEYS.map(key => [key.id, key]));
+
+/** The configured idle period for app terminals in ms, or null when off
+ * (#479). The Gateway store is the Mac layer's truth; the built-in applies when
+ * it is unset. */
+export async function terminalIdleLimitMs(model: {
+  resolve(target: { kind: "mac" }, session?: undefined, keys?: readonly string[], options?: { storeState?: boolean }): Promise<{ keys: readonly { key: string; value?: unknown }[] }>;
+}): Promise<number | null> {
+  const resolution = await model.resolve({ kind: "mac" }, undefined, ["setup.terminalIdleMinutes"], { storeState: false });
+  const value = resolution.keys.find(row => row.key === "setup.terminalIdleMinutes")?.value ?? TERMINAL_IDLE_DEFAULT_MINUTES;
+  return typeof value === "number" && value > 0 ? value * 60_000 : null;
+}
 
 export function schemaKey(id: string): KeyDeclaration {
   const key = byId.get(id);

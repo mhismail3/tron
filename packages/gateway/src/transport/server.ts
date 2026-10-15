@@ -1557,6 +1557,15 @@ export class GatewayServer {
     }
   }
 
+  /** Whether any connected client has the terminal open: such a terminal is
+   * in use and never idle-closed (#479). */
+  terminalAttached(terminalId: string): boolean {
+    for (const client of this.clients.values()) {
+      if (client.terminals.has(terminalId)) return true;
+    }
+    return false;
+  }
+
   revokeSessionTerminals(sessionId: string): void {
     for (const client of this.clients.values()) {
       releaseSessionTerminals(

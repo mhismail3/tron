@@ -218,6 +218,7 @@ schema data (F1); no row here is an exception to a rule.
 | `npmCommand` | Sources | Mac | Live |
 | `sessionDir` | Setup | Mac | Restart |
 | `enableInstallTelemetry` | Setup | Mac | Live |
+| App terminal idle period (`gateway/settings/gateway.json` `terminal.idleMinutes`) → `setup.terminalIdleMinutes` | Setup | Mac | Live (next idle pass, #479) |
 | Push policy (`notifications.json`) | Setup | Mac | Live |
 | Terminal-only pi keys (`theme`, `tuiMode`, ...) | Not declared | | |
 
@@ -295,7 +296,7 @@ F2: each store is its layer's truth.
 | Chat | The session JSONL: pi's `model_change` and `thinking_level_change` entries, Tron's `tron.context-window.v1` entry (`packages/gateway/src/providers/context-window-policy.ts`), the active tools, and a new `tron.settings.v1` entry for the other Chat-layer keys and the provenance of fixed values. | The session's runtime slot lane. |
 | Profile (Home) | `<tronHome>/gateway/home/profile.json`, typed. Not Knowledge note text ([6](#6-the-home-profile-layer)). | `HomeOwner`. |
 | Project | `.pi/settings.json`, `.pi/mcp.json` and the rest of `.pi/`, on disk at the chat's worktree root ([Q27](#81-decisions)). | The repo (git). Tron writes the working tree and stages; it never commits ([5.7](#57-project-writes)). |
-| Mac | `<tronHome>/agent/settings.json`, `models.json`, `mcp.json`, `trust.json`, plus the Gateway stores (`connections`, `notifications.json`, `settings/floors.json`). | The Gateway. pi CLI runs and hand edits are outside writers. |
+| Mac | `<tronHome>/agent/settings.json`, `models.json`, `mcp.json`, `trust.json`, plus the Gateway stores (`connections`, `notifications.json`, `settings/floors.json`, and `settings/gateway.json` for Gateway-owned keys no pi file holds). | The Gateway. pi CLI runs and hand edits are outside writers. |
 | Built-in | Code: pi defaults and the schema's `builtin` values. | The release. |
 
 The Mac layer is `<tronHome>/agent/settings.json`: the agent directory is
