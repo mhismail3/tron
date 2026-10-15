@@ -1,3 +1,4 @@
+import { MacTerminalHost, MacTerminalKeys } from "./security/mac-terminal.js";
 import { ManagedSubagents } from "./sessions/managed-subagents.js";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -185,7 +186,10 @@ const trust = new TrustService(config.agentDir, { standaloneDirectories: [homeWo
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
+// Mac Terminal's store is the Gateway user's own ~/.ssh/authorized_keys.
+const macTerminalKeys = new MacTerminalKeys(join(homedir(), ".ssh"));
 const settingsModel = new SettingsModel({
+  macTerminalKeys,
   agentDir: config.agentDir,
   tronHome: config.tronHome,
   trust,
@@ -846,6 +850,7 @@ const service = new GatewayService({
   trust,
   settingsModel,
   settingsChanges,
+  macTerminal: new MacTerminalHost(macTerminalKeys),
   modelConfig,
   packages,
   hookResources,

@@ -4341,6 +4341,15 @@ final class AppModel {
         try await settingsTrust.inspectTrust(target: target)
     }
 
+    func macTerminalStatus() async throws -> MacTerminalStatus {
+        try await settingsTrust.macTerminalStatus()
+    }
+
+    func setMacTerminalKey(device: String, publicKey: String?) async throws {
+        try await settingsTrust.setMacTerminalKey(device: device, publicKey: publicKey)
+        settingsTrust.noteSettingsChanged()
+    }
+
     func setTrust(target: TrustTarget, decision: Bool?) async throws -> JSONValue {
         try await settingsTrust.setTrust(target: target, decision: decision)
     }
