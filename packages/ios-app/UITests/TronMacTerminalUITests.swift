@@ -85,7 +85,7 @@ final class TronMacTerminalUITests: XCTestCase {
         waitForEmulator(app, containing: "SHELL_ONE_42")
         try capture(app, "persist-before-dismiss")
 
-        app.buttons["Done"].tap()
+        app.navigationBars.buttons["Done"].firstMatch.tap()
         let row = app.buttons["settings-link-Mac Terminal"]
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
         row.tap()
