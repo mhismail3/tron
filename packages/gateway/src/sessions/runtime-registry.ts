@@ -1448,7 +1448,10 @@ export class RuntimeRegistry {
         recovery: boolean,
         observed: boolean,
       ) => this.attentionLane.run(async () => {
-        const result = await this.attention.complete(sessionId, completion.id, !recovery && observed);
+        // A Home worker's completions are read by construction (#1003). Startup
+        // recovery runs before the worker index is seeded; seeding acknowledges those.
+        const read = (!recovery && observed) || this.homeTaskWorkers.has(sessionId);
+        const result = await this.attention.complete(sessionId, completion.id, read);
         if (result.changed) await this.publishAttentionSummary(sessionId, result.projection);
       }),
       closed: (sessionId: string, slot: RuntimeSlot) => {
@@ -4875,27 +4878,60 @@ export class RuntimeRegistry {
 
   /** Record which Home task created each worker session. The first task to
    * name a session owns it (a resumed task rebinds the same worker). A change
-   * invalidates catalogs once per call, so recovery publishes one batch. */
+   * invalidates catalogs once per call, so recovery publishes one batch.
+   *
+   * Home workers never read as unread (#1003): their result reports back to
+   * Home, so only sessions the maintainer started himself join the Unread
+   * queue. Every completion of a recorded worker is admitted read. A worker
+   * newly recorded here, which recovery does for every worker in the ledger at
+   * startup, also has any earlier completion acknowledged: that clears unread
+   * left by builds before this rule and completions recovered at startup
+   * before this index was seeded. An explicit mark-unread is kept. */
   recordTaskWorkers(workers: Iterable<readonly [sessionId: string, taskId: string]>): void {
     let changed = false;
+    const acknowledge: string[] = [];
     for (const [sessionId, taskId] of workers) {
       if (this.homeTaskWorkers.has(sessionId)) continue;
       this.homeTaskWorkers.set(sessionId, taskId);
       changed = true;
+      if (this.attention.hasUnacknowledgedCompletion(sessionId)) acknowledge.push(sessionId);
     }
+    if (acknowledge.length > 0) void this.acknowledgeTaskWorkers(acknowledge);
     if (!changed) return;
     this.catalogProjectionGeneration += 1;
     this.options.sessionListChanged();
   }
 
+  private async acknowledgeTaskWorkers(sessionIds: readonly string[]): Promise<void> {
+    await this.attentionLane.run(async () => {
+      let cold = false;
+      for (const sessionId of sessionIds) {
+        try {
+          const result = await this.attention.acknowledgeCompletions(sessionId);
+          if (!result.changed) continue;
+          const latest = this.latestSummaries.get(sessionId);
+          if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
+          else cold = true;
+        } catch {
+          // The worker stays unread until the next startup's seeding retries it.
+          this.options.persistenceDiagnostic?.(sessionId, "home-worker-attention-failed");
+        }
+      }
+      if (cold) {
+        this.catalogProjectionGeneration += 1;
+        this.options.sessionListChanged();
+      }
+    });
+  }
+
   /** A Home task settled: its worker session gains one attention completion,
-   * keyed by the task, so an unopened worker reads as unread exactly like a
-   * chat that finished. A worker ends through its `report` tool call, which is
-   * never a successful final assistant reply, so the ordinary completion path
-   * cannot see it. Observed (read) when the worker chat is presented now. */
+   * keyed by the task, admitted read (#1003) so the worker never joins the
+   * Unread queue; the completion still advances the row's attention revision.
+   * A worker ends through its `report` tool call, which is never a successful
+   * final assistant reply, so the ordinary completion path cannot see it. */
   taskWorkerSettled(sessionId: string, taskId: string): Promise<void> {
     return this.attentionLane.run(async () => {
-      const result = await this.attention.complete(sessionId, `task:${taskId}`, this.isSessionPresented(sessionId));
+      const result = await this.attention.complete(sessionId, `task:${taskId}`, true);
       if (!result.changed) return;
       const latest = this.latestSummaries.get(sessionId);
       if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });

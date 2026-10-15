@@ -129,6 +129,30 @@ export class SessionAttentionStore {
     });
   }
 
+  /** Acknowledge every admitted completion without touching an explicit
+   * mark-unread: a Home worker's completions are read by construction. */
+  async acknowledgeCompletions(sessionId: string): Promise<SessionAttentionMutation> {
+    return this.mutex.run(async () => {
+      const current = ownRecord(this.requireDocument().sessions, sessionId);
+      if (!current || current.readThroughRevision === current.completionRevision) {
+        return { changed: false, projection: projection(current) };
+      }
+      const next: SessionAttentionRecord = {
+        ...current,
+        readThroughRevision: current.completionRevision,
+        attentionRevision: current.attentionRevision + 1,
+      };
+      await this.replace(sessionId, next);
+      return { changed: true, projection: projection(next) };
+    });
+  }
+
+  /** Whether an admitted completion is still unacknowledged (not a manual mark). */
+  hasUnacknowledgedCompletion(sessionId: string): boolean {
+    const record = this.document === undefined ? undefined : ownRecord(this.document.sessions, sessionId);
+    return record !== undefined && record.completionRevision > record.readThroughRevision;
+  }
+
   async remove(sessionId: string): Promise<boolean> {
     return this.mutex.run(async () => {
       const document = this.requireDocument();
