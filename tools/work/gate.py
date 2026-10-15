@@ -211,6 +211,91 @@ def _suite_shards(root: Path, suite: str) -> List[str]:
     return [f"python3 -B {suite} {node.name}" for node in classes if node.name in test_classes]
 
 
+# Swift comments and string literals, blanked before scanning so braces and `func test` inside
+# them are not read as declarations.
+_SWIFT_NOISE = re.compile(r'//[^\n]*|/\*.*?\*/|#*""".*?"""#*|#*"(?:\\.|[^"\\\n])*"#*', re.S)
+_SWIFT_ATTRS = r"(?:@\w+(?:\([^()]*\))?\s*)"
+_SWIFT_MODIFIERS = r"(?:public|internal|open|final|override|nonisolated|private|fileprivate|static|class|mutating)"
+# The head of a top-level type body: `@MainActor final class X: XCTestCase {`, `extension X {`.
+_SWIFT_TYPE_HEAD = re.compile(rf"(?:^|\s)(?:{_SWIFT_ATTRS}|{_SWIFT_MODIFIERS}\s+)*(class|struct|enum|actor|extension|protocol)\s+"
+                              r"([A-Za-z_]\w*)\s*(?::\s*([^{]*?))?\s*(?:where\b[^{]*)?$")
+# The head of a method body XCTest runs: an instance `func testX()` with no parameters, after
+# any attributes and modifiers (`@MainActor`, `@available(...)`, `override`, on the same line or not).
+_SWIFT_TEST_HEAD = re.compile(rf"(?:^|\s)((?:{_SWIFT_ATTRS}|{_SWIFT_MODIFIERS}\s+)*)func\s+(test\w*)\s*\(\s*\)\s*"
+                              r"(?:async\s*)?(?:throws\s*)?(?:->\s*(?:Void|\(\s*\))\s*)?$")
+
+
+def _swift_declarations(source: str) -> tuple:
+    """Top-level types of one Swift file and the XCTest methods each declares.
+
+    Returns ({type: [inherited names]} for classes, [(type, method)] in source order). A method
+    counts only as a direct member of a top-level class or extension body; methods of nested
+    types, local functions and static/private functions are not XCTest test methods.
+    """
+    text = _SWIFT_NOISE.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), source)
+    classes: Dict[str, List[str]] = {}
+    methods: list = []
+    stack: List[Optional[str]] = []  # the enclosing top-level type name, or None for any other body
+    head_start = 0
+    for match in re.finditer(r"[{};]", text):
+        head, head_start = text[head_start:match.start()], match.end()
+        if match.group() == ";":
+            continue
+        if match.group() == "}":
+            if stack:
+                stack.pop()
+            continue
+        owner = None
+        if not stack:
+            declared = _SWIFT_TYPE_HEAD.search(head)
+            if declared:
+                owner = declared.group(2)
+                if declared.group(1) == "class":
+                    classes[owner] = [base.strip() for base in (declared.group(3) or "").split(",") if base.strip()]
+        elif len(stack) == 1 and stack[0]:
+            test = _SWIFT_TEST_HEAD.search(head)
+            if test and not re.search(r"\b(static|class|private|fileprivate)\s", test.group(1)):
+                methods.append((stack[0], test.group(2)))
+        stack.append(owner)
+    return classes, methods
+
+
+def _ios_journey_shards(root: Path, paths: List[str]) -> List[str]:
+    """One shard per IOS_METHODS_PER_SHARD test methods of each changed UI test class, all
+    from the same stamped build products; methods are read from the files every time.
+
+    Test classes are the UI test target's classes that inherit XCTestCase, directly or through
+    another test class; a changed file contributes the test methods it declares in them,
+    including through an extension in a file of another name.
+    """
+    folder, excluded = "packages/ios-app/UITests/", "packages/ios-app/UITests/RealGateway/"
+    files = {}
+    for path in sorted((root / folder).rglob("*.swift")):
+        relative = path.relative_to(root).as_posix()
+        if not relative.startswith(excluded):
+            files[relative] = _swift_declarations(path.read_text(errors="replace"))
+    bases = {name: inherited for classes, _ in files.values() for name, inherited in classes.items()}
+    tests = {"XCTestCase"}
+    while True:
+        found = {name for name, inherited in bases.items() if inherited and inherited[0] in tests} - tests
+        if not found:
+            break
+        tests |= found
+    tests.discard("XCTestCase")
+    by_class: Dict[str, List[str]] = {}
+    for path in paths:
+        for owner, method in files.get(path, ({}, []))[1]:
+            if owner in tests:
+                by_class.setdefault(owner, []).append(method)
+    shards = []
+    for owner, methods in by_class.items():
+        methods = list(dict.fromkeys(methods))
+        for start in range(0, len(methods), IOS_METHODS_PER_SHARD):
+            shards.append(" ".join(f"--only-testing TronMobileUITests/{owner}/{m}"
+                                   for m in methods[start:start + IOS_METHODS_PER_SHARD]))
+    return shards
+
+
 def _select(name: str, change: Change, code: List[str]) -> List[str]:
     """Arguments a selecting step needs from the change; empty means the step is not needed."""
     root = change.root
@@ -252,16 +337,7 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
                         suites.append(candidate)
         return [command for suite in dict.fromkeys(suites) for command in _suite_shards(root, suite)]
     if name == "ios-journeys":
-        # One shard per IOS_METHODS_PER_SHARD test methods of each changed UI test class, all
-        # from the same stamped build products; methods are read from the file every time.
-        shards = []
-        for path in change.existing():
-            if path.startswith("packages/ios-app/UITests/") and path.endswith("UITests.swift") and "/RealGateway/" not in path:
-                owner = f"TronMobileUITests/{Path(path).stem}"
-                methods = re.findall(r"^\s*func (test\w+)\(", (root / path).read_text(errors="replace"), re.M)
-                for start in range(0, len(methods), IOS_METHODS_PER_SHARD):
-                    shards.append(" ".join(f"--only-testing {owner}/{m}" for m in methods[start:start + IOS_METHODS_PER_SHARD]))
-        return list(dict.fromkeys(shards)) or [""]
+        return list(dict.fromkeys(_ios_journey_shards(root, change.existing()))) or [""]
     if name == "named-journeys":
         return list(change.tests)
     raise GateError(f"unknown selector {name}")
