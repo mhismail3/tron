@@ -26,6 +26,40 @@ final class TronSheetTintUITests: XCTestCase {
     }
 
     @MainActor
+    func testNestedSessionsRetentionOpensAndPersistsInLightAndDark() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-mac-settings-fixture", "-settings-nested"]
+            if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
+            app.launch(); defer { app.terminate() }
+            XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
+            app.buttons["Open Settings"].tap()
+            let sessions = app.buttons["settings-link-Sessions"]
+            for _ in 0..<12 where !sessions.isHittable { app.swipeUp() }
+            XCTAssertTrue(sessions.isHittable, app.debugDescription)
+            sessions.tap()
+            let retention = app.buttons["Show finished subagents"]
+            XCTAssertTrue(retention.waitForExistence(timeout: 5), app.debugDescription)
+            let previous = retention.value as? String
+            retention.tap()
+            let choice = app.buttons[previous == "Only active" ? "1 minute" : "Only active"]
+            XCTAssertTrue(choice.waitForExistence(timeout: 5), "The control must open at sheet depth two: \(app.debugDescription)")
+            let selected = choice.label
+            let capture = XCTAttachment(screenshot: app.screenshot())
+            capture.name = "877-retention-\(appearance)"; capture.lifetime = .keepAlways; add(capture)
+            choice.tap()
+            XCTAssertTrue(retention.waitForExistence(timeout: 5))
+            XCTAssertEqual(retention.value as? String, selected)
+            retention.tap()
+            let restore = app.buttons[previous ?? "Only active"]
+            XCTAssertTrue(restore.waitForExistence(timeout: 5)); restore.tap()
+            XCTAssertEqual(retention.value as? String, previous)
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testDashboardSheetToolbarsTakeTheirTitleTint() {
         continueAfterFailure = false
         for (mode, action, title) in [("Automations", "Choose agenda date", "Jump to date"),

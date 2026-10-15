@@ -13,6 +13,7 @@ struct HostedSettingsRendererFixture: View {
     @State private var ready = false
     @State private var activity = PresentationActivityCoordinator()
     @State private var covering = false
+    @State private var nestedSettings = false
     @State private var heldPreviews = 0
     @State private var error: String?
     @State private var applied = 0
@@ -53,6 +54,11 @@ struct HostedSettingsRendererFixture: View {
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") {
                         // The Context sheet itself, so the fixture's cover control stays reachable.
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("context"))
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-nested") {
+                        Button("Open Settings") { nestedSettings = true }
+                            .tronManagedSheet(isPresented: $nestedSettings, identity: "fixture.nested-settings") {
+                                SettingsView()
+                            }
                     } else {
                         SettingsView()
                     }
