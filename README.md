@@ -97,12 +97,9 @@ Node runtimes and the locked gateway production tree.
 ## Development
 
 ```bash
-# Gateway: fast, deterministic checks
-cd packages/gateway
-npm ci
-npm run build
-npm test
-cd ../..
+# Gate a change: the ordered steps it needs, then run them (tools/work/README.md#gate)
+scripts/tron gate plan
+scripts/tron gate run
 
 # Install the repository-pinned native project generator
 scripts/install-ci-tools.sh xcodegen

@@ -1337,7 +1337,7 @@ Run
 `python3 scripts/test-ios-test-infrastructure.py DeviceLeaseFixture GatewayE2EFixture`
 to regenerate inspectable process-survival reports at
 `test-results/ios-infrastructure/*-cleanup.json`. The full hardware-free suite is
-registered in both `work verify` and the CI policy job; it does not use real
+a `tooling.tests` gate shard when its scripts change and runs in the CI policy job; it does not use real
 devices or simulators.
 
 ### Test runner safety contract
