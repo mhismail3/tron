@@ -360,7 +360,7 @@ def _audit_comment(gh: Gh, number: int, old: str, new: str, head: str, transitio
     gh.run("issue", "comment", str(number), "--body-file", "-", stdin=body)
 
 
-OWNER_STATES = {"settled", "live", "absent", "indeterminate"}
+OWNER_STATES = {"settled", "live", "absent", "idle", "indeterminate"}
 
 
 def _owner_helper(root: Path) -> tuple[Path | None, str]:

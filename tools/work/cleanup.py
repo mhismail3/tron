@@ -218,33 +218,36 @@ def _local_blockers(tree: Worktree, settings: Settings) -> List[str]:
     return reasons
 
 
-def _process_cwds() -> Tuple[Dict[int, int], List[Tuple[int, str, str]]]:
-    """({pid: ppid}, [(pid, command, cwd)]) for every process lsof can see."""
+def _process_files() -> Tuple[Dict[int, int], List[Tuple[int, str, str, str]]]:
+    """({pid: ppid}, [(pid, command, descriptor, name)]): every working directory and open file lsof can see."""
     lsof = shutil.which("lsof")
     if lsof is None:
         raise CleanupError("lsof is not available")
-    listed = subprocess.run([lsof, "-w", "-n", "-P", "-d", "cwd", "-F", "pRcn"], capture_output=True, text=True)
+    listed = subprocess.run([lsof, "-w", "-n", "-P", "-F", "pRcfn"], capture_output=True, text=True)
     if listed.returncode != 0:
         raise CleanupError(f"lsof failed: {listed.stderr.strip() or listed.returncode}")
     parents: Dict[int, int] = {}
-    rows: List[Tuple[int, str, str]] = []
-    pid, command = 0, ""
+    rows: List[Tuple[int, str, str, str]] = []
+    pid, command, descriptor = 0, "", ""
     for line in listed.stdout.splitlines():
         tag, value = line[:1], line[1:]
         if tag == "p":
-            pid, command = int(value), ""
+            pid, command, descriptor = int(value), "", ""
         elif tag == "R":
             parents[pid] = int(value)
         elif tag == "c":
             command = value
+        elif tag == "f":
+            descriptor = value
         elif tag == "n":
-            rows.append((pid, command, value))
+            rows.append((pid, command, descriptor, value))
     return parents, rows
 
 
 def _process_blockers(path: Path, settings: Settings) -> List[str]:
+    """Processes working inside `path` or holding a file there open: live work removal or release must keep."""
     try:
-        parents, rows = _process_cwds()
+        parents, rows = _process_files()
     except CleanupError as error:
         return [f"cannot prove no process works inside: {error}"]
     # The caller's shell (and whatever launched it) may sit in the worktree it was started from.
@@ -253,9 +256,12 @@ def _process_blockers(path: Path, settings: Settings) -> List[str]:
     while pid and pid not in exempt:
         exempt.add(pid)
         pid = parents.get(pid, 0)
-    inside = [f"pid {pid} ({command})" for pid, command, cwd in rows
-              if pid not in exempt and (cwd == str(path) or cwd.startswith(f"{path}/"))]
-    return [f"working directory of {_shown(inside)}"] if inside else []
+    inside = [(pid, command, descriptor) for pid, command, descriptor, name in rows
+              if pid not in exempt and (name == str(path) or name.startswith(f"{path}/"))]
+    cwd = sorted({f"pid {pid} ({command})" for pid, command, descriptor in inside if descriptor == "cwd"})
+    held = sorted({f"pid {pid} ({command})" for pid, command, descriptor in inside if descriptor != "cwd"}
+                  - set(cwd))
+    return ([f"working directory of {_shown(cwd)}"] if cwd else []) + ([f"open files of {_shown(held)}"] if held else [])
 
 
 @dataclass

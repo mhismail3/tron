@@ -199,7 +199,11 @@ def run() -> None:
                     sessions_listed=[idle_row, {"id": LIVE, "phase": "running", "activeSince": "2026-01-01T00:00:00Z"}])
             refused("live Home task owner refused", "is live", "home-worker",
                     sessions_listed=[idle_row], tasks=[{"taskId": "task-1", "lifecycle": "active", "sessionId": "home-worker"}])
-            refused("idle existing session is indeterminate", "is indeterminate", IDLE, sessions_listed=[idle_row])
+            refused("idle listed session needs the maintainer", f"{IDLE} is idle (", IDLE, sessions_listed=[idle_row])
+            assert "--force-maintainer" in evidence[-1]["stderr"], evidence[-1]
+            refused("idle session with an unsettled Home task is indeterminate", "ended without settlement proof", IDLE,
+                    sessions_listed=[idle_row], tasks=[{"taskId": "task-0", "lifecycle": "terminal", "sessionId": IDLE}],
+                    statuses={"task-0": {"taskId": "task-0", "lifecycle": "terminal"}})
             # A delegated child or Home chapter is absent from the user listing but has a file: not absent.
             child = sessions / "--fixture--" / f"2026-01-01T00-00-00-000Z_{IDLE}" / FILE_ONLY
             child.mkdir(parents=True)
@@ -312,7 +316,7 @@ def run() -> None:
                       comment_times=[time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3600))])
             untouched("stale sweep keeps an idle live owner", LIVE, 100, "is live",
                       sessions_listed=[idle_row, {"id": LIVE, "phase": "running", "activeSince": "2026-01-01T00:00:00Z"}])
-            untouched("stale sweep keeps an idle resumable session", IDLE, 100, "is indeterminate", sessions_listed=[idle_row])
+            untouched("stale sweep keeps an idle resumable session", IDLE, 100, f"{IDLE} is idle (", sessions_listed=[idle_row])
             untouched("stale sweep keeps a settled Home task owner's claim", SETTLED, 100, "is settled",
                       sessions_listed=[idle_row, {"id": SETTLED, "phase": "idle"}],
                       tasks=[{"taskId": "task-2", "lifecycle": "terminal", "sessionId": SETTLED}], statuses={"task-2": settled})
@@ -335,28 +339,49 @@ def run() -> None:
             assert (restored_stale / "draft.txt").read_bytes() == b"in-progress edit\n"
             assert (restored_stale / "tracked.txt").read_bytes() == b"stale unstaged edit\n"
 
-            # A maintainer releases a legacy owner no Gateway knows, only from a real terminal with the exact phrase;
-            # a Gateway-shaped idle session can be resumed, so force never releases it.
+            # A maintainer releases an idle Gateway session or a legacy owner no Gateway knows, only from a real
+            # terminal with the exact phrase (#1001). A live owner is refused before any confirmation, and an idle
+            # owner's worktree that a process still holds open is kept.
+            claim(LIVE)
+            fixture(sessions_listed=[idle_row, {"id": LIVE, "phase": "running", "activeSince": "2026-01-01T00:00:00Z"}])
+            before = snapshot()
+            forced = call("release", "41", "--reason", "running owner", "--force-maintainer")
+            evidence.append({"case": "force never releases a live owner", "exit": forced.returncode, "stderr": forced.stderr.strip()})
+            assert forced.returncode and "is live" in forced.stderr and snapshot() == before, forced.stderr
             claim(IDLE)
             fixture(sessions_listed=[idle_row])
             before = snapshot()
-            forced = call("release", "41", "--reason", "legacy owner", "--force-maintainer")
-            evidence.append({"case": "force never releases a resumable Gateway session", "exit": forced.returncode,
+            forced = call("release", "41", "--reason", "idle owner", "--force-maintainer")
+            evidence.append({"case": "force for an idle owner requires a real terminal", "exit": forced.returncode,
                              "stderr": forced.stderr.strip()})
-            assert forced.returncode and "is indeterminate" in forced.stderr and snapshot() == before, forced.stderr
-            claim("legacy-owner")
-            fixture(sessions_listed=[idle_row])
-            before = snapshot()
-            forced = call("release", "41", "--reason", "legacy owner", "--force-maintainer")
-            evidence.append({"case": "force requires a real terminal", "exit": forced.returncode, "stderr": forced.stderr.strip()})
             assert forced.returncode and "interactive terminal" in forced.stderr and snapshot() == before, forced.stderr
-
+            holder = subprocess.Popen([sys.executable, "-c", "import sys,time; f=open(sys.argv[1]); time.sleep(60)",
+                                       str(worktree / "tracked.txt")], cwd=root)
+            try:
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline and str(worktree.resolve()) not in subprocess.run(
+                        ["lsof", "-w", "-n", "-P", "-p", str(holder.pid), "-F", "n"], capture_output=True, text=True).stdout:
+                    time.sleep(0.1)
+                forced = call("release", "41", "--reason", "idle owner", "--force-maintainer")
+            finally:
+                holder.kill()
+                holder.wait()
+            evidence.append({"case": "force keeps an idle owner's worktree a process holds open", "exit": forced.returncode,
+                             "stderr": forced.stderr.strip()})
+            assert forced.returncode and f"open files of pid {holder.pid}" in forced.stderr and snapshot() == before, forced.stderr
+            # An interrupted `warm.py` clone leaves its staging directory; it is regenerable, never bundled or blocking.
+            warm = worktree / "packages/gateway/.tron-warm-k3x9q1/node_modules/pkg"
+            warm.mkdir(parents=True)
+            (warm / "index.js").write_text("partial clone\n")
+            (worktree / "packages/gateway/.tron-warm-k3x9q1").chmod(0o700)
+            idle_head = git(worktree, "rev-parse", "HEAD")
+            before = snapshot()
             def terminal(answer: bytes):
                 pid, descriptor = pty.fork()
                 if pid == 0:
                     os.chdir(repo)
                     os.execve(sys.executable, [sys.executable, str(ROOT / "tools/work/cli.py"), "release", "41",
-                                               "--reason", "legacy owner", "--force-maintainer"], env)
+                                               "--reason", "maintainer release", "--force-maintainer"], env)
                 output, deadline = b"", time.monotonic() + 60
                 while time.monotonic() < deadline and b"> " not in output:
                     if select.select([descriptor], [], [], 1)[0]:
@@ -383,6 +408,28 @@ def run() -> None:
             code, output = terminal(b"RELEASE #41 FROM unknown\n")
             evidence.append({"case": "force refuses a confirmation naming another owner", "exit": code, "output": output[-600:]})
             assert code and "did not match" in output and snapshot()[1:] == before[1:], output
+            code, output = terminal(f"RELEASE #41 FROM {IDLE}\n".encode())
+            evidence.append({"case": "maintainer releases an idle Gateway session after exact confirmation, warm leftover included",
+                             "exit": code, "output": output[-600:], "gh": load()["gh"]})
+            assert code == 0 and "released #41" in output and "owner " + IDLE + " idle" in output, output
+            assert not worktree.exists() and branch not in git(remote, "for-each-ref", "--format=%(refname)")
+            assert IDLE in load()["gh"]["comments"][-1] and "maintainer confirmed" in load()["gh"]["comments"][-1]
+            assert load()["gh"]["status"] == "Ready"
+            idle_saved = Path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")) / f"work/releases/41-{idle_head[:12]}"
+            idle_manifest = json.loads((idle_saved / "manifest.json").read_text())
+            assert idle_manifest["ownerState"] == "idle" and idle_manifest["phase"] == "released", idle_manifest
+            bundled = subprocess.run(["git", "bundle", "list-heads", str(idle_saved / "claim.bundle")], cwd=repo, env=env,
+                                     capture_output=True, text=True, check=True).stdout
+            assert f"refs/work-release/41/{idle_head[:12]}/remote" in bundled, bundled
+            if idle_manifest["snapshot"]:
+                assert ".tron-warm-" not in git(repo, "ls-tree", "-r", "--name-only", idle_manifest["snapshot"])
+
+            claim("legacy-owner")
+            fixture(sessions_listed=[idle_row])
+            before = snapshot()
+            forced = call("release", "41", "--reason", "legacy owner", "--force-maintainer")
+            evidence.append({"case": "force requires a real terminal", "exit": forced.returncode, "stderr": forced.stderr.strip()})
+            assert forced.returncode and "interactive terminal" in forced.stderr and snapshot() == before, forced.stderr
             code, output = terminal(b"RELEASE #41 FROM legacy-owner\n")
             evidence.append({"case": "maintainer releases a legacy owner after exact confirmation", "exit": code, "output": output[-600:]})
             assert code == 0 and "released #41" in output, output

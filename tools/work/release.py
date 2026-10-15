@@ -25,8 +25,10 @@ from gh import Gh
 RELEASABLE = {"settled", "absent"}
 # `release --stale` sweeps only claims with no claim-branch commit and no issue comment for this long.
 STALE_HOURS = 72
-# The Gateway's session id shape (packages/gateway/src/client/work-owner-status.ts). A maintainer may
-# force-release only an owner outside it: a Gateway-shaped idle owner can be resumed, so it is never forced.
+# The Gateway's session id shape (packages/gateway/src/client/work-owner-status.ts). Among indeterminate
+# owners a maintainer may force-release only one outside it (a legacy owner no Gateway knows); a
+# Gateway-shaped indeterminate owner (a delegated session, an unsettled Home task, an unreadable Gateway)
+# is never forced. A listed `idle` session with no Home task is the maintainer's to release (#1001).
 _GATEWAY_SESSION = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
@@ -102,15 +104,21 @@ def _owner(repo: Path, number: int, head: str, force: bool) -> str:
 
 
 def _admit_owner(owner: str, force: bool = False) -> Tuple[str, str]:
-    """Admit a settled or absent owner; with force, also a legacy owner no Gateway can resume or report live."""
+    """Admit a settled or absent owner; with force, also an idle Gateway session or a legacy owner no Gateway knows.
+
+    An idle session could be resumed at any moment, so its release needs the maintainer's typed
+    confirmation; `run` re-reads this verdict right before the remote write, and a session that
+    became live in between keeps its claim. Live owners are never released.
+    """
     if force and owner == "unknown":
         return "unknown", "legacy claim without an owner session; maintainer confirmed"
     state, why = handoff.owner_status(owner)
     if state in RELEASABLE:
         return state, why
-    if force and state == "indeterminate" and not _GATEWAY_SESSION.fullmatch(owner.lower()):
+    if force and (state == "idle" or state == "indeterminate" and not _GATEWAY_SESSION.fullmatch(owner.lower())):
         return state, f"{why}; maintainer confirmed"
-    raise ReleaseError(f"owner session {owner} is {state} ({why}); refusing release, claim left unchanged")
+    hint = " (a maintainer may use --force-maintainer from a real terminal)" if state == "idle" and not force else ""
+    raise ReleaseError(f"owner session {owner} is {state} ({why}); refusing release, claim left unchanged{hint}")
 
 
 def _confirm(number: int, owner: str) -> None:
