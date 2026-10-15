@@ -22,11 +22,25 @@ Failure modes:
   7. A real hardened-runtime Node without disable-library-validation (the signed
      payload binary, copied anywhere) is accepted. Runs only where such a binary
      is installed on this Mac.
+  8. The checksum-verified cache `tron-node install` fills is never found, so an
+     agent without nvm cannot run anything; or a linked worktree misses the
+     primary checkout's cache and must download the pinned Node again (#244).
+  9. `pin` writes a version whose archives disagree with SHASUMS256.txt, edits
+     only part of the pins, or writes digests that `install` then rejects; the
+     pin -> install -> resolve journey is the update (and rollback) path.
+ 10. `status` touches the network without --online, or --online does not report
+     a newer patch, its security releases and the major's support window.
+
+Release files are served from a temporary directory through file:// URLs in
+the fixture checkout's own config/ci-toolchain.env.
 """
 from __future__ import annotations
 
 import glob
+import hashlib
+import json
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -36,6 +50,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / ".node-version").read_text().strip()
 SYSTEM_PATH = "/usr/bin:/bin"
+ARCH = "arm64" if platform.machine() in ("arm64", "aarch64") else "x64"
+PIN_KEYS = ("TRON_NODE_ARM64_ARCHIVE_SHA256", "TRON_NODE_X64_ARCHIVE_SHA256", "TRON_NODE_ARM64_RUNTIME_SHA256",
+            "TRON_NODE_X64_RUNTIME_SHA256", "TRON_NODE_NPM_VERSION", "TRON_NODE_NPM_TREE_SHA256")
 
 
 class TronNodeResolver(unittest.TestCase):
@@ -161,6 +178,143 @@ class TronNodeResolver(unittest.TestCase):
         (copy / "npm").chmod(0o755)
         (self.checkout / ".node-version").write_text(version.removeprefix("v") + "\n")
         self.assertRefused("its hardened-runtime signature refuses unsigned native add-ons", TRON_NODE_BIN=str(copy / "node"))
+
+    # --- the verified cache, release status and the pin update (#244) ---
+
+    def release_checkout(self) -> Path:
+        """The fixture checkout with the release commands' real collaborators and a
+        config pointing every release URL at a local directory."""
+        for name in ("install-ci-tools.sh", "hash-npm-runtime.py"):
+            shutil.copy2(ROOT / "scripts" / name, self.checkout / "scripts" / name)
+        (self.checkout / "config").mkdir(exist_ok=True)
+        self.dist = self.tmp / "dist"
+        self.dist.mkdir(exist_ok=True)
+        config = (ROOT / "config/ci-toolchain.env").read_text()
+        config = "\n".join(
+            f"TRON_NODE_ARCHIVE_BASE_URL=file://{self.dist}" if line.startswith("TRON_NODE_ARCHIVE_BASE_URL=")
+            else f"TRON_NODE_RELEASE_SCHEDULE_URL=file://{self.dist}/schedule.json"
+            if line.startswith("TRON_NODE_RELEASE_SCHEDULE_URL=") else line
+            for line in config.splitlines()) + "\n"
+        (self.checkout / "config/ci-toolchain.env").write_text(config)
+        return self.checkout
+
+    def pins(self) -> dict[str, str]:
+        return dict(line.split("=", 1) for line in (self.checkout / "config/ci-toolchain.env").read_text().splitlines()
+                    if line.split("=", 1)[0] in PIN_KEYS)
+
+    def publish(self, version: str, npm_version: str = "11.0.0") -> None:
+        """Official-layout macOS archives and SHASUMS256.txt for `version`."""
+        release = self.dist / f"v{version}"
+        release.mkdir(parents=True)
+        sums = []
+        for arch in ("arm64", "x64"):
+            stage = self.tmp / f"stage-{version}-{arch}"
+            top = stage / f"node-v{version}-darwin-{arch}"
+            self.toolchain(top / "bin", version, f"cached-{arch}")
+            npm = top / "lib/node_modules/npm"
+            (npm / "bin").mkdir(parents=True)
+            (npm / "package.json").write_text(json.dumps({"name": "npm", "version": npm_version}))
+            (npm / "bin/npm-cli.js").write_text("// npm\n")
+            archive = release / f"node-v{version}-darwin-{arch}.tar.gz"
+            subprocess.run(["tar", "-czf", str(archive), "-C", str(stage), top.name], check=True)
+            sums.append(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}")
+        (release / "SHASUMS256.txt").write_text("\n".join(sums) + "\n")
+
+    def tron_node(self, *argv: str, **environment: str) -> subprocess.CompletedProcess:
+        return self.run_script([str(self.checkout / "scripts/tron-node"), *argv], **environment)
+
+    def test_a_linked_worktree_resolves_the_primary_checkouts_verified_cache(self) -> None:
+        primary = self.checkout
+        subprocess.run(["git", "init", "-q", "-b", "main", str(primary)], check=True)
+        subprocess.run(["git", "-C", str(primary), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(primary), "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+                        "commit", "-qm", "fixture"], check=True)
+        worktree = self.tmp / "worktree"
+        subprocess.run(["git", "-C", str(primary), "worktree", "add", "-q", str(worktree)], check=True)
+        cached = self.toolchain(primary / f".ci-tools/node-v{VERSION}-{ARCH}/bin", VERSION, "cached")
+        # The Gateway runtime is first on PATH and there is no nvm: only the cache can serve.
+        result = self.run_script([str(worktree / "scripts/tron-node")], PATH=self.gateway_path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), str(cached))
+        # nvm's exact directory still wins over the cache.
+        result = self.run_script([str(worktree / "scripts/tron-node")], PATH=self.gateway_path, NVM_DIR=str(self.nvm))
+        self.assertEqual(result.stdout.strip(), str(self.nvm_node))
+        # Without the cache the refusal names the verified install command.
+        shutil.rmtree(primary / ".ci-tools")
+        result = self.run_script([str(worktree / "scripts/tron-node")], PATH=self.gateway_path)
+        self.assertEqual(result.returncode, 127)
+        self.assertIn("scripts/tron-node install", result.stderr)
+
+    def test_pin_then_install_then_resolve_moves_and_rolls_back_the_pin(self) -> None:
+        self.release_checkout()
+        self.publish("99.1.0", npm_version="11.5.0")
+        before = self.pins()
+        result = self.tron_node("pin", "99.1.0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("major move", result.stdout)
+        self.assertEqual((self.checkout / ".node-version").read_text(), "99.1.0\n")
+        pinned = self.pins()
+        self.assertEqual(pinned["TRON_NODE_NPM_VERSION"], "11.5.0")
+        self.assertTrue(all(pinned[key] != before[key] for key in PIN_KEYS), pinned)
+        # The real installer accepts exactly what pin recorded, and the resolver serves it.
+        cache = self.tmp / "cache"
+        result = self.tron_node("install", PATH=self.gateway_path, TRON_CI_TOOLS_DIR=str(cache))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], str(cache / f"node-v99.1.0-{ARCH}/bin/node"))
+        # Rollback is the same command with the earlier version: every pin returns.
+        self.publish("99.0.0", npm_version="11.4.0")
+        self.assertEqual(self.tron_node("pin", "99.1.0").returncode, 0)
+        moved = self.pins()
+        self.assertEqual(self.tron_node("pin", "99.0.0").returncode, 0)
+        self.assertEqual(self.tron_node("pin", "99.1.0").returncode, 0)
+        self.assertEqual(self.pins(), moved)
+        self.assertEqual(self.tron_node("pin", "99.0.0").returncode, 0)
+        self.assertEqual(self.pins()["TRON_NODE_NPM_VERSION"], "11.4.0")
+        self.assertEqual((self.checkout / ".node-version").read_text(), "99.0.0\n")
+
+    def test_pin_refuses_an_archive_that_disagrees_with_shasums_and_writes_nothing(self) -> None:
+        self.release_checkout()
+        self.publish("99.1.0")
+        archive = self.dist / "v99.1.0/node-v99.1.0-darwin-x64.tar.gz"
+        archive.write_bytes(archive.read_bytes() + b"tampered")
+        before, version = self.pins(), (self.checkout / ".node-version").read_text()
+        result = self.tron_node("pin", "99.1.0")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("node-v99.1.0-darwin-x64.tar.gz does not match SHASUMS256.txt", result.stderr)
+        self.assertEqual(self.pins(), before)
+        self.assertEqual((self.checkout / ".node-version").read_text(), version)
+        self.assertNotEqual(self.tron_node("pin", "99.2").returncode, 0)
+
+    def test_status_reports_offline_and_online_release_freshness(self) -> None:
+        self.release_checkout()
+        major = VERSION.split(".")[0]
+        # Offline status reads nothing remote: the (absent) release files cannot fail it.
+        result = self.tron_node("status", PATH=self.gateway_path, NVM_DIR=str(self.nvm))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"pin: v{VERSION}", result.stdout)
+        self.assertIn(f"toolchain: {self.nvm_node}", result.stdout)
+        self.assertIn("release check: skipped", result.stdout)
+        self.assertNotEqual(self.tron_node("status", "--online").returncode, 0)
+        newer = f"{major}.999.1"
+        (self.dist / "index.json").write_text(json.dumps([
+            {"version": "v1000.0.0", "date": "2099-01-01", "security": False},
+            {"version": f"v{newer}", "date": "2099-01-02", "security": False},
+            {"version": f"v{major}.999.0", "date": "2099-01-01", "security": True},
+            {"version": f"v{VERSION}", "date": "2000-01-01", "security": False},
+        ]))
+        (self.dist / "schedule.json").write_text(json.dumps({
+            f"v{major}": {"start": "2000-01-01", "lts": "2000-06-01", "maintenance": "2001-01-01", "end": "2098-01-01"},
+            "v1000": {"start": "2001-01-01", "lts": "2001-06-01", "maintenance": "2098-01-01", "end": "2099-01-01"},
+        }))
+        result = self.tron_node("status", "--online", NVM_DIR=str(self.nvm))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"patch: behind; latest v{major}.x is v{newer}", result.stdout)
+        self.assertIn(f"security releases v{major}.999.0", result.stdout)
+        self.assertIn(f"scripts/tron-node pin {newer}", result.stdout)
+        self.assertIn(f"major: v{major} is maintenance LTS since 2001-01-01, end of life 2098-01-01", result.stdout)
+        self.assertIn("lts: v1000 is the active LTS major", result.stdout)
+        # The report never edits the pin.
+        self.assertEqual((self.checkout / ".node-version").read_text().strip(), VERSION)
 
 
 if __name__ == "__main__":

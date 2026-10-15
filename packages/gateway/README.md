@@ -1077,7 +1077,9 @@ provider-supplied 5-hour, weekly, model-scoped weekly, and optional extra-usage
 monthly limits; amounts/resets omitted by Anthropic remain absent rather than
 being inferred. API-key authentication is not advertised as subscription usage.
 OpenCode Go reports its account-wide rolling 5-hour, weekly, and monthly percent
-windows; a valid key whose account is not on Go reports unsupported rather than a
+windows. Its first-party shapes cover both the bundled catalog's `opencode.ai/zen/go`
+paths and the refreshed remote catalog's `opencode.ai/inference/go` paths (including
+its `google-generative-ai` model), so a catalog refresh keeps usage supported; a valid key whose account is not on Go reports unsupported rather than a
 rejected credential. Moonshot reads `GET /v1/users/me/balance` on the exact regional
 host and reports Available/Voucher/Cash balances in that region's currency (USD on
 `api.moonshot.ai`, CNY on `api.moonshot.cn`), with no quota windows because Moonshot

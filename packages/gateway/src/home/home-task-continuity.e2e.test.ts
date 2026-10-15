@@ -278,6 +278,9 @@ from tron_mac_replace_journal import Journal, write_json_atomic
 from tron_mac_replace_platform import MacPlatform
 class Fixture(MacPlatform):
     port = int(sys.argv[3])
+    # This test process hosts the fixture Gateway; without this the platform
+    # asks launchd for the live com.tron.server job and probes Stable (#1072).
+    def gateway_pid(self): return int(sys.argv[9])
     def token(self): return json.loads((Path(sys.argv[4]) / 'gateway/local-auth.json').read_text())['bearerToken']
     def node(self): return Path(sys.argv[5]), Path(sys.argv[6])
     def protocol(self): return int(sys.argv[7])
