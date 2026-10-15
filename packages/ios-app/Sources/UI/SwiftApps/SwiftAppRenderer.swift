@@ -209,6 +209,14 @@ private struct SwiftAppViewDepthKey: EnvironmentKey {
     static let defaultValue = 0
 }
 
+private struct SwiftAppHostedRootKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private struct SwiftAppHostsNavigationKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 private struct SwiftAppDismissKey: EnvironmentKey {
     static let defaultValue: DismissAction? = nil
 }
@@ -225,6 +233,18 @@ extension EnvironmentValues {
     }
     /// The dismiss action of the innermost presentation the program created
     /// (`SwiftAppPresentedContent`); nil in the program's root.
+    /// True inside the program's root as the runner hosts it, until a
+    /// presentation the program creates (#909).
+    var swiftAppHostedRoot: Bool {
+        get { self[SwiftAppHostedRootKey.self] }
+        set { self[SwiftAppHostedRootKey.self] = newValue }
+    }
+    /// True until the program's outermost NavigationStack, which merges into
+    /// the runner sheet's own stack (`SwiftAppNavigationStack`).
+    var swiftAppHostsNavigation: Bool {
+        get { self[SwiftAppHostsNavigationKey.self] }
+        set { self[SwiftAppHostsNavigationKey.self] = newValue }
+    }
     var swiftAppDismiss: DismissAction? {
         get { self[SwiftAppDismissKey.self] }
         set { self[SwiftAppDismissKey.self] = newValue }

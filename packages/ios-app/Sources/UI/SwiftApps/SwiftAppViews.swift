@@ -15,6 +15,51 @@ struct SwiftAppPresentedContent: View {
     var body: some View {
         SwiftAppLazyContent(runtime: runtime, value: value)
             .environment(\.swiftAppDismiss, dismiss)
+            // A presentation leaves the runner's hosted root: its own
+            // NavigationStack and title are the program's, not the sheet's.
+            .environment(\.swiftAppHostedRoot, false)
+            .environment(\.swiftAppHostsNavigation, false)
+    }
+}
+
+/// The program's outermost `NavigationStack` merges into the runner's shared
+/// `TronDocumentSheet` stack, so its title, toolbar and pushes use the sheet's
+/// navigation bar instead of nesting a second stack inside it (#909). Any other
+/// stack (inside a sheet the program presents) stays a real NavigationStack.
+struct SwiftAppNavigationStack: View {
+    let content: AnyView
+    @Environment(\.swiftAppHostsNavigation) private var hosted
+
+    var body: some View {
+        if hosted {
+            content.environment(\.swiftAppHostsNavigation, false)
+        } else {
+            NavigationStack { content }
+        }
+    }
+}
+
+/// `navigationTitle`. In the runner's hosted root it also names the shared
+/// sheet title (`SwiftAppRootTitleKey`), so the program's own title wins over
+/// the file name.
+struct SwiftAppNavigationTitle: View {
+    let content: AnyView
+    let title: String
+    @Environment(\.swiftAppHostedRoot) private var hostedRoot
+
+    var body: some View {
+        if hostedRoot {
+            content.navigationTitle(title).preference(key: SwiftAppRootTitleKey.self, value: title)
+        } else {
+            content.navigationTitle(title)
+        }
+    }
+}
+
+struct SwiftAppRootTitleKey: PreferenceKey {
+    static let defaultValue: String? = nil
+    static func reduce(value: inout String?, nextValue: () -> String?) {
+        value = value ?? nextValue()
     }
 }
 
@@ -201,18 +246,18 @@ struct SwiftAppModifiedView: View {
         case "ScrollView":
             let horizontal: Bool = if case .member("horizontal", _)? = node.unlabeled.first { true } else { false }
             let content = try nodes()
-            return AnyView(ScrollView(horizontal ? .horizontal : .vertical) { content })
+            return AnyView(ScrollView(horizontal ? .horizontal : .vertical) { content }.tronScrollEdgeChrome())
         case "List":
             if node.unlabeled.contains(where: { if case .closure = $0 { false } else { true } }) {
                 // `List(items) { item in … }` is a List around a ForEach.
                 let rows = SwiftAppViewNode(name: "ForEach", arguments: node.arguments)
-                return AnyView(List { SwiftAppNodeView(runtime: runtime, node: rows) })
+                return AnyView(List { SwiftAppNodeView(runtime: runtime, node: rows) }.tronScrollEdgeChrome())
             }
             let content = try nodes()
-            return AnyView(List { content })
+            return AnyView(List { content }.tronScrollEdgeChrome())
         case "Form":
             let content = try nodes()
-            return AnyView(Form { content })
+            return AnyView(Form { content }.tronScrollEdgeChrome())
         case "Group", "WindowGroup", "ToolbarItem", "ToolbarItemGroup":
             return try nodes()
         case "GroupBox":
@@ -235,8 +280,7 @@ struct SwiftAppModifiedView: View {
                 if let footer { SwiftAppLazyContent(runtime: runtime, value: footer) }
             })
         case "NavigationStack", "NavigationView":
-            let content = try nodes()
-            return AnyView(NavigationStack { content })
+            return AnyView(SwiftAppNavigationStack(content: try nodes()))
         case "TabView":
             let content = try nodes()
             return AnyView(TabView { content })
@@ -396,7 +440,7 @@ struct SwiftAppModifiedView: View {
         case "offset":
             return AnyView(view.offset(x: SwiftAppRenderer.number(argument(arguments, "x")) ?? 0, y: SwiftAppRenderer.number(argument(arguments, "y")) ?? 0))
         case "blur": return AnyView(view.blur(radius: SwiftAppRenderer.number(argument(arguments, "radius")) ?? 0))
-        case "navigationTitle": return AnyView(view.navigationTitle(text(first)))
+        case "navigationTitle": return AnyView(SwiftAppNavigationTitle(content: view, title: text(first)))
         case "navigationBarTitleDisplayMode":
             if case .member("inline", _)? = first { return AnyView(view.navigationBarTitleDisplayMode(.inline)) }
             return AnyView(view.navigationBarTitleDisplayMode(.large))
