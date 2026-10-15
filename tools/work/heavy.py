@@ -37,9 +37,9 @@ from typing import IO, Iterator, List, Optional
 
 HELD_ENV = "TRON_HEAVY_LEASE_HELD"
 # Memory, not a slot count, is what limits this Mac (#1023): the slot count is
-# only an upper bound on concurrent heavy runs, and each admission also needs
-# its expected peak RSS to fit. Measured peaks (#1022): unsharded Gateway vitest
-# 2.9 GB, nested suite 2.1 GB; unmeasured runs claim a conservative 4 GB.
+# only an upper bound on concurrent heavy steps, and each admission also needs
+# its expected peak RSS to fit. Gate steps pass their catalog `expectedRssMb`;
+# a command without a measurement claims a conservative 4 GB.
 DEFAULT_SLOTS = 4
 DEFAULT_NEED_MB = 4000
 POLL_SECONDS = 1.0
@@ -145,6 +145,10 @@ def holders(directory: Path) -> List[dict]:
     return result
 
 
+class Cancelled(Exception):
+    """The waiter's owner gave up before it was admitted."""
+
+
 class Lease:
     def __init__(self, slot: int, handle: IO[str]):
         self.slot = slot
@@ -186,7 +190,8 @@ def memory_state(need_mb: int, holding: List[dict]) -> Optional[str]:
     return None
 
 
-def acquire(owner: str, command: str, report: IO[str] = sys.stderr, need_mb: int = DEFAULT_NEED_MB) -> Optional[Lease]:
+def acquire(owner: str, command: str, report: IO[str] = sys.stderr, need_mb: int = DEFAULT_NEED_MB,
+            cancelled=lambda: False) -> Optional[Lease]:
     """Wait in the queue for a slot and the memory the step needs. None when this process inherited one."""
     if os.environ.get(HELD_ENV):
         return None
@@ -236,6 +241,8 @@ def acquire(owner: str, command: str, report: IO[str] = sys.stderr, need_mb: int
             if state != last:
                 print(state, file=report, flush=True)
                 last = state
+            if cancelled():
+                raise Cancelled()
             time.sleep(POLL_SECONDS)
     finally:
         with contextlib.suppress(FileNotFoundError):
