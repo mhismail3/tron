@@ -61,7 +61,11 @@ command still runs. A step is admitted only when all of these fit:
   takes a job slot (a flock its runner holds) at its first heavy shard and keeps it
   until the run ends; a standalone `tron-heavy run` is its own job. Admitted runs
   finish instead of every worker holding half-finished work, and a dead runner's
-  job slot is reclaimed by the kernel like a step slot.
+  job slot is reclaimed by the kernel like a step slot. A run with no step running
+  whose waiting step waits only for a full pool lends its place in the limit (it
+  keeps its slot and priority): in the #1083 benchmark two runs otherwise waited
+  761 s for job slots behind three runs queued on the serial pool, with 12 of 18
+  cores idle.
 
 The first heavy step always starts, and so does the first Xcode step, so a host busy
 for reasons outside Tron still makes progress one step at a time.

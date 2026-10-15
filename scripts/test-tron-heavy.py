@@ -54,10 +54,10 @@ class Fixture:
         self.processes[name] = process
         return process
 
-    def job(self, name: str, steps: int, **environment: str) -> subprocess.Popen:
+    def job(self, name: str, steps: int, pool: str = "", **environment: str) -> subprocess.Popen:
         """A gate run: one heavy-queue Job whose steps run one after another (gate.execute)."""
         output = (self.root / f"{name}.out").open("w")
-        process = subprocess.Popen([sys.executable, "-c", JOB, str(HEAVY.parent), str(self.log), name, str(self.root), str(steps)],
+        process = subprocess.Popen([sys.executable, "-c", JOB, str(HEAVY.parent), str(self.log), name, str(self.root), str(steps), pool],
                                    env={**self.environment, **environment}, stdout=output, stderr=subprocess.STDOUT,
                                    start_new_session=True)
         self.processes[name] = process
@@ -105,14 +105,16 @@ class Fixture:
 
 # A gate run's job: `steps` heavy steps in sequence under one heavy.Job, each named
 # <name>.<i> and released by its release file, the job slot held until the run ends.
+# The last step runs in `pool`, if one is given.
 JOB = ("import os, pathlib, subprocess, sys\n"
        "sys.path.insert(0, sys.argv[1]); import heavy\n"
        "log, name, root, steps = pathlib.Path(sys.argv[2]), sys.argv[3], pathlib.Path(sys.argv[4]), int(sys.argv[5])\n"
+       "pool = sys.argv[6] or None\n"
        "job = heavy.Job(name)\n"
        "try:\n"
        "    for index in range(steps):\n"
        "        step = f'{name}.{index}'\n"
-       "        lease = heavy.acquire(step, 'step', need_mb=1000, cores=1, job=job)\n"
+       "        lease = heavy.acquire(step, 'step', need_mb=1000, cores=1, job=job, pool=pool if index == steps - 1 else None)\n"
        "        try:\n"
        "            subprocess.run([sys.executable, '-c', " + repr(WORK) + ", str(log), step, str(root / f'release-{step}')],\n"
        "                           env={**os.environ, **lease.environment()}, pass_fds=(lease.fd,), check=True)\n"
@@ -316,6 +318,20 @@ def case_gate_jobs_fair_and_bounded(root: Path) -> dict:
         wait_until(lambda: "B" in fixture.running(), "B starts once job A ends")
         fixture.release("B")
         assert fixture.processes["A"].wait(timeout=10) == 0
+        # A run whose only waiting step waits for a full pool lends its place in the limit:
+        # with S holding the serial pool, run C waits for it and D starts on idle cores.
+        fixture.start("S", pool="serial", TRON_HEAVY_JOBS="2")
+        wait_until(lambda: "S" in fixture.running(), "S holds the serial pool")
+        fixture.job("C", steps=2, pool="serial", TRON_HEAVY_JOBS="2")
+        wait_until(lambda: "C.0" in fixture.running(), "C's first step takes its job slot")
+        fixture.release("C.0")
+        wait_until(lambda: "for a serial slot" in fixture.output("C"), "C's next step waits for the pool")
+        fixture.start("D", TRON_HEAVY_JOBS="2")
+        wait_until(lambda: "D" in fixture.running(), "D starts: C lends its job slot while it waits for the pool")
+        fixture.release("S")
+        wait_until(lambda: "C.1" in fixture.running(), "C runs once the pool frees")
+        for name in ("D", "C.1"):
+            fixture.release(name)
         return {"started": fixture.started()}
     finally:
         fixture.close()

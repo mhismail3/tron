@@ -16,7 +16,9 @@ host-wide step slot, admitted only when its measured cost fits:
   slow each other through process spawning and file churn, not CPU (#1083);
 - gate jobs: at most TRON_HEAVY_JOBS gate runs with heavy work in flight. A gate run
   (Job) takes a job slot at its first heavy step and keeps it until the run ends, so
-  admitted runs finish instead of every worker holding half-finished work.
+  admitted runs finish instead of every worker holding half-finished work. A run whose
+  only waiting step waits for a full pool lends its place, so idle cores do not wait
+  behind runs that cannot use them.
 
 A step that scales (xcodebuild -jobs, vitest workers) declares the fewest cores it can
 use; it may start with fewer than its full cores and receives its grant in
@@ -55,7 +57,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import IO, Callable, Iterator, List, Optional
 
 HELD_ENV = "TRON_HEAVY_LEASE_HELD"
@@ -64,6 +66,9 @@ CORES_ENV = "TRON_HEAVY_CORES"
 DEFAULT_NEED_MB = 4000
 DEFAULT_CORES = 4.0
 POLL_SECONDS = 1.0
+# Job slot files: more than TRON_HEAVY_JOBS, because runs that wait only for a pool
+# lend their place in the limit but keep their slot (and their priority).
+JOB_FILES = 64
 XCODE = "xcode"
 SERIAL = "serial"
 POOLS = (XCODE, SERIAL)
@@ -270,7 +275,7 @@ def holders(directory: Path) -> List[dict]:
 def jobs(directory: Path) -> List[dict]:
     """Job slots currently held by gate runs (or standalone heavy runs)."""
     result = []
-    for index in range(_job_slots()):
+    for index in range(JOB_FILES):
         metadata = _locked(directory / f"job-{index}.lock")
         if metadata is not None:
             result.append({"jobSlot": index, **metadata})
@@ -359,6 +364,7 @@ class Host:
     busy: float
     available: int
     booted: Callable[[], int]
+    queued: List[dict] = field(default_factory=list)
 
     @property
     def claimed_mb(self) -> int:
@@ -373,6 +379,21 @@ class Host:
 
     def in_use(self, pool: str) -> int:
         return max(self.held(pool), self.booted()) if pool == XCODE else self.held(pool)
+
+    def pool_full(self, pool: Optional[str]) -> bool:
+        # Like the first heavy step, the first xcode step always starts: simulators booted outside
+        # the queue (or orphans the iOS tooling has yet to sweep) limit concurrency, never progress.
+        return pool in POOLS and bool(self.held(pool)) and self.in_use(pool) >= _pool_slots(pool)
+
+    def lending_jobs(self) -> set:
+        """Active runs with no step running whose every waiting step waits for a full pool."""
+        running = {item.get("job") for item in self.holding}
+        lending = set()
+        for job in self.active_jobs - running:
+            tickets = [item for item in self.queued if item.get("job") == job]
+            if tickets and all(self.pool_full(item.get("pool")) for item in tickets):
+                lending.add(job)
+        return lending
 
     def summary(self) -> str:
         return (f"host cpu {self.busy:.1f}/{_cpus()} cores busy (load {os.getloadavg()[0]:.1f}), "
@@ -389,12 +410,13 @@ def blocked(ticket: dict, host: Host) -> tuple:
     need_mb = int(ticket.get("needMb") or DEFAULT_NEED_MB)
     cores = float(ticket.get("cores") or DEFAULT_CORES)
     minimum = float(ticket.get("coresMin") or cores)
-    if ticket.get("job") not in host.active_jobs and len(host.active_jobs) >= _job_slots():
-        return "count", f"a gate job slot ({len(host.active_jobs)} of {_job_slots()} gate jobs have heavy work in flight)"
+    if ticket.get("job") not in host.active_jobs:
+        lending = host.lending_jobs()
+        if len(host.active_jobs) - len(lending) >= _job_slots():
+            return "count", (f"a gate job slot ({len(host.active_jobs) - len(lending)} of {_job_slots()} gate jobs have "
+                             f"heavy work in flight" + (f"; {len(lending)} more wait only for a pool" if lending else "") + ")")
     pool = ticket.get("pool")
-    # Like the first heavy step, the first xcode step always starts: simulators booted
-    # outside the queue (or orphans the iOS tooling has yet to sweep) limit concurrency, never progress.
-    if pool in POOLS and host.held(pool) and host.in_use(pool) >= _pool_slots(pool):
+    if host.pool_full(pool):
         if pool == XCODE:
             return "count", (f"an Xcode slot ({host.in_use(pool)} of {_pool_slots(pool)} in use: {host.held(pool)} xcode steps, "
                              f"{host.booted()} booted simulators)")
@@ -422,6 +444,7 @@ def blocked(ticket: dict, host: Host) -> tuple:
 def decide(queued: List[dict], host: Host) -> tuple:
     """Which ticket starts now and with how many cores: (ticket name or None, grant, {ticket: why})."""
     reasons = {}
+    host.queued = queued
     for ticket in queued:
         kind, detail = blocked(ticket, host)
         if not kind:
@@ -486,7 +509,7 @@ def acquire(owner: str, command: str, report: IO[str] = sys.stderr, need_mb: int
                 queued = waiters(directory, host.active_jobs)
                 chosen, grant, reasons = decide(queued, host)
                 if chosen == ticket.name:
-                    if job.held or (job_slot := _take(directory, "job", _job_slots(), {"owner": job.owner, "pid": os.getpid(),
+                    if job.held or (job_slot := _take(directory, "job", JOB_FILES, {"owner": job.owner, "pid": os.getpid(),
                                                                                        "worktree": os.getcwd(), "job": job.id})):
                         if not job.held:
                             job.slot, job.handle = job_slot
