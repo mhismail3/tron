@@ -41,7 +41,10 @@ class Repo:
         shutil.copy(ROOT / ".node-version", root / ".node-version")
         (root / "scripts").mkdir()
         shutil.copy(ROOT / "scripts/personal-info-guard.sh", root / "scripts/personal-info-guard.sh")
+        shutil.copy(ROOT / "scripts/tron-node", root / "scripts/tron-node")
         self.write("README.md", "fixture\n")
+        self.write("packages/gateway/package.json", '{"dependencies": {}}\n')
+        self.write("packages/gateway/package-lock.json", '{"packages": {}}\n')
         self.commit("base")
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
         self.git("checkout", "-q", "-b", "feature")
@@ -90,7 +93,7 @@ def plans(base: Path, env: dict) -> None:
                                 "gateway.full#1/6", "gateway.full#2/6", "gateway.full#3/6", "gateway.full#4/6", "gateway.full#5/6", "gateway.full#6/6",
                                 "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]"]),
         "protocol": ({"config/GatewayProtocol.json": "{}\n"},
-                     ["repo.privacy", "repo.whitespace", "protocol.contract", "mac.build", "gateway.full#1/6", "gateway.full#2/6", "gateway.full#3/6", "gateway.full#4/6", "gateway.full#5/6", "gateway.full#6/6", "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]", "ios.build"]),
+                     ["repo.privacy", "repo.whitespace", "protocol.contract", "mac.build", "gateway.full#1/6", "gateway.full#2/6", "gateway.full#3/6", "gateway.full#4/6", "gateway.full#5/6", "gateway.full#6/6", "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]", "ios.build", "ios.gateway-boundary[build]", "ios.gateway-boundary[resilience]", "ios.gateway-boundary[lan]"]),
         "docs-only": ({"packages/gateway/docs/x.md": "docs\n", "packages/ios-app/docs/y.md": "docs\n"},
                       ["repo.privacy", "repo.whitespace"]),
     }
@@ -237,6 +240,96 @@ def runner(base: Path, env: dict) -> None:
         raise AssertionError("the landing gate must refuse a dirty tree")
 
 
+def boundary_plans(base: Path, env: dict) -> None:
+    repo = Repo(base / "boundary", env)
+    manifests = {
+        "packages/gateway/package.json": {"dependencies": {"@earendil-works/pi-ai": "1.0.0"}},
+        "packages/gateway/package-lock.json": {"packages": {"node_modules/@earendil-works/pi-ai": {"version": "1.0.0"}}},
+    }
+    for path, value in manifests.items():
+        repo.write(path, json.dumps(value))
+    repo.commit("Pi graph baseline")
+    repo.git("update-ref", "refs/remotes/origin/main", "HEAD")
+
+    def selected(label: str) -> list[str]:
+        result = repo.gate("plan", "--json")
+        assert result.returncode == 0, result.stderr
+        rows = json.loads(result.stdout)["plan"]
+        evidence.append({"case": label, "plan": rows})
+        return [row["shard"] for row in rows]
+
+    lock = manifests["packages/gateway/package-lock.json"]
+    lock["packages"]["node_modules/unrelated"] = {"version": "2.0.0"}
+    repo.write("packages/gateway/package-lock.json", json.dumps(lock))
+    assert not any("gateway-boundary" in name or "pi-sdk-rollback" in name for name in selected("unrelated lock churn"))
+    lock["packages"]["node_modules/@earendil-works/pi-ai"]["version"] = "1.1.0"
+    repo.write("packages/gateway/package-lock.json", json.dumps(lock))
+    expected = ["ios.gateway-boundary[build]", "ios.gateway-boundary[resilience]", "ios.gateway-boundary[lan]"]
+    names = selected("dirty Pi lock graph change")
+    assert "gateway.pi-sdk-rollback" in names and all(name in names for name in expected), names
+    repo.git("restore", "packages/gateway/package-lock.json")
+    repo.write("packages/gateway/src/transport/server.ts", "export {};\n")
+    names = selected("transport change")
+    assert "gateway.pi-sdk-rollback" not in names and all(name in names for name in expected), names
+    (repo.root / "packages/gateway/src/transport/server.ts").unlink()
+    repo.write("packages/ios-app/Core/Gateway/GatewayLanPin.swift", "// pin\n")
+    names = selected("iOS LAN change")
+    assert "gateway.pi-sdk-rollback" not in names and all(name in names for name in expected), names
+
+
+def hosted_cli(base: Path, env: dict) -> None:
+    repo = Repo(base / "hosted", env)
+    for path in ("scripts/tron", "scripts/tron-node", "tools/work/gate.py", "tools/work/heavy.py",
+                 "packages/gateway/src/tron-home-environment-policy.mjs"):
+        target = repo.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(ROOT / path, target)
+    repo.commit("CLI")
+    # Shallow hosted checkouts need no origin/main for explicit CI steps.
+    repo.git("update-ref", "-d", "refs/remotes/origin/main")
+    catalog = json.loads((ROOT / "tools/work/gate-catalog.json").read_text())
+    trace = base / "ci-trace"
+    for step in catalog["steps"]:
+        step.pop("shardCommands", None)
+        step.pop("shards", None)
+        step.pop("artifacts", None)
+        step["command"] = f"echo {step['id']} >> '{trace}'"
+        if step["id"] == "gateway.integration":
+            step["command"] += "; exit 7"
+    path = base / "hosted-catalog.json"
+    path.write_text(json.dumps(catalog))
+    env = {**env, "TRON_GATE_CATALOG": str(path), "GITHUB_ACTIONS": "true",
+           "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
+    result = subprocess.run([str(repo.root / "scripts/tron"), "ci"], cwd=repo.root, env=env,
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 1, result.stdout + result.stderr
+    ran = trace.read_text().splitlines()
+    assert ran == ["repo.privacy", "repo.agent-policy", "protocol.contract", "repo.policy", "relay.check",
+                   "gateway.deps", "gateway.build", "gateway.deps", "gateway.build", "gateway.integration"], ran
+    assert "Reproduce: scripts/tron ci gateway.integration" in result.stdout, result.stdout
+    assert "FAIL (exit 7)" in result.stdout and "heavy queue" not in result.stdout, result.stdout
+    refused = repo.gate("run", "--base", "HEAD", "gateway.full", env=env)
+    assert refused.returncode == 2 and "local-only" in refused.stderr, refused.stdout + refused.stderr
+    assert trace.read_text().splitlines() == ran, "hosted refusal must happen before any command"
+    evidence.append({"case": "hosted CI uses catalog, prerequisites, shallow HEAD and stable failure line; local-only refused",
+                     "trace": ran, "output": result.stdout, "refusal": refused.stderr})
+
+
+def inherited_suite(base: Path, env: dict) -> None:
+    repo = Repo(base / "inherited", env)
+    # Real unittest discovery includes indirect subclasses. Every one must run
+    # when the gate partitions a larger script suite.
+    source = "import unittest\nclass Base(unittest.TestCase):\n    def test_runs(self):\n        print(type(self).__name__)\n"
+    source += "\n".join(f"class Child{i}(Base): pass" for i in range(8))
+    source += "\nif __name__ == '__main__': unittest.main()\n"
+    repo.write("scripts/test-inherited.py", source)
+    result = repo.gate("run", "tooling.tests")
+    assert result.returncode == 0, result.stdout + result.stderr
+    logs = "\n".join(path.read_text() for path in (repo.root / ".git/work/logs").rglob("*.log"))
+    assert "Base" in logs and all(f"Child{i}" in logs for i in range(8)), logs
+    evidence.append({"case": "all indirect unittest subclasses execute in sharded tooling suite", "output": result.stdout})
+
+
 def main() -> None:
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -246,8 +339,12 @@ def main() -> None:
             (base / "tmp").mkdir()
             env = {**{k: v for k, v in os.environ.items() if k != "TRON_HEAVY_LEASE_HELD"},
                    "HOME": str(base / "home"), "TMPDIR": str(base / "tmp"), "TRON_HEAVY_DIR": str(base / "heavy"),
-                   "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+                   "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+                   "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
             plans(base, env)
+            boundary_plans(base, env)
+            hosted_cli(base, env)
+            inherited_suite(base, env)
             runner(base, env)
         print(f"Passed gate journeys; evidence: {REPORT}")
     finally:

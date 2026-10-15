@@ -78,9 +78,6 @@ Commands:
                                     Give up a stale claim after preserving its work;
                                     --stale sweeps claims idle over 72h whose owner is
                                     absent; force (TTY) only for a legacy non-Gateway owner
-  work verify [--tests "<command>"]...
-                                    Run the local checks the branch diff requires,
-                                    plus each --tests command, on the current commit
   work dashboard [--html <path>] [--json <path>]
                                     Read-only live view of all work: epics, claims,
                                     queue, stale, paused epics, past exit dates, orphans
@@ -105,11 +102,15 @@ Commands:
   work issue block <issue> --blocked-by <issue>
                                     Create native parent or blocker links
   work land --summary-file <md> [--title <t>] [--tests "<command>"]...
-            [--dry-run]             From a task worktree: merge origin/main in, verify
+            [--dry-run|--publish-only]
+                                    From a task worktree: merge origin/main in, verify
                                     the merged tree, push, open or update the pull
                                     request (body = the summary verbatim), squash-merge
                                     it at the verified commit, delete the branch, and
-                                    close the issue as completed with Status Done
+                                    close the issue as completed with Status Done.
+                                    --publish-only stops after PR publication.
+  work ci-dispatch                  Dispatch hosted CI once on the clean published
+                                    task head; no retry, merge or settings change
   work cleanup [--all] [--dry-run]  Remove this task worktree and its branches once its
                                     PR merged at its head; --all: every one under the
                                     worktree root, naming why each other is kept
@@ -138,37 +139,16 @@ case "$cmd" in
     ;;
   ci)
     use_pinned_node
-    # Hosted CI (.github/workflows/ci.yml) runs exactly these steps, one workflow step
-    # each, so a red CI step is reproduced by the same command here. Only deterministic
-    # checks belong here; E2E journeys, the nested SDK pass and native builds run in
-    # the local landing gate. Seam for #1022: once `scripts/tron gate` lands, each step
-    # becomes `gate run <id>` of the catalog's hosted-safe steps.
+    # The catalog owns CI commands and membership; the wrapper only preserves
+    # the public step names and failure annotation. HEAD works in a shallow CI
+    # checkout because these explicit steps do not depend on a changed-file plan.
+    CI_STEPS="$(python3 "$ROOT/tools/work/gate.py" catalog --ci)"
     ci_step() {
-      case "$1" in
-        repo.policy)
-          # `if ci_step` disables errexit inside the function, so every step chains with &&.
-          "$ROOT/scripts/personal-info-guard.sh" \
-            && "$ROOT/scripts/tron" version check \
-            && "$ROOT/scripts/check-agent-policy.sh" \
-            && python3 "$ROOT/scripts/check-documentation-policy.py" \
-            && python3 "$ROOT/scripts/verify-gateway-protocol-contract.py" ;;
-        relay.check)
-          (cd "$ROOT/packages/push-relay" && npm ci --no-audit --no-fund && npm run check && npm run build && npm test) ;;
-        gateway.build)
-          (cd "$GATEWAY" && npm ci --no-audit --no-fund && npm run check:pi-sdk && npm run build) ;;
-        gateway.integration)
-          # On this Mac the suite is a heavy run and waits for a host-wide slot (#915);
-          # a hosted runner is a dedicated VM.
-          if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-            (cd "$GATEWAY" && npx vitest run --config vitest.hosted.config.ts)
-          else
-            python3 "$ROOT/tools/work/heavy.py" run --owner "tron ci gateway.integration in $(basename "$ROOT")" \
-              -- bash -c 'cd "$1" && npx vitest run --config vitest.hosted.config.ts' _ "$GATEWAY"
-          fi ;;
+      case " $CI_STEPS " in
+        *" $1 "*) "$ROOT/scripts/tron" gate run --base HEAD --force "$1" ;;
         *) echo "unknown ci step: $1 (steps: $CI_STEPS)" >&2; return 64 ;;
       esac
     }
-    CI_STEPS="repo.policy relay.check gateway.build gateway.integration"
     if [[ "${1:-}" == --list ]]; then echo "$CI_STEPS"; exit 0; fi
     steps=("$@"); [[ ${#steps[@]} -gt 0 ]] || read -r -a steps <<<"$CI_STEPS"
     for step in "${steps[@]}"; do

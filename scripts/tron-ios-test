@@ -26,7 +26,6 @@ IOS_BUILD_ROOT="$HOME/Library/Developer/Tron/ios"
 # only this worktree's and lane's share of them.
 RESULTS_ROOT="${TRON_IOS_TEST_RESULTS_DIR:-$IOS_BUILD_ROOT/test-runs}"
 PRODUCTS_ROOT="$IOS_BUILD_ROOT/test-derived-data"
-EPHEMERAL="${TRON_IOS_TEST_EPHEMERAL:-0}"
 PROCESS="$ROOT/scripts/ios-test-process.py"
 SIMULATOR="$ROOT/scripts/ios-test-simulator.py"
 LOCKER="$ROOT/scripts/ios-test-lock.py"
@@ -267,7 +266,6 @@ simulator_args=(
   --discovery-root "$DISCOVERY_ROOT"
   --default-state-dir "$DEFAULT_STATE_ROOT"
 )
-[[ "$EPHEMERAL" == 1 ]] && simulator_args+=(--ephemeral)
 
 # The one test product: the app and the UI-test bundle, under the UIValidation plan.
 test_scheme="Tron UI Validation"

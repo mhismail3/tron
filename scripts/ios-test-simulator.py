@@ -1655,7 +1655,6 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
             "runtime_build": runtime.get("buildversion"),
             "device_type_identifier": device_type["identifier"],
             "device_type_name": device_type["name"],
-            "ephemeral": arguments.ephemeral,
         }
         marker = stamp_lane_use(arguments, marker)
         document = inventory()
@@ -1696,7 +1695,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--results-root", type=Path)
     parser.add_argument("--products-root", type=Path)
     parser.add_argument("--development-state", type=Path)
-    parser.add_argument("--ephemeral", action="store_true")
     parser.add_argument("--discovery-root", type=Path)
     parser.add_argument("--default-state-dir", type=Path)
     parser.add_argument("--lane-dir", type=Path)
