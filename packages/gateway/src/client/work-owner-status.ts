@@ -8,6 +8,8 @@
  * - `absent`: the id has Gateway session shape, the Gateway lists no such session, and no file in the
  *   Gateway's session root (validated against that listing) carries the id. Only `work release`
  *   accepts this; handoff and recover need `settled`.
+ * - `idle`: the Gateway lists the session as idle (no turn, subagent or user wait) and no Home task is
+ *   bound to it. It can still be resumed, so only a maintainer-confirmed `work release` accepts it.
  * - `indeterminate`: anything else, including a deadline. Callers fail closed.
  * Exit 3 with a JSON stderr detail is a protocol mismatch; any other failure exits 2.
  *
@@ -40,7 +42,7 @@ const settledEvidence = new Set([
   "limited:deadline", "limited:length",
 ]);
 
-type State = "settled" | "live" | "absent" | "indeterminate" | "none";
+type State = "settled" | "live" | "absent" | "idle" | "indeterminate" | "none";
 type Verdict = { state: State; reason: string };
 class Indeterminate extends Error {}
 
@@ -172,11 +174,12 @@ async function verdict(client: GatewayProtocolClient, session: string, deadline:
     cursor = result.nextCursor;
     if (!cursor) break;
   }
-  return { state: "indeterminate", reason: row
-    ? `session ${session} exists, is idle and is no settled Home task; it can be resumed`
-    : sessionShaped
-      ? `session ${session} has a file but no user listing (a delegated session or Home chapter) and is no settled Home task`
-      : `owner ${session} is not a Gateway session id and is no Home task; another runtime may hold it` };
+  // Idle needs the whole Home task list read: a task beyond the page cap could still hold the session.
+  if (cursor) throw new Indeterminate("home.taskList has more than 100 pages; the session's Home task is unknown");
+  if (row) return { state: "idle", reason: `session ${session} is listed idle with no live turn and no Home task; it can be resumed` };
+  return { state: "indeterminate", reason: sessionShaped
+    ? `session ${session} has a file but no user listing (a delegated session or Home chapter) and is no settled Home task`
+    : `owner ${session} is not a Gateway session id and is no Home task; another runtime may hold it` };
 }
 
 /** The newest non-terminal Home task bound to `session`. Tasks are listed newest first, so the
