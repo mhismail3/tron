@@ -1131,7 +1131,7 @@ final class TronSmokeUITests: XCTestCase {
     func testHomeSheetDismissesWhenProfileSwitches() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-switch-profile-after-task-list"]
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-switch-profile-after-task-open"]
         app.launch()
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
@@ -1140,9 +1140,9 @@ final class TronSmokeUITests: XCTestCase {
         tapManageRow(app, "home-manage-tasks")
         XCTAssertTrue(app.buttons["home-sheet-done-tasks"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5), app.debugDescription)
-        // Reloading is the sheet's second read; the fixture then selects another profile through
-        // the production switch, which must release the chat and the sheet it presents.
-        app.buttons["Reload tasks"].tap()
+        // Opening a task is the sheet's next read; the fixture then selects another profile through
+        // the production switch, which must release the chat and every Home sheet it presents.
+        app.buttons["home-task-active"].tap()
         XCTAssertTrue(app.buttons["home-sheet-done-tasks"].waitForNonExistence(timeout: 10),
                       "A profile switch left the Home sheet presented for the previous profile")
     }
