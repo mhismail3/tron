@@ -38,10 +38,12 @@ one while its command still runs.
   interactive agents and the OS (`TRON_HEAVY_RESERVE_MB`, default 6 GB). The
   first heavy step always starts, so a large step progresses on a busy host.
   `TRON_HEAVY_SLOTS` (default 4) only caps how many heavy steps run at once.
-- **Measured needs.** Each catalog step's `expectedRssMb` is its measured peak
-  tree RSS on this Mac (`scripts/tron gate report`), e.g. a Gateway vitest shard
-  about 3 GB, an iOS build about 7 GB. Two Gateway shards run together; an iOS
-  build runs beside a Gateway shard but not beside another native build.
+- **Measured needs.** Each catalog step's `expectedRssMb` comes from its measured
+  peak on this Mac (`scripts/tron gate report`): Gateway vitest shards 1.3–2.9 GB,
+  nested shards up to 2.1 GB, a type check 1 GB, npm ci 0.6 GB. Xcode and simulator
+  steps do their work in launchd-owned services outside the step's process tree, so
+  their steps sample the host's memory in use instead and claim conservatively
+  (6–7 GB). A command without a measurement claims 4 GB.
 - **Queue.** Waiters hold FIFO tickets (owner, worktree, PID, command, need,
   enqueue time); a waiter prints its position and why it waits (memory, load)
   whenever that changes. `scripts/tron-heavy status` prints the budget, claimed

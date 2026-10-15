@@ -16,7 +16,7 @@ async function awaitCatalogCut(registry: RuntimeRegistry): Promise<void> {
     .sessionCatalog.whenPublished();
 }
 
-describe.sequential("recent model usage", () => {
+describe("recent model usage", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
 

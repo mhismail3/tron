@@ -964,17 +964,12 @@ settles the task `unknown` with `admission-cancelled` (Stop) or
 its one result wake follows. A step that took 5 s or more, timed out or was cancelled
 logs `home.task.dispatch-stage` naming the stage.
 
-**Worker budget (#930, [host load](host-load.md#2-home-worker-admission-gateway)).** At
-most three tasks hold a worker slot (launching or running). An authorized task beyond
-the budget, behind an earlier waiting task, or admitted while host pressure is
-`critical` is not refused: its record stays `pending` with `queuedAt`, `delegate`
-returns a null session and operation with its 1-based `queuePosition`, and it starts in
-order when a slot frees (or, under pressure, on a 5 s re-check). `task status` shows
-`queuePosition`; `home.status.workers` shows `{ running, queued, limit }`. Stop with
-operation `queued` settles a waiting task `interrupted` (`stopped-before-start`)
-before any worker exists. The queue is in memory: a restart settles a waiting task
-`unknown` (`cold-queued-not-started`) and never replays it. Each decision logs
-`home.task.queue`.
+**No worker cap (#1023, [host load](host-load.md#2-home-workers-gateway)).** Every
+authorized task starts its worker at once, whatever the host pressure: `delegate` always
+returns the worker's session and operation, and `home.status.workers` shows
+`{ running }`. Memory is protected where it is spent: the heavy verification steps
+workers run (builds, simulator journeys, test shards) wait in the host-wide heavy
+queue, which admits them by measured memory.
 
 **Worker model and thinking.** At each `delegate` call the Gateway resolves `model.ref[role=worker]`
 and `model.thinking[role=worker]` from the typed Home profile. The built-in value for either
