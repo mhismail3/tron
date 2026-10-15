@@ -276,6 +276,7 @@ final class TronHomeSheetsUITests: XCTestCase {
             self.assertMarkdown(self.element(app, "home-tool-text-report"), contains: "PR #773")
         }
         toolSheet(app, "task-status", chip: "Task, Completed", index: 2, outcome: "Active") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Latest check-in").label.contains("Gateway journey passed"))
             XCTAssertTrue(self.element(app, "home-tool-row-Tokens").label.contains("in"))
             XCTAssertTrue(self.element(app, "home-tool-row-Subagents").label.contains("3 started"))
             XCTAssertTrue(self.element(app, "home-tool-row-Model").label.contains("Claude Opus 5.5"))

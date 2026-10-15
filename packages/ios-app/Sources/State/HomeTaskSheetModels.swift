@@ -51,7 +51,7 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
         let spend: HomeTaskSpendDTO?
         let attention: Bool
         let pendingGrant: Bool
-        let checkins: [HomeTaskCheckinDTO]
+        let checkins: [HomeTaskCheckinDTO]?
         var id: String { taskId }
         /// The Gateway names the dispatched worker `sessionId` (HomeTaskSummary).
         private enum CodingKeys: String, CodingKey {
@@ -63,7 +63,7 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
                 && (title.map { $0.unicodeScalars.count <= 160 && homeText($0, bytes: 640) } ?? true)
                 && (project.map { homeText($0, bytes: 512) } ?? true)
                 && (workerSessionId.map(homeID) ?? true)
-                && HomeTaskCheckinDTO.valid(checkins)
+                && (checkins.map(HomeTaskCheckinDTO.valid) ?? true)
                 && homeText(target, bytes: 4096)
                 && target.hasPrefix("/") && ((lifecycle == .terminal) == (outcome != nil)) && (spend?.valid ?? true)
         }
@@ -120,7 +120,8 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
     let workerModel: ModelRef?
     let subagents: Subagents?
     let subagentRuns: SubagentRuns?
-    let checkins: [HomeTaskCheckinDTO]
+    /// Historical canonical tool results may predate progress; absence means none was recorded.
+    let checkins: [HomeTaskCheckinDTO]?
 
     /// The Gateway's task record names the dispatched worker `sessionId`.
     private enum CodingKeys: String, CodingKey {
@@ -157,7 +158,7 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
               task.target.hasPrefix("/"), task.spend?.valid ?? true,
               task.title.map({ $0.unicodeScalars.count <= 160 && homeText($0, bytes: 640) }) ?? true,
               task.project.map({ homeText($0, bytes: 512) }) ?? true,
-              HomeTaskCheckinDTO.valid(task.checkins),
+              task.checkins.map(HomeTaskCheckinDTO.valid) ?? true,
               task.workerSessionId.map(homeID) ?? true,
               (task.lifecycle == .terminal) == (task.terminalEvidence != nil),
               (task.lifecycle == .terminal) == (task.wake != nil),
@@ -272,6 +273,11 @@ private func invalidHomeTask() -> GatewayFailure {
 /// The task rows' and detail's derived text: one title rule and one state pill,
 /// so the list and the detail name a task the same way.
 enum HomeTaskPresentation {
+    static func checkinText(_ checkin: HomeTaskCheckinDTO) -> String {
+        [HomeSheetTime.relative(checkin.at), checkin.step, "Done: \(checkin.done)", "Next: \(checkin.next)",
+         checkin.blocker.map { "Blocker: \($0)" }].compactMap { $0 }.joined(separator: "\n")
+    }
+
     /// The worker's name, else the brief's first non-empty line, else the project.
     static func title(title: String?, briefText: String?, project: String?) -> String {
         if let title, !title.isEmpty { return title }

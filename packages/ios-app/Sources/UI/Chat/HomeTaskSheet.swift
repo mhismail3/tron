@@ -197,10 +197,10 @@ struct HomeTaskSheet: View {
 
     private func taskRow(_ row: HomeTaskPageDTO.Row) -> some View {
         let title = HomeTaskPresentation.title(title: row.title, briefText: nil, project: row.project)
-        let subtitle = [row.project, HomeSheetTime.relative(milliseconds: row.updatedAt), row.checkins.last.map { "\($0.step) · \(HomeSheetTime.relative($0.at))" }].compactMap { $0 }.joined(separator: " · ")
+        let subtitle = [row.project, HomeSheetTime.relative(milliseconds: row.updatedAt), row.checkins?.last.map { "\($0.step) · \(HomeSheetTime.relative($0.at))" }].compactMap { $0 }.joined(separator: " · ")
         return Button { child = .task(row.taskId) } label: {
             TronSettingsRow(icon: Self.taskIcon(row.lifecycle, outcome: row.outcome), title: title, subtitle: subtitle,
-                            subtitleLineLimit: row.checkins.isEmpty ? 1 : 2, accent: .tronSessionTeal) {
+                            subtitleLineLimit: row.checkins?.last == nil ? 1 : 2, accent: .tronSessionTeal) {
                 TronStatusPill(text: HomeTaskPresentation.stateLabel(lifecycle: row.lifecycle, outcome: row.outcome),
                                accent: Self.taskAccent(row.lifecycle, outcome: row.outcome))
             }
@@ -274,13 +274,13 @@ struct HomeTaskSheet: View {
     /// The worker: its model, its subagents, the runs live right now and its token spend.
     @ViewBuilder private func workerCard(_ task: HomeTaskDTO) -> some View {
         let runs = task.subagentRuns.flatMap { $0.total > 0 ? $0 : nil }
-        if task.workerModel != nil || task.subagents != nil || runs != nil || task.spend != nil || !task.checkins.isEmpty {
+        if task.workerModel != nil || task.subagents != nil || runs != nil || task.spend != nil || task.checkins?.last != nil {
             TronSettingsGroup("Worker", accent: .tronSessionTeal) {
                 VStack(spacing: 0) {
                     let rows = workerRows(task)
-                    if let checkin = task.checkins.last {
+                    if let checkin = task.checkins?.last {
                         TronSettingsRow(icon: "text.bubble", title: "Latest check-in",
-                                        subtitle: [HomeSheetTime.relative(checkin.at), checkin.step, "Done: \(checkin.done)", "Next: \(checkin.next)", checkin.blocker.map { "Blocker: \($0)" }].compactMap { $0 }.joined(separator: "\n"),
+                                        subtitle: HomeTaskPresentation.checkinText(checkin),
                                         subtitleLineLimit: nil, accent: .tronSessionTeal)
                             .accessibilityElement(children: .combine)
                             .accessibilityIdentifier("home-task-checkin")

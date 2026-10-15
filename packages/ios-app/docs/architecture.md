@@ -3225,7 +3225,10 @@ The Tasks sheet uses the task contract in
 `packages/gateway/docs/home.md` (task persistence, authorization, task recovery,
 inbox/redelivery and shared control). `home.taskList` is a bounded newest-first
 summary, not a native task catalog; `home.taskStatus` supplies exact detail and
-execution authority. One page replaces another. Dates are store-reported Unix
+execution authority. The latest check-in is also shown in a task-status tool result,
+using the same progress text and shared row owner. Historical canonical tool results
+without a check-in field remain readable; absence means no recorded progress, not
+invalid task state. One page replaces another. Dates are store-reported Unix
 milliseconds; spend shows the task's input and output token counts, or is unavailable when the Gateway reports none. Neither
 an unknown outcome nor a last assistant reply is labeled success.
 
