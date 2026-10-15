@@ -61,14 +61,21 @@ describe("TerminalService", () => {
       idle: { idleLimitMs: async () => limit, isAttached: id => attached.has(id) },
       log: (_level, message, metadata) => logs.push({ message, metadata }),
     });
+    // A login shell runs children (path_helper) while it starts; each terminal
+    // first finishes a command, so it is known to sit at its prompt.
+    const ready = async (terminal: { id: string }, marker: string) => {
+      service.write(terminal.id, `ready-${marker}`, `printf '${marker}_%s' READY\r`);
+      await waitFor(() => service.attach(terminal.id, 0).chunks.map(chunk => chunk.data).join("").includes(`${marker}_READY`) || undefined, `${marker} at its prompt`);
+    };
     const abandoned = service.open("session", cwd);
     const open = service.open("session", cwd);
     attached.add(open.id);
     const busy = service.open("session", cwd);
-    service.write(busy.id, "run", "sleep 6480\r");
     const typed = service.open("session", cwd);
-    service.write(typed.id, "type", "echo unsaved");
     const settled = service.open("session", cwd);
+    await Promise.all([ready(abandoned, "ABANDONED"), ready(open, "OPEN"), ready(busy, "BUSY"), ready(typed, "TYPED")]);
+    service.write(busy.id, "run", "sleep 6480\r");
+    service.write(typed.id, "type", "echo unsaved");
     service.write(settled.id, "settled", "printf 'SETTLED_%s' OK\r");
     await waitFor(async () => await running("sleep 6480") || undefined, "the foreground program");
     await waitFor(() => service.attach(settled.id, 0).chunks.map(chunk => chunk.data).join("").includes("SETTLED_OK") || undefined, "the finished command");
@@ -84,7 +91,9 @@ describe("TerminalService", () => {
     expect(service.activeTerminalIds()).toHaveLength(5);
     // The period applies at the next pass without a restart.
     limit = 60 * 60_000;
-    await service.sweepIdle();
+    // A prompt hook may run a short child right after a command; that pass
+    // keeps the terminal and the next one (the interval's) closes it.
+    await waitFor(async () => { await service.sweepIdle(); return service.activeTerminalIds().length <= 3 || undefined; }, "the idle pass");
     expect(service.activeTerminalIds().sort()).toEqual([open.id, busy.id, typed.id].sort());
     const closed = service.list("session").filter(terminal => terminal.exitedAt !== undefined);
     expect(closed.map(terminal => [terminal.id, terminal.closedReason]).sort())
@@ -95,7 +104,7 @@ describe("TerminalService", () => {
       .toMatchObject({ closedReason: "Closed after 60 minutes idle" });
     expect(logs.find(log => log.message.includes(abandoned.id))?.metadata).toEqual({ event: "terminal.auto-closed", reason: "idle", elapsedMs: 61 * 60_000 });
     // No terminal content reaches the log.
-    expect(JSON.stringify(logs)).not.toMatch(/sleep|unsaved|SETTLED/u);
+    expect(JSON.stringify(logs)).not.toMatch(/sleep|unsaved|SETTLED|READY/u);
 
     // Input resets the period; a detached terminal counts from the last pass
     // that saw a device holding it open.
@@ -107,7 +116,7 @@ describe("TerminalService", () => {
     await service.sweepIdle();
     expect(service.activeTerminalIds()).toHaveLength(3);
     now += 2 * 60_000;
-    await service.sweepIdle();
+    await waitFor(async () => { await service.sweepIdle(); return service.activeTerminalIds().length <= 1 || undefined; }, "the second idle pass");
     expect(service.activeTerminalIds()).toEqual([busy.id]);
     await service.terminate(busy.id);
     service.dispose();

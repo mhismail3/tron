@@ -140,8 +140,12 @@ async function startGateway() {
     const { terminal, replay } = await app.request<{ terminal: Terminal; replay: { chunks: Array<{ data: string }> } }>(
       "terminal.open", { sessionId, commandId: `open-${randomUUID()}`, columns: 80, rows: 24 },
     );
-    // The login shell prints its prompt before it is sitting idle.
-    await waitFor(() => app.events.some(event => event.topic === "terminal.output") || replay.chunks.length > 0 || undefined, "the shell prompt");
+    // A login shell runs children (path_helper) while it starts: a finished
+    // command proves it sits at its prompt before the case's own input.
+    const output = () => [...replay.chunks.map(chunk => chunk.data), ...app.events
+      .filter(event => event.topic === "terminal.output").map(event => (event.payload as { data: string }).data)].join("");
+    await app.request("terminal.write", { terminalId: terminal.id, writeId: randomUUID(), data: "printf 'PROMPT_%s' READY\r", commandId: `ready-${randomUUID()}` });
+    await waitFor(() => output().includes("PROMPT_READY") || undefined, "the shell at its prompt");
     if (input !== undefined) await app.request("terminal.write", { terminalId: terminal.id, writeId: randomUUID(), data: input, commandId: `write-${randomUUID()}` });
     return { app, terminal };
   };
