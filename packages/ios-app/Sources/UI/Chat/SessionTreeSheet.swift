@@ -122,20 +122,20 @@ struct SessionTreeSheet: View {
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
-    @State private var store = SessionHistoryStore()
-    @State private var selection: HistorySelection?
-    @State private var labelNode: SessionTreeNode?
-    @State private var labelIdentity: SessionHistoryReadIdentity?
-    @State private var label = ""
-    @State private var pageRequest = HistoryPageRequest()
+    @PresentationState private var store = SessionHistoryStore()
+    @PresentationState private var selection: HistorySelection?
+    @PresentationState private var labelNode: SessionTreeNode?
+    @PresentationState private var labelIdentity: SessionHistoryReadIdentity?
+    @PresentationState private var label = ""
+    @PresentationState private var pageRequest = HistoryPageRequest()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if HOSTED_TEST
     @Environment(\.sessionHistoryPagingProbe) private var pagingProbe
     #endif
-    @State private var installedRevision = -1
-    @State private var initialEntryResolved = false
-    @State private var initialEntryStore = SessionHistoryEntryStore()
-    @State private var forkNavigation = ChatForkNavigationOwner()
+    @PresentationState private var installedRevision = -1
+    @PresentationState private var initialEntryResolved = false
+    @PresentationState private var initialEntryStore = SessionHistoryEntryStore()
+    @PresentationState private var forkNavigation = ChatForkNavigationOwner()
 
     init(sessionID: String, initialEntryID: String? = nil, onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void, onNavigated: @escaping () -> Void) {
         self.sessionID = sessionID
@@ -488,12 +488,12 @@ struct HistoryEntryDetailsSheet: View {
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
-    @State private var store = SessionHistoryEntryStore()
-    @State private var offset = 0
-    @State private var revision = 0
+    @PresentationState private var store = SessionHistoryEntryStore()
+    @PresentationState private var offset = 0
+    @PresentationState private var revision = 0
     init(node: SessionTreeNode, identity: SessionHistoryReadIdentity, initialPage: SessionHistoryEntryPage? = nil) {
         self.node = node; self.identity = identity
-        _store = State(initialValue: SessionHistoryEntryStore(initialPage: initialPage))
+        _store = PresentationState(wrappedValue: SessionHistoryEntryStore(initialPage: initialPage))
     }
     private var active: Bool { activity.allowsPresentationPublication && (coordinator?.activity(for: surfaceToken).allowsPresentationPublication ?? true) }
     private var current: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
@@ -546,10 +546,10 @@ struct HistoryNavigationSheet: View {
     let onNavigated: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var summarize = false
-    @State private var instructions = ""
-    @State private var replaceInstructions = false
-    @State private var working = false
+    @PresentationState private var summarize = false
+    @PresentationState private var instructions = ""
+    @PresentationState private var replaceInstructions = false
+    @PresentationState private var working = false
     private var current: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
     private var leafID: String? { model.sessionHistoryPresentation(for: identity.target.sessionID)?.leafEntryId }
     var body: some View {
@@ -598,8 +598,8 @@ struct HistoryForkSheet: View {
     let onCreated: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var position: SessionForkPosition = .at
-    @State private var working = false
+    @PresentationState private var position: SessionForkPosition = .at
+    @PresentationState private var working = false
     private var current: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
     var body: some View {
         NavigationStack {

@@ -26,9 +26,12 @@ struct SessionTerminalToolbarButton: View {
 struct TerminalSheet: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
-    @State private var controller = TerminalController()
-    @State private var keyboard = TerminalKeyboardController()
-    @State private var confirmQuit = false
+    // Presentation-scoped: SwiftUI may rebuild this content while the sheet
+    // stays presented, and the attachment and emulator must survive it (#1073).
+    @PresentationState private var controller = TerminalController()
+    @PresentationState private var keyboard = TerminalKeyboardController()
+    @PresentationState private var emulator = TerminalEmulatorHost()
+    @PresentationState private var confirmQuit = false
 
     var body: some View {
         TerminalSheetChrome(title: "Terminal", phase: controller.connectionPhase, keyboard: keyboard) { accent in
@@ -40,27 +43,28 @@ struct TerminalSheet: View {
                 .scrollEdgeEffectStyle(.soft, for: .all)
             } else if let terminal = controller.terminal {
                 let replay = model.terminalReplay(for: terminal.id)
+                let identity = TerminalRendererIdentity(terminalID: terminal.id, replayRevision: replay.revision)
                 TerminalSurface(
                     chunks: replay.chunks,
                     isInteractive: controller.isRunning(model: model),
                     keyboard: keyboard,
+                    emulator: emulator,
+                    emulatorIdentity: identity,
                     onSend: { controller.send($0, model: model) },
                     onResize: { controller.resize(columns: $0, rows: $1, model: model) }
                 )
-                .id(TerminalRendererIdentity(
-                    terminalID: terminal.id,
-                    replayRevision: replay.revision
-                ))
+                .id(identity)
             } else {
                 TronSheetLoadingState(label: "Connecting terminal…", accent: accent)
             }
         } menu: {
             terminalMenu
         }
+        // Idempotent: a rebuilt sheet finds its attachment already started.
+        // It stops when the sheet is dismissed (`presentationDidRetire`).
         .task {
             controller.start(sessionID: sessionID, model: model)
         }
-        .onDisappear { controller.stop(model: model) }
         .alert("Quit Terminal?", isPresented: $confirmQuit) {
             Button("Cancel", role: .cancel) {}
             Button("Quit Terminal", role: .destructive) { controller.terminate(model: model) }
@@ -186,6 +190,8 @@ struct TerminalSurface: View {
     let chunks: [TerminalChunk]
     let isInteractive: Bool
     let keyboard: TerminalKeyboardController
+    let emulator: TerminalEmulatorHost
+    let emulatorIdentity: AnyHashable
     let onSend: (ArraySlice<UInt8>) -> Void
     let onResize: (Int, Int) -> Void
 
@@ -194,6 +200,8 @@ struct TerminalSurface: View {
             chunks: chunks,
             isInteractive: isInteractive,
             keyboard: keyboard,
+            emulator: emulator,
+            emulatorIdentity: emulatorIdentity,
             onSend: onSend,
             onResize: onResize
         )

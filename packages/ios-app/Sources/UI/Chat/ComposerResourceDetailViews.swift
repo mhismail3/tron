@@ -9,7 +9,7 @@ struct ComposerResourceInfoSheet: View {
     let technicalValue: JSONValue?
     let technicalTitle: String?
     @Environment(\.dismiss) private var dismiss
-    @State private var detent: PresentationDetent = .medium
+    @PresentationState private var detent: PresentationDetent = .medium
 
     init(items: [TronTechnicalMetadataItem], accent: Color, technicalValue: JSONValue? = nil, technicalTitle: String? = nil) {
         self.items = items

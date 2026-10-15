@@ -69,7 +69,7 @@ struct CommandLifecycleView: View {
 private struct CommandLifecycleDetailsSheet: View {
     let item: TranscriptItem
     @Environment(\.dismiss) private var dismiss
-    @State private var detent: PresentationDetent = .medium
+    @PresentationState private var detent: PresentationDetent = .medium
 
     private let accent = ChatSemanticPillRole.command.accent
     private var resource: ComposerResourceInvocation? { item.semantic?.resourceInvocations?.first }

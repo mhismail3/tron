@@ -13,16 +13,16 @@ struct HomeTaskSheet: View {
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var token
     @Environment(\.tronPresentationActivity) private var activity
-    @State private var owner = HomeSheetReadOwner()
-    @State var requestID = UUID()
-    @State var query: HomeSheetReadQuery
-    @State var child: HomeSheetDestination?
-    @State var failure: String?
-    @State var expiry = Date.now
+    @PresentationState private var owner = HomeSheetReadOwner()
+    @PresentationState var requestID = UUID()
+    @PresentationState var query: HomeSheetReadQuery
+    @PresentationState var child: HomeSheetDestination?
+    @PresentationState var failure: String?
+    @PresentationState var expiry = Date.now
     /// The brief opened whole in the shared document sheet.
-    @State private var reading: HomeTextReading?
+    @PresentationState private var reading: HomeTextReading?
     @Environment(\.tronSettingsVisualTheme) private var visualTheme
-    @State var revoking: PendingRevocation?
+    @PresentationState var revoking: PendingRevocation?
 
     /// A standing scope or one-use grant the user is about to revoke, with the
     /// admission its tap captured before the confirmation covered this sheet.
@@ -44,7 +44,7 @@ struct HomeTaskSheet: View {
         self.destination = destination
         self.profileID = profileID
         self.onOpenSession = onOpenSession
-        _query = State(initialValue: destination.initialQuery)
+        _query = PresentationState(wrappedValue: destination.initialQuery)
     }
 
     var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
@@ -130,7 +130,7 @@ struct HomeTaskSheet: View {
                 onConfirm: { run(pending.target.command, pending.admission) }
             )
         }
-        .onDisappear { owner.retire() }
+        .onPresentationRetire { owner.retire() }
     }
 
     @ViewBuilder private var content: some View {

@@ -16,9 +16,9 @@ struct MacTerminalStatus: Decodable, Equatable, Sendable {
 }
 
 /// One Mac Terminal sheet's shell: enrollment while the Gateway is up, then a
-/// direct SSH login shell that never touches the Gateway. The sheet owns one
-/// controller; closing the sheet closes the connection (the login shell gets
-/// SIGHUP, as when a Terminal window closes).
+/// direct SSH login shell that never touches the Gateway. The sheet's
+/// presentation owns one controller; dismissing the sheet closes the
+/// connection (the login shell gets SIGHUP, as when a Terminal window closes).
 @MainActor
 @Observable
 final class MacTerminalController {
@@ -47,8 +47,12 @@ final class MacTerminalController {
 
     private(set) var stage: Stage = .loading
     private(set) var chunks: [TerminalChunk] = []
-    /// Advances per connection, so a new shell gets a fresh emulator.
+    /// Advances per connection; output from an earlier shell is dropped.
     private(set) var connectionGeneration = 0
+    /// Advances only when the output is discarded (the key is removed), so
+    /// the sheet keeps one emulator across reconnects.
+    private(set) var outputGeneration = 0
+    private var started = false
     private(set) var enrollment: MacTerminalEnrollment?
 
     var isRunning: Bool { stage == .connected }
@@ -80,6 +84,9 @@ final class MacTerminalController {
 
     /// Opens the shell for the selected Mac, or says what enabling it needs.
     func start(model: AppModel) {
+        // A rebuilt sheet calls this again; its shell is already open.
+        guard !started else { return }
+        started = true
         guard let profile = model.profiles.selected else {
             stage = .setup(.unpaired)
             return
@@ -161,6 +168,9 @@ final class MacTerminalController {
         close()
         self.enrollment = nil
         chunks = []
+        sequence = 0
+        retainedBytes = 0
+        outputGeneration &+= 1
         await refreshSetup(model: model)
     }
 
@@ -191,10 +201,12 @@ final class MacTerminalController {
         close()
         connectionGeneration &+= 1
         let generation = connectionGeneration
-        chunks = []
-        sequence = 0
-        retainedBytes = 0
+        // The earlier shell's output stays on screen; the new shell starts on
+        // a fresh line with default attributes and the main screen.
         pendingUTF8 = []
+        if !chunks.isEmpty {
+            append(Array("\u{1B}[0m\u{1B}[?1049l\r\n".utf8), generation: generation)
+        }
         stage = .connecting
         // The Gateway is not consulted from here on: a missing tailnet is
         // named before any dial would only time out.
@@ -286,4 +298,8 @@ enum MacTerminalRemovalError: LocalizedError {
             "This iPhone's Mac Terminal key is missing. Remove Mac Terminal and enable it again while the Gateway is running."
         }
     }
+}
+
+extension MacTerminalController: PresentationScopedResource {
+    func presentationDidRetire() { close() }
 }

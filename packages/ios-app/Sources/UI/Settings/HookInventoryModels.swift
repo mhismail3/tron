@@ -258,7 +258,7 @@ struct HookExtensionDetailView: View {
     let title: String?
     let accent: Color
     @Environment(\.dismiss) private var dismiss
-    @State private var showsInfo = false
+    @PresentationState private var showsInfo = false
 
     init(record: HookExtensionRecord, title: String? = nil, accent: Color) {
         self.record = record

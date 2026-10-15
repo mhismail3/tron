@@ -25,16 +25,16 @@ struct SettingsRendererView: View {
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
 
-    @State private var loadError: String?
-    @State private var retryTick = 0
-    @State private var previewGeneration = 0
-    @State private var sliderPresentation = ConfigurationSliderPresentation()
+    @PresentationState private var loadError: String?
+    @PresentationState private var retryTick = 0
+    @PresentationState private var previewGeneration = 0
+    @PresentationState private var sliderPresentation = ConfigurationSliderPresentation()
     /// Gateway refusals of a dry run, shown under their row; nothing was applied.
-    @State private var rowErrors: [String: String] = [:]
-    @State private var changingID: String?
-    @State private var previewingID: String?
-    @State private var pendingConfirmation: PendingConfirmation?
-    @State private var layerEditor: LayerEditor?
+    @PresentationState private var rowErrors: [String: String] = [:]
+    @PresentationState private var changingID: String?
+    @PresentationState private var previewingID: String?
+    @PresentationState private var pendingConfirmation: PendingConfirmation?
+    @PresentationState private var layerEditor: LayerEditor?
 
     private enum LayerEditor: String, Identifiable {
         case project, mac

@@ -333,7 +333,13 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @ViewBuilder let sheetContent: () -> SheetContent
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var parent
+    @Environment(\.tronPresentationStateStore) private var sceneStateStore
+    @Environment(\.tronPresentationStateScope) private var parentStateScope
     @State private var lease = PresentationDismissalLease()
+    @State private var localStateStore = PresentationStateStore()
+
+    private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
+    private var statePath: String { PresentationStateStore.path(parent: parentStateScope, identity: identity) }
 
     func body(content: Content) -> some View {
         content
@@ -343,6 +349,8 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
                         // A sheet owns its own scrolls; the covered chat's
                         // secondary-scroll exclusion must not cross this boundary.
                         .environment(\.chatOwnsStatusBar, false)
+                        // Outlives SwiftUI rebuilding this content (#1073).
+                        .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath))
                 }
             }
             .onChange(of: isPresented, initial: true) { _, presented in
@@ -365,6 +373,8 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
         if lease.dismissingToken == nil, !isPresented { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: isPresented ? identity : nil)
         apply(transition)
+        // Only an actual dismissal ends the presentation's state.
+        if !isPresented { stateStore.retire(path: statePath) }
         if !isPresented, transition.retired != nil { onDismiss?() }
     }
 
@@ -387,7 +397,21 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     @ViewBuilder let sheetContent: (Item) -> SheetContent
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var parent
+    @Environment(\.tronPresentationStateStore) private var sceneStateStore
+    @Environment(\.tronPresentationStateScope) private var parentStateScope
     @State private var lease = PresentationDismissalLease()
+    @State private var localStateStore = PresentationStateStore()
+    /// The identity whose state scope this presenter last showed, so a
+    /// replacement or dismissal retires exactly that scope.
+    @State private var presentedStatePath: String?
+
+    private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
+
+    /// The item's own identity is part of the path: a presenter whose identity
+    /// string is constant still gives a different item a fresh state.
+    private func statePath(_ value: Item) -> String {
+        PresentationStateStore.path(parent: parentStateScope, identity: "\(identity(value))#\(value.id)")
+    }
 
     func body(content: Content) -> some View {
         content
@@ -395,6 +419,8 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
                 TronPresentationSurface(token: lease.contentToken(identity: identity(value)), parent: parent) {
                     sheetContent(value)
                         .environment(\.chatOwnsStatusBar, false)
+                        // Outlives SwiftUI rebuilding this content (#1073).
+                        .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath(value)))
                 }
             }
             .onChange(of: item.map(identity), initial: true) { _, _ in itemChanged() }
@@ -406,6 +432,10 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
             lease.beginDismissal()
             return
         }
+        // A different item replaces the presentation: the old one's state ends.
+        let path = statePath(item)
+        if let presentedStatePath, presentedStatePath != path { stateStore.retire(path: presentedStatePath) }
+        presentedStatePath = path
         let itemIdentity = identity(item)
         if lease.registeredToken == nil {
             if let token = lease.register(identity: itemIdentity) {
@@ -420,6 +450,10 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         if lease.dismissingToken == nil, item == nil { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: item.map(identity))
         apply(transition)
+        if item == nil, let presentedStatePath {
+            stateStore.retire(path: presentedStatePath)
+            self.presentedStatePath = nil
+        }
         if item == nil, transition.retired != nil { onDismiss?() }
     }
 
@@ -515,3 +549,4 @@ extension View {
         TronPresentationSurface(id: id, onMount: onMount, onRetire: onRetire) { self }
     }
 }
+

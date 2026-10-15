@@ -142,16 +142,16 @@ struct HooksSettingsView: View {
     private var accent: Color { theme?.accent ?? .tronSessionTeal }
     @Environment(\.tronPresentationActivity) private var presentationActivity
     private var scope: SettingsScope { projectCWD == nil ? .global : .project }
-    @State private var mode: HookViewMode = .byEvent
-    @State private var showUnregisteredEvents = false
-    @State private var selected: HookExtensionRecord?
-    @State private var selectedEvent: HookEventRecord?
-    @State private var projection: JSONValue?
-    @State private var loadError: String?
+    @PresentationState private var mode: HookViewMode = .byEvent
+    @PresentationState private var showUnregisteredEvents = false
+    @PresentationState private var selected: HookExtensionRecord?
+    @PresentationState private var selectedEvent: HookEventRecord?
+    @PresentationState private var projection: JSONValue?
+    @PresentationState private var loadError: String?
     /// A surface starts loading: its empty state waits for the first read.
-    @State private var loading = true
-    @State private var refreshGeneration = 0
-    @State private var trust: ProjectTrustSummary?
+    @PresentationState private var loading = true
+    @PresentationState private var refreshGeneration = 0
+    @PresentationState private var trust: ProjectTrustSummary?
 
     /// One scope's read. A scope, trust or refresh change is a new read, and a
     /// late answer for a superseded scope cannot publish into it.

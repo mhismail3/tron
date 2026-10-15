@@ -3,7 +3,7 @@ import SwiftUI
 /// Settings › Tools & Diagnostics › Experimental: prototypes this iPhone can opt into.
 /// Each switch is a device-local preference with no Gateway setting behind it.
 struct ExperimentalSettingsView: View {
-    @State private var swiftApps = SwiftAppExperiment.shared
+    @PresentationState private var swiftApps = SwiftAppExperiment.shared
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {

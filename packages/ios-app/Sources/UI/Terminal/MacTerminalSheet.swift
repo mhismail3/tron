@@ -5,7 +5,7 @@ import TronMobileCore
 /// presented directly like Manage Session's terminal, not wrapped in a
 /// settings destination's navigation stack and Done.
 struct MacTerminalSettingsRow: View {
-    @State private var isPresented = false
+    @PresentationState private var isPresented = false
     @Environment(\.tronSettingsVisualTheme) private var theme
 
     var body: some View {
@@ -33,10 +33,14 @@ struct MacTerminalSettingsRow: View {
 struct MacTerminalSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @State private var controller = MacTerminalController()
-    @State private var keyboard = TerminalKeyboardController()
-    @State private var confirmRemove = false
-    @State private var removalError: String?
+    // Presentation-scoped: SwiftUI rebuilds this content when the app returns
+    // from the background while the sheet stays presented; the shell, its
+    // output and the emulator belong to the presentation, not the view (#1073).
+    @PresentationState private var controller = MacTerminalController()
+    @PresentationState private var keyboard = TerminalKeyboardController()
+    @PresentationState private var emulator = TerminalEmulatorHost()
+    @PresentationState private var confirmRemove = false
+    @PresentationState private var removalError: String?
 
     var body: some View {
         TerminalSheetChrome(title: "Mac Terminal", phase: controller.phase, keyboard: keyboard) { accent in
@@ -52,8 +56,9 @@ struct MacTerminalSheet: View {
         } menu: {
             menu
         }
+        // Idempotent: a rebuilt sheet keeps its shell. Dismissal closes it
+        // (`presentationDidRetire`).
         .task { controller.start(model: model) }
-        .onDisappear { controller.close() }
         .onChange(of: scenePhase) { _, phase in
             // iOS suspends the app's sockets in the background; back in the
             // foreground a dropped connection opens a new shell by itself.
@@ -85,7 +90,7 @@ struct MacTerminalSheet: View {
             TronSheetLoadingState(label: "Checking your Mac…", accent: accent)
         case .enrolling:
             TronSheetLoadingState(label: "Adding this iPhone's key…", accent: accent)
-        case .connecting:
+        case .connecting where controller.chunks.isEmpty:
             TronSheetLoadingState(label: "Connecting to your Mac…", accent: accent)
         case .setup(let notice):
             placeholder(setup(notice), accent: accent)
@@ -93,15 +98,20 @@ struct MacTerminalSheet: View {
             placeholder(Placeholder(title: "Mac Terminal unavailable", detail: message, actionTitle: "Try Again") {
                 if controller.enrollment != nil { controller.reconnect() } else { Task { await controller.refreshSetup(model: model) } }
             }, accent: accent)
-        case .connected, .ended:
+        case .connecting, .connected, .ended:
+            // One emulator for the whole presentation: a new shell (Reconnect,
+            // New Shell, or the automatic one on return) continues below the
+            // previous output instead of clearing it.
             TerminalSurface(
                 chunks: controller.chunks,
                 isInteractive: controller.isRunning,
                 keyboard: keyboard,
+                emulator: emulator,
+                emulatorIdentity: controller.outputGeneration,
                 onSend: { controller.send($0) },
                 onResize: { controller.resize(columns: $0, rows: $1) }
             )
-            .id(controller.connectionGeneration)
+            .id(controller.outputGeneration)
         }
     }
 
