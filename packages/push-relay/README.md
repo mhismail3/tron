@@ -124,7 +124,7 @@ The exact bounded body is:
 `category` is allowlisted: its only value is `settings-approval`, accepted only
 with `notificationKind` `waiting`, and the relay maps it to `aps.category` so
 the iOS app shows its Approve and Decline actions (Gateway
-[settings-model.md decision 35](../gateway/docs/settings-model.md#101-decisions)).
+[settings-model.md decision 35](../gateway/docs/settings-model.md#81-decisions)).
 Any other value, or the field on another kind, is `invalid_request`.
 
 `GET /v3/capabilities` is unauthenticated, reads no state, and returns
