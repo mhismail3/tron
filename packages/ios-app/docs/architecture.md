@@ -2107,6 +2107,10 @@ Document-style sheets use the shared `TronDocumentSheet` for the standard
 the concrete content surface owns any custom blur overlay. Default detents remain
 unchanged; a caller may explicitly provide an initial detent, in which case the
 shared owner keeps the other configured detents available for native dragging.
+Its navigation chrome is the shared `tronDocumentSheetChrome` modifier. Content
+that owns its own stacks (an interpreted Swift app whose root is a TabView) uses
+`hostsNavigation: false` and applies that modifier at each stack root, so the
+chrome is never nested inside a second NavigationStack.
 Video display sheets open at medium with large available and use native safe-area
 placement without a content-level custom blur surface. Playback at medium and
 expansion to large are covered by hosted UI tests. Paused-control icon rendering

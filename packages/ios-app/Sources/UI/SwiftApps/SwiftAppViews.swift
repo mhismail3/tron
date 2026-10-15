@@ -15,6 +15,88 @@ struct SwiftAppPresentedContent: View {
     var body: some View {
         SwiftAppLazyContent(runtime: runtime, value: value)
             .environment(\.swiftAppDismiss, dismiss)
+            // A presentation leaves the runner's hosted root: its own
+            // NavigationStack and title are the program's, not the sheet's.
+            .environment(\.swiftAppHostedRoot, false)
+            .environment(\.swiftAppHostsNavigation, false)
+    }
+}
+
+/// What the runner gives the program's root (#909): until the program's
+/// first non-container view, `swiftAppHostChrome` is set, and that view is
+/// wrapped in a `SwiftAppHostStack`.
+struct SwiftAppHostChrome {
+    /// The sheet title when the program sets no root `navigationTitle`.
+    let title: String
+
+    /// Containers the program's root passes through before its first real view.
+    @MainActor static func passesThrough(_ node: SwiftAppViewNode) -> Bool {
+        node.declaration != nil || ["WindowGroup", "TabView"].contains(node.name)
+            || (node.name == "Group" && node.modifiers.isEmpty)
+    }
+    static let tabModifiers: Set<String> = ["tabItem", "badge", "tag"]
+}
+
+/// One navigation stack the runner owns, with the shared document sheet
+/// chrome (`tronDocumentSheetChrome`): the program's root `navigationTitle`
+/// (else the file name), and Done, which closes the runner. A root TabView
+/// gets one per tab, because a stack around a TabView would hide each tab's
+/// own toolbar.
+struct SwiftAppHostStack<Content: View>: View {
+    let chrome: SwiftAppHostChrome
+    @ViewBuilder let content: () -> Content
+    @State private var programTitle: String?
+
+    var body: some View {
+        NavigationStack {
+            content()
+                .environment(\.swiftAppHostChrome, nil)
+                .environment(\.swiftAppHostsNavigation, true)
+                .environment(\.swiftAppHostedRoot, true)
+                .onPreferenceChange(SwiftAppRootTitleKey.self) { programTitle = $0 }
+                .tronDocumentSheetChrome(title: programTitle ?? chrome.title)
+        }
+    }
+}
+
+/// The program's outermost `NavigationStack` merges into the runner's shared
+/// `TronDocumentSheet` stack, so its title, toolbar and pushes use the sheet's
+/// navigation bar instead of nesting a second stack inside it (#909). Any other
+/// stack (inside a sheet the program presents) stays a real NavigationStack.
+struct SwiftAppNavigationStack: View {
+    let content: AnyView
+    @Environment(\.swiftAppHostsNavigation) private var hosted
+
+    var body: some View {
+        if hosted {
+            content.environment(\.swiftAppHostsNavigation, false)
+        } else {
+            NavigationStack { content }
+        }
+    }
+}
+
+/// `navigationTitle`. In the runner's hosted root it also names the shared
+/// sheet title (`SwiftAppRootTitleKey`), so the program's own title wins over
+/// the file name.
+struct SwiftAppNavigationTitle: View {
+    let content: AnyView
+    let title: String
+    @Environment(\.swiftAppHostedRoot) private var hostedRoot
+
+    var body: some View {
+        if hostedRoot {
+            content.navigationTitle(title).preference(key: SwiftAppRootTitleKey.self, value: title)
+        } else {
+            content.navigationTitle(title)
+        }
+    }
+}
+
+struct SwiftAppRootTitleKey: PreferenceKey {
+    static let defaultValue: String? = nil
+    static func reduce(value: inout String?, nextValue: () -> String?) {
+        value = value ?? nextValue()
     }
 }
 
@@ -47,9 +129,24 @@ struct SwiftAppModifiedView: View {
         }
     }
 
+    @Environment(\.swiftAppHostChrome) private var hostChrome
+
     private func build() throws -> AnyView {
-        var view = try base()
-        for modifier in node.modifiers {
+        // The program's first view that is not a pass-through container gets
+        // the runner's navigation stack and shared chrome (#909). A tab's own
+        // tabItem/badge/tag stay outside it so the TabView still reads them.
+        guard let hostChrome, !SwiftAppHostChrome.passesThrough(node) else {
+            return try modified(try base(), node.modifiers)
+        }
+        let tabLevel = node.modifiers.filter { SwiftAppHostChrome.tabModifiers.contains($0.name) }
+        let inner = node.modifiers.filter { !SwiftAppHostChrome.tabModifiers.contains($0.name) }
+        let inside = try modified(try base(), inner)
+        return try modified(AnyView(SwiftAppHostStack(chrome: hostChrome) { inside }), tabLevel)
+    }
+
+    private func modified(_ base: AnyView, _ modifiers: [(name: String, arguments: [SwiftAppLabeledValue])]) throws -> AnyView {
+        var view = base
+        for modifier in modifiers {
             view = try apply(modifier.name, modifier.arguments, to: view)
         }
         return view
@@ -201,18 +298,18 @@ struct SwiftAppModifiedView: View {
         case "ScrollView":
             let horizontal: Bool = if case .member("horizontal", _)? = node.unlabeled.first { true } else { false }
             let content = try nodes()
-            return AnyView(ScrollView(horizontal ? .horizontal : .vertical) { content })
+            return AnyView(ScrollView(horizontal ? .horizontal : .vertical) { content }.tronScrollEdgeChrome())
         case "List":
             if node.unlabeled.contains(where: { if case .closure = $0 { false } else { true } }) {
                 // `List(items) { item in … }` is a List around a ForEach.
                 let rows = SwiftAppViewNode(name: "ForEach", arguments: node.arguments)
-                return AnyView(List { SwiftAppNodeView(runtime: runtime, node: rows) })
+                return AnyView(List { SwiftAppNodeView(runtime: runtime, node: rows) }.tronScrollEdgeChrome())
             }
             let content = try nodes()
-            return AnyView(List { content })
+            return AnyView(List { content }.tronScrollEdgeChrome())
         case "Form":
             let content = try nodes()
-            return AnyView(Form { content })
+            return AnyView(Form { content }.tronScrollEdgeChrome())
         case "Group", "WindowGroup", "ToolbarItem", "ToolbarItemGroup":
             return try nodes()
         case "GroupBox":
@@ -235,8 +332,7 @@ struct SwiftAppModifiedView: View {
                 if let footer { SwiftAppLazyContent(runtime: runtime, value: footer) }
             })
         case "NavigationStack", "NavigationView":
-            let content = try nodes()
-            return AnyView(NavigationStack { content })
+            return AnyView(SwiftAppNavigationStack(content: try nodes()))
         case "TabView":
             let content = try nodes()
             return AnyView(TabView { content })
@@ -396,7 +492,7 @@ struct SwiftAppModifiedView: View {
         case "offset":
             return AnyView(view.offset(x: SwiftAppRenderer.number(argument(arguments, "x")) ?? 0, y: SwiftAppRenderer.number(argument(arguments, "y")) ?? 0))
         case "blur": return AnyView(view.blur(radius: SwiftAppRenderer.number(argument(arguments, "radius")) ?? 0))
-        case "navigationTitle": return AnyView(view.navigationTitle(text(first)))
+        case "navigationTitle": return AnyView(SwiftAppNavigationTitle(content: view, title: text(first)))
         case "navigationBarTitleDisplayMode":
             if case .member("inline", _)? = first { return AnyView(view.navigationBarTitleDisplayMode(.inline)) }
             return AnyView(view.navigationBarTitleDisplayMode(.large))
