@@ -100,6 +100,71 @@ const reAsk = (seen: string[]) => (context: Context) => {
 };
 
 describe("resuming a stopped Home worker in place", () => {
+  it("keeps bounded worker check-ins through stop, cold reads and resume with exact operation attribution", async () => {
+    const f = await fixture();
+    const { port } = await listen(f);
+    const client = new GatewayProtocolClient(`ws://127.0.0.1:${port}/v1/socket`, await readLocalCredential(f.tronHome));
+    await client.connect(5_000);
+    cleanups.push(async () => client.close());
+    const entered = { count: 0 };
+    const checkin = { step: "Reproducing the failure", done: "Mapped task ownership", next: "Run the real Gateway journey", refs: { issue: "#1044", branch: "feature/checkins" } };
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("checkin", checkin)], { stopReason: "toolUse" }), holding(entered),
+    ]);
+    const task = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "checkin-worker", intent: "Finite work", target: f.cwd });
+    await waitFor(() => entered.count === 1, "worker continues after checkin");
+    const status = await client.request("home.taskStatus", { taskId: task.taskId }) as any;
+    expect(status.checkins).toEqual([expect.objectContaining({ ...checkin, taskId: task.taskId, operationId: task.operationId, sessionId: task.sessionId, at: expect.any(String) })]);
+    const list = await client.request("home.taskList", {}) as any;
+    expect(list.items.find((row: any) => row.taskId === task.taskId).checkins).toEqual(status.checkins);
+    const toolList = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "list" }) as any;
+    expect(toolList.tasks.find((row: any) => row.taskId === task.taskId).checkins).toEqual(status.checkins);
+    expect(f.notifications).toHaveLength(0);
+    expect(f.signals.filter(row => row.outcome === "wake" && row.decision === "admitted")).toHaveLength(0);
+    await f.registry.homeOwner().stopTask({ taskId: task.taskId, operationId: task.operationId });
+    await task.completion;
+    expect((await client.request("home.taskStatus", { taskId: task.taskId }) as any).checkins).toEqual(status.checkins);
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("checkin", { step: "Validating the fix", done: "Resumed in place", next: "Report evidence" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }),
+    ]);
+    const resumed = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "resume", taskId: task.taskId }) as { taskId: string; operationId: string };
+    await waitFor(async () => (await f.registry.homeOwner().taskStatus(resumed.taskId)).lifecycle === "terminal", "checkin successor settles");
+    const final = await client.request("home.taskStatus", { taskId: resumed.taskId }) as any;
+    expect(final.checkins).toHaveLength(2);
+    expect(final.checkins[0]).toEqual(status.checkins[0]);
+    expect(final.checkins[1]).toMatchObject({ taskId: resumed.taskId, operationId: resumed.operationId, sessionId: task.sessionId, step: "Validating the fix" });
+    await client.close();
+    const cold = await f.restart();
+    expect((await cold.homeOwner().taskStatus(resumed.taskId) as any).checkins).toEqual(final.checkins);
+    evidence.push({ case: "durable-checkins-stop-resume", status, list, resumed: final });
+  }, 60_000);
+  it("bounds check-in storage and projections and refuses malformed requests without ending the worker", async () => {
+    const f = await fixture(false, true);
+    const request = { step: "Validating", done: "Previous milestone", next: "Next milestone" };
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("checkin", { ...request, step: "x".repeat(257) }),
+        fauxToolCall("checkin", { ...request, needsAttention: true }),
+        fauxToolCall("checkin", { ...request, done: "界".repeat(200) }),
+        ...Array.from({ length: 14 }, (_, index) => fauxToolCall("checkin", { ...request, step: `Milestone ${index}` })),
+      ], { stopReason: "toolUse" }),
+      fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }),
+    ]);
+    const task = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "bounded-checkins", intent: "Finite work", target: f.cwd });
+    const final = await task.completion;
+    expect(final.terminalEvidence?.outcome).toBe("final");
+    expect(final.checkins).toHaveLength(12);
+    expect(final.checkins?.map(row => row.step)).toEqual(Array.from({ length: 12 }, (_, index) => `Milestone ${index + 2}`));
+    const status = await f.registry.homeOwner().taskStatus(task.taskId);
+    expect(status.checkins?.map(row => row.step)).toEqual(["Milestone 11", "Milestone 12", "Milestone 13"]);
+    const entries = (await f.registry.acquire(task.sessionId)).canonicalSessionEntries();
+    const results = entries.filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "checkin");
+    expect(results.filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.isError)).toHaveLength(3);
+    expect(f.signals.filter(row => row.event === "home.task.checkin")).toHaveLength(14);
+    expect(f.signals.filter(row => row.event === "home.task.checkin").every(row => row.attention === "none")).toBe(true);
+    evidence.push({ case: "bounded-checkins", retained: final.checkins?.length, status: status.checkins, refused: 3 });
+  }, 30_000);
+
   it("continues the same session and worktree from Home's task tool and re-asks the question the stop interrupted inside codemode", async () => {
     const f = await fixture(false, true);
     const { port } = await listen(f);

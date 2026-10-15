@@ -227,6 +227,7 @@ enum HostedHomeToolFixture {
    "lifecycle": "active",
    "sessionId": "worker-session",
    "operationId": "task-0b7c",
+   "checkins": [{"id": "tool-checkin", "taskId": "tron-home-tool-sheets-1", "sessionId": "worker-session", "operationId": "task-0b7c", "at": "2026-10-13T22:40:00Z", "step": "Validating settings changes", "done": "Gateway journey passed", "next": "Review native screenshots", "attention": "none"}],
    "stopIntent": null,
    "spend": {
     "sourceDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

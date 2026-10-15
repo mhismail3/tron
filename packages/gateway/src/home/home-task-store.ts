@@ -8,6 +8,7 @@ import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { authorizationRequestId, type HomeTaskAuthorizationState, type HomeTaskAuthorizationStore } from "./home-task-authorization.js";
 import type { HomeTaskCounts } from "../protocol/types.js";
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
+import { HOME_TASK_CHECKIN_LIMIT, parseHomeTaskCheckin, type HomeTaskCheckin } from "./home-task-checkin.js";
 
 const TASK_BYTES = 256 * 1_024;
 const AUTHORIZATION_BYTES = 4 * 1_024 * 1_024;
@@ -28,6 +29,11 @@ export interface HomeTaskRecord {
   generation: number;
   routeGeneration: number;
   wake: HomeWakeEvent | null;
+  /** Bounded recent history; copied on resume without changing original attribution. */
+  checkins?: HomeTaskCheckin[];
+  lastAttentionAt?: string;
+  /** One independent blocker outbox, so settlement cannot overwrite a delivered wake. */
+  attention?: { checkin: HomeTaskCheckin; wake: HomeWakeEvent };
   intent: { text: string };
   /** `taskIntentDigest(intent.text)`: the grant binding's identity of the intent. */
   intentDigest: string;
@@ -258,18 +264,21 @@ export class HomeTaskStore {
 
   /** Inbox is the sole mutable portion of a terminal task. Its result and
    * authority cannot be rewritten by delivery, recovery or notification. */
-  async updateWake(taskId: string, change: (wake: HomeWakeEvent) => HomeWakeEvent): Promise<HomeTaskRecord> {
+  async updateWake(taskId: string, change: (wake: HomeWakeEvent) => HomeWakeEvent, eventId?: string): Promise<HomeTaskRecord> {
     return this.run(async () => {
       if (!identifier(taskId) || taskId === "authorization") throw new HomeTaskStoreError("invalid-record");
       const authorization = await this.inspectAuthority();
       if (!authorization) throw new HomeTaskStoreError("not-initialized");
       const current = await this.readTask(taskId, authorization);
-      if (!current || current.lifecycle !== "terminal" || !current.wake) throw new HomeTaskStoreError("missing-state");
-      const wake = structuredClone(change(structuredClone(current.wake)));
-      if (JSON.stringify(wake) === JSON.stringify(current.wake)) return current;
-      if (wake.eventId !== current.wake.eventId || wake.createdAt !== current.wake.createdAt
-        || current.wake.state === "acknowledged" || (current.wake.push === "decided" && wake.push !== "decided")) throw new HomeTaskStoreError("invalid-record");
-      const next = { ...current, revision: current.revision + 1, updatedAt: Math.max(Date.now(), current.updatedAt), wake };
+      const attention = eventId !== undefined && current?.attention?.wake.eventId === eventId;
+      const before = attention ? current?.attention?.wake : current?.wake;
+      if (!current || !before || (eventId !== undefined && before.eventId !== eventId)) throw new HomeTaskStoreError("missing-state");
+      const wake = structuredClone(change(structuredClone(before)));
+      if (JSON.stringify(wake) === JSON.stringify(before)) return current;
+      if (wake.eventId !== before.eventId || wake.createdAt !== before.createdAt
+        || before.state === "acknowledged" || (before.push === "decided" && wake.push !== "decided")) throw new HomeTaskStoreError("invalid-record");
+      const next = { ...current, revision: current.revision + 1, updatedAt: Math.max(Date.now(), current.updatedAt),
+        ...(attention ? { attention: { ...current.attention!, wake } } : { wake }) };
       validateTask(next);
       await this.publish(this.taskPath(next), next, TASK_BYTES);
       return next;
@@ -507,7 +516,7 @@ function validateAuthorityReferences(task: HomeTaskRecord, authorization: HomeTa
 
 function validateTask(value: unknown): HomeTaskRecord {
   if (!keys(value, ["version", "taskId", "revision", "createdAt", "updatedAt", "homeId", "generation", "intent", "intentDigest", "target",
-    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"], ["budget", "resumes", "queuedAt"])
+    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"], ["budget", "resumes", "queuedAt", "checkins", "attention", "lastAttentionAt"])
     || value.version !== 1 || !identifier(value.taskId) || value.taskId === "authorization" || !positive(value.revision)
     || !timestamp(value.createdAt) || (value.createdAt as number) > 9_999_999_999_999
     || !timestamp(value.updatedAt) || (value.updatedAt as number) < (value.createdAt as number)
@@ -544,11 +553,26 @@ function validateTask(value: unknown): HomeTaskRecord {
     || (value.lifecycle === "active" && (value.sessionId === null || value.operationId === null
       || (value.grantRef === null && value.scopeRef === null)))
     || (evidence !== null && evidence.outcome === "final" && reportRef === null)) invalid();
-  const wake = value.wake;
-  if ((value.lifecycle === "terminal") !== (wake !== null)) invalid();
-  if (wake !== null) {
-    if (value.lifecycle !== "terminal" || !keys(wake, ["eventId", "routeGeneration", "createdAt", "state", "push", "delivery", "acknowledgedAt", "redeliveries"])
-      || wake.eventId !== `task-result-${createHash("sha256").update(value.taskId as string).digest("hex")}` || !positive(wake.routeGeneration)
+  if (value.checkins !== undefined) {
+    if (!Array.isArray(value.checkins) || value.checkins.length > HOME_TASK_CHECKIN_LIMIT) invalid();
+    try { value.checkins.forEach(parseHomeTaskCheckin); } catch { invalid(); }
+    if (new Set(value.checkins.map(item => item.id)).size !== value.checkins.length) invalid();
+  }
+  if (value.lastAttentionAt !== undefined && (!text(value.lastAttentionAt, 64) || !Number.isFinite(Date.parse(value.lastAttentionAt)))) invalid();
+  if (value.attention !== undefined) {
+    if (!keys(value.attention, ["checkin", "wake"]) || !object(value.attention.wake)) invalid();
+    let checkin: HomeTaskCheckin;
+    try { checkin = parseHomeTaskCheckin(value.attention.checkin); } catch { invalid(); }
+    if (checkin.taskId !== value.taskId || checkin.operationId !== value.operationId || checkin.sessionId !== value.sessionId
+      || checkin.attention !== "requested" || value.lastAttentionAt !== checkin.at) invalid();
+  }
+  if ((value.lifecycle === "terminal") !== (value.wake !== null)) invalid();
+  const wakes = [{ wake: value.wake, id: `task-result-${createHash("sha256").update(value.taskId as string).digest("hex")}` },
+    ...(value.attention ? [{ wake: value.attention.wake, id: `task-attention-${(value.attention.checkin as unknown as HomeTaskCheckin).id}` }] : [])];
+  for (const { wake, id } of wakes) {
+    if (wake === null) continue;
+    if (!keys(wake, ["eventId", "routeGeneration", "createdAt", "state", "push", "delivery", "acknowledgedAt", "redeliveries"])
+      || wake.eventId !== id || !positive(wake.routeGeneration)
       || !text(wake.createdAt, 64) || !Number.isFinite(Date.parse(wake.createdAt))
       || !["pending", "claimed", "admitted", "terminal", "acknowledged", "blocked", "outcome-unknown"].includes(wake.state as string)
       || !["pending", "decided"].includes(wake.push as string)
