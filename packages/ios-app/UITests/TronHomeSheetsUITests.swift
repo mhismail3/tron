@@ -193,6 +193,8 @@ final class TronHomeSheetsUITests: XCTestCase {
         let tasksTitle = app.navigationBars.staticTexts["Tasks"].firstMatch.frame, firstTask = element(app, "home-task-active").frame
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == 'Tasks'")).allElementsBoundByIndex
             .filter { $0.frame.minY > tasksTitle.maxY && $0.frame.maxY <= firstTask.minY }.isEmpty, "No section header repeats the title")
+        XCTAssertTrue(element(app, "home-task-active").label.contains("Validating settings changes"))
+        XCTAssertFalse(element(app, "home-task-active").label.contains("Optional("), "The timestamp renders as a relative date, not Swift debug text")
         keep("08-tasks")
         open(app, element(app, "home-task-active"), ready: "home-task-detail", name: "task")
         expand(app, done: "home-sheet-done-task")
@@ -208,6 +210,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         let brief = element(app, "home-task-brief")
         XCTAssertTrue(brief.exists)
         XCTAssertFalse(app.buttons["Show all"].exists, "The brief never expands in place")
+        let checkin = element(app, "home-task-checkin")
+        XCTAssertTrue(checkin.exists)
+        XCTAssertTrue(checkin.label.contains("Latest check-in") && checkin.label.contains("Gateway journey passed") && checkin.label.contains("Review native screenshots"), checkin.label)
         keep("09-task-detail")
         open(app, element(app, "home-task-brief-view-all"), ready: "home-reading-text", name: "brief")
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'settings model doc'")).firstMatch.exists, "View All shows the whole brief")
@@ -328,6 +333,7 @@ final class TronHomeSheetsUITests: XCTestCase {
             self.assertMarkdown(self.element(app, "home-tool-text-report"), contains: "PR #773")
         }
         toolSheet(app, "task-status", chip: "Task, Completed", index: 2, outcome: "Active") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Latest check-in").label.contains("Gateway journey passed"))
             XCTAssertTrue(self.element(app, "home-tool-row-Tokens").label.contains("in"))
             XCTAssertTrue(self.element(app, "home-tool-row-Subagents").label.contains("3 started"))
             XCTAssertTrue(self.element(app, "home-tool-row-Model").label.contains("Claude Opus 5.5"))

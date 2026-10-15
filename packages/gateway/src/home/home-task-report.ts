@@ -1,6 +1,7 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { FileEntry, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { HOME_TASK_CHECKIN_PARAMETERS, parseHomeTaskCheckinRequest, type HomeTaskCheckin, type HomeTaskCheckinRequest } from "./home-task-checkin.js";
 
 export const HOME_TASK_MARKER = "tron-home-task";
 export const HOME_TASK_REPORT = "tron-home-task-report";
@@ -94,7 +95,8 @@ export class HomeTaskReportOwner {
   async joinStop(): Promise<void> { await this.stopping; }
   readonly identity: Readonly<HomeTaskWorkerIdentity>;
   private admission: { interrupt: () => Promise<void> } | undefined;
-  constructor(identity: HomeTaskWorkerIdentity, interrupt: () => Promise<void>) {
+  constructor(identity: HomeTaskWorkerIdentity, interrupt: () => Promise<void>,
+    private readonly checkin?: (sessionId: string, request: HomeTaskCheckinRequest) => Promise<HomeTaskCheckin>) {
     this.identity = Object.freeze({ ...identity });
     this.admission = { interrupt };
   }
@@ -143,6 +145,22 @@ export class HomeTaskReportOwner {
       this.sealed = { request: payload, report, entryId };
       return entryId;
     });
+  }
+
+  /** Shares the report lease/mutex, but never seals or pauses the worker. */
+  checkinTool(sessionId: () => string, operationId: () => string | undefined): ToolDefinition {
+    return { name: "checkin", label: "Check in", annotations: { openWorldHint: false },
+      description: "Send Home a short durable progress check-in without pausing or ending work. Use at milestones and about every 30 minutes: step, done, next, optional blocker and branch/commit/issue refs. Quiet by default. needsAttention requires a blocker and requests a Home wake at most once per 30 minutes across resumes; it is not a final report.",
+      parameters: HOME_TASK_CHECKIN_PARAMETERS, executionMode: "sequential",
+      execute: async (_id, value) => {
+        const request = parseHomeTaskCheckinRequest(value);
+        const checkin = await this.mutex.run(async () => {
+          if (operationId() !== this.identity.operationId || !this.acceptsSteering || this.signal.aborted || !this.checkin) throw new Error("Check-in refused: task operation is stale, stopping or sealed");
+          return this.checkin(sessionId(), request);
+        });
+        return { content: [{ type: "text", text: `Check-in saved. Attention: ${checkin.attention}. Continue working.` }], details: { checkin } };
+      },
+    };
   }
 
   /** Sealing ends the task without a stop: the runtime ends the run at this

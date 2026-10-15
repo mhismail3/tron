@@ -973,7 +973,13 @@ private actor HostedHomeShellGateway {
             "title": .string(id == "active" ? "Settings model: continue epic #758" : "Garden review email draft"), "project": .string("tron"),
             "sessionId": .string("worker-session"), "target": .string("/trusted/project"),
             "lifecycle": .string(terminal ? "terminal" : "active"), "outcome": terminal ? .string(id == "active" ? "interrupted" : "final") : .null,
-            "spend": taskSpend(), "attention": .bool(false), "pendingGrant": .bool(false)])
+            "spend": taskSpend(), "attention": .bool(false), "pendingGrant": .bool(false),
+            "checkins": .array(id == "active" ? [.object([
+                "id": .string("checkin-one"), "taskId": .string(id), "sessionId": .string("worker-session"),
+                "operationId": .string("task-operation"), "at": .string(isoAgo(360)),
+                "step": .string("Validating settings changes"), "done": .string("Gateway journey passed"),
+                "next": .string("Review native screenshots"), "attention": .string("none"),
+            ])] : [])])
     }
     private func taskRecord(_ id: String) -> JSONValue {
         var record = taskSummary(id).objectValue!

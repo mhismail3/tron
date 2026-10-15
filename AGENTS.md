@@ -92,6 +92,10 @@
   commits no temporary files, scratch fixtures or one-off reports. Agent
   progress notes (`progress.md`) are local-only and gitignored, so they never
   mark a checkout dirty for `scripts/tron gate` or a dev candidate.
+- **Home workers check in lightly.** When the `checkin` tool is available, send a
+  short update at milestones and about every 30 minutes: current step, done, next,
+  optional blocker and branch/commit/issue refs. Keep working afterward. Reserve
+  `needsAttention` for blockers Home can help resolve; `report` alone seals the result.
 - **Leave useful breadcrumbs.** Add concise comments where ownership, an
   invariant, ordering, or a non-obvious tradeoff would otherwise be easy to break.
   Explain why; link the owning contract or focused regression when useful. Do not
