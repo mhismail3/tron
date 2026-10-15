@@ -374,7 +374,7 @@ the patch onto that tag, and running `--write`.
 ships both changes (the declaration's `removeWhen`), remove the patch in one
 change: set `pi-coding-agent` in `package.json` back to the exact release
 version, delete `pi-coding-agent-patch.json`, `third_party/pi-coding-agent/`,
-`scripts/build-pi-coding-agent-patch.mjs` and its `reproduce:pi-coding-agent`
+`packages/gateway/scripts/build-pi-coding-agent-patch.mjs` and its `reproduce:pi-coding-agent`
 script, drop the declaration from `packages/mac-app/scripts/stage-gateway-app.sh`
 and the `BUILD_INPUT_FILES` of `scripts/gateway-install-inputs.mjs`, run
 `npm install` so the lock returns to the registry entry, then

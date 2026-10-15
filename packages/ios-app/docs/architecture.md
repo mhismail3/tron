@@ -720,8 +720,7 @@ and one read per actual invalidation rather than feeding its own reload loop.
 construction, and trust inspection/mutation; it keeps no settings projection. Settings are read
 only through `settings.resolve` (the generic renderer's `resolveForRenderer`, or one resolve for a
 single served key, reading `value` or the target's own layer through `ResolvedSetting.value(at:)`)
-and written only through the Gateway's one change path, `settings.change` (gateway
-`docs/settings-model.md`). Hand-built screens send schema keys with `SettingsTarget.keyChange`, so
+and written only through the Gateway's one change path, `settings.change` (`packages/gateway/docs/settings-model.md`). Hand-built screens send schema keys with `SettingsTarget.keyChange`, so
 iOS holds no pi-document path table. A trust decision is the `permissions.projectTrust` key for the
 project target, and its change outcome carries the resulting trust inspection; clearing a saved
 decision is an `unset`, while `true` and `false` remain distinct decisions. It uses the shared
@@ -735,7 +734,7 @@ decisions. `TronProjectTrustUITests` exercises the real controls against the `HO
 `HostedProjectTrustFixture`: an older accepted receipt and older inspection value/error cannot replace
 a later canonical Block, with ordered/single decisions, foreground receipt reconciliation and a
 replacement Mac with the same cwd as controls. The fixture changes no actual trust or resources.
-The settings risk gate's iPhone half (gateway `docs/settings-model.md` 5.4 and 5.5) has the same
+The settings risk gate's iPhone half (`packages/gateway/docs/settings-model.md` 5.4 and 5.5) has the same
 owner. `SettingsApprovalsSection` shows pending changes in Manage Home (Home's and its task
 workers') and Manage Session (this chat's): it re-reads `settings.approvals` on the
 `settings.approvalsChanged` revision and decides with `settings.decide` through the receipt
@@ -791,7 +790,7 @@ Changes separates disposable history errors from action failures. An undo confli
 
 `SettingsValueEditors` supplies the generic numeric-map list editor as well as secret and string-list editors. A numeric map takes every field name, label and numeric range from the served metadata; unknown fields or unsafe numeric representations stay read-only. Save sends a typed object through the ordinary preview/receipt path, and dismissal never submits a draft. The existing secret/list E2E journey also checks offered bounds, untouched-field preservation and numeric-map save/reopen/cancel; the Gateway journey proves an unoffered field cannot erase the stored map. Project settings reuse the scoped package and Hooks owners rather than returning to a Mac/Project picker. Settings › Projects opens the existing workspace browser, so a folder needs no chat to acquire defaults. Its sheet handoff samples current presentation authority at dismissal (not a cached active flag) and retains the exact Mac identity. New Session resolves its model default through the same schema and shows the shared served source badge; choosing an override removes that default-source claim. The dashboard/no-chat journey proves a Project default remains inherited at creation. Manage Session shows automatic-compaction policy once, in the generic Context group; manual Compact Now remains a separate receipt-owning Context action rather than a repeated policy footer in the model card.
 
-The generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is
+The generic settings renderer (`packages/gateway/docs/settings-model.md` F1, 7.5, 7.5a) is
 `SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
 in `TronPresentation.swift`. It restores the pre-schema Settings design language
 (#876): primary surfaces are titled section cards, each with that section's glyph and
