@@ -202,6 +202,12 @@ final class TronHomeDashboardUITests: XCTestCase {
                 XCTAssertEqual(bar.minX, column.minX, accuracy: 1)
                 XCTAssertEqual(bar.maxY, column.maxY, accuracy: 1, "\(provider) bar sits under its copy")
                 XCTAssertEqual(bar.height, 5, accuracy: 0.5)
+                // Every non-zero fill keeps the capsule's rounded left end: it
+                // starts at the track's start and is never narrower than tall.
+                let fill = try! XCTUnwrap(frames["\(provider).column\(index).fill"], probe.label)
+                XCTAssertEqual(fill.minX, bar.minX, accuracy: 0.5, "\(provider) fill starts at its track")
+                XCTAssertEqual(fill.height, bar.height, accuracy: 0.5)
+                XCTAssertGreaterThanOrEqual(fill.width + 0.01, fill.height, "\(provider) fill keeps its rounded ends")
                 XCTAssertGreaterThan(bar.width / cardFrame.width, 0.2, "\(provider) bar is about a quarter of the card")
                 XCTAssertLessThan(bar.width / cardFrame.width, 0.34, "\(provider) bar no longer spans the card")
                 XCTAssertEqual(column.midY, name.midY, accuracy: 1, "\(provider) name is centered against its columns")
@@ -214,7 +220,115 @@ final class TronHomeDashboardUITests: XCTestCase {
             }
             XCTAssertEqual(previous!.maxX, cardFrame.maxX - 12, accuracy: 1, "\(provider) columns are right-aligned")
         }
+        // OpenAI's weekly window is 2% used: proportionally under 2pt, its fill
+        // is a round dot exactly one bar height wide, while a larger share
+        // (Anthropic's 42%) stays proportional.
+        let small = try! XCTUnwrap(frames["openai-codex.column1.fill"], probe.label)
+        let smallTrack = try! XCTUnwrap(frames["openai-codex.column1.bar"], probe.label)
+        XCTAssertLessThan(smallTrack.width * 0.02, small.height, "the fixture share is below one bar height")
+        XCTAssertEqual(small.width, small.height, accuracy: 0.5, "a small share is a round dot")
+        let large = try! XCTUnwrap(frames["anthropic.column0.fill"], probe.label)
+        let largeTrack = try! XCTUnwrap(frames["anthropic.column0.bar"], probe.label)
+        XCTAssertEqual(large.width, largeTrack.width * 0.42, accuracy: 1, "a larger share stays proportional")
         keep("11-usage-card-window-columns")
+    }
+
+    /// #1009: the Recently Completed sheet's floating search button opens the
+    /// shared search pill, which filters the rows by title locally: tolerant
+    /// of diacritics and abbreviations, a title prefix ranked above a match
+    /// inside a word, and the shared placeholder when nothing matches.
+    @MainActor
+    func testRecentlyCompletedSheetSearchesTitles() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home"]
+        app.launch(); defer { app.terminate() }
+
+        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-running"].waitForExistence(timeout: 10), app.debugDescription)
+        app.swipeUp()
+        let viewAll = element(app, "home-completed-view-all")
+        XCTAssertTrue(viewAll.waitForExistence(timeout: 5), app.debugDescription)
+        viewAll.tap()
+        let row = { (id: String) in app.buttons["home-completed-sheet-row-home-shell-fixture:\(id)"] }
+        XCTAssertTrue(row("worker-done-1").waitForExistence(timeout: 5), app.debugDescription)
+
+        let searchButton = app.buttons["home-completed-sheet-search"]
+        XCTAssertTrue(searchButton.exists, app.debugDescription)
+        XCTAssertGreaterThan(searchButton.frame.minX, app.frame.width * 0.7, "the search button sits bottom right")
+        XCTAssertGreaterThan(searchButton.frame.minY, app.frame.height * 0.5, "the search button sits bottom right")
+        keep("12-recently-completed-search-button")
+        searchButton.tap()
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.buttons["Close search"].exists)
+        XCTAssertFalse(searchButton.exists, "the pill replaces the button")
+
+        // Abbreviation across words: "simlan" finds "Simulator lane cleanup".
+        field.typeText("simlan")
+        XCTAssertTrue(row("worker-done-7").waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(waitFor(row("worker-done-1"), "exists == false"), app.debugDescription)
+        XCTAssertFalse(row("worker-done-2").exists)
+        keep("13-recently-completed-search-filtered")
+
+        // Diacritics and case fold; every word must match.
+        replace(field, with: "GÀRDEN email", app: app)
+        XCTAssertTrue(row("worker-done-2").waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(waitFor(row("worker-done-7"), "exists == false"), app.debugDescription)
+        replace(field, with: "garden budget", app: app)
+        XCTAssertTrue(noMatches(app).waitForExistence(timeout: 3), app.debugDescription)
+
+        // "ra": the title starting with it ranks above the older-ordered title
+        // that only contains it ("Garden review email dRAft").
+        replace(field, with: "ra", app: app)
+        let raindrop = row("worker-done-6"), garden = row("worker-done-2")
+        XCTAssertTrue(raindrop.waitForExistence(timeout: 3) && garden.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertLessThan(raindrop.frame.minY, garden.frame.minY, "a title prefix ranks above a match inside a word")
+        XCTAssertFalse(row("worker-done-3").exists, "Kitchen countertop bids has no 'ra'")
+
+        app.buttons["Close search"].tap()
+        XCTAssertTrue(row("worker-done-1").waitForExistence(timeout: 3), "closing search restores every row")
+        XCTAssertTrue(app.buttons["home-completed-sheet-search"].waitForExistence(timeout: 3))
+    }
+
+    /// #1009: dashboard search lists the dashboard's own session rows, ranked
+    /// by title on the iPhone; it has no remote-ranking options button and no
+    /// "Open matching session" action rows, and it searches every session the
+    /// server filter shows, not only Home's sections.
+    @MainActor
+    func testDashboardSearchListsPlainSessionRows() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home"]
+        app.launch(); defer { app.terminate() }
+
+        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-running"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["dashboard.menu"].tap()
+        app.buttons["Search"].tap()
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.buttons["Close search"].exists)
+        XCTAssertFalse(app.buttons["Search options"].exists, "no remote-ranking options button")
+
+        // The simulator's one-time swipe-typing tip covers the keyboard.
+        if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
+        field.typeText("dedup")
+        let dedupe = app.buttons["session-row-home-shell-fixture:worker-unread-3"]
+        XCTAssertTrue(dedupe.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(waitFor(app.buttons["session-row-home-shell-fixture:worker-running"], "exists == false"), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Open matching session"].exists)
+        XCTAssertFalse(app.staticTexts["Searching connected Gateways…"].exists)
+        XCTAssertFalse(element(app, "home-usage-card").exists, "results replace the Home sections")
+        keep("14-dashboard-search-results")
+
+        // The ordinary chat is outside Home's sections, yet search finds it.
+        replace(field, with: "ordinary", app: app)
+        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:ordinary-session"].waitForExistence(timeout: 3), app.debugDescription)
+        replace(field, with: "qqqzzz", app: app)
+        XCTAssertTrue(noMatches(app).waitForExistence(timeout: 3), app.debugDescription)
+        keep("15-dashboard-search-no-matches")
+
+        app.buttons["Close search"].tap()
+        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-running"].waitForExistence(timeout: 3), app.debugDescription)
     }
 
     @MainActor
@@ -248,6 +362,19 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertEqual(action.frame.midY, title.frame.midY, accuracy: 2, "View All is on the title's line")
         XCTAssertGreaterThan(action.frame.minX, title.frame.maxX)
         XCTAssertGreaterThan(action.frame.maxX, app.frame.width * 0.85, "View All is right-aligned")
+    }
+
+    /// Replaces the search field's text through its clear button, so the
+    /// journey types exactly what a user would.
+    @MainActor private func replace(_ field: XCUIElement, with text: String, app: XCUIApplication) {
+        let clear = app.buttons["Clear search"]
+        if clear.exists { clear.tap() }
+        field.typeText(text)
+    }
+
+    /// The shared placeholder's combined accessibility element.
+    @MainActor private func noMatches(_ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'No matches'")).firstMatch
     }
 
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {

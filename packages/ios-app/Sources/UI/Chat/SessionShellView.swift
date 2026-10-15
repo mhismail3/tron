@@ -787,7 +787,6 @@ struct SessionShellView: View {
                     icon: "magnifyingglass",
                     accent: .tronEmerald
                 )
-                .accessibilityIdentifier("dashboard-search-no-matches")
             }
         }
         .listStyle(.plain)

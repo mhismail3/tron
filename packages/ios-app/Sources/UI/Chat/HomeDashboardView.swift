@@ -97,7 +97,6 @@ struct HomeSectionRowsSheet: View, Equatable {
                     icon: "magnifyingglass",
                     accent: .tronEmerald
                 )
-                .accessibilityIdentifier("home-\(section.rawValue)-sheet-no-matches")
             }
             LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
                 ForEach(visible, id: \.session.dashboardID) { row in
