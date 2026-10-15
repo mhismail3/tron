@@ -168,9 +168,41 @@ package struct PackageSummary: Codable, Hashable, Identifiable, Sendable {
     /// shows no Provides groups rather than an empty one.
     package var provides: PackageProvides? = nil
     package var conflict: PackageConflict? = nil
+    /// The package's `engines.node` against the Mac's Gateway Node (#243).
+    /// Optional: absent when the package declares none or the Gateway predates it.
+    package var nodeRequirement: PackageNodeRequirement? = nil
     package var id: String { "\(scope.rawValue):\(source)" }
     /// The scope word the installed row and its detail sheet both show.
     package var scopeLabel: String { scope == .project ? "Project" : "Global" }
+}
+
+/// A declared Node range the Gateway's runtime does not meet, or cannot read, is
+/// a warning only: the package still installs and loads (D-2, #241).
+package struct PackageNodeRequirement: Codable, Hashable, Sendable {
+    package let range: String
+    package let runtime: String
+    package let status: String
+
+    /// The short tag the Installed row and the detail header add, or nil when met.
+    package var tag: String? {
+        switch status {
+        case "satisfied": nil
+        case "invalid": "Unreadable Node range"
+        default: "Needs Node \(range)"
+        }
+    }
+
+    /// The detail sheet's explanation, or nil when the requirement is met.
+    package var notice: String? {
+        switch status {
+        case "satisfied":
+            return nil
+        case "invalid":
+            return "This package declares Node “\(range)”, which isn’t a valid version range, so Tron can’t check it against Node \(runtime) on this Mac. The package is still loaded."
+        default:
+            return "This package needs Node \(range), but this Mac runs Node \(runtime). It is still loaded, but it may fail until Tron ships a Node it supports."
+        }
+    }
 }
 
 /// Gateway-owned exclusion state; unknown codes retain their display message.

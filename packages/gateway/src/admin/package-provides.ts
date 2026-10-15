@@ -1,12 +1,14 @@
 import { isManagedSubagentExtension, isUserSubagentsPackage, IGNORED_SUBAGENTS_MESSAGE, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../sessions/managed-subagents.js";
-import { basename, dirname, sep } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { basename, dirname, join, sep } from "node:path";
+import semver from "semver";
 import type {
   Extension,
   ResolvedPaths,
   ResolvedResource,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { PackageProvides, PackageConflict } from "../protocol/types.js";
+import type { PackageProvides, PackageConflict, PackageNodeRequirement } from "../protocol/types.js";
 import {
   loadSubagentCatalog,
   type AvailableSubagent,
@@ -23,6 +25,9 @@ import type { TrustService } from "./trust-service.js";
 const MAX_PROVIDES_NAMES_PER_KIND = 256;
 const MAX_PROVIDES_DIAGNOSTIC_CHARACTERS = 512;
 const SKILL_FILE_NAME = "SKILL.md";
+/** A package manifest larger than this is not read for its Node requirement. */
+const MAX_PACKAGE_MANIFEST_BYTES = 1_024 * 1_024;
+const MAX_NODE_RANGE_CHARACTERS = 128;
 
 /** One installed package as the package owner reports it: the configured source
  * and scope, whether a resource filter applies, and the installed root when the
@@ -35,7 +40,45 @@ export interface InstalledPackage {
 }
 
 /** An installed-package row with the names it provides. */
-export type PackageProvidesEntry = InstalledPackage & { provides: PackageProvides; conflict?: PackageConflict };
+export type PackageProvidesEntry = InstalledPackage & {
+  provides: PackageProvides;
+  conflict?: PackageConflict;
+  nodeRequirement?: PackageNodeRequirement;
+};
+
+/** The installed package's `engines.node` against the Node running this Gateway,
+ * which is the Node every package runs in. npm only prints `EBADENGINE` at
+ * install time, so this projection is where the mismatch stays visible (#243).
+ * It warns and never blocks (D-2): a missing, unreadable or oversized manifest,
+ * or no declared range, yields no requirement. */
+export async function packageNodeRequirement(
+  installedPath: string | undefined,
+  runtime: string = process.versions.node,
+): Promise<PackageNodeRequirement | undefined> {
+  if (installedPath === undefined) return undefined;
+  const manifestPath = join(installedPath, "package.json");
+  let manifest: unknown;
+  try {
+    if ((await stat(manifestPath)).size > MAX_PACKAGE_MANIFEST_BYTES) return undefined;
+    manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  } catch { return undefined; }
+  const engines = (manifest as { engines?: unknown } | null)?.engines;
+  const declared = engines !== null && typeof engines === "object" ? (engines as { node?: unknown }).node : undefined;
+  if (declared === undefined) return undefined;
+  if (typeof declared !== "string" || semver.validRange(declared) === null) {
+    return { range: boundedRange(typeof declared === "string" ? declared : JSON.stringify(declared) ?? ""), runtime, status: "invalid" };
+  }
+  return {
+    range: boundedRange(declared),
+    runtime,
+    // npm's own engine check: prereleases of the runtime still count.
+    status: semver.satisfies(runtime, declared, { includePrerelease: true }) ? "satisfied" : "unsatisfied",
+  };
+}
+
+function boundedRange(range: string): string {
+  return range.length <= MAX_NODE_RANGE_CHARACTERS ? range : `${range.slice(0, MAX_NODE_RANGE_CHARACTERS - 1)}…`;
+}
 
 type ResourceKind = "skills" | "prompts" | "themes";
 
@@ -173,12 +216,16 @@ export async function loadPackageProvides(request: PackageProvidesRequest): Prom
   if (catalog.diagnostic) diagnostics.push(catalog.diagnostic);
   return {
     resources,
-    entries: [...request.packages, ...managedPackage(request)].map((pkg) => ({
-      ...pkg,
-      ...(request.managedSubagents && isUserSubagentsPackage(pkg.source) ? {
-        conflict: { code: "managed-provider" as const, message: IGNORED_SUBAGENTS_MESSAGE },
-        provides: { skills: [], prompts: [], themes: [], subagents: [], tools: [], commands: [] },
-      } : { provides: packageProvides({ pkg, resources, extensions, subagents: catalog.subagents }) }),
+    entries: await Promise.all([...request.packages, ...managedPackage(request)].map(async (pkg) => {
+      const nodeRequirement = await packageNodeRequirement(pkg.installedPath);
+      return {
+        ...pkg,
+        ...(request.managedSubagents && isUserSubagentsPackage(pkg.source) ? {
+          conflict: { code: "managed-provider" as const, message: IGNORED_SUBAGENTS_MESSAGE },
+          provides: { skills: [], prompts: [], themes: [], subagents: [], tools: [], commands: [] },
+        } : { provides: packageProvides({ pkg, resources, extensions, subagents: catalog.subagents }) }),
+        ...(nodeRequirement ? { nodeRequirement } : {}),
+      };
     })),
     ...(diagnostics.length > 0 ? { diagnostic: boundedDiagnostic(diagnostics.join("; ")) } : {}),
   };

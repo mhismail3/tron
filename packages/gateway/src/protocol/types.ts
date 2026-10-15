@@ -1031,6 +1031,18 @@ export interface TronModuleSummary {
  * `resources` inventory stays authoritative for every resolved path — and each
  * kind is capped. A kind whose source failed to resolve is empty, and the
  * response carries one bounded `providesDiagnostic`. */
+/** An installed package's declared `engines.node` evaluated against the Node
+ * that runs this Gateway (and so the package). `unsatisfied` and `invalid` are
+ * warnings only (D-2, #243): the package still installs and loads. Absent when
+ * the package declares no requirement. */
+export interface PackageNodeRequirement {
+  /** The declared range, truncated to a bounded length. */
+  range: string;
+  /** `process.versions.node` of the running Gateway. */
+  runtime: string;
+  status: "satisfied" | "unsatisfied" | "invalid";
+}
+
 /** A configured user package excluded from execution by Tron's managed owner. */
 export interface PackageConflict {
   code: "managed-provider";
