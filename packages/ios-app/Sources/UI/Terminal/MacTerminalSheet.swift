@@ -107,7 +107,7 @@ struct MacTerminalSheet: View {
                 if controller.enrollment != nil { controller.reconnect() } else { Task { await controller.refreshSetup(model: model) } }
             }, accent: accent)
         case .terminal:
-            if controller.chunks.isEmpty && controller.link != .idle {
+            if controller.chunks.isEmpty && controller.link == .connecting {
                 TronSheetLoadingState(label: "Connecting to your Mac…", accent: accent)
             } else {
                 TerminalSurface(
