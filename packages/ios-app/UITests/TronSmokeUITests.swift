@@ -843,36 +843,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-terminal-established-unavailable-state")
     }
 
-    /// #479: a terminal the Gateway closed shows its reason on the existing
-    /// Recent terminals entry, and its replay ends with the same line.
-    @MainActor
-    func testClosedTerminalShowsGatewayReason() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-terminal-closed"]
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-        app.buttons["home-pinned-row"].tap()
-        openManageHome(app)
-        let terminal = app.buttons["manage-home-terminal"]
-        XCTAssertTrue(terminal.waitForExistence(timeout: 5))
-        terminal.tap()
-        let options = app.buttons["Terminal options"]
-        XCTAssertTrue(options.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.otherElements["terminal-sheet-title"].waitForExistence(timeout: 5)
-            || app.staticTexts["terminal-sheet-title"].exists)
-        options.tap()
-        let closed = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Closed after 60 minutes idle")).firstMatch
-        XCTAssertTrue(closed.waitForExistence(timeout: 5), app.debugDescription)
-        keepScreenshot(named: "terminal-recent-closed-reason")
-        // No other notice covers the menu (a failed fixture read would raise one).
-        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Gateway response")).firstMatch.exists)
-        closed.tap()
-        XCTAssertFalse(app.staticTexts["Terminal unavailable"].waitForExistence(timeout: 2))
-        keepScreenshot(named: "terminal-closed-replay-reason")
-    }
-
     @MainActor
     func testManageHomeTerminalRespectsUnavailableCapability() {
         continueAfterFailure = false

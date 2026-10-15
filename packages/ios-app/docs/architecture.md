@@ -1763,7 +1763,7 @@ terminal options menu shows it as the subtitle of that terminal's Recent
 terminals item (a standard menu item, no new component), and its replay ends
 with the same bracketed line. The idle period is the Gateway-declared
 `setup.terminalIdleMinutes` key, rendered by the generic settings renderer.
-`TronSmokeUITests.testClosedTerminalShowsGatewayReason` covers it with the
+`TronSessionTerminalUITests.testClosedTerminalShowsGatewayReason` covers it with the
 `-home-terminal-closed` hosted fixture.
 
 ### Mac Terminal
