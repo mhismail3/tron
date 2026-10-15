@@ -16,7 +16,7 @@ async function awaitCatalogCut(registry: RuntimeRegistry): Promise<void> {
     .sessionCatalog.whenPublished();
 }
 
-describe.sequential("Gateway session context windows", () => {
+describe("Gateway session context windows", { concurrent: false }, () => {
   const roots: string[] = [];
   const registries: RuntimeRegistry[] = [];
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;

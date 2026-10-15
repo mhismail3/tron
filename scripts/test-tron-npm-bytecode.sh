@@ -51,8 +51,8 @@ run_toolchain() {
   local tron="$1" tree="$2"
   # A caller (verify's prelude, a developer shell) may already export the flag;
   # only scripts/tron's own export may protect the tree, or the mutant proves nothing.
-  env -u PYTHONDONTWRITEBYTECODE PATH="$TMP/fakebin:$PATH" TRON_NODE_BIN="$TMP/fakebin/node" TRON_TEST_NPM_TREE="$tree" "$tron" ci check >"$TMP/ci.log" 2>&1 \
-    || { cat "$TMP/ci.log" >&2; fail "scripts/tron ci check failed"; }
+  env -u PYTHONDONTWRITEBYTECODE PATH="$TMP/fakebin:$PATH" TRON_NODE_BIN="$TMP/fakebin/node" TRON_TEST_NPM_TREE="$tree" "$tron" ci gateway.build >"$TMP/ci.log" 2>&1 \
+    || { cat "$TMP/ci.log" >&2; fail "scripts/tron ci gateway.build failed"; }
 }
 
 has_pycache() {

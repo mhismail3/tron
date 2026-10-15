@@ -366,7 +366,6 @@ export class HomeOwner {
     const state = `"${task.taskId}" is ${row.state}${row.outcome ? ` (${row.outcome}${row.reason ? `: ${row.reason}` : ""}${row.detail ? `, ${row.detail}` : ""})` : ""}`;
     if (!row.actions.includes(action)) {
       const hint = row.state === "running" ? "Use steer to message it or stop to end it."
-        : row.state === "queued" ? "It has no worker yet; stop removes it from the queue."
         : row.state === "settled" ? (row.actions.includes("resume") ? "Use resume to continue it in place." : "It never started a worker, so it cannot be resumed; delegate it again with a new taskId.")
         : "It is still starting; retry in a moment.";
       throw new GatewayError("conflict", `task ${action}: ${state}, so ${action} does not apply. ${hint}`, false, { ...row, ...resolved });
@@ -379,7 +378,7 @@ export class HomeOwner {
       if (action === "resume") {
         const resumed = await this.resumeTask({ taskId: task.taskId, operationId, ...(request.text === undefined ? {} : { text: request.text }) }, sessionId);
         return { accepted: true, action, taskId: resumed.taskId, sessionId: resumed.sessionId, operationId: resumed.operationId,
-          ...(resumed.queuePosition != null ? { queuePosition: resumed.queuePosition } : {}), resumes: task.taskId, ...resolved };
+          resumes: task.taskId, ...resolved };
       }
       if (task.generation !== record.generation) throw new GatewayError("conflict", "Home was re-designated after this task started; its controls belong to the earlier Home generation");
       if (action === "steer") await this.steerTask(sessionId, { taskId: task.taskId, operationId, text: request.text! });
@@ -500,8 +499,8 @@ export class HomeOwner {
   }
 
   /** A wake whose trigger never reached the canonical session goes back to pending. */
-  async releaseWakeTrigger(taskId: string, operationId: string): Promise<void> {
-    await this.inbox.releaseTrigger(taskId, operationId);
+  async releaseWakeTrigger(taskId: string, operationId: string, eventId: string): Promise<void> {
+    await this.inbox.releaseTrigger(taskId, operationId, eventId);
   }
 
   async settleTaskResults(sessionId: string, operationId: string): Promise<void> {

@@ -1203,10 +1203,10 @@ export interface HomeStatus {
   /** Process-owned task recovery projection; refusal fences only task surfaces
    * until the next Gateway start, never ordinary session readiness. */
   taskRecovery: { available: true } | { available: false; reason: string };
-  /** Host pressure at this read (#915, docs/host-load.md): queued Home workers do not start while it is `critical`. */
+  /** Host pressure at this read (#915, docs/host-load.md); informational: workers are never held back. */
   hostPressure: { level: "normal" | "elevated" | "critical"; load1PerCpu: number; eventLoopUtilization: number; sampledAt: string };
-  /** The Home worker budget: tasks running (or launching), tasks queued for a slot, and the limit. */
-  workers: { running: number; queued: number; limit: number };
+  /** Home workers running (or launching) now; there is no running cap (#1023). */
+  workers: { running: number };
   /** Derived from the durable designation, runtime presence, memory and current/last activation. */
   phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "rollover-pending" | "blocked" | "paused" | "active" | "ready";
   /** Current or last activation evidence; never includes message or memory-view bodies. */
@@ -1368,6 +1368,7 @@ export interface HomeTaskSummary extends HomeTaskDisplay {
   outcome: "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown" | null;
   spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
   attention: boolean;
+  checkins: import("../home/home-task-checkin.js").HomeTaskCheckin[];
   pendingGrant: boolean;
 }
 export interface HomeTaskPage {

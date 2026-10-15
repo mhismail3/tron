@@ -2,10 +2,10 @@
 
 `scripts/tron work` coordinates parallel agents on Tron. Issues and the Tron Project
 say who owns which work; branches and worktrees keep the edits apart; `land` merges
-them. The tooling adds no review or hosted-check gate. The gate is a local verify of
+them. The tooling adds no review or hosted-check gate. The gate is a local [gate](#gate) run of
 the exact commit being merged. Policy is in [AGENTS.md](../../AGENTS.md#work-tracking);
 the agent procedure is the [tron-work skill](../../.agents/skills/tron-work/SKILL.md).
-Repository settings (labels, Project fields, claim and cleanup rules, the verify
+Repository settings (labels, Project fields, claim and cleanup rules, the gate
 prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json).
 
 ## Commands
@@ -17,8 +17,7 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | `recover <issue> --expected-local SHA --expected-remote SHA --reason TEXT` | Publishes an exact clean descendant candidate as **unverified work**, without transferring ownership or changing local history. Requires the same known claim at both full commit IDs and canonical owner/children settlement; there is no force override. See [candidate recovery](#candidate-recovery). |
 | `release <issue> --reason TEXT [--force-maintainer]` | Gives up a stale claim on an **open** issue: preserves the claim's work, deletes the remote claim branch with an exact lease, posts an audited comment, sets Status back to Ready and removes the worktree and local branch. The issue stays open and unclaimed. Refuses a live or indeterminate owner; an idle Gateway session or a legacy owner needs the maintainer's `--force-maintainer`. See [`release`](#release). |
 | `release --stale [--dry-run]` | Sweeps every open-issue claim idle for more than 72 h and releases, through the same path, each one whose owner is `absent`. See [stale sweep](#stale-sweep). |
-| `verify [--tests CMD]...` | Runs the checks the branch's paths require, then each `--tests` command, on the current commit. Exit 0 when all pass. |
-| `land --summary-file <md> [--title T] [--tests CMD]... [--ready] [--dry-run]` | Merges `origin/main` in, verifies the merged tree, pushes the branch, opens or updates its pull request (title = `--title` or the issue title; body = the summary file, verbatim), squash-merges at the verified commit, deletes the remote branch, and closes the issue as completed with Status Done. A draft pull request refuses before the merge unless `--ready`, which marks it ready for review only after verify and the exact-head publication, re-reads it, and merges nothing if it is still a draft. An issue with open sub-issues (an epic) is left open and `land` lists them: close each fulfilled child with `work issue close`, then the epic. Prints `merged: <commit>`. |
+| `land --summary-file <md> [--title T] [--tests CMD]... [--ready] [--dry-run]` | Merges `origin/main` in, runs the [gate](#gate) on the merged tree, pushes the branch, opens or updates its pull request (title = `--title` or the issue title; body = the summary file, verbatim), squash-merges at the verified commit, deletes the remote branch, and closes the issue as completed with Status Done. A draft pull request refuses before the merge unless `--ready`, which marks it ready for review only after verify and the exact-head publication, re-reads it, and merges nothing if it is still a draft. An issue with open sub-issues (an epic) is left open and `land` lists them: close each fulfilled child with `work issue close`, then the epic. Prints `merged: <commit>`. |
 | `cleanup [--all] [--dry-run]` | Removes a task worktree and its branches once its pull request merged at its head (or its issue is closed and it holds only its claim commit). Names what it keeps and why. |
 | `dashboard [--html P] [--json P]` | Read-only view of claims, Status, epics, stale claims, paused epics, past exit dates, orphans, classification gaps and main CI. |
 | `comment <issue> --body-file F` | Privacy-checks, then posts a public issue comment. |
@@ -54,7 +53,7 @@ Reads are plain `gh` reads.
 Do not create manual ownerless epic/custom-base branches. Explicit `start --integration`
 creates the canonical owner claim; `--base` records the exact configured-remote
 branch, not a guessed `main`. This selects the starting tree, not a different merge
-target: `verify` and `land` still use the configured base (normally `main`).
+target: the gate and `land` still use the configured base (normally `main`).
 Creation is not adoption: existing local-only branches refuse without publication,
 and unknown/live remote claims still require supported `handoff`. Unknown-owner maintainer recovery requires a real
 terminal and exact `HANDOFF #<issue> FROM unknown` confirmation. Before continuation
@@ -63,42 +62,80 @@ public audit and normal `work start` admission. Durable receipts include issue, 
 worktree, owner, head/tree, PR, exact test commands with actual pass/fail results and
 the next slice; historical failed gates remain failed.
 
-## `verify` and `land`
+## Gate
 
-`verify` diffs `HEAD` against the merge base with `<remote>/<base>` and selects checks
-by path. A package's check runs only for code paths: markdown and `docs/` changes never
-start a build:
+Every change reaches `main` through one deterministic, gated pipeline (#1022).
+[`gate-catalog.json`](gate-catalog.json) is its single source of truth: for each step
+its id, trigger (paths, or a selector over the change), exact command, cache inputs,
+time budget and hard timeout, resource class (`light` or `heavy`, with its expected
+peak RSS), artifacts, pass criteria and the gate it unlocks. `scripts/tron gate`
+(`gate.py`) is the only runner; agents run verification steps through it, never by
+hand-copying their commands.
 
-- always: the privacy guard (`scripts/personal-info-guard.sh`) and `git diff --check`;
-- `packages/gateway`: `npm ci` only when the lockfile changed or `node_modules` is
-  missing, then `npm run check`, then `vitest related` for the changed sources and
-  `vitest run` for the changed test files, under the default and nested configs;
-- `packages/push-relay`: `npm run check` and `npm run build`;
-- `packages/ios-app`: `scripts/tron-ios-test build`;
-- `packages/mac-app`: `scripts/tron mac generate`, then a Debug `xcodebuild build-for-testing` (it also compiles the integration target);
-- changed scripts: `ast` parse for `.py`, `node --check` for `.mjs`/`.js`, `bash -n`
-  for `.sh` and for shebang-shell files under `scripts/`;
-- each `--tests` command, run from the repository root.
+| Command | Does |
+| --- | --- |
+| `gate plan [--tests CMD]... [--json]` | Classifies the change (the worktree, dirty or committed, against its merge base with `origin/main`) and prints the ordered shards it needs, each marked `pending` or `reusable pass`. |
+| `gate run [STEP...] [--tests CMD]... [--force]` | Runs the plan, or the named steps (with their planned prerequisites), in catalog order. |
+| `gate next` | Runs only the next shard without a valid pass, then stops. |
+| `gate submit [run args]` / `jobs` / `wait JOB` / `cancel JOB` | Hands a run to the background and returns at once, so the session keeps working; `jobs` shows each job's live state, heavy-queue position and last line; `wait` streams it and returns its result; `cancel` stops it and its running step. |
+| `gate report [--json]` / `gate catalog` | Median and max wall time and peak RSS per shard from every recorded run; the catalog as a table. |
 
-Read-only preflight checks run two at a time. Canonical builds then run one at a
-time, in Mac → Gateway → push relay → iOS order when selected; only after they
-succeed do explicit `--tests` commands run, at most two together. Mac staging can
-replace the Gateway's source `node_modules`, and package checks can install their
-dependencies, so those publishers must settle before consumers run. The first
-failed phase prevents later phases from starting; no assertion or timeout is
-relaxed. Explicit journeys must themselves avoid conflicting writes.
+**Plans.** Plan order is catalog order, so the same change always gets the same
+plan. Markdown and `docs/` paths never start a build. Representative plans:
 
-Each log is kept under `<git dir>/work/logs/`; every check prints a flushed
-`running: <check> (log: <path>)` line before it starts, and a failing check prints
-the end of its log. `land` uses the same verify runner. On cleanup of a merged task,
-the exact merged head's log directory is retained in the common Git directory;
-retained log directories older than 30 days are pruned. Claim-only cleanup does not
-retain or prune logs. A tree that passed with the same check set and build-order contract is
-recorded under `<git dir>/work/verified/` and is not run again. `verify` refuses
-a dirty worktree, because it checks a commit. `python3 -B scripts/test-work-verify.py`
-exercises the real CLI with child-process dependency replacement, an explicit
-reader journey, failed-publisher admission, and exact-tree cache reuse; its
-repeatable evidence is `test-results/work-verify.json`.
+- docs only: `repo.privacy`, `repo.whitespace`;
+- Gateway TypeScript: `gateway.deps` (verifies the install against the lock and
+  repairs drift with `npm ci`, the #1011 guard) → `gateway.typecheck` → the related
+  vitest files in 3 shards, two at a time (`gateway.affected`) → the nested-SDK pass in
+  four named shards run one at a time, balanced by measured file time (`gateway.nested`; it has no
+  affected-only form, and new nested files land in its `[rest]` shard);
+- Gateway lockfile, package, vitest config, test support or `.node-version`: the
+  whole default suite in 6 shards, two at a time (`gateway.full`, which supersedes
+  `gateway.affected`) plus `gateway.scripts` (three named shards);
+- iOS Swift: one `ios.build` (build-for-testing), then `ios.journeys`, which runs the
+  changed UI test classes (or the smoke set) with test-without-building, two test
+  methods per shard, from the same stamped products;
+- Mac: `mac.build` (build-for-testing; it stages the Gateway payload, so it precedes
+  every Gateway step) → `mac.test` (test-without-building); replacement scripts add
+  `mac.replace-e2e`;
+- protocol (`config/GatewayProtocol.json`): `protocol.contract`, `mac.build`, the full
+  Gateway suite and `ios.build`;
+- tooling (`tools/work`, `scripts/test-*.py`): `repo.syntax` and one `tooling.tests`
+  shard per affected suite; `--tests` commands become `journey` shards.
+
+**Shards and cache.** Each shard's cache key hashes its expanded command and the
+git tree of its declared inputs (`keyExtra: xcode` adds the Xcode version;
+`cacheScope: worktree` binds steps whose products live in the worktree). A passing
+shard is recorded under `<git common dir>/work/gate/results/`; a rerun reuses every
+pass whose key still matches and reruns only failed or invalidated shards. Tests are
+never skipped or weakened to meet a budget: a slow step is split into shards or
+narrowed to affected files.
+
+**Progress and failure.** Each shard prints a start line with its class, budget,
+hard limit and log path (`<git dir>/work/logs/<head12>/`), a heartbeat every 15 s
+with elapsed time, live tree RSS and the log's last line, and a result line with
+wall time, peak tree RSS and CPU. The first failing shard stops the run, prints the
+end of its log, names the step and how many later shards did not start, and lists
+the step's `knownFlakes` (for example #1016). A shard past its hard timeout is
+killed with its process group and reported as `TIMEOUT <shard> exceeded its hard
+limit`. Every finished shard appends to `<git common dir>/work/gate/metrics.jsonl`.
+
+**Heavy steps.** A `heavy` shard waits in the host-wide heavy queue
+(`heavy.py`, `scripts/tron-heavy status`;
+[host load management](../../packages/gateway/docs/host-load.md#1-heavy-run-queue-work-tooling))
+with its catalog `expectedRssMb`, so admission accounts for memory; the shard's
+tree holds the lease descriptor and inherits it (`TRON_HEAVY_LEASE_HELD`), so a
+journey that runs `scripts/tron-ios-test` does not wait on itself. Light shards never
+wait.
+
+`land` runs the whole plan on the merged, committed tree (`gate.verify`) and
+refuses a dirty worktree or a tree that changed while steps ran. `python3 -B
+scripts/test-gate.py` exercises the real CLI in temporary repositories: the plan for
+each change kind, an injected failure that stops at its shard, a retry that reuses
+passing shards, input invalidation, a hard timeout, background submit/cancel/wait,
+and the dirty-tree refusal; evidence is `test-results/gate.json`.
+
+## `land`
 
 `land` refuses a detached HEAD, a base branch, a dirty worktree, a merge or rebase in
 progress, and a branch with no commits beyond the base. The privacy guard runs on the
@@ -108,14 +145,6 @@ then `land` runs again. A moved base sends `land` back to merging it, at most th
 times. A refused merge after the base moved is retried the same way. A head that a
 pull request already merged is refused, so a repeat run cannot open a second one.
 Other refusals stop `land` with nothing merged. Claim handoff serializes through a read-only descriptor on the pre-existing common Git directory (it creates no lock file), checks operation markers in the selected worktree's private Git directory (including linked-worktree merge/rebase/cherry-pick/revert state), and rechecks local and remote heads before changing a ref. An exact accepted transition commit can repair local ref state after a partial push; unrelated or malformed remote objects are never treated as proof. A local head that differs from the remote claim head is not accepted merely because it is unpushed or has the same tree: use the explicit candidate recovery path for a clean settled-owner descendant, or stop and preserve the conflicting state. Force confirmation does not bypass this expected-head fence.
-
-When the planned checks include a build or a `--tests` journey, `verify` first waits for
-a slot in the host-wide heavy-run queue (`tools/work/heavy.py`, `scripts/tron-heavy
-status`; [host load management](../../packages/gateway/docs/host-load.md#1-heavy-run-queue-work-tooling),
-#915) and prints its queue position while it waits. The checks hold the slot's
-descriptor and inherit it (`TRON_HEAVY_LEASE_HELD`), so a journey that runs
-`scripts/tron-ios-test` or `scripts/ios-gateway-e2e-test` does not wait on itself.
-Read-only checks alone take no slot.
 
 ## Candidate recovery
 
@@ -308,7 +337,7 @@ deletes the local branch and the remote branch with a lease on the proven head.
 ## Tests
 
 The tooling has no unit tests. Changes are validated by running the real commands: a
-`verify` or `land --dry-run` on the branch, and an integration run against a temporary
+`scripts/tron gate run` or `land --dry-run` on the branch, and an integration run against a temporary
 repository when a change touches Git, GitHub or cleanup behavior.
 
 `python3 scripts/test-work-start.py` exercises real CLI/Git creation, custom-base

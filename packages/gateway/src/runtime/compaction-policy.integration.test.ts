@@ -81,7 +81,7 @@ function checkpoint(session: AgentSession) {
     context: session.sessionManager.buildSessionContext().messages.map(message => JSON.stringify(message, (key, value) => key === "timestamp" ? undefined : value)) };
 }
 
-describe.sequential("provider request-size overflow classification", () => {
+describe("provider request-size overflow classification", { concurrent: false }, () => {
   it("treats a provider body-limit rejection as recoverable context overflow and leaves other failures alone", () => {
     const rejected = fauxAssistantMessage("", { stopReason: "error", errorMessage: OVERSIZED_REQUEST_ERROR });
     const recovered = oversizedRequestOverflow(rejected);
@@ -96,7 +96,7 @@ describe.sequential("provider request-size overflow classification", () => {
   });
 });
 
-describe.sequential("pinned SDK compaction request policy", () => {
+describe("pinned SDK compaction request policy", { concurrent: false }, () => {
   it("keeps exact built-in split-summary requests, checkpoint, file tracking and rebuilt context under standard behavior", async () => {
     const baseline = await fixture({}, false);
     const adapted = await fixture();

@@ -138,6 +138,11 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertEqual(summary.label, "0 of 3 done today")
         XCTAssertTrue(app.staticTexts["4 day streak"].exists)
         keepScreenshot(app, "889-2-app-running")
+        // #909: the runner hosts the program in the shared document sheet
+        // chrome. The program's root navigationTitle is the shared sheet title
+        // and Done is inked in that title's tint (TronSheetTitle +
+        // tronToolbarAction); a runner with its own chrome fails here.
+        assertToolbarTint(app, title: "Habits")
 
         app.buttons["Complete Drink water"].tap()
         XCTAssertTrue(wait(summary, predicate: "label == '1 of 3 done today'"), "Button actions mutate interpreted @State through a @Binding")
@@ -157,6 +162,11 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Meditate"].waitForExistence(timeout: 5), "TextField binding and array append work")
         XCTAssertTrue(wait(summary, predicate: "label == '1 of 4 done today'"))
         keepScreenshot(app, "889-4-app-after-add")
+
+        // #909: the shared Done closes the runner, back to the document sheet.
+        app.navigationBars.containing(.staticText, identifier: "Habits").buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(wait(summary, predicate: "exists == false"), "Done closes the runner")
+        XCTAssertTrue(run.waitForExistence(timeout: 5), "Closing the runner returns to the .swift document sheet")
     }
 
     /// #889: without the flag a `.swift` display is an ordinary document
@@ -195,6 +205,11 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Groceries"].waitForExistence(timeout: 10), "The App's WindowGroup renders the first tab")
         XCTAssertTrue(app.staticTexts["$42.50"].exists, "String(format:) formats currency")
+        // #909: a root TabView gets the shared chrome per tab, and the tab's own
+        // toolbar stays beside Done (a stack around the TabView would hide it).
+        assertToolbarTint(app, title: "Expenses", excluding: ["Plan trip", "Leave app"])
+        let expensesBar = app.navigationBars.containing(.staticText, identifier: "Expenses").firstMatch
+        XCTAssertTrue(expensesBar.buttons["Plan trip"].exists, "The tab keeps its toolbar under the shared chrome")
         app.buttons["Add food"].tap()
         XCTAssertTrue(app.staticTexts["New food"].waitForExistence(timeout: 5), "A store method appends a @Published expense")
         XCTAssertTrue(app.staticTexts["$12.25"].exists)
@@ -203,14 +218,37 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         app.buttons["Summary"].tap()
         let total = app.staticTexts["budget.total"]
         XCTAssertTrue(total.waitForExistence(timeout: 5), "The TabView switches to the second tab")
+        assertToolbarTint(app, title: "Summary")
+        // Optional.map: applied to a value, and nil stays nil for `??`.
+        XCTAssertTrue(app.staticTexts["Latest: New food"].exists, "Optional.map applies its closure to a value")
+        XCTAssertTrue(app.staticTexts["No big expense"].exists, "Optional.map on nil is nil")
         XCTAssertEqual(total.label, "Total $72.75 across 3 expenses", "The other tab reads the same environment object")
         XCTAssertEqual(app.staticTexts["budget.food"].label, "54.75")
         XCTAssertEqual(app.staticTexts["budget.travel"].label, "18.00")
         XCTAssertEqual(app.staticTexts["budget.fun"].label, "0.00")
         keepScreenshot(app, "889-7-budget-summary")
 
+        // #1027: dismiss() closes the presentation the program created, and
+        // only that: a pushed destination pops, a sheet closes after its save,
+        // and in the program's root it never closes the runner itself.
+        app.buttons["Biggest expense"].tap()
+        let back = app.buttons["Back to summary"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
+        XCTAssertTrue(wait(back, predicate: "exists == false"), "dismiss() pops the program's navigation destination")
+        XCTAssertTrue(total.waitForExistence(timeout: 5))
+
         app.buttons["Expenses"].tap()
         XCTAssertTrue(app.staticTexts["New food"].waitForExistence(timeout: 5), "Switching tabs keeps the shared store")
+        app.buttons["Plan trip"].tap()
+        let save = app.buttons["Save trip"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5)); save.tap()
+        XCTAssertTrue(wait(save, predicate: "exists == false"), "dismiss() closes the program's own sheet")
+        XCTAssertTrue(app.staticTexts["New travel"].waitForExistence(timeout: 5), "The sheet's action ran before it closed")
+        keepScreenshot(app, "1027-sheet-dismissed")
+
+        app.buttons["Leave app"].tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertTrue(app.staticTexts["New travel"].exists, "dismiss() in the program's root never closes the runner sheet")
     }
 
     /// #889: unsupported Swift shows a line-numbered diagnostic; runaway loops,
@@ -242,6 +280,9 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
         let taps = app.staticTexts["limits.taps"]
         XCTAssertTrue(taps.waitForExistence(timeout: 10))
+        // #909: a program with no NavigationStack or title still gets the
+        // shared chrome, titled with the file name.
+        assertToolbarTint(app, title: "Limits")
         XCTAssertTrue(diagnostic(app, "Line 62: Unknown name 'Map'").exists, "An unsupported view renders an inline diagnostic beside working views")
 
         var expectedTaps = 0
@@ -279,7 +320,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: \(expectedTaps + 1)"), "The app stays responsive after nesting views")
     }
 
-    /// #1006: the Settings › This iPhone › Experimental switch turns the run
+    /// #1006: the Settings › Tools & Diagnostics › Experimental switch turns the run
     /// control on and off live, without a relaunch, and it wins over the
     /// launch argument that started this process with the runner off.
     @MainActor func testSettingsSwitchAddsAndRemovesSwiftRunControlLive() {
@@ -313,7 +354,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let experimental = app.buttons["settings-link-Experimental"]
         XCTAssertTrue(experimental.waitForExistence(timeout: 10))
         for _ in 0..<12 where !experimental.isHittable { app.swipeUp() }
-        keepScreenshot(app, "1006-1-settings-this-iphone")
+        keepScreenshot(app, "1006-1-settings-tools-diagnostics")
         experimental.tap()
         let toggle = app.switches["settings-experimental-swift-apps"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 10), app.debugDescription)

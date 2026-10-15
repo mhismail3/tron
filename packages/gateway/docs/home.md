@@ -943,6 +943,39 @@ admission. The scope binds to the restore epoch.
 - Maintainer RPCs and terminal controls list, revoke and decide. Home's model tools
   cannot approve grants.
 
+### Worker progress check-ins
+
+`checkin` is available beside `report` only on the current task-worker operation.
+It never seals, pauses or ends work, and is allowed while task-owned subagents run.
+Workers send one at meaningful milestones and about every 30 minutes, not per tool:
+`step` (256 UTF-8 bytes), `done` and `next` (512 each), optional `blocker` (512),
+optional `refs` (`branch`, `commit`, `issue`, 256 each), and optional `needsAttention`.
+The request is at most 4 KiB. Empty/invalid/oversized requests are refused without
+writing. A sealed, stopping, retired or different operation cannot check in.
+
+The task record is canonical: a durable atomic update adds the Gateway-assigned
+ID, timestamp, task/session/operation identity and attention disposition. It retains
+12 entries; `task status`, `task list`, `home.taskStatus` and `home.taskList` expose
+only the latest three in chronological order. Stop and cold reads preserve them;
+a resumed successor carries the bounded history unchanged, so old entries retain
+their original operation attribution. No transcript scan or native timer owns progress.
+
+Routine check-ins cause no wake or push. `needsAttention: true` requires a blocker
+and may request a wake at most once per 30 minutes for that worker lineage, including
+resumes. A pending/in-flight blocker outbox cannot be replaced. The saved entry says
+`requested`, `rate-limited`, `pending`, or `none`; requested is not proof Home replied.
+One separate task-owned attention outbox pins the blocker snapshot and shares the
+existing Home wake admission, route, ceiling, canonical proof and acknowledgement
+owner. Final-result settlement cannot overwrite it. Unavailable/paused Home keeps
+it for the next eligible activation, without a fallback push; an admitted Home reply
+keeps the ordinary Home reply notification policy. Progress is never success evidence.
+
+`home-task-continuity.e2e.test.ts` covers the real worker tool, socket status/list,
+Home tool listing, stop/resume attribution and cold read. `home-wake.e2e.test.ts`
+covers nonterminal blocker wake, rate limiting across resume and independent final
+results; repeatable evidence is in `test-results/home-task-continuity.json` and
+`test-results/home-task-checkin-wake.json` under the Gateway package.
+
 ### Dispatch and workers
 
 Only the enabled Home's active chapter may call `delegate` with a stable `taskId`, a
@@ -964,17 +997,12 @@ settles the task `unknown` with `admission-cancelled` (Stop) or
 its one result wake follows. A step that took 5 s or more, timed out or was cancelled
 logs `home.task.dispatch-stage` naming the stage.
 
-**Worker budget (#930, [host load](host-load.md#2-home-worker-admission-gateway)).** At
-most three tasks hold a worker slot (launching or running). An authorized task beyond
-the budget, behind an earlier waiting task, or admitted while host pressure is
-`critical` is not refused: its record stays `pending` with `queuedAt`, `delegate`
-returns a null session and operation with its 1-based `queuePosition`, and it starts in
-order when a slot frees (or, under pressure, on a 5 s re-check). `task status` shows
-`queuePosition`; `home.status.workers` shows `{ running, queued, limit }`. Stop with
-operation `queued` settles a waiting task `interrupted` (`stopped-before-start`)
-before any worker exists. The queue is in memory: a restart settles a waiting task
-`unknown` (`cold-queued-not-started`) and never replays it. Each decision logs
-`home.task.queue`.
+**No worker cap (#1023, [host load](host-load.md#2-home-workers-gateway)).** Every
+authorized task starts its worker at once, whatever the host pressure: `delegate` always
+returns the worker's session and operation, and `home.status.workers` shows
+`{ running }`. Memory is protected where it is spent: the heavy verification steps
+workers run (builds, simulator journeys, test shards) wait in the host-wide heavy
+queue, which admits them by measured memory.
 
 **Worker model and thinking.** At each `delegate` call the Gateway resolves `model.ref[role=worker]`
 and `model.thinking[role=worker]` from the typed Home profile. The built-in value for either
@@ -1113,7 +1141,7 @@ proves zero Gateway stops. Its value is `null` unless every stop was accepted an
 run was joined. Stop-target enumeration takes one snapshot of the activity rows before
 awaiting workflow-child status. Artifact refresh may reorder the live activity map but
 cannot make the same row receive or count a second stop. The managed-provider journey
-in `home-task-subagents.e2e.test.ts` forces a real artifact refresh during that read and
+in `home-task-subagents-*.e2e.test.ts` forces a real artifact refresh during that read and
 checks the canonical one-child stop count and terminal provider state.
 
 **Completion notices.** The provider writes an async run's completion as a `subagent-notify`
@@ -1132,7 +1160,7 @@ The provider also creates a mission record for a default task-based launch unles
 Its async completion watcher settles a stopped run's linked mission to `cancelled`;
 Home does not rewrite mission files. Provider retention bounds terminal mission history
 (default 200), not abandoned active records. The real Stop journey in
-`home-task-subagents.e2e.test.ts` checks the exact run's mission after task settlement
+`home-task-subagents-*.e2e.test.ts` checks the exact run's mission after task settlement
 and writes `test-results/stopped-subagent-mission.json`. A terminal run paired with an
 active mission after settlement is a provider lifecycle defect, not expected retention.
 
@@ -1168,7 +1196,7 @@ other unknown reasons (including cold recovery, detached work and failed stops)
 remain excluded. This never turns `unknown` into a successful work outcome or grants
 control of another task. The proof requires an updated Gateway and rebuilt helper;
 an old Gateway remains fail-closed. The canonical corruption/race regression is in
-`home-task-subagents.e2e.test.ts`; `scripts/test-work-handoff.py` exercises the built
+`home-task-subagents-*.e2e.test.ts`; `scripts/test-work-handoff.py` exercises the built
 helper and real claim command, including refusal preservation and status races.
 
 **Task waits across turns.** A task turn that ends normally (its final assistant message
@@ -1195,7 +1223,7 @@ or on a failed or aborted turn, never on a turn that ends with live work and no 
 
 Provider completion notices reach a task worker as context of its operation. No turn
 starts after settlement: a wake starts a turn only while the task holds its operation open
-between turns, and the no-turn checks in `home-task-subagents.e2e.test.ts` cover that
+between turns, and the no-turn checks in `home-task-subagents-*.e2e.test.ts` cover that
 property.
 
 
@@ -1807,7 +1835,7 @@ without a retained artifact.
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on explicit/profile/Home values; profile model and thinking resolve independently, unsupported thinking is clamped, provenance is captured in the brief and worker Chat, direct Home dispatch inherits the live Home choice, Home’s context names its identity, unknown tasks return not_found, and ordinary chats retain their own defaults; unavailable profile models fall through; invalid explicit choices are refused before any task or session; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries plus a deterministically held empty-PID publication interval (positive identity before cancellation, unchanged reaping and no-further-effects assertions); frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
 | `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
-| `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a run's late completion notice recorded before the settlement fact, with nothing appended after it, and a notice the bound never records counted without changing the outcome; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; task Stop leaves the exact provider mission cancelled (sanitized artifact `test-results/stopped-subagent-mission.json`); a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |
+| `src/home/home-task-subagents-*.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a run's late completion notice recorded before the settlement fact, with nothing appended after it, and a notice the bound never records counted without changing the outcome; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; task Stop leaves the exact provider mission cancelled (sanitized artifact `test-results/stopped-subagent-mission.json`); a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents-*.e2e.test.ts` |
 | `src/home/home-wake-inbox.integration.test.ts` | frozen-owner cuts for claim, admission, terminal and acknowledgement; route replacement; redelivery | `HOME_WAKE_REPORT=<artifact-path>` | `HOME_WAKE_REPORT=<artifact-path> npx vitest run src/home/home-wake-inbox.integration.test.ts` |
 | `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice; the ninth wake is refused and says Home is waiting; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | none (faux provider; reports under the fixture) | `npx vitest run src/home/home-wake.e2e.test.ts` |
 | `src/home/home-system-prompt.e2e.test.ts` | every request of an activation carries one identical Home system prompt, framed at the request seam | none | `npx vitest run src/home/home-system-prompt.e2e.test.ts` |
