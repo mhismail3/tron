@@ -1,268 +1,559 @@
 {
   "version": 1,
   "about": "The gate step catalog: the one source of truth for every verification step (tools/work/README.md#gate). Plan order is catalog order. Budgets and RSS come from measurements recorded on #1022; `scripts/tron gate report` prints the current ones.",
-  "codeExclude": ["**/*.md", "**/docs/**"],
+  "codeExclude": [
+    "**/*.md",
+    "**/docs/**"
+  ],
   "steps": [
     {
       "id": "repo.privacy",
       "summary": "Personal-data guard over the tree",
-      "trigger": {"always": true},
+      "trigger": {
+        "always": true
+      },
       "command": "scripts/personal-info-guard.sh",
-      "inputs": ["."],
-      "budgetSeconds": 20, "timeoutSeconds": 120,
-      "class": "light", "expectedRssMb": 100,
+      "inputs": [
+        "."
+      ],
+      "budgetSeconds": 20,
+      "timeoutSeconds": 120,
+      "class": "light",
+      "expectedRssMb": 100,
       "pass": "exit 0",
       "unlocks": "builds"
     },
     {
       "id": "repo.whitespace",
       "summary": "git diff --check against the merge base",
-      "trigger": {"always": true},
+      "trigger": {
+        "always": true
+      },
       "command": "git diff --check {merge_base}",
-      "inputs": ["."],
-      "budgetSeconds": 10, "timeoutSeconds": 60,
-      "class": "light", "expectedRssMb": 50,
+      "inputs": [
+        "."
+      ],
+      "budgetSeconds": 10,
+      "timeoutSeconds": 60,
+      "class": "light",
+      "expectedRssMb": 50,
       "pass": "exit 0",
       "unlocks": "builds"
     },
     {
       "id": "repo.syntax",
       "summary": "Syntax of changed scripts: ast for Python, node --check, bash -n",
-      "trigger": {"select": "script-syntax"},
+      "trigger": {
+        "select": "script-syntax"
+      },
       "command": "{select}",
-      "inputs": ["scripts", "tools", "packages/*/scripts"],
-      "budgetSeconds": 20, "timeoutSeconds": 120,
-      "class": "light", "expectedRssMb": 100,
+      "inputs": [
+        "scripts",
+        "tools",
+        "packages/*/scripts"
+      ],
+      "budgetSeconds": 20,
+      "timeoutSeconds": 120,
+      "class": "light",
+      "expectedRssMb": 100,
       "pass": "exit 0",
       "unlocks": "builds"
     },
     {
       "id": "repo.agent-policy",
       "summary": "Skill catalog and agent guidance policy",
-      "trigger": {"paths": ["AGENTS.md", "CONTRIBUTING.md", ".agents/**", "scripts/check-agent-policy.sh", ".pi/prompts/**"]},
+      "trigger": {
+        "paths": [
+          "AGENTS.md",
+          "CONTRIBUTING.md",
+          ".agents/**",
+          "scripts/check-agent-policy.sh",
+          ".pi/prompts/**"
+        ]
+      },
       "command": "scripts/check-agent-policy.sh",
-      "inputs": ["AGENTS.md", "CONTRIBUTING.md", ".agents", "scripts/check-agent-policy.sh", ".pi/prompts"],
-      "budgetSeconds": 20, "timeoutSeconds": 120,
-      "class": "light", "expectedRssMb": 100,
+      "inputs": [
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        ".agents",
+        "scripts/check-agent-policy.sh",
+        ".pi/prompts"
+      ],
+      "budgetSeconds": 20,
+      "timeoutSeconds": 120,
+      "class": "light",
+      "expectedRssMb": 100,
       "pass": "exit 0",
       "unlocks": "builds"
     },
     {
       "id": "tooling.tests",
       "summary": "Real-process journeys of the work and gate tooling and the changed script suites, one shard per suite",
-      "trigger": {"select": "tooling-tests"},
+      "trigger": {
+        "select": "tooling-tests"
+      },
       "command": "{select}",
-      "inputs": ["tools", "scripts", ".github/work.json", ".node-version"],
-      "budgetSeconds": 120, "timeoutSeconds": 300,
-      "class": "light", "expectedRssMb": 400,
+      "inputs": [
+        "tools",
+        "scripts",
+        ".github/work.json",
+        ".node-version"
+      ],
+      "budgetSeconds": 120,
+      "timeoutSeconds": 300,
+      "class": "light",
+      "expectedRssMb": 400,
       "pass": "exit 0 for every suite shard",
       "unlocks": "builds"
     },
     {
       "id": "protocol.contract",
       "summary": "Gateway protocol contract shared by Gateway, iOS and Mac",
-      "trigger": {"paths": ["config/GatewayProtocol.json", "scripts/gateway_protocol_contract.py", "scripts/verify-gateway-protocol-contract.py"]},
+      "trigger": {
+        "paths": [
+          "config/GatewayProtocol.json",
+          "scripts/gateway_protocol_contract.py",
+          "scripts/verify-gateway-protocol-contract.py"
+        ]
+      },
       "command": "python3 scripts/verify-gateway-protocol-contract.py",
-      "inputs": ["config/GatewayProtocol.json", "scripts/gateway_protocol_contract.py", "scripts/verify-gateway-protocol-contract.py", "packages/gateway/src", "packages/ios-app", "packages/mac-app"],
-      "budgetSeconds": 30, "timeoutSeconds": 120,
-      "class": "light", "expectedRssMb": 200,
+      "inputs": [
+        "config/GatewayProtocol.json",
+        "scripts/gateway_protocol_contract.py",
+        "scripts/verify-gateway-protocol-contract.py",
+        "packages/gateway/src",
+        "packages/ios-app",
+        "packages/mac-app"
+      ],
+      "budgetSeconds": 30,
+      "timeoutSeconds": 120,
+      "class": "light",
+      "expectedRssMb": 200,
       "pass": "exit 0",
       "unlocks": "builds"
     },
     {
       "id": "mac.build",
       "summary": "XcodeGen and Debug build-for-testing of TronMac (stages the Gateway payload, which rewrites packages/gateway/node_modules, so it runs before every Gateway step)",
-      "trigger": {"paths": ["packages/mac-app/**", "config/GatewayProtocol.json"], "code": true},
+      "trigger": {
+        "paths": [
+          "packages/mac-app/**",
+          "config/GatewayProtocol.json"
+        ],
+        "code": true
+      },
       "command": "scripts/tron mac generate && cd packages/mac-app && xcodebuild build-for-testing -quiet -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData",
-      "inputs": ["packages/mac-app", "packages/gateway/package-lock.json", "config", ".node-version"],
-      "keyExtra": ["xcode"],
+      "inputs": [
+        "packages/mac-app",
+        "packages/gateway/package-lock.json",
+        "config",
+        ".node-version"
+      ],
+      "keyExtra": [
+        "xcode"
+      ],
       "cacheScope": "worktree",
-      "budgetSeconds": 300, "timeoutSeconds": 900,
-      "class": "heavy", "expectedRssMb": 6000,
-      "artifacts": ["packages/mac-app/build/DerivedData/Build/Products"],
+      "budgetSeconds": 300,
+      "timeoutSeconds": 900,
+      "class": "heavy",
+      "expectedRssMb": 6000,
+      "artifacts": [
+        "packages/mac-app/build/DerivedData/Build/Products"
+      ],
       "pass": "exit 0",
       "unlocks": "mac.test"
     },
     {
       "id": "mac.test",
       "summary": "TronMacIntegrationTests from the mac.build products (test-without-building)",
-      "trigger": {"paths": ["packages/mac-app/**"], "code": true},
-      "after": ["mac.build"],
+      "trigger": {
+        "paths": [
+          "packages/mac-app/**"
+        ],
+        "code": true
+      },
+      "after": [
+        "mac.build"
+      ],
       "command": "cd packages/mac-app && xcodebuild test-without-building -quiet -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData",
-      "inputs": ["packages/mac-app", "packages/gateway/package-lock.json", "config", ".node-version"],
-      "keyExtra": ["xcode"],
+      "inputs": [
+        "packages/mac-app",
+        "packages/gateway/package-lock.json",
+        "config",
+        ".node-version"
+      ],
+      "keyExtra": [
+        "xcode"
+      ],
       "cacheScope": "worktree",
-      "budgetSeconds": 120, "timeoutSeconds": 300,
-      "class": "heavy", "expectedRssMb": 2000,
+      "budgetSeconds": 120,
+      "timeoutSeconds": 300,
+      "class": "heavy",
+      "expectedRssMb": 2000,
       "pass": "exit 0, every test passed",
       "unlocks": "gateway"
     },
     {
       "id": "mac.replace-e2e",
       "summary": "One-tap Mac replacement journeys under launchd (#984)",
-      "trigger": {"paths": ["scripts/tron_mac_replace*.py", "scripts/test-tron-mac-replace.py", "packages/mac-app/Sources/**/Replace*", "scripts/tron_mac_reinstall.py"]},
+      "trigger": {
+        "paths": [
+          "scripts/tron_mac_replace*.py",
+          "scripts/test-tron-mac-replace.py",
+          "packages/mac-app/Sources/**/Replace*",
+          "scripts/tron_mac_reinstall.py"
+        ]
+      },
       "command": "python3 scripts/test-tron-mac-replace.py",
-      "inputs": ["scripts", "packages/gateway/src", "packages/gateway/package-lock.json", ".node-version"],
-      "budgetSeconds": 240, "timeoutSeconds": 420,
-      "class": "heavy", "expectedRssMb": 1500,
-      "artifacts": ["test-results/mac-replace-e2e.json"],
+      "inputs": [
+        "scripts",
+        "packages/gateway/src",
+        "packages/gateway/package-lock.json",
+        ".node-version"
+      ],
+      "budgetSeconds": 240,
+      "timeoutSeconds": 420,
+      "class": "heavy",
+      "expectedRssMb": 1500,
+      "artifacts": [
+        "test-results/mac-replace-e2e.json"
+      ],
       "pass": "exit 0, every journey in the artifact passed",
       "unlocks": "gateway"
     },
     {
       "id": "gateway.deps",
       "summary": "Verify the Gateway install against package-lock.json; repair drift with npm ci (#1011 guard)",
-      "trigger": {"paths": ["packages/gateway/**"], "code": true},
+      "trigger": {
+        "paths": [
+          "packages/gateway/**"
+        ],
+        "code": true
+      },
       "command": "node scripts/gateway-install-inputs.mjs ensure packages/gateway \"$(dirname \"$(command -v node)\")\"",
-      "inputs": ["packages/gateway/package.json", "packages/gateway/package-lock.json", "packages/gateway/third_party", ".node-version", "scripts/gateway-install-inputs.mjs"],
+      "inputs": [
+        "packages/gateway/package.json",
+        "packages/gateway/package-lock.json",
+        "packages/gateway/third_party",
+        ".node-version",
+        "scripts/gateway-install-inputs.mjs"
+      ],
       "cacheScope": "worktree",
-      "budgetSeconds": 120, "timeoutSeconds": 300,
-      "class": "heavy", "expectedRssMb": 1200,
-      "artifacts": ["packages/gateway/node_modules/.package-lock.json"],
+      "budgetSeconds": 120,
+      "timeoutSeconds": 300,
+      "class": "heavy",
+      "expectedRssMb": 1200,
+      "artifacts": [
+        "packages/gateway/node_modules/.package-lock.json"
+      ],
       "pass": "exit 0: the install matches the lock",
       "unlocks": "gateway.typecheck"
     },
     {
       "id": "gateway.typecheck",
       "summary": "tsc for Gateway sources and test support",
-      "trigger": {"paths": ["packages/gateway/**"], "code": true},
-      "after": ["gateway.deps"],
+      "trigger": {
+        "paths": [
+          "packages/gateway/**"
+        ],
+        "code": true
+      },
+      "after": [
+        "gateway.deps"
+      ],
       "command": "cd packages/gateway && npm run check",
-      "inputs": ["packages/gateway", ".node-version"],
-      "budgetSeconds": 90, "timeoutSeconds": 300,
-      "class": "light", "expectedRssMb": 1500,
+      "inputs": [
+        "packages/gateway",
+        ".node-version"
+      ],
+      "budgetSeconds": 90,
+      "timeoutSeconds": 300,
+      "class": "light",
+      "expectedRssMb": 1500,
       "pass": "exit 0",
       "unlocks": "gateway.affected"
     },
     {
       "id": "gateway.affected",
       "summary": "Vitest files related to the changed Gateway files (default config), sharded",
-      "trigger": {"paths": ["packages/gateway/**"], "code": true, "select": "gateway-affected"},
-      "after": ["gateway.typecheck"],
+      "trigger": {
+        "paths": [
+          "packages/gateway/**"
+        ],
+        "code": true,
+        "select": "gateway-affected"
+      },
+      "after": [
+        "gateway.typecheck"
+      ],
       "command": "cd packages/gateway && npx vitest related --run --passWithNoTests --shard={shard}/{shards} {select}",
       "shards": 3,
       "parallelShards": true,
       "supersededBy": "gateway.full",
-      "inputs": ["packages/gateway", ".node-version"],
-      "budgetSeconds": 180, "timeoutSeconds": 300,
-      "class": "heavy", "expectedRssMb": 3000,
+      "inputs": [
+        "packages/gateway",
+        ".node-version"
+      ],
+      "budgetSeconds": 180,
+      "timeoutSeconds": 300,
+      "class": "heavy",
+      "expectedRssMb": 3000,
       "pass": "exit 0, no failed test",
       "unlocks": "gateway.affected-nested"
     },
     {
       "id": "gateway.affected-nested",
       "summary": "Nested-SDK vitest files related to the changed Gateway files (serial config), sharded",
-      "trigger": {"paths": ["packages/gateway/**"], "code": true, "select": "gateway-affected"},
-      "after": ["gateway.typecheck"],
+      "trigger": {
+        "paths": [
+          "packages/gateway/**"
+        ],
+        "code": true,
+        "select": "gateway-affected"
+      },
+      "after": [
+        "gateway.typecheck"
+      ],
       "command": "cd packages/gateway && npx vitest related --run --passWithNoTests --config vitest.nested.config.ts --shard={shard}/{shards} {select}",
       "shards": 3,
       "supersededBy": "gateway.full-nested",
-      "inputs": ["packages/gateway", ".node-version"],
-      "budgetSeconds": 180, "timeoutSeconds": 300,
-      "class": "heavy", "expectedRssMb": 2000,
-      "knownFlakes": ["#1016 home-task-subagents nested settlement can outlive its 60 s bound under heavy host load"],
+      "inputs": [
+        "packages/gateway",
+        ".node-version"
+      ],
+      "budgetSeconds": 180,
+      "timeoutSeconds": 300,
+      "class": "heavy",
+      "expectedRssMb": 2000,
+      "knownFlakes": [
+        "#1016 home-task-subagents nested settlement can outlive its 60 s bound under heavy host load"
+      ],
       "pass": "exit 0, no failed test",
       "unlocks": "gateway.full"
     },
     {
       "id": "gateway.scripts",
-      "summary": "Gateway script suites: pi-subagents and pi-sdk node --test, device binding",
-      "trigger": {"paths": ["packages/gateway/scripts/**", "packages/gateway/package.json", "packages/gateway/package-lock.json", "packages/gateway/pi-subagents-pin.json", "packages/gateway/pi-coding-agent-patch.json", "scripts/tron-ios-device-bind*"]},
-      "after": ["gateway.deps"],
-      "command": "cd packages/gateway && npm run test:pi-subagents-scripts && npm run test:pi-sdk-scripts && npm run test:device-binding",
-      "inputs": ["packages/gateway", "scripts/tron-ios-device-bind.mjs", "scripts/tron-ios-device-bind.test.mjs", ".node-version"],
-      "budgetSeconds": 240, "timeoutSeconds": 420,
-      "class": "heavy", "expectedRssMb": 1500,
+      "summary": "Gateway script suites (npm test's node --test part): pi-subagents update journeys split across two shards by test name, then the closure, owner, pi-sdk and device-binding suites",
+      "trigger": {
+        "paths": [
+          "packages/gateway/scripts/**",
+          "packages/gateway/package.json",
+          "packages/gateway/package-lock.json",
+          "packages/gateway/pi-subagents-pin.json",
+          "packages/gateway/pi-coding-agent-patch.json",
+          "scripts/tron-ios-device-bind*"
+        ]
+      },
+      "after": [
+        "gateway.deps"
+      ],
+      "inputs": [
+        "packages/gateway",
+        "scripts/tron-ios-device-bind.mjs",
+        "scripts/tron-ios-device-bind.test.mjs",
+        ".node-version"
+      ],
+      "budgetSeconds": 240,
+      "timeoutSeconds": 420,
+      "class": "heavy",
+      "expectedRssMb": 1500,
       "pass": "exit 0",
-      "unlocks": "gateway.full"
+      "unlocks": "gateway.full",
+      "shardCommands": {
+        "update-slow": "cd packages/gateway && node --test --test-concurrency=1 --test-name-pattern='^refuses (rollback|join|execution) ' scripts/update-pi-subagents.integration.test.mjs",
+        "update-rest": "cd packages/gateway && node --test --test-concurrency=1 --test-skip-pattern='^refuses (rollback|join|execution) ' scripts/update-pi-subagents.integration.test.mjs",
+        "suites": "cd packages/gateway && node --test --test-concurrency=1 scripts/check-pi-subagents.integration.test.mjs scripts/build-pi-subagents-closure.integration.test.mjs scripts/fixture-process-owner.integration.test.mjs && npm run test:pi-sdk-scripts && npm run test:device-binding"
+      }
     },
     {
       "id": "gateway.full",
       "summary": "The whole Gateway vitest suite (default config) in shards, for changes every file can depend on",
-      "trigger": {"paths": ["packages/gateway/package-lock.json", "packages/gateway/package.json", "packages/gateway/vitest*.ts", "packages/gateway/test-support/**", "packages/gateway/tsconfig*.json", "config/GatewayProtocol.json", ".node-version"]},
-      "after": ["gateway.typecheck"],
+      "trigger": {
+        "paths": [
+          "packages/gateway/package-lock.json",
+          "packages/gateway/package.json",
+          "packages/gateway/vitest*.ts",
+          "packages/gateway/test-support/**",
+          "packages/gateway/tsconfig*.json",
+          "config/GatewayProtocol.json",
+          ".node-version"
+        ]
+      },
+      "after": [
+        "gateway.typecheck"
+      ],
       "command": "cd packages/gateway && npx vitest run --passWithNoTests --shard={shard}/{shards}",
       "shards": 4,
       "parallelShards": true,
-      "inputs": ["packages/gateway", "config/GatewayProtocol.json", ".node-version"],
-      "budgetSeconds": 180, "timeoutSeconds": 300,
-      "class": "heavy", "expectedRssMb": 3000,
+      "inputs": [
+        "packages/gateway",
+        "config/GatewayProtocol.json",
+        ".node-version"
+      ],
+      "budgetSeconds": 180,
+      "timeoutSeconds": 300,
+      "class": "heavy",
+      "expectedRssMb": 3000,
       "pass": "exit 0, no failed test",
       "unlocks": "gateway.full-nested"
     },
     {
       "id": "gateway.full-nested",
       "summary": "The whole nested-SDK vitest suite in shards",
-      "trigger": {"paths": ["packages/gateway/package-lock.json", "packages/gateway/package.json", "packages/gateway/vitest*.ts", "packages/gateway/test-support/**", "packages/gateway/tsconfig*.json", "config/GatewayProtocol.json", ".node-version"]},
-      "after": ["gateway.typecheck"],
+      "trigger": {
+        "paths": [
+          "packages/gateway/package-lock.json",
+          "packages/gateway/package.json",
+          "packages/gateway/vitest*.ts",
+          "packages/gateway/test-support/**",
+          "packages/gateway/tsconfig*.json",
+          "config/GatewayProtocol.json",
+          ".node-version"
+        ]
+      },
+      "after": [
+        "gateway.typecheck"
+      ],
       "command": "cd packages/gateway && npx vitest run --passWithNoTests --config vitest.nested.config.ts --shard={shard}/{shards}",
       "shards": 3,
-      "inputs": ["packages/gateway", "config/GatewayProtocol.json", ".node-version"],
-      "budgetSeconds": 180, "timeoutSeconds": 300,
-      "class": "heavy", "expectedRssMb": 2000,
-      "knownFlakes": ["#1016 home-task-subagents nested settlement can outlive its 60 s bound under heavy host load"],
+      "inputs": [
+        "packages/gateway",
+        "config/GatewayProtocol.json",
+        ".node-version"
+      ],
+      "budgetSeconds": 180,
+      "timeoutSeconds": 300,
+      "class": "heavy",
+      "expectedRssMb": 2000,
+      "knownFlakes": [
+        "#1016 home-task-subagents nested settlement can outlive its 60 s bound under heavy host load"
+      ],
       "pass": "exit 0, no failed test",
       "unlocks": "relay"
     },
     {
       "id": "gateway.payload",
       "summary": "Gateway payload deploy and install-input journeys (real npm ci from local tarballs)",
-      "trigger": {"paths": ["scripts/gateway-payload-deploy*", "scripts/gateway-install-inputs*", "scripts/hash-npm-runtime.py", "packages/mac-app/scripts/bundle-gateway.sh"]},
-      "after": ["gateway.deps"],
+      "trigger": {
+        "paths": [
+          "scripts/gateway-payload-deploy*",
+          "scripts/gateway-install-inputs*",
+          "scripts/hash-npm-runtime.py",
+          "packages/mac-app/scripts/bundle-gateway.sh"
+        ]
+      },
+      "after": [
+        "gateway.deps"
+      ],
       "command": "node --test --test-concurrency=2 scripts/gateway-payload-deploy.test.mjs scripts/gateway-install-inputs.test.mjs",
-      "inputs": ["scripts", "packages/gateway/package.json", "packages/gateway/package-lock.json", "packages/mac-app/scripts", ".node-version"],
-      "budgetSeconds": 240, "timeoutSeconds": 420,
-      "class": "heavy", "expectedRssMb": 1500,
+      "inputs": [
+        "scripts",
+        "packages/gateway/package.json",
+        "packages/gateway/package-lock.json",
+        "packages/mac-app/scripts",
+        ".node-version"
+      ],
+      "budgetSeconds": 240,
+      "timeoutSeconds": 420,
+      "class": "heavy",
+      "expectedRssMb": 1500,
       "pass": "exit 0",
       "unlocks": "relay"
     },
     {
       "id": "relay.check",
       "summary": "Push relay install, typecheck and dry-run build",
-      "trigger": {"paths": ["packages/push-relay/**"], "code": true},
+      "trigger": {
+        "paths": [
+          "packages/push-relay/**"
+        ],
+        "code": true
+      },
       "command": "cd packages/push-relay && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run check && npm run build",
-      "inputs": ["packages/push-relay", ".node-version"],
+      "inputs": [
+        "packages/push-relay",
+        ".node-version"
+      ],
       "cacheScope": "worktree",
-      "budgetSeconds": 120, "timeoutSeconds": 300,
-      "class": "heavy", "expectedRssMb": 1000,
+      "budgetSeconds": 120,
+      "timeoutSeconds": 300,
+      "class": "heavy",
+      "expectedRssMb": 1000,
       "pass": "exit 0",
       "unlocks": "ios.build"
     },
     {
       "id": "ios.build",
       "summary": "One iOS build-for-testing; every iOS journey shard reuses its stamped products",
-      "trigger": {"paths": ["packages/ios-app/**", "config/GatewayProtocol.json", "config/PushService.xcconfig"], "code": true},
+      "trigger": {
+        "paths": [
+          "packages/ios-app/**",
+          "config/GatewayProtocol.json",
+          "config/PushService.xcconfig"
+        ],
+        "code": true
+      },
       "command": "scripts/tron-ios-test build",
-      "inputs": ["packages/ios-app", "config", ".node-version"],
-      "keyExtra": ["xcode"],
+      "inputs": [
+        "packages/ios-app",
+        "config",
+        ".node-version"
+      ],
+      "keyExtra": [
+        "xcode"
+      ],
       "cacheScope": "worktree",
-      "budgetSeconds": 300, "timeoutSeconds": 900,
-      "class": "heavy", "expectedRssMb": 7000,
+      "budgetSeconds": 300,
+      "timeoutSeconds": 900,
+      "class": "heavy",
+      "expectedRssMb": 7000,
       "pass": "exit 0 and the products carry the source identity stamp",
       "unlocks": "ios.journeys"
     },
     {
       "id": "ios.journeys",
       "summary": "Simulator journeys for the changed UI test classes (or the smoke set) with test-without-building, one shard per class",
-      "trigger": {"paths": ["packages/ios-app/**"], "code": true, "select": "ios-journeys"},
-      "after": ["ios.build"],
+      "trigger": {
+        "paths": [
+          "packages/ios-app/**"
+        ],
+        "code": true,
+        "select": "ios-journeys"
+      },
+      "after": [
+        "ios.build"
+      ],
       "command": "scripts/tron-ios-test run {select}",
-      "inputs": ["packages/ios-app", "config", ".node-version"],
-      "keyExtra": ["xcode"],
+      "inputs": [
+        "packages/ios-app",
+        "config",
+        ".node-version"
+      ],
+      "keyExtra": [
+        "xcode"
+      ],
       "cacheScope": "worktree",
-      "budgetSeconds": 240, "timeoutSeconds": 420,
-      "class": "heavy", "expectedRssMb": 4000,
+      "budgetSeconds": 240,
+      "timeoutSeconds": 420,
+      "class": "heavy",
+      "expectedRssMb": 4000,
       "pass": "exit 0, result bundle passed > 0 and failed = 0",
       "unlocks": "journeys"
     },
     {
       "id": "journey",
       "summary": "Each integration or E2E command named with --tests, from the repository root",
-      "trigger": {"select": "named-journeys"},
+      "trigger": {
+        "select": "named-journeys"
+      },
       "command": "{select}",
-      "inputs": ["."],
-      "budgetSeconds": 240, "timeoutSeconds": 420,
-      "class": "heavy", "expectedRssMb": 3000,
+      "inputs": [
+        "."
+      ],
+      "budgetSeconds": 240,
+      "timeoutSeconds": 420,
+      "class": "heavy",
+      "expectedRssMb": 3000,
       "pass": "exit 0",
       "unlocks": "land"
     }

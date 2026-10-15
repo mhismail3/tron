@@ -121,9 +121,11 @@ def load_catalog(path: Path = CATALOG) -> dict:
     if len(ids) != len(set(ids)):
         raise GateError("gate catalog has duplicate step ids")
     for step in catalog["steps"]:
-        for name in ("command", "inputs", "budgetSeconds", "timeoutSeconds", "class", "expectedRssMb", "pass", "unlocks"):
+        for name in ("inputs", "budgetSeconds", "timeoutSeconds", "class", "expectedRssMb", "pass", "unlocks"):
             if name not in step:
                 raise GateError(f"gate catalog step {step['id']} lacks {name}")
+        if "command" not in step and "shardCommands" not in step:
+            raise GateError(f"gate catalog step {step['id']} lacks command")
         if step["class"] not in ("light", "heavy"):
             raise GateError(f"gate catalog step {step['id']} has class {step['class']}")
         if step["budgetSeconds"] > step["timeoutSeconds"]:
@@ -249,21 +251,31 @@ def plan(catalog: dict, change: Change) -> List[Shard]:
             selections = _select(trigger["select"], change, code)
             if not selections:
                 continue
-        shards = int(step.get("shards", 1))
-        expanded: List[Shard] = []
-        if shards > 1:
-            for index in range(1, shards + 1):
-                expanded.append(Shard(step, index, shards, _render(step["command"], change, selections[0], index, shards)))
-        else:
-            for index, selection in enumerate(selections, 1):
-                label = ""
-                if len(selections) > 1 or trigger.get("select") in ("named-journeys", "ios-journeys", "tooling-tests"):
-                    label = _label(trigger.get("select"), selection, index)
-                expanded.append(Shard(step, index, len(selections), _render(step["command"], change, selection, index, len(selections)), label))
+        expanded = expand(step, change, selections)
         selected.extend(expanded)
     # A whole-suite step covers its affected-only subset, which would only repeat its tests.
     chosen = {shard.step["id"] for shard in selected}
     return [shard for shard in selected if shard.step.get("supersededBy") not in chosen]
+
+
+def expand(step: dict, change: Change, selections: List[str]) -> List[Shard]:
+    """A step's shards: its named shard commands, N numbered shards, or one per selection."""
+    trigger = step["trigger"]
+    if step.get("shardCommands"):
+        named = step["shardCommands"]
+        return [Shard(step, index, len(named), _render(command, change, "", index, len(named)), label)
+                for index, (label, command) in enumerate(named.items(), 1)]
+    shards = int(step.get("shards", 1))
+    if shards > 1:
+        return [Shard(step, index, shards, _render(step["command"], change, selections[0], index, shards))
+                for index in range(1, shards + 1)]
+    expanded = []
+    for index, selection in enumerate(selections, 1):
+        label = ""
+        if len(selections) > 1 or trigger.get("select") in ("named-journeys", "ios-journeys", "tooling-tests"):
+            label = _label(trigger.get("select"), selection, index)
+        expanded.append(Shard(step, index, len(selections), _render(step["command"], change, selection, index, len(selections)), label))
+    return expanded
 
 
 def _label(select: Optional[str], selection: str, index: int) -> str:
@@ -306,7 +318,7 @@ def cache_key(root: Path, change: Change, shard: Shard) -> str:
         "worktree": str(root) if step.get("cacheScope") == "worktree" else None,
     }
     # Commands that compare against the merge base depend on it beyond their inputs.
-    if "{merge_base}" in step["command"]:
+    if "{merge_base}" in step.get("command", ""):
         scope["mergeBase"] = change.merge_base
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
 
@@ -660,8 +672,10 @@ def catalog_table() -> int:
         trigger = step["trigger"]
         when = "always" if trigger.get("always") else ", ".join(trigger.get("paths", [])) or f"select:{trigger.get('select')}"
         shards = f" x{step['shards']}" if step.get("shards") else ""
+        commands = step.get("shardCommands") or {"": step["command"]}
+        runs = "\n".join(f"    run{(' [' + label + ']') if label else ''}:  {command}" for label, command in commands.items())
         print(f"{step['id']:<26} {step['class']:<5} budget {step['budgetSeconds']:>3}s limit {step['timeoutSeconds']:>3}s "
-              f"rss~{step['expectedRssMb']:>5} MB{shards}  unlocks {step['unlocks']}\n    when: {when}\n    run:  {step['command']}")
+              f"rss~{step['expectedRssMb']:>5} MB{shards}  unlocks {step['unlocks']}\n    when: {when}\n{runs}")
     return 0
 
 
@@ -844,13 +858,12 @@ def _named(catalog: dict, change: Change, planned: List[Shard], names: List[str]
             step = steps.get(name.split("#")[0].split("[")[0])
             if not step:
                 raise GateError(f"no step or shard named {name}; see scripts/tron gate catalog")
-            shards = int(step.get("shards", 1))
-            selection = ""
+            selections = [""]
             if "select" in step["trigger"]:
                 selections = _select(step["trigger"]["select"], change, change.paths) or [""]
-                selection = selections[0]
-            matched = [Shard(step, i, shards, _render(step["command"], change, selection, i, shards)) for i in range(1, shards + 1)]
-            matched = [s for s in matched if s.name == name or s.step["id"] == name]
+            matched = [s for s in expand(step, change, selections) if s.name == name or s.step["id"] == name]
+            if not matched:
+                raise GateError(f"no shard named {name}; see scripts/tron gate plan")
         for prerequisite in matched[0].step.get("after", []):
             wanted.extend(s for s in planned if s.step["id"] == prerequisite and s not in wanted)
         wanted.extend(s for s in matched if s not in wanted)
