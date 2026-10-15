@@ -3817,17 +3817,26 @@ exec "{real_node}" "$@"
 
         A test process started from a Gateway-spawned shell has that Gateway's
         bundled runtime first on `PATH`: the very runtime #445 keeps out of a
-        fixture, and one that cannot load this checkout's node-pty prebuild. The
-        repository resolver refuses it and prefers what the harness prefers.
+        fixture, and one that cannot load this checkout's node-pty prebuild. So
+        prefer the candidates the harness itself prefers, and use the first PATH
+        entry only on a machine that has neither (hosted CI's setup-node).
         """
-        resolved = subprocess.run(
-            # This host's nvm install, not the fixture's home.
-            [str(ROOT / "scripts/tron-node")],
-            env={**environment, "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))},
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-        self.assertEqual(resolved.returncode, 0, f"the pinned Node runtime is required by the E2E runner: {resolved.stderr}")
-        return resolved.stdout.strip()
+        candidates = [
+            Path(os.environ.get("NVM_DIR", Path.home() / ".nvm")) / f"versions/node/v{NODE_VERSION}/bin/node",
+            Path("/opt/homebrew/bin/node"),
+            Path("/usr/local/bin/node"),
+        ]
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            if subprocess.run(
+                [str(candidate), "--version"], env=environment,
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            ).stdout.strip() == f"v{NODE_VERSION}":
+                return str(candidate)
+        found = shutil.which("node", path=environment["PATH"])
+        self.assertIsNotNone(found, "the pinned Node runtime is required by the E2E runner")
+        return found
 
     def nvm_pinned_environment(self, environment: dict[str, str]) -> dict[str, str]:
         """The fixture toolchain selected the way a machine without TRON_NODE_BIN
