@@ -6,7 +6,6 @@ import XCTest
 /// a thumbnail opens its preview directly instead of going through the grouped
 /// tool sheet. Generic calls in a mixed group keep their grouped chip.
 final class TronChatDisplayStripUITests: XCTestCase {
-    override func setUp() { continueAfterFailure = true }
 
     @MainActor func testGroupedDisplaysRenderAsInlineThumbnailRowThatOpensPreviewDirectly() {
         continueAfterFailure = false
@@ -91,6 +90,7 @@ final class TronChatDisplayStripUITests: XCTestCase {
     /// 8 pt) separates every pair. Collapsing one card with its x and expanding
     /// its chip again keeps that spacing (#1012).
     @MainActor func testReopenedInlineDisplayGroupKeepsLiveCardSpacingThroughCollapseAndExpand() {
+        continueAfterFailure = false
         let reopened = launch("-chat-display-inline-group")
         let reopenedFrames = inlineCardFrames(reopened, name: "1012-reopened-inline-group")
         reopened.terminate()
