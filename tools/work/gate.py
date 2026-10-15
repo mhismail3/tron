@@ -350,6 +350,11 @@ def _tree_rss_kb(pgid: int) -> int:
     return total
 
 
+def _host_used_mb() -> int:
+    """Physical memory in use on the host: total minus what heavy.available_mb() counts as available."""
+    return heavy._total_mb() - heavy.available_mb()
+
+
 def _check_environment() -> Dict[str, str]:
     """The environment every step runs with: variables pointing at a live Tron home are dropped."""
     policy = Path(__file__).resolve().parents[2] / "packages" / "gateway" / "src" / "tron-home-environment-policy.mjs"
@@ -400,6 +405,12 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
         env[heavy.HELD_ENV] = str(lease.slot + 1)
     started = time.monotonic()
     peak = 0
+    # Xcode builds and simulators do their work in launchd-owned services outside the
+    # step's process group, so their tree RSS undercounts; these steps also sample the
+    # host's memory in use above its level at start (an upper bound when others run).
+    host_sampling = step.get("memorySample") == "host"
+    host_base = _host_used_mb() if host_sampling else 0
+    host_peak = 0
     timed_out = False
     cancelled = False
     try:
@@ -424,6 +435,8 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
                 while not done.wait(SAMPLE_SECONDS):
                     now = time.monotonic()
                     peak = max(peak, _tree_rss_kb(process.pid))
+                    if host_sampling:
+                        host_peak = max(host_peak, _host_used_mb() - host_base)
                     if stop.is_set():
                         cancelled = True
                         _kill_group(process.pid)
@@ -452,7 +465,7 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
     usage = result.get("usage")
     cpu = round(usage.ru_utime + usage.ru_stime, 1) if usage else 0.0
     # Sampling misses very short steps; the largest single process (bytes on macOS) is a floor.
-    peak = max(peak, (usage.ru_maxrss // 1024) if usage else 0)
+    peak = max(peak, (usage.ru_maxrss // 1024) if usage else 0, host_peak * 1024)
     status = result.get("status", -1)
     code = os.waitstatus_to_exitcode(status) if status != -1 else 124
     if cancelled:

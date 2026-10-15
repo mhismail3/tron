@@ -161,7 +161,8 @@
         "packages/mac-app/build/DerivedData/Build/Products"
       ],
       "pass": "exit 0",
-      "unlocks": "mac.test"
+      "unlocks": "mac.test",
+      "memorySample": "host"
     },
     {
       "id": "mac.test",
@@ -191,7 +192,8 @@
       "class": "heavy",
       "expectedRssMb": 2000,
       "pass": "exit 0, every test passed",
-      "unlocks": "gateway"
+      "unlocks": "gateway",
+      "memorySample": "host"
     },
     {
       "id": "mac.replace-e2e",
@@ -219,7 +221,8 @@
         "test-results/mac-replace-e2e.json"
       ],
       "pass": "exit 0, every journey in the artifact passed",
-      "unlocks": "gateway"
+      "unlocks": "gateway",
+      "memorySample": "host"
     },
     {
       "id": "gateway.deps",
@@ -383,7 +386,7 @@
         "gateway.typecheck"
       ],
       "command": "cd packages/gateway && npx vitest run --passWithNoTests --shard={shard}/{shards}",
-      "shards": 4,
+      "shards": 6,
       "parallelShards": true,
       "inputs": [
         "packages/gateway",
@@ -508,7 +511,8 @@
       "class": "heavy",
       "expectedRssMb": 7000,
       "pass": "exit 0 and the products carry the source identity stamp",
-      "unlocks": "ios.journeys"
+      "unlocks": "ios.journeys",
+      "memorySample": "host"
     },
     {
       "id": "ios.journeys",
@@ -538,7 +542,8 @@
       "class": "heavy",
       "expectedRssMb": 4000,
       "pass": "exit 0, result bundle passed > 0 and failed = 0",
-      "unlocks": "journeys"
+      "unlocks": "journeys",
+      "memorySample": "host"
     },
     {
       "id": "journey",
