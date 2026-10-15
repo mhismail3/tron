@@ -98,6 +98,17 @@ agent execution, session state, inbox, badge, or reminder policy.
 
 Start with the smallest owner and expand only after it passes.
 
+**Hosted CI** (`.github/workflows/ci.yml`, #1026) is a regression signal on `main`
+and pull requests, not a landing gate. It runs only checks that pass deterministically
+on small hosted runners, each as one `scripts/tron ci <step>` you can run here:
+`repo.policy` (privacy guard, version mirrors, agent and documentation policy,
+protocol contract), `relay.check`, `gateway.build` (install, Pi SDK cohort, typecheck
+and emit) and `gateway.integration` (the integration files of
+`packages/gateway/vitest.hosted.config.ts`). `scripts/tron ci` runs them all in order.
+E2E journeys, the nested SDK pass, timing-sensitive files and the iOS/Mac builds
+run in the local landing gate only. A check joins hosted CI only if it passes there
+without retries.
+
 The privacy guard uses Git's inventory: full scans include every tracked file
 and nonignored untracked file, so new packages, configuration and agent guidance
 need no parallel scan-root list. Ignored generated output is skipped only when
@@ -112,8 +123,9 @@ and the Gateway build for staged gateway TypeScript. Run
 regressions covering those boundaries, literal filenames, fail-closed Git errors
 and hook installation from linked worktrees. Fixtures isolate Git's
 environment/configuration so an inherited alternate index cannot redirect their
-writes. CI runs them on Linux and macOS; pattern syntax must work with both Git
-regex implementations.
+writes. The guard runs on macOS here and on Linux in hosted CI
+(`scripts/tron ci repo.policy`); pattern syntax must work with both Git regex
+implementations.
 
 ### Toolchain
 
@@ -287,4 +299,4 @@ maintainer actions. Release tags use `tron-v<version>`.
 `VERSION.env` is the only hand-edited product identity file; `scripts/tron version`
 owns its mirrors. `sync` rewrites every generated platform mirror from it, `bump
 beta|patch|minor` updates `VERSION.env`, syncs the mirrors, and prints the result,
-and CI runs `check` to reject drift read-only.
+and hosted CI runs `check` (`scripts/tron ci repo.policy`) to reject drift read-only.

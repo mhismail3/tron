@@ -1191,8 +1191,7 @@ command leaves none behind. A named lane refuses
 and `TRON_IOS_TEST_DEVICE_NAME` rather than guess which spelling was meant;
 those two overrides name - and, when set without a lane, select - the default
 lane until SIM-10 (GitHub issue #227, in the simulator lifecycle epic)
-removes them, and they are what CI (`scripts/ios-ci-test.sh`) and the
-energy-efficiency profiling lanes still set. Lanes do not serialize against each other: each lane owns its own
+removes them, and the energy-efficiency profiling lanes still set them. Lanes do not serialize against each other: each lane owns its own
 lease and simulator, so worktrees test in parallel until the Mac's memory runs
 out. Two lanes of one worktree do share that worktree's single products
 directory, so run one lane per worktree while building.
@@ -1259,8 +1258,7 @@ is the whole point of `--keep-booted` - provisioning reads `memory_pressure` and
 refuses the boot with exit 73 and the simulator table (every lane with its
 state, worktree, lease holder, uptime and disk, every booted device no lane
 owns, and `Simulator.app`) when free memory is below 8 GB.
-`TRON_IOS_TEST_MEMORY_RESERVE_BYTES` overrides that default; CI sets it to 0
-because a hosted runner is a dedicated VM with less memory than the default.
+`TRON_IOS_TEST_MEMORY_RESERVE_BYTES` overrides that default.
 Swap in use is
 reported in that table beside the free memory and never refuses a boot: it
 drains slowly, so a reading at a limit would refuse boots persistently. The
@@ -1337,7 +1335,7 @@ Run
 `python3 scripts/test-ios-test-infrastructure.py DeviceLeaseFixture GatewayE2EFixture`
 to regenerate inspectable process-survival reports at
 `test-results/ios-infrastructure/*-cleanup.json`. The full hardware-free suite is
-registered in both `work verify` and the CI policy job; it does not use real
+registered in `work verify`; it does not use real
 devices or simulators.
 
 ### Test runner safety contract

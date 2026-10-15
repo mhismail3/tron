@@ -180,10 +180,10 @@ The push notification policy is stored on the Gateway
 (`<tronHome>/gateway/notifications.json`), so it belongs to Setup, not This
 iPhone ([decision 10](#81-decisions)).
 
-### 2.3 Today's keys by primitive
+### 2.3 Keys by primitive
 
-Keys exposed by `SettingsService` today (`packages/gateway/src/admin/settings-service.ts:121-195`),
-plus the Tron stores outside `settings.json`. The allowed layers and timing are
+The pi `settings.json` keys and the Tron stores outside it, as declared in
+`packages/gateway/src/admin/settings-schema.ts`. The allowed layers and timing are
 schema data (F1); no row here is an exception to a rule.
 
 | Key (storage) | Primitive | Allowed layers | Timing |
@@ -292,14 +292,14 @@ F2: each store is its layer's truth.
 
 | Layer | Store | Owner |
 |---|---|---|
-| Chat | The session JSONL: pi's `model_change` and `thinking_level_change` entries, Tron's `tron.context-window.v1` entry (`packages/gateway/src/providers/context-window-policy.ts:7`), the active tools, and a new `tron.settings.v1` entry for the other Chat-layer keys and the provenance of fixed values. | The session's runtime slot lane. |
+| Chat | The session JSONL: pi's `model_change` and `thinking_level_change` entries, Tron's `tron.context-window.v1` entry (`packages/gateway/src/providers/context-window-policy.ts`), the active tools, and a new `tron.settings.v1` entry for the other Chat-layer keys and the provenance of fixed values. | The session's runtime slot lane. |
 | Profile (Home) | `<tronHome>/gateway/home/profile.json`, typed. Not Knowledge note text ([6](#6-the-home-profile-layer)). | `HomeOwner`. |
 | Project | `.pi/settings.json`, `.pi/mcp.json` and the rest of `.pi/`, on disk at the chat's worktree root ([Q27](#81-decisions)). | The repo (git). Tron writes the working tree and stages; it never commits ([5.7](#57-project-writes)). |
 | Mac | `<tronHome>/agent/settings.json`, `models.json`, `mcp.json`, `trust.json`, plus the Gateway stores (`connections`, `notifications.json`, `settings/floors.json`). | The Gateway. pi CLI runs and hand edits are outside writers. |
 | Built-in | Code: pi defaults and the schema's `builtin` values. | The release. |
 
 The Mac layer is `<tronHome>/agent/settings.json`: the agent directory is
-`<tronHome>/agent` (`packages/gateway/src/config.ts:434`), not `~/.pi/agent`.
+`<tronHome>/agent` (`packages/gateway/src/config.ts`), not `~/.pi/agent`.
 
 **The Project store's location.** The Project store for a chat is `.pi/` at
 that chat's worktree root: a linked worktree uses its own `.pi/`, never the main
@@ -317,7 +317,7 @@ A target has a layer when it has that layer's store. Nothing else decides it.
   includes the chats the maintainer starts and the workers Home starts.
 - **Home's own chat** has Chat, Profile, Mac and Built-in. It has no project:
   Home runs in a neutral workspace with no project discovery
-  (`packages/gateway/src/sessions/runtime-slot.ts:1919-1924`).
+  (`packages/gateway/src/sessions/runtime-slot.ts`).
 - A **Home task worker** is an ordinary chat in its target project. Its model
   and thinking arrive as `delegate` arguments that Home filled from its own
   profile, written into the worker's Chat layer at start
@@ -459,7 +459,7 @@ chapters, not a default.
 
 Trust is schema data, not an exception. `permissions.projectTrust` is a Mac-layer
 key qualified by project path, stored in `<tronHome>/agent/trust.json` through
-pi's `ProjectTrustStore` (`packages/gateway/src/admin/trust-service.ts:30`). Its
+pi's `ProjectTrustStore` (`packages/gateway/src/admin/trust-service.ts`). Its
 allowed layers exclude Project, so a repo can never grant itself trust. Its widen
 floor is `approve` by default (F3). The default policy (`defaultProjectTrust`:
 ask, always or never) is a Mac-layer key.
@@ -1152,7 +1152,7 @@ each of `model` and `thinking` the call left out:
 
 The filled call goes through the existing admission rules (registered,
 physical, has credentials; `home-task-worker-choice.ts`) and, at worker start
-(`packages/gateway/src/home/home-task-dispatcher.ts:190-193`), is written into
+(`packages/gateway/src/home/home-task-dispatcher.ts`), is written into
 the worker's Chat layer with provenance, for example
 `{ from: "delegate", via: "home-profile:sameAs:home", value: anthropic/<model>, at }`.
 Manage Session for the worker shows **"From Home at start: same as Home

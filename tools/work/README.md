@@ -111,7 +111,7 @@ Other refusals stop `land` with nothing merged. Claim handoff serializes through
 
 When the planned checks include a build or a `--tests` journey, `verify` first waits for
 a slot in the host-wide heavy-run queue (`tools/work/heavy.py`, `scripts/tron-heavy
-status`; [host load management](../../packages/gateway/docs/host-load.md#1-heavy-run-queue-work-tooling),
+status`; [host load management](../../packages/gateway/docs/host-load.md#1-heavy-queue-work-tooling),
 #915) and prints its queue position while it waits. The checks hold the slot's
 descriptor and inherit it (`TRON_HEAVY_LEASE_HELD`), so a journey that runs
 `scripts/tron-ios-test` or `scripts/ios-gateway-e2e-test` does not wait on itself.
