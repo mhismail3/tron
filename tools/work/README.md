@@ -168,8 +168,7 @@ wait.
 refuses a dirty worktree or a tree that changed while steps ran. `python3 -B
 scripts/test-gate.py` exercises the real CLI in temporary repositories: the plan for
 each change kind, an injected failure that stops at its shard, a retry that reuses
-passing shards, input invalidation, a hard timeout, a timed-out step whose processes
-in other sessions (under the real iOS lease holder) all end and free the lane, background submit/cancel/wait,
+passing shards, input invalidation, a hard timeout, background submit/cancel/wait,
 and the dirty-tree refusal. It also exercises the real `tron ci` wrapper in a
 shallow fixture checkout (prerequisites, fail-first annotation, local-only refusal),
 Pi versus unrelated lock deltas, transport/LAN plans and complete inherited-suite
