@@ -228,6 +228,9 @@ journal.settle('succeeded')
       String((await import("../version.js")).PROTOCOL_VERSION), operation], { encoding: "utf8" });
     expect(drain.stderr).toBe("");
     expect(await running.completion).toMatchObject({ terminalEvidence: { outcome: "interrupted", reason: "task-stop" } });
+    // The dispatch handle can return before the worker session binds; the task record names it.
+    const sessionId = (await f.registry.homeOwner().taskStatus("replace-worker")).sessionId!;
+    expect(sessionId).toBeTruthy();
 
     // The journal lists the stopped worker; the Gateway projects it as resumable.
     const app = new GatewayProtocolClient(`ws://127.0.0.1:${port}/v1/socket`, await readLocalCredential(f.tronHome));
@@ -235,10 +238,10 @@ journal.settle('succeeded')
     cleanups.push(async () => app.close());
     const before = await app.request("mac.replace.status", {}) as { operation: { id: string }; workers: Array<{ taskId: string; sessionId: string; state: string }> };
     expect(before.operation.id).toBe(operation);
-    expect(before.workers).toEqual([expect.objectContaining({ taskId: "replace-worker", sessionId: running.sessionId, state: "resumable" })]);
+    expect(before.workers).toEqual([expect.objectContaining({ taskId: "replace-worker", sessionId, state: "resumable" })]);
     const sessionsBefore = (await f.registry.list("all")).length;
     const resumed = await app.request("mac.replace.resumeWorker", { commandId: randomUUID(), operationId: operation, taskId: "replace-worker" }) as { taskId: string; sessionId: string };
-    expect(resumed).toMatchObject({ taskId: "replace-worker.resume-1", sessionId: running.sessionId });
+    expect(resumed).toMatchObject({ taskId: "replace-worker.resume-1", sessionId });
     await waitFor(async () => (await f.registry.homeOwner().taskStatus("replace-worker.resume-1")).lifecycle === "terminal", "resumed worker settles");
     expect(seen[0]).toContain("The Mac app was replaced while this task ran");
     expect((await f.registry.list("all")).length).toBe(sessionsBefore);
@@ -246,7 +249,7 @@ journal.settle('succeeded')
     expect(after.workers[0]!.state).toBe("resumed");
     await expect(app.request("mac.replace.resumeWorker", { commandId: randomUUID(), operationId: operation, taskId: "replace-worker" }))
       .rejects.toThrow(/already resumed/u);
-    evidence.push({ case: "mac-replace-stop-and-resume", stopped: "replace-worker", resumed: resumed.taskId, sessionId: running.sessionId });
+    evidence.push({ case: "mac-replace-stop-and-resume", stopped: "replace-worker", resumed: resumed.taskId, sessionId });
   }, 60_000);
 });
 
