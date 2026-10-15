@@ -283,7 +283,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         // #909: a program with no NavigationStack or title still gets the
         // shared chrome, titled with the file name.
         assertToolbarTint(app, title: "Limits")
-        XCTAssertTrue(diagnostic(app, "Line 62: Unknown name 'Map'").exists, "An unsupported view renders an inline diagnostic beside working views")
+        XCTAssertTrue(diagnostic(app, "Unknown name 'Map'").exists, "An unsupported view renders an inline diagnostic beside working views")
 
         var expectedTaps = 0
         for (button, message) in [
@@ -298,11 +298,21 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             app.buttons[button].tap()
             XCTAssertTrue(diagnostic(app, message).waitForExistence(timeout: 15), "\(button) stops with a diagnostic")
             keepScreenshot(app, "889-9-\(button)")
+            XCTAssertEqual(app.staticTexts["limits.state"].label, "State: 1/1/1/0",
+                           "A failed action restores nested bindings, arrays and aliased object fields")
+            XCTAssertEqual(taps.label, "Taps: \(expectedTaps)", "Failed writes to other state slots roll back too")
+            XCTAssertFalse(app.staticTexts["must roll back"].exists, "Other @State writes are restored")
+            XCTAssertTrue(diagnostic(app, "Action cancelled; state restored.").exists)
+            assertSwiftDiagnosticStyle(app, diagnostic(app, message))
             app.buttons["Count"].tap()
             expectedTaps += 1
             XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: \(expectedTaps)"), "The app stays responsive after \(button)")
             XCTAssertTrue(wait(diagnostic(app, message), predicate: "exists == false"), "A successful action clears the diagnostic")
         }
+
+        app.buttons["Commit changes"].tap()
+        XCTAssertTrue(wait(app.staticTexts["limits.state"], predicate: "label == %@", value: "State: 2/5/2/1"),
+                      "A successful action commits all writes and recomputes derived state")
 
         // A program-chosen format never reaches Foundation with a mismatched
         // argument: %s and %@ print the value instead of reading memory.
@@ -318,6 +328,38 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(app, "889-9-Nest views")
         app.buttons["Count"].tap()
         XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: \(expectedTaps + 1)"), "The app stays responsive after nesting views")
+    }
+
+    /// The shared info card uses neutral primary copy and a separate semantic
+    /// error icon. Catch a regression to the old all-red, ad-hoc Label using
+    /// rendered ink rather than asserting production source text.
+    @MainActor private func assertSwiftDiagnosticStyle(_ app: XCUIApplication, _ message: XCUIElement) {
+        XCTAssertTrue(message.isHittable, "The full error is readable over the runner")
+        let frame = message.frame
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(frame), "Error copy stays inside the sheet")
+        guard let image = app.screenshot().image.cgImage else { return XCTFail("Missing screenshot") }
+        let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
+        guard let crop = image.cropping(to: frame.applying(CGAffineTransform(scaleX: scale, y: scale))) else {
+            return XCTFail("Missing diagnostic crop")
+        }
+        var pixels = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
+        guard let context = CGContext(data: &pixels, width: crop.width, height: crop.height, bitsPerComponent: 8,
+                                      bytesPerRow: crop.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return XCTFail("Missing diagnostic pixels")
+        }
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
+        var neutralInk = 0
+        var coloredInk = 0
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            let channels = [Int(pixels[i]), Int(pixels[i + 1]), Int(pixels[i + 2])]
+            guard channels.max()! > 150 else { continue }
+            if channels.max()! - channels.min()! < 35 { neutralInk += 1 }
+            else { coloredInk += 1 }
+        }
+        XCTAssertGreaterThan(neutralInk, 100, "Shared TronInfoCard copy uses readable primary ink")
+        XCTAssertLessThan(Double(coloredInk) / Double(max(1, neutralInk + coloredInk)), 0.15,
+                          "Diagnostic text must use shared primary ink, not an all-red custom label")
     }
 
     /// #1006: the Settings › Tools & Diagnostics › Experimental switch turns the run

@@ -39,6 +39,12 @@ final class SwiftAppRuntime {
     @ObservationIgnored private var deadline = ContinuousClock.now
     @ObservationIgnored private var depth = 0
     @ObservationIgnored private var activeEntries = 0
+    private struct WriteKey: Hashable {
+        let owner: ObjectIdentifier
+        let field: String
+    }
+    @ObservationIgnored private var actionJournal: [WriteKey: () -> Void]?
+    @ObservationIgnored private var committedEffects: [() -> Void] = []
     /// The latest action failure, shown over the running app.
     var actionError: String?
 
@@ -123,12 +129,74 @@ final class SwiftAppRuntime {
     /// Runs a user action (button, toggle side effect, gesture) and reports
     /// failures over the app instead of terminating it.
     func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = []) {
+        // SwiftUI actions are synchronous. Nested interpreted calls share this
+        // journal and budget; only the outer action commits or rolls back.
+        precondition(actionJournal == nil)
+        actionJournal = [:]
         do {
             _ = try entered { try apply(callable, arguments.map { SwiftAppLabeledValue(label: nil, value: $0) }) }
+            actionJournal = nil
+            let effects = committedEffects
+            committedEffects = []
             actionError = nil
+            for effect in effects { effect() }
         } catch {
-            actionError = String(describing: error)
+            let journal = actionJournal
+            actionJournal = nil
+            committedEffects = []
+            // Restore raw storage, not projected setters or evaluated code:
+            // rollback must work even when the action exhausted its budget.
+            if let journal { for restore in journal.values { restore() } }
+            actionError = "Action cancelled; state restored.\n\(error)"
         }
+    }
+
+    /// Snapshot the first write to each owned slot, not just the root value:
+    /// arrays/records have value semantics, but objects may be shared or cyclic.
+    private func beforeWrite(_ owner: AnyObject, _ field: String, snapshot: () -> (() -> Void)) {
+        guard actionJournal != nil else { return }
+        let key = WriteKey(owner: ObjectIdentifier(owner), field: field)
+        if actionJournal?[key] == nil { actionJournal?[key] = snapshot() }
+    }
+
+    func set(_ box: SwiftAppBox, to value: SwiftAppValue) {
+        beforeWrite(box, "value") {
+            let old = box.value
+            return { box.value = old }
+        }
+        box.value = value
+    }
+
+    func set(_ state: SwiftAppStateStore, _ name: String, to value: SwiftAppValue) {
+        beforeWrite(state, name) {
+            let old = state.values[name]
+            return { state.values[name] = old }
+        }
+        state.values[name] = value
+    }
+
+    func set(_ object: SwiftAppObject, _ name: String, to value: SwiftAppValue) {
+        beforeWrite(object, name) {
+            let old = object.fields[name]
+            return { object.fields[name] = old }
+        }
+        object.fields[name] = value
+    }
+
+    func setStatic(_ name: String, to value: SwiftAppValue) {
+        beforeWrite(self, name) {
+            let old = staticStorage[name]
+            return { [unowned self] in self.staticStorage[name] = old }
+        }
+        staticStorage[name] = value
+    }
+
+    /// A dismissed native presentation cannot be restored from interpreted
+    /// state. Delay it until commit, so a later throw leaves it open.
+    func dismissAfterCommit(_ action: DismissAction?) {
+        guard let action else { return }
+        if actionJournal != nil { committedEffects.append { action() } }
+        else { action() }
     }
 
     // MARK: Calls
