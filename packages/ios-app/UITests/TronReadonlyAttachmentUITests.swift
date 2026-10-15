@@ -298,7 +298,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: \(expectedTaps + 1)"), "The app stays responsive after nesting views")
     }
 
-    /// #1006: the Settings › This iPhone › Experimental switch turns the run
+    /// #1006: the Settings › Tools & Diagnostics › Experimental switch turns the run
     /// control on and off live, without a relaunch, and it wins over the
     /// launch argument that started this process with the runner off.
     @MainActor func testSettingsSwitchAddsAndRemovesSwiftRunControlLive() {
@@ -332,7 +332,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let experimental = app.buttons["settings-link-Experimental"]
         XCTAssertTrue(experimental.waitForExistence(timeout: 10))
         for _ in 0..<12 where !experimental.isHittable { app.swipeUp() }
-        keepScreenshot(app, "1006-1-settings-this-iphone")
+        keepScreenshot(app, "1006-1-settings-tools-diagnostics")
         experimental.tap()
         let toggle = app.switches["settings-experimental-swift-apps"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 10), app.debugDescription)
