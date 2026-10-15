@@ -2212,18 +2212,34 @@ The wrong-code control uses the same link with a code the Gateway refuses: it as
 the app's own `Pairing code is invalid` refusal, and then that the fixture's own link
 pairs through the same address — the setup sheet reaching its workspace step is what
 only a connected Gateway shows — so the control cannot pass by being a broken address.
-`testSettingsSurfacesServeEveryKeyAndEditAtItsLayer` takes its key inventory from
+`testChatSettingsServeEveryKeyAndEditAtChatLayer`,
+`testProjectSettingsServeEveryKeyAndEditAtProjectLayer`, and
+`testMacSettingsServeEveryKeyAndEditAtMacLayer` take their key inventory from
 the fixture Gateway's own built schema (`TRON_E2E_SETTINGS_INVENTORY`, written by the
-harness), never a Swift key list. On Manage Session, the shared Project card and
-Settings it requires every key served on that target to have a row with a value and
-a layer source badge, and every unserved key to have none, and attaches the per-surface
-counts (`settings-surface-coverage.json`). It edits one key per layer through the
-shared toggle (Chat, then Project after the untrusted write is refused on its row and
-the project is trusted through Review trust, then Mac) and reads each accepted value
-and badge back after reopening; Mac-only rows open Settings through Edit at Mac. It
-then edits the fixture's Mac `settings.json` by rename-replace (`TRON_E2E_AGENT_DIR`)
-and requires `Changed outside Tron` with Apply again, which restores Tron's value.
-All journeys retain screenshots.
+harness), never a Swift key list. On Chat Settings, the shared Project card and
+Mac Settings, they require every key served on that target to have a row with a
+value and a layer source badge, and every unserved key to have none. Each attaches
+its surface counts (`settings-surface-coverage.json`). Sources is reached through Extensions on
+both Project and Mac Settings; Mac Setup is reached through its named Setup row.
+The journeys check the embedded schema section, not the surrounding hand-built
+controls, and retain screenshots of those destinations. Large qualified inventories,
+such as permission floors, are checked inside their instances sheet rather than
+mistaking its navigation link for a missing setting. Each destination is read as
+one accessibility snapshot, preserving the per-key row, value and source checks
+without a remote accessibility read for every descendant. Floor and enrolled-device
+instances belong only to the Mac target; saved-project and enrolled-device rows may
+be absent when the isolated fixture has no corresponding trust decision or SSH key.
+Each surface edits one key at its layer through the shared toggle and reads the
+accepted value and badge back after reopening. Project first proves the untrusted
+write is refused on its row, then trusts the project through Review trust. Mac-only
+rows open Settings through the named Edit at Mac action.
+`testSettingsOutsideChangesAndBuiltinExtensionPersist` uses a separate fresh fixture
+to edit the Mac `settings.json` by rename-replace (`TRON_E2E_AGENT_DIR`) and requires
+`Changed outside Tron` on the summary row, then opens its setting-detail sheet for
+the live value and Apply again, which restores Tron's value. It also proves
+the Built-in switch's persisted setting and live outside MCP additions in the open
+MCP screen and Changes. Each surface and the outside-change journey runs independently
+against its own fresh fixture as a bounded gate shard; no assertion is omitted. All journeys retain screenshots.
 
 This lane pairs the hosted app for real, and the lane's app container is shared with the
 hosted E2E lane of the same worktree; a pairing left behind made that lane's
