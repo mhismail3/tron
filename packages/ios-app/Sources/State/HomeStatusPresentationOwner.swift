@@ -76,6 +76,19 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         let currentEntries: Int?
         let recoveryDecision: RecoveryDecision
     }
+    struct HostPressure: Decodable, Equatable, Sendable {
+        enum Level: String, Decodable, Sendable { case normal, elevated, critical }
+        let level: Level
+    }
+
+    struct Workers: Decodable, Equatable, Sendable {
+        let running: Int
+    }
+
+    // These are Gateway process facts, not the dashboard's session-row count or
+    // the work tooling's heavy-step queue. Home workers have no admission cap.
+    let hostPressure: HostPressure
+    let workers: Workers
     let taskRecovery: TaskRecovery?
     let routeGeneration: Int?
     let phase: Phase
@@ -107,6 +120,7 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         let status = try JSONDecoder().decode(HomeStatusDTO.self, from: JSONEncoder().encode(value))
         guard status.taskRecovery.map({ $0.available || ($0.reason.map { !$0.isEmpty && $0.utf8.count <= 1024 } ?? false) }) ?? true,
               status.routeGeneration.map({ $0 > 0 }) ?? true,
+              status.workers.running >= 0,
               status.readiness.gaps.count <= 128,
               status.readiness.gaps.allSatisfy({ $0.utf8.count <= 256 }),
               status.generation.map({ $0 >= 0 }) ?? true,
@@ -149,6 +163,15 @@ enum HomeChatRouteKey: Equatable, Sendable {
 
 /// The one source of the Home state and memory lines the Manage Home sheet shows.
 enum HomeStatusLinePresentation {
+    static func workers(_ status: HomeStatusDTO) -> String {
+        let count = status.workers.running
+        return "\(count.formatted()) \(count == 1 ? "worker" : "workers") running"
+    }
+
+    static func host(_ status: HomeStatusDTO) -> String {
+        "Host \(status.hostPressure.level.rawValue) · \(workers(status))"
+    }
+
     static func state(_ status: HomeStatusDTO) -> String {
         switch status.phase {
         case .ready: "Ready"

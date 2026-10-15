@@ -9,6 +9,62 @@ final class TronHomeSheetsUITests: XCTestCase {
     private var timings: [String: Double] = [:]
 
     @MainActor
+    func testHostPressureNormalAndIdleWorkers() {
+        checkHostStatus(level: "Normal", workers: "0 workers running", arguments: [])
+    }
+
+    @MainActor
+    func testHostPressureElevatedAndSingleWorkerInDarkMode() {
+        checkHostStatus(level: "Elevated", workers: "1 worker running",
+                        arguments: ["-host-elevated", "-home-dark"])
+    }
+
+    @MainActor
+    func testHostPressureCriticalAndUncappedWorkersAtLargeText() {
+        checkHostStatus(level: "Critical", workers: "7 workers running",
+                        arguments: ["-host-critical", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+    }
+
+    @MainActor
+    private func checkHostStatus(level: String, workers: String, arguments: [String]) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"] + arguments
+        app.launch(); defer { app.terminate() }
+        let home = app.buttons["home-pinned-row"]
+        XCTAssertTrue(home.waitForExistence(timeout: 15))
+        XCTAssertTrue(home.label.contains("Host \(level.lowercased())"), home.label)
+        XCTAssertTrue(home.label.contains(workers), home.label)
+        let dashboard = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        dashboard.name = "931-\(level)-dashboard"
+        dashboard.lifetime = .keepAlways
+        add(dashboard)
+        home.tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(ring.waitForExistence(timeout: 15))
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        open(app, ring, ready: "home-manage-state", name: "host-status")
+        expand(app, done: "home-sheet-done-manage")
+        let host = element(app, "home-manage-host")
+        // Hittable alone can mean only the title is visible at accessibility
+        // sizes. Bring the whole row, including the status pill, above the edge.
+        for _ in 0..<8 where !host.isHittable || host.frame.maxY > app.frame.maxY - 60 { app.swipeUp() }
+        XCTAssertTrue(host.isHittable, app.debugDescription)
+        XCTAssertLessThanOrEqual(host.frame.maxY, app.frame.maxY - 60, "The complete host status remains visible")
+        XCTAssertTrue(host.label.contains(workers), host.label)
+        XCTAssertTrue(host.label.contains(level), host.label)
+        XCTAssertFalse(host.label.lowercased().contains("queued"), "Home workers have no queue")
+        let memory = element(app, "home-manage-memory-browser")
+        if memory.isHittable {
+            XCTAssertEqual(host.frame.minX, memory.frame.minX, accuracy: 1, "Host uses the shared row alignment")
+            XCTAssertEqual(host.frame.width, memory.frame.width, accuracy: 1, "Host uses the shared row width")
+        }
+        XCTAssertGreaterThanOrEqual(host.frame.minX, 0)
+        XCTAssertLessThanOrEqual(host.frame.maxX, app.frame.maxX)
+        keep("931-\(level)-manage")
+    }
+
+    @MainActor
     func testHomeSheetsJourney() {
         continueAfterFailure = false
         let app = XCUIApplication()
