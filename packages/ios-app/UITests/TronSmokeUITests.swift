@@ -2592,6 +2592,17 @@ final class TronSmokeUITests: XCTestCase {
         for group in ["Accounts", "Agent", "Tools & Extensions", "More"] where app.staticTexts[group].firstMatch.exists {
             XCTAssertLessThan(app.staticTexts[group].firstMatch.frame.minY, iphone.frame.minY, "This iPhone follows \(group)")
         }
+        // Same shared row inside the same shared group card: every moved row has
+        // the Accounts rows' left edge and width, and keeps its scope summary.
+        let rowGeometry = connections.frame
+        for (row, name) in zip(movedRows, movedNames) {
+            XCTAssertEqual(row.frame.minX, rowGeometry.minX, accuracy: 1, "\(name) is a shared Settings row")
+            XCTAssertEqual(row.frame.width, rowGeometry.width, accuracy: 1, "\(name) is a shared Settings row")
+        }
+        for summary in ["A shell on your Mac, even without the Gateway", "Prototypes to try on this iPhone",
+                        "Import, Mac session folder, and telemetry", "Diagnostics from this iPhone and your Macs"] {
+            XCTAssertTrue(app.staticTexts[summary].exists, "a moved row keeps its scope summary: \(summary)")
+        }
         XCTAssertFalse(app.staticTexts["Data & Diagnostics"].exists)
         XCTAssertFalse(app.staticTexts["Stored on this iPhone. Never changes what the agent does."].exists,
                        "Setup and Logs reach the Mac, so neither group makes a device-only promise")
