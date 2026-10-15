@@ -45,10 +45,11 @@ if [[ "$APP_PROTOCOL_VERSION" =~ ^[1-9][0-9]{0,4}$ && "$APP_MIN_PROTOCOL_VERSION
 else
   fail "installed app Gateway protocol metadata missing or malformed"
 fi
-if python3 "$(dirname "$0")/verify-gateway-protocol-contract.py" --mac-app "$APP" >/dev/null 2>&1; then
+# The verifier names the exact mismatch; keep it with the FAIL line.
+if protocol_output="$(python3 "$(dirname "$0")/verify-gateway-protocol-contract.py" --mac-app "$APP" 2>&1)"; then
   pass "installed app and bundled Gateway match the canonical protocol"
 else
-  fail "installed app or bundled Gateway protocol does not match source"
+  fail "installed app or bundled Gateway protocol does not match source: $(tail -n 3 <<<"$protocol_output")"
 fi
 
 # Verify the installed signed helper before using its in-process canonical
