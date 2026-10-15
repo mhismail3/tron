@@ -107,14 +107,14 @@ final class SessionMutationService {
         sessionID: String,
         uploadIDs: [String],
         behavior: String?,
-        resourceInvocation: ComposerResourceInvocation? = nil
+        resourceInvocations: [ComposerResourceInvocation] = []
     ) async throws -> String {
         struct Params: Codable {
             let sessionId: String
             let text: String
             let uploadIds: [String]
             let behavior: String?
-            let resourceInvocation: ComposerResourceInvocation?
+            let resourceInvocations: [ComposerResourceInvocation]?
             let commandId: String
         }
         struct Response: Codable { let operationId: String }
@@ -124,7 +124,7 @@ final class SessionMutationService {
             text: text,
             uploadIds: uploadIDs,
             behavior: behavior,
-            resourceInvocation: resourceInvocation,
+            resourceInvocations: resourceInvocations.isEmpty ? nil : resourceInvocations,
             commandId: commandID
         )
         let response: Response = try await executor.perform(method: "session.prompt", commandID: commandID) {
@@ -142,7 +142,7 @@ final class SessionMutationService {
         sessionID: String,
         uploadIDs: [String],
         behavior: String?,
-        resourceInvocation: ComposerResourceInvocation?
+        resourceInvocations: [ComposerResourceInvocation]
     ) async throws -> String {
         switch route {
         case .session:
@@ -151,14 +151,14 @@ final class SessionMutationService {
                 sessionID: sessionID,
                 uploadIDs: uploadIDs,
                 behavior: behavior,
-                resourceInvocation: resourceInvocation
+                resourceInvocations: resourceInvocations
             )
         case .home:
             try await homePrompt(
                 text,
                 uploadIDs: uploadIDs,
                 behavior: behavior,
-                resourceInvocation: resourceInvocation
+                resourceInvocations: resourceInvocations
             )
         }
     }
@@ -167,13 +167,13 @@ final class SessionMutationService {
         _ text: String,
         uploadIDs: [String],
         behavior: String?,
-        resourceInvocation: ComposerResourceInvocation?
+        resourceInvocations: [ComposerResourceInvocation]
     ) async throws -> String {
         struct Params: Codable {
             let text: String
             let uploadIds: [String]
             let behavior: String?
-            let resourceInvocation: ComposerResourceInvocation?
+            let resourceInvocations: [ComposerResourceInvocation]?
             let commandId: String
         }
         struct Response: Codable { let operationId: String }
@@ -182,7 +182,7 @@ final class SessionMutationService {
             text: text,
             uploadIds: uploadIDs,
             behavior: behavior,
-            resourceInvocation: resourceInvocation,
+            resourceInvocations: resourceInvocations.isEmpty ? nil : resourceInvocations,
             commandId: commandID
         )
         let response: Response = try await executor.perform(method: "home.prompt", commandID: commandID) {

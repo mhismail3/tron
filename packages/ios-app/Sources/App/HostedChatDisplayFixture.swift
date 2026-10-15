@@ -734,11 +734,15 @@ private actor HostedHomeShellGateway {
             else { result["previousOffset"] = .number(0) }
             return (.object(result), nil)
         case "home.prompt":
-            // A composer resource rides the logical route as the Gateway's
-            // `resourceInvocation`; the route records exactly which one.
-            if let resource = params["resourceInvocation"]?.objectValue,
-               let source = resource["source"]?.stringValue, let name = resource["name"]?.stringValue {
-                promptRoutes.append("home.prompt:\(source):\(name):\(resource["arguments"]?.stringValue ?? "")")
+            // Composer resources ride the logical route as the Gateway's ordered
+            // `resourceInvocations`; the route records exactly which, in order,
+            // and the message text that follows them (#311).
+            if let resources = params["resourceInvocations"]?.arrayValue, !resources.isEmpty {
+                let names = resources.compactMap { $0.objectValue }.map {
+                    "\($0["source"]?.stringValue ?? "?"):\($0["name"]?.stringValue ?? "?")"
+                        + (($0["arguments"]?.stringValue ?? "").isEmpty ? "" : "=\($0["arguments"]!.stringValue!)")
+                }
+                promptRoutes.append("home.prompt:\(names.joined(separator: "+")):\(params["text"]?.stringValue ?? "")")
                 return (.object(["logicalSessionId": .string("home"), "homeId": .string("home-fixture"), "bindingRevision": .number(1),
                     "sessionId": .string("home-session"), "operationId": .string("resource-operation")]), nil)
             }
@@ -863,6 +867,7 @@ private actor HostedHomeShellGateway {
             }
             return (.object(["commands": .array([
                 user("daily-brief", "prompt", "Draft a short daily brief from my notes", hint: "<topic>"),
+                user("weekly-review", "prompt", "Review the week's notes and open loops"),
                 user("skill:jev", "skill", "Use Tron's explicit typed Jev decision adapter for bounded workflow decisions."),
                 user("skill:wordcraft", "skill", "Create, edit, inspect, render and convert word-processor documents."),
             ])]), nil)

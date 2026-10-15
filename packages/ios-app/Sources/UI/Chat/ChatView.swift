@@ -484,7 +484,7 @@ struct ChatView: View {
               identity == composerResourceCatalogIdentity else { return }
         installedComposerResourceCatalog = (identity, catalog)
         if ownsCatalog, let composerScope {
-            model.composerDrafts.reconcileSelectedResource(for: composerScope, commands: commands)
+            model.composerDrafts.reconcileSelectedResources(for: composerScope, commands: commands)
         }
         if let picker = composerResourcePicker {
             composerResourceResults = catalog.entries(for: picker)
@@ -1628,10 +1628,9 @@ struct ChatView: View {
         return model.composerDrafts.annotations(for: composerScope)
     }
 
-    private var selectedComposerResource: ComposerResourceEntry? {
-        guard let composerScope,
-              let command = model.composerDrafts.selectedResource(for: composerScope) else { return nil }
-        return ComposerResourceEntry(command: command)
+    private var selectedComposerResources: [ComposerResourceEntry] {
+        guard let composerScope else { return [] }
+        return model.composerDrafts.selectedResources(for: composerScope).compactMap(ComposerResourceEntry.init(command:))
     }
 
     private var candidatePresentedInteraction: ExtensionInteraction? {
@@ -1774,7 +1773,7 @@ struct ChatView: View {
             // transcript identity is the Gateway invocation-start receipt;
             // never hand the outgoing submission to the ordinary prompt graft,
             // even after the first projection has been skipped.
-            if submission.resourceInvocation?.isExtensionCommand == true { return .none }
+            if submission.isExtensionCommand { return .none }
             let canonicalIDs = model.composerDrafts.canonicalSubmissionIDs(
                 target: target,
                 canonicalTranscript: snapshot.transcript
@@ -2721,7 +2720,7 @@ struct ChatView: View {
             processActivities: model.sessionProcessPresentation(for: sessionID)?.activities,
             extensionRetainedContent: extensionRetainedContent,
             pendingAttachments: pendingAttachments,
-            selectedResource: selectedComposerResource,
+            selectedResources: selectedComposerResources,
             annotations: composerAnnotations,
             resourcePicker: presentedComposerResourcePicker,
             resourceResults: presentedComposerResourcePicker == nil ? [] : composerResourceResults,
@@ -2762,9 +2761,9 @@ struct ChatView: View {
                 guard let target = presentationTarget else { return }
                 model.composerDrafts.removeAttachment(id, target: target)
             },
-            onRemoveResource: {
+            onRemoveResource: { resource in
                 guard let composerScope else { return }
-                model.composerDrafts.removeSelectedResource(for: composerScope)
+                model.composerDrafts.removeSelectedResource(resource.commandInfo, for: composerScope)
             },
             onUpdateAnnotation: { id, comment in
                 guard let composerScope else { return }
@@ -2805,7 +2804,7 @@ struct ChatView: View {
             hasContent: ChatComposerPolicy.hasSendableContent(
                 text: composerText,
                 attachmentCount: pendingAttachments.count,
-                hasResource: selectedComposerResource != nil,
+                hasResource: !selectedComposerResources.isEmpty,
                 annotationCount: composerAnnotations.count
             ),
             isSending: sending
@@ -3364,16 +3363,14 @@ struct ChatView: View {
         }
     }
 
-    private func composerResourceInvocation() -> ComposerResourceInvocation? {
+    /// Every resource this message would invoke: the staged chips, or else one
+    /// typed leading invocation. A slash typed beside a chip is message text,
+    /// not an opportunity to replace the chips.
+    private func composerInvocationIntent() -> (staged: [CommandInfo], typed: ComposerResourceInvocation?) {
+        let staged = composerScope.map(model.composerDrafts.selectedResources(for:)) ?? []
+        guard staged.isEmpty else { return (staged, nil) }
         let value = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        // The staged chip is the sole invocation authority. A slash typed into
-        // its argument text is data, not an opportunity to replace the chip.
-        if let scope = composerScope,
-           let resource = model.composerDrafts.selectedResource(for: scope),
-           let entry = ComposerResourceEntry(command: resource) {
-            return entry.invocation(arguments: value)
-        }
-        return ComposerResourceInvocationPolicy.leadingInvocation(in: value, commands: model.commands)
+        return ([], ComposerResourceInvocationPolicy.leadingInvocation(in: value, commands: model.commands))
     }
 
     @MainActor
@@ -3405,8 +3402,18 @@ struct ChatView: View {
         }
         // Capture invocation intent exactly once before any presentation state
         // changes. The same value is validated, staged, rendered, and sent.
-        let resourceInvocation = composerResourceInvocation()
-        if let resourceInvocation {
+        let intent = composerInvocationIntent()
+        let typedInvocation = intent.typed
+        let invoked: [(source: CommandInfo.Source, name: String)] = intent.staged.map { ($0.source, $0.name) }
+            + (typedInvocation.map { invocation in
+                let source: CommandInfo.Source = switch invocation.source {
+                case .skill: .skill
+                case .prompt: .prompt
+                case .extension: .extension
+                }
+                return [(source, source == .skill ? "skill:\(invocation.name)" : invocation.name)]
+            } ?? [])
+        if !invoked.isEmpty {
             guard model.commandCatalogTarget == target else {
                 model.presentComposerActionError(
                     "Resources are still loading for this session.",
@@ -3414,23 +3421,22 @@ struct ChatView: View {
                 )
                 return
             }
-            let source: CommandInfo.Source = switch resourceInvocation.source {
-            case .skill: .skill
-            case .prompt: .prompt
-            case .extension: .extension
+            let unavailable = invoked.filter { resource in
+                let matches = model.commands.filter {
+                    $0.source == resource.source && $0.name == resource.name
+                }
+                let shadowed = resource.source != .extension && model.commands.contains {
+                    $0.source == .extension && $0.name == resource.name
+                }
+                return matches.count != 1 || shadowed
             }
-            let catalogName = source == .skill
-                ? "skill:\(resourceInvocation.name)"
-                : resourceInvocation.name
-            let matches = model.commands.filter {
-                $0.source == source && $0.name == catalogName
-            }
-            let shadowed = source != .extension && model.commands.contains {
-                $0.source == .extension && $0.name == catalogName
-            }
-            guard matches.count == 1, !shadowed else {
+            guard unavailable.isEmpty else {
                 if let composerScope {
-                    model.composerDrafts.removeSelectedResource(for: composerScope)
+                    for staged in intent.staged where unavailable.contains(where: {
+                        $0.source == staged.source && $0.name == staged.name
+                    }) {
+                        model.composerDrafts.removeSelectedResource(staged, for: composerScope)
+                    }
                 }
                 model.presentComposerActionError(
                     "That resource is no longer available for this session.",
@@ -3461,7 +3467,7 @@ struct ChatView: View {
                 let submission = try model.beginComposerSubmission(
                     target: target,
                     behavior: behavior,
-                    resourceInvocation: resourceInvocation,
+                    typedInvocation: typedInvocation,
                     route: isHomeRoute ? .home : .session,
                     canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
                     queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? [],
@@ -3481,7 +3487,7 @@ struct ChatView: View {
                     }
                     .prefix(ComposerAttachmentPolicy.maximumCount)
                     .map { $0.frozenForHandoff() }
-                let isExtensionCommand = submission.resourceInvocation?.isExtensionCommand == true
+                let isExtensionCommand = submission.isExtensionCommand
                 // UIKit publishes its keyboard clock synchronously when
                 // available before the already-sized outgoing row is grafted.
                 dismissComposerForAdmittedSubmission()

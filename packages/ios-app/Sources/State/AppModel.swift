@@ -653,14 +653,14 @@ final class AppModel {
             },
             attachmentFileAccess: composerAttachmentFileAccess,
             draftStore: composerDraftStore,
-            send: composerSend ?? { text, sessionID, uploadIDs, behavior, resourceInvocation, route in
+            send: composerSend ?? { text, sessionID, uploadIDs, behavior, resourceInvocations, route in
                 try await sessionMutations.submitComposer(
                     text,
                     route: route,
                     sessionID: sessionID,
                     uploadIDs: uploadIDs,
                     behavior: behavior,
-                    resourceInvocation: resourceInvocation
+                    resourceInvocations: resourceInvocations
                 )
             },
             admitsLifecycleGeneration: { lifecycle.admits(.init(generation: $0, connectionID: nil)) }
@@ -3738,21 +3738,17 @@ final class AppModel {
     func beginComposerSubmission(
         target: SessionPresentationTarget,
         behavior: String? = nil,
-        resourceInvocation: ComposerResourceInvocation? = nil,
+        typedInvocation: ComposerResourceInvocation? = nil,
         route: ComposerSubmissionRoute = .session,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
         runtimeGeneration: String? = nil
     ) throws -> ComposerSubmissionSnapshot {
         guard admitsLiveSessionCommands(target) else { throw CancellationError() }
-        let invokesSkill: Bool
-        if let resourceInvocation {
-            invokesSkill = resourceInvocation.source == .skill
-        } else if let scope = composerDrafts.scope(for: target) {
-            invokesSkill = composerDrafts.selectedResource(for: scope)?.source == .skill
-        } else {
-            invokesSkill = false
-        }
+        let invokesSkill = typedInvocation?.source == .skill
+            || composerDrafts.scope(for: target).map {
+                composerDrafts.selectedResources(for: $0).contains { $0.source == .skill }
+            } == true
         // Capability is command authority, not a side effect of asynchronous
         // picker cleanup. Reject before the draft or submission ledger changes.
         guard !invokesSkill || gatewayInfo?.capabilities.contains("skill-prompt.v1") == true else {
@@ -3761,7 +3757,7 @@ final class AppModel {
         return try composerDrafts.beginSubmission(
             target: target,
             behavior: behavior,
-            resourceInvocation: resourceInvocation,
+            typedInvocation: typedInvocation,
             route: route,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages,
@@ -3776,7 +3772,7 @@ final class AppModel {
     func sendComposer(
         target: SessionPresentationTarget,
         behavior: String? = nil,
-        resourceInvocation: ComposerResourceInvocation? = nil,
+        typedInvocation: ComposerResourceInvocation? = nil,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
         runtimeGeneration: String? = nil
@@ -3784,7 +3780,7 @@ final class AppModel {
         let submission = try beginComposerSubmission(
             target: target,
             behavior: behavior,
-            resourceInvocation: resourceInvocation,
+            typedInvocation: typedInvocation,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages,
             runtimeGeneration: runtimeGeneration

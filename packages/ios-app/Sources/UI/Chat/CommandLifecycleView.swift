@@ -25,7 +25,7 @@ struct CommandLifecycleView: View {
     let item: TranscriptItem
     @State private var showingDetails = false
 
-    private var resource: ComposerResourceInvocation? { item.semantic?.resourceInvocation }
+    private var resource: ComposerResourceInvocation? { item.semantic?.resourceInvocations?.first }
     private var name: String { resource?.name ?? "Extension command" }
     private var state: String { item.semantic?.lifecycle?.rawValue ?? "accepted" }
     private var origin: String {
@@ -72,7 +72,7 @@ private struct CommandLifecycleDetailsSheet: View {
     @State private var detent: PresentationDetent = .medium
 
     private let accent = ChatSemanticPillRole.command.accent
-    private var resource: ComposerResourceInvocation? { item.semantic?.resourceInvocation }
+    private var resource: ComposerResourceInvocation? { item.semantic?.resourceInvocations?.first }
     private var name: String { resource?.name ?? "Extension command" }
     private var origin: String {
         item.semantic?.origin.title

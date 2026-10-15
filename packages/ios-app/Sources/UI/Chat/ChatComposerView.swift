@@ -12,7 +12,7 @@ struct ChatComposerView: View {
     let processActivities: [SessionProcessActivity]?
     let extensionRetainedContent: ExtensionRetainedContent
     let pendingAttachments: [PendingAttachment]
-    let selectedResource: ComposerResourceEntry?
+    let selectedResources: [ComposerResourceEntry]
     let annotations: [ChatAnnotation]
     let resourcePicker: ComposerResourcePickerSource?
     let resourceResults: [ComposerResourceEntry]
@@ -50,7 +50,7 @@ struct ChatComposerView: View {
 
     let onActivityTap: () -> Void
     let onRemoveAttachment: (String) -> Void
-    let onRemoveResource: () -> Void
+    let onRemoveResource: (ComposerResourceEntry) -> Void
     let onUpdateAnnotation: (String, String) -> Void
     let onRemoveAnnotation: (String) -> Void
     let onSelectResource: (ComposerResourceEntry) -> Void
@@ -71,7 +71,7 @@ struct ChatComposerView: View {
         ChatComposerStructuralHost(
             accessoryIdentity: ChatComposerAccessoryLayoutIdentity(
                 attachmentIDs: pendingAttachments.map(\.id),
-                selectedResourceID: selectedResource?.id,
+                selectedResourceIDs: selectedResources.map(\.id),
                 annotationIDs: annotations.map(\.id),
                 resourcePickerKind: resourcePicker?.kind,
                 resourceResultIDs: resourceResults.map(\.id)
@@ -121,7 +121,7 @@ struct ChatComposerView: View {
                 submissionTransitionID == nil
                     ? ChatMotion.composerSurfaceResize(reduceMotion: reduceMotion)
                     : nil,
-                value: selectedResource?.id
+                value: selectedResources.map(\.id)
             )
             .animation(
                 submissionTransitionID == nil
@@ -194,18 +194,21 @@ struct ChatComposerView: View {
     }
 
     /// Staged chips share one horizontally scrolling strip: the selected
-    /// resource, then annotations in the order they were made.
+    /// resources in pick order, then annotations in the order they were made.
     @ViewBuilder
     private var selectedResourceStrip: some View {
-        if selectedResource != nil || !annotations.isEmpty {
+        if !selectedResources.isEmpty || !annotations.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    if let selectedResource {
+                    ForEach(selectedResources) { resource in
                         ComposerResourceChip(
                             sessionID: sessionFacts?.sessionID,
-                            resource: selectedResource,
-                            onRemove: onRemoveResource
+                            resource: resource,
+                            onRemove: { onRemoveResource(resource) }
                         )
+                        .transition(ChatContentTransitionPolicy.composerSurfaceTransition(
+                            reduceMotion: reduceMotion
+                        ))
                     }
                     ForEach(annotations) { annotation in
                         ComposerAnnotationChip(
