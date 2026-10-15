@@ -107,7 +107,7 @@ struct SwiftAppLazyContent: View {
     var body: some View {
         switch Result(catching: { () throws -> [SwiftAppViewNode] in
             switch value {
-            case .closure?, .function?: SwiftAppRenderer.flattenGroups(try runtime.apply(value!, []))
+            case .closure?, .function?: SwiftAppRenderer.flattenGroups(try runtime.renderContent(value!))
             case let value?: SwiftAppRenderer.flattenGroups(value)
             case nil: []
             }
@@ -200,6 +200,8 @@ struct SwiftAppModifiedView: View {
     private func base() throws -> AnyView {
         let runtime = runtime
         switch node.name {
+        case SwiftAppRenderer.diagnostic:
+            return AnyView(SwiftAppErrorView(message: text(node.unlabeled.first)))
         case "Text":
             return AnyView(Text(verbatim: text(node.argument("verbatim") ?? node.unlabeled.first)))
         case "Label":
@@ -570,7 +572,7 @@ struct SwiftAppModifiedView: View {
             })
         case "toolbar":
             guard let content = arguments.last?.value else { return view }
-            let items = SwiftAppRenderer.flattenGroups(try runtime.apply(content, []))
+            let items = SwiftAppRenderer.flattenGroups(try runtime.renderContent(content))
             let leading = items.filter { item in
                 guard case .member(let placement, _)? = item.argument("placement") else { return false }
                 return ["topBarLeading", "navigationBarLeading", "cancellationAction"].contains(placement)

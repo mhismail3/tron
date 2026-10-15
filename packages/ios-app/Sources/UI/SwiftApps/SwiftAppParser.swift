@@ -11,6 +11,7 @@ struct SwiftAppParser {
     /// evaluator's recursion and the recursive release of the tree; the stack
     /// guard bounds the parser's own recursion.
     private var nesting = 0
+    private var unsupported: [SwiftAppSyntaxError] = []
     static let maximumNesting = 256
 
     init(tokens: [SwiftAppToken], nesting: Int = 0) {
@@ -20,7 +21,13 @@ struct SwiftAppParser {
 
     static func parse(_ source: String) throws -> SwiftAppProgramSyntax {
         var parser = SwiftAppParser(tokens: try SwiftAppLexer.tokenize(source))
-        return try parser.parseProgram()
+        do { return try parser.parseProgram() }
+        catch let error as SwiftAppSyntaxError {
+            // A fatal syntax error ends recovery, but must not erase the
+            // independent unsupported constructs already found before it.
+            guard !parser.unsupported.isEmpty else { throw error }
+            throw SwiftAppUnsupportedSyntax(diagnostics: parser.unsupported + [error], reachedLimit: false)
+        }
     }
 
     static func parseArguments(_ source: String, line: Int, nesting: Int) throws -> [SwiftAppArgument] {
@@ -33,6 +40,7 @@ struct SwiftAppParser {
             if !parser.consumeSymbol(",") { break }
         }
         guard parser.atEnd else { throw parser.error("Unsupported interpolation") }
+        try parser.requireSupportedSyntax()
         return arguments
     }
 
@@ -74,6 +82,21 @@ struct SwiftAppParser {
         case .symbol(let v): " but found '\(v)'"
         case .end: " at end of file"
         default: ""
+        }
+    }
+
+    /// Recovery is grammar-owned: callers consume a known complete construct.
+    /// Malformed input, lexer errors and nesting exhaustion still fail closed.
+    private mutating func recordUnsupported(_ message: String, line: Int) throws {
+        unsupported.append(SwiftAppSyntaxError(message: message, line: line))
+        if unsupported.count == 10 {
+            throw SwiftAppUnsupportedSyntax(diagnostics: unsupported, reachedLimit: true)
+        }
+    }
+
+    private func requireSupportedSyntax() throws {
+        if !unsupported.isEmpty {
+            throw SwiftAppUnsupportedSyntax(diagnostics: unsupported, reachedLimit: false)
         }
     }
 
@@ -149,8 +172,12 @@ struct SwiftAppParser {
             case "struct", "class", "enum", "extension":
                 try parseType(keyword: keyword, into: &program)
             case "protocol":
+                let line = current.line
                 advance(); _ = try expectIdentifier()
                 while !current.isSymbol("{"), !atEnd { advance() }
+                if !peek(1).isSymbol("}") {
+                    try recordUnsupported("Protocols with requirements are not supported", line: line)
+                }
                 try skipBalanced(open: "{", close: "}")
             case "func":
                 let function = try parseFunction(isStatic: isStatic, isMutating: false)
@@ -168,6 +195,7 @@ struct SwiftAppParser {
             }
             _ = attributes
         }
+        try requireSupportedSyntax()
         return program
     }
 
@@ -183,7 +211,10 @@ struct SwiftAppParser {
     private mutating func parseType(keyword: String, into program: inout SwiftAppProgramSyntax) throws {
         advance()
         let name = try expectIdentifier()
-        if current.isSymbol("<") { try skipBalanced(open: "<", close: ">") }
+        if current.isSymbol("<") {
+            try recordUnsupported("Generic type '\(name)' is not supported", line: current.line)
+            try skipBalanced(open: "<", close: ">")
+        }
         let declaration: SwiftAppTypeDeclaration
         if keyword == "extension" {
             guard let existing = program.types[name] else {
@@ -229,7 +260,10 @@ struct SwiftAppParser {
                 advance()
                 repeat {
                     let caseName = try expectIdentifier()
-                    if current.isSymbol("(") { throw error("Enum cases with associated values are not supported") }
+                    if current.isSymbol("(") {
+                        try recordUnsupported("Enum cases with associated values are not supported (\(caseName))", line: current.line)
+                        try skipBalanced(open: "(", close: ")")
+                    }
                     if consumeSymbol("=") { declaration.rawValues[caseName] = try parsePrimary() }
                     declaration.cases.append(caseName)
                 } while consumeSymbol(",")
@@ -237,7 +271,14 @@ struct SwiftAppParser {
                 let function = try parseFunction(isStatic: isStatic, isMutating: isMutating)
                 declaration.functions[function.name] = function
             case "init", "deinit":
-                throw error("Custom initializers are not supported; use property defaults")
+                try recordUnsupported("Custom initializers/deinitializers are not supported (\(word)); use property defaults", line: current.line)
+                advance()
+                // The signature and body have explicit delimiters. Do not
+                // guess a new declaration boundary after malformed syntax.
+                _ = consumeSymbol("?") || consumeSymbol("!")
+                if current.isSymbol("(") { try skipBalanced(open: "(", close: ")") }
+                while current.isIdentifier("throws") || current.isIdentifier("async") { advance() }
+                try skipBalanced(open: "{", close: "}")
             case "typealias":
                 advance(); _ = try expectIdentifier(); try expectSymbol("="); try skipType()
             case "var", "let":
@@ -287,7 +328,10 @@ struct SwiftAppParser {
     private mutating func parseFunction(isStatic: Bool, isMutating: Bool) throws -> SwiftAppFunction {
         advance() // func
         let name = try expectIdentifier()
-        if current.isSymbol("<") { try skipBalanced(open: "<", close: ">") }
+        if current.isSymbol("<") {
+            try recordUnsupported("Generic function '\(name)' is not supported", line: current.line)
+            try skipBalanced(open: "<", close: ">")
+        }
         try expectSymbol("(")
         var parameters: [SwiftAppParameter] = []
         while !consumeSymbol(")") {
@@ -304,7 +348,10 @@ struct SwiftAppParser {
             parameters.append(SwiftAppParameter(label: label, name: second ?? first ?? "_", defaultValue: defaultValue))
             _ = consumeSymbol(",")
         }
-        while let word = current.identifier, ["throws", "async", "rethrows"].contains(word) { advance() }
+        while let word = current.identifier, ["throws", "async", "rethrows"].contains(word) {
+            if word == "async" { try recordUnsupported("async functions are not supported", line: current.line) }
+            advance()
+        }
         if consumeSymbol("->") { try skipType() }
         if consumeIdentifier("where") { while !current.isSymbol("{"), !atEnd { advance() } }
         let body = try parseBlock()
@@ -393,8 +440,10 @@ struct SwiftAppParser {
             advance()
             var name = "_"
             if !consumeSymbol("_") {
-                if current.isSymbol("(") { throw error("Tuple patterns in for-in are not supported") }
-                name = try expectIdentifier()
+                if current.isSymbol("(") {
+                    try recordUnsupported("Tuple patterns in for-in are not supported", line: current.line)
+                    try skipBalanced(open: "(", close: ")")
+                } else { name = try expectIdentifier() }
             }
             guard consumeIdentifier("in") else { throw error("Expected 'in'") }
             let saved = forbidTrailingClosure
@@ -460,6 +509,7 @@ struct SwiftAppParser {
         try nest()
         defer { nesting -= 1 }
         while let word = current.identifier, ["try", "await"].contains(word) {
+            if word == "await" { try recordUnsupported("await is not supported", line: current.line) }
             advance()
             if current.isSymbol("?") || current.isSymbol("!") { advance() }
         }
@@ -499,7 +549,11 @@ struct SwiftAppParser {
             advance()
             left = .binary(op, left, try parseBinary(level: level + 1))
         }
-        if level == 2, current.isIdentifier("is") { throw error("'is' checks are not supported") }
+        if level == 2, current.isIdentifier("is") {
+            try recordUnsupported("'is' checks are not supported", line: current.line)
+            advance()
+            try skipType()
+        }
         return left
     }
 
@@ -699,14 +753,23 @@ struct SwiftAppParser {
                 return .tuple(elements)
             case "[":
                 advance()
-                if consumeSymbol(":") { try expectSymbol("]"); throw error("Dictionaries are not supported") }
+                if consumeSymbol(":") {
+                    try recordUnsupported("Dictionaries are not supported", line: token.line)
+                    try expectSymbol("]")
+                    return .nilLiteral
+                }
                 var elements: [SwiftAppExpr] = []
+                var dictionary = false
                 while !consumeSymbol("]") {
                     elements.append(try parseExpression())
-                    if consumeSymbol(":") { throw error("Dictionaries are not supported") }
+                    if consumeSymbol(":") {
+                        if !dictionary { try recordUnsupported("Dictionaries are not supported", line: token.line) }
+                        dictionary = true
+                        _ = try parseExpression()
+                    }
                     if !consumeSymbol(",") { try expectSymbol("]"); break }
                 }
-                return .array(elements)
+                return dictionary ? .nilLiteral : .array(elements)
             case "{":
                 return .closure(try parseClosure())
             case "\\":

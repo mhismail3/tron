@@ -13,6 +13,14 @@ enum HostedSwiftAppFixtureSource {
             let nested = String(repeating: "(", count: 2_000) + "1" + String(repeating: ")", count: 2_000)
             return ("Deep.swift", "import SwiftUI\n\nlet depth = \(nested)\n\nstruct ContentView: View {\n    var body: some View { Text(\"Deep\") }\n}\n")
         }
+        if scenario.contains("diagnostic-cap") {
+            let declarations = (1...12).map { "struct Unsupported\($0) { init() {} }" }.joined(separator: "\n")
+            return ("Capped.swift", "import SwiftUI\n" + declarations + "\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
+        }
+        if scenario.contains("diagnostic-malformed") {
+            return ("Malformed.swift", "import SwiftUI\nstruct Broken { init() {\n")
+        }
+        if scenario.contains("diagnostics") { return ("Diagnostics.swift", diagnostics) }
         if scenario.contains("limits") { return ("Limits.swift", limits) }
         if scenario.contains("truncated") {
             // Past the document sheet's text preview limit, so the preview is truncated.
@@ -305,11 +313,54 @@ enum HostedSwiftAppFixtureSource {
 
     struct ContentView: View {
         @State private var scores: [String: Int] = ["Ada": 3]
+        init() { }
 
         var body: some View {
+            let other = ["Bob": 4]
             Text("Scores")
         }
     }
+
+    enum Result {
+        case value(Int)
+    }
+
+    protocol HasValue { var value: Int { get } }
+    func identity<T>(_ value: T) -> T { value }
+    """#
+
+    /// One invalid child must not erase earlier/later siblings or swallow an
+    /// error in a value helper called by an action.
+    static let diagnostics = #"""
+    import SwiftUI
+    struct ContentView: View {
+        @State private var taps = 0
+        var body: some View {
+            VStack {
+                Text("Taps: \(taps)").accessibilityIdentifier("diagnostics.taps")
+                Text([1].count())
+                HStack {
+                    Text("Nested sibling")
+                    Text(badValue())
+                    Text("After nested failure")
+                }
+                Text("Last sibling")
+                ForEach(0..<3, id: \.self) { index in
+                    Text("Row \(10 / (index - 1))")
+                }
+                Button("Count") { taps += 1 }
+                Button("Fail action") {
+                    taps += 10
+                    taps = badValue()
+                }
+            }
+        }
+        func badValue() -> Int {
+            let values = [1]
+            return values[4]
+        }
+    }
+    protocol Marker {}
     """#
 
     /// Runaway and hostile programs and an unsupported view. Each must end

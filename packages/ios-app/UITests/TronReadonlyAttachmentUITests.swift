@@ -264,6 +264,11 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let unsupported = broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 4: Dictionaries are not supported'")).firstMatch
         XCTAssertTrue(unsupported.waitForExistence(timeout: 10), "Unsupported syntax names its line instead of running")
         keepScreenshot(broken, "889-8-unsupported-syntax")
+        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 5: Custom initializers'")).firstMatch.exists)
+        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 8: Dictionaries'")).firstMatch.exists)
+        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 14: Enum cases with associated values'")).firstMatch.exists)
+        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 17: Protocols with requirements'")).firstMatch.exists)
+        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS \"Line 18: Generic function 'identity'\"")).firstMatch.exists)
         broken.terminate()
 
         // Nesting deep enough to overflow a recursive parser stops at the parser limit.
@@ -328,6 +333,57 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(app, "889-9-Nest views")
         app.buttons["Count"].tap()
         XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: \(expectedTaps + 1)"), "The app stays responsive after nesting views")
+    }
+
+    @MainActor func testSwiftDiagnosticsPreserveSiblingViews() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-diagnostics", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Diagnostics.swift")
+        app.buttons["Run Diagnostics.swift"].tap()
+        let taps = app.staticTexts["diagnostics.taps"]
+        XCTAssertTrue(taps.waitForExistence(timeout: 10), "A bad footer must not replace the whole body")
+        for title in ["Nested sibling", "After nested failure", "Last sibling"] {
+            XCTAssertTrue(app.staticTexts[title].exists, "Working sibling survives: \(title)")
+        }
+        XCTAssertTrue(diagnostic(app, "Line 7: 'count' is a property, not a method").exists)
+        XCTAssertTrue(diagnostic(app, "Line 10: Index 4 is out of range").exists)
+        XCTAssertTrue(app.staticTexts["Row -10"].exists)
+        XCTAssertTrue(app.staticTexts["Row 10"].exists, "A failing ForEach row does not erase later rows")
+        XCTAssertTrue(diagnostic(app, "Division by zero").exists)
+        assertToolbarTint(app, title: "Diagnostics")
+        keepScreenshot(app, "1039-contained-siblings")
+        app.buttons["Count"].tap()
+        XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: 1"))
+        app.buttons["Fail action"].tap()
+        XCTAssertTrue(diagnostic(app, "Action cancelled; state restored.").waitForExistence(timeout: 10))
+        XCTAssertEqual(taps.label, "Taps: 1", "Value helpers still throw into the action transaction")
+        keepScreenshot(app, "1039-action-still-throws")
+        app.buttons["Count"].tap()
+        XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: 2"))
+        XCTAssertTrue(wait(diagnostic(app, "Action cancelled; state restored."), predicate: "exists == false"))
+    }
+
+    @MainActor func testSwiftUnsupportedDiagnosticsAreBoundedAndMalformedSyntaxStops() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-diagnostic-cap", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Capped.swift")
+        app.buttons["Run Capped.swift"].tap()
+        let capped = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Stopped after 10 unsupported constructs'")).firstMatch
+        XCTAssertTrue(capped.waitForExistence(timeout: 10))
+        XCTAssertTrue(capped.label.contains("Line 2: Custom initializers"))
+        XCTAssertTrue(capped.label.contains("Line 11: Custom initializers"))
+        XCTAssertFalse(capped.label.contains("Line 12:"))
+        XCTAssertFalse(app.staticTexts["Must not run"].exists, "A partial parse is never executed")
+        keepScreenshot(app, "1039-bounded-diagnostics")
+        app.terminate()
+
+        let malformed = launchSwift("display-swift-diagnostic-malformed", flag: true); defer { malformed.terminate() }
+        openSwiftDisplay(malformed, named: "Malformed.swift")
+        malformed.buttons["Run Malformed.swift"].tap()
+        XCTAssertTrue(malformed.staticTexts.matching(NSPredicate(format: "label CONTAINS \"Unbalanced '{'\"")).firstMatch.waitForExistence(timeout: 10),
+                      "Malformed delimiters are fatal, not speculative recovery points")
+        XCTAssertTrue(malformed.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 2: Custom initializers'")).firstMatch.exists,
+                      "A fatal syntax error retains independent unsupported diagnostics already collected")
     }
 
     /// The shared info card uses neutral primary copy and a separate semantic

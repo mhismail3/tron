@@ -17,6 +17,8 @@ final class SwiftAppRuntime {
     }
 
     final class Collector {
+        let isViewBuilder: Bool
+        init(isViewBuilder: Bool) { self.isViewBuilder = isViewBuilder }
         var views: [SwiftAppViewNode] = []
         var lastValue: SwiftAppValue = .void
     }
@@ -35,6 +37,7 @@ final class SwiftAppRuntime {
     @ObservationIgnored let globals: SwiftAppScope
     @ObservationIgnored var staticStorage: [String: SwiftAppValue] = [:]
     @ObservationIgnored private var steps = 0
+    @ObservationIgnored private var entryExhausted = false
     @ObservationIgnored private var nextClockCheck = 0
     @ObservationIgnored private var deadline = ContinuousClock.now
     @ObservationIgnored private var depth = 0
@@ -81,6 +84,7 @@ final class SwiftAppRuntime {
     func entered<T>(_ work: () throws -> T) rethrows -> T {
         if activeEntries == 0 {
             steps = 0
+            entryExhausted = false
             nextClockCheck = 0
             depth = 0
             deadline = .now + Self.timeBudget
@@ -95,10 +99,10 @@ final class SwiftAppRuntime {
     /// recursion that does not pass through `call`, such as computed properties.
     func tick(_ cost: Int = 1) throws {
         steps += cost
-        if steps > Self.stepBudget { throw SwiftAppRuntimeError(Self.tooLong) }
+        if steps > Self.stepBudget { entryExhausted = true; throw SwiftAppRuntimeError(Self.tooLong) }
         if steps >= nextClockCheck {
             nextClockCheck = steps + 1_024
-            if ContinuousClock.now > deadline { throw SwiftAppRuntimeError(Self.tooLong) }
+            if ContinuousClock.now > deadline { entryExhausted = true; throw SwiftAppRuntimeError(Self.tooLong) }
         }
         if !SwiftAppStackGuard.hasHeadroom() { throw SwiftAppRuntimeError(Self.tooDeep) }
     }
@@ -201,11 +205,11 @@ final class SwiftAppRuntime {
 
     // MARK: Calls
 
-    func call(_ closure: SwiftAppClosure, _ arguments: [SwiftAppValue]) throws -> SwiftAppValue {
-        try entered { try callClosure(closure, arguments) }
+    func call(_ closure: SwiftAppClosure, _ arguments: [SwiftAppValue], viewBuilder: Bool = false) throws -> SwiftAppValue {
+        try entered { try callClosure(closure, arguments, viewBuilder: viewBuilder) }
     }
 
-    private func callClosure(_ closure: SwiftAppClosure, _ arguments: [SwiftAppValue]) throws -> SwiftAppValue {
+    private func callClosure(_ closure: SwiftAppClosure, _ arguments: [SwiftAppValue], viewBuilder: Bool) throws -> SwiftAppValue {
         try enterCall()
         defer { leaveCall() }
         let scope = SwiftAppScope(parent: closure.scope)
@@ -219,7 +223,7 @@ final class SwiftAppRuntime {
                 scope.declare(name, index < arguments.count ? arguments[index] : .nilValue)
             }
         }
-        return try run(closure.literal.body, in: scope)
+        return try run(closure.literal.body, in: scope, viewBuilder: viewBuilder)
     }
 
     /// Counts one interpreted call frame; callers pair it with `leaveCall()`.
@@ -233,7 +237,7 @@ final class SwiftAppRuntime {
 
     func leaveCall() { depth -= 1 }
 
-    func call(_ function: SwiftAppFunction, receiver: SwiftAppSelf?, _ arguments: [SwiftAppLabeledValue]) throws -> SwiftAppValue {
+    func call(_ function: SwiftAppFunction, receiver: SwiftAppSelf?, _ arguments: [SwiftAppLabeledValue], viewBuilder: Bool = false) throws -> SwiftAppValue {
         try enterCall()
         defer { leaveCall() }
         let scope = SwiftAppScope(parent: globals, selfReference: receiver)
@@ -252,13 +256,13 @@ final class SwiftAppRuntime {
                 throw SwiftAppRuntimeError("Missing argument '\(parameter.label ?? parameter.name)' for \(function.name)")
             }
         }
-        return try run(function.body, in: scope)
+        return try run(function.body, in: scope, viewBuilder: viewBuilder)
     }
 
     /// A body's value: an explicit `return`, the views a builder produced, or
     /// the value of a single-expression body.
-    func run(_ body: [SwiftAppStmt], in scope: SwiftAppScope) throws -> SwiftAppValue {
-        let collector = Collector()
+    func run(_ body: [SwiftAppStmt], in scope: SwiftAppScope, viewBuilder: Bool = false) throws -> SwiftAppValue {
+        let collector = Collector(isViewBuilder: viewBuilder)
         if case .returned(let value) = try execute(body, in: scope, collector: collector) { return value }
         if !collector.views.isEmpty {
             return .view(collector.views.count == 1
@@ -273,7 +277,27 @@ final class SwiftAppRuntime {
 
     func execute(_ statements: [SwiftAppStmt], in scope: SwiftAppScope, collector: Collector?) throws -> Flow {
         for statement in statements {
-            try tick()
+            do {
+                try tick()
+                let flow = try execute(statement, in: scope, collector: collector)
+                if case .normal = flow {} else { return flow }
+            } catch {
+                // Only native view-builder entry points opt in. Actions and
+                // value helpers must still throw, preserving transaction rollback.
+                guard let collector, collector.isViewBuilder else { throw error }
+                collector.views.append(SwiftAppViewNode(
+                    name: SwiftAppRenderer.diagnostic,
+                    arguments: [SwiftAppLabeledValue(label: nil, value: .string(String(describing: error)))]
+                ))
+                // Keep completed siblings, but never refill an exhausted entry
+                // just to try later siblings (or iterate a runaway builder).
+                if entryExhausted { return .normal }
+            }
+        }
+        return .normal
+    }
+
+    private func execute(_ statement: SwiftAppStmt, in scope: SwiftAppScope, collector: Collector?) throws -> Flow {
             switch statement {
             case .declaration(let name, let expression):
                 scope.declare(name, try expression.map { try evaluate($0, in: scope) } ?? .nilValue)
@@ -354,7 +378,6 @@ final class SwiftAppRuntime {
             case .continueStatement:
                 return .continued
             }
-        }
         return .normal
     }
 

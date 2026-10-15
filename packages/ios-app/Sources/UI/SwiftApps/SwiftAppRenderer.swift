@@ -6,6 +6,7 @@ import SwiftUI
 @MainActor
 enum SwiftAppRenderer {
     static let builderGroup = "_ViewBuilderGroup"
+    static let diagnostic = "_SwiftAppDiagnostic"
 
     static let viewNames: Set<String> = [
         "Text", "Label", "Image", "Button", "Toggle", "TextField", "SecureField", "Stepper", "Slider", "ProgressView",
@@ -159,7 +160,7 @@ enum SwiftAppRenderer {
         let closure = label.flatMap { name in node.closures.first(where: { $0.label == name })?.closure }
             ?? node.closures.first(where: { $0.label == nil || $0.label == "content" })?.closure
         guard let closure else { return [] }
-        return flattenGroups(try runtime.call(closure, []))
+        return flattenGroups(try runtime.call(closure, [], viewBuilder: true))
     }
 
     static func flattenGroups(_ value: SwiftAppValue) -> [SwiftAppViewNode] {
@@ -194,7 +195,7 @@ enum SwiftAppRenderer {
         return try elements.map { element in
             var id = element.resolved.identity(keyPath: keyPath)
             if let count = seen[id] { seen[id] = count + 1; id += "#\(count + 1)" } else { seen[id] = 0 }
-            let produced = flattenGroups(try runtime.call(closure, [element]))
+            let produced = flattenGroups(try runtime.call(closure, [element], viewBuilder: true))
             let child = produced.count == 1 ? produced[0] : SwiftAppViewNode(name: builderGroup, arguments: [], children: produced)
             return Item(id: id, node: child, element: element.resolved)
         }
