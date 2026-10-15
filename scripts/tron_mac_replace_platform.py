@@ -4,7 +4,7 @@
 the app's coordinated Quit (AppKit terminate, so the Gateway drains and the
 native helper retires normally; nothing is force-killed or disabled), launches
 the installed app so its approved Login Item starts the Gateway, and talks to
-the Gateway over its authenticated local socket. The E2E fixture subclasses it
+the Gateway over the authenticated socket its launchd job actually listens on. The E2E fixture subclasses it
 with a launchd-supervised fixture Gateway; the orchestrator never branches on
 which platform it drives.
 """
@@ -55,17 +55,20 @@ const [url, token, protocolVersion, method, paramsJson, timeoutMs] = process.arg
 const ws = new WebSocket(url, { headers: { authorization: `Bearer ${token}` }, perMessageDeflate: false });
 const done = (code, value) => { process.stdout.write(JSON.stringify(value)); ws.terminate(); process.exit(code); };
 const timer = setTimeout(() => done(2, { error: { code: "timeout", message: `${method} timed out` } }), Number(timeoutMs));
+let sent = false;
 ws.on("open", () => ws.send(JSON.stringify({ type: "hello", protocolVersion: Number(protocolVersion), minProtocolVersion: Number(protocolVersion) })));
 ws.on("message", raw => {
   let frame; try { frame = JSON.parse(raw.toString()); } catch { return; }
-  if (frame.type === "hello") ws.send(JSON.stringify({ type: "request", id: "replace", method, params: JSON.parse(paramsJson) }));
+  if (frame.type === "hello") { sent = true; ws.send(JSON.stringify({ type: "request", id: "replace", method, params: JSON.parse(paramsJson) })); }
   if (frame.type === "error" && frame.id === undefined) { clearTimeout(timer); done(3, { error: frame.error ?? { code: "handshake", message: "handshake refused" } }); }
   if (frame.type === "response" && frame.id === "replace") {
     clearTimeout(timer);
     done(frame.ok === true ? 0 : 3, frame.ok === true ? { result: frame.result } : { error: frame.error ?? { code: "error", message: "request failed" } });
   }
 });
-ws.on("error", error => { clearTimeout(timer); done(4, { error: { code: "unreachable", message: String(error.message || error) } }); });
+// Exit 4: the request never left this process, so another listener may be
+// tried. Once sent, a lost connection is that request's own failure.
+ws.on("error", error => { clearTimeout(timer); done(sent ? 5 : 4, { error: { code: sent ? "connection-lost" : "unreachable", message: String(error.message || error) } }); });
 '''
 
 
@@ -87,6 +90,7 @@ class MacPlatform:
     def __init__(self, home=None):
         self.home = Path(home or pwd.getpwuid(os.getuid()).pw_dir)
         self.installed = Path('/Applications/Tron.app')
+        self.endpoint = None
 
     # Locations ---------------------------------------------------------
     @property
@@ -152,22 +156,64 @@ class MacPlatform:
     def token(self):
         return json.loads((self.tron_home / 'gateway/local-auth.json').read_text())['bearerToken']
 
+    def gateway_pid(self):
+        code, out, _ = capture(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{self.gateway_label}'], timeout=15)
+        match = re.search(r'^\tpid = (\d+)$', out, re.M) if code == 0 else None
+        return int(match.group(1)) if match else None
+
+    def endpoints(self):
+        """Plain WebSocket URLs of the Gateway job's own listeners on its port.
+
+        The bind is the launcher's choice, not ours: Stable binds its Tailscale
+        address (plus a TLS-only LAN listener on a private address) and never
+        loopback, so an assumed 127.0.0.1 is refused (#1059). Like
+        verify-mac-install.sh, read the exact launchd PID's listeners; only the
+        main one answers a plain socket, and rpc() remembers the one that did.
+        """
+        pid = self.gateway_pid()
+        if pid is None:
+            raise RpcError('unreachable', f'{self.gateway_label} has no running process to reach on port {self.port}')
+        _, out, _ = capture(['/usr/sbin/lsof', '-nP', '-a', '-p', str(pid), f'-iTCP:{self.port}', '-sTCP:LISTEN', '-Fn'],
+                            timeout=15)
+        urls = []
+        for line in out.splitlines():
+            if not line.startswith('n'):
+                continue
+            host = line[1:].rsplit(':', 1)[0].strip('[]')
+            host = {'*': '127.0.0.1', '0.0.0.0': '127.0.0.1', '::': '::1'}.get(host, host)
+            url = f'ws://{f"[{host}]" if ":" in host else host}:{self.port}/v1/socket'
+            if url not in urls:
+                urls.append(url)
+        if not urls:
+            raise RpcError('unreachable', f'{self.gateway_label} (pid {pid}) has no TCP listener on port {self.port}')
+        # The listener that answered last goes first, so the TLS-only one is
+        # probed at most once per Gateway process.
+        return sorted(urls, key=lambda url: url != self.endpoint)
+
     def rpc(self, method, params=None, timeout=30):
         node, modules = self.node()
-        argv = [node, '-e', RPC_CLIENT, f'ws://127.0.0.1:{self.port}/v1/socket', self.token(), str(self.protocol()),
-                method, json.dumps(params or {}), str(timeout * 1000)]
         env = {'PATH': '/usr/bin:/bin', 'NODE_PATH': str(modules), 'HOME': str(self.home)}
-        try:
-            code, out, _ = capture(argv, timeout=timeout + 15, env=env)
-        except subprocess.TimeoutExpired:
-            raise RpcError('timeout', f'{method} timed out') from None
-        try:
-            value = json.loads(out)
-        except ValueError:
-            raise RpcError('unreachable', f'{method}: no response (exit {code})') from None
-        if 'error' in value:
-            raise RpcError(value['error'].get('code', 'error'), value['error'].get('message', 'request failed'))
-        return value['result']
+        refused = []
+        for url in self.endpoints():
+            argv = [node, '-e', RPC_CLIENT, url, self.token(), str(self.protocol()),
+                    method, json.dumps(params or {}), str(timeout * 1000)]
+            try:
+                code, out, _ = capture(argv, timeout=timeout + 15, env=env)
+            except subprocess.TimeoutExpired:
+                raise RpcError('timeout', f'{method} timed out on {url}') from None
+            try:
+                value = json.loads(out)
+            except ValueError:
+                raise RpcError('unreachable', f'{method}: no response from {url} (exit {code})') from None
+            if code == 4:
+                refused.append(f'{url}: {value["error"].get("message", "unreachable")}')
+                continue
+            self.endpoint = url
+            if 'error' in value:
+                error = value['error']
+                raise RpcError(error.get('code', 'error'), f'{error.get("message", "request failed")} ({url})')
+            return value['result']
+        raise RpcError('unreachable', f'{method}: no {self.gateway_label} listener answered ({"; ".join(refused)})')
 
     def mutation(self, method, params=None, timeout=30):
         return self.rpc(method, {'commandId': f'mac-replace-{uuid.uuid4()}', **(params or {})}, timeout)

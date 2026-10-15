@@ -154,8 +154,12 @@ class Fixture:
         self.home = self.root / 'home'
         self.label = f'com.tron.e2e.mac-replace.{os.getpid()}'
         self.node = Path(subprocess.run([REPO / 'scripts/tron-node'], check=True, capture_output=True, text=True).stdout.strip())
-        with socket.socket() as probe:
-            probe.bind(('127.0.0.1', 0))
+        # The fixture Gateway binds IPv6 loopback, not 127.0.0.1: like live Stable
+        # (bound to its Tailscale address, #1059), the runner must reach the
+        # listener the Gateway job actually holds rather than an assumed one.
+        self.host = '::1'
+        with socket.socket(socket.AF_INET6) as probe:
+            probe.bind((self.host, 0))
             self.port = probe.getsockname()[1]
         # A clean source checkout at this commit: the orchestrator refuses dirty sources.
         self.source = self.root / 'source'
@@ -183,7 +187,7 @@ class Fixture:
                                'PATH': f'{self.node.parent}:/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(self.home),
                                'TRON_DATA_DIR': str(self.home / '.tron'), 'PI_CODING_AGENT_DIR': str(self.home / '.tron/agent'),
                                'PI_SUBAGENTS_TEMP_ROOT': str(self.home / '.tron/internal/subagents'),
-                               'TRON_MACHINE_GROUP_ID': 'tron-mac-replace-e2e', 'TRON_GATEWAY_HOST': '127.0.0.1',
+                               'TRON_MACHINE_GROUP_ID': 'tron-mac-replace-e2e', 'TRON_GATEWAY_HOST': self.host,
                                'TRON_GATEWAY_PORT': str(self.port), 'TRON_GATEWAY_SUPERVISED': '1', 'TRON_GATEWAY_CHANNEL': 'stable',
                                'FIXTURE_ROOT': str(self.root), 'FIXTURE_NODE': str(self.node),
                                'FIXTURE_GATEWAY': str(REPO / 'packages/gateway')}}, stream)
@@ -260,6 +264,8 @@ def journeys():
         check('reinstall' in data['error']['message'] and data['error']['log'].endswith('logs/preflight.log'), 'preflight error is exact with its log path', evidence)
         check(not (platform.store / 'builds').exists(), 'nothing was built after a failed preflight', evidence)
         check(platform.system_info()['sourceRevision'] == fixture.old_revision, 'the old Gateway kept running', evidence)
+        check(platform.endpoint == f'ws://[::1]:{fixture.port}/v1/socket',
+              'the runner reaches the listener the Gateway job holds, not an assumed 127.0.0.1', evidence)
         check(data['notification']['state'] == 'requested', 'the failure was pushed through the running Gateway', evidence)
         (platform.maintenance / 'active.json').unlink()
 
