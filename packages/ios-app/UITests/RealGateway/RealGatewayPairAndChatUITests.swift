@@ -1459,7 +1459,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         flagged.tap()
         let notice = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "This package needs Node >=999.0.0, but this Mac runs Node ")).firstMatch
         XCTAssertTrue(notice.waitForExistence(timeout: 30), "the detail sheet must explain the mismatch: \(app.debugDescription)")
-        XCTAssertTrue(app.staticTexts["future-node-package"].exists, "the warned package still loads and provides its skill: \(app.debugDescription)")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "future-node-package")).firstMatch.exists, "the warned package still loads and provides its skill: \(app.debugDescription)")
         keepScreenshot(app, name: "extensions-package-needs-node-detail")
     }
 
