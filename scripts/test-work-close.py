@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise work issue close and reopen through the real CLI, Git and a process-level gh fixture."""
+"""Exercise work issue create, close and reopen through the real CLI, Git and a process-level gh fixture."""
 from __future__ import annotations
 
 import json
@@ -26,7 +26,10 @@ def fixture_gh() -> None:
     elif args[:2] == ["api", "graphql"]:
         request = json.load(sys.stdin)
         query = request["query"]
-        if "mutation" in query:
+        if "addProjectV2ItemById" in query:
+            write = "project-add"
+            response = {"data": {"addProjectV2ItemById": {"item": {"id": "item"}}}}
+        elif "mutation" in query:
             if state.pop("fail_status_once", False):
                 path.write_text(json.dumps(state))
                 print("fixture status transport failure", file=sys.stderr)
@@ -43,6 +46,15 @@ def fixture_gh() -> None:
         elif "projectItems" in query:
             response = {"data": {"node": {"projectItems": {"pageInfo": page, "nodes": [
                 {"id": "item", "project": {"id": "project", "title": "Tron"}}]}}}}
+    elif args[:3] == ["api", "-X", "POST"] and args[3].endswith("/issues"):
+        created = json.load(sys.stdin)
+        state.setdefault("created", []).append(created)
+        write = "create"
+        response = {"number": 77, "node_id": "created-issue", **created}
+    elif args[:3] == ["api", "-X", "PATCH"]:
+        state["edited"] = json.load(sys.stdin)
+        write = "edit"
+        response = {"number": 41}
     elif args[:3] == ["api", "-X", "GET"]:
         response = {"number": 41, "node_id": "issue", "state": state["state"],
                     "labels": [{"name": state.get("label", "epic")} ]}
@@ -146,7 +158,7 @@ def run() -> None:
             state, _ = close("retry finishes partial close", True)
             assert state["status"] == "Done" and len(state["comments"]) == 1
 
-            reset(label="task", child_pages=[[{"number": 42, "state": "open"}]])
+            reset(label="kind:bug", child_pages=[[{"number": 42, "state": "open"}]])
             state, _ = close("ordinary task unchanged", True)
             assert state["state"] == "closed"
 
@@ -157,6 +169,51 @@ def run() -> None:
             git("checkout", "main")
             state, error = close("foreign claim refused", False)
             assert "another session" in error and not state["writes"]
+
+            # Filing (#992, #994): a task is classified and on the Project in one command; every
+            # refusal happens before any GitHub write.
+            body = root / "issue.md"
+
+            def create(name, success, *extra, title="Composer drops a chip", text="The chip is replaced.\n"):
+                body.write_text(text)
+                result = subprocess.run([sys.executable, str(ROOT / "tools/work/cli.py"), "issue", "create",
+                                         "--title", title, "--body-file", str(body), *extra],
+                                        cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+                evidence.append({"case": name, "exit": result.returncode, "stdout": result.stdout, "stderr": result.stderr})
+                assert (result.returncode == 0) == success, evidence[-1]
+                return json.loads(state_path.read_text()), result.stderr
+
+            reset()
+            state, error = create("task without a kind refused", False, "--area", "area:ios")
+            assert "--kind" in error and not state["writes"]
+            state, error = create("task without an area refused", False, "--kind", "kind:bug")
+            assert "--area" in error and not state["writes"]
+            state, error = create("undeclared label refused", False, "--kind", "kind:bug", "--area", "area:nowhere")
+            assert "not a declared area" in error and not state["writes"]
+            state, error = create("template title prefix refused", False, "--kind", "kind:bug", "--area", "area:ios",
+                                  title="[Task]: Composer drops a chip")
+            assert "prefix" in error and not state["writes"]
+            state, error = create("wait-for-recurrence issue without an exit refused", False, "--kind", "kind:bug",
+                                  "--area", "area:gateway", text="Not reproducible; keep open until the next failure.\n")
+            assert "--exit-by" in error and not state["writes"]
+            state, _ = create("classified task filed onto the Project", True, "--kind", "kind:bug", "--area", "area:ios",
+                              "--area", "area:gateway", "--exit-by", "2099-01-31",
+                              text="Not reproducible; keep open until the next failure.\n")
+            filed = state["created"][-1]
+            assert filed["labels"] == ["kind:bug", "area:ios", "area:gateway"], filed
+            assert "Exit by: 2099-01-31." in filed["body"] and state["status"] == "Ready"
+            assert state["writes"] == ["create", "project-add", "status"], state["writes"]
+            reset()
+            state, _ = create("epic filed with the epic label only", True, "--type", "epic")
+            assert state["created"][-1]["labels"] == ["epic"] and state["writes"] == ["create", "project-add", "status"]
+            reset()
+            body.write_text("## Remaining\nOnly the iOS half is left.\n")
+            edited = subprocess.run([sys.executable, str(ROOT / "tools/work/cli.py"), "issue", "edit", "41",
+                                     "--body-file", str(body)], cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+            evidence.append({"case": "body edited to the remaining scope", "exit": edited.returncode, "stderr": edited.stderr})
+            state = json.loads(state_path.read_text())
+            assert edited.returncode == 0 and state["edited"] == {"body": "## Remaining\nOnly the iOS half is left.\n"}
+            assert state["writes"] == ["edit"]
 
             reason = root / "reopen.md"
             git("push", "origin", "--delete", "feat/41-foreign")
@@ -170,7 +227,7 @@ def run() -> None:
                 return json.loads(state_path.read_text()), result.stderr
 
             # An issue closed by mistake (for example by a PR's closing keyword) reopens only with a stated reason.
-            reset(state="closed", status="Done", label="task")
+            reset(state="closed", status="Done", label="kind:bug")
             reason.write_text("  \n")
             state, error = reopen("reopen without a reason refused", False)
             assert "must not be empty" in error and not state["writes"]
@@ -182,12 +239,12 @@ def run() -> None:
             state, _ = reopen("same reopen is idempotent", True)
             assert len(state["comments"]) == 1 and state["writes"].count("reopen") == 1
 
-            reset(label="task")
+            reset(label="kind:bug")
             state, error = reopen("open issue it did not reopen refused", False)
             assert "is open" in error and not state["writes"]
 
             # A claim survives the mistaken close: reopening returns the issue to its owner, In progress.
-            reset(state="closed", status="Done", label="task", fail_status_once=True)
+            reset(state="closed", status="Done", label="kind:bug", fail_status_once=True)
             git("push", "origin", "feat/41-foreign")
             state, _ = reopen("partial status failure", False)
             assert state["state"] == "open" and state["status"] == "Done"
@@ -196,7 +253,7 @@ def run() -> None:
             assert state["writes"] == ["comment", "reopen", "status"]
             audit = (repo / ".git/work/github-writes.jsonl").read_text()
             assert '"issue.reopen"' in audit and "unrelated PR" not in audit
-        print(f"Passed {len(evidence)} real-CLI close and reopen journeys; evidence: {artifact}")
+        print(f"Passed {len(evidence)} real-CLI create, close and reopen journeys; evidence: {artifact}")
     finally:
         artifact.write_text(json.dumps(evidence, indent=2) + "\n")
 

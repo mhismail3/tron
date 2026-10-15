@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import os
+import pty
+import select
 import shutil
 import subprocess
 import sys
@@ -58,7 +60,7 @@ import json, os, sys
 path = os.environ["FIXTURE"]; state = json.load(open(path)); args = sys.argv[1:]; out = None
 gh = state["gh"]
 if args[:2] == ["repo", "view"]: print("fixture/project"); sys.exit(0)
-if args[:2] == ["issue", "view"]: out = {"state": gh["state"]}
+if args[:2] == ["issue", "view"]: out = {"state": gh["state"], "comments": [{"createdAt": t} for t in gh.get("commentTimes", [])]}
 elif args[:2] == ["api", "graphql"]:
     req = json.load(sys.stdin); query = req["query"]
     if "mutation" in query:
@@ -116,10 +118,12 @@ def run() -> None:
             def load() -> dict:
                 return json.loads(state.read_text())
 
-            def fixture(sessions_listed=(), tasks=(), statuses=None, stall=None, fail_comment=False, delay=None) -> None:
+            def fixture(sessions_listed=(), tasks=(), statuses=None, stall=None, fail_comment=False, delay=None,
+                        comment_times=()) -> None:
                 state.write_text(json.dumps({"gatewayCalls": [], "gateway": {
                     "sessions": list(sessions_listed), "tasks": list(tasks), "statuses": statuses or {}, "stall": stall, "delay": delay},
-                    "gh": {"state": "OPEN", "status": "In progress", "comments": [], "writes": [], "failComment": fail_comment}}))
+                    "gh": {"state": "OPEN", "status": "In progress", "comments": [], "writes": [], "failComment": fail_comment,
+                           "commentTimes": list(comment_times)}}))
 
             # A fixture repository with the real work configuration; release commands only record that they ran.
             git(repo, "init", "-b", "main")
@@ -141,13 +145,16 @@ def run() -> None:
             branch = "feat/41-fixture"
             worktree = root / "tron-worktrees/41-fixture"
 
-            def claim(owner: str, content_commit: bool = False) -> None:
+            def claim(owner: str, content_commit: bool = False, age_hours: float = 0) -> None:
                 if worktree.exists():
                     git(repo, "worktree", "remove", "--force", str(worktree))
                 git(repo, "branch", "-f", branch, "main")
                 git(repo, "worktree", "add", "-q", str(worktree), branch)
-                git(worktree, "commit", "-q", "--allow-empty", "-m",
-                    f"chore: claim #41\n\nWork-Claim-Issue: 41\nWork-Claim-Session: {owner}\nWork-Claim-Base: main\n")
+                stamp = f"@{int(time.time() - age_hours * 3600)} +0000"
+                subprocess.run(["git", "commit", "-q", "--allow-empty", "-m",
+                                f"chore: claim #41\n\nWork-Claim-Issue: 41\nWork-Claim-Session: {owner}\nWork-Claim-Base: main\n"],
+                               cwd=worktree, env={**env, "GIT_COMMITTER_DATE": stamp, "GIT_AUTHOR_DATE": stamp},
+                               check=True, capture_output=True)
                 if content_commit:
                     (worktree / "published.txt").write_text("published\n")
                     git(worktree, "add", "published.txt")
@@ -280,6 +287,107 @@ def run() -> None:
                              "stderr": clean.stderr.strip(), "gatewayCalls": load()["gatewayCalls"]})
             assert clean.returncode == 0 and "settled" in clean.stdout, clean.stderr
             assert not worktree.exists() and branch not in git(remote, "for-each-ref", "--format=%(refname)")
+
+            # The stale sweep (#991) releases only claims idle for more than 72 h whose owner is absent.
+            def sweep(name: str):
+                result = call("release", "--stale")
+                evidence.append({"case": name, "exit": result.returncode, "stdout": result.stdout.strip(),
+                                 "stderr": result.stderr.strip()})
+                assert result.returncode == 0, result.stderr
+                return result
+
+            def untouched(name: str, owner: str, age_hours: float, expect: str, **gateway):
+                claim(owner, age_hours=age_hours)
+                (worktree / "draft.txt").write_text("in-progress edit\n")
+                fixture(**gateway)
+                before = snapshot()
+                result = sweep(name)
+                assert expect in result.stdout and "releasing" not in result.stdout, result.stdout
+                assert snapshot() == before, f"{name} changed refs, the worktree or GitHub"
+
+            untouched("stale sweep keeps a recent absent-owner claim", ABSENT, 2, "released 0, kept 0",
+                      sessions_listed=[idle_row])
+            untouched("stale sweep keeps an absent-owner claim with a recent issue comment", ABSENT, 100,
+                      "released 0, kept 0", sessions_listed=[idle_row],
+                      comment_times=[time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3600))])
+            untouched("stale sweep keeps an idle live owner", LIVE, 100, "is live",
+                      sessions_listed=[idle_row, {"id": LIVE, "phase": "running", "activeSince": "2026-01-01T00:00:00Z"}])
+            untouched("stale sweep keeps an idle resumable session", IDLE, 100, "is indeterminate", sessions_listed=[idle_row])
+            untouched("stale sweep keeps a settled Home task owner's claim", SETTLED, 100, "is settled",
+                      sessions_listed=[idle_row, {"id": SETTLED, "phase": "idle"}],
+                      tasks=[{"taskId": "task-2", "lifecycle": "terminal", "sessionId": SETTLED}], statuses={"task-2": settled})
+
+            claim(ABSENT, age_hours=100)
+            stale_head = git(worktree, "rev-parse", "HEAD")
+            (worktree / "draft.txt").write_text("in-progress edit\n")
+            (worktree / "tracked.txt").write_text("stale unstaged edit\n")
+            fixture(sessions_listed=[idle_row])
+            result = sweep("stale sweep releases an idle absent-owner claim after preserving dirty files")
+            assert "released 1 (#41)" in result.stdout, result.stdout
+            assert not worktree.exists() and branch not in git(remote, "for-each-ref", "--format=%(refname)")
+            gh_state = load()["gh"]
+            assert gh_state["status"] == "Ready" and len(gh_state["comments"]) == 1 and "idle 4.2 days" in gh_state["comments"][0]
+            stale_saved = Path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")) / f"work/releases/41-{stale_head[:12]}"
+            restored_stale = root / "restored-stale"
+            git(root, "clone", "-q", str(remote), str(restored_stale))
+            git(restored_stale, "fetch", "-q", str(stale_saved / "claim.bundle"), "refs/work-release/*:refs/work-release/*")
+            git(restored_stale, "checkout", "-q", f"refs/work-release/41/{stale_head[:12]}/worktree")
+            assert (restored_stale / "draft.txt").read_bytes() == b"in-progress edit\n"
+            assert (restored_stale / "tracked.txt").read_bytes() == b"stale unstaged edit\n"
+
+            # A maintainer releases a legacy owner no Gateway knows, only from a real terminal with the exact phrase;
+            # a Gateway-shaped idle session can be resumed, so force never releases it.
+            claim(IDLE)
+            fixture(sessions_listed=[idle_row])
+            before = snapshot()
+            forced = call("release", "41", "--reason", "legacy owner", "--force-maintainer")
+            evidence.append({"case": "force never releases a resumable Gateway session", "exit": forced.returncode,
+                             "stderr": forced.stderr.strip()})
+            assert forced.returncode and "is indeterminate" in forced.stderr and snapshot() == before, forced.stderr
+            claim("legacy-owner")
+            fixture(sessions_listed=[idle_row])
+            before = snapshot()
+            forced = call("release", "41", "--reason", "legacy owner", "--force-maintainer")
+            evidence.append({"case": "force requires a real terminal", "exit": forced.returncode, "stderr": forced.stderr.strip()})
+            assert forced.returncode and "interactive terminal" in forced.stderr and snapshot() == before, forced.stderr
+
+            def terminal(answer: bytes):
+                pid, descriptor = pty.fork()
+                if pid == 0:
+                    os.chdir(repo)
+                    os.execve(sys.executable, [sys.executable, str(ROOT / "tools/work/cli.py"), "release", "41",
+                                               "--reason", "legacy owner", "--force-maintainer"], env)
+                output, deadline = b"", time.monotonic() + 60
+                while time.monotonic() < deadline and b"> " not in output:
+                    if select.select([descriptor], [], [], 1)[0]:
+                        try:
+                            output += os.read(descriptor, 4096)
+                        except OSError:
+                            break
+                os.write(descriptor, answer)
+                while time.monotonic() < deadline:
+                    if select.select([descriptor], [], [], 1)[0]:
+                        try:
+                            output += os.read(descriptor, 4096)
+                        except OSError:
+                            pass
+                    waited, status = os.waitpid(pid, os.WNOHANG)
+                    if waited:
+                        break
+                else:
+                    os.kill(pid, 9)
+                    _, status = os.waitpid(pid, 0)
+                os.close(descriptor)
+                return os.waitstatus_to_exitcode(status), output.decode(errors="replace")
+
+            code, output = terminal(b"RELEASE #41 FROM unknown\n")
+            evidence.append({"case": "force refuses a confirmation naming another owner", "exit": code, "output": output[-600:]})
+            assert code and "did not match" in output and snapshot()[1:] == before[1:], output
+            code, output = terminal(b"RELEASE #41 FROM legacy-owner\n")
+            evidence.append({"case": "maintainer releases a legacy owner after exact confirmation", "exit": code, "output": output[-600:]})
+            assert code == 0 and "released #41" in output, output
+            assert not worktree.exists() and branch not in git(remote, "for-each-ref", "--format=%(refname)")
+            assert "legacy-owner" in load()["gh"]["comments"][-1]
             print(f"Passed {len(evidence)} release journeys; evidence: {artifact}")
     finally:
         if server:

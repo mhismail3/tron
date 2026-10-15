@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from contextlib import nullcontext
+from datetime import date
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import quote
@@ -85,47 +87,123 @@ def _repository(gh: Gh) -> Tuple[str, str]:
     return owner, name
 
 
-def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path,
-                 issue_type: str, kind: Optional[str], visibility: Optional[str], areas: Optional[List[str]]) -> int:
+# Title prefixes the retired issue templates added; labels carry the type and kind.
+_TEMPLATE_PREFIX = re.compile(r"^\s*\[[^\]]{1,20}\]:?\s|^\s*(Task|Bug|Feature|Epic):\s", re.IGNORECASE)
+# An issue that waits for the next failure or recurrence lives forever unless it names when to stop waiting.
+_WAITS_FOR_RECURRENCE = re.compile(
+    r"next (failure|occurrence|recurrence|time it (fails|happens))|if it (recurs|reappears|happens again)"
+    r"|until it (recurs|reproduces|happens again)|wait(ing)? for (it to recur|a recurrence|the next)", re.IGNORECASE)
+EXIT_LINE = re.compile(r"^Exit by: (\d{4}-\d{2}-\d{2})\b", re.MULTILINE)
+
+
+def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path, issue_type: str,
+                 kind: Optional[str], areas: Optional[List[str]], status: Optional[str] = None,
+                 priority: Optional[str] = None, exit_by: Optional[str] = None) -> int:
+    """File an issue that is classified and on the Project in one command; every check runs before any write."""
     title = title.strip()
     if not title or len(title) > 200:
         raise TrackingError("issue title must contain 1 to 200 characters")
+    if _TEMPLATE_PREFIX.search(title):
+        raise TrackingError("drop the title prefix (for example [Task]:); labels carry the type and kind")
     if issue_type not in {"task", "epic"}:
         raise TrackingError("issue type must be task or epic")
     try:
         body = body_file.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
         raise TrackingError("could not read the issue body file") from error
-    if len(body.encode("utf-8")) > 64 * 1024:
-        raise TrackingError("issue body exceeds the 64 KiB bound")
     if not body.strip():
         raise TrackingError("issue body must not be empty")
+    if exit_by is not None:
+        try:
+            when = date.fromisoformat(exit_by)
+        except ValueError as error:
+            raise TrackingError("--exit-by must be a YYYY-MM-DD date") from error
+        if when <= date.today():
+            raise TrackingError("--exit-by must be a future date")
+        body = body.rstrip() + f"\n\nExit by: {when.isoformat()}. Close as not planned if it has not recurred by then.\n"
+    elif _WAITS_FOR_RECURRENCE.search(title + "\n" + body) and not EXIT_LINE.search(body):
+        raise TrackingError("this issue waits for a recurrence; give it an exit with --exit-by YYYY-MM-DD "
+                            "(the date after which it closes as not planned)")
+    if len(body.encode("utf-8")) > 64 * 1024:
+        raise TrackingError("issue body exceeds the 64 KiB bound")
 
     declared = {label["name"] for label in config["labels"]}
-    labels: List[str] = [issue_type]
+    board = config["dashboard"]
+    labels: List[str] = []
     if issue_type == "task":
-        # Classification is optional: it helps the dashboard group work, never gates filing.
-        for value, prefix in ((kind, "kind:"), (visibility, "visibility:")):
-            if value is None:
-                continue
-            if not value.startswith(prefix) or value not in declared:
-                raise TrackingError(f"{value!r} is not a declared {prefix[:-1]} label")
-            labels.append(value)
-        for area in areas or []:
-            if not area.startswith("area:") or area not in declared:
+        # Every task is classified at filing: exactly one kind and at least one area.
+        if not kind:
+            raise TrackingError("a task needs --kind with one declared kind: label")
+        if not kind.startswith(board["kindPrefix"]) or kind not in declared:
+            raise TrackingError(f"{kind!r} is not a declared kind label")
+        if not areas:
+            raise TrackingError("a task needs at least one --area with a declared area: label")
+        for area in areas:
+            if not area.startswith(board["areaPrefix"]) or area not in declared:
                 raise TrackingError(f"{area!r} is not a declared area label")
-        if areas and len(set(areas)) != len(areas):
+        if len(set(areas)) != len(areas):
             raise TrackingError("task area labels must be unique")
-        labels.extend(areas or [])
-    elif any(value is not None for value in (kind, visibility, areas)):
-        raise TrackingError("epics do not take task kind, visibility or area labels")
+        labels = [kind, *areas]
+    else:
+        if kind is not None or areas:
+            raise TrackingError("epics do not take kind or area labels")
+        labels = [board["epicLabel"]]
+    status = status or config["claim"]["readyStatus"]
+    _check_options(config, status, priority)
     _scrub(repo, config, title + "\n\n" + body, "issue title and body")
     owner, name = _repository(gh)
+    _, project = _project(gh, repo, config)  # resolved before filing, so a missing Project refuses first
     response = gh.rest("POST", f"repos/{owner}/{name}/issues", {"title": title, "body": body, "labels": labels})
     if not isinstance(response, dict) or not isinstance(response.get("number"), int):
         raise TrackingError("GitHub did not return the created issue number")
-    print(f"created issue #{response['number']}")
-    return response["number"]
+    number = response["number"]
+    print(f"created issue #{number}")
+    try:
+        item = gh.graphql(
+            "mutation($project: ID!, $content: ID!) { addProjectV2ItemById(input: "
+            "{projectId: $project, contentId: $content}) { item { id } } }",
+            project=project["id"], content=response["node_id"])["addProjectV2ItemById"]["item"]["id"]
+        _write_fields(gh, project, item, number, status, priority)
+    except (GhError, KeyError, TypeError) as error:
+        raise TrackingError(f"created #{number}, but its Project membership is incomplete; finish with "
+                            f"work project add {number} and work project set {number} --status {status}") from error
+    return number
+
+
+def edit_issue(gh: Gh, repo: Path, config: dict, number: int, title: Optional[str], body_file: Optional[Path]) -> None:
+    """Replace an issue's title and/or body, for example to name only the remaining scope."""
+    update = {}
+    if title is not None:
+        title = title.strip()
+        if not title or len(title) > 200:
+            raise TrackingError("issue title must contain 1 to 200 characters")
+        update["title"] = title
+    if body_file is not None:
+        try:
+            body = body_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as error:
+            raise TrackingError("could not read the issue body file") from error
+        if not body.strip() or len(body.encode("utf-8")) > 64 * 1024:
+            raise TrackingError("issue body must be non-empty and at most 64 KiB")
+        update["body"] = body
+    if not update:
+        raise TrackingError("provide --title or --body-file")
+    _scrub(repo, config, "\n\n".join(update.values()), "issue title and body")
+    owner, name = _repository(gh)
+    _issue(gh, f"{owner}/{name}", number)
+    gh.rest("PATCH", f"repos/{owner}/{name}/issues/{number}", update)
+    print(f"updated issue #{number}: {', '.join(update)}")
+
+
+def _check_options(config: dict, status: Optional[str], priority: Optional[str]) -> None:
+    declared_fields = {field["name"]: field for field in config["project"]["fields"]}
+    for name, value in ((config["claim"]["statusField"], status), (config["dashboard"]["priorityField"], priority)):
+        if value is None:
+            continue
+        field = declared_fields.get(name)
+        options = {option["name"] for option in field.get("options", [])} if field else set()
+        if value not in options:
+            raise TrackingError(f"{value!r} is not a declared {name} option")
 
 
 def set_labels(gh: Gh, config: dict, number: int, additions: List[str], removals: List[str]) -> None:
@@ -136,12 +214,12 @@ def set_labels(gh: Gh, config: dict, number: int, additions: List[str], removals
     declared = {label["name"] for label in config["labels"]}
     if set(additions) - declared:
         raise TrackingError("only labels declared in .github/work.json may be added")
-    if {"task", "epic"} & (set(additions) | set(removals)):
-        raise TrackingError("issue type labels are fixed at creation")
+    if config["dashboard"]["epicLabel"] in (set(additions) | set(removals)):
+        raise TrackingError("the epic label is fixed at creation")
     if number <= 0:
         raise TrackingError("issue numbers must be positive")
 
-    taxonomy_prefixes = ("kind:", "visibility:", "area:")
+    taxonomy_prefixes = ("kind:", "area:")
     changes_taxonomy = any(label.startswith(taxonomy_prefixes)
                            for label in additions + removals)
     owner, name = _repository(gh)
@@ -152,7 +230,7 @@ def set_labels(gh: Gh, config: dict, number: int, additions: List[str], removals
         updated = [label for label in current if label not in removals]
         updated.extend(label for label in additions if label not in updated)
         if "epic" not in updated:
-            # Classification is optional, but a kind or visibility, once set, is set once.
+            # A task holds one kind; areas may repeat.
             for prefix in taxonomy_prefixes:
                 classified = [label for label in updated if label.startswith(prefix)]
                 if any(label not in declared for label in classified):
@@ -224,14 +302,7 @@ def set_project_fields(gh: Gh, repo: Path, config: dict, number: int,
                        status: Optional[str], priority: Optional[str]) -> None:
     if status is None and priority is None:
         raise TrackingError("provide --status or --priority")
-    declared_fields = {field["name"]: field for field in config["project"]["fields"]}
-    for name, value in (("Status", status), ("Priority", priority)):
-        if value is None:
-            continue
-        field = declared_fields.get(name)
-        options = {option["name"] for option in field.get("options", [])} if field else set()
-        if value not in options:
-            raise TrackingError(f"{value!r} is not a declared {name} option")
+    _check_options(config, status, priority)
 
     owner, name = _repository(gh)
     issue = _issue(gh, f"{owner}/{name}", number)
@@ -282,7 +353,8 @@ def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number:
     epic = _issue(gh, f"{owner}/{name}", epic_number)
     child_labels = {label["name"] for label in child.get("labels", [])}
     epic_labels = {label["name"] for label in epic.get("labels", [])}
-    if child_number == epic_number or "task" not in child_labels or "epic" not in epic_labels:
+    epic_label = config["dashboard"]["epicLabel"]
+    if child_number == epic_number or epic_label in child_labels or epic_label not in epic_labels:
         raise TrackingError("parent links require a task child and an epic parent")
     if any(node["id"] == child["node_id"] for node in _relation(gh, epic["node_id"])["subIssues"]["nodes"]):
         print(f"issue #{child_number} is already a sub-issue of #{epic_number}")
