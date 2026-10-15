@@ -45,6 +45,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -57,6 +58,8 @@ PREFIX = "ios-build-cache"
 DEFAULT_ROOT = Path.home() / "Library/Developer/Tron/ios/build-cache"
 DEFAULT_LIMIT_GB = 12
 DEFAULT_SLOTS = 3
+HIT = re.compile(rb"note: replay(ed)? cache hit", re.IGNORECASE)
+MISS = re.compile(rb"note: (replay cache miss|cache miss:)", re.IGNORECASE)
 
 
 def say(message: str) -> None:
@@ -284,9 +287,11 @@ def run_xcodebuild(argv: list[str], counts: dict[str, int]) -> int:
         for line in iter(process.stdout.readline, b""):
             out.write(line)
             out.flush()
-            if b"cache hit" in line:
+            # One remark per cached task (Swift, Clang and module builds word
+            # them differently); "local cache miss for key" precedes a miss.
+            if HIT.search(line):
                 counts["hits"] += 1
-            elif b"cache miss" in line:
+            elif MISS.search(line):
                 counts["misses"] += 1
         status = process.wait()
         finished.set()

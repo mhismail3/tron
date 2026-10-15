@@ -327,6 +327,10 @@ class ContainedFixture:
             "TRON_HEAVY_MAX_LOAD": "999999",
             "TRON_HEAVY_AVAILABLE_MB": "32768",
             "TRON_HEAVY_MEMORY_BUDGET_MB": "16384",
+            # The synthetic xcodebuild compiles nothing, so these lifecycle cases
+            # build without the shared compilation cache; scripts/test-ios-build-cache.py
+            # proves the cache with real builds.
+            "TRON_IOS_BUILD_CACHE": "0",
             "FAKE_CONTAINMENT_ROOT": str(root),
             "FAKE_FIXTURE_OWNER_PID": str(os.getpid()),
             "FAKE_CONTAINMENT_LOG": str(self.containment_log(root)),
@@ -5744,7 +5748,7 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
         (worktree / "packages/ios-app").mkdir(parents=True)
         for relative in (
             "config/ci-toolchain.env", "scripts/tron-ios-simulator", "scripts/tron-ios-device",
-            "scripts/ios-test-lock.py", "scripts/ios-test-build-identity.py",
+            "scripts/ios-test-lock.py", "scripts/ios-test-build-identity.py", "scripts/ios-build-cache.py",
         ):
             source = ROOT / relative
             target = worktree / relative
