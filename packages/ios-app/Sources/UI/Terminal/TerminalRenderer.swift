@@ -163,6 +163,12 @@ struct NativeTerminal: UIViewRepresentable {
             keyboard?.isKeyboardPresented = isPresented
         }
         keyboard.attach(terminal)
+        let coordinator = context.coordinator
+        terminal.didLayout = { [weak terminal, weak coordinator] in
+            guard let terminal, let coordinator else { return }
+            coordinator.isLaidOut = true
+            coordinator.feed(terminal)
+        }
         applySoftEdges(to: terminal)
         #if HOSTED_TEST
         terminal.getTerminal().setCursorStyle(.steadyBlock)
@@ -186,16 +192,8 @@ struct NativeTerminal: UIViewRepresentable {
             }
         }
         keyboard.attach(view)
-        for chunk in chunks.replaySuffix(after: context.coordinator.lastSequence) {
-            view.feed(byteArray: Array(chunk.data.utf8)[...])
-            context.coordinator.lastSequence = chunk.sequence
-        }
-        #if HOSTED_TEST
-        // Journeys read what the emulator shows (its normal buffer's text), so
-        // a test proves output survived, not only that a shell answered.
-        view.accessibilityIdentifier = "terminal-emulator"
-        view.accessibilityValue = String(String(decoding: view.getTerminal().getBufferAsData(kind: .normal), as: UTF8.self).suffix(4_000))
-        #endif
+        context.coordinator.chunks = chunks
+        if context.coordinator.isLaidOut { context.coordinator.feed(view) }
         if !isInteractive { view.stopCursorBlinking() }
     }
 
@@ -203,6 +201,7 @@ struct NativeTerminal: UIViewRepresentable {
         _ = view.resignFirstResponder()
         coordinator.keyboard.detach(view)
         view.focusDidChange = nil
+        view.didLayout = nil
         view.terminalDelegate = nil
     }
 
@@ -222,6 +221,25 @@ struct NativeTerminal: UIViewRepresentable {
         var onSend: (ArraySlice<UInt8>) -> Void
         var onResize: (Int, Int) -> Void
         var lastSequence = 0
+        var chunks: [TerminalChunk] = []
+        /// Output is fed only once the emulator has its real width. A replay
+        /// fed into the zero-frame view is laid out at a default width and then
+        /// reflowed, which misplaces the shell's own line-editing output when
+        /// a reopened sheet replays it.
+        var isLaidOut = false
+
+        func feed(_ view: TronNativeTerminalView) {
+            for chunk in chunks.replaySuffix(after: lastSequence) {
+                view.feed(byteArray: Array(chunk.data.utf8)[...])
+                lastSequence = chunk.sequence
+            }
+            #if HOSTED_TEST
+            // Journeys read what the emulator shows (its normal buffer's text),
+            // so a test proves output survived, not only that a shell answered.
+            view.accessibilityIdentifier = "terminal-emulator"
+            view.accessibilityValue = String(String(decoding: view.getTerminal().getBufferAsData(kind: .normal), as: UTF8.self).suffix(4_000))
+            #endif
+        }
 
         init(
             keyboard: TerminalKeyboardController,
@@ -354,6 +372,13 @@ struct TerminalControlBar: View {
 final class TronNativeTerminalView: TerminalView {
     var focusDidChange: ((Bool) -> Void)?
     var allowsTerminalInput = true
+    /// After each layout with a real size (SwiftTerm has applied it).
+    var didLayout: (() -> Void)?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if bounds.width > 0, bounds.height > 0 { didLayout?() }
+    }
 
     func stopCursorBlinking() {
         _ = resignFirstResponder()
