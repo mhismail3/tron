@@ -1,19 +1,34 @@
 #!/usr/bin/env bash
-# The one repository resolver for the pinned development Node (#242).
+# The one repository owner of the pinned development Node (#242, #244).
 #
-#   scripts/tron-node              print the absolute path of the pinned `node`
-#   scripts/tron-node exec CMD...  run CMD with that Node's directory first on PATH
+#   scripts/tron-node                 print the absolute path of the pinned `node`
+#   scripts/tron-node exec CMD...     run CMD with that Node's directory first on PATH
+#   scripts/tron-node install         install the pinned Node into the verified cache
+#   scripts/tron-node status [--online]
+#                                     report the pin and its toolchain; --online also
+#                                     reports newer patches and the major's support window
+#   scripts/tron-node pin VERSION     move the pin: verify both macOS archives against
+#                                     SHASUMS256.txt and rewrite .node-version and the
+#                                     digests in config/ci-toolchain.env
 #
 # `.node-version` is the only version authority. Candidates, in order:
 #   1. TRON_NODE_BIN (absolute; an explicit choice that fails loudly),
 #   2. the exact nvm directory ($NVM_DIR or ~/.nvm)/versions/node/v<pin>,
-#   3. each `node` on PATH in order, then Homebrew,
+#   3. the checksum-verified cache `install` fills (scripts/install-ci-tools.sh
+#      node): TRON_CI_TOOLS_DIR, else this checkout's and then the primary
+#      checkout's `.ci-tools`, so one install serves every linked worktree,
+#   4. each `node` on PATH in order, then Homebrew,
 # each accepted only when it reports exactly v<pin>, has a sibling `npm`, and is
 # a development toolchain rather than a signed Gateway runtime. A shell spawned
 # by a Gateway has that Gateway's payload runtime first on PATH; it answers the
 # pinned version and has an npm alias, but its hardened runtime refuses the
 # unsigned native add-ons development loads (Vitest's Rolldown, node-pty) and it
 # ships no npx, so it is never chosen here.
+#
+# `status` and `pin` never run as part of a build: `status` only reports, and
+# `pin` is the one deliberate update (and, with the earlier version, rollback)
+# of the development, CI and bundled-runtime pin. The update rule is in
+# CONTRIBUTING.md#toolchain.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -30,7 +45,37 @@ NODE_VERSION="$(<"$VERSION_FILE")"
   || die "canonical Node version must be one strict x.y.z line: $VERSION_FILE"
 [[ -z "${NVM_DIR:-}" || "$NVM_DIR" == /* ]] || die "relative NVM_DIR is not allowed: $NVM_DIR"
 
-INSTALL_HINT="install it with \`nvm install $NODE_VERSION\` or set TRON_NODE_BIN to an absolute Node v$NODE_VERSION that has a sibling npm"
+INSTALL_HINT="install it with \`scripts/tron-node install\` (checksum-verified) or \`nvm install $NODE_VERSION\`, or set TRON_NODE_BIN to an absolute Node v$NODE_VERSION that has a sibling npm"
+
+# Only the release commands read the archive pins; resolving needs nothing but
+# .node-version, so fixtures that copy just this script keep resolving.
+load_release_pins() {
+  # shellcheck disable=SC1091
+  source "$ROOT/config/ci-toolchain.env" || die "missing release pins: $ROOT/config/ci-toolchain.env"
+}
+
+node_architecture() {
+  case "$(uname -m)" in
+    arm64|aarch64) printf arm64 ;;
+    x86_64) printf x64 ;;
+    *) die "unsupported Node archive architecture: $(uname -m)" ;;
+  esac
+}
+
+# The verified caches, most specific first. A linked worktree shares the primary
+# checkout's cache; an explicit TRON_CI_TOOLS_DIR is the only cache.
+cache_dirs() {
+  if [[ -n "${TRON_CI_TOOLS_DIR:-}" ]]; then
+    printf '%s\n' "$TRON_CI_TOOLS_DIR"
+    return
+  fi
+  printf '%s\n' "$ROOT/.ci-tools"
+  local common
+  if common="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    && [[ "$(dirname "$common")" != "$ROOT" ]]; then
+    printf '%s\n' "$(dirname "$common")/.ci-tools"
+  fi
+}
 
 # Why `$1` is a Gateway runtime rather than a development toolchain, or nothing.
 gateway_runtime_reason() {
@@ -77,7 +122,11 @@ resolve() {
     printf '%s\n' "$TRON_NODE_BIN"
     return
   fi
-  local candidates=("${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v$NODE_VERSION/bin/node")
+  local candidates=("${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v$NODE_VERSION/bin/node") cache architecture
+  architecture="$(node_architecture)"
+  while IFS= read -r cache; do
+    candidates+=("$cache/node-v$NODE_VERSION-$architecture/bin/node")
+  done < <(cache_dirs)
   local entry entries=() seen=" "
   IFS=: read -r -a entries <<<"${PATH:-}"
   for entry in ${entries[@]+"${entries[@]}"}; do
@@ -100,6 +149,133 @@ resolve() {
   exit 127
 }
 
+# Fetch a release-metadata URL into $2; failures name the URL and never guess.
+fetch() {
+  curl -fsSL --retry 2 --max-time 60 "$1" -o "$2" || die "could not fetch $1"
+}
+
+status() {
+  local online=0
+  case "${1:-}" in
+    "") ;;
+    --online) online=1 ;;
+    *) die "usage: scripts/tron-node status [--online]" ;;
+  esac
+  echo "pin: v$NODE_VERSION (.node-version)"
+  local node
+  if node="$(resolve 2>/dev/null)"; then
+    echo "toolchain: $node"
+  else
+    echo "toolchain: missing; $INSTALL_HINT"
+  fi
+  if ((online == 0)); then
+    echo "release check: skipped (run \`scripts/tron-node status --online\`)"
+    return
+  fi
+  local work
+  load_release_pins
+  work="$(mktemp -d "${TMPDIR:-/tmp}/tron-node-status.XXXXXX")"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$work'" EXIT
+  fetch "$TRON_NODE_ARCHIVE_BASE_URL/index.json" "$work/index.json"
+  fetch "$TRON_NODE_RELEASE_SCHEDULE_URL" "$work/schedule.json"
+  python3 - "$NODE_VERSION" "$work/index.json" "$work/schedule.json" "$(date -u +%F)" <<'PY'
+import json, sys
+pin, index_path, schedule_path, today = sys.argv[1:]
+key = lambda v: tuple(int(p) for p in v.lstrip("v").split("."))
+major = pin.split(".")[0]
+releases = json.load(open(index_path))
+schedule = json.load(open(schedule_path))
+line = sorted((r for r in releases if r["version"].startswith(f"v{major}.")), key=lambda r: key(r["version"]))
+newer = [r for r in line if key(r["version"]) > key(pin)]
+if not line:
+    print(f"releases: no v{major}.x release is published")
+elif newer:
+    latest = newer[-1]
+    security = [r["version"] for r in newer if r.get("security")]
+    print(f"patch: behind; latest v{major}.x is {latest['version']} ({latest['date']})"
+          + (f", including security releases {', '.join(security)}" if security else "")
+          + f"; move with `scripts/tron-node pin {latest['version'].lstrip('v')}`")
+else:
+    print(f"patch: current; v{pin} is the latest v{major}.x")
+window = schedule.get(f"v{major}", {})
+lts, maintenance, end = window.get("lts"), window.get("maintenance"), window.get("end")
+if end and today > end:
+    phase = f"past end of life since {end}; move to a supported LTS major now"
+elif maintenance and today >= maintenance:
+    phase = f"maintenance LTS since {maintenance}, end of life {end}"
+elif lts and today >= lts:
+    phase = f"active LTS since {lts}, maintenance from {maintenance}"
+else:
+    phase = "not an LTS line" if not lts else f"current, LTS from {lts}"
+print(f"major: v{major} is {phase}")
+active = [name for name, w in schedule.items()
+          if w.get("lts") and w["lts"] <= today < w.get("maintenance", "9999") and today <= w.get("end", "9999")]
+active.sort(key=lambda name: int(name.lstrip("v")))
+if active and active[-1] != f"v{major}":
+    print(f"lts: {active[-1]} is the active LTS major; the update rule adopts it within six months of its LTS date")
+PY
+}
+
+pin() {
+  local version="${1:-}"
+  [[ $# == 1 && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "usage: scripts/tron-node pin X.Y.Z"
+  local work arch upper archive entry digest npm_version npm_digest previous_npm="" assignments=()
+  load_release_pins
+  work="$(mktemp -d "${TMPDIR:-/tmp}/tron-node-pin.XXXXXX")"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$work'" EXIT
+  fetch "$TRON_NODE_ARCHIVE_BASE_URL/v$version/SHASUMS256.txt" "$work/SHASUMS256.txt"
+  for arch in arm64 x64; do
+    archive="node-v$version-darwin-$arch.tar.gz"
+    entry="$(awk -v name="$archive" '$2 == name || $2 == "*" name {print $1}' "$work/SHASUMS256.txt")"
+    [[ "$entry" =~ ^[0-9a-f]{64}$ ]] || die "SHASUMS256.txt for v$version lists no $archive"
+    fetch "$TRON_NODE_ARCHIVE_BASE_URL/v$version/$archive" "$work/$archive"
+    digest="$(shasum -a 256 "$work/$archive" | awk '{print $1}')"
+    [[ "$digest" == "$entry" ]] || die "$archive does not match SHASUMS256.txt ($digest, expected $entry)"
+    mkdir "$work/$arch"
+    tar -xzf "$work/$archive" -C "$work/$arch" --strip-components=1 \
+      "node-v$version-darwin-$arch/bin/node" "node-v$version-darwin-$arch/lib/node_modules/npm" \
+      || die "$archive has no bin/node or npm tree"
+    # macOS ships bash 3.2: no associative arrays.
+    upper="$(printf '%s' "$arch" | tr '[:lower:]' '[:upper:]')"
+    assignments+=("TRON_NODE_${upper}_ARCHIVE_SHA256=$digest"
+      "TRON_NODE_${upper}_RUNTIME_SHA256=$(shasum -a 256 "$work/$arch/bin/node" | awk '{print $1}')")
+    npm_digest="$(python3 "$ROOT/scripts/hash-npm-runtime.py" "$work/$arch/lib/node_modules/npm")"
+    npm_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' \
+      "$work/$arch/lib/node_modules/npm/package.json")"
+    # Bundle assembly stages one npm tree for both architectures.
+    [[ -z "$previous_npm" || "$previous_npm" == "$npm_digest $npm_version" ]] \
+      || die "the arm64 and x64 archives of v$version carry different npm trees"
+    previous_npm="$npm_digest $npm_version"
+  done
+  python3 - "$ROOT/config/ci-toolchain.env" "${assignments[@]}" \
+    "TRON_NODE_NPM_VERSION=$npm_version" "TRON_NODE_NPM_TREE_SHA256=$npm_digest" <<'PY'
+import os, sys
+path, assignments = sys.argv[1], dict(a.split("=", 1) for a in sys.argv[2:])
+lines, seen = [], set()
+for line in open(path).read().splitlines():
+    name = line.split("=", 1)[0]
+    if name in assignments:
+        line = f"{name}={assignments[name]}"
+        seen.add(name)
+    lines.append(line)
+missing = set(assignments) - seen
+if missing:
+    sys.exit(f"tron-node: {path} has no {', '.join(sorted(missing))}")
+with open(path + ".tmp", "w") as stream:
+    stream.write("\n".join(lines) + "\n")
+os.replace(path + ".tmp", path)
+PY
+  local from="$NODE_VERSION"
+  printf '%s\n' "$version" >"$VERSION_FILE.tmp" && mv "$VERSION_FILE.tmp" "$VERSION_FILE"
+  echo "pinned Node v$version (was v$from) with npm $npm_version; archives verified against SHASUMS256.txt"
+  if [[ "${version%%.*}" != "${from%%.*}" ]]; then
+    echo "major move: also update packages/gateway/package.json engines.node and @types/node, as CONTRIBUTING.md#toolchain describes"
+  fi
+  echo "next: scripts/tron-node install, then scripts/tron gate run"
+}
+
 case "${1:-}" in
   "")
     resolve
@@ -114,10 +290,25 @@ case "${1:-}" in
     export PATH="$(dirname "$node"):$PATH" PYTHONDONTWRITEBYTECODE=1
     exec "$@"
     ;;
+  install)
+    shift
+    (($# == 0)) || die "usage: scripts/tron-node install"
+    # The primary checkout's cache serves every linked worktree.
+    TRON_CI_TOOLS_DIR="$(cache_dirs | tail -n 1)" "$ROOT/scripts/install-ci-tools.sh" node
+    resolve
+    ;;
+  status)
+    shift
+    status "$@"
+    ;;
+  pin)
+    shift
+    pin "$@"
+    ;;
   -h|--help)
-    sed -n '2,5p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     ;;
   *)
-    die "usage: scripts/tron-node [exec COMMAND [ARGUMENTS...]]"
+    die "usage: scripts/tron-node [exec COMMAND [ARGUMENTS...] | install | status [--online] | pin X.Y.Z]"
     ;;
 esac
