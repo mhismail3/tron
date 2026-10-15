@@ -4171,9 +4171,9 @@ data root. The delegated-provider keeps its separate in-process `PI_SUBAGENTS_TE
 for pi-subagents children; arbitrary shell commands and their process trees do not receive
 that live-home root, Gateway supervision/payload identity, or the `TRON_DATA_DIR` and
 `TRON_HOME_NAME` selectors. Gateway Vitest configurations (regular, scale and corpus), Node
-test scripts, and `scripts/tron work verify` share one environment
-policy. Vitest rejects during setup, before test modules execute; `scripts/tron work verify`
-rejects before checks are selected or carried. The policy expands SDK-style `~` paths and
+test scripts, and `scripts/tron gate` share one environment
+policy. Vitest rejects during setup, before test modules execute; `scripts/tron gate`
+rejects before any step runs. The policy expands SDK-style `~` paths and
 normalizes dot segments, including path-list entries, and interprets `TRON_HOME_NAME` using
 the same home-relative resolution as `resolveTronHome()`.
 
