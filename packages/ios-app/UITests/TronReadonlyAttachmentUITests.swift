@@ -138,6 +138,11 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertEqual(summary.label, "0 of 3 done today")
         XCTAssertTrue(app.staticTexts["4 day streak"].exists)
         keepScreenshot(app, "889-2-app-running")
+        // #909: the runner hosts the program in the shared document sheet
+        // chrome. The program's root navigationTitle is the shared sheet title
+        // and Done is inked in that title's tint (TronSheetTitle +
+        // tronToolbarAction); a runner with its own chrome fails here.
+        assertToolbarTint(app, title: "Habits")
 
         app.buttons["Complete Drink water"].tap()
         XCTAssertTrue(wait(summary, predicate: "label == '1 of 3 done today'"), "Button actions mutate interpreted @State through a @Binding")
@@ -157,6 +162,11 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Meditate"].waitForExistence(timeout: 5), "TextField binding and array append work")
         XCTAssertTrue(wait(summary, predicate: "label == '1 of 4 done today'"))
         keepScreenshot(app, "889-4-app-after-add")
+
+        // #909: the shared Done closes the runner, back to the document sheet.
+        app.navigationBars.containing(.staticText, identifier: "Habits").buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(wait(summary, predicate: "exists == false"), "Done closes the runner")
+        XCTAssertTrue(run.waitForExistence(timeout: 5), "Closing the runner returns to the .swift document sheet")
     }
 
     /// #889: without the flag a `.swift` display is an ordinary document
@@ -195,6 +205,11 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Groceries"].waitForExistence(timeout: 10), "The App's WindowGroup renders the first tab")
         XCTAssertTrue(app.staticTexts["$42.50"].exists, "String(format:) formats currency")
+        // #909: a root TabView gets the shared chrome per tab, and the tab's own
+        // toolbar stays beside Done (a stack around the TabView would hide it).
+        assertToolbarTint(app, title: "Expenses", excluding: ["Plan trip", "Leave app"])
+        let expensesBar = app.navigationBars.containing(.staticText, identifier: "Expenses").firstMatch
+        XCTAssertTrue(expensesBar.buttons["Plan trip"].exists, "The tab keeps its toolbar under the shared chrome")
         app.buttons["Add food"].tap()
         XCTAssertTrue(app.staticTexts["New food"].waitForExistence(timeout: 5), "A store method appends a @Published expense")
         XCTAssertTrue(app.staticTexts["$12.25"].exists)
@@ -203,6 +218,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         app.buttons["Summary"].tap()
         let total = app.staticTexts["budget.total"]
         XCTAssertTrue(total.waitForExistence(timeout: 5), "The TabView switches to the second tab")
+        assertToolbarTint(app, title: "Summary")
         XCTAssertEqual(total.label, "Total $72.75 across 3 expenses", "The other tab reads the same environment object")
         XCTAssertEqual(app.staticTexts["budget.food"].label, "54.75")
         XCTAssertEqual(app.staticTexts["budget.travel"].label, "18.00")
@@ -261,6 +277,9 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
         let taps = app.staticTexts["limits.taps"]
         XCTAssertTrue(taps.waitForExistence(timeout: 10))
+        // #909: a program with no NavigationStack or title still gets the
+        // shared chrome, titled with the file name.
+        assertToolbarTint(app, title: "Limits")
         XCTAssertTrue(diagnostic(app, "Line 62: Unknown name 'Map'").exists, "An unsupported view renders an inline diagnostic beside working views")
 
         var expectedTaps = 0
