@@ -138,6 +138,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == 'Tasks'")).allElementsBoundByIndex
             .filter { $0.frame.minY > tasksTitle.maxY && $0.frame.maxY <= firstTask.minY }.isEmpty, "No section header repeats the title")
         XCTAssertTrue(element(app, "home-task-active").label.contains("Validating settings changes"))
+        XCTAssertFalse(element(app, "home-task-active").label.contains("Optional("), "The timestamp renders as a relative date, not Swift debug text")
         keep("08-tasks")
         open(app, element(app, "home-task-active"), ready: "home-task-detail", name: "task")
         expand(app, done: "home-sheet-done-task")

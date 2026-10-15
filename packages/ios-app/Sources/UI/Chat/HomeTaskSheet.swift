@@ -197,7 +197,7 @@ struct HomeTaskSheet: View {
 
     private func taskRow(_ row: HomeTaskPageDTO.Row) -> some View {
         let title = HomeTaskPresentation.title(title: row.title, briefText: nil, project: row.project)
-        let subtitle = [row.project, HomeSheetTime.relative(milliseconds: row.updatedAt), row.checkins?.last.map { "\($0.step) · \(HomeSheetTime.relative($0.at))" }].compactMap { $0 }.joined(separator: " · ")
+        let subtitle = [row.project, HomeSheetTime.relative(milliseconds: row.updatedAt), row.checkins?.last.map { [$0.step, HomeSheetTime.relative($0.at)].compactMap { $0 }.joined(separator: " · ") }].compactMap { $0 }.joined(separator: " · ")
         return Button { child = .task(row.taskId) } label: {
             TronSettingsRow(icon: Self.taskIcon(row.lifecycle, outcome: row.outcome), title: title, subtitle: subtitle,
                             subtitleLineLimit: row.checkins?.last == nil ? 1 : 2, accent: .tronSessionTeal) {
