@@ -70,14 +70,14 @@ or retarget another home. `PATH` is never changed, because it locates the execut
 owners apply the rule: Vitest (`setupFiles`) and Node test entry points (`node --import`)
 import `test-support/tron-home-environment-preflight.mjs`, which removes the path variables from
 `process.env` before test modules execute and throws `Gateway tests refuse inherited Tron-home
-selectors` for a selector; `scripts/tron work verify` runs the policy script, which lists the
-variables each check environment drops, and prints `Tron-home environment preflight failed` for a
-selector as a verification error before checks are selected or carried. This is a command-line
+selectors` for a selector; `scripts/tron gate` runs the policy script, which lists the
+variables each step environment drops, and prints `Tron-home environment preflight failed` for a
+selector as a gate error before any step runs. This is a command-line
 guard, not a Gateway runtime log event, and is not persisted in `gateway.jsonl` or
 `gateway-stderr.log`.
 
 Reproduce the test-runner signal with `TRON_HOME_NAME=.tron-dev npm run test:pi-subagents-scripts`;
-reproduce the verification signal with `TRON_HOME_NAME=.tron-dev scripts/tron work verify`.
+reproduce the gate signal with `TRON_HOME_NAME=.tron-dev scripts/tron gate plan`.
 The selector is resolved relative to the user's home, as in `resolveTronHome()`.
 
 The connector credential adapter also fails closed at construction in Vitest or
@@ -560,8 +560,9 @@ repeat, or was reclaimed ahead of geometry — not a control the app never sampl
 
 | Signal | Where to inspect | Meaning / action | Regression |
 | --- | --- | --- | --- |
-| `dependent checks not started after prerequisite failure` | `work verify` output and `<git dir>/work/logs/<head>/` | A canonical build/install owner failed, so later readers were not admitted. Mac staging's `installing locked gateway dependencies` must complete before the Gateway check begins: overlapping that line with SDK reads can produce missing extensions or changing package-asset paths, not a product timeout. | `scripts/test-work-verify.py`: real CLI, child-process package replacement, reader ordering, failed-publisher refusal and exact-tree reuse; `test-results/work-verify.json` |
-| `heavy-run: next, waiting for memory: ...` | output of `scripts/tron-heavy run`, `work verify`, `tron-ios-test`; `scripts/tron-heavy status` | A heavy run's expected RSS does not fit the heavy budget with running heavy runs, or the host lacks that much available memory beyond the reserve; it starts when memory frees. | `scripts/test-tron-heavy.py` `case_memory_admission`; `test-results/tron-heavy.json` |
+| `gate: stopped at <shard>; N later shards not started` | `scripts/tron gate` / `work land` output and `<git dir>/work/logs/<head>/<shard>.log` | The first failing gate step, with its log tail and any catalog `knownFlakes`. Plan order is catalog order: `mac.build` (which stages the Gateway payload and rewrites `packages/gateway/node_modules`) settles before any Gateway step reads dependencies. | `scripts/test-gate.py`: real CLI, injected failure, retry reuse, input invalidation; `test-results/gate.json` |
+| `gate: TIMEOUT <shard> exceeded its hard limit of Ns` | gate output and the shard log | The shard ran past its catalog `timeoutSeconds` and was killed with its process group; the heartbeat lines before it show elapsed time, live RSS and the log's last line. | `scripts/test-gate.py` timeout case |
+| `heavy-run: next, waiting for memory: ...` | output of a heavy gate shard or `scripts/tron-heavy run`; `scripts/tron-heavy status` | A heavy step's expected RSS does not fit the heavy budget with running steps, or the host lacks that much available memory beyond the reserve; it starts when memory frees. | `scripts/test-tron-heavy.py` `case_memory_admission`; `test-results/tron-heavy.json` |
 
 ## Mac payload build diagnostics
 
@@ -596,7 +597,7 @@ through their existing diagnostic envelopes.
 
 | Signal | Owner | Interpretation | Regression |
 | --- | --- | --- | --- |
-| `home.taskStatus.ownerSettlement` | `home-task-dispatcher.ts`, read-only canonical cut | For terminal `unknown:no-report`, a non-null proof binds exact task/session/operation and marker, invocation-terminal and successful child-settlement entry IDs. `null` is unproven, not live or successful. Terminal `subagentRuns.total: 0` alone is synthetic and cannot diagnose settlement. Identity/lifecycle changes during inspection refuse the read. | `home-task-subagents.e2e.test.ts` exercises stopped/naturally completed children, corrupt and mismatched receipts, missing/failed settlement and replacement races; `scripts/test-work-handoff.py` exercises helper status rechecks and unchanged claims on refusal. |
+| `home.taskStatus.ownerSettlement` | `home-task-dispatcher.ts`, read-only canonical cut | For terminal `unknown:no-report`, a non-null proof binds exact task/session/operation and marker, invocation-terminal and successful child-settlement entry IDs. `null` is unproven, not live or successful. Terminal `subagentRuns.total: 0` alone is synthetic and cannot diagnose settlement. Identity/lifecycle changes during inspection refuse the read. | `home-task-subagents-*.e2e.test.ts` exercises stopped/naturally completed children, corrupt and mismatched receipts, missing/failed settlement and replacement races; `scripts/test-work-handoff.py` exercises helper status rechecks and unchanged claims on refusal. |
 
 ## Getting a diagnostic bundle
 

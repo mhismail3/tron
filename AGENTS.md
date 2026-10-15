@@ -91,7 +91,7 @@
   updates every reference to it and its owning doc in the same change, and
   commits no temporary files, scratch fixtures or one-off reports. Agent
   progress notes (`progress.md`) are local-only and gitignored, so they never
-  mark a checkout dirty for `scripts/tron work verify` or a dev candidate.
+  mark a checkout dirty for `scripts/tron gate` or a dev candidate.
 - **Home workers check in lightly.** When the `checkin` tool is available, send a
   short update at milestones and about every 30 minutes: current step, done, next,
   optional blocker and branch/commit/issue refs. Keep working afterward. Reserve
@@ -180,10 +180,12 @@ test suites with an isolated `HOME` and `TMPDIR`.
   outside the tooling (`scripts/tron-ios-simulator stop` for the Development
   simulator), before your final response unless the user asked to keep it
   running.
-- Heavy runs (iOS simulator suites, real-Gateway E2E, full suites, `work verify`/`land`
-  builds and journeys) wait in the host-wide heavy queue (`scripts/tron-heavy`), which
-  admits them by expected memory, not just a count; the owning tools take it themselves.
-  Research, thinking and editing never wait, and Home workers have no running cap. Check `scripts/tron-heavy status` before starting one by
+- Only steps the [gate catalog](tools/work/gate-catalog.json) classes `heavy`
+  (xcodebuild, simulators, npm installs, Gateway test shards, E2E journeys) wait in
+  the host-wide heavy queue (`scripts/tron-heavy`), which admits them by their
+  measured memory, not just a count. Research, thinking and editing never wait, and
+  Home workers have no running cap. The gate and the owning tools take the queue
+  themselves; check `scripts/tron-heavy status` before running a heavy command by
   hand, and never bypass it with `TRON_HEAVY_LEASE_HELD`.
 - Prefer commands that exit when they finish. Avoid watch mode and background
   processes unless the task needs them.
@@ -221,34 +223,38 @@ test suites with an isolated `HOME` and `TMPDIR`.
 
 ## Validation
 
-`scripts/tron work land` is the gate. It verifies the merged tree with the checks
-the branch's paths require (privacy guard, whitespace, changed gateway, push-relay,
-iOS, Mac and script syntax), then runs every journey you name with `--tests`.
-Name the integration or E2E commands your change relies on, so they run on the
-merged tree. Passing trees are remembered, so an unchanged tree is not re-run.
+Every change to the Gateway, iOS app or Mac app passes one deterministic gated
+pipeline. [`tools/work/gate-catalog.json`](tools/work/gate-catalog.json) defines its
+steps (trigger, command, cache inputs, budget under 5 minutes with a hard timeout,
+light or heavy class); `scripts/tron gate` is the only way to run them, and
+[tools/work/README.md#gate](tools/work/README.md#gate) owns the contract.
 
-While iterating, run the narrowest check that exercises the change, and do not
-repeat full multi-minute suites during diagnosis:
+1. **Plan.** `scripts/tron gate plan` prints the ordered steps your change needs.
+   The order is fixed by the catalog; do not reorder, skip or substitute steps.
+2. **Run.** `scripts/tron gate next` runs the next pending step; `scripts/tron gate run`
+   runs them all. Each step fails early with its log tail and names itself; fix the
+   first failure and rerun: passing shards whose inputs did not change are reused.
+   To keep working while heavy steps wait for memory, use `scripts/tron gate submit`
+   and later `gate wait <job>`.
+3. **Land.** `scripts/tron work land --summary-file <md> --tests "<command>"` runs the
+   same plan on the merged tree, plus every integration or E2E journey you name
+   with `--tests`, before anything is pushed.
+
+While diagnosing a failure, run the narrowest command that exercises it (one
+vitest file, one `--only-testing` journey) rather than repeating multi-minute
+shards; the gate run on the final commit is the evidence. A step that cannot fit
+its budget is split into shards in the catalog, never weakened or skipped.
 
 ```bash
-# Local gate on the current commit; repeat --tests for each journey
-scripts/tron work verify --tests "<integration or E2E command>"
-
-# Gateway, focused
-cd packages/gateway && npx vitest run <owning-test-file>
-
-# iOS: canonical owned test simulator; UI journeys by name
-scripts/tron-ios-test build
-scripts/tron-ios-test run --only-testing TronMobileUITests/<Suite>/<test>
-
-# Mac
-scripts/tron mac generate
-cd packages/mac-app && xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
-  -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData
+scripts/tron gate plan                     # what this change needs
+scripts/tron gate run [<step>...]          # run (named) steps; reuses valid passes
+scripts/tron gate run --tests "<journey>"  # add an integration or E2E journey
+cd packages/gateway && npx vitest run <owning-test-file>      # diagnosis only
+scripts/tron-ios-test run --only-testing TronMobileUITests/<Suite>/<test>  # diagnosis only
 ```
 
-Run the full gateway and native suites at cross-module checkpoints or when an
-owner asks. The [Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests)
+Run the full suites (`scripts/tron gate run gateway.full gateway.nested`,
+`ios.journeys`) at cross-module checkpoints or when an owner asks. The [Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests)
 owns the TronMac commands.
 
 When closing an incident, name the signal that would have diagnosed it in one
