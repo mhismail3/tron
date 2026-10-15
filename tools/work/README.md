@@ -18,6 +18,8 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | `release <issue> --reason TEXT [--force-maintainer]` | Gives up a stale claim on an **open** issue: preserves the claim's work, deletes the remote claim branch with an exact lease, posts an audited comment, sets Status back to Ready and removes the worktree and local branch. The issue stays open and unclaimed. Refuses a live or indeterminate owner; an idle Gateway session or a legacy owner needs the maintainer's `--force-maintainer`. See [`release`](#release). |
 | `release --stale [--dry-run]` | Sweeps every open-issue claim idle for more than 72 h and releases, through the same path, each one whose owner is `absent`. See [stale sweep](#stale-sweep). |
 | `land --summary-file <md> [--title T] [--tests CMD]... [--ready] [--dry-run]` | Merges `origin/main` in, runs the [gate](#gate) on the merged tree, pushes the branch, opens or updates its pull request (title = `--title` or the issue title; body = the summary file, verbatim), squash-merges at the verified commit, deletes the remote branch, and closes the issue as completed with Status Done. A draft pull request refuses before the merge unless `--ready`, which marks it ready for review only after verify and the exact-head publication, re-reads it, and merges nothing if it is still a draft. An issue with open sub-issues (an epic) is left open and `land` lists them: close each fulfilled child with `work issue close`, then the epic. Prints `merged: <commit>`. |
+| `land --publish-only --summary-file <md> [--tests CMD]...` | Runs the same merge-base integration and exact-tree gate, pushes and opens/updates the PR, but does not merge, close issues or delete the branch. Use when a task explicitly requires hosted evidence before landing; normal `land` remains the merge owner. Incompatible with `--dry-run` and `--ready`. |
+| `ci-dispatch` | Dispatches the configured CI workflow once on the current clean, already-published task branch through the audited GitHub boundary. It never retries or merges. The receipt names the requested head; verify the resulting run's `headSha` before counting it because GitHub accepts a branch ref. |
 | `cleanup [--all] [--dry-run]` | Removes a task worktree and its branches once its pull request merged at its head (or its issue is closed and it holds only its claim commit). Names what it keeps and why. |
 | `dashboard [--html P] [--json P]` | Read-only view of claims, Status, epics, stale claims, paused epics, past exit dates, orphans, classification gaps and main CI. |
 | `comment <issue> --body-file F` | Privacy-checks, then posts a public issue comment. |
@@ -361,6 +363,14 @@ deletes the local branch and the remote branch with a lease on the proven head.
   label (epics), or an issue blocked by an open issue.
 
 ## Tests
+
+For an explicitly requested multi-run hosted check, publish with `land --publish-only`,
+observe the PR run, then use `work ci-dispatch` for each additional fresh run. Count
+only successful first attempts on the exact same head; changing the candidate
+invalidates that acceptance evidence. Dispatch is not a required gate for ordinary
+landings and does not change repository settings. The real-CLI `test-work-land.py`
+journeys cover publication without merging/closing, one audited dispatch, and
+refusal of unpublished or dirty heads before writing.
 
 The tooling has no unit tests. Changes are validated by running the real commands: a
 `scripts/tron gate run` or `land --dry-run` on the branch, and an integration run against a temporary

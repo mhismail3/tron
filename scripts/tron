@@ -78,9 +78,6 @@ Commands:
                                     Give up a stale claim after preserving its work;
                                     --stale sweeps claims idle over 72h whose owner is
                                     absent; force (TTY) only for a legacy non-Gateway owner
-  work verify [--tests "<command>"]...
-                                    Run the local checks the branch diff requires,
-                                    plus each --tests command, on the current commit
   work dashboard [--html <path>] [--json <path>]
                                     Read-only live view of all work: epics, claims,
                                     queue, stale, paused epics, past exit dates, orphans
@@ -105,11 +102,15 @@ Commands:
   work issue block <issue> --blocked-by <issue>
                                     Create native parent or blocker links
   work land --summary-file <md> [--title <t>] [--tests "<command>"]...
-            [--dry-run]             From a task worktree: merge origin/main in, verify
+            [--dry-run|--publish-only]
+                                    From a task worktree: merge origin/main in, verify
                                     the merged tree, push, open or update the pull
                                     request (body = the summary verbatim), squash-merge
                                     it at the verified commit, delete the branch, and
-                                    close the issue as completed with Status Done
+                                    close the issue as completed with Status Done.
+                                    --publish-only stops after PR publication.
+  work ci-dispatch                  Dispatch hosted CI once on the clean published
+                                    task head; no retry, merge or settings change
   work cleanup [--all] [--dry-run]  Remove this task worktree and its branches once its
                                     PR merged at its head; --all: every one under the
                                     worktree root, naming why each other is kept
