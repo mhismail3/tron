@@ -228,7 +228,7 @@ struct NativeTerminal: UIViewRepresentable {
         /// a reopened sheet replays it.
         var isLaidOut = false
 
-        func feed(_ view: TronNativeTerminalView) {
+        @MainActor func feed(_ view: TronNativeTerminalView) {
             for chunk in chunks.replaySuffix(after: lastSequence) {
                 view.feed(byteArray: Array(chunk.data.utf8)[...])
                 lastSequence = chunk.sequence
