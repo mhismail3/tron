@@ -129,7 +129,7 @@ export default function (pi) {
 
 // Uses the production runtime with a private canonical session and fake model;
 // no active session, credential store, native permission or GUI is consulted.
-describe.sequential("native-tool settlement qualification with the pinned runtime", () => {
+describe("native-tool settlement qualification with the pinned runtime", { concurrent: false }, () => {
   for (const waiterOnly of [false, true]) {
     it(waiterOnly
       ? "negative control exposes early idle/drain when only a native waiter is cancelled"

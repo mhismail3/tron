@@ -283,7 +283,7 @@ async function open(label: string, options: FixtureOptions = {}) {
 
 /** Rationale for the case names: the prototype's numbering (#412) is kept, so
  * this file's rows line up with the qualification evidence it ports. */
-describe.sequential("Home request seam inside the Gateway runtime", () => {
+describe("Home request seam inside the Gateway runtime", { concurrent: false }, () => {
   it("single-flights a reserved Home materialization and records its path before returning", async () => {
     const item = await open("reserved-materialization-single-flight", { home: true });
     const owner = item.registry.homeOwner() as unknown as {
