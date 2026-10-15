@@ -128,6 +128,7 @@ case "$cmd" in
         repo.policy)
           # `if ci_step` disables errexit inside the function, so every step chains with &&.
           "$ROOT/scripts/personal-info-guard.sh" \
+            && "$ROOT/scripts/tron" version check \
             && "$ROOT/scripts/check-agent-policy.sh" \
             && python3 "$ROOT/scripts/check-documentation-policy.py" \
             && python3 "$ROOT/scripts/verify-gateway-protocol-contract.py" ;;

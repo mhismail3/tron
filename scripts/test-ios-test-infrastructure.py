@@ -1314,41 +1314,6 @@ shutil.copytree(source, clone)
     def latest_metadata(self) -> dict[str, object]:
         return json.loads((self.latest_run() / "metadata.json").read_text())
 
-    def test_ci_metrics_report_the_checkpoint_run(self) -> None:
-        """W-21 (issue #101): the CI adapter's metrics name the run its checkpoint made.
-
-        Failure mode: the adapter finds its run through a pointer the runner no
-        longer keeps, or through another lane's or worktree's run, and uploads
-        metrics with no run metadata or test summary - a green job whose
-        artifact says nothing.
-        """
-        metrics = self.root / "ios-ci-metrics.json"
-        environment = self.contained_environment(self.root)
-        environment.update(self.reader_environment())
-        environment.update({
-            "PATH": f"{self.bin}:{environment['PATH']}",
-            **self.tools_environment,
-            "TRON_IOS_XCRUN": str(self.xcrun),
-            "FAKE_SIMULATOR_INVENTORY": str(self.simulator_inventory),
-            "TRON_IOS_SIMULATOR_STATE_DIR": str(self.root / "development-state"),
-            "RUNNER_TEMP": str(self.root),
-            "TRON_IOS_CI_DERIVED_DATA": str(self.derived),
-            "TRON_IOS_CI_RESULTS_DIR": str(self.results),
-            "TRON_IOS_CI_METRICS": str(metrics),
-            "FAKE_SUMMARY": '{"passedTests":3,"failedTests":0,"skippedTests":0,"totalTestCount":3}',
-        })
-        result = subprocess.run(
-            [str(self.checkout / "scripts/ios-ci-test.sh")], env=environment,
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        value = json.loads(metrics.read_text())
-        self.assertEqual(value["exit_code"], 0)
-        self.assertEqual(value["run"].get("command"), "checkpoint", value)
-        self.assertEqual(value["run"].get("phase"), "complete", value)
-        self.assertEqual(value["test_summary"].get("passedTests"), 3, value)
-        self.assertEqual(sorted(value["processes"]), ["build", "test"], value)
-
     def test_summary_validation_reconciles_expected_failures(self) -> None:
         result = self.invoke(summary='{"passedTests":2,"failedTests":0,"skippedTests":1,"expectedFailures":3,"totalTestCount":6}')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

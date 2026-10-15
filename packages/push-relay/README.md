@@ -212,9 +212,10 @@ npm run build:sandbox   # isolated sandbox-config dry-run only
 ```
 
 Tests run in the Workers Vitest pool and exercise the real SQLite Durable Object
-boundary. Outbound APNs requests are intercepted locally. CI runs the pinned install,
-type check, tests, production dependency audit, and production-config Wrangler dry run;
-it never receives deployment credentials or deploys either environment.
+boundary. Outbound APNs requests are intercepted locally. Hosted CI
+(`scripts/tron ci relay.check`) runs the pinned install, type check, production-config
+Wrangler dry run and tests; it never receives deployment credentials or deploys either
+environment.
 
 `package.json` `overrides` exist only to clear security advisories in the
 development toolchain, so that `npm audit` stays clean (#489):
