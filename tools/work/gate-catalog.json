@@ -578,6 +578,37 @@
       "hosted": "local-only: Xcode and the owned simulator lanes"
     },
     {
+      "id": "ios.device-compile",
+      "summary": "Unsigned compile of the shipped app exactly as the iPhone install builds it (Tron Device + LocalDevice, optimized, generic arm64 iOS); the HOSTED_TEST simulator build cannot see code only the shipped configuration compiles (#1061)",
+      "trigger": {
+        "paths": [
+          "packages/ios-app/**",
+          "config/GatewayProtocol.json",
+          "config/PushService.xcconfig",
+          "scripts/tron-ios-device"
+        ],
+        "code": true
+      },
+      "command": "scripts/tron-ios-device compile",
+      "inputs": [
+        "packages/ios-app",
+        "config",
+        "scripts/tron-ios-device"
+      ],
+      "keyExtra": [
+        "xcode"
+      ],
+      "cacheScope": "worktree",
+      "budgetSeconds": 180,
+      "timeoutSeconds": 600,
+      "class": "heavy",
+      "expectedRssMb": 6000,
+      "pass": "exit 0 and BUILD SUCCEEDED",
+      "unlocks": "ios.journeys",
+      "memorySample": "host",
+      "hosted": "local-only: Xcode on this Mac"
+    },
+    {
       "id": "ios.journeys",
       "summary": "Simulator journeys for the changed UI test classes, two test methods per shard (or the smoke set), with test-without-building from the one ios.build",
       "trigger": {

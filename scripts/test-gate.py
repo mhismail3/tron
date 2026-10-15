@@ -84,7 +84,7 @@ def plans(base: Path, env: dict) -> None:
         "ios-only": ({"packages/ios-app/Sources/UI/View.swift": "// view\n",
                       "packages/ios-app/UITests/TronHomeSheetsUITests.swift":
                           "final class TronHomeSheetsUITests {\n    func testA() {}\n    func testB() {}\n    func testC() {}\n}\n"},
-                     ["repo.privacy", "repo.whitespace", "ios.build", "ios.journeys[TronHomeSheetsUITests.testA+1]",
+                     ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile", "ios.journeys[TronHomeSheetsUITests.testA+1]",
                       "ios.journeys[TronHomeSheetsUITests.testC]"]),
         "mac-only": ({"packages/mac-app/Sources/App.swift": "// app\n"},
                      ["repo.privacy", "repo.whitespace", "mac.build", "mac.test"]),
@@ -93,7 +93,7 @@ def plans(base: Path, env: dict) -> None:
                                 "gateway.full#1/6", "gateway.full#2/6", "gateway.full#3/6", "gateway.full#4/6", "gateway.full#5/6", "gateway.full#6/6",
                                 "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]"]),
         "protocol": ({"config/GatewayProtocol.json": "{}\n"},
-                     ["repo.privacy", "repo.whitespace", "protocol.contract", "mac.build", "gateway.full#1/6", "gateway.full#2/6", "gateway.full#3/6", "gateway.full#4/6", "gateway.full#5/6", "gateway.full#6/6", "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]", "ios.build", "ios.gateway-boundary[build]", "ios.gateway-boundary[resilience]", "ios.gateway-boundary[lan]"]),
+                     ["repo.privacy", "repo.whitespace", "protocol.contract", "mac.build", "gateway.full#1/6", "gateway.full#2/6", "gateway.full#3/6", "gateway.full#4/6", "gateway.full#5/6", "gateway.full#6/6", "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]", "ios.build", "ios.device-compile", "ios.gateway-boundary[build]", "ios.gateway-boundary[resilience]", "ios.gateway-boundary[lan]"]),
         "docs-only": ({"packages/gateway/docs/x.md": "docs\n", "packages/ios-app/docs/y.md": "docs\n"},
                       ["repo.privacy", "repo.whitespace"]),
     }

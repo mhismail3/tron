@@ -45,7 +45,7 @@ journeys as test-without-building shards from the same stamped products
 ([gate](../../../tools/work/README.md#gate)):
 
 ```bash
-scripts/tron gate plan                     # ios.build, then ios.journeys[<Class>] shards
+scripts/tron gate plan                     # ios.build, ios.device-compile, then ios.journeys[<Class>] shards
 scripts/tron gate run ios.build ios.journeys
 ```
 

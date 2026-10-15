@@ -1446,7 +1446,6 @@ enum HostedHomeDashboardWorkers {
         ] + (longName ? [snapshot("cortexkit", [window("weekly", "Weekly", 48, 604_800)])] : []))])
     }
 }
-#endif
 
 /// The #479 terminal fixture: a closed terminal with the Gateway's reason, and
 /// the live terminal the sheet opens beside it.
@@ -1464,3 +1463,4 @@ private enum HostedClosedTerminal {
         .object(["sequence": .number(Double(sequence)), "data": .string(data)])
     }
 }
+#endif

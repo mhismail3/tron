@@ -44,6 +44,7 @@ Usage:
   scripts/tron-ios-device status [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device share --title TITLE --notes NOTES [--fast-debug]
   scripts/tron-ios-device share-host enable|status|disable
+  scripts/tron-ios-device compile [--fast-debug]
 
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
@@ -346,13 +347,16 @@ prepare_xcodebuild_args() {
     local result_bundle_path="$2"
     local device_id="$3"
     local build_mode="$4"
+    local signing="${5:-signed}"
 
     local destination=(-destination "generic/platform=iOS")
-    local registration=()
+    local provisioning=(-allowProvisioningUpdates)
     if [[ -n "$device_id" ]]; then
         destination=(-destination "platform=iOS,id=${device_id}" -destination-timeout 30)
-        registration=(-allowProvisioningDeviceRegistration)
+        provisioning+=(-allowProvisioningDeviceRegistration)
     fi
+    # Unsigned (compile) builds need no account, profile or device.
+    [[ "$signing" == "signed" ]] || provisioning=()
     XCODEBUILD_ARGS=(
         build
         -project "$PROJECT"
@@ -361,10 +365,10 @@ prepare_xcodebuild_args() {
         "${destination[@]}"
         -derivedDataPath "$derived_data_path"
         -resultBundlePath "$result_bundle_path"
-        -allowProvisioningUpdates
-        ${registration[@]+"${registration[@]}"}
+        ${provisioning[@]+"${provisioning[@]}"}
     )
     XCODEBUILD_ARGS+=(SWIFT_COMPILATION_MODE=singlefile)
+    [[ "$signing" == "signed" ]] || XCODEBUILD_ARGS+=(CODE_SIGNING_ALLOWED=NO)
     if [[ "$build_mode" == "fast-debug" ]]; then
         XCODEBUILD_ARGS+=(
             SWIFT_OPTIMIZATION_LEVEL=-Onone
@@ -376,13 +380,15 @@ prepare_xcodebuild_args() {
     fi
 }
 
-# Builds and validates the canonical app for DEVICE_ID (empty: any registered
-# device) and sets BUILT_APP, BUILD_LOG and BUILD_XCRESULT. Leaves cwd at IOS_DIR.
-BUILT_APP=""
+# Generates the project and builds into DERIVED_DATA for DEVICE_ID (empty: any
+# device), BUILD_MODE and signing ("signed" or "unsigned"). On failure it prints
+# the compiler errors and failed commands and exits with xcodebuild's status;
+# the Gateway's install sheet surfaces that summary. Sets BUILD_LOG and
+# BUILD_XCRESULT. Leaves cwd at IOS_DIR.
 BUILD_LOG=""
 BUILD_XCRESULT=""
-build_validated_app() {
-    local device_id="$1"
+run_device_xcodebuild() {
+    local derived_data="$1" device_id="$2" signing="$3"
     xcodebuild -version
     printf 'iPhoneOS SDK %s\n' "$(xcrun --sdk iphoneos --show-sdk-version)"
     cd "$IOS_DIR"
@@ -399,12 +405,7 @@ build_validated_app() {
     xcresult="/tmp/xcode-${ts}.xcresult"
 
     set +e
-    if [[ "$BUILD_MODE" == "fast-debug" ]]; then
-        DERIVED_DATA="build/DerivedData-fast-debug"
-    else
-        DERIVED_DATA="build/DerivedData"
-    fi
-    prepare_xcodebuild_args "$DERIVED_DATA" "$xcresult" "$device_id" "$BUILD_MODE"
+    prepare_xcodebuild_args "$derived_data" "$xcresult" "$device_id" "$BUILD_MODE" "$signing"
     xcodebuild "${XCODEBUILD_ARGS[@]}" \
         2>&1 \
         | tee "$log" \
@@ -431,6 +432,21 @@ build_validated_app() {
         echo "xcresult: $xcresult"
         exit "$build_status"
     fi
+    BUILD_LOG="$log"
+    BUILD_XCRESULT="$xcresult"
+}
+
+# Builds and validates the canonical app for DEVICE_ID (empty: any registered
+# device) and sets BUILT_APP, BUILD_LOG and BUILD_XCRESULT. Leaves cwd at IOS_DIR.
+BUILT_APP=""
+build_validated_app() {
+    local device_id="$1"
+    if [[ "$BUILD_MODE" == "fast-debug" ]]; then
+        DERIVED_DATA="build/DerivedData-fast-debug"
+    else
+        DERIVED_DATA="build/DerivedData"
+    fi
+    run_device_xcodebuild "$DERIVED_DATA" "$device_id" signed
 
     local app
     app="$DERIVED_DATA/Build/Products/${CONFIG}-iphoneos/TronMobile.app"
@@ -439,8 +455,18 @@ build_validated_app() {
         --configuration "$CONFIG" --require-profile
     validate_gateway_protocol_target "$app"
     BUILT_APP="$app"
-    BUILD_LOG="$log"
-    BUILD_XCRESULT="$xcresult"
+}
+
+# The gate's guard for the shipped app (gate step ios.device-compile): the exact
+# install argv for any iOS device, unsigned, so it needs no device, account or
+# provisioning. The simulator UI-validation build defines HOSTED_TEST, so only
+# this build proves the shipped app compiles without hosted-test symbols and
+# under the optimizer (#1061). Its own DerivedData keeps the signed install
+# cache untouched.
+compile_unsigned_app() {
+    require_full_xcode
+    run_device_xcodebuild "build/DerivedData-compile" "" unsigned
+    echo "Compiled $SCHEME + $CONFIG ($BUILD_MODE) for generic iOS arm64, unsigned"
 }
 
 build_install_launch() {
@@ -708,6 +734,11 @@ main() {
             parse_common_args "$@"
             validate_install_pair
             share_build
+            ;;
+        compile)
+            parse_common_args "$@"
+            validate_install_pair
+            compile_unsigned_app
             ;;
         share-host)
             case "${1:-}" in
