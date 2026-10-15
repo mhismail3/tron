@@ -12,6 +12,16 @@ struct SwiftAppSyntaxError: Error, CustomStringConvertible {
     var description: String { "Line \(line): \(message)" }
 }
 
+/// A refused parse, never a runnable partial program.
+struct SwiftAppUnsupportedSyntax: Error, CustomStringConvertible {
+    let diagnostics: [SwiftAppSyntaxError]
+    let reachedLimit: Bool
+    var description: String {
+        diagnostics.sorted { $0.line < $1.line }.map(\.description).joined(separator: "\n")
+            + (reachedLimit ? "\nStopped after 10 unsupported constructs; more may remain." : "")
+    }
+}
+
 enum SwiftAppStringPart {
     case text(String)
     /// Raw source of one `\( … )` segment, parsed as an argument list so

@@ -324,9 +324,37 @@ extension SwiftAppRuntime {
                 try assign(base, updated, in: scope)
                 return result
             }
-            return try apply(try property(of: receiver, name), arguments)
+            return try applyNamed(try property(of: receiver, name), arguments, callee: callee)
         }
-        return try apply(try evaluate(callee, in: scope), arguments)
+        return try applyNamed(try evaluate(callee, in: scope), arguments, callee: callee)
+    }
+
+    private func applyNamed(_ value: SwiftAppValue, _ arguments: [SwiftAppLabeledValue], callee: SwiftAppExpr) throws -> SwiftAppValue {
+        switch value.resolved {
+        case .typeReference, .closure, .function, .builtin, .dismiss, .member(_, nil):
+            return try apply(value, arguments)
+        default:
+            switch callee {
+            case .member(_, let name), .selfMember(let name):
+                throw SwiftAppRuntimeError("'\(name)' is a property, not a method")
+            case .identifier(let name, _):
+                throw SwiftAppRuntimeError("'\(name)' is not callable")
+            default:
+                throw SwiftAppRuntimeError("This expression is not callable")
+            }
+        }
+    }
+
+    /// Builder content is explicit at the SwiftUI boundary, never inherited by
+    /// a value helper or an action merely because it was declared in a body.
+    func renderContent(_ value: SwiftAppValue) throws -> SwiftAppValue {
+        try entered {
+            switch value.resolved {
+            case .closure(let closure): return try call(closure, [], viewBuilder: true)
+            case .function(let function, let receiver): return try call(function, receiver: receiver, [], viewBuilder: true)
+            default: return value
+            }
+        }
     }
 
     private func mutate(_ value: SwiftAppValue, _ name: String, _ arguments: [SwiftAppLabeledValue]) throws -> (SwiftAppValue, SwiftAppValue) {
@@ -449,7 +477,7 @@ extension SwiftAppRuntime {
         guard let body = instance.declaration.computed["body"] else {
             throw SwiftAppRuntimeError("\(instance.declaration.name) has no body")
         }
-        return try entered { try run(body, in: SwiftAppScope(parent: globals, selfReference: .view(instance))) }
+        return try entered { try run(body, in: SwiftAppScope(parent: globals, selfReference: .view(instance)), viewBuilder: true) }
     }
 
     /// Optional's own methods. Values carry no Optional wrapper, so these
