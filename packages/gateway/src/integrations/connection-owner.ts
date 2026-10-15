@@ -371,4 +371,3 @@ export class ConnectionOwner {
     await durableAtomicWriteJson(statePath(this.tronHome), state, 0o600);
   }
 }
-
