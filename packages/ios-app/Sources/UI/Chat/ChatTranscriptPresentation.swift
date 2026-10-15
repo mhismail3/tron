@@ -250,7 +250,7 @@ enum ChatPromptLifecycleReplacementPolicy {
     }
 
     static func matches(queue: SessionSnapshot.QueuedMessage, item: TranscriptItem) -> Bool {
-        guard queue.resourceInvocation == item.semantic?.resourceInvocation else { return false }
+        guard (queue.resourceInvocations ?? []) == (item.semantic?.resourceInvocations ?? []) else { return false }
         let text = (item.content ?? []).compactMap { part -> String? in
             guard part.type == .text, part.attachment == nil else { return nil }
             return part.text
@@ -327,7 +327,7 @@ struct ChatOutgoingSubmissionPresentation: Equatable, Hashable, Identifiable, Se
     let text: String
     let attachmentIDs: [String]
     let behavior: String?
-    let resourceInvocation: ComposerResourceInvocation?
+    let resourceInvocations: [ComposerResourceInvocation]
     let transportActive: Bool
     let preflightCompacting: Bool
 
@@ -340,7 +340,7 @@ struct ChatOutgoingSubmissionPresentation: Equatable, Hashable, Identifiable, Se
         text = snapshot.outgoingText
         attachmentIDs = snapshot.attachmentIDs
         behavior = snapshot.behavior
-        resourceInvocation = snapshot.resourceInvocation
+        resourceInvocations = snapshot.resourceInvocations
         self.transportActive = transportActive
         self.preflightCompacting = preflightCompacting
     }
@@ -371,7 +371,7 @@ struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendabl
     let attachmentCount: Int
     let photoCount: Int?
     let fileAttachmentCount: Int?
-    let resourceInvocation: ComposerResourceInvocation?
+    let resourceInvocations: [ComposerResourceInvocation]
     var attachments: [SessionSnapshot.PromptAttachment]? = nil
     let isCompacting: Bool
 
@@ -383,9 +383,7 @@ struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendabl
         attachmentCount = snapshot.attachmentCount
         photoCount = snapshot.photoCount
         fileAttachmentCount = snapshot.fileAttachmentCount
-        resourceInvocation = snapshot.resourceInvocation.map {
-            ComposerResourceInvocation(source: $0.source, name: $0.name, arguments: $0.arguments)
-        }
+        resourceInvocations = snapshot.resourceInvocations ?? []
         attachments = snapshot.attachments
         self.isCompacting = isCompacting
     }
@@ -498,7 +496,7 @@ enum ChatPendingCanonicalSuppressionPolicy {
                 photoCount: pending.photoCount,
                 fileAttachmentCount: pending.fileAttachmentCount,
                 attachments: pending.attachments,
-                resourceInvocation: pending.resourceInvocation
+                resourceInvocations: pending.resourceInvocations.isEmpty ? nil : pending.resourceInvocations
             ),
             in: transcript
         )
@@ -531,7 +529,7 @@ enum ChatPendingCanonicalSuppressionPolicy {
         _ pending: SessionSnapshot.PendingPrompt,
         item: TranscriptItem
     ) -> Bool {
-        guard pending.resourceInvocation == item.semantic?.resourceInvocation else { return false }
+        guard (pending.resourceInvocations ?? []) == (item.semantic?.resourceInvocations ?? []) else { return false }
         if pending.text.isEmpty {
             guard pending.attachmentCount > 0,
                   pending.photoCount != nil,
@@ -2336,8 +2334,7 @@ enum ChatTranscriptPresentation {
     /// remain attached to the same visible content across rederivation.
     static func messageParts(in item: TranscriptItem) -> [ChatMessagePart] {
         if item.role == .user,
-           let text = UserPromptPresentationPolicy.promptDisplayText(item.semantic?.resourceInvocation)
-            ?? item.semantic?.submittedText {
+           let text = item.semantic?.submittedText {
             // Keep canonical bytes and attachment identities untouched. One
             // display part replaces all expanded template text, including
             // prompts whose expansion contains multiple text blocks.

@@ -274,11 +274,13 @@
             "invocationId": "65ac1d29-a6ee-41cf-91c2-eefdd264c3c8",
             "operationId": "7c9164a7-4492-40a5-bdee-e9cc706140dc",
             "lifecycle": "completed",
-            "resourceInvocation": {
-              "source": "extension",
-              "name": "mcp",
-              "arguments": ""
-            },
+            "resourceInvocations": [
+              {
+                "source": "extension",
+                "name": "mcp",
+                "arguments": ""
+              }
+            ],
             "sequence": 8
           }
         },

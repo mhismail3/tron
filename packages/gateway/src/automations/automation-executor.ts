@@ -1,6 +1,5 @@
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import type { NotificationService } from "../notifications/notification-service.js";
-import type { ResourceInvocation } from "../protocol/types.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { canonicalResourceName } from "../sessions/resource-invocation.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -35,11 +34,6 @@ function terminalResult(terminal: OwnedOperationTerminal): AutomationExecutionRe
     };
   }
   return { state: "outcomeUnknown", reason: terminal.errorCode ?? "terminal-outcome-unknown", invocationId: terminal.invocationId };
-}
-
-function promptText(text: string, resource: ResourceInvocation | undefined): string {
-  if (!resource) return text;
-  return `/${canonicalResourceName(resource.source, resource.name)}${text ? ` ${text}` : ""}`;
 }
 
 export class GatewayAutomationExecutor implements AutomationExecutor {
@@ -151,12 +145,14 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
       signal?.addEventListener("abort", cancelAdmission, { once: true });
       try {
         admission = await this.dispatch.admit(slot,
-          promptText(run.actionSnapshot.text, resource),
+          run.actionSnapshot.text,
           [],
           undefined,
           {
             text: run.actionSnapshot.text,
-            ...(resource === undefined ? {} : { resourceInvocation: resource }),
+            // A saved automation names at most one skill or prompt; it runs as a
+            // one-resource message, its text following the expansion (#311).
+            ...(resource === undefined ? {} : { resourceInvocations: [{ source: resource.source, name: resource.name, arguments: "" }] }),
             attachmentEnvelope: "",
             attachmentCount: 0,
           },
