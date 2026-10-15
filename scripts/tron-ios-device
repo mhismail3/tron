@@ -472,8 +472,10 @@ compile_unsigned_app() {
     # removing a finished worktree (#1063). One owned, stamped directory per
     # worktree; a directory whose worktree is gone is pruned here first.
     local identity="$ROOT_DIR/scripts/ios-test-build-identity.py" key derived
+    # Fatal, not a warning: a prune that silently never runs leaks gigabytes.
     python3 "$ROOT_DIR/scripts/ios-test-simulator.py" prune --products-root "$COMPILE_PRODUCTS_ROOT" \
-        || echo "warning: could not prune device-compile products of deleted worktrees" >&2
+        --development-state "${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid" \
+        || die "could not prune the device-compile products of deleted worktrees in $COMPILE_PRODUCTS_ROOT"
     key="$(python3 "$identity" worktree-key --worktree "$ROOT_DIR")"
     [[ -n "$key" ]] || die "could not derive this worktree's products key"
     derived="$COMPILE_PRODUCTS_ROOT/$key"
