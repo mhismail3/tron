@@ -121,6 +121,9 @@ def main(argv: list) -> int:
                          help="integration or E2E command to run on the merged tree; repeat for each")
     landing.add_argument("--ready", action="store_true",
                          help="mark a draft pull request ready for review, after verify and publication, before the merge")
+    landing.add_argument("--publish-only", action="store_true",
+                         help="verify and publish the PR, but do not merge, close issues or delete branches")
+    commands.add_parser("ci-dispatch", help="dispatch the configured hosted CI once on this exact published task head")
     landing.add_argument("--dry-run", action="store_true",
                          help="verify the merged tree, then stop before any push or GitHub write")
     tidy = commands.add_parser("cleanup", help="remove this task worktree and its branches once its PR merged")
@@ -187,8 +190,13 @@ def main(argv: list) -> int:
             if args.project_command == "set":
                 tracking.set_project_fields(gh, root, config, args.issue, args.status, args.priority)
                 return 0
+        if args.command == "ci-dispatch":
+            return land.dispatch_ci(Gh(root), root, config)
         if args.command == "land":
-            return land.land(Gh(root), root, config, args.title, args.summary_file, args.tests, args.dry_run, args.ready)
+            if args.publish_only and (args.dry_run or args.ready):
+                parser.error("--publish-only cannot combine with --dry-run or --ready")
+            return land.land(Gh(root), root, config, args.title, args.summary_file, args.tests, args.dry_run,
+                             args.ready, args.publish_only)
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
     except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, release.ReleaseError, gate.GateError, dashboard.DashboardError,

@@ -76,6 +76,10 @@ def fixture_gh() -> None:
         else:
             response = pull(7, state["first_head"])
         state["last_title"] = request["title"]
+    elif args[:3] == ["api", "-X", "POST"] and args[3].endswith("/actions/workflows/ci.yml/dispatches"):
+        request = json.load(sys.stdin)
+        state["events"].append("ci-dispatch")
+        state["dispatch_ref"] = request["ref"]
     elif args[:3] == ["api", "-X", "PUT"]:
         request = json.load(sys.stdin)
         state["events"].append("merge")
@@ -146,7 +150,8 @@ def run() -> None:
             tmp.mkdir()
             env = {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "TRON_HEAVY_DIR": str(tmp / "heavy"), "WORK_GH": str(Path(__file__).resolve()),
                    "WORK_SESSION_ID": "fixture-owner", "WORK_LAND_FIXTURE": str(root / "github.json"),
-                   "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+                   "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+                   "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
             def run_git(*args):
                 return subprocess.run(["git", *args], cwd=repo, env=env, check=True, text=True, capture_output=True).stdout.strip()
             run_git("init", "-b", "main")
@@ -156,7 +161,9 @@ def run() -> None:
             shutil.copy(ROOT / ".github/work.json", repo / ".github/work.json")
             (repo / "scripts").mkdir()
             shutil.copy(ROOT / "scripts/personal-info-guard.sh", repo / "scripts/personal-info-guard.sh")
-            run_git("add", ".github/work.json", "scripts/personal-info-guard.sh")
+            shutil.copy(ROOT / "scripts/tron-node", repo / "scripts/tron-node")
+            shutil.copy(ROOT / ".node-version", repo / ".node-version")
+            run_git("add", ".github/work.json", "scripts", ".node-version")
             run_git("commit", "-m", "fixture base")
             # The remote HEAD is part of this fixture, not the caller's Git defaults.
             subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(remote)], check=True, capture_output=True)
@@ -283,6 +290,25 @@ def run() -> None:
             assert "merge" in after["events"] and "issue-patch" not in after["events"], evidence[-1]
             assert ("issue:   left #867 open: sub-issues #869 remain open; "
                     "close each fulfilled one with work issue close, then the epic") in completed.stdout, evidence[-1]
+            completed, after, head = land_case("feat/1032-publish", ["--publish-only"])
+            assert completed.returncode == 0 and "published: PR #7" in completed.stdout, completed.stdout + completed.stderr
+            assert after["events"] == ["pull-patch"] and after["merge_sha"] is None, after
+            assert run_git("ls-remote", "--heads", "origin", "refs/heads/feat/1032-publish").split()[0] == head
+            dispatch = [sys.executable, str(ROOT / "tools/work/cli.py"), "ci-dispatch"]
+            completed = subprocess.run(dispatch, cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+            after = json.loads((root / "github.json").read_text())
+            assert completed.returncode == 0 and after["dispatch_ref"] == "feat/1032-publish", completed.stdout + completed.stderr
+            assert after["events"] == ["pull-patch", "ci-dispatch"] and after["merge_sha"] is None, after
+            evidence.append({"case": "publish-only leaves PR/branch/issue open; explicit dispatch is audited once", "head": head,
+                             "stdout": completed.stdout, "events": after["events"]})
+            run_git("commit", "--allow-empty", "-m", "unpublished")
+            refused = subprocess.run(dispatch, cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+            assert refused.returncode != 0 and "published first" in refused.stderr, refused.stderr
+            assert json.loads((root / "github.json").read_text())["events"] == after["events"]
+            (repo / "untracked").write_text("preserve")
+            refused = subprocess.run(dispatch, cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+            assert refused.returncode != 0 and "local changes" in refused.stderr, refused.stderr
+            evidence.append({"case": "dispatch refuses unpublished or dirty task head before writes", "stderr": refused.stderr})
         print(f"Passed {len(evidence)} real-CLI land publication and ready/epic assertions; evidence: {artifact}")
     finally:
         artifact.write_text(json.dumps(evidence, indent=2) + "\n")
