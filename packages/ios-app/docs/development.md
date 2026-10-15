@@ -583,8 +583,10 @@ checkouts live inside DerivedData, so every worktree replays the packages
 (SwiftNIO, swift-nio-ssh, swift-crypto, SwiftTerm and their dependencies, over
 half of a clean build's compiler work); the app, `Core` and the local
 `MacTerminalSSH` package sit at worktree paths and replay only within their own
-worktree. `-file-compilation-dir .` keeps the project directory out of the keys;
-debug info keeps absolute source paths.
+worktree. Mapping the worktree path as well would make compiler diagnostics and
+`#filePath` (which UI tests read) name the mapped path, so it is not done.
+`-file-compilation-dir .` and `-fcoverage-compilation-dir=.` keep the project
+directory out of the keys; debug info keeps absolute source paths.
 
 Each build ends with one summary line, for example `ios-build-cache: 1180
 cache hits, 410 misses (slot 0, 120s); cache … 2.10 GB of 12 GB`.

@@ -15,9 +15,11 @@ the worktree's own DerivedData is renamed to `slots/<n>/DerivedData` for the
 build and renamed back afterwards. Swift package checkouts live inside
 DerivedData, so every worktree compiles them at the same path and replays them
 from the shared cache; the worktree's own sources keep their worktree paths,
-so they hit only within that worktree. `-file-compilation-dir .` keeps the
-project directory out of the keys (it only sets the debug-info compilation dir;
-source paths stay absolute).
+so they hit only within that worktree. Mapping the worktree path too would make
+compiler diagnostics and `#filePath` (which UI tests read) name the mapped path,
+so it is not done. `-file-compilation-dir .` and `-fcoverage-compilation-dir=.`
+keep the project directory out of the keys (they only set the debug-info and
+coverage compilation directory; source paths stay absolute).
 
 Ownership and safety:
 - The cache partition is keyed by the selected Xcode and Swift compiler, so a
@@ -353,9 +355,10 @@ def build(derived_data: Path, xcodebuild: list[str]) -> int:
         "COMPILATION_CACHE_ENABLE_CACHING=YES",
         f"COMPILATION_CACHE_CAS_PATH={partition.path}",
         "COMPILATION_CACHE_ENABLE_DIAGNOSTIC_REMARKS=YES",
-        # Keeps the project directory out of every Swift cache key; debug info
-        # still records absolute source paths.
+        # Keep the project directory out of every Swift and Clang cache key;
+        # debug info still records absolute source paths.
         "OTHER_SWIFT_FLAGS=$(inherited) -file-compilation-dir .",
+        "OTHER_CFLAGS=$(inherited) -fcoverage-compilation-dir=.",
     ] if use_cache else []
     counts = {"hits": 0, "misses": 0}
     started = time.monotonic()
