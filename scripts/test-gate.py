@@ -115,6 +115,9 @@ FIXTURE_CATALOG = {
          "pass": "exit 0", "unlocks": "slow"},
         {"id": "slow", "trigger": {"paths": ["slow/**"]}, "command": "echo slow >> \"$GATE_TRACE\"; sleep 30",
          "inputs": ["slow"], "budgetSeconds": 1, "timeoutSeconds": 2, "class": "light", "expectedRssMb": 10,
+         "pass": "exit 0", "unlocks": "long"},
+        {"id": "long", "trigger": {"paths": ["long/**"]}, "command": "echo $$ > \"$GATE_TRACE.pid\"; sleep 30",
+         "inputs": ["long"], "budgetSeconds": 40, "timeoutSeconds": 60, "class": "heavy", "expectedRssMb": 10,
          "pass": "exit 0", "unlocks": "land"},
     ],
 }
@@ -168,6 +171,40 @@ def runner(base: Path, env: dict) -> None:
     assert result.returncode == 1 and "slow: TIMEOUT" in result.stdout, result.stdout
     assert "TIMEOUT slow exceeded its hard limit of 2s" in result.stdout
     assert result.seconds < 15, "the timed-out step must not run to completion"
+
+    # A worker hands the plan to the background and keeps working; it can watch, wait and cancel.
+    repo.write("slow/file", "")
+    (repo.root / "slow/file").unlink()
+    repo.write("long/file", "long\n")
+    result = repo.gate("submit")
+    assert result.returncode == 0 and "submitted job" in result.stdout, result.stdout + result.stderr
+    job = result.stdout.split("submitted job ")[1].split()[0]
+    pid_file = Path(str(trace) + ".pid")
+    deadline = time.monotonic() + 30
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.2)
+    step_pid = int(pid_file.read_text())
+    listing = repo.gate("jobs").stdout
+    assert f"{job}  running" in listing, listing
+    cancelled = repo.gate("cancel", job)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            os.kill(step_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.2)
+    else:
+        raise AssertionError("cancel must stop the running step's process group")
+    waited = repo.gate("wait", job)
+    evidence.append({"case": "submit, jobs, cancel, wait", "jobs": listing, "cancel": cancelled.stdout, "wait": waited.stdout[-1500:]})
+    assert waited.returncode != 0 and f"job {job} cancelled" in waited.stdout, waited.stdout
+    (repo.root / "long/file").unlink()
+    result = repo.gate("submit")
+    job = result.stdout.split("submitted job ")[1].split()[0]
+    waited = repo.gate("wait", job)
+    assert waited.returncode == 0 and f"job {job} passed" in waited.stdout and "reused" in waited.stdout, waited.stdout
+    repo.write("slow/file", "slow\n")
 
     sys.path.insert(0, str(GATE.parent))
     import gate  # noqa: E402

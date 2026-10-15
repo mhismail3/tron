@@ -589,6 +589,122 @@ def catalog_table() -> int:
     return 0
 
 
+# ---------------------------------------------------------------- background jobs
+
+def _jobs_dir(root: Path) -> Path:
+    return _common_dir(root) / "work" / "gate" / "jobs"
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _job(root: Path, job_id: str) -> dict:
+    matches = sorted(_jobs_dir(root).glob(f"{job_id}*/job.json"))
+    if len(matches) != 1:
+        raise GateError(f"no single gate job matches {job_id}; see scripts/tron gate jobs")
+    job = json.loads(matches[0].read_text())
+    exit_file = matches[0].parent / "exit"
+    if exit_file.exists():
+        job["state"], job["exit"] = ("passed" if exit_file.read_text().strip() == "0" else "failed"), int(exit_file.read_text())
+    elif (matches[0].parent / "cancelled").exists():
+        job["state"] = "cancelled"
+    elif not _alive(job["pid"]):
+        job["state"] = "ended without a result"
+    else:
+        job["state"] = "running"
+    job["dir"] = str(matches[0].parent)
+    return job
+
+
+def submit(root: Path, argv: List[str]) -> int:
+    """Hand a gate run to the background and return at once: the session keeps working.
+
+    The job runs `gate run` detached in its own process group; heavy shards wait in the
+    host queue as usual. `jobs` shows its live state, queue position and last line, `wait`
+    returns its result to the requesting session and `cancel` stops it.
+    """
+    job_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}"
+    directory = _jobs_dir(root) / job_id
+    directory.mkdir(parents=True)
+    output = directory / "output.log"
+    script = (f"{shlex.quote(sys.executable)} {shlex.quote(str(Path(__file__).resolve()))} run "
+              + " ".join(shlex.quote(a) for a in argv)
+              + f" > {shlex.quote(str(output))} 2>&1; echo $? > {shlex.quote(str(directory / 'exit'))}")
+    process = subprocess.Popen(["bash", "-c", script], cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, start_new_session=True)
+    session = os.environ.get("WORK_SESSION_ID") or os.environ.get("PI_SESSION_ID") or ""
+    (directory / "job.json").write_text(json.dumps({
+        "id": job_id, "pid": process.pid, "worktree": str(root), "session": session, "args": argv,
+        "submittedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}, indent=2) + "\n")
+    print(f"gate: submitted job {job_id} (pid {process.pid}); keep working.\n"
+          f"  progress: scripts/tron gate jobs\n  result:   scripts/tron gate wait {job_id}\n"
+          f"  cancel:   scripts/tron gate cancel {job_id}")
+    return 0
+
+
+def jobs(root: Path) -> int:
+    directory = _jobs_dir(root)
+    queued = {item.get("pid"): position for position, item in enumerate(heavy.waiters(heavy._directory()), 1)}
+    for path in sorted(directory.glob("*/job.json")) if directory.is_dir() else []:
+        job = _job(root, path.parent.name)
+        if job["state"] != "running" and job["worktree"] != str(root):
+            continue
+        output = Path(job["dir"]) / "output.log"
+        last = _last_line(output)
+        # The waiting runner is a child of the job's shell; its heavy ticket names its own pid.
+        position = next((f", heavy queue #{n}" for pid, n in queued.items() if pid and _parent_chain(pid, job["pid"])), "")
+        print(f"{job['id']}  {job['state']}{position}  {Path(job['worktree']).name}  {' '.join(job['args']) or '(plan)'}\n    {last}")
+    return 0
+
+
+def _parent_chain(pid: int, ancestor: int) -> bool:
+    for _ in range(6):
+        if pid == ancestor:
+            return True
+        done = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True)
+        if not done.stdout.strip():
+            return False
+        pid = int(done.stdout.strip())
+    return False
+
+
+def wait(root: Path, job_id: str) -> int:
+    job = _job(root, job_id)
+    output = Path(job["dir"]) / "output.log"
+    printed = 0
+    while job["state"] == "running":
+        time.sleep(1)
+        text = output.read_text(errors="replace") if output.exists() else ""
+        if len(text) > printed:
+            print(text[printed:], end="", flush=True)
+            printed = len(text)
+        job = _job(root, job_id)
+    text = output.read_text(errors="replace") if output.exists() else ""
+    print(text[printed:], end="")
+    print(f"gate: job {job['id']} {job['state']}")
+    return int(job.get("exit", 1)) if job["state"] in ("passed", "failed") else 1
+
+
+def cancel(root: Path, job_id: str) -> int:
+    job = _job(root, job_id)
+    if job["state"] != "running":
+        print(f"gate: job {job['id']} already {job['state']}")
+        return 0
+    (Path(job["dir"]) / "cancelled").touch()
+    # The job owns its process group; the runner's own step groups are killed by its TERM handler.
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(job["pid"], signal.SIGTERM)
+    print(f"gate: cancelled job {job['id']}")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="tron gate", description="Deterministic gated verification (tools/work/README.md#gate)")
     commands = parser.add_subparsers(dest="action", required=True)
@@ -603,6 +719,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         if name == "run":
             sub.add_argument("steps", nargs="*", help="step ids or shard names (default: the whole plan)")
             sub.add_argument("--force", action="store_true", help="rerun even shards with a valid cached pass")
+    sub = commands.add_parser("submit", help="hand `gate run [args]` to the background and return at once")
+    sub.add_argument("args", nargs=argparse.REMAINDER)
+    commands.add_parser("jobs", help="background gate jobs with live state and heavy-queue position")
+    for name in ("wait", "cancel"):
+        commands.add_parser(name, help=f"{name} a background gate job").add_argument("job")
     sub = commands.add_parser("report", help="wall time and peak RSS per shard from recorded runs")
     sub.add_argument("--json", action="store_true")
     commands.add_parser("catalog", help="print the step catalog")
@@ -613,6 +734,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             return report(root, args.json)
         if args.action == "catalog":
             return catalog_table()
+        if args.action == "submit":
+            return submit(root, args.args)
+        if args.action == "jobs":
+            return jobs(root)
+        if args.action == "wait":
+            return wait(root, args.job)
+        if args.action == "cancel":
+            return cancel(root, args.job)
         config = _config(root)
         catalog = load_catalog()
         change = change_for(root, _base_ref(root, config, args.base), args.tests)
@@ -652,5 +781,16 @@ def _named(catalog: dict, change: Change, planned: List[Shard], names: List[str]
     return wanted
 
 
+def _terminate(_signal, _frame) -> None:
+    # Cancellation (gate cancel, a closed terminal): unwind so the running step's group is killed.
+    raise KeyboardInterrupt
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    for received in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(received, _terminate)
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("gate: interrupted; the running step was stopped", file=sys.stderr)
+        sys.exit(130)

@@ -34,12 +34,13 @@ class Fixture:
         self.log.touch()
         self.environment = {**{k: v for k, v in os.environ.items() if k != "TRON_HEAVY_LEASE_HELD"},
                             "TRON_HEAVY_DIR": str(root / "queue"), "TRON_HEAVY_SLOTS": "2",
-                            "TRON_HEAVY_MAX_LOAD": "100000", **environment}
+                            "TRON_HEAVY_MAX_LOAD": "100000", "TRON_HEAVY_AVAILABLE_MB": "1000000",
+                            "TRON_HEAVY_MEMORY_BUDGET_MB": "1000000", **environment}
         self.processes: dict[str, subprocess.Popen] = {}
 
-    def start(self, name: str, **environment: str) -> subprocess.Popen:
+    def start(self, name: str, need_mb: int = 3000, **environment: str) -> subprocess.Popen:
         output = (self.root / f"{name}.out").open("w")
-        process = subprocess.Popen([sys.executable, str(HEAVY), "run", "--owner", name, "--",
+        process = subprocess.Popen([sys.executable, str(HEAVY), "run", "--owner", name, "--need-mb", str(need_mb), "--",
                                     sys.executable, "-c", WORK, str(self.log), name, str(self.root / f"release-{name}")],
                                    env={**self.environment, **environment}, stdout=output, stderr=subprocess.STDOUT)
         self.processes[name] = process
@@ -201,8 +202,45 @@ def case_inherited_slot_never_waits(root: Path) -> dict:
         fixture.close()
 
 
+def case_memory_admission(root: Path) -> dict:
+    """Free slots do not admit a step whose expected RSS does not fit (#1023)."""
+    fixture = Fixture(root, TRON_HEAVY_SLOTS="4", TRON_HEAVY_MEMORY_BUDGET_MB="10000")
+    try:
+        fixture.start("a", need_mb=6000)
+        wait_until(lambda: "a" in fixture.running(), "the first heavy step always starts")
+        fixture.start("b", need_mb=6000)
+        wait_until(lambda: "waiting for memory: heavy steps claim 6000 MB of the 10000 MB heavy budget" in fixture.output("b"),
+                   "b waits on the heavy memory budget with free slots")
+        fixture.start("c", need_mb=1000)
+        wait_until(lambda: "queued at position 2 of 2" in fixture.output("c"), "c keeps FIFO order behind b")
+        status = fixture.status()
+        assert "6000 MB claimed" in status and "needs 6000 MB" in status, status
+        time.sleep(1.5)
+        assert fixture.running() == {"a"}, fixture.running()
+        fixture.release("a")
+        wait_until(lambda: {"b", "c"} <= fixture.running(), "b and c fit together once a ends")
+        for name in ("b", "c"):
+            fixture.release(name)
+        # Host memory: with too little available beyond the reserve, a second step waits.
+        (root / "low").mkdir()
+        low = Fixture(root / "low", TRON_HEAVY_SLOTS="4", TRON_HEAVY_AVAILABLE_MB="7000", TRON_HEAVY_RESERVE_MB="6144")
+        try:
+            low.start("d", need_mb=2000)
+            wait_until(lambda: "d" in low.running(), "d starts")
+            low.start("e", need_mb=2000)
+            wait_until(lambda: "host has 856 MB available beyond the 6144 MB reserve" in low.output("e"), "e waits on host memory")
+            low.release("d")
+            wait_until(lambda: "e" in low.running(), "e starts alone")
+            low.release("e")
+        finally:
+            low.close()
+        return {"started": fixture.started(), "status": status.splitlines()}
+    finally:
+        fixture.close()
+
+
 def main() -> int:
-    cases = [case_slots_fifo_and_positions, case_holder_killed_slot_follows_command_tree,
+    cases = [case_memory_admission, case_slots_fifo_and_positions, case_holder_killed_slot_follows_command_tree,
              case_dead_waiter_leaves_queue, case_load_gate_is_bounded, case_inherited_slot_never_waits]
     evidence = []
     failed = False
