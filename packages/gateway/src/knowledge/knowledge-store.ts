@@ -188,12 +188,19 @@ function invalid(message: string): GatewayError { return new GatewayError("inval
 /** A note's labels and retirement are owner state that a native client's typed draft
  * does not model. An edit that omits them keeps the current revision's, so a confirmation
  * or edit cannot silently remove a note from the owner's role; an edit that names them
- * replaces them. */
+ * replaces them. `retired: false` clears retirement and is never stored. */
 function carryNoteMarks(current: KnowledgeRecord, content: NoteContent): NoteContent {
-  if (current.kind !== "note") return content;
+  if (current.kind !== "note") return storedNoteContent(content);
   const tags = content.tags ?? current.content.tags;
   const retired = content.retired ?? current.content.retired;
-  return { ...content, ...(tags ? { tags } : {}), ...(retired ? { retired } : {}) };
+  const { retired: _named, ...rest } = content;
+  return { ...rest, ...(tags ? { tags } : {}), ...(retired ? { retired: true } : {}) };
+}
+/** A stored note revision holds `retired: true` or nothing. */
+function storedNoteContent(content: NoteContent): NoteContent {
+  if (content.retired !== false) return content;
+  const { retired: _cleared, ...rest } = content;
+  return rest;
 }
 function requestHash(operation: string, request: unknown): string { return createHash("sha256").update(operation).update("\0").update(JSON.stringify(request)).digest("hex"); }
 function now(): string { return new Date().toISOString(); }
@@ -1789,7 +1796,7 @@ export class KnowledgeStore {
       return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, preview: request.preview } }, request.expectedRevision);
     }, undefined, signal);
   }
-  async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record)); }
+  async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, { ...request.record, content: storedNoteContent(request.record.content) })); }
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, content: carryNoteMarks(current, request.record.content), id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
   private assertSourceDecisionAuthority(current: KnowledgeRecord & { kind: "source" }, next: KnowledgeRecordDraft & { kind: "source" }, producer: string | undefined): void {
     if (!isConnectorProducer(producer)) return;

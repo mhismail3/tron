@@ -151,18 +151,15 @@ bounded media loading are complete; physical acceptance and the Phase 6 exit gat
 ## Reproduction
 
 Generate and build before either run. The performance tests skip unless the
-hosted test process sees `TRON_PERFORMANCE_BASELINE=1`, so normal focused/full
-suites remain fast. xcodebuild forwards a caller environment variable to the test
+hosted test process sees `TRON_PERFORMANCE_BASELINE=1`, so ordinary runs stay
+fast. The baseline of record is the pinned device run below: `scripts/tron-ios-test`
+builds only the UI-validation products, so it does not run this target. xcodebuild forwards a caller environment variable to the test
 process only with the `TEST_RUNNER_` prefix (which it strips); a scheme
 environment macro such as `$(NAME)` is not expanded from the caller's
 environment or from a command-line build setting (verified 2026-09-27 with
 Xcode 26.6: both variants skipped, the prefixed form ran).
 
 ```bash
-# Exact repository-owned simulator (Test configuration); unique log/result paths are automatic.
-TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1 scripts/tron-ios-test run \
-  --only-testing TronMobileTests/ChatPerformanceBaselineTests
-
 # Provisioned pinned device, optimized DevicePerformance build, under the
 # device's host-wide lease (run from packages/ios-app).
 DEVICE_ID=<pinned-device-coredevice-id>
@@ -173,7 +170,7 @@ TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1 python3 ../../scripts/ios-test-lock.py \
   -project TronMobile.xcodeproj -scheme 'Tron Device Performance' \
   -configuration DevicePerformance -destination "platform=iOS,id=$DEVICE_ID" \
   -derivedDataPath /tmp/tron-perf-device-derived \
-  -only-testing:TronMobileTests/ChatPerformanceBaselineTests \
+  -only-testing:TronMobileProfiling/ChatPerformanceBaselineTests \
   -resultBundlePath /tmp/tron-perf-device.xcresult
 ```
 

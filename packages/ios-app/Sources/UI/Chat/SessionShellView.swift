@@ -79,18 +79,9 @@ struct SessionShellView: View {
     @State private var knowledgeDraftIdentity: KnowledgePresentationIdentity?
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
+    @State private var projectSettings: ProjectSettingsRoute?
     @State private var search = ""
-    @State private var contentSearchSessionIDs: Set<String> = []
-    @State private var searchResults: [SessionSearchResult] = []
-    @State private var searchGroups: [SessionSearchSessionGroup] = []
-    @State private var searchProfileStatuses: [SessionSearchProfileStatus] = []
-    @State private var searchLoading = false
-    @State private var remoteRankingEnabled = false
-    @State private var remoteRankingError: String?
-    @State private var rankingPolicyTask: Task<Void, Never>?
-    @State private var restoringRankingPolicy = false
     @State private var showingSearch = false
-    @State private var showingSearchOptions = false
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
     @State private var archiveConfirmation: SessionArchiveConfirmation?
@@ -112,6 +103,12 @@ struct SessionShellView: View {
     @State private var dashboardReconcileTask: Task<Void, Never>?
     @State private var homeStatusSurfaceToken: PresentationSurfaceToken?
     @State private var mountedHomeChatRouteID: String?
+    @State private var homeSectionSheet: HomeDashboardSections.Section?
+    @State private var showingHomeUsageProviders = false
+    /// When the Home view's first-appearance stagger began. Nil while the view's
+    /// list is unmounted or another view is selected, so each entry fades its
+    /// sections in once; live catalog refreshes leave it alone.
+    @State private var homeRevealStart: Date?
 
     init() {
         let appSettings = AppLocalBehaviorSettings.shared
@@ -182,17 +179,23 @@ struct SessionShellView: View {
                 })
                 .presentationDragIndicator(.hidden)
             }
-            .tronManagedSheet(
-                isPresented: $showingSearchOptions,
-                identity: "dashboard.search-options"
-            ) {
-                searchOptionsSheet
+            .tronManagedSheet(item: $projectSettings, identity: { "dashboard.project-settings.\($0.id)" }) { route in
+                ProjectSettingsSheet(route: route)
             }
             .tronManagedSheet(
                 isPresented: $showingServerFilter,
                 identity: "dashboard.server-filter"
             ) {
                 serverFilterSheet
+            }
+            .tronManagedSheet(item: $homeSectionSheet, identity: { "dashboard.home-section.\($0.id)" }) { section in
+                homeSectionRowsSheet(section)
+            }
+            .tronManagedSheet(
+                isPresented: $showingHomeUsageProviders,
+                identity: "dashboard.home-usage-providers"
+            ) {
+                HomeUsageProvidersSheet(onDone: { showingHomeUsageProviders = false })
             }
             .tronManagedSheet(
                 item: $sessionToDelete,
@@ -226,9 +229,6 @@ struct SessionShellView: View {
             .onChange(of: model.profiles.selected?.id, initial: true) { previousProfileID, profileID in
                 if previousProfileID != profileID {
                     routeReplacementOwner.invalidate(); knowledgeDraftText = nil; knowledgeDraftIdentity = nil
-                    rankingPolicyTask?.cancel(); rankingPolicyTask = nil
-                    remoteRankingEnabled = profileID.map(model.sessionSearchConsent(for:)) ?? false
-                    remoteRankingError = nil
                 }
                 var route = presentedSession
                 profileRouteOwner.reconcile(
@@ -256,12 +256,6 @@ struct SessionShellView: View {
                 guard activity.allowsPresentationPublication else { return }
                 scheduleDashboardReconciliation()
             }
-            .onChange(of: search) { _, value in
-                if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    contentSearchSessionIDs = []; searchResults = []; searchGroups = []; searchProfileStatuses = []
-                    model.dismissSessionSearch()
-                }
-            }
             .onChange(of: activity, initial: true) { _, current in
                 dashboardPresentationIsActive = current.allowsPresentationPublication
                 if dashboardPresentationIsActive {
@@ -269,65 +263,21 @@ struct SessionShellView: View {
                 } else {
                     dashboardReconcileTask?.cancel()
                     dashboardReconcileTask = nil
-                    model.dismissSessionSearch()
-                    searchLoading = false
                 }
             }
             .onDisappear {
                 dashboardReconcileTask?.cancel()
                 dashboardReconcileTask = nil
-                rankingPolicyTask?.cancel()
-                rankingPolicyTask = nil
+            }
+            // Settings opens with this Mac's sections already read: warm the shared
+            // snapshot once a Gateway is connected (and again when it goes stale).
+            .task(id: model.connectionState == .connected ? model.settingsFreshness : nil) {
+                guard model.connectionState == .connected else { return }
+                try? await model.refreshSettingsSnapshot(for: SettingsTarget.global.gatewayTarget)
             }
             .task(id: model.actionablePushNavigationRequest?.id) {
                 guard let request = model.actionablePushNavigationRequest else { return }
                 await presentPushNavigation(request)
-            }
-            .task(id: "search-policy:\(model.sessionSearchPolicyDemandIdentity):\(model.profileRevision):\(activity)") {
-                guard activity.allowsPresentationPublication,
-                      let profileID = model.profiles.selected?.id else { return }
-                let demand = model.sessionSearchPolicyDemandIdentity
-                restoringRankingPolicy = true
-                defer {
-                    if model.profiles.selected?.id == profileID,
-                       model.sessionSearchPolicyDemandIdentity == demand {
-                        restoringRankingPolicy = false
-                    }
-                }
-                await model.restoreSessionSearchPolicy(profileID: profileID, force: true)
-                guard !Task.isCancelled, model.profiles.selected?.id == profileID,
-                      model.sessionSearchPolicyDemandIdentity == demand else { return }
-                guard !model.sessionSearchPolicyMutationIsInFlight(for: profileID) else { return }
-                remoteRankingEnabled = model.sessionSearchConsent(for: profileID)
-                remoteRankingError = nil
-            }
-            .task(id: "\(model.profiles.selected?.id ?? ""):\(search):\(remoteRankingEnabled):\(activity):\(serverFilter.searchIdentity):\(model.profileRevision):\(model.sessionSearchConsent(for: model.profiles.selected?.id ?? ""))") {
-                guard activity.allowsPresentationPublication else { return }
-                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
-                guard !Task.isCancelled else { return }
-                let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !query.isEmpty else {
-                    contentSearchSessionIDs = []; searchResults = []; searchGroups = []; searchProfileStatuses = []; searchLoading = false
-                    return
-                }
-                searchLoading = true
-                let localGroups = dashboardPresentation.sessions.filter { session in
-                    serverFilter.allows(session.gatewayProfileID, selectedProfileID: model.profiles.selected?.id)
-                        && (session.title.localizedCaseInsensitiveContains(query) || session.cwd.localizedCaseInsensitiveContains(query))
-                }.map { session in
-                    SessionSearchSessionGroup(profileID: session.gatewayProfileID ?? "unknown", profileLabel: session.gatewayProfileLabel ?? "Gateway", sessionId: session.id, title: session.title, cwd: session.cwd, updatedAt: session.updatedAt, passages: [], isLocalMatch: true)
-                }
-                searchGroups = localGroups
-                let targets = model.dashboardServerSources
-                    .filter { serverFilter.allows($0.profileID, selectedProfileID: model.profiles.selected?.id) }
-                    .map { SessionSearchProfileTarget(profileID: $0.profileID, label: $0.label, capabilities: $0.capabilities, isSelected: $0.profileID == model.profiles.selected?.id) }
-                let aggregate = await model.searchSessions(query: query, targets: targets, remoteRanking: remoteRankingEnabled)
-                guard !Task.isCancelled else { return }
-                searchGroups = SessionSearchGrouping.merge(local: localGroups, remote: aggregate.groups)
-                searchProfileStatuses = aggregate.profiles
-                searchResults = aggregate.groups.flatMap(\.passages)
-                contentSearchSessionIDs = Set(searchGroups.map(\.sessionId))
-                searchLoading = false
             }
     }
 
@@ -431,7 +381,10 @@ struct SessionShellView: View {
             header: dashboardHeader,
             onSelect: selectDashboard,
             actions: dashboardMenuActions,
-            showingSearch: showingSearch
+            showingSearch: showingSearch,
+            floatingAccessory: showsHomeFloatingButton
+                ? AnyView(HomeFloatingButton(state: HomeButtonIndicatorState(status: model.homeStatus.status), action: openHome))
+                : nil
         ) {
             sessionDashboardContent
         } search: {
@@ -446,7 +399,6 @@ struct SessionShellView: View {
                     initialEditorText: route.editorText,
                     initialModel: route.initialModel,
                     initialHistoryEntryID: route.initialHistoryEntryID,
-                    initialSearchResult: route.initialSearchResult,
                     isHomeRoute: route.isHome,
                     onForkCreated: present,
                     performanceSignposts: model.performanceSignposts
@@ -497,14 +449,10 @@ struct SessionShellView: View {
             text: $search,
             prompt: "Search sessions",
             focusOnAppear: true,
-            onClose: dismissDashboardSearch,
-            onOptions: { showingSearchOptions = true }
+            onClose: dismissDashboardSearch
         )
-        .padding(.horizontal, 8)
+        .padding(.horizontal, TronSpacing.section)
         .padding(.vertical, 8)
-        // The search chrome is overlaid by DashboardChrome. Use an opaque
-        // dashboard-colored backing so translucent result rows cannot show
-        // through it while the list scrolls underneath.
         .simultaneousGesture(
             DragGesture(minimumDistance: 16)
                 .onEnded { value in
@@ -513,68 +461,6 @@ struct SessionShellView: View {
                     dismissDashboardSearch()
                 }
         )
-    }
-
-    private var searchRankingProfileLabel: String {
-        model.profiles.selected?.label ?? "No connected Gateway"
-    }
-
-    private var searchRankingIsEnabled: Bool {
-        guard let profileID = model.profiles.selected?.id else { return false }
-        return !restoringRankingPolicy && !model.sessionSearchPolicyMutationIsInFlight(for: profileID)
-    }
-
-    private var searchRankingDetail: String {
-        if restoringRankingPolicy { return "Checking consent for \(searchRankingProfileLabel)…" }
-        if model.profiles.selected == nil { return "Connect a Gateway before enabling remote ranking" }
-        if model.profiles.selected.map({ model.sessionSearchPolicyMutationIsInFlight(for: $0.id) }) == true {
-            return "Saving consent…"
-        }
-        if let remoteRankingError { return remoteRankingError }
-        return "Up to 0.2688¢ per query and 2.688¢ per day"
-    }
-
-    private var searchOptionsSheet: some View {
-        TronDashboardFilterSheet(
-            title: "Search options",
-            accent: .tronEmerald,
-            detents: [.medium],
-            onDone: { showingSearchOptions = false }
-        ) {
-            TronDashboardFilterSectionTitle(
-                title: "Ranking",
-                detail: "Keyword search stays on this Gateway. Optional remote ranking sends the query and up to 16 snippets to Jev."
-            )
-            TronToggleRow(
-                icon: "arrow.up.arrow.down",
-                title: "Use remote ranking",
-                detail: searchRankingDetail,
-                accent: .tronEmerald,
-                isEnabled: searchRankingIsEnabled,
-                isOn: Binding(
-                    get: { remoteRankingEnabled },
-                    set: { value in updateRemoteRanking(value) }
-                )
-            )
-        }
-    }
-
-    private func updateRemoteRanking(_ enabled: Bool) {
-        guard !restoringRankingPolicy,
-              let profileID = model.profiles.selected?.id,
-              !model.sessionSearchPolicyMutationIsInFlight(for: profileID) else { return }
-        remoteRankingEnabled = enabled
-        remoteRankingError = nil
-        rankingPolicyTask = Task { @MainActor in
-            do { _ = try await model.setSessionSearchRemoteRanking(enabled, profileID: profileID) }
-            catch is CancellationError { return }
-            catch {
-                guard !Task.isCancelled, model.profiles.selected?.id == profileID else { return }
-                remoteRankingEnabled = !enabled
-                remoteRankingError = "Could not save ranking consent"
-                model.presentError(error)
-            }
-        }
     }
 
     private func present(_ route: AppModel.SessionNavigationRoute) {
@@ -629,6 +515,7 @@ struct SessionShellView: View {
         routeReplacementOwner.invalidate()
         showNewSession = false
         showSettings = false
+        projectSettings = nil
         showingServerFilter = false
         if showingSearch { dismissDashboardSearch() }
 
@@ -679,6 +566,8 @@ struct SessionShellView: View {
                 requestID: request.id,
                 pendingRequestID: model.pushNavigationRequest?.id
             ) else { return }
+            // A failed navigation never reaches the chat, so its staged action must not outlive it.
+            if let staged = model.stagedSettingsDecision { model.consumeStagedSettingsDecision(staged.id) }
             model.consumePushNavigation(request.id)
             model.presentError(error)
         }
@@ -880,39 +769,32 @@ struct SessionShellView: View {
         )
     }
 
+    /// Search results: the dashboard's own session rows, ranked by title with
+    /// `SessionTitleSearch` over the sessions the server filter shows. The
+    /// query never leaves the iPhone.
     private var searchResultList: some View {
-        SessionSearchResultsView(
-            loading: searchLoading,
-            statuses: searchProfileStatuses,
-            groups: searchGroups,
-            onOpenSession: openLocalSearchGroup,
-            onOpenResult: openSearchResult
-        )
+        let results = SessionTitleSearch.filter(filteredSessions, query: search) { $0.title }
+        return List {
+            ForEach(results, id: \.dashboardID) { session in
+                sessionButton(session, showsContext: true)
+            }
+        }
+        .overlay {
+            if results.isEmpty {
+                TronPlaceholderState(
+                    title: "No matches",
+                    detail: "No session title matches \u{201C}\(search.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}.",
+                    icon: "magnifyingglass",
+                    accent: .tronEmerald
+                )
+            }
+        }
+        .listStyle(.plain)
+        .environment(\.defaultMinListRowHeight, 38)
+        .contentMargins(.bottom, 92)
+        .tronCollectionSurface()
         .tronScrollEdgeChrome()
         .tronDashboardScroll(dashboardHeader, topMargin: 6)
-    }
-
-    private func openLocalSearchGroup(_ group: SessionSearchSessionGroup) {
-        let intent = navigationOwner.begin()
-        Task { @MainActor in
-            guard let route = try? await model.navigationRoute(profileID: group.profileID, sessionID: group.sessionId),
-                  navigationOwner.admit(intent), model.ownsNavigationRoute(route) else { return }
-            present(route)
-        }
-    }
-
-    private func openSearchResult(_ result: SessionSearchResult) {
-        let profileID = result.gatewayProfileID ?? model.profiles.selected?.id
-        guard let profileID else { return }
-        let navigationIntent = navigationOwner.begin()
-        Task { @MainActor in
-            do {
-                let route = try await model.navigationRoute(profileID: profileID, sessionID: result.sessionId, searchResult: result)
-                guard navigationOwner.admit(navigationIntent), model.ownsNavigationRoute(route) else { return }
-                dashboardMode = .sessions
-                present(route)
-            } catch is CancellationError { return } catch { model.presentError(error) }
-        }
     }
 
     private var sessionList: some View {
@@ -925,7 +807,15 @@ struct SessionShellView: View {
         // reads that scroll owner's geometry.
         return ScrollViewReader { proxy in
             List {
-                if model.homeStatus.capabilityEnabled {
+                if serverFilter.sortMode == .home {
+                    Section {
+                        HomeUsageSummaryCard(onChooseProviders: { showingHomeUsageProviders = true })
+                            .tronDashboardSectionReveal(order: 0, revealStart: homeRevealStart)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(SessionDashboardLayout.rowInsets)
+                    }
+                } else if model.homeStatus.capabilityEnabled {
                     Section {
                         homePinnedButton
                     }
@@ -937,7 +827,8 @@ struct SessionShellView: View {
             }
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, 38)
-            .contentMargins(.bottom, 92)
+            // The Home view stacks its floating Home button above the logo button.
+            .contentMargins(.bottom, serverFilter.sortMode == .home ? 92 + 56 + HomeDashboardLayout.floatingButtonSpacing : 92)
             .tronCollectionSurface()
             .tronScrollEdgeChrome()
             .tronDashboardScroll(dashboardHeader, topMargin: 6)
@@ -949,6 +840,12 @@ struct SessionShellView: View {
                 TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
                 value: filtered.map(\.dashboardID)
             )
+            // Runs after the list mounts, so the hidden first frame is committed
+            // before the stagger animates it in.
+            .task(id: serverFilter.sortMode == .home) {
+                homeRevealStart = serverFilter.sortMode == .home ? Date() : nil
+            }
+            .onDisappear { homeRevealStart = nil }
         }
     }
 
@@ -957,7 +854,9 @@ struct SessionShellView: View {
         _ filtered: [SessionSummary],
         onRevealArchivedRows: @escaping () -> Void
     ) -> some View {
-        if serverFilter.sortMode == .recent {
+        if serverFilter.sortMode == .home {
+            homeSections(filtered)
+        } else if serverFilter.sortMode == .recent {
             Section {
                 ForEach(filtered, id: \.dashboardID) { session in
                     sessionButton(session, showsContext: true)
@@ -1040,7 +939,91 @@ struct SessionShellView: View {
             }
         }
         }
-        archivedContainerSection(onRevealRows: onRevealArchivedRows)
+        if serverFilter.sortMode != .home {
+            archivedContainerSection(onRevealRows: onRevealArchivedRows)
+        }
+    }
+
+    private var showsHomeFloatingButton: Bool {
+        serverFilter.sortMode == .home && model.homeStatus.capabilityEnabled && !showingSearch
+    }
+
+    private func homeDashboardSections(_ filtered: [SessionSummary]) -> HomeDashboardSections {
+        HomeDashboardSections(sessions: filtered)
+    }
+
+    @ViewBuilder
+    private func homeSections(_ filtered: [SessionSummary]) -> some View {
+        let sections = homeDashboardSections(filtered)
+        // The usage card is order 0; present sections follow it in order.
+        let order = sections.revealOrder
+        if let inProgressOrder = order[.inProgress] {
+            Section {
+                ForEach(sections.inProgress, id: \.dashboardID) { session in
+                    sessionButton(session, showsContext: true)
+                        .tronDashboardSectionReveal(order: inProgressOrder, revealStart: homeRevealStart)
+                }
+            } header: {
+                dashboardSectionHeader("In Progress")
+                    .tronDashboardSectionReveal(order: inProgressOrder, revealStart: homeRevealStart)
+            }
+        }
+        if let completedOrder = order[.completed] {
+            cappedHomeSection(.completed, title: "Recently Completed", header: "Recently Completed",
+                              rows: sections.completed, order: completedOrder,
+                              hint: "Shows every recently completed Home worker")
+        }
+        if let unreadOrder = order[.unread] {
+            cappedHomeSection(.unread, title: "Unread", header: "Unread · \(sections.unread.count)",
+                              rows: sections.unread, order: unreadOrder,
+                              hint: "Shows every unread session")
+        }
+    }
+
+    /// Recently Completed and Unread: the first rows, with View All in the
+    /// header, once the section exceeds its cap, opening the shared sheet of
+    /// every row in the section.
+    private func cappedHomeSection(
+        _ section: HomeDashboardSections.Section,
+        title: String,
+        header: String,
+        rows: [SessionSummary],
+        order: Int,
+        hint: String
+    ) -> some View {
+        Section {
+            ForEach(rows.prefix(HomeDashboardLayout.sectionRowLimit), id: \.dashboardID) { session in
+                sessionButton(session, showsContext: true)
+                    .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
+            }
+        } header: {
+            dashboardSectionHeader(header, viewAll: rows.count > HomeDashboardLayout.sectionRowLimit ? DashboardSectionHeaderAction(
+                title: "View All",
+                accessibilityLabel: "View all sessions in \(title)",
+                hint: hint,
+                identifier: "home-\(section.rawValue)-view-all",
+                action: { homeSectionSheet = section }
+            ) : nil)
+                .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
+        }
+    }
+
+    /// The View All sheet of a capped Home section. Its rows are computed here,
+    /// once per parent update, and handed to an equatable view, so a catalog
+    /// change that leaves the section's rows unchanged re-renders nothing in it.
+    private func homeSectionRowsSheet(_ section: HomeDashboardSections.Section) -> some View {
+        HomeSectionRowsSheet(
+            section: section,
+            rows: homeDashboardSections(filteredSessions).sheetRows(section).map {
+                HomeSectionRowsSheet.Row(session: $0, activity: dashboardPresentation.activity(for: $0))
+            },
+            onOpen: { session in
+                homeSectionSheet = nil
+                openSession(session)
+            },
+            onDone: { homeSectionSheet = nil }
+        )
+        .equatable()
     }
 
     /// One container row after every workspace group, owned by
@@ -1068,64 +1051,37 @@ struct SessionShellView: View {
     }
 
     private var recentActivityHeader: some View {
-        Text("Recent Activity · active first")
-            .font(TronTypography.sheetSectionHeader)
-            .foregroundStyle(Color.tronEmerald)
-            .textCase(nil)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, SessionDashboardLayout.headerLeadingPadding)
-            .padding(.top, SessionDashboardLayout.headerTopPadding)
-            .padding(.bottom, SessionDashboardLayout.headerBottomPadding)
-            .listRowInsets(SessionDashboardLayout.headerInsets)
+        dashboardSectionHeader("Recent Activity · active first")
+    }
+
+    private func dashboardSectionHeader(_ title: String, viewAll: DashboardSectionHeaderAction? = nil) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: SessionDashboardLayout.iconTextSpacing) {
+            Text(title)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let viewAll {
+                Button(action: viewAll.action) {
+                    Text(viewAll.title)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(viewAll.accessibilityLabel)
+                .accessibilityHint(viewAll.hint)
+                .accessibilityIdentifier(viewAll.identifier)
+            }
+        }
+        .font(TronTypography.sheetSectionHeader)
+        .foregroundStyle(Color.tronEmerald)
+        .textCase(nil)
+        // Symmetric insets: View All lines up with the rows' trailing timestamps.
+        .padding(.horizontal, SessionDashboardLayout.headerLeadingPadding)
+        .padding(.top, SessionDashboardLayout.headerTopPadding)
+        .padding(.bottom, SessionDashboardLayout.headerBottomPadding)
+        .listRowInsets(SessionDashboardLayout.headerInsets)
     }
 
     private var homePinnedButton: some View {
         Button {
-            guard openingSessionID == nil,
-                  let profileID = model.profiles.selected?.id else { return }
-            openingSessionID = "home:\(profileID)"
-            let navigationIntent = navigationOwner.begin()
-            let presentationToken = homeStatusSurfaceToken
-            guard let authority = try? model.homeMutations.authority(profileID: profileID) else {
-                openingSessionID = nil
-                return
-            }
-            let ownsUnresolvedCommand = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
-            let action = HomePinnedRowPolicy.action(
-                for: model.homeStatus.status,
-                hasUnresolvedCommand: ownsUnresolvedCommand
-            )
-            Task {
-                defer { openingSessionID = nil }
-                do {
-                    let status: HomeStatusDTO
-                    switch action {
-                    case .open:
-                        guard let currentStatus = model.homeStatus.status else { return }
-                        status = currentStatus
-                    case .checkReceipt:
-                        try await model.checkHomeControlCompletion(authority: authority)
-                        return
-                    case .designate:
-                        status = try await model.designateHomeAndRefreshStatus(authority: authority)
-                    case .unavailable:
-                        return
-                    }
-                    let route = try model.navigationRouteForHome(profileID: profileID, status: status)
-                    guard navigationOwner.admit(navigationIntent),
-                          model.profiles.selected?.id == profileID,
-                          model.ownsNavigationRoute(route) else { return }
-                    present(route)
-                } catch is CancellationError {
-                    return
-                } catch {
-                    guard navigationOwner.admit(navigationIntent),
-                          model.profiles.selected?.id == profileID,
-                          presentationToken != nil,
-                          homeStatusSurfaceToken == presentationToken else { return }
-                    model.presentError(error)
-                }
-            }
+            openHome()
         } label: {
             HomePinnedRow(
                 status: model.homeStatus.status,
@@ -1152,24 +1108,78 @@ struct SessionShellView: View {
         .transition(.opacity)
     }
 
-    private func sessionButton(_ session: SessionSummary, showsContext: Bool = false) -> some View {
-        return Button {
-            guard openingSessionID == nil else { return }
-            openingSessionID = session.dashboardID
-            let navigationIntent = navigationOwner.begin()
-            Task {
-                defer { openingSessionID = nil }
-                do {
-                    let route = try await model.navigationRoute(for: session)
-                    guard navigationOwner.admit(navigationIntent),
-                          model.ownsNavigationRoute(route) else { return }
-                    present(route)
-                } catch is CancellationError {
+    /// Opens (or sets up) Home. The pinned row and the Home view's floating
+    /// button share this one route decision.
+    private func openHome() {
+        guard openingSessionID == nil,
+              let profileID = model.profiles.selected?.id else { return }
+        openingSessionID = "home:\(profileID)"
+        let navigationIntent = navigationOwner.begin()
+        let presentationToken = homeStatusSurfaceToken
+        guard let authority = try? model.homeMutations.authority(profileID: profileID) else {
+            openingSessionID = nil
+            return
+        }
+        let ownsUnresolvedCommand = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
+        let action = HomePinnedRowPolicy.action(
+            for: model.homeStatus.status,
+            hasUnresolvedCommand: ownsUnresolvedCommand
+        )
+        Task {
+            defer { openingSessionID = nil }
+            do {
+                let status: HomeStatusDTO
+                switch action {
+                case .open:
+                    guard let currentStatus = model.homeStatus.status else { return }
+                    status = currentStatus
+                case .checkReceipt:
+                    try await model.checkHomeControlCompletion(authority: authority)
                     return
-                } catch {
-                    model.presentError(error)
+                case .designate:
+                    status = try await model.designateHomeAndRefreshStatus(authority: authority)
+                case .unavailable:
+                    return
                 }
+                let route = try model.navigationRouteForHome(profileID: profileID, status: status)
+                guard navigationOwner.admit(navigationIntent),
+                      model.profiles.selected?.id == profileID,
+                      model.ownsNavigationRoute(route) else { return }
+                present(route)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard navigationOwner.admit(navigationIntent),
+                      model.profiles.selected?.id == profileID,
+                      presentationToken != nil,
+                      homeStatusSurfaceToken == presentationToken else { return }
+                model.presentError(error)
             }
+        }
+    }
+
+    private func openSession(_ session: SessionSummary) {
+        guard openingSessionID == nil else { return }
+        openingSessionID = session.dashboardID
+        let navigationIntent = navigationOwner.begin()
+        Task {
+            defer { openingSessionID = nil }
+            do {
+                let route = try await model.navigationRoute(for: session)
+                guard navigationOwner.admit(navigationIntent),
+                      model.ownsNavigationRoute(route) else { return }
+                present(route)
+            } catch is CancellationError {
+                return
+            } catch {
+                model.presentError(error)
+            }
+        }
+    }
+
+    private func sessionButton(_ session: SessionSummary, showsContext: Bool = false) -> some View {
+        Button {
+            openSession(session)
         } label: {
             HistoricalSessionRow(
                 session: session,
@@ -1245,6 +1255,13 @@ struct SessionShellView: View {
         .buttonStyle(.plain)
         .textCase(nil)
         .listRowInsets(SessionDashboardLayout.headerInsets)
+        .contextMenu {
+            if !group.path.isEmpty, let profileID = group.profileID ?? model.selectedGatewayProfileID() {
+                Button("Project Settings", systemImage: "folder.badge.gearshape") {
+                    projectSettings = ProjectSettingsRoute(cwd: group.path, profileID: profileID)
+                }
+            }
+        }
         .accessibilityLabel(group.name)
         .accessibilityValue(isExpanded ? "expanded" : "collapsed")
         .accessibilityHint(isExpanded ? "Double tap to hide sessions" : "Double tap to show sessions")
@@ -1289,10 +1306,6 @@ struct SessionShellView: View {
                 session.gatewayProfileID,
                 selectedProfileID: model.profiles.selected?.id
             )
-                && (search.isEmpty
-                    || session.title.localizedCaseInsensitiveContains(search)
-                    || session.cwd.localizedCaseInsensitiveContains(search)
-                    || contentSearchSessionIDs.contains(session.id))
         }
     }
 
@@ -1375,6 +1388,15 @@ struct SessionShellView: View {
     }
 }
 
+/// A section header's trailing action, drawn in the header's own font and tint.
+struct DashboardSectionHeaderAction {
+    let title: String
+    let accessibilityLabel: String
+    let hint: String
+    let identifier: String
+    let action: () -> Void
+}
+
 /// Dashboard row geometry, shared with the archived container's rows so both
 /// surfaces keep one layout.
 enum SessionDashboardLayout {
@@ -1448,6 +1470,8 @@ struct SessionListExpansionControls: View {
     let isEnabled: Bool
     let onShowLess: () -> Void
     let onShowMore: () -> Void
+    var showMoreTitle = "Show more"
+    var showMoreHint: String?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -1457,9 +1481,9 @@ struct SessionListExpansionControls: View {
         layout {
             if canShowMore {
                 expansionButton(
-                    title: "Show more",
+                    title: showMoreTitle,
                     symbolName: "chevron.down",
-                    hint: "Shows 10 more older sessions in \(workspaceName)",
+                    hint: showMoreHint ?? "Shows 10 more older sessions in \(workspaceName)",
                     action: onShowMore
                 )
                 .transition(.opacity)
@@ -1538,6 +1562,38 @@ enum DashboardSessionIndicatorPresentation {
     static let subagentOrbSize = TronTypography.sizeBody3
 }
 
+/// The one status-indicator transition: a session row's status icon and the
+/// floating Home button swap their indicator through this view, so every state
+/// change scales and fades the same way.
+struct DashboardIndicatorSwap<State: Hashable, Content: View>: View {
+    let state: State
+    @ViewBuilder let content: (State) -> Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            content(state)
+                .id(state)
+                .transition(transition)
+        }
+        .animation(animation, value: state)
+    }
+
+    private var transition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .scale(scale: 0.72).combined(with: .opacity),
+            removal: .scale(scale: 1.14).combined(with: .opacity)
+        )
+    }
+
+    private var animation: Animation {
+        reduceMotion
+            ? .easeOut(duration: 0.12)
+            : .spring(response: 0.3, dampingFraction: 0.8)
+    }
+}
+
 struct HistoricalSessionRow: View {
     let session: SessionSummary
     let activity: DashboardSessionActivity
@@ -1572,13 +1628,8 @@ struct HistoricalSessionRow: View {
     private func row(relativeActivity: String) -> some View {
         let trailingStatus = activity == .waitingForUser ? "Waiting for you" : relativeActivity
         return HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
-            ZStack {
-                sessionIndicator
-                    .id(indicatorState)
-                    .transition(indicatorTransition)
-            }
-            .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
-            .animation(indicatorAnimation, value: indicatorState)
+            DashboardIndicatorSwap(state: indicatorState) { _ in sessionIndicator }
+                .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
 
             VStack(alignment: .leading, spacing: showsContext ? 2 : 0) {
                 Text(session.title)
@@ -1611,10 +1662,7 @@ struct HistoricalSessionRow: View {
                         .foregroundStyle(Color.tronEmerald)
                         .accessibilityHidden(true)
                 }
-                Text(trailingStatus)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(activity == .waitingForUser ? Color.tronAmber : Color.tronTextMuted)
-                    .lineLimit(1)
+                SessionRowRelativeTime(text: trailingStatus, isWaiting: activity == .waitingForUser)
             }
         }
         .padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)
@@ -1664,20 +1712,6 @@ struct HistoricalSessionRow: View {
         }
     }
 
-    private var indicatorTransition: AnyTransition {
-        guard !reduceMotion else { return .opacity }
-        return .asymmetric(
-            insertion: .scale(scale: 0.72).combined(with: .opacity),
-            removal: .scale(scale: 1.14).combined(with: .opacity)
-        )
-    }
-
-    private var indicatorAnimation: Animation {
-        reduceMotion
-            ? .easeOut(duration: 0.12)
-            : .spring(response: 0.3, dampingFraction: 0.8)
-    }
-
     private var projectServerContext: String {
         let project = URL(fileURLWithPath: session.cwd).lastPathComponent
         let projectName = project.isEmpty ? session.cwd : project
@@ -1685,184 +1719,6 @@ struct HistoricalSessionRow: View {
             label.isEmpty ? nil : label
         } ?? "Unknown server"
         return "\(projectName) · \(serverName)"
-    }
-}
-
-private struct SessionSearchResultsView: View {
-    let loading: Bool
-    let statuses: [SessionSearchProfileStatus]
-    let groups: [SessionSearchSessionGroup]
-    let onOpenSession: (SessionSearchSessionGroup) -> Void
-    let onOpenResult: (SessionSearchResult) -> Void
-
-    var body: some View {
-        ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if loading {
-                    HStack(spacing: 8) {
-                        ProgressView().tint(.tronEmerald)
-                        Text("Searching connected Gateways…")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                            .foregroundStyle(Color.tronTextMuted)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, SessionDashboardLayout.headerLeadingPadding)
-                    .padding(.vertical, 12)
-                }
-                ForEach(statuses) { status in
-                    if shouldShowStatus(status) {
-                        HStack(spacing: 7) {
-                            Image(systemName: status.state == "error" || status.state == "offline" || rankingUnavailable(status) ? "exclamationmark.circle" : "info.circle")
-                            Text(statusMessage(status))
-                        }
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(status.state == "error" || status.state == "offline" || rankingUnavailable(status) ? Color.tronAmber : Color.tronTextMuted)
-                        .padding(.horizontal, SessionDashboardLayout.headerLeadingPadding)
-                        .padding(.vertical, 8)
-                    }
-                }
-                ForEach(groups) { group in
-                    SessionSearchGroupView(group: group, onOpenSession: { onOpenSession(group) }, onOpenResult: onOpenResult)
-                }
-                if !loading && groups.isEmpty {
-                    ContentUnavailableView(emptyTitle, systemImage: emptySymbol, description: Text(emptyDescription))
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 48)
-                }
-            }
-            .padding(.top, 6)
-            .padding(.bottom, 110)
-        }
-        .scrollIndicators(.hidden)
-        // DashboardChrome presents the search field as bottom chrome. Reserve
-        // its footprint so the last result never sits underneath it after the
-        // keyboard is dismissed.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            Color.clear.frame(height: 76)
-        }
-    }
-
-    private var emptyTitle: String {
-        if statuses.isEmpty { return "No searchable Gateways" }
-        if statuses.allSatisfy({ $0.state == "ready" }) { return "No matches" }
-        if statuses.allSatisfy({ $0.state == "cancelled" }) { return "Search cancelled" }
-        return "Search unavailable"
-    }
-
-    private var emptySymbol: String {
-        statuses.isEmpty || statuses.allSatisfy({ $0.state == "ready" }) ? "magnifyingglass" : "exclamationmark.circle"
-    }
-
-    private var emptyDescription: String {
-        if statuses.isEmpty { return "Connect a Gateway or change the server filter." }
-        if statuses.allSatisfy({ $0.state == "ready" }) { return "Try a title, folder, or conversation phrase." }
-        return statuses.compactMap(\.message).joined(separator: " · ")
-    }
-
-    private func shouldShowStatus(_ status: SessionSearchProfileStatus) -> Bool {
-        guard status.state != "cancelled" else { return false }
-        if status.state != "ready" { return true }
-        return rankingUnavailable(status)
-    }
-
-    private func rankingUnavailable(_ status: SessionSearchProfileStatus) -> Bool {
-        guard let ranking = status.response?.ranking else { return false }
-        return SessionSearchCoveragePresentation.rankingWarning(for: ranking) != nil
-    }
-
-    private func statusMessage(_ status: SessionSearchProfileStatus) -> String {
-        if let message = status.message, !message.isEmpty { return "\(status.label): \(message)" }
-        if let ranking = status.response?.ranking,
-           let warning = SessionSearchCoveragePresentation.rankingWarning(for: ranking) {
-            return "\(status.label): \(warning)"
-        }
-        return "\(status.label): \(status.state)"
-    }
-}
-
-private struct SessionSearchGroupView: View {
-    let group: SessionSearchSessionGroup
-    let onOpenSession: () -> Void
-    let onOpenResult: (SessionSearchResult) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Image(systemName: "bubble.left.and.bubble.right").foregroundStyle(Color.tronEmerald)
-                Text(group.title.isEmpty ? group.sessionId : group.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(1)
-                if group.isArchived { archivedLabel }
-                Spacer(minLength: 8)
-                Text(group.profileLabel)
-                    .font(TronTypography.code(size: TronTypography.sizeCaption))
-                    .foregroundStyle(Color.tronTextMuted)
-                    .lineLimit(1)
-            }
-            if !group.cwd.isEmpty {
-                Text(URL(fileURLWithPath: group.cwd).lastPathComponent)
-                    .font(TronTypography.code(size: TronTypography.sizeCaption))
-                    .foregroundStyle(Color.tronTextMuted)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.horizontal, SessionDashboardLayout.headerLeadingPadding)
-        .padding(.top, 14)
-        .padding(.bottom, 7)
-        if group.passages.isEmpty {
-            Button(action: onOpenSession) {
-                row(title: "Open matching session", detail: "Title or workspace match", symbol: "arrow.right.circle")
-            }
-            .buttonStyle(.plain)
-        } else {
-            ForEach(group.passages) { result in
-                Button { onOpenResult(result) } label: {
-                    row(title: result.snippet, detail: "\(result.passageKind == "user" ? "You" : "Tron") · message \(result.ordinal)", symbol: "arrow.up.right")
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    /// One label for the whole session: every passage row in this group is the
-    /// same archived session, so repeating it per row would add noise without
-    /// new information. Opening a result never changes archive state.
-    private var archivedLabel: some View {
-        Text("Archived")
-            .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
-            .foregroundStyle(Color.tronTextMuted)
-            .fixedSize()
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(Color.tronSurfaceElevated))
-            .accessibilityIdentifier("session-search-archived-\(group.sessionId)")
-    }
-
-    private func row(title: String, detail: String, symbol: String) -> some View {
-        HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
-            Image(systemName: symbol)
-                .font(TronTypography.sans(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
-                .foregroundStyle(Color.tronEmerald)
-                .frame(width: SessionDashboardLayout.iconColumnWidth)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Text(detail)
-                    .font(TronTypography.code(size: TronTypography.sizeCaption))
-                    .foregroundStyle(Color.tronTextMuted)
-            }
-            Spacer(minLength: 6)
-        }
-        .padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .tronGlassSurface(accent: .tronEmerald, cornerRadius: 12, tintOpacity: 0.14, interactive: true)
-        .padding(.horizontal, SessionDashboardLayout.rowContainerHorizontalInset)
-        .padding(.vertical, 2)
     }
 }
 

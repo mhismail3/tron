@@ -1,0 +1,613 @@
+pi-coding-agent 1.0.4 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
+
+Apply with git apply at tag v1.0.4 (7c10bd4337495ee613f2224843ecdf349b80d1df).
+
+1. projectDir. Upstream proposal commit 7a795da1c69cbc2df30485c173d14d2266ead2ba (parent a447ba1).
+   A session can run in a subdirectory (cwd) while its project .pi comes from projectDir:
+   settings, resources, packages, SYSTEM.md, and built-in MCP config, whose stdio servers
+   start in projectDir. Tools, context files, .agents/skills discovery and session grouping
+   keep cwd. Extensions read ctx.projectDir. projectDir defaults to cwd.
+
+2. Image-only queue delivery (Tron #974). AgentSession dequeued a delivered steer or follow-up
+   only when its text was non-empty, so an image-only queued message stayed in
+   getSteeringMessages()/getFollowUpMessages() after delivery. Empty text now dequeues too.
+
+diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
+index c6e160444644530af9831f3135f593bd89ebf798..28f46728894ab5ccc4add4e41f89206a3d9c9614 100644
+--- a/packages/coding-agent/docs/mcp.md
++++ b/packages/coding-agent/docs/mcp.md
+@@ -59,7 +59,7 @@ The format matches other MCP clients:
+ }
+ ```
+ 
+-Stdio servers use `command`, `args`, `env`, and `cwd`. Relative `cwd` values resolve against the session directory. A leading `~/` in `command`, an argument, or `cwd` names the home directory.
++Stdio servers use `command`, `args`, `env`, and `cwd`. Servers start in the project directory, and relative `cwd` values resolve against it. The project directory is the working directory unless an SDK host sets [`projectDir`](sdk.md#session-management), which also selects the project `.pi/mcp.json` and is the root Pi reports to servers. A leading `~/` in `command`, an argument, or `cwd` names the home directory.
+ 
+ HTTP servers use `url`, `headers`, and `oauth` (see [Authenticate with OAuth](#authenticate-with-oauth)). The legacy SSE transport is not supported.
+ 
+diff --git a/packages/coding-agent/docs/sdk.md b/packages/coding-agent/docs/sdk.md
+index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..0066a21b880daea759cbc196fe4e6a38ba5a8559 100644
+--- a/packages/coding-agent/docs/sdk.md
++++ b/packages/coding-agent/docs/sdk.md
+@@ -53,6 +53,8 @@ See the checked [sessions example](../examples/sdk/11-sessions.ts) for creating,
+ 
+ `cwd` selects the workspace used for project resource discovery, context files, session grouping, and built-in tool paths. Pass it explicitly when the target differs from `process.cwd()`.
+ 
++`projectDir` selects the directory whose `.pi` holds the project configuration when it is not `cwd`, for example the repository root of a session that runs in a subdirectory. Project settings, resources, packages, `SYSTEM.md`, and MCP servers then come from `<projectDir>/.pi`, and stdio MCP servers start in `projectDir`. Tools, context files, `.agents/skills` discovery, and session grouping still use `cwd`. Extensions read it as `ctx.projectDir`. `createAgentSessionServices()` passes it to the settings manager and resource loader it creates; when you construct them yourself, pass the same directory to `SettingsManager.create()`, `DefaultResourceLoader`, and `createAgentSession()`. Decide project trust for `projectDir`, since it gates that configuration; `hasTrustRequiringProjectResources(cwd, projectDir)` reports whether a decision is needed. `AgentSessionRuntime` calls its factory with the target `cwd` only, so a factory that uses `projectDir` resolves it for that `cwd`.
++
+ `session.dispose()` aborts active work, invalidates extension contexts, disconnects from the agent, and removes event listeners. Call it when the session is no longer needed.
+ 
+ `AgentSessionRuntime` adds `newSession()`, `switchSession()`, `fork()`, and `importFromJsonl()`. Each operation replaces the active `AgentSession` and recreates services for the target working directory.
+diff --git a/packages/coding-agent/src/core/agent-session-services.ts b/packages/coding-agent/src/core/agent-session-services.ts
+index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca085834e102 100644
+--- a/packages/coding-agent/src/core/agent-session-services.ts
++++ b/packages/coding-agent/src/core/agent-session-services.ts
+@@ -36,12 +36,14 @@ export interface AgentSessionRuntimeDiagnostic {
+  */
+ export interface CreateAgentSessionServicesOptions {
+ 	cwd: string;
++	/** Directory whose `.pi` holds project configuration. Default: `cwd`. See `DefaultResourceLoaderOptions.projectDir`. */
++	projectDir?: string;
+ 	agentDir?: string;
+ 	settingsManager?: SettingsManager;
+ 	modelRuntime?: ModelRuntime;
+ 	modelRuntimeSignal?: AbortSignal;
+ 	extensionFlagValues?: Map<string, boolean | string>;
+-	resourceLoaderOptions?: Omit<DefaultResourceLoaderOptions, "cwd" | "agentDir" | "settingsManager">;
++	resourceLoaderOptions?: Omit<DefaultResourceLoaderOptions, "cwd" | "projectDir" | "agentDir" | "settingsManager">;
+ 	resourceLoaderReloadOptions?: ResourceLoaderReloadOptions;
+ }
+ 
+@@ -72,6 +74,7 @@ export interface CreateAgentSessionFromServicesOptions {
+  */
+ export interface AgentSessionServices {
+ 	cwd: string;
++	projectDir: string;
+ 	agentDir: string;
+ 	modelRuntime: ModelRuntime;
+ 	settingsManager: SettingsManager;
+@@ -136,6 +139,7 @@ export async function createAgentSessionServices(
+ 	options: CreateAgentSessionServicesOptions,
+ ): Promise<AgentSessionServices> {
+ 	const cwd = resolvePath(options.cwd);
++	const projectDir = options.projectDir ? resolvePath(options.projectDir) : cwd;
+ 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getAgentDir();
+ 	const modelRuntime =
+ 		options.modelRuntime ??
+@@ -144,10 +148,11 @@ export async function createAgentSessionServices(
+ 			modelsPath: join(agentDir, "models.json"),
+ 			signal: options.modelRuntimeSignal,
+ 		}));
+-	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
++	const settingsManager = options.settingsManager ?? SettingsManager.create(projectDir, agentDir);
+ 	const resourceLoader = new DefaultResourceLoader({
+ 		...(options.resourceLoaderOptions ?? {}),
+ 		cwd,
++		projectDir,
+ 		agentDir,
+ 		settingsManager,
+ 	});
+@@ -196,6 +201,7 @@ export async function createAgentSessionServices(
+ 
+ 	return {
+ 		cwd,
++		projectDir,
+ 		agentDir,
+ 		modelRuntime,
+ 		settingsManager,
+@@ -216,6 +222,7 @@ export async function createAgentSessionFromServices(
+ ): Promise<CreateAgentSessionResult> {
+ 	return createAgentSession({
+ 		cwd: options.services.cwd,
++		projectDir: options.services.projectDir,
+ 		agentDir: options.services.agentDir,
+ 		modelRuntime: options.services.modelRuntime,
+ 		settingsManager: options.services.settingsManager,
+diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
+index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f8b93acf9d562c0262d580d4098acc47fd91c8e1 100644
+--- a/packages/coding-agent/src/core/agent-session.ts
++++ b/packages/coding-agent/src/core/agent-session.ts
+@@ -249,6 +249,8 @@ export interface AgentSessionConfig {
+ 	sessionManager: SessionManager;
+ 	settingsManager: SettingsManager;
+ 	cwd: string;
++	/** Directory whose `.pi` holds project configuration. Default: `cwd`. */
++	projectDir?: string;
+ 	/** Models to cycle through with Ctrl+P (from --models flag) */
+ 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
+ 	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
+@@ -427,6 +429,7 @@ export class AgentSession {
+ 	private _customTools: ToolDefinition[];
+ 	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
+ 	private _cwd: string;
++	private _projectDir: string;
+ 	private _extensionRunnerRef?: { current?: ExtensionRunner };
+ 	private _initialActiveToolNames?: string[];
+ 	/**
+@@ -479,6 +482,7 @@ export class AgentSession {
+ 		this._resourceLoader = config.resourceLoader;
+ 		this._customTools = config.customTools ?? [];
+ 		this._cwd = config.cwd;
++		this._projectDir = config.projectDir ?? config.cwd;
+ 		this._modelRuntime = config.modelRuntime;
+ 		this._cacheWarmer = config.cacheWarmer;
+ 		if (this._cacheWarmer) {
+@@ -1105,20 +1109,20 @@ export class AgentSession {
+ 		// This ensures the UI sees the updated queue state
+ 		if (event.type === "message_start" && event.message.role === "user") {
+ 			this._overflowRecoveryAttempted = false;
++			// An image-only message queues an empty text entry, so empty text must
++			// dequeue too; otherwise its delivered entry stays queued forever.
+ 			const messageText = contentText(event.message.content, "");
+-			if (messageText) {
+-				// Check steering queue first
+-				const steeringIndex = this._steeringMessages.indexOf(messageText);
+-				if (steeringIndex !== -1) {
+-					this._steeringMessages.splice(steeringIndex, 1);
++			// Check steering queue first
++			const steeringIndex = this._steeringMessages.indexOf(messageText);
++			if (steeringIndex !== -1) {
++				this._steeringMessages.splice(steeringIndex, 1);
++				this._emitQueueUpdate();
++			} else {
++				// Check follow-up queue
++				const followUpIndex = this._followUpMessages.indexOf(messageText);
++				if (followUpIndex !== -1) {
++					this._followUpMessages.splice(followUpIndex, 1);
+ 					this._emitQueueUpdate();
+-				} else {
+-					// Check follow-up queue
+-					const followUpIndex = this._followUpMessages.indexOf(messageText);
+-					if (followUpIndex !== -1) {
+-						this._followUpMessages.splice(followUpIndex, 1);
+-						this._emitQueueUpdate();
+-					}
+ 				}
+ 			}
+ 		}
+@@ -2410,6 +2414,11 @@ export class AgentSession {
+ 		return this._followUpMessages;
+ 	}
+ 
++	/** Directory whose `.pi` holds the project configuration of this session. */
++	get projectDir(): string {
++		return this._projectDir;
++	}
++
+ 	get resourceLoader(): ResourceLoader {
+ 		return this._resourceLoader;
+ 	}
+@@ -3626,6 +3635,7 @@ export class AgentSession {
+ 			this._cwd,
+ 			this.sessionManager,
+ 			new ModelRegistry(this._modelRuntime),
++			this._projectDir,
+ 		);
+ 		if (this._extensionRunnerRef) {
+ 			this._extensionRunnerRef.current = this._extensionRunner;
+diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
+index 11ffaca7eef16a665ef4164b20a86fcfa8c41bbe..ed772774418b3e06ccb85c3d96befd28d09d5745 100644
+--- a/packages/coding-agent/src/core/extensions/runner.ts
++++ b/packages/coding-agent/src/core/extensions/runner.ts
+@@ -360,6 +360,7 @@ export class ExtensionRunner {
+ 	private uiContext: ExtensionUIContext;
+ 	private mode: ExtensionMode = "print";
+ 	private cwd: string;
++	private projectDir: string;
+ 	private sessionManager: SessionManager;
+ 	private modelRegistry: ModelRegistry;
+ 	private errorListeners: Set<ExtensionErrorListener> = new Set();
+@@ -398,11 +399,13 @@ export class ExtensionRunner {
+ 		cwd: string,
+ 		sessionManager: SessionManager,
+ 		modelRegistry: ModelRegistry,
++		projectDir: string = cwd,
+ 	) {
+ 		this.extensions = extensions;
+ 		this.runtime = runtime;
+ 		this.uiContext = noOpUIContext;
+ 		this.cwd = cwd;
++		this.projectDir = projectDir;
+ 		this.sessionManager = sessionManager;
+ 		this.modelRegistry = modelRegistry;
+ 	}
+@@ -895,6 +898,10 @@ export class ExtensionRunner {
+ 				runner.assertActive();
+ 				return runner.cwd;
+ 			},
++			get projectDir() {
++				runner.assertActive();
++				return runner.projectDir;
++			},
+ 			get sessionManager() {
+ 				runner.assertActive();
+ 				return runner.sessionManager;
+diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
+index 941cfe8cbafb20a0d73a6264ffd5d856d62cbace..808c983ab3731794219846e5f27f5317d0d554a6 100644
+--- a/packages/coding-agent/src/core/extensions/types.ts
++++ b/packages/coding-agent/src/core/extensions/types.ts
+@@ -331,6 +331,11 @@ export interface ExtensionContext {
+ 	hasUI: boolean;
+ 	/** Current working directory */
+ 	cwd: string;
++	/**
++	 * Directory whose `.pi` holds the project configuration. It equals `cwd` unless the host runs the
++	 * session in a subdirectory of the project (`projectDir` of `createAgentSession()`).
++	 */
++	projectDir: string;
+ 	/** Session manager (read-only) */
+ 	sessionManager: ReadonlySessionManager;
+ 	/** Model registry for API key resolution */
+diff --git a/packages/coding-agent/src/core/package-manager.ts b/packages/coding-agent/src/core/package-manager.ts
+index b5bb19d74c38afe928477d272293d2ed6960c860..459f7054396a761402ece2cf74eac917421e0e09 100644
+--- a/packages/coding-agent/src/core/package-manager.ts
++++ b/packages/coding-agent/src/core/package-manager.ts
+@@ -130,7 +130,10 @@ export interface PackageManager {
+ }
+ 
+ interface PackageManagerOptions {
++	/** Working directory. Project `.agents/skills` are discovered from it and its parents. */
+ 	cwd: string;
++	/** Directory whose `.pi` holds project settings and packages. Default: `cwd`. */
++	projectDir?: string;
+ 	agentDir: string;
+ 	settingsManager: SettingsManager;
+ 	/** Names of built-in extensions, resolved as `builtin:<name>` extension resources. */
+@@ -811,6 +814,7 @@ function applyAutoloadDisabledPatterns(allPaths: string[], patterns: string[], b
+ 
+ export class DefaultPackageManager implements PackageManager {
+ 	private cwd: string;
++	private projectDir: string;
+ 	private agentDir: string;
+ 	private settingsManager: SettingsManager;
+ 	private builtinExtensions: string[];
+@@ -820,6 +824,7 @@ export class DefaultPackageManager implements PackageManager {
+ 
+ 	constructor(options: PackageManagerOptions) {
+ 		this.cwd = resolvePath(options.cwd);
++		this.projectDir = options.projectDir ? resolvePath(options.projectDir) : this.cwd;
+ 		this.agentDir = resolvePath(options.agentDir);
+ 		this.settingsManager = options.settingsManager;
+ 		this.builtinExtensions = options.builtinExtensions ?? [];
+@@ -936,7 +941,7 @@ export class DefaultPackageManager implements PackageManager {
+ 		await this.resolvePackageSources(packageSources, accumulator, onMissing);
+ 
+ 		const globalBaseDir = this.agentDir;
+-		const projectBaseDir = join(this.cwd, CONFIG_DIR_NAME);
++		const projectBaseDir = join(this.projectDir, CONFIG_DIR_NAME);
+ 
+ 		for (const resourceType of RESOURCE_TYPES) {
+ 			const target = this.getTargetMap(accumulator, resourceType);
+@@ -1547,7 +1552,7 @@ export class DefaultPackageManager implements PackageManager {
+ 		const stdout = await this.runCommandCapture(
+ 			npmCommand.command,
+ 			[...npmCommand.args, "view", packageSpec, "version", "--json"],
+-			{ cwd: this.cwd, timeoutMs: NETWORK_TIMEOUT_MS },
++			{ cwd: this.projectDir, timeoutMs: NETWORK_TIMEOUT_MS },
+ 		);
+ 		const raw = stdout.trim();
+ 		if (!raw) throw new Error("Empty response from npm view");
+@@ -2088,7 +2093,7 @@ export class DefaultPackageManager implements PackageManager {
+ 		}
+ 		if (scope === "project") {
+ 			this.assertProjectTrustedForScope(scope);
+-			return join(this.cwd, CONFIG_DIR_NAME, "npm");
++			return join(this.projectDir, CONFIG_DIR_NAME, "npm");
+ 		}
+ 		return join(this.agentDir, "npm");
+ 	}
+@@ -2129,7 +2134,7 @@ export class DefaultPackageManager implements PackageManager {
+ 		}
+ 		if (scope === "project") {
+ 			this.assertProjectTrustedForScope(scope);
+-			return join(this.cwd, CONFIG_DIR_NAME, "npm", "node_modules", source.name);
++			return join(this.projectDir, CONFIG_DIR_NAME, "npm", "node_modules", source.name);
+ 		}
+ 		return join(this.agentDir, "npm", "node_modules", source.name);
+ 	}
+@@ -2169,7 +2174,7 @@ export class DefaultPackageManager implements PackageManager {
+ 		}
+ 		if (scope === "project") {
+ 			this.assertProjectTrustedForScope(scope);
+-			return join(this.cwd, CONFIG_DIR_NAME, "git");
++			return join(this.projectDir, CONFIG_DIR_NAME, "git");
+ 		}
+ 		return join(this.agentDir, "git");
+ 	}
+@@ -2195,7 +2200,7 @@ export class DefaultPackageManager implements PackageManager {
+ 	private getBaseDirForScope(scope: SourceScope): string {
+ 		if (scope === "project") {
+ 			this.assertProjectTrustedForScope(scope);
+-			return join(this.cwd, CONFIG_DIR_NAME);
++			return join(this.projectDir, CONFIG_DIR_NAME);
+ 		}
+ 		if (scope === "user") {
+ 			return this.agentDir;
+diff --git a/packages/coding-agent/src/core/resource-loader.ts b/packages/coding-agent/src/core/resource-loader.ts
+index b45b21299c60867f208e4ebd049a1ccabc9246af..771333a89b57396ed12afd7e558500cde34d1868 100644
+--- a/packages/coding-agent/src/core/resource-loader.ts
++++ b/packages/coding-agent/src/core/resource-loader.ts
+@@ -270,7 +270,13 @@ export function loadProjectContextFiles(options: {
+ }
+ 
+ export interface DefaultResourceLoaderOptions {
++	/** Working directory of the session. Context files are discovered from it and its parents. */
+ 	cwd: string;
++	/**
++	 * Directory whose `.pi` holds project settings, resources, packages, and `SYSTEM.md`. Default: `cwd`.
++	 * Set it to load one project configuration for sessions that run in its subdirectories.
++	 */
++	projectDir?: string;
+ 	agentDir: string;
+ 	settingsManager?: SettingsManager;
+ 	eventBus?: EventBus;
+@@ -310,6 +316,7 @@ export interface DefaultResourceLoaderOptions {
+ 
+ export class DefaultResourceLoader implements ResourceLoader {
+ 	private cwd: string;
++	private projectDir: string;
+ 	private agentDir: string;
+ 	private settingsManager: SettingsManager;
+ 	private eventBus: EventBus;
+@@ -370,14 +377,16 @@ export class DefaultResourceLoader implements ResourceLoader {
+ 
+ 	constructor(options: DefaultResourceLoaderOptions) {
+ 		this.cwd = resolvePath(options.cwd);
++		this.projectDir = options.projectDir ? resolvePath(options.projectDir) : this.cwd;
+ 		this.agentDir = resolvePath(options.agentDir);
+-		this.settingsManager = options.settingsManager ?? SettingsManager.create(this.cwd, this.agentDir);
++		this.settingsManager = options.settingsManager ?? SettingsManager.create(this.projectDir, this.agentDir);
+ 		this.eventBus = options.eventBus ?? createEventBus();
+ 		const factories = options.extensionFactories ?? [];
+ 		this.extensionFactories = factories.filter((input) => !isBuiltinExtension(input));
+ 		this.builtinExtensions = new Map(factories.filter(isBuiltinExtension).map((input) => [input.name, input]));
+ 		this.packageManager = new DefaultPackageManager({
+ 			cwd: this.cwd,
++			projectDir: this.projectDir,
+ 			agentDir: this.agentDir,
+ 			settingsManager: this.settingsManager,
+ 			builtinExtensions: [...this.builtinExtensions.keys()],
+@@ -839,7 +848,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+ 			skillsResult = { skills: [], diagnostics: [] };
+ 		} else {
+ 			skillsResult = loadSkills({
+-				cwd: this.cwd,
++				cwd: this.projectDir,
+ 				agentDir: this.agentDir,
+ 				skillPaths,
+ 				includeDefaults: false,
+@@ -862,7 +871,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+ 			promptsResult = { prompts: [], diagnostics: [] };
+ 		} else {
+ 			const loaded = loadPromptTemplates({
+-				cwd: this.cwd,
++				cwd: this.projectDir,
+ 				agentDir: this.agentDir,
+ 				promptPaths,
+ 				includeDefaults: false,
+@@ -990,10 +999,10 @@ export class DefaultResourceLoader implements ResourceLoader {
+ 			join(this.agentDir, "extensions"),
+ 		];
+ 		const projectRoots = [
+-			join(this.cwd, CONFIG_DIR_NAME, "skills"),
+-			join(this.cwd, CONFIG_DIR_NAME, "prompts"),
+-			join(this.cwd, CONFIG_DIR_NAME, "themes"),
+-			join(this.cwd, CONFIG_DIR_NAME, "extensions"),
++			join(this.projectDir, CONFIG_DIR_NAME, "skills"),
++			join(this.projectDir, CONFIG_DIR_NAME, "prompts"),
++			join(this.projectDir, CONFIG_DIR_NAME, "themes"),
++			join(this.projectDir, CONFIG_DIR_NAME, "extensions"),
+ 		];
+ 
+ 		for (const root of agentRoots) {
+@@ -1047,7 +1056,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+ 		const themes: Theme[] = [];
+ 		const diagnostics: ResourceDiagnostic[] = [];
+ 		if (includeDefaults) {
+-			const defaultDirs = [join(this.agentDir, "themes"), join(this.cwd, CONFIG_DIR_NAME, "themes")];
++			const defaultDirs = [join(this.agentDir, "themes"), join(this.projectDir, CONFIG_DIR_NAME, "themes")];
+ 
+ 			for (const dir of defaultDirs) {
+ 				this.loadThemesFromDir(dir, themes, diagnostics, colorMode);
+@@ -1207,7 +1216,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+ 	}
+ 
+ 	private discoverSystemPromptFile(): string | undefined {
+-		const projectPath = join(this.cwd, CONFIG_DIR_NAME, "SYSTEM.md");
++		const projectPath = join(this.projectDir, CONFIG_DIR_NAME, "SYSTEM.md");
+ 		if (this.settingsManager.isProjectTrusted() && existsSync(projectPath)) {
+ 			return projectPath;
+ 		}
+@@ -1221,7 +1230,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+ 	}
+ 
+ 	private discoverAppendSystemPromptFile(): string | undefined {
+-		const projectPath = join(this.cwd, CONFIG_DIR_NAME, "APPEND_SYSTEM.md");
++		const projectPath = join(this.projectDir, CONFIG_DIR_NAME, "APPEND_SYSTEM.md");
+ 		if (this.settingsManager.isProjectTrusted() && existsSync(projectPath)) {
+ 			return projectPath;
+ 		}
+diff --git a/packages/coding-agent/src/core/sdk.ts b/packages/coding-agent/src/core/sdk.ts
+index 09bb92fa0379799836862a311e0804bb608bfd27..7ae0ebbeef7df3adb023e69e6b062c12fdf6a91a 100644
+--- a/packages/coding-agent/src/core/sdk.ts
++++ b/packages/coding-agent/src/core/sdk.ts
+@@ -42,6 +42,12 @@ setDefaultStreamFn(streamSimple);
+ export interface CreateAgentSessionOptions {
+ 	/** Working directory for project-local discovery. Default: process.cwd() */
+ 	cwd?: string;
++	/**
++	 * Directory whose `.pi` holds project configuration, when it is not `cwd`, for a session that runs in
++	 * a subdirectory of the project. Default: `cwd`. Extensions read it as `ctx.projectDir`. Pass the
++	 * same directory to the `settingsManager` and `resourceLoader` you supply.
++	 */
++	projectDir?: string;
+ 	/** Global config directory. Default: ~/.pi/agent */
+ 	agentDir?: string;
+ 
+@@ -89,7 +95,7 @@ export interface CreateAgentSessionOptions {
+ 	/** Session manager. Default: SessionManager.create(cwd) */
+ 	sessionManager?: SessionManager;
+ 
+-	/** Settings manager. Default: SettingsManager.create(cwd, agentDir) */
++	/** Settings manager. Default: SettingsManager.create(projectDir, agentDir) */
+ 	settingsManager?: SettingsManager;
+ 	/** Session start event metadata for extension runtime startup. */
+ 	sessionStartEvent?: SessionStartEvent;
+@@ -180,6 +186,7 @@ function getDefaultAgentDir(): string {
+  */
+ export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
+ 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
++	const projectDir = options.projectDir ? resolvePath(options.projectDir) : cwd;
+ 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
+ 	let resourceLoader = options.resourceLoader;
+ 
+@@ -187,11 +194,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
+ 	const modelsPath = options.agentDir ? join(agentDir, "models.json") : undefined;
+ 	const modelRuntime = options.modelRuntime ?? (await ModelRuntime.create({ authPath, modelsPath }));
+ 
+-	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
++	const settingsManager = options.settingsManager ?? SettingsManager.create(projectDir, agentDir);
+ 	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir));
+ 
+ 	if (!resourceLoader) {
+-		resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
++		resourceLoader = new DefaultResourceLoader({ cwd, projectDir, agentDir, settingsManager });
+ 		await resourceLoader.reload();
+ 		time("resourceLoader.reload");
+ 	}
+@@ -445,6 +452,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
+ 		sessionManager,
+ 		settingsManager,
+ 		cwd,
++		projectDir,
+ 		scopedModels: options.scopedModels,
+ 		resourceLoader,
+ 		customTools: options.customTools,
+diff --git a/packages/coding-agent/src/core/trust-manager.ts b/packages/coding-agent/src/core/trust-manager.ts
+index 3396c9a399be0ea4e1a89dddb5a679dd1e2855a4..2faa09e9b38983615e7139e481cfd24f09cf1484 100644
+--- a/packages/coding-agent/src/core/trust-manager.ts
++++ b/packages/coding-agent/src/core/trust-manager.ts
+@@ -178,17 +178,18 @@ function withTrustFileLock<T>(path: string, fn: () => T): T {
+ 
+ /**
+  * Returns true when cwd has project-local resources that must be gated by
+- * project trust: trust-requiring entries under cwd/.pi, or .agents/skills in
+- * cwd or one of its ancestors. Returns false when no such project resources
+- * exist. The user/global ~/.agents/skills directory is always treated as a
+- * trusted user resource and is ignored here, even when cwd is $HOME.
++ * project trust: trust-requiring entries under projectDir/.pi (projectDir
++ * defaults to cwd), or .agents/skills in cwd or one of its ancestors. Returns
++ * false when no such project resources exist. The user/global ~/.agents/skills
++ * directory is always treated as a trusted user resource and is ignored here,
++ * even when cwd is $HOME.
+  */
+-export function hasTrustRequiringProjectResources(cwd: string): boolean {
++export function hasTrustRequiringProjectResources(cwd: string, projectDir: string = cwd): boolean {
+ 	const homeDir = canonicalizePath(resolvePath(process.env.HOME || homedir()));
+ 	const userAgentsSkillsDir = join(homeDir, ".agents", "skills");
+ 	let currentDir = canonicalizePath(resolvePath(cwd));
+ 
+-	const configDir = join(currentDir, CONFIG_DIR_NAME);
++	const configDir = join(canonicalizePath(resolvePath(projectDir)), CONFIG_DIR_NAME);
+ 	if (TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES.some((entry) => existsSync(join(configDir, entry)))) {
+ 		return true;
+ 	}
+diff --git a/packages/coding-agent/src/extensions/mcp/index.ts b/packages/coding-agent/src/extensions/mcp/index.ts
+index b2b8cb71d341c69277e0c8fb1ae9a2aa41ab6554..43b3522f10bcd99770b978869e62324c362ccaf1 100644
+--- a/packages/coding-agent/src/extensions/mcp/index.ts
++++ b/packages/coding-agent/src/extensions/mcp/index.ts
+@@ -67,7 +67,7 @@ import { type McpMenu, type McpUi, showMcpManager } from "./ui.ts";
+ export type { McpTransportFactory } from "./runtime.ts";
+ 
+ export interface McpExtensionOptions {
+-	/** Defaults to reading `mcp.json` from the agent directory and the trusted project. */
++	/** Defaults to reading `mcp.json` from the agent directory and the trusted project's `ctx.projectDir`. */
+ 	loadConfig?: (ctx: ExtensionContext) => LoadedMcpConfig;
+ 	/** Defaults to stdio and streamable HTTP transports built from the server config. */
+ 	createTransport?: McpTransportFactory;
+@@ -294,8 +294,8 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 		const startupWaitMs = options.startupWaitMs ?? DEFAULT_STARTUP_WAIT_MS;
+ 		/** Bumped on every session start and shutdown so a runtime load that resolves late is dropped. */
+ 		let generation = 0;
+-		/** Working directory of the session, for stdio servers. */
+-		let sessionCwd = process.cwd();
++		/** Project directory of the session, where stdio servers start and their relative `cwd` resolves. */
++		let serverCwd = process.cwd();
+ 		let credentials = options.credentials;
+ 		/** The session's model registry, which resolves `auth.provider` tokens. */
+ 		let modelRegistry: ModelRegistry | undefined;
+@@ -526,7 +526,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 			const runtime = await loadMcpRuntime();
+ 			const connection = new runtime.McpServerConnection({
+ 				entry: server.entry,
+-				cwd: sessionCwd,
++				cwd: serverCwd,
+ 				createTransport: options.createTransport ?? runtime.createDefaultTransport,
+ 				credentials: getCredentials(runtime),
+ 				providerToken: async (provider) => modelRegistry?.getApiKeyForProvider(provider),
+@@ -1001,7 +1001,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 			autoEnableCodemode = loaded.autoEnableCodemode ?? true;
+ 			warnedUnreachable = false;
+ 			waitedForStartup = false;
+-			sessionCwd = ctx.cwd;
++			serverCwd = ctx.projectDir;
+ 			modelRegistry = ctx.modelRegistry;
+ 			const current = ++generation;
+ 			sessionActive = true;
+@@ -1219,7 +1219,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ }
+ 
+ function defaultLoadConfig(ctx: ExtensionContext): LoadedMcpConfig {
+-	return loadMcpConfig({ agentDir: getAgentDir(), cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() });
++	return loadMcpConfig({ agentDir: getAgentDir(), cwd: ctx.projectDir, projectTrusted: ctx.isProjectTrusted() });
+ }
+ 
+ export default createMcpExtension();
+diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+index 18d6d95dd12d3a12fbc77d399cffa73aea2483f2..97e58691312f638623b79b9d8807eceec950c81a 100644
+--- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+@@ -2239,6 +2239,7 @@ export class InteractiveMode {
+ 			mode: "tui",
+ 			hasUI: true,
+ 			cwd: this.sessionManager.getCwd(),
++			projectDir: this.session.projectDir,
+ 			sessionManager: this.sessionManager,
+ 			modelRegistry: extensionRunner.getModelRegistry(),
+ 			model: this.session.model,
+diff --git a/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts b/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
+index 9991520690bee8593e48b3f49c2eaff4c3748aa4..238f32d0c2d08c802b76282343993fa8e255b28f 100644
+--- a/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
++++ b/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
+@@ -42,6 +42,7 @@ describe("regression #8724: in-memory fork during an active tool turn", () => {
+ 		const harness = await createHarness({ tools: [blockingTool] });
+ 		const services: AgentSessionServices = {
+ 			cwd: harness.tempDir,
++			projectDir: harness.tempDir,
+ 			agentDir: harness.tempDir,
+ 			modelRuntime: harness.session.modelRuntime,
+ 			settingsManager: harness.settingsManager,
+diff --git a/packages/coding-agent/test/trigger-compact-extension.test.ts b/packages/coding-agent/test/trigger-compact-extension.test.ts
+index 930769f378e26f1b458ea36ccddbcc685c60f811..3e6cf0ea5e99ccaffa90369c6a17e52d4d0820e1 100644
+--- a/packages/coding-agent/test/trigger-compact-extension.test.ts
++++ b/packages/coding-agent/test/trigger-compact-extension.test.ts
+@@ -8,6 +8,7 @@ function createContext(tokens: number | null, compact = vi.fn()): ExtensionConte
+ 		hasUI: false,
+ 		ui: {} as ExtensionContext["ui"],
+ 		cwd: process.cwd(),
++		projectDir: process.cwd(),
+ 		sessionManager: {} as ExtensionContext["sessionManager"],
+ 		modelRegistry: {} as ExtensionContext["modelRegistry"],
+ 		model: undefined,
+diff --git a/packages/evals/evals/tui.docs.eval.ts b/packages/evals/evals/tui.docs.eval.ts
+index eddd20a978a4fa8c83a9bddf10caf66591164397..a9f00dedcf32d995f84f411ae860f82b69c94ee5 100644
+--- a/packages/evals/evals/tui.docs.eval.ts
++++ b/packages/evals/evals/tui.docs.eval.ts
+@@ -116,6 +116,7 @@ async function inspectContextFooter(session: AgentSession, agentDir: string): Pr
+ 	const model = { ...activeModel, contextWindow: CONTEXT_WINDOW };
+ 	const services: AgentSessionServices = {
+ 		cwd: session.sessionManager.getCwd(),
++		projectDir: session.projectDir,
+ 		agentDir,
+ 		modelRuntime: session.modelRuntime,
+ 		settingsManager: session.settingsManager,

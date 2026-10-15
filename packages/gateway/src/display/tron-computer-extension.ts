@@ -12,6 +12,8 @@ export function createTronComputerExtension(input: { sessionId: () => string }):
     pi.on("before_agent_start", async () => { computer.invalidateObservation(); });
     pi.registerTool({
       name: "computer", label: "Mac computer",
+      // It reads whatever the screen shows, web pages included (docs/settings-model.md 5.4).
+      annotations: { openWorldHint: true },
       description: "Operate native Mac apps with Tron's bundled Cua driver. Use tool=help with empty arguments to list operations, or arguments={tool:NAME} for the driver's exact schema. Use list_apps/list_windows and launch_app, get_window_state or get_desktop_state, then fresh element tokens or screenshot coordinates for click, type_text, press_key, hotkey, scroll, drag, set_value, set_window_frame and related native actions. Browser work belongs to agent_browser. Observe after actions; an unverified result is not proof of the desired effect. This tool never changes backend configuration or permissions.",
       promptGuidelines: [
         "Before foreground/desktop input, inspect get_desktop_state for system dialogs or overlays. A focused or frontmost ordinary window and a window-only screenshot can hide blocking permission dialogs.",

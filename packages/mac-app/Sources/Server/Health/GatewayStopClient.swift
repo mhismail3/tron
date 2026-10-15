@@ -1,27 +1,40 @@
 import Foundation
 
-/// Authenticated, receipt-backed intentional stop. The accepted response is
-/// not process-exit proof; MacQuitCoordinator verifies the captured runtime.
+/// Authenticated intentional stop and its canonical drain observation. Acceptance
+/// is not completion; the Quit owner separately verifies the exact process exit.
 enum GatewayStopClient {
     struct Response: Codable, Equatable, Sendable {
         let stopping: Bool
         let scheduled: Bool
+        let drainId: String
     }
 
-    enum Frame: Equatable {
-        case result(Response)
-        case ignore
-        case error(GatewayRestartClient.Failure)
-        case malformed
+    struct Drain: Decodable, Sendable {
+        let drainId: String
+        let phase: String
     }
 
     static func stop(
-        host: String,
-        port: Int,
-        token: String?,
-        commandID: String,
+        host: String, port: Int, token: String?, commandID: String,
         timeout: TimeInterval = GatewayRestartClient.defaultTimeout
     ) async throws -> Response {
+        let response: Response = try await request(
+            host: host, port: port, token: token, method: "gateway.stop",
+            commandID: commandID, params: ["commandId": commandID], timeout: timeout
+        )
+        guard response.scheduled, !response.drainId.isEmpty else { throw GatewayRestartClient.Failure.malformedResponse }
+        return response
+    }
+
+    static func drain(host: String, port: Int, token: String?) async throws -> Drain {
+        try await request(host: host, port: port, token: token, method: "gateway.drain.status",
+                          commandID: UUID().uuidString, params: [:], timeout: 2)
+    }
+
+    private static func request<Result: Decodable>(
+        host: String, port: Int, token: String?, method: String,
+        commandID: String, params: [String: String], timeout: TimeInterval
+    ) async throws -> Result {
         try Task.checkCancellation()
         guard GatewayRestartClient.validCommandID(commandID) else { throw GatewayRestartClient.Failure.invalidCommandID }
         guard let token, !token.isEmpty else { throw GatewayRestartClient.Failure.missingCredential }
@@ -37,19 +50,20 @@ enum GatewayStopClient {
             )
             defer { connection.close() }
             try await connection.send(jsonObject: [
-                "type": "request",
-                "id": commandID,
-                "method": "gateway.stop",
-                "params": ["commandId": commandID],
+                "type": "request", "id": commandID, "method": method, "params": params,
             ], deadline: deadline)
             for _ in 0..<8 {
                 guard let data = try await connection.receiveData(deadline: deadline) else {
                     throw GatewayRestartClient.Failure.malformedResponse
                 }
-                switch Self.decodeFrame(data: data, expectedID: commandID) {
+                let frame: GatewayResponseDecoder.Frame<Result> = GatewayResponseDecoder.decode(data: data, expectedID: commandID)
+                switch frame {
                 case .result(let response): return response
                 case .ignore: continue
-                case .error(let failure): throw failure
+                case .error(let error):
+                    guard let code = error?.code, let message = error?.message,
+                          !code.isEmpty, !message.isEmpty else { throw GatewayRestartClient.Failure.malformedResponse }
+                    throw GatewayRestartClient.Failure.gateway(code: code, message: message, retryable: error?.retryable ?? false)
                 case .malformed: throw GatewayRestartClient.Failure.malformedResponse
                 }
             }
@@ -67,25 +81,6 @@ enum GatewayStopClient {
             }
         } catch {
             throw GatewayRestartClient.Failure.transport
-        }
-    }
-
-    static func decodeFrame(data: Data, expectedID: String) -> Frame {
-        let frame: GatewayResponseDecoder.Frame<Response> = GatewayResponseDecoder.decode(
-            data: data,
-            expectedID: expectedID
-        )
-        switch frame {
-        case .ignore:
-            return .ignore
-        case .malformed:
-            return .malformed
-        case .result(let response):
-            return response.scheduled ? .result(response) : .malformed
-        case .error(let error):
-            guard let code = error?.code, let message = error?.message,
-                  !code.isEmpty, !message.isEmpty else { return .malformed }
-            return .error(.gateway(code: code, message: message, retryable: error?.retryable ?? false))
         }
     }
 }

@@ -58,7 +58,7 @@ export function decodeNodeCode(code: string): string | undefined {
 
 /** The view's lines up to (not including) `end`, as level runs from message 0.
  * The view tiles from 0, so the runs reconstruct every address exactly. */
-export function encodeContextRuns(parts: readonly EpisodicViewPart[]): EpisodicContextRun[] {
+function encodeContextRuns(parts: readonly EpisodicViewPart[]): EpisodicContextRun[] {
   const runs: Array<[number, number]> = [];
   for (const part of parts) {
     const last = runs[runs.length - 1];

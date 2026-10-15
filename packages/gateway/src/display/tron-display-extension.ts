@@ -80,6 +80,8 @@ export function createTronDisplayExtension(input: {
     registerNestedPresentationHandlers(pi);
     pi.registerTool({
       name: "display",
+      // docs/settings-model.md 5.4: declares it reads no open-world content.
+      annotations: { openWorldHint: false },
       label: "Display",
       description: "Present an artifact, public HTTPS webpage, or read-only live browser/Mac window view in Tron chat. Live views default to floating; other content defaults to a sheet. Inline and floating apply only to compatible content. source.kind=path uses a path relative to the session directory; internal_file uses a path relative to Tron's internal workspace files/ directory. Neither accepts absolute paths.",
       promptSnippet: "Proactively display useful visual results in Tron chat; prefer inline image previews when they help the user understand or judge the result.",

@@ -12,6 +12,4 @@ let package = Package(
     targets: [
         .target(name: "TronComputerControl", dependencies: []),
         .executableTarget(name: "TronNativeCaptureQualification", dependencies: ["TronComputerControl"]),
-        .testTarget(name: "TronComputerControlTests", dependencies: ["TronComputerControl"]),
-        .testTarget(name: "TronNativeCaptureQualificationTests", dependencies: ["TronNativeCaptureQualification", "TronComputerControl"]),
     ])

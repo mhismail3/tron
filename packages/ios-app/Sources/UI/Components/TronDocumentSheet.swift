@@ -9,6 +9,9 @@ struct TronDocumentSheet<Content: View>: View {
     /// their parent sheets and start at medium.
     var detents: Set<PresentationDetent>
     let initialDetent: PresentationDetent?
+    /// An optional leading toolbar action, such as running a displayed
+    /// `.swift` file (#889). Done stays the only trailing control.
+    let leadingAction: TronDocumentSheetAction?
     @State private var selectedDetent: PresentationDetent
     @ViewBuilder let content: () -> Content
     @Environment(\.dismiss) private var dismiss
@@ -20,11 +23,13 @@ struct TronDocumentSheet<Content: View>: View {
         title: String,
         detents: Set<PresentationDetent> = [.large],
         initialDetent: PresentationDetent? = nil,
+        leadingAction: TronDocumentSheetAction? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
         self.detents = detents
         self.initialDetent = initialDetent
+        self.leadingAction = leadingAction
         _selectedDetent = State(initialValue: initialDetent ?? .large)
         self.content = content
     }
@@ -42,6 +47,16 @@ struct TronDocumentSheet<Content: View>: View {
                 .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
                 .toolbar(.hidden, for: .bottomBar)
                 .toolbar {
+                    if let leadingAction {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button(action: leadingAction.action) {
+                                Image(systemName: leadingAction.systemImage)
+                                    .font(TronTypography.buttonSM)
+                                    .tronToolbarAction(accent: resolvedAccent)
+                            }
+                            .accessibilityLabel(leadingAction.accessibilityLabel)
+                        }
+                    }
                     ToolbarItem(placement: .principal) {
                         TronSheetTitle(title: title, accent: resolvedAccent)
                     }
@@ -49,7 +64,7 @@ struct TronDocumentSheet<Content: View>: View {
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(resolvedAccent)
+                                .tronToolbarAction(accent: resolvedAccent)
                         }
                         .accessibilityLabel("Done")
                     }
@@ -65,6 +80,12 @@ struct TronDocumentSheet<Content: View>: View {
         .presentationDragIndicator(.hidden)
         .tronPresentation()
     }
+}
+
+struct TronDocumentSheetAction {
+    let systemImage: String
+    let accessibilityLabel: String
+    let action: () -> Void
 }
 
 private struct TronDocumentSheetDetents: ViewModifier {

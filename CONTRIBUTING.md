@@ -46,7 +46,10 @@ agent execution, session state, inbox, badge, or reminder policy.
    is the version authority; do not merge independent Pi package updates. Use
    `cd packages/gateway && npm run update:pi-sdk -- <exact-version>` from a
    clean manifest/lockfile, then run `npm run check:pi-sdk` and
-   `npm run test:pi-sdk-scripts` and `npm run test:pi-sdk-rollback`. The
+   `npm run test:pi-sdk-rollback`. While `pi-coding-agent-patch.json` declares
+   the Tron-patched `pi-coding-agent`, the updater refuses: rebuild the patch for
+   the target release or delete it once upstream ships the API (Gateway README,
+   "Tron-patched `pi-coding-agent`"). The
    `pi-sdk-baseline.json` file records the prior runtime used by the sequential
    rollback probe, and any one-way rollback delta the maintainer has accepted for
    that version range under `knownOneWayDeltas`; `package.json` remains the
@@ -226,7 +229,7 @@ iteration proceeds on `9848`.
 
 ```bash
 scripts/tron-ios-test build
-scripts/tron-ios-test run --only-testing TronMobileTests/<OwningSuite>
+scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>
 python3 scripts/test-ios-test-infrastructure.py
 ```
 
@@ -251,7 +254,7 @@ scripts/tron mac generate
 The TronMac build and test commands are in the
 [Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests).
 CI only compiles the Mac app and test sources, unsigned. Run the app-hosted
-`TronMacTests` locally, because they need the team's signing certificate.
+`TronMacIntegrationTests` locally, because they need the team's signing certificate.
 
 The Release app packages only `Tron Agent.app` under the stable
 `com.tron.server` label. Developer tooling reuses that installed signed launcher

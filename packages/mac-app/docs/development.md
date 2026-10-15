@@ -191,7 +191,7 @@ packages/mac-app/scripts/test-gateway-payload-verifier.sh
 # Launcher boundary fixture (also covers channel path-component rejection)
 packages/mac-app/scripts/test-tron-gateway-launcher.sh
 # The launcher's argv against the app's admission checks is the hosted
-# TronMacTests/GatewayLauncherArgvTests suite; run it after any argv change.
+# TronMacIntegrationTests/GatewayLauncherArgvTests suite; run it after any argv change.
 
 # Bundled npm removal with sanitized PATH and isolated HOME/cache
 packages/mac-app/scripts/test-tron-gateway-npm.sh
@@ -416,9 +416,15 @@ process absence alone nor a timer substitutes for a successful Quit.
 Quit leaves the approved Login Items registered. The Gateway LaunchAgent's
 successful exit policy prevents relaunch after its intentional clean stop; the
 next wrapper launch uses the existing approved LaunchAgent owner to start it.
-The native helper drains capture and automation work, then exits while its
+The native helper drains capture and automation work, confirms, then exits while its
 SMAppService registration remains enabled; its Mach service is started on demand
-by the next authenticated XPC connection. No new approval or desired-state
+by the next authenticated XPC connection. The helper exits only after the wrapper
+closes the retirement connection: the wrapper pins the helper's signature, so
+libxpc refuses a reply whose sender has already exited (`Received message
+forbidden due to code signing requirement`, `errSecCSNoSuchCode`) and the wrapper
+would correctly report unconfirmed retirement. The wrapper records
+`native-host.retirement-unconfirmed` in `~/.tron/logs` with either the XPC error
+(reply lost or refused) or `helper-reported-unjoined-capture`. No new approval or desired-state
 record is created. An unapproved or unknown service is never registered to make
 Quit succeed. A `.notFound` native-service status refuses retirement rather
 than being treated as evidence that work is absent. A retried Quit after the
@@ -481,8 +487,9 @@ plists left in `~/Library/LaunchAgents` also fail verification, even when unload
 login could relaunch a retired owner against Stable's home and port. The maintainer
 must retire the exact legacy service and its login plist; the verifier never unloads
 services or removes files. A healthy current listener does not clear that gate.
-The collision regression runs in `scripts/test-mac-reinstall.py`. The offline
-checkpoint also refuses the loaded dev-takeover job, even without a listener.
+The collision check is in `scripts/verify-mac-install.sh` and runs against the
+installed app (`scripts/tron mac verify`). It also refuses the loaded dev-takeover
+job, even without a listener.
 The verifier checks both signed runtimes and aliases on every Mac, but executes
 only the host-native runtime. The bundled
 foreign-architecture runtime is validated statically; this avoids false
@@ -637,9 +644,6 @@ packages. Do not repeatedly restart after failure. Preserve post-update writes
 and use the coherent manual rollback procedure: restore the protected backup only
 when no accepted new work would be lost.
 
-Focused regression: `python3 scripts/test-mac-reinstall.py` (CI runs it in the Mac
-job).
-
 ### Local recovery location and retention
 
 Use `~/.tron-maintenance` as the single local recovery storage root, outside
@@ -699,6 +703,49 @@ protection against disk loss. Off-device backup requires a separately configured
 protected destination. Restoration and any app/Gateway transition remain
 maintainer actions.
 
+### One-tap Mac app replacement
+
+`scripts/tron mac replace` (started from iPhone Settings → Connections → Quick Rebuild →
+**Replace Mac App**, or from a Mac terminal) replaces the installed app and its bundled Gateway in
+one tracked operation (#984). It is the supported path for changes a source rebuild cannot apply.
+
+```bash
+scripts/tron mac replace --plan              # quick or full, and why
+scripts/tron mac replace --start             # start, retry a failure, or resume an interrupted run
+scripts/tron mac replace --status --follow   # stream the journal until it settles
+```
+
+- **Path.** Quick (the Gateway's own source update) when the active payload's
+  `package-lock.json`, dependency manifest and protocol match the checkout and
+  `packages/mac-app` is unchanged since the installed build; otherwise a full signed Release
+  build and app swap. `none` when the checkout already runs.
+- **Runner.** A launchd job of its own (`com.tron.mac.replace.<id>`) running a private copy of
+  the scripts, so it survives the Gateway and app it replaces. Steps: preflight → build →
+  verify signature → stop running workers → stop Gateway → swap app → start → verify → finish
+  (quick: preflight → stop workers → rebuild → verify → finish).
+- **Preflight** checks source cleanliness and HEAD, disk space, signing identity, Gateway and
+  native-helper registration, protocol compatibility with the requesting iPhone
+  (`--allow-protocol-change` overrides from the Mac), and that no manual `mac reinstall`
+  operation is active. Nothing changes before it passes.
+- **Workers** are stopped through Home's task stop path (sessions, worktrees, branches and claims
+  kept) and listed in the journal; iPhone offers Resume in place for each.
+- **Stop** uses the app's coordinated Quit (an AppKit terminate request), which drains accepted
+  work and retires the native helper; nothing is signaled, killed or disabled.
+- **Swap** takes an APFS clone of `~/.tron` (`state-snapshot`, the data rollback point), moves the
+  external Stable payload channel and the old app into the operation directory, journaling each
+  move first, then installs the verified build.
+- **Failure** stops at its step with the exact message and step log. After the swap the previous
+  app and payload channel are restored and verified automatically; the `~/.tron` snapshot is
+  kept, never restored over newer data. A retry reuses the verified build; a runner that died
+  mid-run is resumed by `--start`, restoring the previous app first if it had swapped.
+- **Verify** requires the running Gateway's revision and protocol, the installed app's cdhash,
+  and `scripts/tron mac verify --require-bundled`; the Gateway then pushes the result.
+
+Builds live in detached worktrees under `~/.tron-maintenance/replace/builds/<revision>` (the
+current and one previous are kept). E2E: `python3 scripts/test-tron-mac-replace.py` drives the
+real runner under launchd against a fixture app and Gateway job (never Stable) and writes
+`test-results/mac-replace-e2e.json`.
+
 ### Gateway payload operations
 
 The installed wrapper owns Stable only. Developer tooling owns Debug. `status` and
@@ -720,7 +767,7 @@ and checker into the existing fingerprinted `app` tree. It checks those staged
 inputs before dependency installation; the payload verifier independently uses
 the trusted source checker against that app root, rejecting missing or invalid
 current/retained provider inputs. This step never installs into a Gateway home.
-The owning regression is `managed-subagents.payload.test.ts` (build the Gateway
+The owning regression is `managed-subagents.payload.integration.test.ts` (build the Gateway
 first): it runs this real staging step, imports its compiled startup boundary
 with TCP denied, and verifies activation plus retained-closure refusal.
 
@@ -787,11 +834,13 @@ copying into `/Applications`, release deployment, or launchd registration.
 
 ## Efficient focused tests
 
-Gateway payload deployment checks run with pinned Node 22:
-`node --test --test-concurrency=2 scripts/gateway-payload-deploy.test.mjs`.
-Lifecycle checks run retention and drain-order assertions inside the injected
-build command and process probe. Do not observe them with `fs.watch`:
-filesystem notifications can be missed, leaving a test waiting indefinitely.
+Gateway payload deployment has two real-boundary checks, run with pinned Node 22:
+`node --test --test-concurrency=2 scripts/gateway-payload-deploy.test.mjs` (a dev
+candidate staged through the real `tron-dev-state.mjs` and `gateway-payload-deploy.mjs`
+CLIs in a git checkout, and a bounded process-tree kill).
+`node --test scripts/gateway-install-inputs.test.mjs` runs real `npm ci` against a
+temp Gateway whose `node_modules` drifted from its lock. That is the repair Rebuild from
+Source performs (#1010).
 
 ```bash
 xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
@@ -801,10 +850,41 @@ xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
 xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build/DerivedData \
-  -only-testing:TronMacTests/PairingURLBuilderTests \
-  -only-testing:TronMacTests/EnrollmentCodeReaderTests \
-  -only-testing:TronMacTests/SingleInstanceLockTests
+  -only-testing:TronMacIntegrationTests/SingleInstanceLockTests \
+  -only-testing:TronMacIntegrationTests/GatewayLauncherArgvTests
 ```
+
+`TronMacIntegrationTests` holds only real-boundary tests: spawned processes and
+pipes (`SubprocessTests`, `CodeSignatureProbeTests`, `CuaProcessOwnerTests`,
+`MenuBarTerminationTests`), a loopback WebSocket (`MenuBarLogReaderTransportTests`),
+the built Gateway launcher (`GatewayLauncherArgvTests`), and the production
+native-helper retirement owner in a launchd-demand-launched Mach service probe
+answering a signature-pinning client (`NativeHostRetirementTests`). Unit tests with fakes
+or in-process module calls are not kept; cover a change with its real-boundary
+test or the fixture scripts above.
+
+`MacQuitGatewayTests` executes the built Quit coordinator against the signed bundled
+Gateway in a uniquely named disposable launchd job, using the production
+`KeepAlive.SuccessfulExit=false` policy. It proves normal exit 0, a real held model
+request longer than the exit grace, blocked Node exit, missing/stale completion
+receipts, receipt publication failure, explicit Retry, and a restart-75 supervisor
+control. Each fixture has isolated HOME/TMPDIR/agent/Gateway stores, bootouts only
+its own job, and removes its files. No installed service or app is addressed.
+Run after the signed build above (test execution HOME/TMPDIR must be scratch
+directories outside live stores):
+
+```bash
+xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
+  -configuration Debug -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build/DerivedData \
+  -only-testing:TronMacIntegrationTests/MacQuitGatewayTests \
+  -resultBundlePath build/MacQuitGateway.xcresult
+```
+
+The signed build uses the existing Xcode user/signing context; do not carry a
+test's isolated HOME into that build, disable signing, or substitute ad-hoc
+signing for hosted test acceptance. Keep test execution isolated. The result
+bundle is behavioral evidence, not deployment or physical-device validation.
 
 `SingleInstanceLockTests` launches the test-only `SingleInstanceLockProbe` in
 separate processes. The owner and contender communicate through bounded pipe
@@ -814,13 +894,13 @@ lifecycle state.
 
 After an edit, rerun the incremental `build-for-testing`, then keep using
 `test-without-building`. This separates compilation from execution and avoids
-repeatedly paying for unrelated suites. `TronMacTests` is hosted by the app and
+repeatedly paying for unrelated suites. `TronMacIntegrationTests` is hosted by the app and
 must inherit the app's signing team; forcing the bundle to an ad-hoc identity
 causes macOS to reject it before tests bootstrap.
 
 CI holds no signing certificate, so its Mac job builds the same
 `build-for-testing` products with `CODE_SIGNING_ALLOWED=NO`. That catches compile
-and link breaks in the app, its helpers and `TronMacTests`, but runs nothing. On
+and link breaks in the app, its helpers and `TronMacIntegrationTests`, but runs nothing. On
 a Mac that has the team's Mac Development certificate, run the hosted tests
 above. Then run `packages/mac-app/scripts/test-signed-pi-payload-smoke.sh` on
 the built `TronMac.app`.

@@ -51,8 +51,15 @@ export type HomeMemoryUnavailableReason =
  * `unavailable` with its reason, never an empty success that reads as "nothing
  * there".
  */
+/** What an answered read found, for a reader of the transcript that should not parse
+ * the model's text: a date's canonical instant, or a search's range and counts. */
+export interface HomeMemoryToolFacts {
+  date?: { id: number; at: string };
+  search?: { query: string; from: number; to: number; matches: number; shown: number; omitted: number; capped: number };
+}
+
 export type HomeMemoryToolResult =
-  | { outcome: "ok"; text: string }
+  | { outcome: "ok"; text: string; facts?: HomeMemoryToolFacts }
   | { outcome: "invalid-arguments"; text: string }
   | { outcome: "unavailable"; reason: HomeMemoryUnavailableReason; text: string };
 
@@ -401,7 +408,7 @@ export class HomeMemory {
       signal?.throwIfAborted();
       await binding.memory.ingestForRead(this.options.sessionId, signal);
       signal?.throwIfAborted();
-      if (binding.memory.status().blocked?.reason === "source-unavailable") throw homeMemorySourceUnavailable();
+      if (binding.memory.status().blocked?.reason === "source-unavailable") throw homeMemorySourceUnavailable("store-source-unavailable");
       return binding.memory.withBrowserRead(async () => {
         signal?.throwIfAborted();
         const revision = binding.memory.browserRevision();
@@ -439,7 +446,7 @@ export class HomeMemory {
       if (text === undefined) {
         return homeMemoryToolUnavailable("timestamp-unavailable", `The recorded date of message ${id} cannot be read.`);
       }
-      return { outcome: "ok", text: `${id}+0|${text}` };
+      return { outcome: "ok", text: `${id}+0|${text}`, facts: { date: { id, at: new Date(timestamp).toISOString() } } };
     });
   }
 
@@ -461,6 +468,7 @@ export class HomeMemory {
           `memory_search ${JSON.stringify(query)} in messages [${found.from}, ${found.to}): ${found.matches} match(es), ${found.lines.length} shown, ${found.omitted} [omitted], ${found.capped} capped.`,
           ...found.lines,
         ].join("\n"),
+        facts: { search: { query, from: found.from, to: found.to, matches: found.matches, shown: found.lines.length, omitted: found.omitted, capped: found.capped } },
       };
     });
   }

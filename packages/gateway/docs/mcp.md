@@ -4,8 +4,9 @@
 
 Pi's built-in MCP extension is the sole MCP client and `mcp.json` is the sole
 configuration authority. Global servers are configured in the Gateway's Pi
-agent directory; project-level `.pi/mcp.json` is read only when Tron's project
-trust decision admits it. Session runtimes and session-free extension discovery compose Pi's built-in
+agent directory; project-level `.pi/mcp.json` is the one at the chat's
+[Project root](../README.md#project-root) and is read only when Tron's project
+trust decision for that root admits it. Its stdio servers start in the root. Session runtimes and session-free extension discovery compose Pi's built-in
 `mcp`, `codemode`, and `tool-search` factories from the same Gateway-owned list.
 MCP logs remain under the Pi agent directory; OAuth credentials are managed by
 Pi's built-in credential store. Static bearer tokens entered through Tron are
@@ -17,7 +18,17 @@ to read a stored bearer token without a prompt. Keychain storage protects the
 secret from files and projections, not from other processes running as that user.
 Each loaded runtime maintains its own MCP connections, including one stdio server process per configured
 active stdio server in that runtime; this is not a process shared across session
-runtimes.
+runtimes. Runtime disposal runs Pi's `session_shutdown`, which closes registered
+connections; if extension shutdown exceeds Tron's 5-second disposal grace, Tron
+invalidates the Pi session synchronously. The RuntimeRegistry integration test
+`reaps a slow-starting MCP stdio process and its child when the runtime is disposed`
+checks that normal Pi shutdown retires a live process group whose stdio server has
+not completed startup. Its artifact records process states even on assertion failure;
+absent or zombie processes are terminal (OS reaping is not live work). Failure cleanup
+joins both captured fixture PIDs before removing their files. Session invalidation alone
+is not proof of process cleanup. The `runtime.dispose-timeout` warning is the production signal
+for shutdown cleanup that exceeds the grace; Tron cannot directly count surviving
+MCP child processes through Pi's public runtime API.
 
 MCP setup, sign-in, and server management are not part of Tron's provider
 connection store. Adding a server to the trusted configuration is the user
@@ -67,10 +78,10 @@ Each string is capped at 256 characters (except `state`, capped at 64); `error`
 is stripped of control bytes and capped at 2,048 characters. Filesystem `source`
 paths are not exposed. Top-level `errors` is a count, not a copy of Pi diagnostic
 objects. The captured pinned CLI payload fixture and startup/config behavior are
-covered by `src/admin/mcp-admin-service.test.ts`, which proves the `!command`
+covered by `src/admin/mcp-admin-service.integration.test.ts`, which proves the `!command`
 header reference through Pi's own CLI against a loopback server that records the
 `Authorization` it receives; sign-in relay outcomes and callback safety are
-covered by `src/admin/auth-broker.test.ts`, and the local OAuth fixture in
+covered by `src/admin/auth-broker.integration.test.ts`, and the local OAuth fixture in
 `src/admin/mcp-auth-session.integration.test.ts` drives Pi's own PKCE S256
 challenge, dynamic client registration, loopback callback relay, token
 persistence and refresh through the Gateway's `mcp.auth.start` operation. That

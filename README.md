@@ -56,6 +56,12 @@ state only.
   with the Mac user's authority.
 - Mobile exposure binds explicitly to the detected Tailscale interface. The
   default developer gateway remains loopback-only.
+- Mac Terminal (Settings › Accounts) opens a login shell on the Mac through
+  macOS Remote Login over Tailscale, without the Gateway. Its per-iPhone key
+  stays in the Secure Enclave, is enrolled into `~/.ssh/authorized_keys` only by
+  the maintainer's tap (restricted to Tailscale source addresses), and the Mac's
+  host key is pinned at enrollment
+  ([Mac Terminal](packages/gateway/README.md#mac-terminal)).
 
 Do not open the same session concurrently in another runtime client: the
 canonical session format does not provide a cross-process session-file lock.
@@ -128,11 +134,6 @@ the five configurations with their schemes, identities, and routes.
 Use the canonical owned simulator runner for iOS; it builds once, then reuses
 products for focused tests with bounded process and result evidence. See the
 [iOS development guide](packages/ios-app/docs/development.md).
-
-```bash
-scripts/tron-ios-test build
-scripts/tron-ios-test run --only-testing TronMobileTests/SnapshotCacheTests
-```
 
 The TronMac build and test commands are in the
 [Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests).

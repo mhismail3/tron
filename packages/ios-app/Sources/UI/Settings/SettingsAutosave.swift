@@ -3,6 +3,9 @@ import TronMobileCore
 
 /// Bind only user controls through this adapter. Installing projections and
 /// switching scopes use the underlying state directly, so reads never write.
+/// A patch maps schema keys to their new values (`null` unsets a key); each entry
+/// is one `settings.change` at the target's own layer. Batches merge as JSON, so
+/// only scalar or choice keys may be autosaved here.
 @MainActor
 enum SettingsAutosave {
     static func binding<Draft: Equatable>(
@@ -29,7 +32,13 @@ enum SettingsAutosave {
                 key: .settings(target, sessionID: sessionID), patch: delta,
                 write: { [weak model] patch in
                     guard let model, model.profileRevision == profile, let patch else { throw CancellationError() }
-                    try await model.updateSettings(patch, target: target, sessionID: sessionID)
+                    for (key, value) in patch.objectValue ?? [:] {
+                        let stored: JSONValue? = if case .null = value { nil } else { value }
+                        try await model.changeSetting(
+                            target: target.gatewayTarget,
+                            change: target.keyChange(key, value: stored)
+                        )
+                    }
                 },
                 completed: { [weak model] in
                     guard let model, model.profileRevision == profile else { return }

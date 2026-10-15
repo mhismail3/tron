@@ -67,7 +67,6 @@ enum AuthorizedDevicePresentationPolicy {
 
 struct ConnectionsSettingsView: View {
     @Environment(AppModel.self) private var model
-    @Environment(PushNotificationCoordinator.self) private var pushNotifications
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var selectedProfile: GatewayProfile?
     @State private var serverDetailDetent: PresentationDetent = .medium
@@ -75,6 +74,7 @@ struct ConnectionsSettingsView: View {
     @State private var authorizedDevices: [GatewayAuthorizedDevice] = []
     @State private var dataLoadGeneration = 0
     @State private var showAddServer = false
+    @State private var showingMacReplacement = false
     @State private var addServerDetent: PresentationDetent = .medium
 
     private var pairedProfiles: [GatewayProfile] {
@@ -89,37 +89,6 @@ struct ConnectionsSettingsView: View {
                 if !presented { selectedAuthorizedDevice = nil }
             }
         )
-    }
-
-    private func notificationPolicyBinding(_ keyPath: WritableKeyPath<PushNotificationPolicy, Bool>) -> Binding<Bool> {
-        Binding(
-            get: { pushNotifications.notificationPolicy[keyPath: keyPath] },
-            set: { value in
-                var next = pushNotifications.notificationPolicy
-                next[keyPath: keyPath] = value
-                Task { @MainActor in
-                    do { try await pushNotifications.updateNotificationPolicy(next) }
-                    catch { model.presentError(error) }
-                }
-            }
-        )
-    }
-
-    private var pushStatus: (icon: String, title: String, detail: String) {
-        switch model.pushNotificationReadiness {
-        case .ready:
-            return ("bell.badge.fill", "Ready", "Agent alerts can reach this iPhone.")
-        case .permissionRequired:
-            return ("bell", "Permission required", "Allow notifications to receive agent alerts.")
-        case .denied:
-            return ("bell.slash.fill", "Disabled", "Enable notifications in iOS Settings to receive alerts.")
-        case .registering:
-            return ("bell.and.waves.left.and.right", "Registering", "Securing this iPhone for agent alerts.")
-        case .pending:
-            return ("clock.arrow.circlepath", "Pending", "Registration will retry without interrupting chat.")
-        case .unavailable:
-            return ("bell.slash", "Unavailable", "Pair a Mac with a push-enabled Tron build.")
-        }
     }
 
     var body: some View {
@@ -189,57 +158,13 @@ struct ConnectionsSettingsView: View {
                     }
                 }
 
-                TronSettingsGroup(
-                    "Push Notifications",
-                    detail: "Private agent alerts for this iPhone.",
-                    accent: .tronBlue
-                ) {
-                    VStack(spacing: 0) {
-                        TronValueRow(
-                            icon: pushStatus.icon,
-                            title: pushStatus.title,
-                            detail: pushStatus.detail,
-                            accent: .tronBlue
-                        )
-                        TronSettingsDivider(accent: .tronBlue)
-                        TronToggleRow(icon: "questionmark.bubble.fill", title: "Input needed", detail: "Time Sensitive alerts when Tron needs a response", accent: .tronBlue, isEnabled: model.connectionState == .connected && pushNotifications.readiness == .ready && !pushNotifications.isUpdatingNotificationPolicy, isOn: notificationPolicyBinding(\.inputNeeded))
-                        TronSettingsDivider(accent: .tronBlue)
-                        TronToggleRow(icon: "stop.circle.fill", title: "Finished", detail: "Alert when the session has no pending background work", accent: .tronBlue, isEnabled: model.connectionState == .connected && pushNotifications.readiness == .ready && !pushNotifications.isUpdatingNotificationPolicy, isOn: notificationPolicyBinding(\.finished))
-                        TronSettingsDivider(accent: .tronBlue)
-                        TronToggleRow(icon: "hourglass", title: "Waiting on background work", detail: "Alert once while delegated work is still running", accent: .tronBlue, isEnabled: model.connectionState == .connected && pushNotifications.readiness == .ready && !pushNotifications.isUpdatingNotificationPolicy, isOn: notificationPolicyBinding(\.waiting))
-                        TronSettingsDivider(accent: .tronBlue)
-                        TronValueRow(
-                            icon: "stethoscope",
-                            title: "Registration stage",
-                            detail: model.pushRegistrationDiagnostic.rawValue,
-                            accent: .tronBlue
-                        )
-                        if pushNotifications.canRetryRejectedRegistration {
-                            TronSettingsDivider(accent: .tronBlue)
-                            Button {
-                                do { try pushNotifications.retryRejectedRegistration() }
-                                catch { model.presentError(error) }
-                            } label: {
-                                TronValueRow(
-                                    icon: "arrow.clockwise",
-                                    title: "Retry Registration",
-                                    detail: "Generate one fresh App Attest key after correcting the relay.",
-                                    accent: .tronBlue
-                                )
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityHint("Preserves the APNs token, pairings, grants, and other Keychain data")
-                        }
-                    }
-                }
-
                 if let selected = model.profiles.selected, model.connectionState == .connected {
                     QuickRebuildGroup(
                         profile: selected,
                         thisDevice: authorizedDevices.first {
                             $0.profileID == selected.id && $0.device.id == selected.deviceId
-                        }
+                        },
+                        showReplacement: { showingMacReplacement = true }
                     )
                 }
 
@@ -255,9 +180,11 @@ struct ConnectionsSettingsView: View {
                     model.isAddingServer = true
                     showAddServer = true
                 } label: {
-                    TronToolbarTextLabel("Add Server", systemImage: "plus")
+                    Image(systemName: "plus")
+                        .font(TronTypography.buttonSM)
                 }
                 .tronToolbarAction()
+                .accessibilityLabel("Add Server")
                 .accessibilityHint("Opens the Connect a Mac pairing screen")
             }
         }
@@ -286,6 +213,14 @@ struct ConnectionsSettingsView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)
                 .presentationContentInteraction(.resizes)
+            }
+        }
+        .tronManagedSheet(
+            isPresented: $showingMacReplacement,
+            identity: "settings.connection.mac-replacement"
+        ) {
+            if let selected = model.profiles.selected {
+                MacReplacementSheet(profile: selected)
             }
         }
         .tronManagedSheet(
@@ -593,6 +528,15 @@ struct GatewayConnectionDetailView: View {
                         ) {
                             GatewayConnectionStatusBadge(state: status)
                         }
+                        if let lastConnectedAt = model.dashboardLastConnectedAt(for: currentProfile.id) {
+                            TronSettingsDivider(accent: statusColor)
+                            TronValueRow(
+                                icon: "clock",
+                                title: "Last connected",
+                                detail: lastConnectedAt.formatted(date: .abbreviated, time: .shortened),
+                                accent: statusColor
+                            )
+                        }
                         if let stopReason = profileStopReason {
                             TronSettingsDivider(accent: .tronError)
                             TronValueRow(
@@ -680,7 +624,7 @@ struct GatewayConnectionDetailView: View {
                 Button { dismiss() } label: {
                     Image(systemName: "checkmark")
                         .font(TronTypography.buttonSM)
-                        .tronSettingsAccent()
+                        .tronToolbarAction()
                 }
                 .accessibilityLabel("Done")
             }
@@ -1151,15 +1095,15 @@ struct GatewayServerInfoSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 18) {
-                    if metadata.isEmpty {
+                    if metadata.isEmpty && loading {
+                        TronSheetLoadingState(label: "Loading server info…", accent: .tronCyan)
+                    } else if metadata.isEmpty {
                         TronSettingsRow(
-                            icon: loading ? "arrow.clockwise" : "questionmark.circle",
-                            title: loading ? "Loading server info…" : "Server info unavailable",
-                            subtitle: loading ? nil : "Connect to this server to load its metadata.",
+                            icon: "questionmark.circle",
+                            title: "Server info unavailable",
+                            subtitle: "Connect to this server to load its metadata.",
                             accent: .tronCyan
-                        ) {
-                            if loading { TronPulseLoadingIndicator(accent: .tronCyan, size: 18) }
-                        }
+                        ) { EmptyView() }
                         .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.09)
                     } else {
                         TronTechnicalMetadataSection(title: "Gateway", items: metadata, accent: .tronCyan)
@@ -1179,7 +1123,7 @@ struct GatewayServerInfoSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronCyan)
+                            .tronToolbarAction(accent: .tronCyan)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -1192,33 +1136,18 @@ struct GatewayServerInfoSheet: View {
     }
 }
 
-struct ImportSettingsView: View {
+/// Imports a session export into a new session in the default workspace.
+struct ImportSessionRow: View {
     @Environment(AppModel.self) private var model
     let onImported: (AppModel.SessionNavigationRoute) -> Void
     @State private var showSessionImporter = false
 
-    init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
-        self.onImported = onImported
-    }
-
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                TronSettingsGroup("Session file", detail: "Open a canonical Tron session export in a new session.") {
-                    Button { showSessionImporter = true } label: {
-                        TronSettingsRow(
-                            icon: "square.and.arrow.down",
-                            title: "Import Session",
-                            subtitle: "JSON, JSONL, or plain-text session export"
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(20)
+        Button { showSessionImporter = true } label: {
+            TronSettingsRow(icon: "square.and.arrow.down", title: "Import Session",
+                            subtitle: "JSON, JSONL, or plain-text session export", subtitleColor: .tronTextSecondary)
         }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle("Import")
+        .buttonStyle(.plain)
         .fileImporter(
             isPresented: $showSessionImporter,
             allowedContentTypes: [.json, .plainText, .data],

@@ -70,6 +70,8 @@ export function createTronNotifyExtension(input: {
   return (pi) => {
     pi.registerTool({
       name: "notify",
+      // docs/settings-model.md 5.4: declares it reads no open-world content.
+      annotations: { openWorldHint: false },
       label: "Notify",
       description: "Queue a bounded notification to the user's notification-enabled Tron iPhones. Routing and delivery are controlled by Tron.",
       promptSnippet: "Send a notification to the user's Tron iPhones when useful.",

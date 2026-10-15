@@ -5,13 +5,14 @@ import { type AgentSession, ModelRuntime } from "@earendil-works/pi-coding-agent
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
-import { SettingsService } from "../admin/settings-service.js";
 import type { SessionSnapshot, ExtensionRunActivity } from "../protocol/types.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import type { RunMarkerStore } from "./run-markers.js";
+import { settingsDependencies } from "../../test-support/settings-dependencies.js";
+import { chatSettingChange } from "../../test-support/chat-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 describe.sequential("compaction cancellation with the pinned runtime", () => {
@@ -159,9 +160,10 @@ async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string
   const snapshots: SessionSnapshot[] = [];
   const sessionEvents: Array<{ topic: string; payload: unknown }> = [];
   let onSnapshot: ((snapshot: SessionSnapshot) => void) | undefined;
+  const trust = new TrustService(agentDir);
   const registry = new RuntimeRegistry({
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
-    modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
+    modelRuntimeFactory: async () => runtime, trust,
     broadcast: (_id, event, value) => {
       sessionEvents.push({ topic: event, payload: value });
       if (event === "session.snapshot") {
@@ -172,7 +174,7 @@ async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string
     }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     compactionDiagnostic: diagnostic => compactionDiagnostics.push(diagnostic),
   });
-  const settings = new SettingsService(agentDir, runtime);
+  const settings = settingsDependencies({ agentDir, tronHome: join(root, "tron"), trust, modelRuntime: runtime, sessions: registry });
   disposals.push(async () => { await registry.dispose(); await rm(root, { recursive: true, force: true }); });
   await registry.initialize();
   const slot = await registry.create(cwd);
@@ -184,10 +186,17 @@ async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string
   await slot.prompt("Establish the API contract");
   await waitFor(() => !slot.isBusy, "the slot to go idle");
   const update = async (compaction: Record<string, unknown>) => {
-    await settings.update({ compaction }, { cwd, scope: "global", projectTrusted: false });
+    // Through the one change path, as the iPhone or an agent changes it.
+    const keys: Record<string, string> = {
+      enabled: "context.compaction.enabled", reserveTokens: "context.compaction.reserveTokens", keepRecentTokens: "context.compaction.keepRecentTokens",
+      thinkingLevel: "model.thinking[role=summarizer]", instructions: "context.compaction.instructions",
+    };
+    await settings.settingsChanges.change({ kind: "mac" }, Object.entries(compaction).map(([field, value]) => ({
+      key: keys[field]!, layer: "mac" as const, ...(value === null ? { op: "unset" as const } : { op: "set" as const, value }),
+    })), { actor: { kind: "ui", id: "fixture" } });
     registry.refreshCompactionPolicies("global", cwd);
   };
-  return { root, slot, session, faux, snapshots, sessionEvents, compactionDiagnostics, registry, update,
+  return { root, slot, session, faux, snapshots, sessionEvents, compactionDiagnostics, registry, update, settings,
     observe: (callback: typeof onSnapshot) => { onSnapshot = callback; },
     entries: async () => (await readFile(slot.sessionFile!, "utf8")).trim().split("\n").map(line => JSON.parse(line)),
   };
@@ -258,7 +267,7 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     const fresh = await item.registry.create(item.slot.cwd);
     const registry = item.registry.administrativeWorkRegistry;
     const service = new GatewayService({
-      config: { tronHome: join(item.root, "tron") }, sessions: item.registry,
+      config: { tronHome: join(item.root, "tron") }, sessions: item.registry, ...item.settings, broadcast: () => {},
       uploads: { removeSession: async () => {} }, sessionDeleted: () => {},
       receipts: new CommandReceiptStore(join(item.root, "tron")), workRegistry: registry,
     } as unknown as GatewayServiceDependencies);
@@ -270,20 +279,20 @@ describe.sequential("compaction operation admission and authoritative reconcilia
       isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
     };
     let command = 0;
-    const switchModel = (modelId: string) => service.invoke(client, "session.setModel", {
+    const switchModel = (modelId: string) => service.invoke(client, "settings.change", chatSettingChange("model", {
       sessionId: fresh.id, expectedRuntimeGeneration: fresh.snapshot().runtimeGeneration, expectedModel: fresh.snapshot().model ?? null, provider: item.faux.getModel().provider, modelId, commandId: `model-change-${++command}`,
-    });
+    }));
     // Negative control: losing the initiating token recreates the original
     // self-block through the real service and session admission boundary.
     const setModel = fresh.setModel.bind(fresh);
     const droppedToken = vi.spyOn(fresh, "setModel").mockImplementation((provider, modelId) => setModel(provider, modelId));
     await expect(switchModel("fixture")).rejects.toMatchObject({ code: "busy" });
     droppedToken.mockRestore();
-    await expect(switchModel("fixture")).resolves.toMatchObject({ updated: true, revision: expect.any(Number) });
+    await expect(switchModel("fixture")).resolves.toMatchObject({ status: "applied", changes: [expect.objectContaining({ revision: expect.any(Number) })] });
     item.faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "Synthetic provider authorization failure" })]);
     await fresh.prompt("A failed turn must not strand the new session");
     await waitFor(() => !fresh.isBusy, "the fresh slot to go idle");
-    await expect(switchModel("alternate")).resolves.toMatchObject({ updated: true, revision: expect.any(Number) });
+    await expect(switchModel("alternate")).resolves.toMatchObject({ status: "applied", changes: [expect.objectContaining({ revision: expect.any(Number) })] });
     expect(fresh.snapshot().model?.id).toBe("alternate");
     const activities = (fresh as unknown as { extensionActivities: Map<string, ExtensionRunActivity> }).extensionActivities;
     const now = new Date().toISOString();
@@ -296,7 +305,7 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     activities.set(child.toolCallId, child);
     try {
       expect(fresh.isDrainBusy).toBe(true);
-      await expect(switchModel("fixture")).resolves.toMatchObject({ updated: true, revision: expect.any(Number) });
+      await expect(switchModel("fixture")).resolves.toMatchObject({ status: "applied", changes: [expect.objectContaining({ revision: expect.any(Number) })] });
       expect(fresh.snapshot().model?.id).toBe("fixture");
       expect(activities.get(child.toolCallId)).toBe(child);
       const otherRPC = registry.begin({ kind: "rpc-mutation", method: "session.setModel", sessionId: fresh.id, hostEpoch: registry.runtimeEpoch });

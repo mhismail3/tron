@@ -10,6 +10,7 @@ from typing import List, Optional
 
 ISSUE_TRAILER = "Work-Claim-Issue"
 SESSION_TRAILER = "Work-Claim-Session"
+BASE_TRAILER = "Work-Claim-Base"
 _MAX_SLUG_WORDS = 5
 # `<type>/<issue>-<slug>`; group 1 is the issue number.
 _CLAIM_BRANCH = re.compile(r"^[a-z0-9._-]+/([0-9]+)-")
@@ -79,7 +80,7 @@ def claim_comment(session: str, branch: str, worktree: str, base: str, base_sha:
         f"Claimed by session `{session}`.\n\n"
         f"- Branch: `{branch}`\n"
         f"- Worktree: `{worktree}`\n"
-        f"- Base: `{base}` at `{base_sha[:12]}`\n"
+        f"- Base: `{base}` at `{base_sha}`\n"
     )
 
 
@@ -98,11 +99,15 @@ class Claim:
     branch: str
     sha: str
     session: Optional[str]  # None when the branch has no claim commit
+    base: Optional[str] = None
+    base_sha: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class ClaimCommit:
     session: str
+    base: Optional[str] = None
+    base_sha: Optional[str] = None
 
 
 @dataclass
@@ -122,21 +127,28 @@ def _remote_heads(repo: Path, remote: str) -> dict:
 
 
 def claim_commit(repo: Path, range_base: str, head: str, number: int) -> Optional[ClaimCommit]:
-    """The claim commit of `number` in `range_base..head`, if any."""
-    # Branch-only commits, oldest first; the first carrying this issue's
-    # trailer is the claim. Merges from the base branch add only base commits.
-    keys = ",".join(f"key={key}" for key in (ISSUE_TRAILER, SESSION_TRAILER))
-    log = _git(repo, "log", "--reverse", f"--format=%(trailers:{keys},separator=%x00)%x1e",
+    """Newest owner plus the immutable creation base on the first-parent path."""
+    keys = ",".join(f"key={key}" for key in (ISSUE_TRAILER, SESSION_TRAILER, BASE_TRAILER))
+    log = _git(repo, "log", "--first-parent", f"--format=%P%x1f%(trailers:{keys},separator=%x00)%x1e",
                f"{range_base}..{head}").stdout
+    session = None
     for record in log.split("\x1e"):
+        parents, separator, trailers = record.strip().partition("\x1f")
+        if not separator:
+            continue
         fields = {}
-        for trailer in record.strip().split("\x00"):
+        for trailer in trailers.split("\x00"):
             key, _, value = trailer.partition(":")
             if value.strip():
                 fields.setdefault(key.strip(), value.strip())
-        if fields.get(ISSUE_TRAILER) == str(number) and fields.get(SESSION_TRAILER):
-            return ClaimCommit(fields[SESSION_TRAILER])
-    return None
+        if fields.get(ISSUE_TRAILER) != str(number) or not fields.get(SESSION_TRAILER):
+            continue
+        session = session or fields[SESSION_TRAILER]
+        # Handoff changes the owner, not the creation base. Its receipt remains
+        # on the same first-parent chain; no second mutable copy is needed.
+        if fields.get(BASE_TRAILER) and len(parents.split()) == 1:
+            return ClaimCommit(session, fields[BASE_TRAILER], parents.strip())
+    return ClaimCommit(session) if session else None
 
 
 def _read_claims(repo: Path, remote: str, default_base: str, heads: dict) -> List[Claim]:
@@ -148,7 +160,8 @@ def _read_claims(repo: Path, remote: str, default_base: str, heads: dict) -> Lis
     claims = []
     for b in sorted(heads):
         found = claim_commit(repo, f"{remote}/{default_base}", f"{remote}/{b}", claimed_issue(b))
-        claims.append(Claim(b, heads[b], found.session if found else None))
+        claims.append(Claim(b, heads[b], found.session if found else None,
+                            found.base if found else None, found.base_sha if found else None))
     return claims
 
 
@@ -170,7 +183,7 @@ def create_claim(repo: Path, remote: str, base: str, branch: str, number: int, s
     base_sha = _git(repo, "rev-parse", f"{remote}/{base}").stdout.strip()
     message = (
         f"chore: claim #{number}\n\n"
-        f"{ISSUE_TRAILER}: {number}\n{SESSION_TRAILER}: {session}\n"
+        f"{ISSUE_TRAILER}: {number}\n{SESSION_TRAILER}: {session}\n{BASE_TRAILER}: {base}\n"
     )
     tree = _git(repo, "rev-parse", f"{base_sha}^{{tree}}").stdout.strip()
     sha = _git(repo, "commit-tree", tree, "-p", base_sha, "-m", message).stdout.strip()

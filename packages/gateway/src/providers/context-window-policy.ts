@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import type { Model } from "@earendil-works/pi-ai";
-import { estimateTokens, type AgentSession, type ExtensionFactory, type ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { estimateTokens, type AgentSession, type ExtensionFactory, type ModelRuntime, type SessionEntry, type SessionManager } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type { ContextWindowLimits, ContextWindowPolicy, ModelRef } from "../protocol/types.js";
 
@@ -95,6 +95,35 @@ export function validateContextWindow(value: unknown, limits: ContextWindowLimit
 
 interface ContextEntry { version: 1; provider: string; modelId: string; contextWindow: number | null }
 
+function canonicalContextWindowOverrides(entries: readonly SessionEntry[]): Map<string, number> {
+  const overrides = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.type !== "custom" || entry.customType !== CONTEXT_WINDOW_ENTRY) continue;
+    const value = entry.data as Partial<ContextEntry> | null;
+    if (!value || value.version !== 1 || typeof value.provider !== "string" || typeof value.modelId !== "string"
+      || (value.contextWindow !== null && (typeof value.contextWindow !== "number"
+        || !Number.isSafeInteger(value.contextWindow) || value.contextWindow <= 0 || value.contextWindow > MAX_CONTEXT_TOKENS))) {
+      throw new GatewayError("conflict", "Canonical session context preference is invalid");
+    }
+    const key = contextModelKey({ provider: value.provider, id: value.modelId });
+    const identity = parseContextModelKey(key);
+    if (identity.provider !== value.provider || identity.id !== value.modelId) throw new GatewayError("conflict", "Canonical session context model identity is ambiguous");
+    if (value.contextWindow === null) overrides.delete(key);
+    else overrides.set(key, value.contextWindow);
+    if (overrides.size > MAX_CONTEXT_PREFERENCES) throw new GatewayError("conflict", "Too many session context preferences");
+  }
+  return overrides;
+}
+
+/** A chapter is a new transcript, not a new Chat policy. Copy only the bounded
+ * effective preferences; replaying the old history would also carry messages. */
+export function appendContextWindowSnapshot(entries: readonly SessionEntry[], manager: SessionManager): void {
+  for (const [key, contextWindow] of canonicalContextWindowOverrides(entries)) {
+    const model = parseContextModelKey(key);
+    manager.appendCustomEntry(CONTEXT_WINDOW_ENTRY, { version: 1, provider: model.provider, modelId: model.id, contextWindow });
+  }
+}
+
 /** One policy per live SDK session. The catalog stays unchanged; only the selected
  * model copy carries the effective budget. Session overrides are branch-local
  * custom entries and never become messages or independent Gateway session state. */
@@ -119,22 +148,7 @@ export class SessionContextWindowPolicy {
     const settings = this.session.settingsManager;
     const global = contextWindowPreferences(settings.getGlobalSettings());
     const project = settings.isProjectTrusted() ? contextWindowPreferences(settings.getProjectSettings()) : {};
-    const overrides = new Map<string, number>();
-    for (const entry of this.session.sessionManager.getBranch()) {
-      if (entry.type !== "custom" || entry.customType !== CONTEXT_WINDOW_ENTRY) continue;
-      const value = entry.data as Partial<ContextEntry> | null;
-      if (!value || value.version !== 1 || typeof value.provider !== "string" || typeof value.modelId !== "string"
-        || (value.contextWindow !== null && (typeof value.contextWindow !== "number"
-          || !Number.isSafeInteger(value.contextWindow) || value.contextWindow <= 0 || value.contextWindow > MAX_CONTEXT_TOKENS))) {
-        throw new GatewayError("conflict", "Canonical session context preference is invalid");
-      }
-      const key = contextModelKey({ provider: value.provider, id: value.modelId });
-      const identity = parseContextModelKey(key);
-      if (identity.provider !== value.provider || identity.id !== value.modelId) throw new GatewayError("conflict", "Canonical session context model identity is ambiguous");
-      if (value.contextWindow === null) overrides.delete(key);
-      else overrides.set(key, value.contextWindow);
-      if (overrides.size > MAX_CONTEXT_PREFERENCES) throw new GatewayError("conflict", "Too many session context preferences");
-    }
+    const overrides = canonicalContextWindowOverrides(this.session.sessionManager.getBranch());
     this.global = global;
     this.project = project;
     this.overrides.clear();

@@ -85,6 +85,10 @@ SCENARIOS: dict[str, tuple[str, float, str]] = {
         "ProfileComposerScenarioTests/testComposerTyping", 10.0,
         "Typing into the composer through ComposerDraftCoordinator and the real ComposerDraftStore while 4 drafts hold image attachments; 400 ms pauses.",
     ),
+    "home-sheet": (
+        "ProfileHomeSheetScenarioTests/testHomeCompletedSheet", 14.0,
+        "Home view over 50 Home workers; opens Recently Completed's sheet, scrolls it end to end and closes it, repeatedly, while 2 running workers publish a summary each second.",
+    ),
     "summary-storm": (
         "ProfileDashboardScenarioTests/testSummaryStorm", 15.0,
         "Dashboard mounted; 5 running sessions each send a session.summary every 750 ms (snapshot rate).",
@@ -769,7 +773,7 @@ class Profiler:
                  "-scheme", SCHEME, "-configuration", CONFIGURATION, "-destination", self.destination(),
                  "-derivedDataPath", str(self.derived_data), "-resultBundlePath", str(result_bundle),
                  "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never",
-                 f"-only-testing:TronMobileTests/{test}"],
+                 f"-only-testing:TronMobileProfiling/{test}"],
                 environment,
             )
         finally:
@@ -812,7 +816,7 @@ class Profiler:
             "window_seconds": window,
             "configuration": CONFIGURATION,
             "scheme": SCHEME,
-            "test": f"TronMobileTests/{test}",
+            "test": f"TronMobileProfiling/{test}",
             "simulator": {"device_type": self.device_type, "runtime": self.runtime},
             "xcode": run(["xcodebuild", "-version"], capture_output=True).stdout.strip().replace("\n", " "),
             "products": str(self.derived_data),

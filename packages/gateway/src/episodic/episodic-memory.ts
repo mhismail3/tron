@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
-import type { HomeMemoryEvidence, HomeMemoryPage } from "../protocol/types.js";
-import { HOME_MEMORY_PAGE_BYTES, encodeHomeMemoryCursor, homeMemoryItem, homeMemoryRevisionChanged, type HomeMemoryPageRequest } from "../home/home-memory-browser.js";
+import type { HomeMemoryEvidence, HomeMemoryView } from "../protocol/types.js";
+import { HOME_MEMORY_PAGE_BYTES, encodeHomeMemoryCursor, homeMemoryItem, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "../home/home-memory-browser.js";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
@@ -220,6 +220,13 @@ export class EpisodicMemory {
         });
       }
       memory.view = await foldViewSliced(memory.messages.size, limits.viewBytes, part => memory.partBytes(part), address => memory.nodes.has(address));
+      // Older stores contain model-written role prefixes. Revoke them through the
+      // same durable projection invalidation path as changed source, so Home can
+      // rebuild under current canonical attribution without showing stale text.
+      const invalidSummaries = [...memory.nodes.values()]
+        .filter(node => node.kind === "summary" && invalidSummaryText(node.text))
+        .map(node => nodeAddress(node.level, node.index));
+      if (invalidSummaries.length > 0) await memory.invalidateNodes(invalidSummaries);
       await memory.repairOrphanedDependencies();
       memory.assertConsistent();
       await memory.repairCatalogMismatch();
@@ -338,7 +345,7 @@ export class EpisodicMemory {
       add({ level: part.level - 1, index: part.index * 2 + 1, start: part.start + half, span: half });
     };
     for (const part of this.view) add(part);
-    const lines = parts.map(part => `${nodeAddress(part.level, part.index)}|${viewLine(this.nodes.get(nodeAddress(part.level, part.index))?.text)}`);
+    const lines = parts.map(part => `${nodeAddress(part.level, part.index)}|${this.attributedViewLine(part.start, part.span, this.nodes.get(nodeAddress(part.level, part.index))?.text)}`);
     const text = lines.join("\n");
     return { text, lines: lines.length, bytes: utf8Bytes(text) };
   }
@@ -349,11 +356,15 @@ export class EpisodicMemory {
     return this.mutex.run(read, signal);
   }
 
-  /** Content-derived page identity belongs to this memory, not an RPC cache.
+  /** Page identity includes the layout because continuation offsets index these parts;
+   * reopening the same ledger may rebuild a different decomposition.
    * No await separates copying a row, its summary and the cursor revision. */
   browserRevision(): string {
     this.assertOpen();
-    return episodicDigest(JSON.stringify([this.dependencies.sessionId, this.generation, this.committedRevision, this.sourceCursor]));
+    return episodicDigest(JSON.stringify([
+      this.dependencies.sessionId, this.generation, this.committedRevision, this.sourceCursor,
+      this.view.map(({ level, index, start, span }) => [level, index, start, span]),
+    ]));
   }
 
   browserCursor(): EpisodicSourceCursor | null {
@@ -369,26 +380,97 @@ export class EpisodicMemory {
       || message.sourceDigest !== evidence.sourceDigest) throw homeMemoryRevisionChanged();
   }
 
-  browserPage(request: HomeMemoryPageRequest): HomeMemoryPage {
+  /** The same hierarchical lines the model-facing memory view renders, newest first.
+   * Chapter filtering recursively splits only parts crossing chapter boundaries. */
+  browserView(request: HomeMemoryViewRequest): HomeMemoryView {
     this.assertOpen();
-    const revision = this.browserRevision();
+    const chapter = request.sessionId;
+    const baseRevision = this.browserRevision();
+    const revision = chapter === undefined ? baseRevision : episodicDigest(JSON.stringify([baseRevision, chapter]));
     if (request.cursor && request.cursor.revision !== revision) throw homeMemoryRevisionChanged();
-    const offset = request.cursor?.offset ?? 0;
-    if (offset > this.messages.size || request.cursor && offset === this.messages.size) throw homeMemoryRevisionChanged();
-    const result: HomeMemoryPage = { homeId: this.dependencies.sessionId, revision, totalItems: this.messages.size, items: [] };
-    let position = offset;
-    // Leave room for the largest cursor and page metadata. Each row is bounded
-    // independently, so one row always fits and no cursor can strand a row.
-    let bytes = Buffer.byteLength(JSON.stringify(result)) + 1024;
-    for (; position < this.messages.size && result.items.length < request.limit; position += 1) {
-      const message = this.messages.get(position)!;
-      const item = homeMemoryItem(message, this.nodes.get(nodeAddress(0, position)));
-      const size = Buffer.byteLength(JSON.stringify(item)) + 1;
-      if (bytes + size > HOME_MEMORY_PAGE_BYTES) break;
-      bytes += size; result.items.push(item);
+    const matches = (index: number): boolean => chapter === undefined || this.messages.get(index)?.sessionId === chapter;
+    const ranges: EpisodicViewPart[] = [];
+    const add = (part: EpisodicViewPart): void => {
+      if (part.start >= this.messages.size) return;
+      const end = Math.min(part.start + part.span, this.messages.size);
+      let inside = 0;
+      for (let i = part.start; i < end; i += 1) if (matches(i)) inside += 1;
+      if (inside === 0) return;
+      if (inside === end - part.start) { ranges.push(part); return; }
+      if (part.span === 1) return;
+      const half = part.span / 2;
+      add({ level: part.level - 1, index: part.index * 2, start: part.start, span: half });
+      add({ level: part.level - 1, index: part.index * 2 + 1, start: part.start + half, span: half });
+    };
+    if (request.part) {
+      const { start, span } = request.part;
+      if (start + span > this.messages.size) throw new GatewayError("invalid_request", "Home memory part is past the catalog end");
+      const level = Math.log2(span), index = start / span;
+      const half = span / 2;
+      const parts = [
+        { level: level - 1, index: index * 2, start, span: half },
+        { level: level - 1, index: index * 2 + 1, start: start + half, span: half },
+      ];
+      const lines = parts.map(part => homeMemoryLine(part, this.messages, this.nodes, nodeAddress));
+      return { homeId: this.dependencies.sessionId, revision, totalMessages: this.messages.size, lines };
     }
-    if (!result.items.length && position < this.messages.size) throw new GatewayError("unsupported", "Home memory row exceeds the browser bound");
-    if (position < this.messages.size) result.nextCursor = encodeHomeMemoryCursor({ revision, offset: position, limit: request.limit });
+    for (const part of this.view) add(part);
+    ranges.reverse(); // Home's view is chronological; the browser presents newest first.
+    const offset = request.cursor?.offset ?? 0;
+    if (offset > ranges.length || request.cursor && offset === ranges.length) throw homeMemoryRevisionChanged();
+    const totalMessages = chapter === undefined ? this.messages.size : [...this.messages.values()].filter(m => m.sessionId === chapter).length;
+    const result: HomeMemoryView = { homeId: this.dependencies.sessionId, revision, totalMessages, lines: [] };
+    let position = offset;
+    let bytes = Buffer.byteLength(JSON.stringify(result)) + 1024;
+    for (; position < ranges.length && result.lines.length < request.limit; position += 1) {
+      const line = homeMemoryLine(ranges[position]!, this.messages, this.nodes, nodeAddress);
+      const size = Buffer.byteLength(JSON.stringify(line)) + 1;
+      if (bytes + size > HOME_MEMORY_PAGE_BYTES) break;
+      bytes += size;
+      result.lines.push(line);
+    }
+    if (!result.lines.length && position < ranges.length) throw new GatewayError("unsupported", "Home memory line exceeds the browser bound");
+    if (position < ranges.length) result.nextCursor = encodeHomeMemoryCursor({ revision, offset: position, limit: request.limit, ...(chapter === undefined ? {} : { sessionId: chapter }) });
+    return result;
+  }
+
+  /**
+   * Largest built summary ranges for each chapter, newest first. Decomposes each
+   * contiguous chapter interval into maximal aligned dyadic nodes; leaf summaries
+   * are used only when no merged node exists for that chapter.
+   */
+  recentSummaries(sessionIds: readonly string[], limit: number): Map<string, string[]> {
+    this.assertOpen();
+    const result = new Map(sessionIds.map(sessionId => [sessionId, [] as string[]]));
+    const catalog = new Map<string, number[]>();
+    for (const message of this.messages.values()) {
+      if (!result.has(message.sessionId)) continue;
+      const indices = catalog.get(message.sessionId) ?? [];
+      indices.push(message.index);
+      catalog.set(message.sessionId, indices);
+    }
+    for (const [sessionId, summaries] of result) {
+      const indices = catalog.get(sessionId) ?? [];
+      if (!indices.length) continue;
+      const start = indices[0]!, end = indices.at(-1)! + 1;
+      const merged: Array<{ start: number; span: number; text: string }> = [];
+      let cursor = start;
+      while (cursor < end) {
+        let chosen: { span: number; text: string } | undefined;
+        for (let span = 2 ** EPISODIC_MAX_LEVEL; span >= 2; span /= 2) {
+          if (cursor % span || cursor + span > end) continue;
+          const node = this.nodes.get(nodeAddress(Math.log2(span), cursor / span));
+          if (node) { chosen = { span, text: node.text }; break; }
+        }
+        if (chosen) { merged.push({ start: cursor, ...chosen }); cursor += chosen.span; }
+        else cursor += 1;
+      }
+      const sources = merged.length ? merged.sort((a, b) => b.start - a.start).map(item => item.text)
+        : indices.sort((a, b) => b - a).flatMap(index => {
+          const node = this.nodes.get(nodeAddress(0, index)); return node ? [node.text] : [];
+        });
+      summaries.push(...sources.slice(0, limit));
+    }
     return result;
   }
 
@@ -420,7 +502,7 @@ export class EpisodicMemory {
     const half = n / 2;
     return [id, id + half].map((start) => {
       const node = this.nodes.get(nodeAddress(level - 1, start / half));
-      return `${start}+${half}|${node ? viewLine(node.text) : EPISODIC_PLACEHOLDER}`;
+      return `${start}+${half}|${node ? this.attributedViewLine(start, half, node.text) : EPISODIC_PLACEHOLDER}`;
     });
   }
 
@@ -693,6 +775,14 @@ export class EpisodicMemory {
     if (previous) this.liveBytes -= Buffer.byteLength(`${JSON.stringify(previous)}\n`);
     this.messages.set(record.index, record);
     this.liveBytes += Buffer.byteLength(`${JSON.stringify(record)}\n`);
+  }
+
+  private attributedViewLine(start: number, span: number, text: string | undefined): string {
+    if (text === undefined) return EPISODIC_PLACEHOLDER;
+    // A merged line has no single speaker. Do not scan its entire historical
+    // span on every render, or claim a model-written sentence is user-authored.
+    const kind = span === 1 ? this.messages.get(start)?.kind : "summary";
+    return `${kind ?? "summary"}: ${span === 1 ? viewLine(text) : text.replace(/\n+/gu, " ")}`;
   }
 
   private setNode(record: EpisodicNodeRecord): void {
@@ -1032,11 +1122,24 @@ export class EpisodicMemory {
     const tries: string[] = [];
     for (let attempt = 0; attempt < EPISODIC_TRIES; attempt += 1) {
       const reply = await this.compactCall(request, stamp);
+      // Formatting failures belong to the same bounded correction conversation
+      // as size failures, not the provider/auth failure path. Never let a rejected
+      // reply enter the shortest-valid candidate set or the durable node store.
+      if (invalidSummaryText(reply)) {
+        this.diagnostic({ event: "episodic.summary-rejected", level: "warning",
+          message: "Episodic summary failed content validation", reason: "invalid-summary",
+          counts: { attempt: attempt + 1, limit: EPISODIC_TRIES } });
+        request = withFeedback(request, reply,
+          "Output only the line of memory content for the original input. Do not add source-role labels or copy summarizer instructions or correction feedback. Tron attaches attribution from the canonical source.");
+        continue;
+      }
       tries.push(reply);
       if (utf8Bytes(reply) <= this.limits.nodeBytes || attempt + 1 >= EPISODIC_TRIES) break;
       request = withFeedback(request, reply, sizeFeedback(reply, this.limits.nodeBytes));
     }
-    // Keep the shortest try (gist §4.3): a stubborn node keeps a line a few
+    if (tries.length === 0) throw new EpisodicBlockedSignal({ reason: "permanent-failure",
+      detail: `the compactor echoed role labels or summarizer repair instructions after ${EPISODIC_TRIES} correction attempts` });
+    // Keep the shortest valid try (gist §4.3): a stubborn node keeps a line a few
     // bytes over, which is fine because the view measures real sizes.
     return tries.reduce((shortest, line) => utf8Bytes(line) < utf8Bytes(shortest) ? line : shortest, tries[0]!);
   }
@@ -1065,8 +1168,9 @@ export class EpisodicMemory {
       this.usageSinceOpen.cacheWrite += message.usage?.cacheWrite ?? 0;
       // Durable before the next call: a crash must not lose recorded spend.
       await this.saveState();
+      const text = summarizerText(message);
       const verdict = classifyReply(message);
-      if (verdict === "ok") return summarizerText(message);
+      if (verdict === "ok") return text;
       if (verdict === "permanent") {
         throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail: message.errorMessage ?? emptyReplyDetail(message) });
       }
@@ -1260,5 +1364,11 @@ export class EpisodicMemory {
 /** One view line's text: newlines flattened to single spaces (gist §5.1), and
  * the placeholder for a part whose node is not built. */
 function viewLine(text: string | undefined): string {
-  return text === undefined ? EPISODIC_PLACEHOLDER : text.replace(/\n+/gu, " ");
+  return text === undefined ? EPISODIC_PLACEHOLDER : text.replace(/^(?:user|talk|echo|event|assistant|tool):\s/iu, "").replace(/\n+/gu, " ");
+}
+
+/** Model-generated metadata and echoed size-repair prompts are never summary content. */
+function invalidSummaryText(text: string): boolean {
+  return /(?:^|;\s*)(?:user|talk|echo|event|assistant|tool):\s/iu.test(text)
+    || /(?:the corrected line must|output only (?:that |the )?line|that line is \d+ bytes; the limit is|end where it is cut|compress this message into one line|merge these two lines into one)/iu.test(text);
 }

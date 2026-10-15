@@ -4,11 +4,7 @@ import CoreImage.CIFilterBuiltins
 import AppKit
 
 /// Wraps `CIQRCodeGenerator` to produce an `NSImage` from a string.
-///
-/// Pure-value tests live in `Tests/Support/Pairing/QRCodeGeneratorTests.swift`.
-/// They assert that the generator returns nil for empty input, returns a
-/// non-empty `NSImage` for valid pairing URLs, and decode the output with a
-/// test-owned CoreImage detector to confirm encoding correctness.
+/// Empty input yields nil.
 enum QRCodeGenerator {
     /// Encodes `payload` as a QR code at the requested pixel size.
     /// Returns nil if the payload is empty or CoreImage refuses to

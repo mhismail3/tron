@@ -15,34 +15,12 @@ enum ChatHostedRowStability: Sendable {
 import SwiftUI
 import TronMobileCore
 
-final class ChatOpeningOverlayMotionMarker: UIView {}
-
-struct ChatOpeningOverlayMotionProbe: UIViewRepresentable {
-    func makeUIView(context: Context) -> ChatOpeningOverlayMotionMarker {
-        let view = ChatOpeningOverlayMotionMarker()
-        view.isUserInteractionEnabled = false
-        view.accessibilityElementsHidden = true
-        return view
-    }
-
-    func updateUIView(_ view: ChatOpeningOverlayMotionMarker, context: Context) {}
-}
-
 /// Test-only mounted UIKit evidence, queried at a display boundary. Unlike the
 /// semantic callback cache, this cannot report a frame after native unmount.
 final class ChatHostedNativeRowMarker: UIView {
     var physicalID = ""
     var semanticID = ""
     var hostIdentity = UUID()
-}
-
-@MainActor
-final class ReadOnlySubagentHostedProbe {
-    weak var store: ReadOnlySubagentSessionStore?
-}
-
-extension EnvironmentValues {
-    @Entry var readOnlySubagentHostedProbe: ReadOnlySubagentHostedProbe? = nil
 }
 
 /// Sheet rows do not otherwise own a hosted lifetime token. The native marker's
@@ -57,13 +35,6 @@ struct ChatHostedStableRowProbe: UIViewRepresentable {
         view.accessibilityElementsHidden = true
     }
 }
-
-struct ChatHostedObstructionProbe: UIViewRepresentable {
-    func makeUIView(context: Context) -> ChatHostedObstructionMarker { ChatHostedObstructionMarker() }
-    func updateUIView(_ uiView: ChatHostedObstructionMarker, context: Context) {}
-}
-
-final class ChatHostedObstructionMarker: UIView {}
 
 struct ChatHostedNativeRowProbe: UIViewRepresentable {
     static let composerID = "hosted-composer"
@@ -213,11 +184,6 @@ struct ChatHostedThinkingTraceProbe: View {
     }
 }
 
-struct ChatHostedScrollState: Sendable {
-    let isDetached: Bool
-    let hasUnread: Bool
-}
-
 struct ChatHostedGeometryTraceSample: Sendable, Equatable {
     let frame: Int
     let offsetY: CGFloat
@@ -282,46 +248,15 @@ struct ChatHostedObservation: Sendable {
     let physicalRowDisappearanceCounts: [String: Int]
     let toolChipSamples: [ToolChipInstrumentationSample]
     let installedProjectionRowCount: Int
-    let controlEventCount: Int
-    let isDetached: Bool
-    let hasUnread: Bool
-    let prependLoadWaiting: Bool
-    let prependCompletionResult: PerformanceResult?
     let readyFrameCompletionCount: Int
     let isReady: Bool
 
     var composerHeight: CGFloat { geometryTrace.last?.composerHeight ?? 0 }
 
-    var postMountResizeCount: Int {
-        rowStabilityRecords.values.reduce(0) { $0 + $1.resizeCount }
-    }
-
-    var maximumPostMountResize: CGFloat {
-        rowStabilityRecords.values.map(\.maximumResize).max() ?? 0
-    }
-
-    var resizedSemanticIDs: [String] {
-        rowStabilityRecords.values
-            .filter { $0.resizeCount > 0 }
-            .map(\.semanticID)
-            .sorted()
-    }
-
-    /// Rows whose content identity changed more than once, which is a remount
-    /// of a row that never left the installed projection.
-    var remountedSemanticIDs: [String] {
-        rowIdentityInstanceCounts.filter { $0.value > 1 }.keys.sorted()
-    }
-}
-
-enum ChatHostedScrollCallbackMode: Sendable {
-    case synthetic
-    case native
 }
 
 @MainActor
 final class ChatHostedProbe {
-    let scrollCallbackMode: ChatHostedScrollCallbackMode
     private var geometry = ChatTranscriptGeometry.zero
     private var composerHeight: CGFloat = 0
     private var geometryTrace: [ChatHostedGeometryTraceSample] = []
@@ -352,48 +287,14 @@ final class ChatHostedProbe {
     private var semanticFrameCallbackCount = 0
     private var projectionSubmitCount = 0
     private var projectionInstallCount = 0
-    private(set) var composerCatalogBuildCount = 0
-    private(set) var composerCatalogCommandNames: [String] = []
-    var openingOverlayControl: (@MainActor (Bool) -> Void)?
-    var composerCatalogWillInstall: (@MainActor (ComposerResourceCatalog) async -> Void)?
-    var composerCatalogDidFinish: (@MainActor ([CommandInfo]) -> Void)?
-    var composerPickerEntries: (@MainActor () -> [ComposerResourceEntry])?
-    var composerResourcePickerPresentation: (@MainActor (ChatAttachmentDestination?) -> Void)?
-    var composerResourceSelection: (@MainActor (ComposerResourceEntry) -> Void)?
     private var physicalRowAppearanceCounts: [String: Int] = [:]
     private var physicalRowDisappearanceCounts: [String: Int] = [:]
     private var toolChipSamples: [ToolChipInstrumentationSample] = []
     private var renderedIDBySemanticID: [String: String] = [:]
     private var installedProjectionRowCount = 0
-    private var controlEventCount = 0
-    private var isDetached = false
-    private var hasUnread = false
-    private var prependLoadWaiting = false
-    private var prependCompletionResult: PerformanceResult?
     private var readyFrameCompletionCount = 0
-    private var geometryControl: ((ChatTranscriptGeometry, ChatTranscriptGeometry, Bool) -> Void)?
-    private var phaseControl: ((ScrollPhase, ScrollPhase, ChatTranscriptGeometry?) -> Void)?
-    private var nativeControl: ((Bool) -> Void)?
-    private var catchUpControl: ((Bool) -> Void)?
-    private var semanticResponseControl: (() -> Void)?
-    private var submitPromptControl: (() -> Void)?
-    private var displayControl: ((DisplayPresentationCommand) -> Void)?
-    private var frameControl: (() async throws -> Void)?
-    private var stateControl: (() -> ChatHostedScrollState)?
-    private var prependControl: (() -> Bool)?
-    private var cancelPresentationControl: (() -> Void)?
-    private var prependPageContinuation: CheckedContinuation<Void, Error>?
     private var isReady = false
     private(set) var revision = 0
-    private(set) var usesDrivenScrollAuthority = false
-
-    init(scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic) {
-        self.scrollCallbackMode = scrollCallbackMode
-    }
-
-    var admitsNativeScrollCallbacks: Bool {
-        scrollCallbackMode == .native || !usesDrivenScrollAuthority
-    }
 
     var observation: ChatHostedObservation {
         let visibleRowIDs = rowFrames
@@ -433,11 +334,6 @@ final class ChatHostedProbe {
             physicalRowDisappearanceCounts: physicalRowDisappearanceCounts,
             toolChipSamples: toolChipSamples,
             installedProjectionRowCount: installedProjectionRowCount,
-            controlEventCount: controlEventCount,
-            isDetached: isDetached,
-            hasUnread: hasUnread,
-            prependLoadWaiting: prependLoadWaiting,
-            prependCompletionResult: prependCompletionResult,
             readyFrameCompletionCount: readyFrameCompletionCount,
             isReady: isReady
         )
@@ -539,7 +435,6 @@ final class ChatHostedProbe {
             rowFrameOrder.removeFirst(overflow)
             for removedID in removed { rowFrames[removedID] = nil }
         }
-        refreshControlledState()
         recordGeometryTrace()
         revision &+= 1
     }
@@ -624,16 +519,6 @@ final class ChatHostedProbe {
 
     func recordProjectionSubmit() {
         projectionSubmitCount &+= 1
-        revision &+= 1
-    }
-
-    func recordComposerCatalogBuild() {
-        composerCatalogBuildCount &+= 1
-        revision &+= 1
-    }
-
-    func recordComposerCatalogInstall(_ catalog: ComposerResourceCatalog) {
-        composerCatalogCommandNames = catalog.commands.map(\.invocationName)
         revision &+= 1
     }
 
@@ -793,175 +678,21 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
-    func installScrollControls(
-        geometry: @escaping (ChatTranscriptGeometry, ChatTranscriptGeometry, Bool) -> Void,
-        phase: @escaping (ScrollPhase, ScrollPhase, ChatTranscriptGeometry?) -> Void,
-        native: @escaping (Bool) -> Void,
-        catchUp: @escaping (Bool) -> Void,
-        semanticResponse: @escaping () -> Void,
-        submitPrompt: @escaping () -> Void,
-        presentDisplay: @escaping (DisplayPresentationCommand) -> Void,
-        frame: @escaping () async throws -> Void,
-        state: @escaping () -> ChatHostedScrollState,
-        prepend: @escaping () -> Bool,
-        cancelPresentation: @escaping () -> Void
-    ) {
-        geometryControl = geometry
-        phaseControl = phase
-        nativeControl = native
-        catchUpControl = catchUp
-        semanticResponseControl = semanticResponse
-        submitPromptControl = submitPrompt
-        displayControl = presentDisplay
-        frameControl = frame
-        stateControl = state
-        prependControl = prepend
-        cancelPresentationControl = cancelPresentation
-        refreshControlledState()
-    }
-
-    func presentDisplay(_ command: DisplayPresentationCommand) { displayControl?(command) }
-
-    func driveGeometry(
-        previous: ChatTranscriptGeometry,
-        current: ChatTranscriptGeometry,
-        viewport: Bool = false
-    ) {
-        usesDrivenScrollAuthority = true
-        controlEventCount &+= 1
-        geometryControl?(previous, current, viewport)
-        refreshControlledState()
-        revision &+= 1
-    }
-
-    func drivePhase(from: ScrollPhase, to: ScrollPhase, geometry: ChatTranscriptGeometry?) {
-        usesDrivenScrollAuthority = true
-        controlEventCount &+= 1
-        phaseControl?(from, to, geometry)
-        refreshControlledState()
-        revision &+= 1
-    }
-
-    func driveNativeOwnership(_ owned: Bool) {
-        usesDrivenScrollAuthority = true
-        controlEventCount &+= 1
-        nativeControl?(owned)
-        refreshControlledState()
-        revision &+= 1
-    }
-
-    func driveSemanticResponse() {
-        controlEventCount &+= 1
-        semanticResponseControl?()
-        refreshControlledState()
-        revision &+= 1
-    }
-
-    func driveCatchUp(reduceMotion: Bool) {
-        controlEventCount &+= 1
-        catchUpControl?(reduceMotion)
-        refreshControlledState()
-        revision &+= 1
-    }
-
-    func submitPrompt() {
-        controlEventCount &+= 1
-        submitPromptControl?()
-        refreshControlledState()
-        revision &+= 1
-    }
-
-    func drivePrepend() -> Bool {
-        prependCompletionResult = nil
-        controlEventCount &+= 1
-        let began = prependControl?() ?? false
-        refreshControlledState()
-        revision &+= 1
-        return began
-    }
-
-    func waitForPrependPageRelease() async throws {
-        prependLoadWaiting = true
-        revision &+= 1
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
-                else { prependPageContinuation = continuation }
-            }
-        } onCancel: {
-            Task { @MainActor in self.cancelPrependPageWait() }
-        }
-    }
-
-    func releasePrependPage() {
-        prependLoadWaiting = false
-        revision &+= 1
-        prependPageContinuation?.resume()
-        prependPageContinuation = nil
-    }
-
-    func retirePresentation() {
-        cancelPresentationControl?()
-        refreshControlledState()
-        cancelPrependPageWait()
-        // Hosted controls capture the mounted view/probe. Final retirement
-        // must break those cycles, not merely invoke their cancellation.
-        geometryControl = nil
-        phaseControl = nil
-        nativeControl = nil
-        catchUpControl = nil
-        semanticResponseControl = nil
-        submitPromptControl = nil
-        fixtureOpenPresentation = nil
-        openingOverlayControl = nil
-        displayControl = nil
-        frameControl = nil
-        stateControl = nil
-        prependControl = nil
-        cancelPresentationControl = nil
-        composerCatalogWillInstall = nil
-        composerCatalogDidFinish = nil
-        composerPickerEntries = nil
-        composerResourcePickerPresentation = nil
-        composerResourceSelection = nil
-        revision &+= 1
-    }
-
-    func recordPrependCompletion(_ result: PerformanceResult) {
-        prependCompletionResult = result
-        refreshControlledState()
-        revision &+= 1
-    }
-
-    private func cancelPrependPageWait() {
-        prependLoadWaiting = false
-        prependPageContinuation?.resume(throwing: CancellationError())
-        prependPageContinuation = nil
-        revision &+= 1
-    }
-
-    func driveFrameBoundary() async throws {
-        controlEventCount &+= 1
-        revision &+= 1
-        try await frameControl?()
-    }
-
-    private func refreshControlledState() {
-        guard let state = stateControl?() else { return }
-        isDetached = state.isDetached
-        hasUnread = state.hasUnread
-    }
-
     func recordReadyFrameCompletion() {
         readyFrameCompletionCount &+= 1
         revision &+= 1
     }
 
-    private(set) var readyPublicationCount = 0
     var fixtureOpenPresentation: (() async throws -> Int)?
 
+    func retirePresentation() {
+        // The fixture open closure captures the mounted view and probe; retirement
+        // must break that cycle, not merely stop observing.
+        fixtureOpenPresentation = nil
+        revision &+= 1
+    }
+
     func markReady() {
-        readyPublicationCount += 1
         guard !isReady else { return }
         isReady = true
         revision &+= 1

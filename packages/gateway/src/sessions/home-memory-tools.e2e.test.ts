@@ -332,7 +332,7 @@ async function prompt(f: Fixture, input: string, reply: string): Promise<void> {
 }
 
 const ok = (answer: ToolObservation): string => {
-  expect(answer.details, `${answer.toolName} must answer, not refuse: ${answer.text}`).toEqual({ status: "ok" });
+  expect(answer.details?.status, `${answer.toolName} must answer, not refuse: ${answer.text}`).toBe("ok");
   return answer.text;
 };
 
@@ -440,6 +440,10 @@ describe.sequential("Tron Home memory tools end to end", () => {
       fractionalIdOne: answers[10]!.text,
       date: ok(answers[11]!),
       expectedDate: `2+0|${expectedDateText(entry)}`,
+      // A reader of the transcript gets the canonical instant typed, not only the local text.
+      dateDetails: answers[11]!.details,
+      expectedDateDetails: { status: "ok", date: { id: 2, at: new Date(entry.timestamp).toISOString() } },
+      zoomDetails: answers[0]!.details,
       unknownDate: answers[12]!.text,
       // The frozen view must not move under the tool loop, and the head of the
       // cached prefix (system prompt plus tool list) must not move across
@@ -462,13 +466,15 @@ describe.sequential("Tron Home memory tools end to end", () => {
       toolResultMessages: (f.requests.at(-1)?.roles ?? []).filter((role) => role === "toolResult").length,
     };
     report.cases.push({ case: "zoom", ...row });
-    expect(row.children).toBe("0+2|user: zoom-m0 talk: reply-r0\n2+2|user: zoom-m2 talk: reply-r2");
+    expect(row.children).toBe("0+2|summary: user: zoom-m0 talk: reply-r0\n2+2|summary: user: zoom-m2 talk: reply-r2");
     expect(row.halves).toBe("0+1|user: zoom-m0\n1+1|talk: reply-r0");
     expect(row.message).toBe("2+0|user: zoom-m2");
     expect(row.misaligned).toBe("No line 1+2.");
     expect(row.notPowerOfTwo).toBe("No line 0+3.");
     expect(row.pastTheEnd).toBe("No line 0+1024.");
     expect(row.date).toBe(row.expectedDate);
+    expect(row.dateDetails).toEqual(row.expectedDateDetails);
+    expect(row.zoomDetails).toEqual({ status: "ok" });
     expect(row.unknownDate).toBe("No line 999+1.");
     expect(row.zeroN).toBe("No line 0+0.");
     expect(row.negativeId).toBe("No line -1+2.");
@@ -653,6 +659,9 @@ describe.sequential("Tron Home memory tools end to end", () => {
       emptyText: empty.text,
       oversizedOutcome: oversized.details,
       oversizedText: oversized.text,
+      // The header's range and counts, typed for a transcript reader.
+      needleDetails: answers[0]!.details,
+      bulkDetails: answers[2]!.details,
     };
     report.cases.push({ case: "search", ...row });
     // Indices 0, 2, 4, 5 and 6 hold "needle" (5 inside a 400-character message, 6
@@ -672,6 +681,8 @@ describe.sequential("Tron Home memory tools end to end", () => {
     // counted in the header and never reported as a hit.
     expect(row.omittedHeader).toBe('memory_search "omitted" in messages [0, 32): 0 match(es), 0 shown, 3 [omitted], 1 capped.');
     expect(row.omittedHits).toEqual([]);
+    expect(row.needleDetails).toEqual({ status: "ok", search: { query: "needle", from: 0, to: 7, matches: 5, shown: 5, omitted: 0, capped: 1 } });
+    expect(row.bulkDetails).toEqual({ status: "ok", search: { query: "bulkbatch", from: 0, to: 32, matches: 21, shown: 20, omitted: 3, capped: 1 } });
     expect(row.emptyOutcome).toEqual({ status: "invalid-arguments" });
     expect(row.emptyText).toBe("memory_search needs a query of 1 to 200 characters.");
     expect(row.oversizedOutcome).toEqual({ status: "invalid-arguments" });

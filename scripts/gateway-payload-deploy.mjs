@@ -60,8 +60,8 @@ const MANIFEST_KEYS = [
 ];
 const PAYLOAD_PI_CLI = "app/node_modules/.bin/pi";
 const PAYLOAD_PI_ALIAS_TARGET = "../../app/node_modules/.bin/pi";
-const PROTOCOL_VERSION = 7;
-const MIN_PROTOCOL_VERSION = 7;
+const PROTOCOL_VERSION = 8;
+const MIN_PROTOCOL_VERSION = 8;
 export const PINNED_XCODEGEN_VERSION = "2.45.3";
 export const PINNED_NPM_VERSION = "10.9.4";
 export const PINNED_NPM_TREE_SHA256 = "adc24b0737566f66bc2ce18251f0bb8168c9cc9177c20fa3379cf129d6091cff";
@@ -1117,9 +1117,9 @@ export function createDeployTimeline(home, commandId, { operation = "update", no
       phaseStartedAt = now();
       if (states.terminal.has(state)) timeline.finish(state, error);
     },
-    mark(event, message) {
+    mark(event, message, level = "info", fields = {}) {
       if (finished) return;
-      appendDeployRecord(home, "info", event, message, { commandId, durationMs: since(phaseStartedAt) });
+      appendDeployRecord(home, level, event, message, { commandId, durationMs: since(phaseStartedAt), ...fields });
     },
     finish(state, error) {
       if (finished) return;
@@ -1962,8 +1962,11 @@ export async function waitForReplacement({
   throw error;
 }
 
-export async function waitForDrainedReplacement({ oldProcess, replacement, expected, oldEpoch, relaunchLimitMs = RELAUNCH_LIMIT_MS, startupLimitMs = STARTUP_LIMIT_MS, onDrainComplete }) {
-  await waitForDrainCompletion(oldProcess, replacement.readExactProcess, replacement.sleep);
+export async function waitForDrainedReplacement({ oldProcess, replacement, expected, oldEpoch, relaunchLimitMs = RELAUNCH_LIMIT_MS, startupLimitMs = STARTUP_LIMIT_MS, onDrainComplete, onExitStalled }) {
+  await waitForDrainCompletion(oldProcess, replacement.readExactProcess, replacement.sleep, {
+    readListener: replacement.readListener,
+    onExitStalled,
+  });
   onDrainComplete?.();
   return waitForReplacement({
     oldProcess,
@@ -2095,17 +2098,54 @@ export async function captureLocalListenerProcess(port, runCommand = runBounded)
  * listener, and port state are never transition evidence after capture: the
  * candidate startup deadline begins only after the exact old PID/start pair is
  * gone or replaced. */
+// The old Gateway keeps its port while it drains accepted work, for as long as
+// that takes, and closes it only when its shutdown begins. The rest of its
+// shutdown is disposal and its own exit, so a process still alive this long
+// after releasing the port is stuck inside its exit (#729), and launchd cannot
+// relaunch until it is gone. The Gateway's exit watcher normally ends it within
+// seconds; this bound also covers an old Gateway that predates that watcher.
+export const DRAIN_EXIT_STALL_LIMIT_MS = 30_000;
+
 export async function waitForDrainCompletion(
   oldProcess,
   readExactProcess,
   sleep = (milliseconds) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds)),
+  {
+    readListener,
+    stallLimitMs = DRAIN_EXIT_STALL_LIMIT_MS,
+    now = () => performance.now(),
+    onExitStalled,
+    killProcess = (pid) => process.kill(pid, "SIGKILL"),
+  } = {},
 ) {
   if (!oldProcess || !Number.isSafeInteger(oldProcess.pid) || oldProcess.pid < 1 || !oldProcess.startIdentity) {
     throw new Error("old Gateway listener process identity is unavailable");
   }
+  let releasedAt;
+  let killed = false;
   while (true) {
     const current = await readExactProcess(oldProcess.pid);
-    if (!current || current.pid !== oldProcess.pid || current.startIdentity !== oldProcess.startIdentity) return current;
+    if (!sameProcess(current, oldProcess)) return current;
+    if (readListener && !killed) {
+      let listener;
+      let listenerKnown = true;
+      try { listener = await readListener(); } catch { listenerKnown = false; }
+      if (!listenerKnown || sameProcess(listener, oldProcess)) {
+        releasedAt = undefined;
+      } else {
+        releasedAt ??= now();
+        const releasedForMs = now() - releasedAt;
+        if (releasedForMs >= stallLimitMs) {
+          // Re-read the exact identity immediately before signalling: a PID
+          // that exited and was reused is never ours to kill.
+          const exact = await readExactProcess(oldProcess.pid);
+          if (!sameProcess(exact, oldProcess)) return exact;
+          onExitStalled?.({ pid: oldProcess.pid, releasedForMs: Math.round(releasedForMs) });
+          try { killProcess(oldProcess.pid); } catch { /* exited between the read and the signal */ }
+          killed = true;
+        }
+      }
+    }
     await sleep(500);
   }
 }
@@ -2298,6 +2338,12 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
           oldProcessGone = true;
           paths.timeline?.mark("deploy.old-process-exited", "Previous Gateway process exited after draining");
         },
+        onExitStalled: ({ pid, releasedForMs }) => paths.timeline?.mark(
+          "deploy.old-process-stalled",
+          `Previous Gateway pid ${pid} was still alive ${releasedForMs} ms after releasing its listener; killing that exact process`,
+          "warning",
+          { pid, releasedForMs },
+        ),
       });
       // /health admits warmup only; authenticated system.info is the promotion proof.
       const confirmed = requireAuthenticatedRuntimeInfo(
@@ -2571,10 +2617,24 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
       // the clean revision after those edits are reverted.
       sourceRevision = await gitRevision(config.sourceRoot);
       const installVerifierPath = join(config.sourceRoot, "scripts", "gateway-install-inputs.mjs");
-      const { gatewayBuildInputFingerprint, verifyGatewayInstallInputs } = await import(pathToFileURL(installVerifierPath).href);
+      const { gatewayBuildInputFingerprint, ensureGatewayInstallInputs } = await import(pathToFileURL(installVerifierPath).href);
       sourceInputFingerprint = await gatewayBuildInputFingerprint(config.sourceRoot);
+      // A changed lock needs a newly signed build; refuse that before repairing
+      // anything, so npm ci only ever restores the lock the payload already runs.
       source = await captureReusableSourcePackage(active.root, gatewayRoot);
-      await verifyGatewayInstallInputs(gatewayRoot);
+      // The checkout's compile-only install drifts whenever main moves its lock
+      // without a reinstall; repair it with the active payload's pinned npm (#1010).
+      const startedAt = Date.now();
+      const install = await ensureGatewayInstallInputs(gatewayRoot, {
+        runtimeBin: join(active.root, "runtime", `bin-${process.arch}`),
+        onRepair: ({ drift }) => paths.timeline?.mark("deploy.source-install-repair",
+          "Source checkout install drifted from package-lock; running npm ci", "warning", { drift }),
+      });
+      if (install.repaired) {
+        paths.timeline?.mark("deploy.source-install-repaired", "Source checkout install restored with npm ci", "info", {
+          durationMs: Date.now() - startedAt,
+        });
+      }
       await runCommand(process.execPath, [
         join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"),
         "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput,
@@ -2606,6 +2666,13 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
         await cp(compilerOutput, join(temporary, "app", "dist"), { recursive: true, errorOnExist: true, force: false });
         await writeFile(join(temporary, "app", "package.json"), source.packageBytes);
         await writeFile(join(temporary, "app", "package-lock.json"), source.lockBytes);
+        // The patched pi-coding-agent declaration explains this exact lock, which a
+        // source update cannot change; refresh it so its metadata is the revision's.
+        const patchDeclaration = await readFile(join(gatewayRoot, "pi-coding-agent-patch.json")).catch((error) => {
+          if (error?.code === "ENOENT") return undefined;
+          throw error;
+        });
+        if (patchDeclaration) await writeFile(join(temporary, "app", "pi-coding-agent-patch.json"), patchDeclaration);
         if (await validatePayloadPushConfiguration(temporary, paths.channel) !== activePushConfiguration) {
           throw new Error("source update changed the active product PushService.xcconfig");
         }
@@ -2825,7 +2892,20 @@ async function applyPayloadInternal(value, paths) {
     await writeProgress(paths, "building", value.commandId);
     let built;
     try {
-      built = await buildSourcePayload({ paths, config, candidateVersion: value.candidateVersion });
+      // The configured checkout is already executable trusted build input.
+      // Use its current builder now, not the copy inside yesterday's payload;
+      // this installed helper still owns promotion, readiness and rollback.
+      const scriptsRoot = await noSymlinkDirectory(join(config.sourceRoot, "scripts"));
+      const sourceUpdaterPath = join(scriptsRoot, "gateway-payload-deploy.mjs");
+      const sourceUpdater = await import(pathToFileURL(sourceUpdaterPath).href);
+      if (typeof sourceUpdater.buildSourcePayload !== "function") {
+        throw new Error("trusted source updater does not export buildSourcePayload");
+      }
+      paths.timeline?.mark("deploy.source-builder", "Building with the trusted checkout updater", "info", {
+        builderSha256: createHash("sha256").update(await readFile(sourceUpdaterPath)).digest("hex"),
+      });
+      built = await sourceUpdater.buildSourcePayload({ paths, config, candidateVersion: value.candidateVersion });
+      payloadManifest(built?.manifest, { channel: value.channel, version: value.candidateVersion });
     } catch (error) {
       await writeProgress(paths, "failure", value.commandId, error?.message ?? error).catch(() => {});
       throw error;
@@ -2932,6 +3012,12 @@ async function rollback({ paths, host, port, token, timeoutMs, commandId, replac
         relaunchLimitMs: timeoutMs,
         startupLimitMs: STARTUP_LIMIT_MS,
         onDrainComplete: () => { oldProcessGone = true; },
+        onExitStalled: ({ pid, releasedForMs }) => paths.timeline?.mark(
+          "deploy.old-process-stalled",
+          `Previous Gateway pid ${pid} was still alive ${releasedForMs} ms after releasing its listener; killing that exact process`,
+          "warning",
+          { pid, releasedForMs },
+        ),
       });
       await writeState(paths, {
         state: "rolled-back", channel: paths.channel, version: target.version,

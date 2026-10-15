@@ -20,7 +20,7 @@ struct ModelRailCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // The checkmark slot has a fixed size in both states, so selecting
-            // a card changes no layout (`ModelRailCardLayoutTests`). It is
+            // a card changes no layout. It is
             // centred on the provider line, clear of the model name below.
             HStack(alignment: .center, spacing: 4) {
                 Text(model.displayProviderName)

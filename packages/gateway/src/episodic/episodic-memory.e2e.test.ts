@@ -309,12 +309,13 @@ function respond(context: TranscriptContext, nodeBytes: number, compactor: Fixtu
     compactor.feedbackTurns += 1;
     return fauxAssistantMessage(pad("short", nodeBytes - 40));
   }
-  const leaf = /Compress this message into one line, in at most \d+ bytes:\n([\s\S]*)$/u.exec(text);
+  const leaf = /Compress this message into one line of content only, in at most \d+ bytes\. Do not add a role label; Tron attaches the canonical kind:\n([\s\S]*)$/u.exec(text);
   const merge = /Merge these two lines into one, in at most \d+ bytes:\n([\s\S]*)$/u.exec(text);
   const body = (leaf?.[1] ?? merge?.[1] ?? text).replace(/\s+/gu, " ").trim();
   if (leaf) compactor.levelZeroBodies.push(body);
   const overshoot = body.length % 5 === 0;
-  const line = pad(body.slice(0, 100), overshoot ? nodeBytes + 100 : nodeBytes - 60);
+  const content = body.replace(/^(?:user|talk|echo|event):\s*/u, "");
+  const line = pad(content.slice(0, 100), overshoot ? nodeBytes + 100 : nodeBytes - 60);
   // One in three summaries carries a second line, so the prompt's context lines
   // have to be flattened (the view is one line per part).
   return fauxAssistantMessage(compactor.calls % 3 === 0 ? `${line}\nLINEBREAK-${compactor.calls}` : line);
@@ -333,7 +334,7 @@ async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}): 
   const sessionId = manager.getSessionId();
   const workspace = new TronWorkspace(home);
   owners.push(workspace);
-  const faux = fauxProvider({ provider: `tron-episodic-${label}`, models: [{ id: "compactor", reasoning: false }] });
+  const faux = fauxProvider({ provider: `tron-episodic-${label}`, tokensPerSecond: 0, models: [{ id: "compactor", reasoning: false }] });
   const modelRuntime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
   modelRuntime.registerNativeProvider(faux.provider);
   const model = faux.getModel();
@@ -583,6 +584,26 @@ describe("episodic memory end to end", () => {
     expect(edited!.index).toBe(editIndex);
 
     await memory.whenReady(memory.status().messages);
+
+    // The memory browser (#911) shows the lines this view renders, newest first:
+    // older ranges as summary lines, recent messages with their items, and a
+    // summary opens into its two halves down to single messages.
+    const rendered = memory.status().view.parts;
+    const browser = memory.browserView({ limit: 50 });
+    expect(browser.lines.map(line => [line.start, line.span]))
+      .toEqual([...rendered].reverse().slice(0, 50).map(part => [part.start, part.messages]));
+    expect(browser.lines.some(line => line.span > 1 && line.text !== null && line.item === undefined)).toBe(true);
+    for (const line of browser.lines) {
+      expect(line.text ?? "").not.toMatch(/(?:^|\s)(?:user|talk|echo|event):\s/u);
+      if (line.span === 1) expect(line.item).toMatchObject({ index: line.start, kind: line.kind });
+    }
+    let summary = browser.lines.find(line => line.span > 1)!;
+    while (summary.span > 1) {
+      const halves = memory.browserView({ limit: 50, part: { start: summary.start, span: summary.span } }).lines;
+      expect(halves.map(line => [line.start, line.span])).toEqual([[summary.start, summary.span / 2], [summary.start + summary.span / 2, summary.span / 2]]);
+      summary = halves[0]!;
+    }
+    expect(summary.item?.index).toBe(summary.start);
     await memory.dispose();
   }, 300_000);
 

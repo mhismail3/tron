@@ -75,6 +75,7 @@ function buildApnsPayload(request: NotificationRequest): string {
       alert: { title: request.title ?? "Tron", body: request.message },
       sound: TRON_NOTIFICATION_SOUND,
       ...(request.interruptionLevel ? { "interruption-level": request.interruptionLevel } : {}),
+      ...(request.category ? { category: request.category } : {}),
     },
     tron: { kind: "agent_notification", requestId: request.requestId },
     ...(request.sessionId && request.machineId

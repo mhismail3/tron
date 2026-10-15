@@ -16,6 +16,7 @@ struct HostedReadonlyAttachmentFixture: View {
     @State private var before = "none"
     @State private var hasBackgrounded = false
     @State private var poisonPublished = false
+    @State private var showsSettings = false
     private let gateway: ReadonlyAttachmentGateway
     private let scenario: String
     private let profile = GatewayProfile(id: "readonly-original", label: "Readonly fixture", host: "original.example.test", port: 9847, machineId: "readonly-machine")
@@ -50,6 +51,11 @@ struct HostedReadonlyAttachmentFixture: View {
                     ChatView(sessionID: sessionID)
                         .id("\(model.knowledgeDestinationIdentity):\(sessionID)")
                 }
+                // The production Settings sheet, for journeys that change an
+                // iPhone preference and then use it on a displayed file.
+                if scenario.contains("settings") {
+                    Button("Open Settings") { showsSettings = true }.accessibilityIdentifier("fixture.open-settings")
+                }
                 Text(counters).font(.caption2).accessibilityIdentifier("fixture.preview-counts")
                 Text(native).font(.caption2).accessibilityIdentifier("fixture.preview-native")
                 Text(poisonPublished ? "poison:true" : "poison:false").font(.caption2).accessibilityIdentifier("fixture.preview-poison")
@@ -58,6 +64,7 @@ struct HostedReadonlyAttachmentFixture: View {
                     .font(.caption2).accessibilityIdentifier("fixture.preview-connection")
             }
         }
+        .tronManagedSheet(isPresented: $showsSettings, identity: "fixture.settings") { SettingsView() }
         .environment(model)
         .tronPresentation()
         .preferredColorScheme(scenario.contains("-light") ? .light : .dark)
@@ -129,6 +136,16 @@ private actor ReadonlyAttachmentGateway {
             var artifact = display["artifact"] as! [String: Any]
             artifact["kind"] = "text"; artifact["name"] = "readonly.txt"; artifact["mimeType"] = "text/plain"
             display["artifact"] = artifact; rows[1]["display"] = display
+        } else if let swiftFile = HostedSwiftAppFixtureSource.file(for: scenario) {
+            // A displayed single-file SwiftUI app for the #889 run journeys.
+            var display = rows[1]["display"] as! [String: Any]
+            display["kind"] = "code"; display["title"] = swiftFile.name
+            display["altText"] = "\(swiftFile.name), a single-file SwiftUI app"
+            display["eligibleSurfaces"] = ["sheet", "inline"]
+            display["presentation"] = ["requestedSurface": "sheet", "inlineTapAction": "sheet"]
+            var artifact = display["artifact"] as! [String: Any]
+            artifact["kind"] = "code"; artifact["name"] = swiftFile.name; artifact["mimeType"] = "text/plain; charset=utf-8"
+            display["artifact"] = artifact; rows[1]["display"] = display
         } else if scenario.contains("display-video") {
             var display = rows[1]["display"] as! [String: Any]
             display["kind"] = "video"
@@ -145,7 +162,8 @@ private actor ReadonlyAttachmentGateway {
         }
         image = Self.image(height: 320)
         poison = Self.image(height: 640)
-        file = Data((0..<300).map { "Readonly fixture row \($0): preserved native selection and viewport." }.joined(separator: "\n").utf8)
+        file = HostedSwiftAppFixtureSource.file(for: scenario).map { Data($0.source.utf8) }
+            ?? Data((0..<300).map { "Readonly fixture row \($0): preserved native selection and viewport." }.joined(separator: "\n").utf8)
     }
     @MainActor private static func image(height: Int) -> Data {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
@@ -239,7 +257,7 @@ private actor ReadonlyAttachmentGateway {
     }
     func fetch(_ identity: ChatMediaIdentity) async -> ChatMediaPayload {
         fetches += 1
-        let isFile = identity.blobID == "readonly-file" || scenario.contains("display-file")
+        let isFile = identity.blobID == "readonly-file" || scenario.contains("display-file") || scenario.contains("display-swift")
         if isFile { fileFetches += 1 } else { imageFetches += 1 }
         publish()
         let holdsThisPayload = isFile ? scenario.contains("file-held") && fileFetches == 2 : scenario.contains("held") && imageFetches == 2
@@ -297,7 +315,7 @@ private actor ReadonlyAttachmentSocket: GatewaySocketConnection {
     private var closed = false
     init(gateway: ReadonlyAttachmentGateway, replacement: Bool) {
         self.gateway = gateway
-        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":7,\"minProtocolVersion\":7,\"machineId\":\"\(replacement ? "readonly-replacement-machine" : "readonly-machine")\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
+        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":8,\"minProtocolVersion\":8,\"machineId\":\"\(replacement ? "readonly-replacement-machine" : "readonly-machine")\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
     }
     func send(_ data: Data) async throws {
         guard !closed else { throw CancellationError() }

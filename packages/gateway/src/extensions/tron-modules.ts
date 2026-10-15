@@ -10,6 +10,7 @@ import { createTronComputerExtension } from "../display/tron-computer-extension.
 import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
 import { createTronHomeExtension } from "../home/tron-home-extension.js";
+import { createTronSettingsExtension, type SettingsToolAccess } from "../admin/tron-settings-extension.js";
 import { homeResearchTools, type HomeResearchTransport } from "../home/home-research-tools.js";
 import type { SessionSearchRequest, SessionSearchResponse } from "../sessions/session-search-contract.js";
 import type { HomeMemoryToolAccess } from "../home/home-memory.js";
@@ -17,6 +18,7 @@ import type { DisplayArtifactStore } from "../display/display-artifact-store.js"
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import type { HomeProfileChangeAccess } from "../home/home-profile.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { NotificationService } from "../notifications/notification-service.js";
@@ -49,8 +51,8 @@ export interface TronModuleHost {
    * here is what keeps the wiring honest: the only Home runtime is built by a
    * slot that answers this. */
   homeMemoryTools: (sessionId: string) => HomeMemoryToolAccess | undefined;
-  homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
-  homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
+  homeTask: (sessionId: string, request: unknown) => Promise<unknown>;
+  homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
   /** Session search for Home's research tools, late-bound: the service is
    * installed after the registry exists, and may be absent on this Gateway. */
   sessionSearch: () => ((request: SessionSearchRequest, signal?: AbortSignal) => Promise<SessionSearchResponse>) | undefined;
@@ -61,6 +63,11 @@ export interface TronModuleHost {
   /** Transport injection for Home's web tools, the same seam capture's fetch
    * exposes (`SourceCaptureOptions`); production omits it. */
   homeWebTransport?: HomeResearchTransport;
+  /** This chat's settings, as itself (Home, a task worker or an agent), late-bound:
+   * the change path is installed after the registry exists. */
+  settings: () => SettingsToolAccess | undefined;
+  /** Home's learned-profile changes through the change path, as Home; late-bound like `settings`. */
+  homeProfileChanges: () => HomeProfileChangeAccess | undefined;
 }
 
 /** One built-in Tron extension. `name` is the runtime-registered inline name, so
@@ -69,8 +76,7 @@ export interface TronModule {
   name: string;
   /** One-line purpose for Settings. */
   purpose: string;
-  /** Tool names the factory registers when its owners are present, proven
-   * against the factory by `tron-modules.test.ts`. */
+  /** Tool names the factory registers when its owners are present. */
   tools: readonly string[];
   /** Command names the factory registers; no Tron module registers one today. */
   commands: readonly string[];
@@ -128,6 +134,13 @@ export const TRON_MODULES: readonly TronModule[] = [
     tools: ["knowledge", "connections", "jev"],
     commands: [],
     factory: (host) => createTronCoreExtension(host.workspace, host.knowledge, host.jev, host.connections),
+  },
+  {
+    name: "tron-settings",
+    purpose: "Lets the agent read and change settings through the one logged change path, and marks a run that read web content.",
+    tools: ["settings"],
+    commands: [],
+    factory: (host) => createTronSettingsExtension(() => host.settings()),
   },
   {
     name: "tron-ask-user",
@@ -212,6 +225,7 @@ export function tronModuleFactories(host: TronModuleHost): TronModuleRegistratio
 export const HOME_MODULE_NAMES: readonly string[] = [
   "tron-context-window",
   "tron-compaction-policy",
+  "tron-settings",
   "tron-ask-user",
   "tron-display",
   "tron-notify",
@@ -226,9 +240,10 @@ export const TRON_HOME_MODULE: TronModule = {
   tools: ["zoom", "date", "memory_search", "delegate", "task", "profile"],
   commands: [],
   factory: (host) => createTronHomeExtension(() => host.homeMemoryTools(host.sessionId()),
-    request => host.homeDelegate(host.sessionId(), request),
+    (request, signal) => host.homeDelegate(host.sessionId(), request, signal),
     request => host.homeTask(host.sessionId(), request),
-    () => host.knowledge),
+    () => host.knowledge,
+    () => host.homeProfileChanges()),
 };
 
 /** The one research module only a Home runtime loads (#724): read-only web
@@ -236,7 +251,7 @@ export const TRON_HOME_MODULE: TronModule = {
  * reading. Like `TRON_HOME_MODULE` it is not part of `TRON_MODULES`, because an
  * ordinary session never loads it. All five tools are always registered — the
  * tool list heads every cached prefix — and each resolves its owner per call. */
-export const TRON_HOME_RESEARCH_MODULE: TronModule = {
+const TRON_HOME_RESEARCH_MODULE: TronModule = {
   name: "tron-home-research",
   purpose: "Adds Home's read-only research tools: web search and fetch, session search, Knowledge lookup and trusted-project file reading.",
   tools: ["web_search", "web_fetch", "session_search", "knowledge", "read_file"],
@@ -258,7 +273,7 @@ export const TRON_HOME_RESEARCH_MODULE: TronModule = {
  * allowlist semantic. */
 export const HOME_TOOL_NAMES: readonly string[] = [
   "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
-  "web_search", "web_fetch", "session_search", "knowledge", "read_file",
+  "web_search", "web_fetch", "session_search", "knowledge", "read_file", "settings",
 ];
 
 /** The curated Home profile: the kept Tron modules plus tron-home, and nothing

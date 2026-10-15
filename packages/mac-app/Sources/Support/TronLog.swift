@@ -3,7 +3,7 @@ import OSLog
 
 /// The Mac process's sole JSONL writer. All filesystem work runs off the main actor.
 final class TronLog: @unchecked Sendable {
-    enum Level: String, Sendable { case debug, info, warning, error }
+    enum Level: String, Sendable { case info, warning, error }
 
     struct Record: Codable, Sendable {
         let timestamp: String
@@ -24,15 +24,11 @@ final class TronLog: @unchecked Sendable {
     // Rare lifecycle transitions fit several days in four 1 MiB segments, below Gateway retention.
     private static let segmentMaximumBytes = 1 * 1_024 * 1_024
     private static let segmentCount = 4
-    private static let debugMaximumRecords = 1_000
-    private static let debugMaximumBytes = 1 * 1_024 * 1_024
     private static let maxMessageBytes = 2_000
     private static let maxFieldCharacters = 160
     private let queue = DispatchQueue(label: "com.tron.mac.log-writer", qos: .utility)
     private let logsDirectory: URL
     private let logger = Logger(subsystem: "com.tron.mac", category: "TronLog")
-    private var debugRecords: [Record] = []
-    private var debugBytes = 0
     private var currentBytes: Int64 = 0
 
     static let shared = TronLog(logsDirectory: TronPaths.tronHome.appendingPathComponent("logs", isDirectory: true))
@@ -63,36 +59,16 @@ final class TronLog: @unchecked Sendable {
                 commandId: commandId.map(Self.boundedField), old: old.map(Self.boundedField),
                 new: new.map(Self.boundedField), why: why.map(Self.boundedField), outcome: outcome.map(Self.boundedField)
             )
-            if level == .debug {
-                self.addDebugRecord(record)
-            } else {
-                self.append(record)
-            }
+            self.append(record)
             if level == .warning || level == .error {
                 self.logger.log(level: level == .error ? .error : .default, "\(record.event, privacy: .public): \(record.message, privacy: .public)")
             }
         }
     }
 
-    func debugBuffer() async -> [Record] {
-        await withCheckedContinuation { continuation in
-            queue.async { [self] in continuation.resume(returning: self.debugRecords) }
-        }
-    }
-
     func flush() async {
         await withCheckedContinuation { continuation in
             queue.async { continuation.resume() }
-        }
-    }
-
-    private func addDebugRecord(_ record: Record) {
-        let size = (try? JSONEncoder().encode(record).count) ?? 0
-        debugRecords.append(record)
-        debugBytes += size
-        while debugRecords.count > Self.debugMaximumRecords || debugBytes > Self.debugMaximumBytes {
-            let first = debugRecords.removeFirst()
-            debugBytes -= (try? JSONEncoder().encode(first).count) ?? 0
         }
     }
 

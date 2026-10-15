@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
-# Canonical bounded owner for local and CI iOS hosted-unit-test execution.
+# Canonical bounded owner for local and CI iOS UI-test execution.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Host-wide heavy-run queue (#915, tools/work/heavy.py): builds and suites wait for
+# a slot unless they inherited one (for example from `work land`).
+case "${1:-checkpoint}" in
+  checkpoint|prepare|build|run|diagnose)
+    if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
+      exec python3 "$ROOT/tools/work/heavy.py" run --owner "tron-ios-test ${1:-checkpoint} in $(basename "$ROOT")" -- "$0" "$@"
+    fi
+    ;;
+esac
 IOS="$ROOT/packages/ios-app"
 # shellcheck disable=SC1091
 source "$ROOT/config/ci-toolchain.env"
@@ -35,9 +44,10 @@ usage() {
 Usage: scripts/tron-ios-test COMMAND [--lane NAME] [--keep-booted] [--only-testing OWNER ...]
 
 Commands:
-  checkpoint, prepare  Provision, generate, build, and run the complete unit target.
-  build                Provision, generate, and build reusable test products.
-  run                  Run reusable products; defaults to the complete unit target.
+  checkpoint, prepare  Provision, generate, build, and run the smoke journeys.
+  build                Provision, generate, and build reusable test products: the app and
+                       the TronMobileUITests bundle (scheme Tron UI Validation).
+  run                  Run reusable products: the --only-testing journeys, or the smoke set.
   diagnose             Explicit verbose-diagnostics run with a larger finite deadline.
   status               Report toolchain, lane, owned simulator, lease, products, and the newest
                        run this worktree started in this lane.
@@ -51,6 +61,10 @@ Commands:
   lane-remove NAME     Delete one lane's simulator and state, and the test products of the
                        worktree that created it when that worktree no longer exists. Refuses
                        a lane a live process holds (73) and state with no ownership marker (66).
+  clean-unowned UUID NAME
+                       Shut down and delete only this exact simulator after proving no lane
+                       marker, live lane lease, or Development marker claims it. Explicit
+                       maintainer cleanup only; never sweeps or adopts devices.
   reap                 Shut down this repository's owned simulators that are booted
                        with no live lease (orphans of a crash, a kill or --keep-booted),
                        delete lanes no command has used for 7 days or whose creating
@@ -66,7 +80,8 @@ Commands:
 
 Selectors:
   --only-testing OWNER  Repeat without shell-generated command fragments, for example:
-                        --only-testing TronMobileTests/SnapshotCacheTests
+                        --only-testing TronMobileUITests/TronSmokeUITests/testIntegrationDestinationsHaveOneDoneButtonThroughSettings
+                        Without a selector, run, checkpoint and prepare run the smoke set (SMOKE_ONLY_TESTING).
 
 Options:
   --all                 With `status`, list every simulator on this Mac (see above).
@@ -254,24 +269,23 @@ simulator_args=(
 )
 [[ "$EPHEMERAL" == 1 ]] && simulator_args+=(--ephemeral)
 
-tier="${TRON_IOS_TEST_TIER:-unit}"
-case "$tier" in
-  unit)
-    test_scheme="Tron Development"
-    test_plan="UnitTests"
-    ;;
-  ui-validation)
-    test_scheme="Tron UI Validation"
-    test_plan="UIValidation"
-    ;;
-  *) die "TRON_IOS_TEST_TIER must be unit or ui-validation" ;;
-esac
+# The one test product: the app and the UI-test bundle, under the UIValidation plan.
+test_scheme="Tron UI Validation"
+test_plan="UIValidation"
+# The smoke set runs when no --only-testing selector is given: the two Home
+# manage-sheet journeys and one Settings journey, the cheapest real-app paths
+# that cover the Home manage surface and the shared Settings chrome.
+SMOKE_ONLY_TESTING=(
+  "TronMobileUITests/TronSmokeUITests/testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings"
+  "TronMobileUITests/TronSmokeUITests/testComposerContextRingOpensManageHomeInHomeAndManageSessionElsewhere"
+  "TronMobileUITests/TronSmokeUITests/testIntegrationDestinationsHaveOneDoneButtonThroughSettings"
+)
 
 command="${1:-checkpoint}"
 if [[ "$command" == -h || "$command" == --help || "$command" == help ]]; then usage; exit 0; fi
 shift || true
 case "$command" in
-  checkpoint|prepare|build|run|diagnose|status|reap|prune|lanes|lane-remove|clean) ;;
+  checkpoint|prepare|build|run|diagnose|status|reap|prune|lanes|lane-remove|clean-unowned|clean) ;;
   *) usage >&2; die "unknown command: $command" ;;
 esac
 
@@ -279,6 +293,8 @@ selectors=()
 keep_booted=0
 all_simulators=0
 lane_target=""
+unowned_udid=""
+unowned_name=""
 while (($#)); do
   case "$1" in
     --only-testing)
@@ -304,9 +320,16 @@ while (($#)); do
       die "unsupported argument: $1"
       ;;
     *)
-      [[ "$command" == lane-remove ]] || die "unsupported argument: $1"
-      [[ -z "$lane_target" ]] || die "lane-remove takes one lane name"
-      lane_target="$1"
+      if [[ "$command" == lane-remove ]]; then
+        [[ -z "$lane_target" ]] || die "lane-remove takes one lane name"
+        lane_target="$1"
+      elif [[ "$command" == clean-unowned ]]; then
+        if [[ -z "$unowned_udid" ]]; then unowned_udid="$1"
+        elif [[ -z "$unowned_name" ]]; then unowned_name="$1"
+        else die "clean-unowned takes exactly UUID and NAME"; fi
+      else
+        die "unsupported argument: $1"
+      fi
       shift
       ;;
   esac
@@ -327,11 +350,16 @@ if [[ "$command" == lane-remove ]]; then
   [[ -n "$lane_target" ]] || die "lane-remove requires a lane name"
   validate_lane_name "$lane_target"
 fi
+if [[ "$command" == clean-unowned ]]; then
+  [[ -n "$unowned_udid" && -n "$unowned_name" ]] || die "clean-unowned requires an exact UUID and NAME"
+  [[ "$unowned_udid" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]] || die "clean-unowned requires a canonical simulator UUID"
+  ((all_simulators == 0 && ${#selectors[@]} == 0)) || die "clean-unowned does not take --all or test selectors"
+fi
 
 case "$command" in
   checkpoint|prepare|run|diagnose)
-    if [[ "$tier" == ui-validation && -z "${selectors[0]-}" ]]; then
-      die "ui-validation runs require explicit --only-testing selectors"
+    if [[ -z "${selectors[0]-}" ]]; then
+      selectors=("${SMOKE_ONLY_TESTING[@]/#/-only-testing:}")
     fi
     ;;
 esac
@@ -396,6 +424,13 @@ if [[ "$command" == "lanes" ]]; then
   python3 "$SIMULATOR" lanes \
     --discovery-root "$DISCOVERY_ROOT" --default-state-dir "$DEFAULT_STATE_ROOT" \
     --development-state "$DEVELOPMENT_STATE" || exit "$EXIT_DESTINATION"
+  exit 0
+fi
+
+if [[ "$command" == clean-unowned ]]; then
+  python3 "$SIMULATOR" delete-unowned --udid "$unowned_udid" --name "$unowned_name" \
+    --discovery-root "$DISCOVERY_ROOT" --default-state-dir "$DEFAULT_STATE_ROOT" \
+    --development-state "$DEVELOPMENT_STATE" || exit $?
   exit 0
 fi
 

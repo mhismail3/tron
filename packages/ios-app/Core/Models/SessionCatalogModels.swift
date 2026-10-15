@@ -61,6 +61,8 @@ package struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     package let kind: Kind
     package let parentSessionId: String?
     package let creationOrigin: SessionCreationOrigin?
+    /// The Home task that created this worker session (Gateway task ledger).
+    package let homeTaskId: String?
     package let createdAt: String
     package let updatedAt: String
     /// Stable Gateway-observed start of the current active dashboard period.
@@ -88,7 +90,7 @@ package struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
 
     package init(
         id: String, name: String?, cwd: String, kind: Kind = .user, parentSessionId: String?,
-        creationOrigin: SessionCreationOrigin? = nil,
+        creationOrigin: SessionCreationOrigin? = nil, homeTaskId: String? = nil,
         createdAt: String, updatedAt: String, activeSince: String? = nil, messageCount: Int,
         firstMessage: String, phase: SessionPhase, foregroundPhase: SessionPhase? = nil,
         hasActiveSubagents: Bool = false, waitingForUser: Bool = false,
@@ -102,6 +104,7 @@ package struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         self.kind = kind
         self.parentSessionId = parentSessionId
         self.creationOrigin = creationOrigin
+        self.homeTaskId = homeTaskId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.activeSince = activeSince
@@ -121,7 +124,7 @@ package struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, cwd, kind, parentSessionId, creationOrigin, createdAt, updatedAt, activeSince, messageCount, firstMessage, phase, foregroundPhase, hasActiveSubagents, waitingForUser, summaryRevision
+        case id, name, cwd, kind, parentSessionId, creationOrigin, homeTaskId, createdAt, updatedAt, activeSince, messageCount, firstMessage, phase, foregroundPhase, hasActiveSubagents, waitingForUser, summaryRevision
         case completionRevision, attentionRevision, isUnread, archivedAt
     }
 
@@ -133,6 +136,7 @@ package struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .user
         parentSessionId = try container.decodeIfPresent(String.self, forKey: .parentSessionId)
         creationOrigin = try container.decodeIfPresent(SessionCreationOrigin.self, forKey: .creationOrigin)
+        homeTaskId = try container.decodeIfPresent(String.self, forKey: .homeTaskId)
         createdAt = try container.decode(String.self, forKey: .createdAt)
         updatedAt = try container.decode(String.self, forKey: .updatedAt)
         activeSince = try container.decodeIfPresent(String.self, forKey: .activeSince)
@@ -167,6 +171,7 @@ package struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
             kind: kind,
             parentSessionId: parentSessionId,
             creationOrigin: creationOrigin,
+            homeTaskId: homeTaskId,
             createdAt: createdAt,
             updatedAt: updatedAt,
             activeSince: activeSince,
@@ -198,6 +203,7 @@ package struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
 
     package var isFork: Bool { parentSessionId != nil }
     package var isAutomationCreated: Bool { creationOrigin?.kind == .automation }
+    package var isHomeWorker: Bool { homeTaskId != nil }
 
     package var title: String {
         if let name, !name.isEmpty { return name }

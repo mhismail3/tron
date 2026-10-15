@@ -405,7 +405,7 @@ export function processOverview(
   };
 }
 
-export function canonicalProcessHistory(manager: ReadonlySessionManager): SessionProcessActivity[] {
+function canonicalProcessHistory(manager: ReadonlySessionManager): SessionProcessActivity[] {
   const receipts = extensionActivityReceipts(manager.getBranch(), manager.getSessionId());
   const subagents = receipts
     .flatMap(({ receipt }) => subagentProcessesFromActivity(manager.getSessionId(), extensionReceiptActivity(receipt)))

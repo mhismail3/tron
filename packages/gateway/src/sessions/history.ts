@@ -4,7 +4,7 @@ import type { JsonValue, SessionTreeNode } from "../protocol/types.js";
 import type { PiMessageContentBlock } from "./projection.js";
 
 const HISTORY_PAGE_SIZE = 100;
-export const HISTORY_TEXT_CHARS = 24_000;
+const HISTORY_TEXT_CHARS = 24_000;
 export interface HistoryCursor { ordinal: number; entryId: string; direction: "older" | "newer" }
 export interface HistoryPage {
   runtimeGeneration: string;

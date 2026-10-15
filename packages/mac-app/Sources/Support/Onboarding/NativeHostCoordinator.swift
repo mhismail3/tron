@@ -159,11 +159,22 @@ private struct NativeHostPlatform: Sendable {
         ) {
             let connection = try connect()
             defer { connection.invalidate() }
-            let reply = NativeHostReply<Bool>()
-            guard let service = connection.service(onError: { reply.resolve(false) }) else { throw NativeHostError.retirementFailed }
-            service.prepareForServiceRetirement { reply.resolve($0) }
+            // nil is a received true confirmation; otherwise the exact reason it was not.
+            let reply = NativeHostReply<String?>()
+            guard let service = connection.service(onError: { error in
+                let error = error as NSError
+                reply.resolve("xpc-error \(error.domain) \(error.code)")
+            }) else { throw NativeHostError.retirementFailed }
+            service.prepareForServiceRetirement { reply.resolve($0 ? nil : "helper-reported-unjoined-capture") }
             // No timeout, forced kill, or cancellation can stand in for native join.
-            guard await reply.value() else { throw NativeHostError.retirementFailed }
+            if let failure = await reply.value() {
+                // An XPC error here (rather than an unjoined report) means the reply
+                // was lost or refused; the system log names any signature refusal.
+                TronLog.shared.record(.error, event: "native-host.retirement-unconfirmed", source: "native-host",
+                                      message: "Native helper retirement was not confirmed; no service change was made",
+                                      why: failure, outcome: "blocked")
+                throw NativeHostError.retirementFailed
+            }
         }
     }
 
@@ -177,7 +188,7 @@ private struct NativeHostPlatform: Sendable {
         }
         defer { timeout.cancel() }
         let values: [String: String] = await withTaskCancellationHandler {
-            guard !Task.isCancelled, let service = connection.service(onError: { reply.resolve([:]) }) else { return [:] }
+            guard !Task.isCancelled, let service = connection.service(onError: { _ in reply.resolve([:]) }) else { return [:] }
             service.probePermissions { reply.resolve($0) }
             return await reply.value()
         } onCancel: { reply.resolve([:]); connection.invalidate() }
@@ -193,7 +204,7 @@ private struct NativeHostPlatform: Sendable {
         defer { connection.invalidate() }
         let reply = NativeHostReply<(String, String)>()
         let failure = ("", PermissionStatus.probeUnavailable.rawValue)
-        guard let service = connection.service(onError: { reply.resolve(failure) }) else { return .probeUnavailable }
+        guard let service = connection.service(onError: { _ in reply.resolve(failure) }) else { return .probeUnavailable }
         service.requestPermission(native.rawValue, requestID: id.uuidString) { reply.resolve(($0, $1)) }
         // No UI timeout cancels an accepted native consent command.
         let value = await reply.value()
@@ -217,8 +228,8 @@ private final class NativeHostConnection: @unchecked Sendable {
     private let connection: NSXPCConnection
     init(_ connection: NSXPCConnection) { self.connection = connection }
     func invalidate() { connection.invalidate() }
-    func service(onError: @escaping @Sendable () -> Void) -> NativeHostPermissionService? {
-        connection.remoteObjectProxyWithErrorHandler { _ in onError() } as? NativeHostPermissionService
+    func service(onError: @escaping @Sendable (Error) -> Void) -> NativeHostPermissionService? {
+        connection.remoteObjectProxyWithErrorHandler { onError($0) } as? NativeHostPermissionService
     }
     deinit { connection.invalidate() }
 }

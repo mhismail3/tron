@@ -13,7 +13,6 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 export { PI_VERSION };
-export const PINNED_PI_VERSION = PI_VERSION;
 export const EXTENSION_PRESENTATION_VERSION = 3 as const;
 
 export type HostClassification = "native-semantic" | "remote-component" | "renderer" | "pi-runtime" | "explicit-fallback";
@@ -74,7 +73,7 @@ export const extensionEventCompatibility = {
 } satisfies Record<ExtensionEvent["type"], CompatibilityEntry>;
 
 export const extensionContextCompatibility = {
-  ui: entry("native-semantic", "context.ui"), mode: entry("pi-runtime", "context.mode"), hasUI: entry("pi-runtime", "context.has-ui"), cwd: entry("pi-runtime", "context.cwd"),
+  ui: entry("native-semantic", "context.ui"), mode: entry("pi-runtime", "context.mode"), hasUI: entry("pi-runtime", "context.has-ui"), cwd: entry("pi-runtime", "context.cwd"), projectDir: entry("pi-runtime", "context.project-dir"),
   sessionManager: entry("pi-runtime", "context.session-manager"), modelRegistry: entry("pi-runtime", "context.model-registry"), model: entry("pi-runtime", "context.model"),
   scopedModels: entry("pi-runtime", "context.scoped-models"), thinkingLevel: entry("pi-runtime", "context.thinking-level"), isIdle: entry("pi-runtime", "context.idle"),
   isProjectTrusted: entry("pi-runtime", "context.trust"), signal: entry("pi-runtime", "context.signal"), abort: entry("pi-runtime", "context.abort"),

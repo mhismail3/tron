@@ -5,7 +5,7 @@ import { JevDecisionClient, JEV_DEFAULT_MODEL, JEV_MAX_ESTIMATED_CHARGE_CENTS, J
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 const JEV_PROFILE_VERSION = "tron-source-profile-v2";
-export const JEV_RUBRIC_VERSION = "tron-source-rubric-v3";
+const JEV_RUBRIC_VERSION = "tron-source-rubric-v3";
 const PRICING = "typesafe-jev-latest-input-0.042-usd-per-million-output-free-estimate" as const;
 
 type AssessmentCoverage = "full" | "sampled";
@@ -42,7 +42,7 @@ function excerpt(points: readonly string[], maximumCharacters: number): string {
   return points.slice(0, headLength).join("") + marker + (tailLength > 0 ? points.slice(-tailLength).join("") : "");
 }
 /** Prepare the smallest authoritative assessment view without changing the source bytes. */
-export function prepareJevAssessmentInput(input: SourceAssessmentModelInput, interests: string[]): { state: Record<string, unknown>; questions: Record<string, JevQuestion>; coverage: AssessmentCoverage } {
+function prepareJevAssessmentInput(input: SourceAssessmentModelInput, interests: string[]): { state: Record<string, unknown>; questions: Record<string, JevQuestion>; coverage: AssessmentCoverage } {
   const rubric = questions();
   const points = Array.from(input.text);
   const full = stateFor(input, interests, input.text, "full", points.length);

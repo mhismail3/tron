@@ -16,7 +16,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 // pong deadline on a healthy link (#700, #186). Frames already handed to the
 // socket may legitimately precede the pong; frames still queued must not.
 
-const NO_TAILSCALE_PATH: PeerPathReader = { lookup: async (): Promise<PeerPathLookup> => ({ peerPath: "unknown", peerRelay: "" }) };
+const NO_TAILSCALE_PATH: PeerPathReader = { lookup: async (): Promise<PeerPathLookup> => ({ peerPath: "unknown", peerPathSource: "not-tailscale", peerRelay: "" }) };
 
 const BACKLOG_TOPIC = "test.backlog";
 const BACKLOG_FRAMES = 12;
@@ -58,7 +58,7 @@ async function pongAgainstBacklog(): Promise<{ backlogBeforePong: number; pendin
     sessions: { unsubscribeClient: vi.fn() } as never,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as never,
     service: {
-      info: () => ({ protocolVersion: 7 }),
+      info: () => ({ protocolVersion: 8 }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       invoke: vi.fn(),
@@ -83,7 +83,7 @@ async function pongAgainstBacklog(): Promise<{ backlogBeforePong: number; pendin
   });
   socket.on("pong", () => { backlogBeforePong = backlogTopicsInOrder.length; });
   await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
-  socket.send(JSON.stringify({ type: "hello", protocolVersion: 7, diagnostics: { clientId: "client-pong", attemptId: "initial", epoch: "1" } }));
+  socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, diagnostics: { clientId: "client-pong", attemptId: "initial", epoch: "1" } }));
   await waitFor(() => connection()?.ready === true, "hello");
 
   // Stop reading: the kernel buffers fill and the Gateway's writes stall, so

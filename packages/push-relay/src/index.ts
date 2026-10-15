@@ -1,9 +1,11 @@
 /** Closed Tron installation registry and APNs transport. */
 import {
+  CAPABILITIES_PATH,
   CHALLENGE_PATH,
   GRANT_PATH_PREFIX,
   INSTALLATIONS_PATH,
   MAX_BODY_BYTES,
+  NOTIFICATION_CATEGORIES,
   NOTIFICATIONS_PATH,
   REGISTRY_NAME,
   type Env,
@@ -17,6 +19,12 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.search || url.hash) return json({ error: "not_found" }, 404);
+    // Capabilities are static relay metadata: answer without the registry so
+    // Gateways can probe support before sending a field an older relay rejects.
+    if (url.pathname === CAPABILITIES_PATH) {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      return json({ version: 1, notificationCategories: NOTIFICATION_CATEGORIES });
+    }
     const admitted =
       (request.method === "POST" && url.pathname === CHALLENGE_PATH) ||
       (request.method === "POST" && url.pathname === INSTALLATIONS_PATH) ||

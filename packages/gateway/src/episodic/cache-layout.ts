@@ -11,7 +11,7 @@
  */
 
 /** Where the view is cut, in characters (gist §8; picked there by replaying real sessions). */
-export const CACHE_MARKS = [50_000, 80_000, 100_000] as const;
+const CACHE_MARKS = [50_000, 80_000, 100_000] as const;
 
 /** Anthropic refuses a request with more `cache_control` blocks than this. */
 export const ANTHROPIC_MAX_CACHE_BREAKPOINTS = 4;

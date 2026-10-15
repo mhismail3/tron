@@ -120,7 +120,7 @@ function humanizedDisplayName(extension: Extension): string {
   return (npmPackage ? titleFromName(npmPackage) : undefined) ?? "Extension";
 }
 
-export function extensionOwnerFor(extension: Extension): ExtensionOwner {
+function extensionOwnerFor(extension: Extension): ExtensionOwner {
   // Inline source labels are loader defaults; this exact generated path is the
   // stable release-owned capability identity used by native projections.
   const source = isManagedSubagentExtension(extension) ? MANAGED_SUBAGENTS_SOURCE : extension.path === TRON_ASK_USER_INLINE_PATH

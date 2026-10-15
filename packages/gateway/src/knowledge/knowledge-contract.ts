@@ -298,8 +298,10 @@ export interface NoteContent {
    * and `kind-*` labels. Not the source tag vocabulary: a note's labels are free, bounded by
    * `NOTE_TAG_PATTERN` and `NOTE_TAGS_MAX`, and an owner alone decides what they mean. */
   tags?: string[];
-  /** Set on a note that has left active use. Its earlier revisions stay in the ledger. */
-  retired?: true;
+  /** Set on a note that has left active use. Its earlier revisions stay in the ledger.
+   * A draft may name `false` to return a retired note to use (an owner's undo); a stored
+   * revision never holds `false`, only `true` or nothing. */
+  retired?: boolean;
 }
 
 export interface KnowledgeRecordBase {
@@ -1379,7 +1381,7 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       if (!Array.isArray(content.tags) || content.tags.length > NOTE_TAGS_MAX) throw new Error("Invalid note tags");
       if (new Set(content.tags).size !== content.tags.length || !content.tags.every(tag => typeof tag === "string" && NOTE_TAG_PATTERN.test(tag))) throw new Error("Invalid note tags");
     }
-    if (content.retired !== undefined && content.retired !== true) throw new Error("Invalid note retirement");
+    if (content.retired !== undefined && typeof content.retired !== "boolean") throw new Error("Invalid note retirement");
     if (content.privacyScope !== undefined && !["private", "shared"].includes(content.privacyScope as string)) throw new Error("Invalid note privacy scope");
     if (content.usageConstraint !== undefined) boundedString(content.usageConstraint, "note usage constraint", 20_000);
     if (content.fields !== undefined) {

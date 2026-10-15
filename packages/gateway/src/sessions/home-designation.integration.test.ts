@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs";
+import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, type FauxProviderHandle } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { HomeDesignation, HomeStatus } from "../protocol/types.js";
 import type { GatewayConfig } from "../config.js";
@@ -126,7 +126,8 @@ function openRegistry(f: {
     sessions: registry,
     home: registry.homeOwner(),
     receipts: new CommandReceiptStore(join(f.tronHome, "receipts")),
-    settings: new SettingsService(f.agentDir, f.runtime),
+    broadcast: () => {},
+    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner() }),
     trust: new TrustService(f.agentDir),
   } as unknown as GatewayServiceDependencies);
   return { registry, service };
@@ -245,16 +246,26 @@ async function homeStatus(f: Fixture): Promise<HomeStatus> {
 }
 
 const HOME_EXTENSIONS = [
-  "tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-notify",
+  "tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-notify", "tron-settings",
 ];
 /** The curated Home profile's executable tool set: the allowlist, sorted the way
  * the assertions read it. */
 const HOME_TOOLS = [
   "ask_user", "date", "delegate", "display", "knowledge", "memory_search", "notify",
-  "profile", "read_file", "session_search", "task", "web_fetch", "web_search", "zoom",
+  "profile", "read_file", "session_search", "settings", "task", "web_fetch", "web_search", "zoom",
 ];
 
 describe("Tron Home designation", () => {
+  homeCase("refuses home.profileList and omits its capability on a Gateway without a Knowledge owner", async () => {
+    const f = await fixture("profile-list-without-knowledge");
+    await designate(f, "home-designate-profile-list");
+    const info = await f.service.invoke(client, "system.info", {}) as unknown as { capabilities: string[] };
+    expect(info.capabilities).toContain("home-chapter-list.v1");
+    expect(info.capabilities).not.toContain("home-profile-list.v1");
+    await expect(f.service.invoke(client, "home.profileList", { extra: true })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(f.service.invoke(client, "home.profileList", {})).rejects.toMatchObject({ code: "unsupported" });
+  });
+
   homeCase("refuses a different model for an enabled Home and keeps matching designations idempotent", async () => {
     const f = await fixture("enabled-model-designate");
     const original = await designate(f, "home-designate-enabled-model");
@@ -267,7 +278,7 @@ describe("Tron Home designation", () => {
       model: { provider: PROVIDER, id: OTHER_MODEL_ID },
     })).rejects.toMatchObject({
       code: "conflict",
-      message: expect.stringContaining("session.setModel"),
+      message: expect.stringContaining("settings.change"),
     });
     expect(await homeStatus(f)).toEqual(before);
     expect(home.snapshot().model).toEqual(runtimeModel);
@@ -352,6 +363,9 @@ describe("Tron Home designation", () => {
       // Derived by HomeOwner.status (#505): an undesignated Home names its one recovery action.
       phase: "undesignated", activation: { available: false },
       readiness: { ready: false, gaps: ["not-designated"] }, recovery: { action: "designate" },
+      // Process facts shown in every phase (#930): no worker runs before designation.
+      hostPressure: expect.objectContaining({ level: expect.stringMatching(/^(normal|elevated|critical)$/u) }),
+      workers: { running: 0, queued: 0, limit: 3 },
     });
 
     // The default-model branch: no model named means this Gateway's default.

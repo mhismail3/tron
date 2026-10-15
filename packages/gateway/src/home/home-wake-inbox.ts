@@ -1,6 +1,7 @@
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "../sessions/context-delivery-receipts.js";
+import { parseHomeTaskReport } from "./home-task-report.js";
 import { HOME_TASK_RESULT_MESSAGE, INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/invocation-receipts.js";
 import { GatewayError } from "../errors.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
@@ -65,7 +66,29 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
  * A result wakes Home only through the wake owner; recovery never prompts. */
 export class WakeInboxOwner {
   private readonly mutex = new AsyncMutex();
+  /** The store write count at which a complete pass found no actionable wake. */
+  private quietAt: number | undefined;
   constructor(private readonly store: HomeTaskStore, private readonly options: Options) {}
+
+  /** Records whose wake this owner may still act on. Inert wakes (none yet,
+   * acknowledged, blocked until maintainer redelivery, or outcome-unknown with its
+   * push decided) are never yielded. A complete pass that finds none, with no store
+   * write during it, proves the inbox quiet until the next write: recovery,
+   * admission, settlement and wake attempts then read no record. Without it a
+   * quiet Home turn re-read every historical record several times on Home's
+   * session lane (#922, after #906). */
+  private async *actionable(): AsyncGenerator<HomeTaskRecord> {
+    const start = this.store.writeCount;
+    if (this.quietAt === start) return;
+    let quiet = true;
+    for await (const task of this.store.records()) {
+      const wake = task.wake;
+      if (!wake || wake.state === "acknowledged" || wake.state === "blocked" || (wake.state === "outcome-unknown" && wake.push === "decided")) continue;
+      quiet = false;
+      yield task;
+    }
+    if (quiet && this.store.writeCount === start) this.quietAt = start;
+  }
 
   event(task: HomeTaskRecord): HomeWakeEvent {
     return { eventId: `task-result-${hash(task.taskId)}`, routeGeneration: task.routeGeneration,
@@ -86,14 +109,14 @@ export class WakeInboxOwner {
   /** The task-finished push of today: one advisory notice per result, decided before enqueue. */
   private async pushTask(task: HomeTaskRecord): Promise<void> {
     await this.decide([task.taskId], "push-task-finished");
-    await this.notify(task.homeId, task.wake!.eventId, `Tron Home task`,
+    await this.notify(task.homeId, task.wake!.eventId,
       `Task finished: ${task.terminalEvidence!.outcome}. Open Home to review the result.`);
   }
 
   /** Results waiting for a wake, in the order a wake would deliver them. */
   async pendingTasks(homeId: string): Promise<HomeTaskRecord[]> {
     const pending: HomeTaskRecord[] = [];
-    for await (const task of this.store.records()) {
+    for await (const task of this.actionable()) {
       if (task.homeId === homeId && task.wake?.state === "pending") pending.push(task);
     }
     return pending.sort(deliveryOrder);
@@ -104,22 +127,28 @@ export class WakeInboxOwner {
   async pushPending(homeId: string, mode: "task" | "waiting"): Promise<void> {
     await this.mutex.run(async () => {
       const pending: HomeTaskRecord[] = [];
-      for await (const task of this.store.records()) {
+      for await (const task of this.actionable()) {
         if (task.homeId === homeId && task.wake?.state === "pending" && task.wake.push === "pending") pending.push(task);
       }
       if (mode === "task") { for (const task of pending) await this.pushTask(task); return; }
       if (pending.length === 0) return;
       await this.decide(pending.map(task => task.taskId), "push-waiting");
-      await this.notify(homeId, `home-waiting:${pending[0]!.wake!.eventId}`, "Tron Home",
+      await this.notify(homeId, `home-waiting:${pending[0]!.wake!.eventId}`,
         "Home is waiting for you: finished task results are waiting in Home.");
     });
   }
 
+  /** Repairs what an interrupted process left. Acknowledged results are history and
+   * cost nothing beyond the one read: only an operation with a delivered result not
+   * yet acknowledged is finished again (#906 — finishing every historical operation
+   * re-read the whole store once per operation, on every Home activation). */
   async recover(route: HomeWakeRoute): Promise<void> {
     await this.mutex.run(async () => {
       const proven = new Map<string, string[]>();
-      for await (const task of this.store.records()) {
+      const unfinished = new Set<string>();
+      for await (const task of this.actionable()) {
         if (!task.wake || task.wake.state === "acknowledged") continue;
+        if (task.wake.state !== "claimed" && task.wake.delivery) unfinished.add(task.wake.delivery.operationId);
         if (task.wake.state === "claimed") {
           await this.change(task.taskId, current => ({ ...current, state: "pending", delivery: null }), "claim-recovered");
         } else if (task.wake.state === "pending" && task.wake.push === "pending") {
@@ -138,9 +167,7 @@ export class WakeInboxOwner {
           else if (proof !== "deferred") await this.change(task.taskId, current => ({ ...current, state: "outcome-unknown" }), `admission-proof-${proof}`);
         }
       }
-      const operations = new Set<string>(proven.keys());
-      for await (const task of this.store.records()) if (task.wake?.delivery) operations.add(task.wake.delivery.operationId);
-      for (const operation of operations) await this.finishOperation(route, operation, proven.get(operation) ?? []);
+      for (const operation of unfinished) await this.finishOperation(route, operation, proven.get(operation) ?? []);
     });
   }
 
@@ -157,13 +184,17 @@ export class WakeInboxOwner {
     append: (message: HomeWakeMessage) => Promise<void>, prepareEnvelope: () => Promise<HomeWakeEnvelope>): Promise<HomeWakeTrigger | undefined> {
     if (!route.enabled) return undefined;
     return this.mutex.run(async () => {
-      let pending = 0;
-      for await (const task of this.store.records()) {
+      // One store read serves the whole selection: it changes no state, so the
+      // pending results, in delivery order, are fixed for this admission.
+      const candidates: HomeTaskRecord[] = [];
+      for await (const task of this.actionable()) {
         if (task.homeId !== route.homeId || task.wake?.state !== "pending") continue;
         if (task.wake.routeGeneration !== route.routeGeneration) {
           await this.change(task.taskId, current => ({ ...current, state: "blocked" }), "route-replaced");
-        } else pending++;
+        } else candidates.push(task);
       }
+      candidates.sort(deliveryOrder);
+      const pending = candidates.length;
       if (!pending) return undefined;
       const envelope = await prepareEnvelope();
       const pendingMessage = (count: number): HomeWakeMessage => ({ customType: HOME_TASK_PENDING_MESSAGE, display: true,
@@ -177,37 +208,39 @@ export class WakeInboxOwner {
       let tokens = envelope.tokens - cost(count);
       let bytes = envelope.bytes - canonicalMessageBytes(count);
       let entries = envelope.entries - 2;
-      let cursor: { createdAt: string; eventId: string } | undefined;
       const selected: Array<{ task: HomeTaskRecord; message: HomeWakeMessage; tokens: number; bytes: number }> = [];
       let remaining = pending;
-      while (remaining > 0 && tokens > 0 && bytes > 0 && entries >= 2) {
-        let next: HomeTaskRecord | undefined;
-        for await (const task of this.store.records()) {
-          if (task.homeId !== route.homeId || task.wake?.state !== "pending" || task.wake.routeGeneration !== route.routeGeneration
-            || (cursor && wakeOrder(task.wake, cursor) <= 0)) continue;
-          if (!next || deliveryOrder(task, next) < 0) next = task;
-        }
-        if (!next) break;
+      for (const task of candidates) {
+        if (!(remaining > 0 && tokens > 0 && bytes > 0 && entries >= 2)) break;
         envelope.signal.throwIfAborted();
-        const task = next; const wake = task.wake!;
+        const wake = task.wake!;
         const result = await this.options.result(task.taskId);
         if (!result.task || JSON.stringify(result.task.reportRef) !== JSON.stringify(task.reportRef)
           || JSON.stringify(result.task.terminalEvidence) !== JSON.stringify(task.terminalEvidence)) throw new GatewayError("conflict", "Immutable inbox result is unavailable");
         envelope.signal.throwIfAborted();
-        // Every result states its subagent counts; the facts are settled with the task, so this header is stable.
-        const header = `Home task ${task.taskId} (${task.terminalEvidence!.outcome}; subagents started ${result.subagents.started}, stopped at end ${result.subagents.stoppedAtEnd ?? "unknown"})`;
-        let content = `${header}\n${result.text}`;
+        // Keep canonical task/session identities in details; the context text is for a person to read.
+        const title = [...task.intent.text.split(/\r?\n/u, 1)[0]!.trim()].slice(0, 160).join("");
+        const durationMs = Math.max(0, Date.parse(wake.createdAt) - task.createdAt);
+        const header = `Home task: ${title || "Untitled"} | outcome: ${task.terminalEvidence!.outcome} | subagents: ${result.subagents.started} started, ${result.subagents.stoppedAtEnd ?? "unknown"} stopped at end | duration: ${durationMs}ms`;
+        const reportText = task.reportRef
+          ? (() => {
+            const canonical = parseHomeTaskReport(JSON.parse(result.text) as unknown);
+            return `${canonical.text}\n\nEvidence:\n${canonical.evidence.map(item => `- ${item}`).join("\n")}`;
+          })()
+          // The reason (and a refusal's own words, #959) say why there is no report.
+          : `No accepted report. Outcome: ${task.terminalEvidence?.outcome ?? "unknown"} (${task.terminalEvidence?.reason ?? "unknown"}${task.terminalEvidence?.detail ? `: ${task.terminalEvidence.detail}` : ""}).`;
+        let content = `${header}\n\n${reportText}`;
         const message = (): HomeWakeMessage => ({ customType: HOME_TASK_RESULT_MESSAGE, display: true, content,
           details: { eventId: wake.eventId, taskId: task.taskId, resultRef: task.reportRef, terminalEvidence: task.terminalEvidence,
             operationId, routeGeneration: route.routeGeneration } });
         // A permanently oversized report is acknowledged by its immutable
         // reference, never by a truncated payload or an unbounded tool read.
-        if (cost(message()) > envelope.freshTokens - cost(count)) content = `${header}: immutable report, ${Buffer.byteLength(result.text)} bytes. Read the full immutable report through task action report with offset/limit pages.`;
+        if (cost(message()) > envelope.freshTokens - cost(count)) content = `${header}: immutable report, ${Buffer.byteLength(result.text)} bytes. Read the full immutable report through task action report with taskId=${task.taskId} and offset/limit pages.`;
         const selectedMessage = message(); const selectedTokens = cost(selectedMessage);
         const selectedBytes = canonicalMessageBytes(selectedMessage);
         if (selectedTokens > tokens || selectedBytes > bytes) break;
         selected.push({ task, message: selectedMessage, tokens: selectedTokens, bytes: selectedBytes });
-        tokens -= selectedTokens; bytes -= selectedBytes; entries -= 2; remaining--; cursor = { createdAt: wake.createdAt, eventId: wake.eventId };
+        tokens -= selectedTokens; bytes -= selectedBytes; entries -= 2; remaining--;
       }
       envelope.signal.throwIfAborted();
       const trigger = delivery === "wake" ? selected.pop() : undefined;
@@ -254,7 +287,10 @@ export class WakeInboxOwner {
   async settle(route: HomeWakeRoute, operationId: string): Promise<void> {
     await this.mutex.run(async () => {
       const proven: string[] = [];
-      for await (const task of this.store.records()) {
+      // Only an operation with an actionable delivered result has anything to finish.
+      let delivered = false;
+      for await (const task of this.actionable()) {
+        if (task.wake?.delivery?.operationId === operationId) delivered = true;
         if (task.wake?.delivery?.operationId !== operationId || task.wake.state !== "admitted") continue;
         this.assertRoute(task, route);
         const proof = await this.prove(task);
@@ -265,7 +301,7 @@ export class WakeInboxOwner {
         await this.change(task.taskId, wake => ({ ...wake, state: "terminal" }), "canonical-terminal");
         proven.push(task.taskId);
       }
-      await this.finishOperation(route, operationId, proven);
+      if (delivered) await this.finishOperation(route, operationId, proven);
     });
   }
 
@@ -290,7 +326,7 @@ export class WakeInboxOwner {
       if (replied) await this.decide(pending.map(task => task.taskId), "push-wake-reply");
       else {
         await this.decide(pending.map(task => task.taskId), "push-waiting-uncertain");
-        await this.notify(route.homeId, `home-waiting:${pending[0]!.wake!.eventId}`, "Tron Home", "Home is waiting for you: finished task results are waiting in Home.");
+        await this.notify(route.homeId, `home-waiting:${pending[0]!.wake!.eventId}`, "Home is waiting for you: finished task results are waiting in Home.");
       }
     }
     for (const taskId of provenIds) {
@@ -365,11 +401,11 @@ export class WakeInboxOwner {
     for (const taskId of taskIds) await this.change(taskId, wake => ({ ...wake, push: "decided" }), reason);
   }
 
-  private async notify(homeId: string, sourceId: string, title: string, message: string): Promise<void> {
+  private async notify(homeId: string, sourceId: string, message: string): Promise<void> {
     const sessionId = this.options.pushSession(homeId);
     if (!sessionId) return;
     try {
-      await this.options.notify({ sessionId, sourceId, kind: "agent_finished", title, message,
+      await this.options.notify({ sessionId, sourceId, kind: "agent_finished", title: "Home", message,
         ...(this.options.machineId ? { route: { sessionId, machineId: this.options.machineId } } : {}) });
     } catch { /* canonical result/inbox remains available independently */ }
   }

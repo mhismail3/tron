@@ -9,7 +9,7 @@ import type { ResourceDistribution } from "../protocol/types.js";
 export const SUBAGENT_PACKAGE = "pi-subagents";
 /** Presentation projection only: the available-subagent list is capped so an
  * unbounded agent directory cannot enlarge `session.resources`. */
-export const MAX_SUBAGENTS = 128;
+const MAX_SUBAGENTS = 128;
 const MAX_DIAGNOSTIC_CHARACTERS = 512;
 const DISCOVERY_SOURCES = ["builtin", "package", "user", "project"] as const;
 
@@ -48,7 +48,7 @@ function isDiscoverySource(value: unknown): value is SubagentDiscoverySource {
 
 /** builtin and package agents ship inside the pi-subagents package, so they are
  * External; user and project agents are Local. */
-export function subagentDistribution(source: SubagentDiscoverySource): ResourceDistribution {
+function subagentDistribution(source: SubagentDiscoverySource): ResourceDistribution {
   return source === "builtin" || source === "package" ? "external" : "local";
 }
 
@@ -57,7 +57,7 @@ export function subagentDistribution(source: SubagentDiscoverySource): ResourceD
  * `{ agents: [...] }` object are all admitted; unknown sources are dropped. A
  * duplicate name keeps the more specific scope (project > user > package >
  * builtin), matching the package's own merge precedence. */
-export function collectSubagents(raw: unknown): AvailableSubagent[] {
+function collectSubagents(raw: unknown): AvailableSubagent[] {
   const groups: Array<{ source?: SubagentDiscoverySource; records: unknown[] }> = [];
   if (Array.isArray(raw)) {
     groups.push({ records: raw });

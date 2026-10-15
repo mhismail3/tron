@@ -1,7 +1,7 @@
 import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
 import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
@@ -6395,7 +6395,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registries.push(registry);
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
-    await waitFor(() => slot.snapshot().extensionPresentation.semanticState.statuses["oversized-widget-callback"] === "completed", "the oversized widget callback to complete");
+    try {
+      await waitFor(() => slot.snapshot().extensionPresentation.semanticState.statuses["oversized-widget-callback"] === "completed", "the oversized widget callback to complete");
+    } catch (cause) {
+      // A timeout alone cannot distinguish an unloaded producer from a rejected
+      // callback. Retain the owning projection, including callback diagnostics.
+      throw new Error(`Oversized-widget callback did not complete: ${JSON.stringify(slot.snapshot().extensionPresentation)}`, { cause });
+    }
     expect(slot.snapshot().extensionPresentation.semanticState.widgets).toEqual([]);
   });
 
@@ -9044,7 +9050,7 @@ export default function (pi) {
     expect(existsSync(markerPath) ? readFileSync(markerPath, "utf8") : undefined, "a marker write landed after dispose").toEqual(markerAtDispose);
   });
 
-  it("keeps main's interrupted receipt when a Stop fails and the run then completes on its own", async () => {
+  it("records completed when SDK Stop fails before cancellation and the real run finishes naturally", async () => {
     const root = await temporaryRoot("tron-abort-failed-stop-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -9073,22 +9079,26 @@ export default function (pi) {
     await agentAdmitted;
     const session = (slot as unknown as { runtime: { session: { abort(): Promise<void> } } }).runtime.session;
     const sdkAbort = session.abort.bind(session);
+    // Inject refusal only at the SDK cancellation boundary. The Registry, Pi
+    // session/model run, event settlement, and canonical receipt I/O remain real.
     session.abort = async () => { throw new Error("abort refused"); };
     try {
       await expect(slot.abort("agent")).rejects.toThrow(/did not stop/);
     } finally {
       session.abort = sdkAbort;
+      release();
+      await prompt;
     }
-    release();
-    await prompt;
     await waitFor(() => !slot.isBusy, "the slot to go idle");
     const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
     const terminals = entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.receiptKind === "terminal");
-    // The user Stop intent outlives the failed attempt. This matches main, which
-    // records the same receipt; whether a failed Stop should instead record
-    // completed is a separate main-branch decision.
     expect(terminals).toHaveLength(1);
-    expect(terminals[0]?.data).toMatchObject({ lifecycle: "interrupted", errorCode: "user-abort" });
+    await mkdir("test-results", { recursive: true });
+    await writeFile("test-results/failed-stop-natural-completion.json", JSON.stringify({
+      lifecycle: terminals[0]?.data.lifecycle, errorCode: terminals[0]?.data.errorCode ?? null,
+    }, null, 2));
+    expect(terminals[0]?.data).toMatchObject({ lifecycle: "completed" });
+    expect(terminals[0]?.data.errorCode).toBeUndefined();
   });
 
   it("records a completed receipt for a Stop that arrives after a natural completion", async () => {
@@ -10914,6 +10924,92 @@ export default function (pi) {
     } finally {
       if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reaps a slow-starting MCP stdio process and its child when the runtime is disposed", async () => {
+    const root = await temporaryRoot("tron-pi-mcp-startup-dispose-");
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    const fixtureScript = resolve(process.cwd(), "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
+    const statePath = join(root, "state.json");
+    const pidFile = join(root, "server.pid");
+    const childPidFile = join(root, "child.pid");
+    const readyPath = join(root, "ready");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    await writeFile(statePath, JSON.stringify({ tools: [{ name: "echo", description: "Fixture", inputSchema: { type: "object", properties: {} } }] }));
+    await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {
+      slow: { command: process.execPath, args: [fixtureScript, "stdio", statePath, pidFile, childPidFile, "30000", readyPath], exposure: "direct" },
+    } }));
+    const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const faux = fauxProvider({ provider: "tron-pi-mcp-slow-start", tokensPerSecond: 10_000 });
+    const modelRuntimeFactory = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, maximumLiveRuntimes: 1,
+      modelRuntimeFactory, trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    let serverPid: number | undefined;
+    let childPid: number | undefined;
+    const processState = (pid: number | undefined): string => {
+      if (pid === undefined) return "absent";
+      if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error("Invalid owned MCP fixture PID");
+      const result = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8" });
+      if (result.error) throw result.error;
+      if (result.status !== 0 && result.status !== 1) throw new Error(`Cannot inspect owned MCP process ${pid}: ${result.stderr}`);
+      return result.stdout.trim() || "absent";
+    };
+    const terminal = (state: string) => state === "absent" || state.startsWith("Z");
+    const states = () => ({ server: processState(serverPid), child: processState(childPid) });
+    try {
+      await initializeRegistry(registry);
+      const slot = await registry.create(cwd);
+      const model = faux.getModel();
+      await slot.setModel(model.provider, model.id);
+      await waitFor(() => existsSync(pidFile) && existsSync(childPidFile), "the starting MCP process and child");
+      serverPid = Number(await readFile(pidFile, "utf8"));
+      childPid = Number(await readFile(childPidFile, "utf8"));
+      // Prove disposal races a live initialization, not an already timed-out server.
+      expect(existsSync(readyPath)).toBe(false);
+      process.kill(serverPid, 0);
+      process.kill(childPid, 0);
+      await registry.dispose();
+      registries.splice(registries.indexOf(registry), 1);
+      // A killed grandchild can remain a zombie until the OS reaps it. It is
+      // terminal and cannot write; kill(pid, 0) alone mistakes it for live work.
+      try {
+        await waitFor(() => Object.values(states()).every(terminal), "the starting MCP process group to exit after runtime disposal");
+        expect(existsSync(readyPath)).toBe(false);
+      } finally {
+        await mkdir(join(process.cwd(), "test-results"), { recursive: true });
+        await writeFile(join(process.cwd(), "test-results", "pi-sdk-mcp-startup-dispose.json"), `${JSON.stringify({ disposedDuringStartup: true, states: states() }, null, 2)}\n`);
+      }
+    } finally {
+      if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
+      // Clean both exact fixture PIDs before any retry of the runtime shutdown:
+      // a failing shutdown/negative control must not strand its child at timeout.
+      if (serverPid === undefined && existsSync(pidFile)) serverPid = Number(await readFile(pidFile, "utf8"));
+      if (childPid === undefined && existsSync(childPidFile)) childPid = Number(await readFile(childPidFile, "utf8"));
+      for (const pid of [serverPid, childPid]) {
+        if (pid !== undefined && !terminal(processState(pid))) {
+          try { process.kill(pid, "SIGKILL"); } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+          }
+        }
+      }
+      await waitFor(() => Object.values(states()).every(terminal), "owned MCP fixture cleanup");
+      if (registries.includes(registry)) {
+        await registry.dispose();
+        registries.splice(registries.indexOf(registry), 1);
+      }
       await rm(root, { recursive: true, force: true });
     }
   });

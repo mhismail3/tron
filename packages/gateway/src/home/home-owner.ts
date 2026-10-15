@@ -1,3 +1,4 @@
+import type { ImageContent } from "@earendil-works/pi-ai";
 import { HOME_TASK_RESULT_MESSAGE, HOME_WAKE_CEILING, isWakeEvidence, WakeInboxOwner, type HomeWakeDelivery, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
 import { visitCanonicalSessionEntries } from "../episodic/episodic-source.js";
 import type { NotificationService } from "../notifications/notification-service.js";
@@ -5,20 +6,22 @@ import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
-import { HomeTaskDispatcher, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest } from "./home-task-dispatcher.js";
+import { HomeTaskDispatcher, successorTaskId, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
 import type { HomeTaskSubagents } from "./home-task-subagents.js";
+import { HOME_CHAPTER_TOPIC_COUNT, HOME_CHAPTER_TOPIC_LIST_CHARACTERS, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { HomeChapterList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryPage, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
+import type { HomeChapterList, HomeProfileList, HomeChapterSummary, HomeContextProjection, HomeDesignation, HomeMemoryStatus, HomeOpen, HomeStatus, ModelRef, HomeMemoryView, HomeMemoryEvidence, HomeMemoryEvidencePage } from "../protocol/types.js";
+import { readHomeProfile } from "./home-profile.js";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { historyEntry } from "../sessions/history.js";
 import type { EpisodicMemory } from "../episodic/episodic-memory.js";
-import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, type HomeMemoryPageRequest } from "./home-memory-browser.js";
+import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, type HomeMemoryViewRequest } from "./home-memory-browser.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { EPISODIC_DEFAULTS, EpisodicMemoryError } from "../episodic/episodic-contract.js";
 import { EpisodicSourceChangedError } from "../episodic/episodic-source.js";
-import { readCanonicalHomeDeltas, readCanonicalHomeIndex, readCanonicalHomeEvidence, type HomeSourceChapter, type HomeSourceSnapshot } from "../episodic/home-source.js";
+import { HomeSourceProofs, readCanonicalHomeDeltas, readCanonicalHomeIndex, readCanonicalHomeEvidence, type HomeSourceChapter, type HomeSourceSnapshot } from "../episodic/home-source.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durablePublishBoundedJson, isDurablePublicationUncertain, syncDurably } from "../util/durable-json.js";
@@ -31,7 +34,9 @@ import {
 import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
 import { HOME_MAX_CHAPTERS, HOME_HARD_BYTES, HOME_HARD_ENTRIES, HOME_SOFT_BYTES, HOME_SOFT_ENTRIES, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
 import type { HomeDiagnostic, HomeDiagnosticRecord } from "./home-diagnostic.js";
-import { homeSystemPrompt } from "./tron-home-extension.js";
+import { admitHomeTaskToolRequest, homeSystemPrompt } from "./tron-home-extension.js";
+import { HomeMemoryProfile } from "./home-memory-profile.js";
+import { HOME_TASK_THINKING_LEVELS } from "./home-task-worker-choice.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 
 /** One Gateway installation keeps at most one Home. */
@@ -72,9 +77,8 @@ export interface HomeRecord {
   model: ModelRef;
   createdAt: string;
   updatedAt: string;
-  /** Home's memory model. Absent until `home.configureMemory` records one: there
-   * are no defaults (decision D4), so an unconfigured memory refuses. */
-  memory?: { model: ModelRef; paused?: true };
+  /** Pause is chapter-independent lifecycle state. The model lives only in Profile. */
+  memory?: { paused?: true };
 }
 
 /** What the Home record says about one session id. `unnamed` means the record
@@ -110,6 +114,12 @@ export interface HomeSessionPort {
   sessionFile(sessionId: string): Promise<string | undefined>;
   /** Whether the session currently holds a live runtime. */
   hasLiveRuntime(sessionId: string): boolean;
+  /** Whether a live runtime is blocked on a semantic user interaction. Optional
+   * because only the runtime owner holds interaction state. */
+  waitingForUser?(sessionId: string): boolean;
+  /** The record's chapter set changed, so the dashboard's Home rule changed: clients
+   * must re-list. Optional because only the runtime owner publishes list changes. */
+  homeChaptersChanged?(): void;
   /** Registry owns session mutation ordering. Seal enters it before taking the
    * Home recordMutex, so admitted attention/archive/delete work settles first. */
   serializeSessionMutation<T>(sessionId: string, commit: () => Promise<T>): Promise<T>;
@@ -163,6 +173,12 @@ export interface HomeOwnerOptions {
   knowledge: () => KnowledgeService | undefined;
 }
 
+/** Tron Home's neutral workspace. It is never part of a Project, so project
+ * trust treats it as its own root (`TrustServiceOptions.standaloneDirectories`). */
+export function homeWorkspaceDirectory(tronHome: string): string {
+  return join(tronHome, "gateway", "home", "workspace");
+}
+
 /**
  * The one owner of Tron Home's designation for this Gateway installation: the
  * durable record under `<tronHome>/gateway/home/home.json`, the neutral working
@@ -180,17 +196,21 @@ export interface HomeOwnerOptions {
 export class HomeOwner {
   private readonly directory: string;
   private readonly recordPath: string;
+  private readonly memoryProfile: HomeMemoryProfile;
   private workspacePath: string;
   private readonly mutex = new AsyncMutex();
   /** Serializes durable record commits with model callbacks that arrive from a
    * slot lane while a Home lifecycle mutation owns `mutex`. */
   private readonly recordMutex = new AsyncMutex();
   /** One memory per Home session id, replacing the previous session's. */
-  private memory: { sessionId: string; owner: HomeMemory } | undefined;
+  /** `proofs` belongs to this owner: its chapter proofs never outlive it (#940). */
+  private memory: { sessionId: string; owner: HomeMemory; proofs: HomeSourceProofs } | undefined;
   /** One request seam per Home session id, so a runtime replacement reuses the
    * open activation rather than dropping it. A fork is a new id, hence a new
    * seam and no activation. */
   private readonly policies = new Map<string, HomeRequestPolicy>();
+  /** Per-chapter counts read from canonical files; a memory cache only (`home-chapter-contents.ts`). */
+  private readonly chapterContents = new HomeChapterContentsReader();
   /** A creation-time Home profile exists before designation publishes its chapter. */
   private designating = false;
   private record: HomeRecord | undefined;
@@ -209,7 +229,8 @@ export class HomeOwner {
   constructor(private readonly options: HomeOwnerOptions) {
     this.directory = join(options.tronHome, "gateway", "home");
     this.recordPath = join(this.directory, "home.json");
-    this.workspacePath = join(this.directory, "workspace");
+    this.memoryProfile = new HomeMemoryProfile(options.tronHome);
+    this.workspacePath = homeWorkspaceDirectory(options.tronHome);
     const store = new HomeTaskStore(options.tronHome, options.workspace, options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {});
     const authorization = new HomeTaskAuthorization({ store: store.authorization,
       ...(options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {}),
@@ -232,13 +253,27 @@ export class HomeOwner {
 
   /** Delegate authority is sampled for the exact enabled Home, never a fork or
    * disabled chapter. Home does not inherit a project's executable resources. */
-  async dispatchTask(sessionId: string, request: HomeTaskDispatchRequest) {
+  async dispatchTask(sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal) {
     await this.taskOwner();
     const record = this.record;
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) {
       throw new GatewayError("conflict", "Task dispatch is unavailable for this Home");
     }
-    return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, request);
+    // A resolved profile fallback deliberately leaves model unset. Never replace
+    // that fixed choice with a second live-Home resolution.
+    const choice = request.model || request.provenance ? request : { ...request, ...await this.currentChatChoice(sessionId),
+      ...(request.thinking === undefined ? {} : { thinking: request.thinking }) };
+    if (this.record !== record) throw new GatewayError("conflict", "Home changed during task admission");
+    return this.tasks.start({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, choice, signal);
+  }
+
+  /** Read the live session, not designation-time defaults or a learned note. The
+   * dispatcher admits this choice through its existing worker configuration path. */
+  private async currentChatChoice(sessionId: string) {
+    const snapshot = (await this.options.taskSessions.acquire(sessionId)).snapshot();
+    const thinking = HOME_TASK_THINKING_LEVELS.find(level => level === snapshot.thinkingLevel);
+    if (!snapshot.model || thinking === undefined) throw new GatewayError("conflict", "Home chat model is unavailable");
+    return { model: { provider: snapshot.model.provider, id: snapshot.model.id }, thinking };
   }
 
   /** Post-listen startup only (see `RuntimeRegistry.recoverHomeTasks`). Recovery
@@ -279,28 +314,128 @@ export class HomeOwner {
     await this.tasks.steer(control);
   }
 
-  async taskTool(sessionId: string, request: import("./tron-home-extension.js").HomeTaskToolRequest): Promise<unknown> {
-    await this.taskOwner();
+  /**
+   * Home's `task` tool (#961). Control actions name only a task: the worker's current task (a
+   * later in-place resume of the same session) and its operation are resolved here, and an
+   * explicit `operationId` is only a guard. Every refusal names the field or the task's state.
+   */
+  async taskTool(sessionId: string, input: unknown): Promise<unknown> {
+    const request = admitHomeTaskToolRequest(input);
+    const owner = await this.taskOwner();
     const record = this.record;
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw new GatewayError("conflict", "Home task control is unavailable");
-    const task = await this.tasks.store.read(request.taskId);
-    if (!task || task.homeId !== record.homeId) throw new GatewayError("conflict", "Home task identity changed");
-    if (request.action === "status") return this.taskStatus(request.taskId);
-    if (request.action === "report") {
-      if (!Number.isSafeInteger(request.offset) || request.offset < 0 || !Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 4096) throw new GatewayError("invalid_request", "Invalid report page");
-      const { text } = await this.immutableTaskReport(request.taskId);
-      const bytes = Buffer.from(text);
-      if (request.offset > bytes.length || (request.offset < bytes.length && (bytes[request.offset]! & 0xc0) === 0x80)) throw new GatewayError("invalid_request", "Invalid report page offset");
-      let end = Math.min(bytes.length, request.offset + request.limit);
-      while (end < bytes.length && end > request.offset && (bytes[end]! & 0xc0) === 0x80) end--;
-      if (end === request.offset && end < bytes.length) throw new GatewayError("invalid_request", "Report page is too small for the next UTF-8 character");
-      return { taskId: task.taskId, offset: request.offset, bytes: bytes.length, text: bytes.subarray(request.offset, end).toString("utf8"), nextOffset: end < bytes.length ? end : null };
+    const { action } = request;
+    if (action === "list" || (action === "status" && request.taskId === undefined)) {
+      const catalog = await owner.controlCatalog(request.limit ?? 20).catch(error => {
+        if (error instanceof HomeTaskStoreError && error.code === "not-initialized") return { tasks: [], counts: { active: 0, finished: 0 }, more: false };
+        throw error;
+      });
+      return { ...catalog, workers: owner.workers() };
     }
-    if (request.action !== "steer" && request.action !== "stop") throw new GatewayError("invalid_request", "Unknown Home task action");
-    if (task.generation !== record.generation) throw new GatewayError("conflict", "Home task generation changed");
-    if (request.action === "steer") await this.steerTask(sessionId, request);
-    else await this.stopTask(request);
-    return { accepted: true };
+    const taskId = request.taskId!;
+    const named = await this.tasks.store.read(taskId).catch(error => {
+      if (error instanceof HomeTaskStoreError && error.code === "not-initialized") return undefined;
+      throw error;
+    });
+    if (!named) {
+      const similar = await owner.similarTaskIds(taskId).catch(() => []);
+      throw new GatewayError("not_found", `task ${action}: no task "${taskId}". `
+        + (similar.length ? `Close matches: ${similar.map(id => JSON.stringify(id)).join(", ")}. ` : "")
+        + "Call {\"action\":\"list\"} for your tasks.", false, { taskId, similar });
+    }
+    if (named.homeId !== record.homeId) throw new GatewayError("conflict", `task ${action}: "${taskId}" belongs to another Home`);
+    if (action === "status") return { control: await owner.controlRow(named, await this.continuation(named)), ...await this.taskStatus(taskId) };
+    if (action === "report") {
+      const offset = request.offset ?? 0, limit = request.limit ?? 4096;
+      if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 4096) throw new GatewayError("invalid_request", "task report: invalid page: offset must be 0 or more and limit 1 to 4096 bytes");
+      if (named.lifecycle !== "terminal") throw new GatewayError("conflict", `task report: "${taskId}" is ${named.lifecycle === "active" ? "still running" : "not started yet"}; it has no report until it settles`);
+      const { text } = await this.immutableTaskReport(taskId);
+      const bytes = Buffer.from(text);
+      if (offset > bytes.length || (offset < bytes.length && (bytes[offset]! & 0xc0) === 0x80)) throw new GatewayError("invalid_request", `task report: offset ${offset} is not a UTF-8 character start within the ${bytes.length}-byte report page`);
+      let end = Math.min(bytes.length, offset + limit);
+      while (end < bytes.length && end > offset && (bytes[end]! & 0xc0) === 0x80) end--;
+      if (end === offset && end < bytes.length) throw new GatewayError("invalid_request", "task report: limit is too small for the next UTF-8 character");
+      return { taskId: named.taskId, offset, bytes: bytes.length, text: bytes.subarray(offset, end).toString("utf8"), nextOffset: end < bytes.length ? end : null };
+    }
+    // Controls act on the worker's current task: a stopped task resumed in place continues as
+    // a newer task on the same session, and naming either one reaches that worker.
+    const continuedAs = await this.continuation(named);
+    const task = continuedAs ? (await this.tasks.store.read(continuedAs)) ?? named : named;
+    const row = await owner.controlRow(task);
+    const resolved = task.taskId === named.taskId ? {} : { resolvedFrom: named.taskId };
+    const state = `"${task.taskId}" is ${row.state}${row.outcome ? ` (${row.outcome}${row.reason ? `: ${row.reason}` : ""}${row.detail ? `, ${row.detail}` : ""})` : ""}`;
+    if (!row.actions.includes(action)) {
+      const hint = row.state === "running" ? "Use steer to message it or stop to end it."
+        : row.state === "queued" ? "It has no worker yet; stop removes it from the queue."
+        : row.state === "settled" ? (row.actions.includes("resume") ? "Use resume to continue it in place." : "It never started a worker, so it cannot be resumed; delegate it again with a new taskId.")
+        : "It is still starting; retry in a moment.";
+      throw new GatewayError("conflict", `task ${action}: ${state}, so ${action} does not apply. ${hint}`, false, { ...row, ...resolved });
+    }
+    if (request.operationId !== undefined && request.operationId !== row.operationId) {
+      throw new GatewayError("conflict", `task ${action}: operationId guard ${JSON.stringify(request.operationId)} does not match ${state} with operation ${JSON.stringify(row.operationId)}. Omit operationId to act on the current operation.`, false, { ...row, ...resolved });
+    }
+    const operationId = row.operationId!;
+    try {
+      if (action === "resume") {
+        const resumed = await this.resumeTask({ taskId: task.taskId, operationId, ...(request.text === undefined ? {} : { text: request.text }) }, sessionId);
+        return { accepted: true, action, taskId: resumed.taskId, sessionId: resumed.sessionId, operationId: resumed.operationId,
+          ...(resumed.queuePosition != null ? { queuePosition: resumed.queuePosition } : {}), resumes: task.taskId, ...resolved };
+      }
+      if (task.generation !== record.generation) throw new GatewayError("conflict", "Home was re-designated after this task started; its controls belong to the earlier Home generation");
+      if (action === "steer") await this.steerTask(sessionId, { taskId: task.taskId, operationId, text: request.text! });
+      else await this.stopTask({ taskId: task.taskId, operationId });
+    } catch (error) {
+      if (!(error instanceof GatewayError)) throw error;
+      // The refusing owner's reason, with the task it was about and its state now.
+      const after = await this.tasks.store.read(task.taskId).catch(() => undefined);
+      const now = after ? await owner.controlRow(after) : row;
+      throw new GatewayError(error.code, `task ${action} "${task.taskId}" refused (${error.code}): ${error.message}. The task is now ${now.state}${now.reason ? ` (${now.reason})` : ""}.`, error.retryable, { ...now, ...resolved });
+    }
+    return { accepted: true, action, taskId: task.taskId, sessionId: task.sessionId, operationId, ...resolved };
+  }
+
+  /** The task that now continues `task`'s worker in place: the last of its resume successors
+   * that is pending, running or bound a worker. A successor refused before it started is skipped,
+   * as resume itself skips it (#959). */
+  private async continuation(task: import("./home-task-store.js").HomeTaskRecord): Promise<string | undefined> {
+    let current: string | undefined;
+    for (let id = task.taskId; ;) {
+      let next: string;
+      try { next = successorTaskId(id); } catch { break; }
+      const successor = await this.tasks.store.read(next);
+      if (!successor?.resumes) break;
+      if (successor.lifecycle !== "terminal" || successor.operationId !== null) current = successor.taskId;
+      id = next;
+    }
+    return current;
+  }
+
+  /** Resumes a settled task in place as its successor (#929): from Home's task tool or the
+   * maintainer's Continue. The result wakes this Home like any task's. */
+  async resumeTask(request: HomeTaskResumeRequest, sessionId?: string, workToken?: string, images: ImageContent[] = []) {
+    await this.taskOwner();
+    const record = this.record;
+    if (this.unavailable || !record?.enabled || (sessionId !== undefined && homeSessionId(record) !== sessionId)) {
+      throw new GatewayError("conflict", "Task resume is unavailable for this Home");
+    }
+    return this.tasks.resume({ homeId: record.homeId, generation: record.generation, routeGeneration: record.routeGeneration }, request, { ...(workToken ? { exceptWorkToken: workToken } : {}), images });
+  }
+
+  /** A maintainer message to a Home worker whose task has settled continues that task in
+   * place with the message as its instruction, instead of being refused (#929). */
+  async resumeWorkerSession(workerSessionId: string, text: string, workToken?: string, images: ImageContent[] = []) {
+    const task = await (await this.taskOwner()).latestTaskForSession(workerSessionId);
+    if (!task) throw new GatewayError("conflict", "This session runs no Home task");
+    if (task.lifecycle !== "terminal" || !task.operationId) {
+      throw new GatewayError("busy", "The worker's task is still settling; send the message again in a moment", true);
+    }
+    return this.resumeTask({ taskId: task.taskId, operationId: task.operationId, text }, undefined, workToken, images);
+  }
+
+  /** The newest task on a worker session: the task itself, or the in-place continuation that resumed it. */
+  async latestWorkerTask(sessionId: string): Promise<{ taskId: string; lifecycle: string; operationId: string | null } | undefined> {
+    const task = await (await this.taskOwner()).latestTaskForSession(sessionId);
+    return task ? { taskId: task.taskId, lifecycle: task.lifecycle, operationId: task.operationId } : undefined;
   }
 
   async maintainTask(control: HomeTaskControlRequest & { text: string }): Promise<void> {
@@ -324,10 +459,10 @@ export class HomeOwner {
       text: entry?.type === "custom" ? JSON.stringify(entry.data) : JSON.stringify({ evidence: task.terminalEvidence, spend: task.spend }) };
   }
 
-  async taskList(input: { limit?: number; cursor?: string }) {
+  async taskList(input: { limit?: number; cursor?: string }, signal?: AbortSignal) {
     const owner = await this.taskOwner();
     if (this.unavailable) throw new GatewayError("conflict", "Home is unavailable", false, { reason: this.unavailable });
-    try { return await owner.store.page(input); }
+    try { return await owner.list(input, signal); }
     catch (error) {
       if (error instanceof HomeTaskStoreError) throw new GatewayError("conflict", "Home task list refused", false, { reason: error.code });
       throw error;
@@ -536,23 +671,33 @@ export class HomeOwner {
       // existing parent is enough to canonicalize the future child identity.
       try { this.workspacePath = join(await realpath(this.directory), "workspace"); } catch { /* no Home directory yet */ }
     }
+    try {
+      await this.memoryProfile.transfer(value => admitRecord(value) !== undefined);
+    } catch {
+      this.unavailable = "Home memory Profile transfer is incomplete or conflicts with its stores";
+      this.options.diagnostic?.({ outcome: "unavailable", reason: "memory-profile-transfer" });
+      return;
+    }
     await this.load();
   }
 
   async status(): Promise<HomeStatus> {
+    // Host pressure and the worker budget (#915) are process facts, shown in every phase.
     const taskRecovery = await this.tasks.recoveryStatus();
+    const hostPressure = this.tasks.hostPressure();
+    const workers = this.tasks.workers();
     const memory = await this.memoryStatus();
     const activation = this.contextStatus();
     if (this.unavailable) {
       return {
-        taskRecovery, phase: "unavailable", activation, readiness: { ready: false, gaps: ["record-unavailable"] },
+        taskRecovery, hostPressure, workers, phase: "unavailable", activation, readiness: { ready: false, gaps: ["record-unavailable"] },
         recovery: { action: "inspect-record", reason: this.unavailable },
         available: false, reason: this.unavailable, enabled: false, live: false, sessionPresent: false, memory,
       };
     }
     const record = this.record;
     if (!record) return {
-      taskRecovery, phase: "undesignated", activation, readiness: { ready: false, gaps: ["not-designated"] },
+      taskRecovery, hostPressure, workers, phase: "undesignated", activation, readiness: { ready: false, gaps: ["not-designated"] },
       recovery: { action: "designate" },
       available: true, enabled: false, live: false, sessionPresent: false, memory,
     };
@@ -586,7 +731,7 @@ export class HomeOwner {
           : memory.blocked || !memory.configured ? "blocked"
           : activation.available && activation.activationOpen ? "active" : memory.paused ? "paused" : "ready";
     return {
-      taskRecovery, phase, activation, readiness: { ready, gaps }, recovery,
+      taskRecovery, hostPressure, workers, phase, activation, readiness: { ready, gaps }, recovery,
       available: true,
       enabled: record.enabled,
       homeId: record.homeId,
@@ -598,6 +743,7 @@ export class HomeOwner {
       model: { ...record.model },
       live,
       sessionPresent,
+      waitingForUser: openSessionId !== undefined && (this.options.sessions.waitingForUser?.(openSessionId) ?? false),
       memory,
       chapter: {
         count: record.chapters.length,
@@ -606,6 +752,20 @@ export class HomeOwner {
         recoveryDecision: currentChapter.state === "reserved" ? "reserved"
           : currentChapter.state === "materializing" ? "materializing" : "none",
       },
+    };
+  }
+
+  /** `home.profileList`: the learned profile Home's instructions apply, read from the
+   * Knowledge owner through the same classifier. Read-only; any Home state answers, since
+   * the profile belongs to the maintainer, not to a designation. */
+  async profileList(): Promise<HomeProfileList> {
+    const knowledge = this.options.knowledge();
+    if (!knowledge) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
+    const read = await readHomeProfile(knowledge);
+    return {
+      items: read.items.map(item => ({ id: item.id, revisionId: item.revisionId, kind: item.kind, text: item.text, confirmed: item.confirmed,
+        status: item.status, createdAt: item.record.createdAt, updatedAt: item.record.updatedAt })),
+      unclassified: read.unclassified,
     };
   }
 
@@ -620,6 +780,7 @@ export class HomeOwner {
     this.assertAvailable();
     const record = this.record;
     if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
+    const topics = await this.chapterTopics(record);
     const chapters: HomeChapterSummary[] = [];
     for (const chapter of record.chapters) {
       const sessionPresent = await this.options.sessions.sessionPresent(chapter.sessionId);
@@ -630,6 +791,8 @@ export class HomeOwner {
         bytes = metrics.bytes;
         entries = metrics.entries;
       }
+      const counts = await this.chapterContents.counts(chapter.sessionId,
+        await this.options.sessions.sessionFile(chapter.sessionId), chapter.state === "reserved");
       chapters.push({
         sessionId: chapter.sessionId,
         ordinal: chapter.ordinal,
@@ -640,6 +803,7 @@ export class HomeOwner {
         ...(chapter.sealedAt === undefined ? {} : { sealedAt: chapter.sealedAt }),
         ...(bytes === undefined ? {} : { bytes }),
         ...(entries === undefined ? {} : { entries }),
+        ...(counts === undefined ? {} : { contents: { ...counts, topics: topics.get(chapter.sessionId) ?? [] } }),
       });
     }
     return {
@@ -651,6 +815,36 @@ export class HomeOwner {
     };
   }
 
+  /**
+   * Each chapter's newest memory summaries, from the open memory only. Without an open memory
+   * there is nothing to show, so no chapter has topics. An unavailable memory is the same
+   * answer, never a failed chapter list: the counts above do not depend on it.
+   */
+  private async chapterTopics(record: HomeRecord): Promise<Map<string, string[]>> {
+    const memory = this.memory?.sessionId === record.homeId ? this.memory.owner : undefined;
+    if (!memory) return new Map();
+    try {
+      const recent = await memory.browserRead(async episodic => episodic.recentSummaries(
+        record.chapters.map(chapter => chapter.sessionId), HOME_CHAPTER_TOPIC_COUNT * 3));
+      // Newest chapters first until the list's topic budget is spent; older chapters
+      // then carry no topics rather than an unbounded frame.
+      let budget = HOME_CHAPTER_TOPIC_LIST_CHARACTERS;
+      const topics = new Map<string, string[]>();
+      for (const chapter of [...record.chapters].reverse()) {
+        const chosen = [...new Set((recent.get(chapter.sessionId) ?? []).map(homeChapterTopic).filter(Boolean))]
+          .slice(0, HOME_CHAPTER_TOPIC_COUNT);
+        const characters = chosen.reduce((sum, topic) => sum + topic.length, 0);
+        if (characters > budget) break;
+        budget -= characters;
+        topics.set(chapter.sessionId, chosen);
+      }
+      return topics;
+    } catch (error) {
+      if (error instanceof GatewayError || error instanceof EpisodicMemoryError || error instanceof HomeMemoryRefusal) return new Map();
+      throw error;
+    }
+  }
+
   /** The admitted model for the enabled Home at the runtime construction
    * boundary; ordinary sessions keep their transcript-selected model. */
   modelFor(sessionId: string): ModelRef | undefined {
@@ -658,8 +852,26 @@ export class HomeOwner {
     return record?.enabled && record.chapters.some(chapter => chapter.sessionId === sessionId) ? { ...record.model } : undefined;
   }
 
+  /** Whether the record names this session as one of Home's chapters, current or
+   * sealed, including a reserved successor whose file does not exist yet. */
+  isHomeChapter(sessionId: string): boolean {
+    return this.record?.chapters.some(chapter => chapter.sessionId === sessionId) ?? false;
+  }
+
   /** Only the current active chapter is writable; sealed and in-progress
    * successor entries fail closed until their owning lifecycle transition lands. */
+  /** Rollover inherits only from the adjacent sealed chapter in this ledger;
+   * a caller cannot choose an unrelated session as a settings source. */
+  settingsPredecessor(sessionId: string): string | undefined {
+    this.assertAvailable();
+    const chapter = this.record?.chapters.find(candidate => candidate.sessionId === sessionId);
+    if (!chapter || chapter.state !== "materializing") throw new GatewayError("conflict", "Home chapter is not materializing");
+    if (chapter.ordinal === 1) return undefined;
+    const previous = this.record?.chapters.find(candidate => candidate.ordinal === chapter.ordinal - 1);
+    if (!previous || previous.state !== "sealed") throw new GatewayError("conflict", "Home settings predecessor is unavailable");
+    return previous.sessionId;
+  }
+
   chapterStateFor(sessionId: string): HomeChapterState {
     const chapter = this.record?.chapters.find(candidate => candidate.sessionId === sessionId);
     if (chapter?.state === "materializing") return {
@@ -854,7 +1066,7 @@ export class HomeOwner {
     if (!policy) {
       policy = new HomeRequestPolicy({
         prepareMemoryView: (activation: HomeActivationIdentity, signal: AbortSignal | undefined) => this.memoryView(activation, signal),
-        prepareSystemPrompt: (base: string) => homeSystemPrompt(base, this.options.knowledge),
+        prepareSystemPrompt: async (base: string) => homeSystemPrompt(base, this.options.knowledge, await this.currentChatChoice(sessionId)),
         ...(this.options.requestDiagnostic ? { onRecord: this.options.requestDiagnostic } : {}),
       });
       this.policies.set(sessionId, policy);
@@ -868,7 +1080,7 @@ export class HomeOwner {
    * cursor and drains its pump under its own bounds, so no caller waits on it.
    *
    * A session whose memory is not open yet is not opened here: designation and
-   * `home.configureMemory` decide when a memory starts spending.
+   * `model.ref[role=memory]` (changed through `settings.change`) decide when a memory starts spending.
    */
   noteEntriesCommitted(sessionId: string): void {
     const record = this.record;
@@ -969,7 +1181,7 @@ export class HomeOwner {
   }
 
   /**
-   * `home.configureMemory`: record the model Home's memory runs its compactor
+   * The `model.ref[role=memory]` applier (settings-model.md 6.1): record the model Home's memory runs its compactor
    * calls on. There is no budget to manage (#493): the memory's spend is bounded
    * by construction and grows only with the conversation. The memory is opened (or re-opened, when the model changed)
    * before the record is written, so a refused configuration changes nothing and
@@ -988,13 +1200,15 @@ export class HomeOwner {
       const memory = { ...record.memory, model: { ...input.model } };
       const owner = this.ownerFor(record.homeId);
       await owner.configure(memory);
-      await this.recordMutex.run(async () => {
-        const current = this.record;
-        if (!current || current.homeId !== record.homeId || !current.enabled) {
-          throw new GatewayError("conflict", "Tron Home changed while configuring its memory");
-        }
-        await this.writeLocked({ ...current, memory, updatedAt: new Date().toISOString() });
-      });
+      try { await this.memoryProfile.setModel(input.model); }
+      catch (error) {
+        // Never leave the open compactor on an unpublished choice. A failed
+        // first configuration is retired; the next read uses Profile only.
+        await this.releaseMemory();
+        const published = await this.memoryProfile.model();
+        if (published) await this.ownerFor(record.homeId).configure({ ...record.memory, model: published });
+        throw error;
+      }
       // Configuration is not a designation/profile transition.
       return this.memoryStatus();
     }));
@@ -1005,7 +1219,7 @@ export class HomeOwner {
    * refuse explicitly. The pump finishes accepted nodes, then stops admission. */
   async pauseMemory(): Promise<HomeMemoryStatus> {
     return this.clientControl("pauseMemory", () => this.mutex.run(async () => {
-      const record = this.requireEnabledMemory();
+      const record = await this.requireEnabledMemory();
       await this.commitMemoryPause(record, true);
       this.memory?.owner.notePause();
       return this.memoryStatus();
@@ -1016,10 +1230,10 @@ export class HomeOwner {
    * by the same store, so resuming never rebuilds them merely due to suspension. */
   async resumeMemory(): Promise<HomeMemoryStatus> {
     return this.clientControl("resumeMemory", () => this.mutex.run(async () => {
-      const record = this.requireEnabledMemory();
+      const record = await this.requireEnabledMemory();
       const owner = this.ownerFor(record.homeId);
-      await owner.configure(record.memory!);
-      if (!record.memory!.paused && !owner.status().blocked) {
+      await owner.configure({ ...record.memory, model: (await this.memoryProfile.model())! });
+      if (!record.memory?.paused && !owner.status().blocked) {
         throw new GatewayError("conflict", "Home memory is neither paused nor blocked");
       }
       await this.commitMemoryPause(record, false);
@@ -1032,23 +1246,23 @@ export class HomeOwner {
     }));
   }
 
-  private requireEnabledMemory(): HomeRecord {
+  private async requireEnabledMemory(): Promise<HomeRecord> {
     this.assertAvailable();
     const record = this.record;
     if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
     if (!record.enabled) throw new GatewayError("conflict", "Tron Home is disabled: designate it before controlling its memory");
-    if (!record.memory) throw new GatewayError("conflict", "Home memory is not configured: configure it with home.configureMemory");
+    if (!await this.memoryProfile.model()) throw new GatewayError("conflict", "Home memory is not configured: set the memory model (model.ref[role=memory]) with settings.change");
     return record;
   }
 
   private async commitMemoryPause(record: HomeRecord, paused: boolean): Promise<void> {
     await this.options.sessions.serializeSessionMutation(homeSessionId(record), () => this.recordMutex.run(async () => {
-      const current = this.requireEnabledMemory();
+      const current = await this.requireEnabledMemory();
       if (current.homeId !== record.homeId) throw new GatewayError("conflict", "Tron Home changed during memory control");
-      if (Boolean(current.memory!.paused) === paused) return;
+      if (Boolean(current.memory?.paused) === paused) return;
       await this.writeLocked({
         ...current,
-        memory: { model: { ...current.memory!.model }, ...(paused ? { paused: true as const } : {}) },
+        memory: paused ? { paused: true } : {},
         updatedAt: new Date().toISOString(),
       });
     }));
@@ -1075,10 +1289,11 @@ export class HomeOwner {
     const record = this.record;
     if (!record) return { configured: false, open: false, paused: false };
     const paused = Boolean(record.memory?.paused);
+    const model = await this.memoryProfile.model();
     const owner = this.memory?.sessionId === record.homeId ? this.memory.owner : undefined;
-    if (owner?.open) return { ...owner.status(), paused };
-    const base: HomeMemoryStatus = record.memory
-      ? { configured: true, open: false, model: { ...record.memory.model } }
+    if (owner?.open && model) return { ...owner.status(), model, paused };
+    const base: HomeMemoryStatus = model
+      ? { configured: true, open: false, model }
       : { configured: false, open: false };
     base.paused = paused;
     const persisted = await (owner ?? this.ownerFor(record.homeId)).persistedState().catch(() => undefined);
@@ -1090,17 +1305,20 @@ export class HomeOwner {
     };
   }
 
-  async memoryPage(request: HomeMemoryPageRequest, signal?: AbortSignal): Promise<HomeMemoryPage> {
-    return this.browserRead(async memory => memory.browserPage(request), signal);
+  async readMemoryView(request: HomeMemoryViewRequest, signal?: AbortSignal): Promise<HomeMemoryView> {
+    if (request.sessionId !== undefined && !this.record?.chapters.some(chapter => chapter.sessionId === request.sessionId)) {
+      throw new GatewayError("not_found", "Session is not a chapter of Tron Home");
+    }
+    return this.browserRead(async memory => memory.browserView(request), signal);
   }
 
   async memoryEvidence(evidence: HomeMemoryEvidence, offset: number, signal?: AbortSignal): Promise<HomeMemoryEvidencePage> {
-    return this.browserRead(async (memory, source) => {
+    return this.browserRead(async (memory, source, proofs) => {
       // Refuse arbitrary/cross-chapter references before opening evidence.
       memory.assertBrowserEvidence(evidence);
       const cursor = memory.browserCursor();
-      if (!cursor) throw homeMemorySourceUnavailable();
-      const entry = await readCanonicalHomeEvidence(source, cursor, evidence, EPISODIC_DEFAULTS, signal);
+      if (!cursor) throw homeMemorySourceUnavailable("no-cursor");
+      const entry = await readCanonicalHomeEvidence(source, cursor, evidence, EPISODIC_DEFAULTS, signal, proofs);
       signal?.throwIfAborted();
       const { runtimeGeneration: _generation, entryId: _entryId, ...content } = historyEntry(
         { getEntry: id => id === entry.id ? entry.raw as unknown as SessionEntry : undefined },
@@ -1112,26 +1330,28 @@ export class HomeOwner {
 
   /** One read boundary proves every admitted chapter and fences both ledger
    * and memory revisions. No partial success, cursor registry or transcript cache. */
-  private async browserRead<T>(read: (memory: EpisodicMemory, source: HomeSourceSnapshot) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  private async browserRead<T>(read: (memory: EpisodicMemory, source: HomeSourceSnapshot, proofs: HomeSourceProofs) => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.mutex.run(async () => {
       signal?.throwIfAborted();
       this.assertAvailable();
       const record = this.record;
-      if (!record?.memory) throw new GatewayError("conflict", "Home memory is not configured");
+      const model = await this.memoryProfile.model();
+      if (!record || !model) throw new GatewayError("conflict", "Home memory is not configured");
       const owner = this.ownerFor(record.homeId);
+      const proofs = this.memory!.proofs;
       try {
-        await owner.configure(record.memory);
+        await owner.configure({ ...record.memory, model });
         signal?.throwIfAborted();
         return await owner.browserRead(async memory => {
           const cursor = memory.browserCursor();
-          if (!cursor) throw homeMemorySourceUnavailable();
+          if (!cursor) throw homeMemorySourceUnavailable("no-cursor");
           const source = await this.readHomeSource();
           signal?.throwIfAborted();
           // Consume to completion: a late chapter failure cannot publish an
           // earlier chapter as a complete page or exact evidence.
-          for await (const _entry of readCanonicalHomeIndex(source, cursor, EPISODIC_DEFAULTS, signal)) { /* proof only */ }
+          for await (const _entry of readCanonicalHomeIndex(source, cursor, EPISODIC_DEFAULTS, signal, proofs)) { /* proof only */ }
           signal?.throwIfAborted();
-          const result = await read(memory, source);
+          const result = await read(memory, source, proofs);
           signal?.throwIfAborted();
           if (this.record !== record || this.memory?.owner !== owner) throw homeMemoryRevisionChanged();
           return result;
@@ -1139,7 +1359,9 @@ export class HomeOwner {
       } catch (error) {
         signal?.throwIfAborted();
         if (error instanceof GatewayError) throw error;
-        if (error instanceof EpisodicMemoryError || error instanceof EpisodicSourceChangedError || error instanceof HomeMemoryRefusal) throw homeMemorySourceUnavailable();
+        if (error instanceof EpisodicMemoryError) throw homeMemorySourceUnavailable(`episodic-${error.kind}`);
+        if (error instanceof EpisodicSourceChangedError) throw homeMemorySourceUnavailable("source-changed");
+        if (error instanceof HomeMemoryRefusal) throw homeMemorySourceUnavailable(`refusal-${error.reason}`);
         throw error;
       }
     }, signal);
@@ -1167,6 +1389,12 @@ export class HomeOwner {
         viewBytes: step.viewBytes,
         effectiveTokens: step.effectiveTokens,
         contextWindow: step.contextWindow,
+        breakdown: {
+          activation: { state: evidence.activationOpen ? "running" : "settled", kind: evidence.kind, startedAt: evidence.startedAt },
+          contextWindow: step.contextWindow,
+          effectiveTokens: step.effectiveTokens,
+          sections: step.sections.map(section => ({ ...section })),
+        },
       } : {}),
       ...(evidence.refusal ? { lastRefusalReason: evidence.refusal.reason, lastRefusalDetail: evidence.refusal.detail } : {}),
     };
@@ -1207,10 +1435,11 @@ export class HomeOwner {
     if (!record || !record.enabled) {
       throw new HomeMemoryRefusal("memory-not-configured", "Tron Home is not enabled");
     }
-    if (!record.memory) {
+    const model = await this.memoryProfile.model();
+    if (!model) {
       throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
     }
-    if (record.memory.paused) {
+    if (record.memory?.paused) {
       throw new HomeMemoryRefusal("memory-paused", "Home memory is paused; resume memory before sending another input");
     }
     const owner = this.ownerFor(record.homeId);
@@ -1220,7 +1449,7 @@ export class HomeOwner {
     const path = await this.options.sessions.sessionFile(chapter.sessionId);
     const present = path ? await stat(path).then(() => true, error => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }) : false;
     if (!present && chapter.activationStarted) throw new HomeMemoryRefusal("memory-unavailable", "A started Home chapter has lost its canonical file");
-    await owner.configure(record.memory);
+    await owner.configure({ ...record.memory, model });
     let view: HomeActivationView;
     if (!present && chapter.ordinal === 1) {
       view = owner.emptyChapterView(signal);
@@ -1250,7 +1479,8 @@ export class HomeOwner {
       let path: string | undefined;
       try { path = await this.options.sessions.sessionFile(chapter.sessionId); }
       catch (error) {
-        if (chapter.state === "sealed") throw new EpisodicMemoryError("source", `Sealed Home chapter ${chapter.sessionId} cannot be resolved: ${String(error)}`);
+        // A retryable refusal (the catalog has no cut yet) stays itself, not a source failure.
+        if (chapter.state === "sealed" && !(error instanceof GatewayError)) throw new EpisodicMemoryError("source", `Sealed Home chapter ${chapter.sessionId} cannot be resolved: ${String(error)}`);
         throw error;
       }
       if (!path) {
@@ -1280,6 +1510,7 @@ export class HomeOwner {
     if (current && current.sessionId === homeId) return current.owner;
     if (current) void current.owner.dispose();
     const source = () => this.readHomeSource();
+    const proofs = new HomeSourceProofs();
     const owner = new HomeMemory({
       workspace: this.options.workspace,
       sessionId: homeId,
@@ -1296,13 +1527,13 @@ export class HomeOwner {
       },
       sessionSource: {
         read: async function* (cursor, limits) { yield* readCanonicalHomeDeltas(await source(), cursor, limits); },
-        branchAtCursor: async function* (cursor, limits) { yield* readCanonicalHomeIndex(await source(), cursor, limits); },
+        branchAtCursor: async function* (cursor, limits) { yield* readCanonicalHomeIndex(await source(), cursor, limits, undefined, proofs); },
       },
       modelSummarizer: this.options.memorySummarizer,
       isPaused: () => Boolean(this.record?.memory?.paused),
       ...(this.options.memoryDiagnostic ? { diagnostic: this.options.memoryDiagnostic } : {}),
     });
-    this.memory = { sessionId: homeId, owner };
+    this.memory = { sessionId: homeId, owner, proofs };
     return owner;
   }
 
@@ -1316,8 +1547,8 @@ export class HomeOwner {
 
   /**
    * `home.designate`. An enabled record whose session still exists is idempotent,
-   * but cannot change the session-owned model; callers use `session.setModel` for
-   * that. A disabled record is re-enabled on the same session. A record whose
+   * but cannot change the session-owned model; callers change `model.ref[role=chat]` through
+   * `settings.change` for that. A disabled record is re-enabled on the same session. A record whose
    * session is gone is kept and given a fresh session, because the record is the
    * only evidence of the designation.
    */
@@ -1337,7 +1568,7 @@ export class HomeOwner {
         if (existing.enabled) {
           if (input.model && (input.model.provider !== existing.model.provider || input.model.id !== existing.model.id)) {
             this.options.diagnostic?.({ outcome: "refused", reason: "model-change-requires-session-set-model" });
-            throw new GatewayError("conflict", "Tron Home is already enabled with a different model; use session.setModel to change its model");
+            throw new GatewayError("conflict", "Tron Home is already enabled with a different model; change its model through settings.change");
           }
           return designation(existing);
         }
@@ -1398,7 +1629,7 @@ export class HomeOwner {
           model: { ...model },
           // The memory's configuration is the user's decision about *how* Home
           // remembers, so a replacement chapter keeps it and its pause decision.
-          ...(existing?.memory ? { memory: { ...existing.memory, model: { ...existing.memory.model } } } : {}),
+          ...(existing?.memory ? { memory: { ...existing.memory } } : {}),
           createdAt: existing?.createdAt ?? now,
           updatedAt: now,
         };
@@ -1495,6 +1726,7 @@ export class HomeOwner {
   private async writeLocked(record: HomeRecord): Promise<void> {
     this.assertAvailable();
     if (!admitRecord(record)) throw new GatewayError("conflict", "The Home record is invalid or exceeds its chapter bounds");
+    const chaptersBefore = chapterIdentities(this.record);
     try {
       await durablePublishBoundedJson(this.recordPath, record, MAXIMUM_RECORD_BYTES);
     } catch (error) {
@@ -1504,6 +1736,7 @@ export class HomeOwner {
         this.unavailable = "Home ledger publication is being reconciled";
         this.options.sessions.beginHomePublicationReconciliation();
         const reloaded = await this.load(false);
+        this.options.sessions.homeChaptersChanged?.();
         // Do not await this here: writeLocked may be running inside a slot lane,
         // and Registry retirement queues behind that lane. Keep the owner fenced
         // until the retained retirement completes successfully.
@@ -1525,6 +1758,7 @@ export class HomeOwner {
       throw error;
     }
     this.record = record;
+    if (chapterIdentities(record) !== chaptersBefore) this.options.sessions.homeChaptersChanged?.();
   }
 
   private async load(clearAvailability = true): Promise<boolean> {
@@ -1566,6 +1800,10 @@ export class HomeOwner {
 function openableChapter(record: HomeRecord): HomeChapter | undefined {
   const current = record.chapters.at(-1);
   return current?.state === "reserved" || current?.state === "materializing" ? record.chapters.at(-2) : current;
+}
+
+function chapterIdentities(record: HomeRecord | undefined): string {
+  return record?.chapters.map(chapter => chapter.sessionId).join("\n") ?? "";
 }
 
 function homeSessionId(record: HomeRecord): string {
@@ -1680,11 +1918,6 @@ function admitMemory(value: unknown): HomeRecord["memory"] | null {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  const model = record.model;
-  if (!hasOnlyKeys(record, ["model", "paused"]) || (record.paused !== undefined && record.paused !== true) || !model || typeof model !== "object" || Array.isArray(model)) return null;
-  const modelRecord = model as Record<string, unknown>;
-  if (!hasOnlyKeys(modelRecord, ["provider", "id"])
-    || !boundedString(modelRecord.provider, MAXIMUM_PROVIDER_BYTES)
-    || !boundedString(modelRecord.id, MAXIMUM_MODEL_ID_BYTES)) return null;
-  return { model: { provider: modelRecord.provider, id: modelRecord.id }, ...(record.paused === true ? { paused: true } : {}) };
+  if (!hasOnlyKeys(record, ["paused"]) || (record.paused !== undefined && record.paused !== true)) return null;
+  return record.paused === true ? { paused: true } : {};
 }

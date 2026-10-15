@@ -11,6 +11,7 @@ struct CustomModelIDsEditor: View {
         TronSettingsGroup("Models", detail: "One model ID per line. These appear in model selection.") {
             TextField("Model IDs", text: $text, axis: .vertical)
                 .lineLimit(2...8).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .tronTextEntryDone(keyboardToolbar: true)
                 .textFieldStyle(.plain)
                 .font(TronTypography.code(size: TronTypography.sizeBody))
                 .foregroundStyle(Color.tronTextPrimary)
@@ -133,7 +134,7 @@ struct CustomModelsSettingsView: View {
                     .font(TronTypography.sheetSectionHeader)
                     .foregroundStyle(Color.tronTextPrimary)
                     .accessibilityAddTraits(.isHeader)
-                TronSettingsDetailText("Choose a provider to edit its endpoint, format, and model IDs.")
+                TronSettingsCaption("Choose a provider to edit its endpoint, format, and model IDs.")
             }
 
             if providers.isEmpty {
@@ -446,7 +447,7 @@ struct CustomModelProviderConfiguration<Content: View>: View {
                     Button(role: .destructive) { confirmingRemoval = true } label: {
                         TronToolbarTextLabel("Remove", systemImage: "trash")
                     }
-                    .tronToolbarAction(accent: .tronError)
+                    .tronToolbarAction(role: .destructive)
                     .accessibilityIdentifier("custom-model-remove")
                 }
             }
@@ -486,6 +487,7 @@ struct CustomModelAdvancedEditorSheet: View {
             VStack(spacing: 12) {
                 SettingsAutosaveNotice(key: .customModels(target))
                 TextEditor(text: $document)
+                    .tronTextEntryDone(keyboardToolbar: true)
             }
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
@@ -497,7 +499,7 @@ struct CustomModelAdvancedEditorSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: onDone) {
                         Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM).foregroundStyle(accent)
+                            .font(TronTypography.buttonSM).tronToolbarAction(accent: accent)
                     }.accessibilityLabel("Done")
                 }
             }

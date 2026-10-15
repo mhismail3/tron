@@ -239,12 +239,7 @@ struct TranscriptRow: View, Equatable {
                                     part.text,
                                     hasAttachments: !displayedAttachments.isEmpty
                                 ) {
-                                    UserPromptText(text: text)
-                                        .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
-                                        .padding(.top, ChatPromptContainerStyle.topPadding)
-                                        .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
-                                        .modifier(UserPromptGlassModifier())
-                                        .modifier(ChatMessageCopyMenu(text: text))
+                                    ChatUserPromptContent(text: text)
                                 }
                             } else {
                                 MarkdownText(
@@ -254,6 +249,13 @@ struct TranscriptRow: View, Equatable {
                                         source: part.text ?? ""
                                     ),
                                     streaming: streaming
+                                )
+                                // Only canonical assistant response text is quotable.
+                                .environment(
+                                    \.chatAnnotationSource,
+                                    item.role == .assistant
+                                        ? ChatAnnotationSource(itemID: item.id, partID: part.id)
+                                        : nil
                                 )
                             }
                         case .thinking:
@@ -356,27 +358,20 @@ struct TranscriptRow: View, Equatable {
     }
 
     private var attachmentStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(displayedAttachments) { part in
-                    if part.type == .image, let id = part.blobId {
-                        TranscriptImageChip(blobID: id)
-                    } else if let attachment = part.attachment {
-                        TranscriptFileChip(
-                            name: attachment.name,
-                            mimeType: attachment.mimeType,
-                            size: attachment.size,
-                            blobID: part.blobId
-                        )
-                    }
+        ChatChipStrip(alignment: item.role == .user ? .trailing : .leading) {
+            ForEach(displayedAttachments) { part in
+                if part.type == .image, let id = part.blobId {
+                    TranscriptImageChip(blobID: id)
+                } else if let attachment = part.attachment {
+                    TranscriptFileChip(
+                        name: attachment.name,
+                        mimeType: attachment.mimeType,
+                        size: attachment.size,
+                        blobID: part.blobId
+                    )
                 }
             }
-            .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
-            .chatSecondaryScrollContent()
         }
-        .scrollClipDisabled()
-        .defaultScrollAnchor(item.role == .user ? .trailing : .leading)
-        .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
         .padding(.vertical, item.role == .user ? 3 : 0)
         .accessibilityLabel("Prompt attachments")
     }
@@ -943,7 +938,7 @@ struct ThinkingTraceDetailSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }

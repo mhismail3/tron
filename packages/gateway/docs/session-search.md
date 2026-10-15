@@ -1,17 +1,16 @@
 # Session search
 
-Gateway capability `session-search.v1`, advertised only while the search
-service is available, provides disposable, read-only search over canonical
-session JSONL. `session.search` combines immediate catalog filtering with
-bounded content postings; `session.search.anchor` validates the returned
-entry/file/branch revision and returns a page containing the exact canonical
-entry.
+`SessionSearchService` is the Gateway's optional, in-process, read-only search
+over canonical session JSONL: bounded content postings plus optional local
+semantic ranking. Its only reader is Home's `session_search` research tool
+([Home](home.md)); it has no client RPC or capability. (The iPhone's dashboard
+search is a local title match over the session catalog it already holds.)
 
 Every result carries `archived`, the Gateway archive projection read from its
 owning store when the response is built. Archive state is never part of the
 index or canonical file, so archiving or unarchiving changes no indexed text
-and needs no reindex, and an archived session stays searchable and anchorable
-while its dashboard row is hidden. The archive store stays the only owner of that
+and needs no reindex, and an archived session stays searchable while its
+dashboard row is hidden. The archive store stays the only owner of that
 state (`session.archive.set`, run-admission clears, backstop clears, deletion,
 rebind and startup pruning all write it); see
 the archive contract in the Gateway README.
@@ -42,26 +41,20 @@ admission. The complete cold graph is validated before the SDK-selected branch
 is retained. Hidden, delegated, tool, thinking, and abandoned-branch entries are
 not indexed. Malformed, oversized, or interrupted files report partial coverage
 rather than an empty corpus. Fork anchors retain the selected-branch gap ordinal
-rather than a fabricated zero.
+rather than a fabricated zero. A result is re-cut immediately before publication
+after optional semantic ranking: unrelated session publications do not
+invalidate the search, and changed result sessions are revalidated against the
+current branch so stale or removed passages are dropped and surviving lexical
+hits carry a fresh branch revision.
 
-Semantic and Jev ranking states are explicit: neither is silently represented
-as lexical success. Semantic readiness requires the signed NaturalLanguage
+The semantic ranking state is explicit and never silently represented as
+lexical success. Semantic readiness requires the signed NaturalLanguage
 helper qualification and one matching model revision,
 language, and dimension for qualification, every vector, and every query;
 unsupported languages remain unavailable with a reason. The helper must be the
 regular, non-symlink, signed bundled artifact (development overrides are only
-admitted under explicit development mode). Jev reranking is disabled without
-user consent, a per-Gateway allowance, and durable bounded reservation. Policy
-allowances named `microCents` are one-millionth of a cent (1e-6 cents); the
-qualified 64,000-token request ceiling reserves 268,800 microCents. Spending
-reservations live in a separate durable SQLite ledger
-(`session-search-jev-allowance.sqlite`) with idempotent settlement, not the
-search index; existing-ledger schema/authority rows are validated
-before any mutation, and corruption fails closed for Jev only without blocking
-core Gateway startup.
-Cancellation after dispatch retains a pending reservation because provider
-settlement is uncertain; pending and historical rows have bounded retention.
-Lexical posting admission uses UTF-8 byte estimates with storage headroom and
+admitted under explicit development mode). Search never calls Jev or any
+remote provider. Lexical posting admission uses UTF-8 byte estimates with storage headroom and
 reports actual owned SQLite file bytes. An actual over-bound SQLite
 file is quarantined and recreated at the index owner boundary, so a later small
 replacement can recover. One document's postings are inserted in slices that
@@ -70,6 +63,4 @@ instead of deleting index rows inline, so neither a reindex nor another owner's
 publication holds the loop. Initial semantic indexing and per-session vector
 refreshes remain serialized, while lexical dirty replacement is independent of
 helper I/O; per-session dirty generations retain invalidations that arrive
-during a refresh. Policy updates
-advance the durable owner-assigned revision monotonically. Neither path changes
-canonical transcript ownership.
+during a refresh. Neither path changes canonical transcript ownership.

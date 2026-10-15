@@ -45,12 +45,13 @@ async function initializeAndSeed(): Promise<void> {
   });
 }
 
-async function signedNotification(input?: { requestId?: string; message?: string; notificationKind?: "ask" | "explicit" | "agent_finished" | "waiting" }): Promise<RequestInit> {
+async function signedNotification(input?: { requestId?: string; message?: string; notificationKind?: "ask" | "explicit" | "agent_finished" | "waiting"; category?: string }): Promise<RequestInit> {
   const requestId = input?.requestId ?? "request-identifier-0001";
   const body = JSON.stringify({
     version: 1,
     kind: "agent_alert",
     notificationKind: input?.notificationKind ?? "agent_finished",
+    ...(input?.category !== undefined ? { category: input.category } : {}),
     requestId,
     message: input?.message ?? "Tron needs your input.",
     expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
@@ -642,6 +643,51 @@ describe("v3 Worker boundary", () => {
       state.storage.sql.exec<{ enabled: number }>("SELECT enabled FROM grants WHERE grant_id = ?", testGrant.grantId).one().enabled,
     );
     expect(enabled).toBe(0);
+  });
+
+  test("advertises its notification categories", async () => {
+    const response = await SELF.fetch("https://push.test/v3/capabilities");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ version: 1, notificationCategories: ["settings-approval"] });
+    expect((await SELF.fetch("https://push.test/v3/capabilities", { method: "POST", body: "{}" })).status).toBe(405);
+  });
+
+  test("maps the settings-approval category to aps.category on a waiting alert", async () => {
+    await initializeAndSeed();
+    const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200, headers: { "apns-id": "provider-id" } }));
+    vi.stubGlobal("fetch", providerFetch);
+    const categorized = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({
+      requestId: "categorized-request-0001", notificationKind: "waiting", category: "settings-approval",
+    }));
+    expect(await categorized.json()).toEqual({ status: "accepted_by_apns", apnsId: "provider-id" });
+    const plain = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({
+      requestId: "uncategorized-request-0001", notificationKind: "waiting",
+    }));
+    expect((await plain.json() as { status: string }).status).toBe("accepted_by_apns");
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    const categorizedPayload = JSON.parse((providerFetch.mock.calls[0][1] as RequestInit).body as string) as { aps: Record<string, unknown> };
+    const plainPayload = JSON.parse((providerFetch.mock.calls[1][1] as RequestInit).body as string) as { aps: Record<string, unknown> };
+    expect(categorizedPayload.aps.category).toBe("settings-approval");
+    expect(plainPayload.aps).not.toHaveProperty("category");
+  });
+
+  test("rejects any other category, and the category on any other kind, before contacting APNs", async () => {
+    await initializeAndSeed();
+    const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const otherCategory = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({
+      requestId: "other-category-request-01", notificationKind: "waiting", category: "other",
+    }));
+    expect(otherCategory.status).toBe(400);
+    expect(await otherCategory.json()).toEqual({ error: "invalid_request" });
+    const otherKind = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({
+      requestId: "explicit-category-request1", notificationKind: "explicit", category: "settings-approval",
+    }));
+    expect(otherKind.status).toBe(400);
+    expect(await otherKind.json()).toEqual({ error: "invalid_request" });
+    expect(providerFetch).not.toHaveBeenCalled();
   });
 
   test("fails closed when App Attest proof is malformed", async () => {

@@ -44,7 +44,7 @@ export type IosDeviceInstallChannel = "stable" | "dev";
 export type IosDeviceInstallBuildMode = "fast-debug" | "optimized";
 export type IosDeviceInstallState = "requested" | "running" | "succeeded" | "failed";
 
-export interface IosPhysicalDeviceTarget {
+interface IosPhysicalDeviceTarget {
   /** Owner-only CoreDevice identifier. Never project this field over RPC. */
   identifier: string;
   name: string;
@@ -301,7 +301,7 @@ async function readActiveInstall(tronHome: string): Promise<ActiveInstall | unde
 /** Admit only bounded physical-iOS fields from `devicectl list devices`:
  * serials, UDIDs and other raw properties are dropped. The real discovery runs
  * `xcrun`, so this admission is the only in-process witness of the field set. */
-export function admitDevicectlTargets(value: unknown): IosPhysicalDeviceTarget[] {
+function admitDevicectlTargets(value: unknown): IosPhysicalDeviceTarget[] {
   const devices = record(record(value)?.result)?.devices;
   if (!Array.isArray(devices) || devices.length > MAX_TARGETS) {
     throw new GatewayError("conflict", "Xcode device discovery returned a malformed result");
@@ -688,7 +688,7 @@ function bundledXcodegen(runtimeExecutable: string): string | undefined {
 /** The allow-listed helper environment, including the payload's own XcodeGen.
  * The install runs detached, so this environment is the only in-process witness
  * of what a PATH-injected tool could otherwise reach. */
-export function iosDeviceInstallHelperEnvironment(
+function iosDeviceInstallHelperEnvironment(
   config: IosDeviceInstallConfig,
   inherited: NodeJS.ProcessEnv = process.env,
   runtimeExecutable = process.execPath,

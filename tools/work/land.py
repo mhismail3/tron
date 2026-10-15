@@ -19,6 +19,7 @@ from gh import Gh, GhError
 
 # A moved base sends land back to merging it, at most this many times.
 MAX_LOOPBACKS = 3
+MAX_PR_HEAD_OBSERVATIONS = 3
 _IN_PROGRESS = (("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"),
                 ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect"))
 
@@ -65,6 +66,9 @@ def delete_branch(root: Path, remote: str, branch: str, head: str) -> str:
     deleted = _git(root, "push", "-q", f"--force-with-lease=refs/heads/{branch}:{head}", remote,
                    f":refs/heads/{branch}", check=False)
     if deleted.returncode != 0:
+        # GitHub deletes a merged head branch itself; a refusal because it is already gone is not a kept branch.
+        if _remote_head(root, remote, branch) is None:
+            return "already deleted"
         detail = (deleted.stderr.strip().splitlines() or ["no detail"])[-1]
         return f"kept: the delete with a lease on {head[:12]} was refused ({detail})"
     return "deleted"
@@ -157,14 +161,69 @@ def _base_moved(root: Path, remote: str, base: str, head: str) -> bool:
     return not _is_ancestor(root, _fetch_base(root, remote, base), head)
 
 
+def _published_pull_request(gh: Gh, root: Path, repository: str, remote: str, branch: str,
+                            head: str, pull: dict) -> dict:
+    """Require current branch and PR heads to agree before merging a published head."""
+    observed = pull
+    for attempt in range(MAX_PR_HEAD_OBSERVATIONS):
+        remote_result = _git(root, "ls-remote", "--heads", remote, f"refs/heads/{branch}", check=False)
+        if remote_result.returncode != 0:
+            raise LandError(f"could not confirm remote branch {branch} after publishing {head[:12]}; "
+                            "publication state is uncertain; rerun land to observe it again")
+        remote_fields = remote_result.stdout.split()
+        remote_head = remote_fields[0] if remote_fields else None
+        if remote_head != head:
+            actual = remote_head[:12] if remote_head else "missing"
+            raise LandError(f"remote branch {branch} is at {actual}, not the verified {head[:12]}; "
+                            "the branch moved after land pushed it")
+        if observed["head"]["sha"] == head:
+            return observed
+        if attempt + 1 < MAX_PR_HEAD_OBSERVATIONS:
+            observed = gh.rest("GET", f"repos/{repository}/pulls/{observed['number']}")
+    raise LandError(f"pull request #{pull['number']} still reports {observed['head']['sha'][:12]} after "
+                    f"{MAX_PR_HEAD_OBSERVATIONS} observations while remote branch {branch} is at {head[:12]}; "
+                    "publication state is uncertain; rerun land to observe it again")
+
+
+def _mark_ready(gh: Gh, repository: str, pull: dict) -> None:
+    """Clear draft state; the re-read must confirm it before any merge request is sent."""
+    number = pull["number"]
+    try:
+        gh.mark_pull_request_ready(pull["node_id"])
+    except GhError as error:
+        raise LandError(f"GitHub refused to mark pull request #{number} ready for review: {error}; "
+                        "nothing was merged") from error
+    try:
+        current = gh.rest("GET", f"repos/{repository}/pulls/{number}")
+    except GhError as error:
+        raise LandError(f"could not re-read pull request #{number} after marking it ready: {error}; "
+                        "its ready state is uncertain; nothing was merged. Rerun land to observe it again") from error
+    if current.get("draft") is not False:
+        raise LandError(f"pull request #{number} is still a draft after marking it ready; its ready state is "
+                        "uncertain; nothing was merged. Rerun land to observe it again")
+
+
+def _finish_issue(gh: Gh, root: Path, config: dict, repository: str, number: int) -> str:
+    """An issue with open sub-issues stays open: its children may still be unfinished scope."""
+    open_children = tracking.open_sub_issues(gh, repository, number)
+    if open_children:
+        listing = ", ".join(f"#{child}" for child in open_children)
+        return (f"left #{number} open: sub-issues {listing} remain open; "
+                "close each fulfilled one with work issue close, then the epic")
+    return tracking.complete_issue(gh, root, config, number)
+
+
 def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: Path,
-         tests: List[str], dry_run: bool) -> int:
+         tests: List[str], dry_run: bool, ready: bool = False) -> int:
     rules = config["claim"]
     remote, base = rules["remote"], rules["baseBranch"]
     branch = _current_branch(root, base)
     body = _summary(summary_file)
-    _scrub(root, config["verify"]["scrubCommand"], (title or "") + "\n\n" + body)
     number = claims.claimed_issue(branch)
+    # The claimed issue names the change; the branch slug is only a fallback.
+    if title is None and number:
+        title = gh.rest("GET", f"repos/{_repository(gh)}/issues/{number}")["title"]
+    _scrub(root, config["verify"]["scrubCommand"], (title or "") + "\n\n" + body)
 
     for loop in range(MAX_LOOPBACKS + 1):
         if loop:
@@ -178,9 +237,12 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
             raise LandError("verify failed; nothing was pushed, opened or merged")
         if dry_run:
             print(f"dry run: {branch} at {head[:12]} verified; nothing pushed")
+            if ready:
+                print("  would mark the pull request ready for review first, if it is a draft")
             print(f"  would push {branch} to {remote}, open or update the pull request into {base}, "
                   f"squash-merge it at {head[:12]}, delete {remote}/{branch}"
-                  + (f" and close #{number} as completed with Status Done" if number else ""))
+                  + (f" and close #{number} as completed with Status Done (left open while it has open sub-issues)"
+                     if number else ""))
             return 0
 
         # A commit already merged from this branch is not landed again: a second pull request would duplicate it.
@@ -195,11 +257,14 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
             pull = _pull_request(gh, repository, branch, base, title, body)
         except GhError as error:
             raise LandError(f"could not open or update the pull request: {error}") from error
-        if pull["head"]["sha"] != head:
-            raise LandError(f"pull request #{pull['number']} is at {pull['head']['sha'][:12]}, not {head[:12]}; "
-                            "someone else pushed to this branch")
+        pull = _published_pull_request(gh, root, repository, remote, branch, head, pull)
         if _base_moved(root, remote, base, head):
             continue
+        if pull.get("draft"):
+            if not ready:
+                raise LandError(f"pull request #{pull['number']} is a draft; rerun land with --ready to mark it "
+                                "ready for review and merge. Nothing was merged.")
+            _mark_ready(gh, repository, pull)
         final_title = pull["title"]
         try:
             merged = gh.rest("PUT", f"repos/{repository}/pulls/{pull['number']}/merge", {
@@ -221,10 +286,10 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
     try:
         print(f"branch:  {delete_branch(root, remote, branch, head)}")
         if number is not None:
-            print(f"issue:   {tracking.complete_issue(gh, root, config, number)}")
+            print(f"issue:   {_finish_issue(gh, root, config, repository, number)}")
     except (GhError, tracking.TrackingError, LandError) as error:
         raise LandError(f"merged as {merge_sha}, but the rest did not finish: {error}. "
-                        f"Finish by hand: close #{number} as completed, set its Status to Done, "
-                        f"and delete {remote}/{branch} if it remains.") from error
+                        f"Finish by hand: close #{number} with work issue close (it refuses an epic with open "
+                        f"sub-issues), and delete {remote}/{branch} if it remains.") from error
     print(f"merged:  {merge_sha}")
     return 0

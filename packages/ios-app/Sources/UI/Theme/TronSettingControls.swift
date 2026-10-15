@@ -1,16 +1,21 @@
 import SwiftUI
 
-/// Passive explanations sit on the sheet, never in a surface that looks tappable.
+/// Passive explanations sit on the sheet, never in a surface that looks tappable:
+/// sheet intros, help and captions, in the settings row subtitle's size and colour
+/// on every sheet (#900), so explanatory copy never reads smaller than its rows.
 struct TronSettingsCaption: View {
     let text: String
-    init(_ text: String) { self.text = text }
+    /// Captions sit 4 points inside the sheet's content edge; a group's detail
+    /// aligns with its header instead.
+    var inset: CGFloat = 4
+    init(_ text: String, inset: CGFloat = 4) { self.text = text; self.inset = inset }
     var body: some View {
         Text(text)
-            .font(TronTypography.secondaryDescription)
+            .font(TronTypography.settingsRowSubtext)
             .foregroundStyle(Color.tronTextSecondary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4)
+            .padding(.horizontal, inset)
     }
 }
 
@@ -64,6 +69,113 @@ struct TronSelectionRow<Choices: View>: View {
     }
 }
 
+/// One option of a `TronChoiceRow`/`TronChoicePicker`.
+struct TronChoice<ID: Hashable>: Identifiable {
+    let id: ID
+    let label: String
+    var detail: String? = nil
+    var disabledReason: String? = nil
+}
+
+/// The standard single-choice row: the chosen value in a right-aligned capsule
+/// that opens a picker sheet of option rows. Use it instead of a menu; SwiftUI
+/// menus fail to open in a sheet presented from another sheet (#877).
+struct TronChoiceRow<ID: Hashable>: View {
+    let icon: String
+    let title: String
+    var detail: String? = nil
+    let choices: [TronChoice<ID>]
+    let selected: ID?
+    var accent: Color = .tronEmerald
+    let onChoose: (ID) -> Void
+
+    var body: some View {
+        TronSelectionSheetRow(icon: icon, title: title, detail: detail,
+                              value: choices.first { $0.id == selected }?.label ?? "None", accent: accent) {
+            TronChoicePicker(title: title, choices: choices, selected: selected, onChoose: onChoose)
+        }
+    }
+}
+
+/// A picker sheet of standard option rows; long lists get the floating search.
+struct TronChoicePicker<ID: Hashable>: View {
+    let title: String
+    let choices: [TronChoice<ID>]
+    let selected: ID?
+    var optionIdentifierPrefix = "settings-option-"
+    let onChoose: (ID) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(choices) { choice in
+                    TronCatalogOptionRow(title: choice.label, summary: choice.disabledReason, detail: choice.detail,
+                                         icon: "circle", isSelected: choice.id == selected,
+                                         isEnabled: choice.disabledReason == nil) {
+                        onChoose(choice.id)
+                        dismiss()
+                    }
+                    .accessibilityIdentifier(optionIdentifierPrefix + choice.label)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle(title)
+    }
+}
+
+/// Several choices from one list, committed with Save. The order chosen is kept;
+/// a newly chosen item joins the end.
+struct TronChecklistPicker<ID: Hashable>: View {
+    let title: String
+    var help: String? = nil
+    let choices: [TronChoice<ID>]?
+    var optionIdentifierPrefix = "settings-option-"
+    let onSave: ([ID]) -> Void
+    @State private var chosen: [ID]
+    @Environment(\.dismiss) private var dismiss
+    private let initial: [ID]
+
+    init(title: String, help: String? = nil, choices: [TronChoice<ID>]?, selected: [ID],
+         optionIdentifierPrefix: String = "settings-option-", onSave: @escaping ([ID]) -> Void) {
+        self.title = title; self.help = help; self.choices = choices
+        self.optionIdentifierPrefix = optionIdentifierPrefix; self.onSave = onSave
+        initial = selected
+        _chosen = State(initialValue: selected)
+    }
+
+    var body: some View {
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                if let help { TronSettingsCaption(help).padding(.bottom, 4) }
+                if choices == nil {
+                    TronSheetLoadingState(label: "Loading…")
+                }
+                ForEach(choices ?? []) { choice in
+                    let isChosen = chosen.contains(choice.id)
+                    TronCatalogOptionRow(title: choice.label, summary: choice.disabledReason, detail: choice.detail,
+                                         icon: "circle", isSelected: isChosen,
+                                         isEnabled: choice.disabledReason == nil || isChosen) {
+                        if isChosen { chosen.removeAll { $0 == choice.id } } else { chosen.append(choice.id) }
+                    }
+                    .accessibilityIdentifier(optionIdentifierPrefix + choice.label)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle(title)
+        .tronSaveToolbar(enabled: chosen != initial) {
+            onSave(chosen)
+            dismiss()
+        }
+    }
+}
+
 /// The same selected-value row can open a richer picker instead of a menu.
 struct TronSelectionSheetRow<Destination: View>: View {
     let icon: String
@@ -80,7 +192,80 @@ struct TronSelectionSheetRow<Destination: View>: View {
             TronProgressiveSheetLink(accessibilityLabel: accessibilityLabel ?? title, accent: theme?.accent ?? accent, destination: destination) {
                 TronInlineActionLabel(value, accent: accent)
             }
+            .accessibilityValue(value)
         }
+    }
+}
+
+/// Catalog choices share the established model-picker row. Catalog owners
+/// supply facts and selection authority; this primitive owns only presentation.
+struct TronCatalogOptionRow: View {
+    let title: String
+    var summary: String? = nil
+    var detail: String? = nil
+    var badge: String? = nil
+    var icon: String = "cpu"
+    let isSelected: Bool
+    var isApplying = false
+    var isEnabled = true
+    let action: () -> Void
+    @Environment(\.tronSettingsVisualTheme) private var theme
+
+    private var accent: Color { theme?.accent ?? (isSelected ? .tronEmerald : .tronSlate) }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Group {
+                    if isSelected && isApplying {
+                        TronPulseLoadingIndicator(accent: theme?.accent ?? .tronEmerald, size: 14)
+                    } else {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : icon)
+                            .foregroundStyle(accent)
+                            .accessibilityLabel(isSelected ? "Selected" : title)
+                    }
+                }
+                .frame(width: 22)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(Color.tronTextPrimary)
+                        if let badge {
+                            Text(badge)
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextSecondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.tronCyan.opacity(0.12), in: Capsule())
+                        }
+                    }
+                    // Uniform fact lines preserve lazy-list scroll estimates.
+                    if let summary {
+                        Text(summary)
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .lineLimit(1)
+                    }
+                    if let detail {
+                        Text(detail)
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .tronScrollSurface(accent: accent, cornerRadius: 14, tintOpacity: isSelected ? 0.18 : 0.08)
+        .disabled(!isEnabled)
+        .accessibilityLabel([title, summary, detail].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityValue(isSelected && isApplying ? "Applying configuration" : isSelected ? "Selected" : "")
     }
 }
 
@@ -143,7 +328,7 @@ struct TronNumberSettingRow: View {
                     .multilineTextAlignment(.trailing)
                     .frame(width: 118)
                     .accessibilityLabel(title)
-                    .focused($focused)
+                    .tronTextEntryDone(keyboardToolbar: true, focus: $focused)
             }
             if invalid {
                 Text(Self.invalidInputMessage)
@@ -199,6 +384,7 @@ struct TronTextSettingRow: View {
                 .multilineTextAlignment(.trailing)
                 .frame(minWidth: 100, maxWidth: 220)
                 .accessibilityLabel(title)
+                .tronTextEntryDone()
         }
     }
 }

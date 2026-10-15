@@ -6,7 +6,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, isDurablePublicationUncertain, syncDurably, type DurableJsonFileSystem } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { authorizationRequestId, type HomeTaskAuthorizationState, type HomeTaskAuthorizationStore } from "./home-task-authorization.js";
-import type { HomeTaskPage, HomeTaskSummary } from "../protocol/types.js";
+import type { HomeTaskCounts } from "../protocol/types.js";
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
 
 const TASK_BYTES = 256 * 1_024;
@@ -39,6 +39,14 @@ export interface HomeTaskRecord {
   operationId: string | null;
   stopIntent: { operationId: string; requestedAt: string } | null;
   spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
+  /** The Home profile's task budget fixed at dispatch (settings-model.md 6.1); absent is no limit. */
+  budget?: { inputTokens?: number; outputTokens?: number };
+  /** The stopped task this one continues in place, in that task's own worker session (#929),
+   * and the maintainer's or Home's instruction it carries: a later resume re-delivers it when
+   * this one is refused before it starts (#959). */
+  resumes?: { taskId: string; operationId: string; instruction?: string };
+  /** When an authorized task began waiting for a running-worker slot (#915); kept once set. */
+  queuedAt?: string;
   /** The one canonical report this task sealed, pinned by entry ID and payload digest. */
   reportRef: { resultId: string; sessionId: string; entryId: string; digest: string } | null;
   terminalEvidence: {
@@ -46,6 +54,8 @@ export interface HomeTaskRecord {
     sessionId: string | null;
     entryIds: string[];
     reason: string;
+    /** Why admission refused the task, in the refusing owner's words (#959). */
+    detail?: string;
   } | null;
 }
 
@@ -73,9 +83,17 @@ interface Options {
   fileSystem?: DurableJsonFileSystem;
 }
 
+/** One listed record, with whether a maintainer decision is still owed for it. */
+export interface HomeTaskPageItem {
+  task: HomeTaskRecord;
+  pendingGrant: boolean;
+}
+
 /** Durable namespace authority only; dispatch and domain lifecycle belong to
  * their later owners. One store per installation shares the workspace lease.
- * Enumeration streams files, never builds a second task catalog. */
+ * Enumeration streams files, never builds a second task catalog, so its owners
+ * keep scans few: a list page is one pass, and Home admission never scans once
+ * per delivered operation (#906). */
 export class HomeTaskStore {
   private readonly mutex = new AsyncMutex();
   private readonly home: string;
@@ -83,6 +101,10 @@ export class HomeTaskStore {
   private readonly authorizationPath: string;
   private publicationUncertain = false;
   readonly authorization: HomeTaskAuthorizationStore;
+  /** Durable publications this process attempted. This process is the namespace's
+   * only writer, so an unchanged count proves no record changed (#922). */
+  private writes = 0;
+  get writeCount(): number { return this.writes; }
 
   constructor(private readonly tronHome: string, private readonly workspace: TronWorkspace, private readonly options: Options = {}) {
     this.home = join(tronHome, "gateway", "home");
@@ -270,7 +292,8 @@ export class HomeTaskStore {
     });
   }
 
-  private async run<T>(operation: () => Promise<T>): Promise<T> {
+  /** `signal` withdraws a read still queued for the mutex (a caller that went away). */
+  private async run<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.mutex.run(async () => {
       try {
         if (this.publicationUncertain) throw new HomeTaskStoreError("publication-uncertain");
@@ -285,10 +308,12 @@ export class HomeTaskStore {
         this.options.diagnostic?.({ event: "home.task.store-refused", reason: refusal.code });
         throw refusal;
       }
-    });
+    }, signal);
   }
 
   private async publish(path: string, document: unknown, maximumBytes: number): Promise<void> {
+    // Counted before the attempt: a failed or uncertain write still ends a quiet proof.
+    this.writes += 1;
     if (Buffer.byteLength(`${JSON.stringify(document, null, 2)}\n`) > maximumBytes) throw new HomeTaskStoreError("invalid-record");
     try { await durableAtomicWriteJson(path, document, 0o600, this.options.fileSystem); }
     catch (error) {
@@ -332,6 +357,8 @@ export class HomeTaskStore {
     }
     return state;
   }
+
+
 
   private taskPath(task: Pick<HomeTaskRecord, "createdAt" | "taskId">): string {
     return join(this.directory, `${String(task.createdAt).padStart(13, "0")}-${task.taskId}.json`);
@@ -384,16 +411,17 @@ export class HomeTaskStore {
     return createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
   }
 
-  /** Maintainer list reads only the selected records, never report bodies.
-   * A continuation is bound to the physical namespace, not installation text. */
-  async page(input: { limit?: number; cursor?: string }): Promise<HomeTaskPage> {
+  /** The newest tasks after `cursor`, with exact lifecycle counts for the whole
+   * namespace, from one locked pass: the counts read every record anyway, so the
+   * page's records come from that same read. Never a report body. */
+  async page(input: { limit?: number; cursor?: string }, signal?: AbortSignal): Promise<{ items: HomeTaskPageItem[]; nextCursor?: string; counts: HomeTaskCounts }> {
     return this.run(async () => {
       const limit = input.limit ?? 20;
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) invalid();
       const authority = await this.inspectAuthority();
       if (!authority) {
         if (input.cursor) invalid();
-        return { items: [] };
+        return { items: [], counts: { active: 0, finished: 0 } };
       }
       const epoch = await this.directoryEpoch();
       let after: TaskName | undefined;
@@ -405,28 +433,27 @@ export class HomeTaskStore {
           after = { createdAt: value.createdAt as number, taskId: value.taskId as string };
         } catch { invalid(); }
       }
-      const selected: TaskName[] = [];
+      // Each record is read once: it counts, and only the page's newest `limit + 1`
+      // are retained, so the cost is one read per record and memory stays bounded.
+      const counts: HomeTaskCounts = { active: 0, finished: 0 };
+      const selected: HomeTaskRecord[] = [];
       for await (const name of this.taskNames()) {
-        if (after && compareTaskNames(name, after) <= 0) continue;
-        selected.push(name);
+        const task = await this.readNamedTask(name);
+        validateAuthorityReferences(task, authority);
+        if (task.lifecycle === "terminal") counts.finished += 1;
+        else counts.active += 1;
+        if (after && compareTaskNames(task, after) <= 0) continue;
+        selected.push(task);
         selected.sort(compareTaskNames);
         if (selected.length > limit + 1) selected.pop();
       }
-      const items: HomeTaskSummary[] = [];
-      for (const name of selected.slice(0, limit)) {
-        const task = await this.readNamedTask(name);
-        validateAuthorityReferences(task, authority);
-        items.push({ taskId: task.taskId, createdAt: task.createdAt, updatedAt: task.updatedAt,
-          title: [...task.intent.text].slice(0, 160).join(""), target: task.target, lifecycle: task.lifecycle,
-          outcome: task.terminalEvidence?.outcome ?? null, spend: task.spend,
-          attention: task.terminalEvidence?.outcome === "needs-input" || task.terminalEvidence?.outcome === "unknown",
-          pendingGrant: task.lifecycle === "pending" && authority.requests.some(pending => pending.request.intentDigest === task.intentDigest
-            && pending.request.target === task.target && !authority.decisions.some(decision => decision.requestId === pending.id)) });
-      }
+      const items = selected.slice(0, limit).map(task => ({ task,
+        pendingGrant: task.lifecycle === "pending" && authority.requests.some(pending => pending.request.intentDigest === task.intentDigest
+          && pending.request.target === task.target && !authority.decisions.some(decision => decision.requestId === pending.id)) }));
       const last = selected[Math.min(limit, selected.length) - 1];
-      return { items, ...(selected.length > limit && last
+      return { items, counts, ...(selected.length > limit && last
         ? { nextCursor: Buffer.from(JSON.stringify({ epoch, createdAt: last.createdAt, taskId: last.taskId })).toString("base64url") } : {}) };
-    });
+    }, signal);
   }
 
 }
@@ -465,7 +492,8 @@ function timestamp(value: unknown): boolean { return typeof value === "number" &
 function unique(records: Record<string, unknown>[]): boolean { return new Set(records.map(record => record.id)).size === records.length; }
 function invalid(): never { throw new HomeTaskStoreError("invalid-record"); }
 function immutableTask(task: HomeTaskRecord): string {
-  return JSON.stringify([task.createdAt, task.taskId, task.homeId, task.generation, task.routeGeneration, task.intent.text, task.intentDigest, task.target]);
+  // The budget is fixed at the task's start: no later publication may raise or drop it.
+  return JSON.stringify([task.createdAt, task.taskId, task.homeId, task.generation, task.routeGeneration, task.intent.text, task.intentDigest, task.target, task.budget ?? null, task.resumes ?? null]);
 }
 
 function authorityReferencesResolve(task: HomeTaskRecord, authorization: HomeTaskAuthorizationState): boolean {
@@ -479,7 +507,7 @@ function validateAuthorityReferences(task: HomeTaskRecord, authorization: HomeTa
 
 function validateTask(value: unknown): HomeTaskRecord {
   if (!keys(value, ["version", "taskId", "revision", "createdAt", "updatedAt", "homeId", "generation", "intent", "intentDigest", "target",
-    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"])
+    "grantRef", "scopeRef", "lifecycle", "sessionId", "operationId", "stopIntent", "spend", "reportRef", "terminalEvidence", "routeGeneration", "wake"], ["budget", "resumes", "queuedAt"])
     || value.version !== 1 || !identifier(value.taskId) || value.taskId === "authorization" || !positive(value.revision)
     || !timestamp(value.createdAt) || (value.createdAt as number) > 9_999_999_999_999
     || !timestamp(value.updatedAt) || (value.updatedAt as number) < (value.createdAt as number)
@@ -497,11 +525,18 @@ function validateTask(value: unknown): HomeTaskRecord {
   if (value.spend !== null && (!keys(value.spend, ["sourceDigest", "inputTokens", "outputTokens"])
     || typeof value.spend.sourceDigest !== "string" || !/^[a-f0-9]{64}$/u.test(value.spend.sourceDigest)
     || !count(value.spend.inputTokens) || !count(value.spend.outputTokens))) invalid();
+  if (value.queuedAt !== undefined && (!text(value.queuedAt, 64) || !Number.isFinite(Date.parse(value.queuedAt as string)))) invalid();
+  if (value.budget !== undefined && (!keys(value.budget, [], ["inputTokens", "outputTokens"]) || Object.keys(value.budget).length === 0
+    || Object.values(value.budget).some(tokens => !positive(tokens)))) invalid();
+  if (value.resumes !== undefined && (!keys(value.resumes, ["taskId", "operationId"], ["instruction"]) || !identifier(value.resumes.taskId)
+    || value.resumes.taskId === value.taskId || !identifier(value.resumes.operationId)
+    || (value.resumes.instruction !== undefined && !text(value.resumes.instruction, 32 * 1_024)))) invalid();
   const reportRef = value.reportRef;
   if (reportRef !== null && (!keys(reportRef, ["resultId", "sessionId", "entryId", "digest"]) || !identifier(reportRef.resultId)
     || !identifier(reportRef.sessionId) || !identifier(reportRef.entryId) || typeof reportRef.digest !== "string" || !/^[a-f0-9]{64}$/u.test(reportRef.digest))) invalid();
   const evidence = value.terminalEvidence;
-  if (evidence !== null && (!keys(evidence, ["outcome", "sessionId", "entryIds", "reason"])
+  if (evidence !== null && (!keys(evidence, ["outcome", "sessionId", "entryIds", "reason"], ["detail"])
+    || (evidence.detail !== undefined && !text(evidence.detail, 2_048))
     || !OUTCOMES.includes(evidence.outcome as typeof OUTCOMES[number]) || !nullableId(evidence.sessionId)
     || !Array.isArray(evidence.entryIds) || evidence.entryIds.length > 256 || evidence.entryIds.some(id => !identifier(id))
     || new Set(evidence.entryIds).size !== evidence.entryIds.length || !identifier(evidence.reason))) invalid();

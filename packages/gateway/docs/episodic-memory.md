@@ -347,9 +347,7 @@ projection is never stale.
 3. **The view is refolded from message 0 only at load** (gist §5.2 "At load"),
    in slices that hand the event loop back every 2,000 messages. A source
    revision expands the affected parts and refits the live view instead
-   (departure 4). Measured by `episodic-memory.scale.test.ts`: 10,000 messages in
-   0.20 s and 100,000 in 2.5 s (every node built; the same shape as a real
-   memory), with the worst synchronous slice 6.3 ms. The persisted store
+   (departure 4). The persisted store
    checkpoint bounds replay of catalog and node history; it does not persist the
    derived presentation view. The live view is maintained incrementally, and a
    restart refolds it from the checkpointed live nodes. The recipe's own load
@@ -426,19 +424,8 @@ and everything merged above them. Measured at the moment of the edit:
 | history at the edit | edit at | nodes before | nodes invalidated |
 | --- | --- | --- | --- |
 | 201 messages (view budget 4 KB, e2e) | index 6 | 585 | 129 |
-| 1,000 messages (view budget 8 KB, scale) | index 1 | 1,994 | 1,993 |
 
-`episodic-memory-reclamation.scale.test.ts` also checks that source edits do
-not leave their unique 64 KiB text payloads reachable as history grows. The
-scale test measures only the K=1 and K=30 endpoints: it streams V8 heap snapshots,
-records string-node name indexes and self sizes, then resolves just edit-prefixed
-strings from the later string table. It checks the reachable payload count and
-bytes, independent of unrelated process-wide allocations. Its catalog-log replay
-measurement (peak and retained heap as the log grows) is a separate test in the
-same file.
-
-The second row is the honest worst case: an edit at the start of a long history
-invalidates essentially the whole tree. The e2e test also proves the invalidated
+An edit at the start of a long history invalidates essentially the whole tree. The e2e test also proves the invalidated
 set is *exactly* the predicted one (computed from the durable records, chunks
 unioned) and that the rebuilt leaves are exactly the invalidated leaves.
 
@@ -469,11 +456,25 @@ report is `test-results/home-activation/report.json`.
 
 ## Retries, spend and blocked states
 
+- **Invalid summary content** (model-written role labels or echoed compactor
+  instructions) receives corrective feedback in the same conversation, sharing
+  the five-attempt size-correction bound. Only valid candidates may be persisted
+  or selected as the shortest answer; a later invalid reply cannot replace an
+  earlier valid oversized candidate. Five invalid replies block with
+  `permanent-failure`; provider/auth failures still follow the rules below.
+  `episodic.summary-rejected` identifies this cause without logging private text.
+  `home-source.e2e.test.ts` proves correction, bounded refusal, persistence across
+  restart and explicit resume, with artifacts under `test-results/home-memory/`.
+
 - **Transient** provider failures (a thrown call, or an error the pinned
   classifier `isRetryableAssistantError` calls retryable) retry after
   `retryMs` (production 10 s, the recipe's `RETRY`) up to `maxRetries`, then the
   node blocks with `retries-exhausted`. A thrown auth or configuration error is
-  classified by that same pinned classifier and blocks at once.
+  classified by that same pinned classifier and blocks at once. A provider's
+  prompt-safety flag ("flagged as potentially violating our usage policy") is
+  intermittent for the same input, so it is transient too (#880): one false
+  positive no longer stops Home, and a flag on every attempt blocks as
+  `retries-exhausted` with the flag in its detail (`home-source.e2e.test.ts`).
 - An **empty reply, a refusal, or any other permanent error** blocks at once
   with `permanent-failure`. A reasoning model can spend its whole output on
   reasoning; that block's detail says so. To make it rare, each call asks a
@@ -545,19 +546,12 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
   placeholder and the rebuilt line, `[omitted]`, the search counts and bounds,
   the stopped-memory answer and the byte-identical request head
   (`npx vitest run src/sessions/home-memory-tools.e2e.test.ts`).
-- `packages/gateway/test-results/episodic-memory/scale.json` — the refold
-  timings and worst synchronous slice, the context-encoding sizes, and the
-  1,000-message invalidation (`npm run test:scale`).
 - `packages/gateway/test-results/episodic-reasoning-model/report.json` — the
   reasoning-model end-to-end cases (`npx vitest run
   src/episodic/episodic-reasoning-model.e2e.test.ts`).
 - `packages/gateway/test-results/home-memory/continuity.json` — the Home source
   end-to-end run's chapter-continuity counts, from `home-source.e2e.test.ts`
   (`npx vitest run src/episodic/home-source.e2e.test.ts`).
-- `packages/gateway/test-results/home-memory/heap.json`,
-  `heap-production.json` and `heap-over-cap.json` — the Home source scale runs'
-  retained and peak heap per message at the test's caps and at production caps,
-  from `home-source.scale.test.ts` (`npm run test:scale`).
 
 ## Home's use of this module
 
@@ -577,7 +571,7 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
   `searchMessages` through `HomeMemory`, which ingests the latest commits first,
   never awaits the pump, and answers a typed result for a memory that is not
   open, not configured or stopped.
-- The model is the Home record's (`home.configureMemory`); what this module
+- The model is the Home record's (`model.ref[role=memory]`, set through `settings.change`); what this module
   persists about spend, blocking and its cursor is described above.
 
 Still outside this module: any per-project compactor instructions, and the tool

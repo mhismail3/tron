@@ -121,6 +121,9 @@ struct EnvironmentSetup: Sendable {
     var stopGateway: @Sendable (String) async throws -> GatewayStopClient.Response = { _ in
         throw GatewayRestartClient.Failure.transport
     }
+    var readDrainForQuit: @Sendable () async throws -> GatewayStopClient.Drain = {
+        throw GatewayRestartClient.Failure.transport
+    }
     var readRuntimeForQuit: @Sendable () async throws -> LaunchAgentRuntimeInfo? = {
         throw LaunchAgentRuntimeReader.ObservationFailure.unavailable
     }
@@ -329,6 +332,12 @@ struct EnvironmentSetup: Sendable {
                 guard let host = await resolveHost() else { throw GatewayRestartClient.Failure.transport }
                 return try await GatewayStopClient.stop(
                     host: host, port: profile.port, token: BearerTokenReader.read(at: bearer), commandID: commandID
+                )
+            },
+            readDrainForQuit: {
+                guard let host = await resolveHost() else { throw GatewayRestartClient.Failure.transport }
+                return try await GatewayStopClient.drain(
+                    host: host, port: profile.port, token: BearerTokenReader.read(at: bearer)
                 )
             },
             readRuntimeForQuit: { try await LaunchAgentRuntimeReader.read(label: profile.launchAgentLabel) },

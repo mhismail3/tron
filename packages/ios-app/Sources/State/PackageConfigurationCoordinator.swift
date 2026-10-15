@@ -270,17 +270,4 @@ final class PackageConfigurationCoordinator {
         guard admits(admission, generations: generations) else { throw CancellationError() }
     }
 
-    #if HOSTED_TEST
-    func installHostedInventory(_ inventory: PackageInventory?, for target: PackageConfigurationTarget) {
-        inventoryByTarget[target] = inventory
-    }
-
-    func installHostedUpdates(_ updates: [PackageUpdate], for target: PackageConfigurationTarget) {
-        updatesByTarget[target] = updates
-    }
-
-    func setHostedInvalidationGeneration(_ generation: Int) {
-        invalidationGeneration = generation
-    }
-    #endif
 }

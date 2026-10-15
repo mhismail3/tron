@@ -183,11 +183,6 @@ private struct FloatingDisplayWindow: View {
             floatingPanel(size: size, safeRect: safeRect)
                 .frame(width: size.width, height: size.height)
                 .onDisappear { _ = retireDrag(size: size, safeRect: safeRect) }
-                #if HOSTED_TEST
-                .background(FloatingDisplayHostedProbe(move: { move($0) }, pan: {
-                    handlePan($0, size: size, safeRect: safeRect)
-                }, dismiss: onClose))
-                #endif
                 .coordinateSpace(name: FloatingWindowPanGesture.Space.window)
                 .position(center)
                 .transition(reduceMotion ? .opacity : .scale(scale: 0.96).combined(with: .opacity))

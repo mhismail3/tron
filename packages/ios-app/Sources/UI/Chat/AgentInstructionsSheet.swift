@@ -192,8 +192,7 @@ struct AgentInstructionsSheet: View {
             if let projection = AgentInstructionsProjection(context: model.context) {
                 AgentInstructionsOverview(projection: projection)
             } else if loading {
-                TronLoadingState(label: "Loading instructions…", accent: .tronSessionTeal)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                TronSheetLoadingState(label: "Loading instructions…", accent: .tronSessionTeal)
             } else {
                 TronInfoCard(icon: "doc.text", text: "Instructions are unavailable for this session.", accent: .tronSessionTeal)
                     .padding(18)
@@ -236,7 +235,7 @@ private struct AgentInstructionsListSheet<Content: View>: View {
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(accent)
+                                .tronToolbarAction(accent: accent)
                         }
                         .accessibilityLabel("Done")
                     }
@@ -283,7 +282,7 @@ struct AgentInstructionsOverview: View {
             // A dozen rows at most; eager layout keeps every row addressable
             // while the sheet rests at its medium detent.
             VStack(alignment: .leading, spacing: TronSpacing.lg) {
-                TronSettingsDetailText("The model reads these sections in this order for every turn. Open one to see where it comes from.")
+                TronSettingsCaption("The model reads these sections in this order for every turn. Open one to see where it comes from.")
                     .padding(.bottom, TronSpacing.xs)
                 ForEach(Array(projection.sections.enumerated()), id: \.element.id) { index, section in
                     sectionRow(section, number: index + 1)
@@ -482,7 +481,6 @@ private struct AgentInstructionsSectionSheet: View {
                 icon: "doc.text",
                 title: entry.name ?? "Instructions",
                 subtitle: [path, "\(entry.text.count.formatted()) characters"].compactMap { $0 }.joined(separator: " · "),
-                subtitleLineLimit: 2,
                 accent: AgentInstructionsPresentation.accent(entry.source)
             )
         }
@@ -579,8 +577,7 @@ struct PreparedAgentInstructions: View {
                         }
                 }
             } else {
-                TronLoadingState(label: "Preparing instructions…", accent: .tronSessionTeal)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                TronSheetLoadingState(label: "Preparing instructions…", accent: .tronSessionTeal)
             }
         }
         .task(id: PresentationActivityTaskID(

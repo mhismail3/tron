@@ -123,6 +123,12 @@ struct ExtensionsSettingsView: View {
                     modulesSection
                 }
 
+                // The schema's package settings for this scope (the npm command, and the
+                // packages list this sheet installs into), with where each comes from.
+                SettingsRendererView(target: projectCWD.map { SettingsTarget.project(cwd: $0).gatewayTarget } ?? SettingsTarget.global.gatewayTarget,
+                                     writeLayer: projectCWD == nil ? "mac" : "project", projectCWD: projectCWD,
+                                     presentation: .section("sources"), embedded: true)
+
                 if let inventory {
                     localThemesGroup(inventory)
                     if inventory.resources.objectValue?.isEmpty == false {
@@ -418,7 +424,7 @@ struct ExtensionsSettingsView: View {
                 Button { showingInstall = false } label: {
                     Image(systemName: "checkmark")
                         .font(TronTypography.buttonSM)
-                        .tronSettingsAccent()
+                        .tronToolbarAction()
                 }
                 .accessibilityLabel("Done")
             }

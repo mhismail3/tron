@@ -324,7 +324,8 @@ struct ProjectResourcesView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var loading = false
+    /// A surface starts loading: its empty state waits for the first read.
+    @State private var loading = true
     @State private var reloading = false
     @State private var loadGeneration = 0
     @State private var selected: ProjectResourceSelection?
@@ -361,11 +362,7 @@ struct ProjectResourcesView: View {
                             .environment(\.tronSettingsVisualTheme, nil)
                         }
                     } else if loading {
-                        TronGlassCard(accent: .tronSessionTeal) {
-                            TronLoadingState(label: "Loading project resources…", accent: .tronSessionTeal)
-                                .padding(18)
-                                .frame(maxWidth: .infinity)
-                        }
+                        TronSheetLoadingState(label: "Loading project resources…", accent: .tronSessionTeal)
                     } else {
                         TronPlaceholderState(
                             title: "Resources Unavailable",
@@ -400,7 +397,7 @@ struct ProjectResourcesView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronSessionTeal)
+                            .tronToolbarAction(accent: .tronSessionTeal)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -578,7 +575,7 @@ struct ProjectResourceDetailSheet: View {
                     Button(action: onDone) {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -758,6 +755,14 @@ struct ProjectResourceDetailSheet: View {
         let identity = loadIdentity
         detail = nil
         loadError = nil
+        // The settings catalog carries the authoritative tool record already;
+        // there is no session RPC to fetch for a Mac/Project settings editor.
+        if selection.kind == .tools,
+           selection.value.objectValue?["description"]?.stringValue != nil,
+           selection.value.objectValue?["parameters"] != nil {
+            loadedIdentity = identity
+            return
+        }
         guard let command = selection.commandInfo else { return }
         do {
             let loaded = try await model.commandDetail(sessionID: sessionID, command: command)

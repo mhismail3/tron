@@ -42,6 +42,8 @@ export interface LogRecord {
   /** Retired legacy connection instance IDs. */
   instanceIds?: readonly string[];
   commandId?: string;
+  /** Process identity for lifecycle records observed across supervisor boundaries. */
+  pid?: number;
   /** A named lifecycle step, such as a startup checkpoint. */
   step?: string;
   /** Sanitized transport request correlation; never a session or payload ID. */
@@ -60,6 +62,9 @@ export interface LogRecord {
   settledBytes?: number;
   settledEntries?: number;
   durationMs?: number;
+  acceptToCloseMs?: number;
+  bytesRead?: number;
+  transportEnd?: "reset" | "timeout" | "fin" | "none";
   /** The request span's compact stage breakdown, one bounded string. */
   stages?: string;
   /** The measured stage a request was in at one instant, e.g. the stage a
@@ -76,7 +81,11 @@ export interface LogRecord {
   helloMs?: number;
   /** The peer's Tailscale path at an inbound-silence episode (`connection.inbound-silent`). */
   peerPath?: string;
+  peerPathSource?: string;
   peerRelay?: string;
+  peerLastHandshake?: string;
+  peerRxBytes?: number;
+  peerTxBytes?: number;
   /** The listener a connection reached: `lan`, `tailscale` or `primary`
    * (`http.upgrade`). The phone names the two real legs it races the same way. */
   transport?: string;
@@ -103,7 +112,7 @@ export interface LogRecord {
   error?: LogError;
 }
 
-export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "boundary" | "chapterOrdinal" | "crossingBytes" | "crossingEntries" | "settledBytes" | "settledEntries"> {
+export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "boundary" | "chapterOrdinal" | "crossingBytes" | "crossingEntries" | "settledBytes" | "settledEntries" | "pid"> {
   event?: string;
   source?: string;
   kind?: string;
@@ -123,6 +132,9 @@ export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | 
   reason?: string;
   cause?: string;
   durationMs?: number;
+  acceptToCloseMs?: number;
+  bytesRead?: number;
+  transportEnd?: "reset" | "timeout" | "fin" | "none";
   /** `name=12ms×2/610KB;name=5ms`; the writer bounds it. */
   stages?: string;
   /** The measured stage a request was in at one instant, e.g. the stage a
@@ -140,7 +152,11 @@ export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | 
   handshakeMs?: number;
   helloMs?: number;
   peerPath?: string;
+  peerPathSource?: string;
   peerRelay?: string;
+  peerLastHandshake?: string;
+  peerRxBytes?: number;
+  peerTxBytes?: number;
   /** The listener a connection reached; the `transport` field of `http.upgrade`. */
   transport?: string;
   silentMs?: number;
@@ -303,6 +319,9 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
   const durationMs = durationField(value.durationMs);
   const unaccountedMs = durationField(value.unaccountedMs);
   const acceptToUpgradeMs = durationField(value.acceptToUpgradeMs);
+  const acceptToCloseMs = durationField(value.acceptToCloseMs);
+  const bytesRead = counterField(value.bytesRead);
+  const transportEnd = value.transportEnd;
   const authMs = durationField(value.authMs);
   const handshakeMs = durationField(value.handshakeMs);
   const helloMs = durationField(value.helloMs);
@@ -344,6 +363,7 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(counterField(value.settledEntries) !== undefined ? { settledEntries: value.settledEntries } : {}),
     ...(typeof value.cause === "string" ? { cause: boundedDiagnosticID(value.cause).slice(0, 64) } : {}),
     ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
+    ...(Number.isSafeInteger(value.pid) && Number(value.pid) > 0 ? { pid: Number(value.pid) } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
     ...(typeof value.stages === "string" ? { stages: boundedStages(value.stages) } : {}),
     ...(typeof value.stage === "string" ? { stage: boundedDiagnosticID(value.stage).slice(0, 64) } : {}),
@@ -354,8 +374,15 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(handshakeMs !== undefined ? { handshakeMs } : {}),
     ...(helloMs !== undefined ? { helloMs } : {}),
     ...(typeof value.peerPath === "string" ? { peerPath: boundedDiagnosticID(value.peerPath).slice(0, 32) } : {}),
+    ...(typeof value.peerPathSource === "string" ? { peerPathSource: boundedDiagnosticID(value.peerPathSource).slice(0, 32) } : {}),
     ...(typeof value.peerRelay === "string" ? { peerRelay: boundedDiagnosticID(value.peerRelay).slice(0, 32) } : {}),
+    ...(typeof value.peerLastHandshake === "string" ? { peerLastHandshake: boundedDiagnosticID(value.peerLastHandshake).slice(0, 64) } : {}),
+    ...(typeof value.peerRxBytes === "number" && Number.isSafeInteger(value.peerRxBytes) && value.peerRxBytes >= 0 ? { peerRxBytes: value.peerRxBytes } : {}),
+    ...(typeof value.peerTxBytes === "number" && Number.isSafeInteger(value.peerTxBytes) && value.peerTxBytes >= 0 ? { peerTxBytes: value.peerTxBytes } : {}),
     ...(typeof value.transport === "string" ? { transport: boundedDiagnosticID(value.transport).slice(0, 32) } : {}),
+    ...(acceptToCloseMs !== undefined ? { acceptToCloseMs } : {}),
+    ...(bytesRead !== undefined ? { bytesRead } : {}),
+    ...(transportEnd === "reset" || transportEnd === "timeout" || transportEnd === "fin" || transportEnd === "none" ? { transportEnd } : {}),
     ...(silentMs !== undefined ? { silentMs } : {}),
     ...(taskHash !== undefined ? { taskHash } : {}),
     ...(operationHash !== undefined ? { operationHash } : {}),

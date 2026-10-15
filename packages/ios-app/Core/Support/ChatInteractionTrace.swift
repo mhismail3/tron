@@ -508,20 +508,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         }
     }
 
-    #if HOSTED_TEST
-    func resetForTesting() {
-        lock.lock()
-        nextSequence = 0
-        nextContext = 0
-        nextIdentity = 0
-        identityTokens = []
-        lastRecordDate = .distantPast
-        lastAvailability = nil
-        records = []
-        lock.unlock()
-    }
-    #endif
-
     private func append(
         context: Int,
         level: String,

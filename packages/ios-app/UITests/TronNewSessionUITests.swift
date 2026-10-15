@@ -1,6 +1,45 @@
 import XCTest
 
 final class TronNewSessionUITests: XCTestCase {
+    @MainActor func testProjectDefaultBeforeFirstChatIsInheritedWithoutChatOverride() {
+        continueAfterFailure = false
+        let app = launch("project-settings"); defer { app.terminate() }
+        let project = app.buttons["project-settings-link"]
+        XCTAssertTrue(project.waitForExistence(timeout: 10))
+        project.tap()
+        XCTAssertTrue(app.staticTexts["Project Settings"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Show all"].exists, "Project settings never expands in place")
+        // The project's sections are links; Model opens on its sheet.
+        let section = app.buttons["settings-section-model-open"]
+        XCTAssertTrue(section.waitForExistence(timeout: 5), app.debugDescription)
+        section.tap()
+        let row = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.filter(\.isHittable).count, 1)
+        let control = row.buttons.firstMatch.buttons.firstMatch
+        for _ in 0..<5 where !control.isHittable { app.swipeUp() }
+        control.tap()
+        // The shared model picker: open a collapsed provider section, as a user would.
+        let collapsed = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@ AND value == %@", " models", "collapsed")).firstMatch
+        if collapsed.waitForExistence(timeout: 3) { collapsed.tap() }
+        let choice = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Project Pro,'")).firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.filter(\.isHittable).count, 1,
+                       "The nested catalog uses the canonical progressive sheet, not a second toolbar")
+        choice.tap()
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:0 typed:0 projectWrites:1'"))
+        evidence(app, "758-project-schema-default-before-first-chat")
+        app.buttons["Done"].firstMatch.tap() // Model
+        app.buttons["Done"].firstMatch.tap() // Project Settings
+        XCTAssertTrue(wait(app.buttons["new-session-card.Model"], "label CONTAINS[c] 'project'"))
+        evidence(app, "758-project-default-new-session")
+        XCTAssertTrue(app.buttons["Create"].isEnabled)
+        app.buttons["Create"].tap()
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'"))
+        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:1 typed:0 projectWrites:1 inherited:true'"),
+                      "The selected project default must remain inheritance, not an explicit Chat override")
+    }
+
     @MainActor func testSourceControlDraftSurvivesChildDoneAndBackground() {
         continueAfterFailure = false
         let app = launch("draft"); defer { app.terminate() }

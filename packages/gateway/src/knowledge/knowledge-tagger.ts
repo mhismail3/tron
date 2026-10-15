@@ -7,7 +7,7 @@ import { GatewayError } from "../errors.js";
 import { KnowledgeCurationRefusal } from "./knowledge-contract.js";
 import { availablePaidBudgetCents, hasOpenPaidBudgetAttempt, markPaidBudgetDispatch, paidBudgetMonth, releaseUndispatchedPaidBudgetAttempt, reservePaidBudgetAttempt, rollPaidBudget } from "./paid-budget-ledger.js";
 
-export const KNOWLEDGE_TAG_CONFIDENCE_THRESHOLD = 0.65;
+const KNOWLEDGE_TAG_CONFIDENCE_THRESHOLD = 0.65;
 export const KNOWLEDGE_TAG_QUESTIONS_PER_CALL = 16;
 export const KNOWLEDGE_TAG_EVIDENCE_MAX_BYTES = 8_000;
 export const KNOWLEDGE_TAG_GUIDELINE_MAX_BYTES = 3_000;
@@ -20,11 +20,6 @@ export interface KnowledgeTagEvidence {
   text: string;
   take: string;
   verdict: string;
-}
-
-export function knowledgeTagInputsDigest(record: KnowledgeRecord & { kind: "source" }): string {
-  const content = record.content;
-  return createHash("sha256").update(JSON.stringify({ title: content.title, summary: content.summary?.text ?? null, text: content.text ?? "", verdict: content.verdict?.verdict ?? null, take: content.take?.text ?? null })).digest("hex");
 }
 
 export function utf8Prefix(value: string, maximumBytes: number): string {
@@ -51,7 +46,7 @@ export function activeTagDefinitions(vocabulary: KnowledgeTagVocabularyConfig): 
   return vocabulary.tags.filter(tag => tag.state === "active").slice(0, 256);
 }
 
-export function chooseKnowledgeTags(answers: Record<string, JevAnswer>, tagIds: readonly string[], threshold = KNOWLEDGE_TAG_CONFIDENCE_THRESHOLD): string[] {
+function chooseKnowledgeTags(answers: Record<string, JevAnswer>, tagIds: readonly string[], threshold = KNOWLEDGE_TAG_CONFIDENCE_THRESHOLD): string[] {
   if (!Number.isFinite(threshold) || threshold <= 0 || threshold >= 1) throw new Error("Tag confidence threshold must be between zero and one");
   // Strictly above threshold means ties at the boundary are conservatively omitted.
   return tagIds.filter(id => {
@@ -225,7 +220,6 @@ export interface KnowledgeTagDecision {
   tagIds: string[];
   model: string;
   vocabularyRevision: number;
-  inputsDigest: string;
   estimatedCostCents: number;
   callCount: number;
 }
@@ -245,7 +239,7 @@ export class KnowledgeTaggingEngine {
 
 /** Executes only the bounded decision; the owning service reserves each paid call
  * before dispatch and publishes through K1's expected-revision curation write. */
-export async function decideKnowledgeTags(
+async function decideKnowledgeTags(
   client: Pick<JevDecisionClient, "evaluate">,
   record: KnowledgeRecord & { kind: "source" },
   vocabulary: KnowledgeTagVocabularyConfig,
@@ -297,5 +291,5 @@ export async function decideKnowledgeTags(
     callCount += 1; estimatedCostCents += response.estimatedCostCents;
     selected.push(...chooseKnowledgeTags(response.answers, batch.map(tag => tag.id)));
   }
-  return { tagIds: selected, model: JEV_DEFAULT_MODEL, vocabularyRevision: vocabulary.revision, inputsDigest: knowledgeTagInputsDigest(record), estimatedCostCents, callCount };
+  return { tagIds: selected, model: JEV_DEFAULT_MODEL, vocabularyRevision: vocabulary.revision, estimatedCostCents, callCount };
 }

@@ -5,15 +5,42 @@ import UIKit
 struct TronMarkdownView: View {
     let document: MarkdownPresentation.Document
     let streaming: Bool
+    /// Body typography for paragraphs and list items; headings keep their
+    /// scale and take the color. The default is the transcript's.
+    var textStyle = ChatSelectableTextStyle()
+    /// Completed inline text uses native range selection with Copy and
+    /// detected links even without annotation. Ask Question opts in so agents'
+    /// URLs, commands and IDs can be copied; other surfaces keep SwiftUI text.
+    var selectableText = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.sizeCategory) private var sizeCategory
+    @Environment(\.chatAnnotationSource) private var annotationSource
+    @Environment(\.chatAnnotationPresenter) private var annotationPresenter
 
-    init(document: MarkdownPresentation.Document, streaming: Bool) {
+    init(
+        document: MarkdownPresentation.Document,
+        streaming: Bool,
+        textStyle: ChatSelectableTextStyle = ChatSelectableTextStyle(),
+        selectableText: Bool = false
+    ) {
         self.document = document
         self.streaming = streaming
+        self.textStyle = textStyle
+        self.selectableText = selectableText
     }
 
-    init(text: String, streaming: Bool) {
-        self.init(document: MarkdownPresentation.Document(source: text), streaming: streaming)
+    init(
+        text: String,
+        streaming: Bool,
+        textStyle: ChatSelectableTextStyle = ChatSelectableTextStyle(),
+        selectableText: Bool = false
+    ) {
+        self.init(
+            document: MarkdownPresentation.Document(source: text),
+            streaming: streaming,
+            textStyle: textStyle,
+            selectableText: selectableText
+        )
     }
 
     var body: some View {
@@ -25,15 +52,33 @@ struct TronMarkdownView: View {
                 // so copy state still resets when a block is replaced.
                 switch block.kind {
                 case .paragraph(let value):
-                    streamingInline(value, identity: "block:\(index)")
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(value.accessibilitySource)
-                        .accessibilityRespondsToUserInteraction(false)
-                        .frame(alignment: .topLeading)
+                    if selectableText {
+                        // The native text view stays the element so its
+                        // links remain activatable by VoiceOver and tests.
+                        inlineBlock(value, identity: "block:\(index)")
+                            .frame(alignment: .topLeading)
+                    } else {
+                        inlineBlock(value, identity: "block:\(index)")
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(value.accessibilitySource)
+                            .accessibilityAddTraits(.isStaticText)
+                            .accessibilityRespondsToUserInteraction(false)
+                            .frame(alignment: .topLeading)
+                    }
                 case .heading(let level, let value):
-                    streamingInline(value, identity: "block:\(index)")
-                        .font(TronFont.body(max(14, 22 - CGFloat(level * 2)), weight: level <= 2 ? .bold : .semibold))
-                        .padding(.top, level <= 2 ? 6 : 2)
+                    let size = max(14, 22 - CGFloat(level * 2))
+                    let weight: Font.Weight = level <= 2 ? .bold : .semibold
+                    inlineBlock(
+                        value,
+                        identity: "block:\(index)",
+                        style: ChatSelectableTextStyle(
+                            size: size,
+                            weight: TronFontLoader.weight(weight),
+                            color: textStyle.color
+                        )
+                    )
+                    .font(TronFont.body(size, weight: weight))
+                    .padding(.top, level <= 2 ? 6 : 2)
                 case .code(let language, let value):
                     CodeBlock(
                         language: language,
@@ -42,17 +87,20 @@ struct TronMarkdownView: View {
                     )
                     .id(block.id)
                 case .quote(let value):
-                    HStack(alignment: .top, spacing: 10) {
-                        RoundedRectangle(cornerRadius: 2).fill(Color.tronBorder).frame(width: 3)
-                        streamingInline(value, identity: "block:\(index)")
-                            .foregroundStyle(Color.tronTextSecondary)
+                    ChatQuoteBlock {
+                        inlineBlock(
+                            value,
+                            identity: "block:\(index)",
+                            style: ChatSelectableTextStyle(size: textStyle.size, weight: textStyle.weight, color: .tronTextSecondary)
+                        )
+                        .foregroundStyle(Color.tronTextSecondary)
                     }
                 case .list(let items):
                     VStack(alignment: .leading, spacing: 5) {
                         ForEach(Array(items.enumerated()), id: \.offset) { itemIndex, item in
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text(item.marker).frame(minWidth: 10, alignment: .leading)
-                                streamingInline(item.inline, identity: "block:\(index):item:\(itemIndex)")
+                                inlineBlock(item.inline, identity: "block:\(index):item:\(itemIndex)")
                             }.padding(.leading, CGFloat(item.depth) * 14)
                         }
                     }
@@ -63,8 +111,8 @@ struct TronMarkdownView: View {
                 }
             }
         }
-        .font(TronFont.body())
-        .foregroundStyle(Color.assistantMessageText)
+        .font(TronFontLoader.createFont(size: textStyle.size, weight: textStyle.weight))
+        .foregroundStyle(textStyle.color)
         // A transcript row is one lazy child even when this eager block stack
         // contains hundreds of paragraphs. Always publish the exact wrapped
         // vertical ideal instead of accepting a viewport-sized/stale proposal;
@@ -72,6 +120,52 @@ struct TronMarkdownView: View {
         // assistant row settles and place later rows against phantom geometry.
         .fixedSize(horizontal: false, vertical: true)
         .transcriptTextSelection(enabled: !dynamicTypeSize.isAccessibilitySize)
+    }
+
+    /// A completed assistant block in the transcript is natively selectable
+    /// and annotatable; streaming text and every other Markdown surface keep
+    /// the SwiftUI reveal renderer.
+    @ViewBuilder
+    private func inlineBlock(
+        _ value: MarkdownPresentation.Inline,
+        identity: String,
+        style: ChatSelectableTextStyle? = nil
+    ) -> some View {
+        let style = style ?? textStyle
+        if !streaming, let annotationSource, let annotationPresenter, annotationPresenter.admitsAnnotations {
+            let blockKey = annotationSource.blockKey(identity)
+            ChatSelectableInlineText(
+                inline: value,
+                style: style,
+                highlights: annotationPresenter.highlights(itemID: annotationSource.itemID, blockKey: blockKey),
+                onAnnotate: { quote, range, rect in
+                    annotationPresenter.begin(ChatAnnotationRequest(
+                        quote: quote,
+                        anchor: ChatAnnotationAnchor(
+                            itemID: annotationSource.itemID,
+                            blockKey: blockKey,
+                            location: range.location,
+                            length: range.length
+                        ),
+                        selectionRect: rect
+                    ))
+                }
+            )
+            .alignmentGuide(.firstTextBaseline) { _ in
+                ChatSelectableTextLayout.firstBaseline(style: style, sizeCategory: sizeCategory)
+            }
+            // Assistive technologies read it as the static text it replaces.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(value.accessibilitySource)
+            .accessibilityAddTraits(.isStaticText)
+        } else if !streaming, selectableText {
+            ChatSelectableInlineText(inline: value, style: style, detectsLinks: true, onAnnotate: nil)
+                .alignmentGuide(.firstTextBaseline) { _ in
+                    ChatSelectableTextLayout.firstBaseline(style: style, sizeCategory: sizeCategory)
+                }
+        } else {
+            streamingInline(value, identity: identity)
+        }
     }
 
     @ViewBuilder
@@ -85,11 +179,25 @@ struct TronMarkdownView: View {
         ChatStreamingInlineText(
             inline: value,
             identity: identity,
-            baseColor: Color.assistantMessageText,
+            baseColor: textStyle.color,
             streaming: streaming
         )
     }
 
+}
+
+/// The Markdown blockquote treatment: a rule beside secondary text. Quoted
+/// annotations reuse it so a quote reads the same everywhere in chat.
+struct ChatQuoteBlock<Content: View>: View {
+    var rule: Color = .tronBorder
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 2).fill(rule).frame(width: 3)
+            content
+        }
+    }
 }
 
 extension View {

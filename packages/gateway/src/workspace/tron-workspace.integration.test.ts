@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { once } from "node:events";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -7,6 +10,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPromp
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { TrustService } from "../admin/trust-service.js";
+import { TronWorkspace } from "./tron-workspace.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 const registries: RuntimeRegistry[] = [];
@@ -163,4 +167,38 @@ describe("Tron workspace through the pinned runtime", () => {
     expect(f.slot.cwd).toBe(f.cwd);
     await expect(readFile(join(f.cwd, "report.md"))).rejects.toMatchObject({ code: "ENOENT" });
   }, 15_000);
+});
+
+describe("Tron workspace ownership across a separate process", () => {
+  const owners: TronWorkspace[] = [];
+  afterEach(async () => {
+    await Promise.all(owners.splice(0).map(value => value.dispose()));
+  });
+  function ownedWorkspace(home: string) {
+    const value = new TronWorkspace(home);
+    owners.push(value);
+    return value;
+  }
+
+  it("refuses a separate process owner and recovers its abandoned stale lock without losing data", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-workspace-owner-"));
+    roots.push(home);
+    const first = ownedWorkspace(home);
+    const { root } = await first.describe();
+    await writeFile(join(root, "kept.txt"), "durable");
+    await first.dispose();
+    const state = join(home, "gateway/workspace-state");
+    const lockModule = createRequire(import.meta.url).resolve("proper-lockfile");
+    const child = spawn(process.execPath, ["-e", `require(${JSON.stringify(lockModule)}).lock(${JSON.stringify(state)}, {stale:60000, update:10000}).then(() => { process.stdout.write('ready'); setInterval(() => {}, 1000); });`], { stdio: ["ignore", "pipe", "pipe"] });
+    const exited = once(child, "exit");
+    try {
+      await once(child.stdout!, "data");
+      expect(await ownedWorkspace(home).describe()).toMatchObject({ available: false, reason: "owned_elsewhere" });
+    } finally { child.kill("SIGKILL"); await exited; }
+    // Advance only the abandoned fixture's lock age, avoiding a minute-long test.
+    const stale = new Date(Date.now() - 120_000);
+    await utimes(`${state}.lock`, stale, stale);
+    expect((await ownedWorkspace(home).describe()).available).toBe(true);
+    expect(await readFile(join(root, "kept.txt"), "utf8")).toBe("durable");
+  });
 });

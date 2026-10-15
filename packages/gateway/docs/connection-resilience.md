@@ -78,7 +78,6 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   `outcome=excused` in the phone's connection log, so a run that shows no
   `pong_timeout` retirement can still tell an excused probe from a probe that
   never missed its deadline.
-  `GatewayClientTransportTests` pins each case on a manual clock.
 - **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
   node ceiling for local and mobile clients. Transcript pages reserve 24,000
   nodes and snapshots 30,000; dense detail is compacted without editing canonical
@@ -127,7 +126,7 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   | Bound | Value | Owner | What it does |
   | --- | --- | --- | --- |
   | `DISPOSABLE_READ_DEADLINES_MS` (`session.open`) | 10 s | `transport/server.ts` | A cold open may parse a large transcript before its subscription commits, so it gets the longer bound. |
-  | `DISPOSABLE_READ_DEADLINES_MS` (`session.list`, `session.transcript`, `session.history.list`, `session.history.entry`) | 5 s | `transport/server.ts` | The request is aborted at its deadline and answered `busy` with `SHED_RETRY_AFTER_MS`; the work it abandoned keeps running only while another waiter needs it. A disposable read outside this table — `session.search` (Jev's own 20 s remote ranking), `provider.usage` (10 s per fetch, then a typed timed-out snapshot), `model.list`, `provider.list` — has no deadline and is never shed, so the phone's one retry can never buy a second paid search. |
+  | `DISPOSABLE_READ_DEADLINES_MS` (`session.list`, `session.transcript`, `session.history.list`, `session.history.entry`) | 5 s | `transport/server.ts` | The request is aborted at its deadline and answered `busy` with `SHED_RETRY_AFTER_MS`; the work it abandoned keeps running only while another waiter needs it. A disposable read outside this table — `provider.usage` (10 s per fetch, then a typed timed-out snapshot), `model.list`, `provider.list` — has no deadline and is never shed. |
   | `MAXIMUM_CONCURRENT_COLD_LOADS` | 2 | `sessions/runtime-registry.ts` | Cold runtime loads (a `session.open` or a JSONL import) queue in FIFO order; a queued load whose *last* waiter left is dropped, so one requester leaving does not end the load another still waits for. |
   | `MAXIMUM_CONCURRENT_SESSION_EXPORTS` | 1 | `transport/gateway-service.ts` | A second export queues rather than halving both. |
   | `MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS` | 2 | `transport/gateway-service.ts` | Directory/git inspections queue behind each other. |
@@ -235,8 +234,7 @@ keeps today's uncompressed frames.
   compressed connection, bounded by the 32-socket cap.
 - **Measured (2026-09-27, Apple silicon Mac, host load about 10):** the real
   `GatewayServer` broadcasting to one paired client. Repository TypeScript,
-  Swift and Markdown filled the recorded snapshot-burst fixture's transcript
-  text (`packages/ios-app/Tests/Fixtures/gateway-real-burst.json.zlib`). Nine
+  Swift and Markdown filled a recorded snapshot-burst transcript. Nine
   600 KB `session.snapshot` frames went from 5,465,624 to 1,132,866 wire bytes
   (20.7%). 223 cumulative `session.progress` frames up to 24 KiB went from
   3,038,448 to 39,157 (1.3%). 200 small responses and summaries went from 51,199
@@ -499,9 +497,7 @@ integration suites protect ordering and accepted-command ownership. iOS recovery
 and dashboard owner tests cover attempt exhaustion, explicit retry and entry
 replacement without silently resetting the budget.
 
-`projection.test.ts` covers dense browser detail and tiny-content-part aggregates,
-including normalized response envelopes. `server-frame.test.ts` and capacity
-integration tests cover exact node limits, read-local fallback, both client roles,
+Capacity integration tests (`server-capacity.integration.test.ts`) cover exact node limits, read-local fallback, both client roles,
 and rejected-open subscription cleanup. The shared JSON-limit fixture is checked
 against both producer and native constants; the native transport regression drives
 an actual over-node-budget frame through decoding, diagnostic capture and strict

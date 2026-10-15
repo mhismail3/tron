@@ -1234,4 +1234,4 @@ export function isVerifiedSourceCapture(record: KnowledgeRecord & { kind: "sourc
   return content.captureDisposition === "complete" && Boolean(content.object && content.object.bytes > 0 && content.text && content.text.trim().length > 0);
 }
 
-export { assertPublicDestination, isPrivateAddress };
+export { assertPublicDestination };
