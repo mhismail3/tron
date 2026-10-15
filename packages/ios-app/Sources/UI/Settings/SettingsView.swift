@@ -93,6 +93,10 @@ struct SettingsView: View {
                         settingsLink("Sessions", summary: "Dashboard list and subagent activity",
                                      icon: "slider.horizontal.2.square") { AppLocalBehaviorSettingsView() }
                         TronSettingsDivider()
+                        settingsLink("Experimental", summary: "Prototypes to try on this iPhone", icon: "flask") {
+                            ExperimentalSettingsView()
+                        }
+                        TronSettingsDivider()
                         settingsLink("Logs", summary: "Diagnostics from this iPhone and your Macs", icon: "text.alignleft") {
                             GatewayLogsSettingsView()
                         }
@@ -180,7 +184,7 @@ struct SettingsView: View {
 /// The settings palette: each group is one titled card with one accent, and every
 /// sheet a row opens keeps that accent. Groups follow what is being configured:
 /// the Macs and accounts Tron reaches, the agent's behaviour, what it can use,
-/// then this iPhone (its alerts, look, logs and setup).
+/// then this iPhone (its alerts, look, prototypes, logs and setup).
 enum SettingsGroupKind {
     case agent, tools, accounts, more, iphone
 

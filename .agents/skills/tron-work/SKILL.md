@@ -20,7 +20,8 @@ what it lists:
 
 - **Stale claims:** run `scripts/tron work release --stale`. It releases only claims idle
   over 72 h whose owner is `absent`, preserving their work, and prints why it kept the
-  rest. Report kept claims; never force them.
+  rest. Report kept claims; never force them yourself. For an owner kept as `idle`, give
+  the maintainer the `release <issue> --force-maintainer` command.
 - **Paused epics** (no activity for 14 days): ask the maintainer whether to resume,
   close or keep each one paused. Nothing closes automatically.
 - **Past exit date:** close each with `issue close --reason not_planned` stating that it
@@ -47,9 +48,10 @@ what it lists:
    gates remain failed. To give up a stale claim on an open issue without a new
    owner, use `scripts/tron work release <issue> --reason TEXT`: it preserves the
    worktree's work in a verified bundle first and refuses live or indeterminate owners;
-   report its refusal as is. A legacy owner that is not a Gateway session id can be
-   released only by the maintainer from a real terminal (`--force-maintainer`); give
-   them the exact command instead of running it. To take over an abandoned claim, use
+   report its refusal as is. An `idle` owner (an ordinary chat that went idle with no Home
+   task) or a legacy owner that is not a Gateway session id can be released only by the
+   maintainer from a real terminal (`--force-maintainer`, typing `RELEASE #<issue> FROM <owner>`);
+   give them the exact command and confirmation instead of running it. To take over an abandoned claim, use
    `scripts/tron work handoff <issue> --reason TEXT` only after authoritative settled-owner proof;
    indeterminate owners refuse. A legacy claim with no owner is `unknown` and
    never proves settlement; a maintainer can recover it only with
