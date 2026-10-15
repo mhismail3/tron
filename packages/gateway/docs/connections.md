@@ -15,8 +15,8 @@ enablement, and setup operation. There is no generic `enable`/`disable` RPC.
 MCP server administration and OAuth sign-in use Pi's built-in MCP and the
 separate `mcp.*` RPCs; they do not create connection rows.
 
-Jev is no longer a ConnectionOwner definition or Keychain connector. Knowledge,
-session search, and the first-party `jev` tool use Pi's `ModelRuntime.classify()`
+Jev is no longer a ConnectionOwner definition or Keychain connector. Knowledge
+and the first-party `jev` tool use Pi's `ModelRuntime.classify()`
 with the TypeSafe `jev-latest` classifier and Pi's provider credential store.
 Tron retains its qualified pre-dispatch estimate and monthly tagging ledger;
 provider credential readiness is owned by Pi and configured through Provider

@@ -123,7 +123,6 @@ import {
   projectToolResult,
   projectTranscriptPage,
   projectTranscriptPageAfter,
-  projectedTranscriptOrdinal,
   canonicalToolResultCallIDs,
   canonicalToolResultCallIDsFromBranch,
   projectTree,
@@ -7771,23 +7770,6 @@ export class RuntimeSlot {
       extensionPresentation: this.ui.state(),
       diagnostics: this.runtime.diagnostics.map((diagnostic) => ({ type: diagnostic.type, message: diagnostic.message })),
     });
-  }
-
-  transcriptPageAtEntry(
-    entryID: string,
-    expectedRuntimeGeneration?: string,
-    expectedLeafEntryID?: string,
-    windowEnd?: number,
-  ): TranscriptPage {
-    this.assertNoTrustReload();
-    const ordinal = projectedTranscriptOrdinal(this.runtime.session.sessionManager, entryID);
-    if (ordinal < 0) throw new GatewayError("not_found", "The canonical entry is not projectable on the active transcript");
-    return this.transcriptPage(
-      Math.max(ordinal + 1, windowEnd ?? ordinal + 1),
-      undefined,
-      expectedRuntimeGeneration,
-      expectedLeafEntryID,
-    );
   }
 
   transcriptPageAfter(

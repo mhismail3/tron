@@ -68,7 +68,6 @@ import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
 import { JevDecisionClient } from "./knowledge/jev-client.js";
 import { KnowledgeTaggingBudget, KnowledgeTaggingEngine } from "./knowledge/knowledge-tagger.js";
 import { SessionSearchIndex } from "./sessions/session-search-index.js";
-import { SessionSearchAllowanceLedger } from "./sessions/session-search-allowance.js";
 import { SessionSearchService } from "./sessions/session-search-service.js";
 import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./sessions/session-search-embedding.js";
 import { KnowledgeConnectorExtension } from "./knowledge/connectors.js";
@@ -446,11 +445,8 @@ let sessionSearch: SessionSearchService | undefined;
 let sessionSearchIndex: SessionSearchIndex | undefined;
 try {
   sessionSearchIndex = await SessionSearchIndex.open(join(config.tronHome, "gateway", "session-search.sqlite"));
-  let sessionSearchAllowance: SessionSearchAllowanceLedger | undefined;
-  try { sessionSearchAllowance = await SessionSearchAllowanceLedger.open(join(config.tronHome, "gateway", "session-search-jev-allowance.sqlite")); }
-  catch (error) { logger.log("warning", "Optional Jev allowance is unavailable; remote ranking disabled", { event: "session-search.jev-ledger-unavailable", source: "search", error }); }
-  sessionSearch = new SessionSearchService(sessions, sessionSearchIndex, jevClient, sessionSearchAllowance);
-  // Home's session_search research tool reads the same owner, late-bound.
+  sessionSearch = new SessionSearchService(sessions, sessionSearchIndex);
+  // Home's session_search research tool is this owner's only reader, late-bound.
   sessions.setSessionSearchService(sessionSearch);
 } catch (error) {
   sessionSearchIndex?.close();
@@ -876,7 +872,6 @@ const service = new GatewayService({
     new MacKeychainMcpCredentialOwner(),
     (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
   ),
-  ...(sessionSearch ? { sessionSearch } : {}),
 });
 outsideSettings.startWatching(error => logger.log("warning", "Outside settings comparison failed", {
   event: "settings.outside.failed", source: "settings", error: error instanceof Error ? error.message : String(error),

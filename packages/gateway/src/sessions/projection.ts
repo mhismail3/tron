@@ -2300,14 +2300,6 @@ export interface TranscriptPage {
   forkBoundary?: TranscriptForkBoundary;
 }
 
-export function projectedTranscriptOrdinal(
-  manager: TranscriptSessionReader,
-  entryID: string,
-  branchCut?: SessionEntry[],
-): number {
-  return projectableTranscriptEntries(manager, undefined, branchCut).entries.findIndex(entry => entry.id === entryID);
-}
-
 export function projectTranscriptPage(
   manager: TranscriptSessionReader,
   blobs: BlobStore,

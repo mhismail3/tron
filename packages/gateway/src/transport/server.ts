@@ -93,7 +93,6 @@ const DISPOSABLE_READ_METHODS: ReadonlySet<string> = new Set([
   "session.history.entry",
   "home.memory.view",
   "home.memory.evidence",
-  "session.search",
   "model.list",
   "provider.list",
   "provider.usage",
@@ -115,13 +114,11 @@ const SHED_RETRY_AFTER_MS = 1_000;
  * prompt is deliberately absent: its owner settles it durably whatever the
  * client does with its wait.
  *
- * Four disposable reads are absent because their own owners allow longer than
- * any bound a client would tolerate, and shedding below the owner's own bound
- * would throw away an answer the owner is about to produce: `session.search`
- * spends up to Jev's 20 s on a remote-ranked evaluation the user paid for, and
- * `provider.usage` answers a typed "timed out" snapshot after up to 10 s per
- * fetch. A read outside this table is never shed, so the phone's single retry
- * after a shed hint can never buy a second paid search.
+ * Three disposable reads (`model.list`, `provider.list`, `provider.usage`) are
+ * absent because their own owners allow longer than any bound a client would
+ * tolerate, and shedding below the owner's own bound would throw away an answer
+ * the owner is about to produce: `provider.usage` answers a typed "timed out"
+ * snapshot after up to 10 s per fetch. A read outside this table is never shed.
  */
 export const DISPOSABLE_READ_DEADLINES_MS: ReadonlyMap<string, number> = new Map([
   ["session.open", SESSION_OPEN_DEADLINE_MS],

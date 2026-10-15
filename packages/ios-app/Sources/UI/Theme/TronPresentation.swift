@@ -765,7 +765,6 @@ struct TronSearchBar: View {
     var accent: Color = .tronEmerald
     var focusOnAppear = false
     var onClose: (() -> Void)?
-    var onOptions: (() -> Void)?
     var onFocusChange: ((Bool) -> Void)?
     @FocusState private var focused: Bool
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
@@ -811,19 +810,6 @@ struct TronSearchBar: View {
             .glassEffect(.regular.tint(accent.opacity(0.16)).interactive(), in: .capsule)
             .contentShape(Capsule())
             .onTapGesture { focused = true }
-
-            if let onOptions {
-                Button(action: onOptions) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(accent)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
-                        .glassEffect(.regular.tint(accent.opacity(0.12)).interactive(), in: .circle)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Search options")
-            }
 
             if let onClose {
                 Button {

@@ -171,7 +171,7 @@ per-instance global theme setter; the host-owned RPC callback palette is
 independent. P99-19 tracks an upstream setter request.
 
 Jev uses Pi `ModelRuntime.classify()` with TypeSafe's catalog `jev-latest` for
-Knowledge, session search, and the `jev` tool. Tron retains input bounds,
+Knowledge and the `jev` tool. Tron retains input bounds,
 qualified pre-dispatch price ceilings, assessment versions, and dispatch
 certainty; TypeSafe provider credentials remain Pi-owned. Actual TypeSafe model
 behavior and price may change without a Tron release.
@@ -1997,12 +1997,12 @@ receives no answer: the Gateway abandons that request's work and records
 `rpc.cancelled` with the stage it interrupted. Cancellation applies only to
 `session.open`, `session.list`, `session.transcript`, `session.history.list`,
 `session.history.entry`, `home.memory.view`, `home.memory.evidence`,
-`session.search`, `model.list`, `provider.list` and `provider.usage`; a cancel for
+`model.list`, `provider.list` and `provider.usage`; a cancel for
 any other method is ignored. An accepted mutation
 or admitted prompt is never cancelled, and neither is a `session.sync`
 acknowledgement: their owners settle them durably whatever the client does with
 their wait.
-Seven of those eleven methods have server-side deadlines
+Seven of those ten methods have server-side deadlines
 (`DISPOSABLE_READ_DEADLINES_MS` in `packages/gateway/src/transport/server.ts`):
 10 s for `session.open`, whose cold load may parse a large transcript before its
 subscription commits, and 5 s for `session.list` and the transcript pages
@@ -2013,11 +2013,11 @@ that outlives its deadline is aborted, answered `busy` with
 `reason=deadline`; the phone waits that hint (bounded to 10 s), retries the read
 once and logs `rpc.retry-after`. A method with no entry in that table has no
 deadline and is never shed: that is every mutation, every prompt, `session.sync`,
-and the four disposable reads whose own owners already allow longer than the
-client does — `session.search` may spend Jev's 20 s on a paid remote-ranked
-evaluation and `provider.usage` answers a typed timed-out snapshot after up to
-10 s per fetch, so a deadline below those owners' bounds would throw away an
-answer they were about to produce (and, for a search, have the phone pay twice).
+and the three disposable reads (`model.list`, `provider.list`,
+`provider.usage`) whose own owners already allow longer than the client does —
+`provider.usage` answers a typed timed-out snapshot after up to 10 s per fetch,
+so a deadline below that owner's bound would throw away an answer it was about
+to produce.
 Concurrency caps queue rather than refuse: two cold runtime loads, one session
 export and two workspace inspections at a time, each a named constant next to its
 user. Cold loads are additionally gated on heap pressure: above
@@ -3712,7 +3712,8 @@ open a real PTY so packaging cannot silently ship a non-executable helper.
 
 ## Session search
 
-[Session search](docs/session-search.md) owns the `session-search.v1` capability.
+[Session search](docs/session-search.md) owns `SessionSearchService`, the
+in-process index Home's `session_search` research tool reads. It has no client RPC.
 
 ## Episodic memory
 

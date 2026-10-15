@@ -1623,23 +1623,23 @@ describe("WebSocket connection and outbound capacity", () => {
     // An admitted mutation has no entry in the table: it is never shed, and its
     // response is the work's own answer.
     socket.send(JSON.stringify({ type: "request", id: "held-command", method: "accepted-command", params: {} }));
-    // A read the table deliberately leaves out is never shed either: a
-    // remote-ranked `session.search` spends up to Jev's 20 s on an evaluation the
-    // user paid for, so shedding it would have the phone pay for it twice.
-    socket.send(JSON.stringify({ type: "request", id: "held-search", method: "session.search", params: { query: "x", remoteRanking: true } }));
+    // A read the table deliberately leaves out is never shed either:
+    // `provider.usage` answers its own typed timeout after up to 10 s per fetch,
+    // so shedding it sooner would throw that answer away.
+    socket.send(JSON.stringify({ type: "request", id: "held-usage", method: "provider.usage", params: {} }));
     // Longer than the deadline: a mutation that were in the table would have
     // been shed by now.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(frames.some((frame) => frame.id === "held-command")).toBe(false);
-    expect(frames.some((frame) => frame.id === "held-search")).toBe(false);
+    expect(frames.some((frame) => frame.id === "held-usage")).toBe(false);
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "accepted-command")).toBe(false);
-    expect(logger.log.mock.calls.some((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "session.search")).toBe(false);
+    expect(logger.log.mock.calls.some((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "provider.usage")).toBe(false);
     gates.get("accepted-command")?.release();
-    gates.get("session.search")?.release();
+    gates.get("provider.usage")?.release();
     await waitFor(() => frames.some((frame) => frame.id === "held-command"), "the held command response");
     expect(frames.find((frame) => frame.id === "held-command")).toMatchObject({ ok: true, result: { method: "accepted-command" } });
-    await waitFor(() => frames.some((frame) => frame.id === "held-search"), "the held search response");
-    expect(frames.find((frame) => frame.id === "held-search")).toMatchObject({ ok: true, result: { method: "session.search" } });
+    await waitFor(() => frames.some((frame) => frame.id === "held-usage"), "the held usage response");
+    expect(frames.find((frame) => frame.id === "held-usage")).toMatchObject({ ok: true, result: { method: "provider.usage" } });
 
     gates.get("session.open")?.release();
     socket.send(JSON.stringify({ type: "request", id: "retry-open", method: "session.open", params: { sessionId: "session" } }));
