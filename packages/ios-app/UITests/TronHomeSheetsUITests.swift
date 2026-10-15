@@ -46,8 +46,11 @@ final class TronHomeSheetsUITests: XCTestCase {
         open(app, ring, ready: "home-manage-state", name: "host-status")
         expand(app, done: "home-sheet-done-manage")
         let host = element(app, "home-manage-host")
-        for _ in 0..<8 where !host.isHittable { app.swipeUp() }
+        // Hittable alone can mean only the title is visible at accessibility
+        // sizes. Bring the whole row, including the status pill, above the edge.
+        for _ in 0..<8 where !host.isHittable || host.frame.maxY > app.frame.maxY - 60 { app.swipeUp() }
         XCTAssertTrue(host.isHittable, app.debugDescription)
+        XCTAssertLessThanOrEqual(host.frame.maxY, app.frame.maxY - 60, "The complete host status remains visible")
         XCTAssertTrue(host.label.contains(workers), host.label)
         XCTAssertTrue(host.label.contains(level), host.label)
         XCTAssertFalse(host.label.lowercased().contains("queued"), "Home workers have no queue")
