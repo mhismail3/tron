@@ -77,9 +77,7 @@ struct AutomationPromptMessageView: View {
             }
             .foregroundStyle(Color.tronAutomation)
 
-            if let resource = item.semantic?.resourceInvocation {
-                CanonicalResourceChip(resource: resource)
-            }
+            CanonicalResourceChips(resources: item.semantic?.resourceInvocations ?? [])
             if let promptText {
                 UserPromptText(text: promptText, tone: .automation)
             }

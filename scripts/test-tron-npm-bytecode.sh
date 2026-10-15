@@ -33,6 +33,11 @@ set -euo pipefail
 python3 -c 'import sys; sys.pycache_prefix = None; sys.path.insert(0, sys.argv[1]); import gyp_probe' "$TRON_TEST_NPM_TREE"
 NPM
 chmod +x "$TMP/fakebin/npm"
+# scripts/tron runs its Gateway commands under the pinned Node that
+# scripts/tron-node selects; this stand-in is that toolchain, so the npm above
+# is the one the command reaches.
+printf '#!/bin/sh\necho "v%s"\n' "$(<"$ROOT/.node-version")" > "$TMP/fakebin/node"
+chmod +x "$TMP/fakebin/node"
 
 make_tree() {
   local tree="$1"
@@ -46,8 +51,8 @@ run_toolchain() {
   local tron="$1" tree="$2"
   # A caller (verify's prelude, a developer shell) may already export the flag;
   # only scripts/tron's own export may protect the tree, or the mutant proves nothing.
-  env -u PYTHONDONTWRITEBYTECODE PATH="$TMP/fakebin:$PATH" TRON_TEST_NPM_TREE="$tree" "$tron" ci check >"$TMP/ci.log" 2>&1 \
-    || { cat "$TMP/ci.log" >&2; fail "scripts/tron ci check failed"; }
+  env -u PYTHONDONTWRITEBYTECODE PATH="$TMP/fakebin:$PATH" TRON_NODE_BIN="$TMP/fakebin/node" TRON_TEST_NPM_TREE="$tree" "$tron" ci gateway.build >"$TMP/ci.log" 2>&1 \
+    || { cat "$TMP/ci.log" >&2; fail "scripts/tron ci gateway.build failed"; }
 }
 
 has_pycache() {
@@ -69,6 +74,8 @@ has_pycache "$TMP/clean" && fail "scripts/tron wrote __pycache__ into the npm tr
 mkdir -p "$TMP/mutant/scripts" "$TMP/mutant/packages/gateway"
 sed '/^export PYTHONDONTWRITEBYTECODE=1$/d' "$ROOT/scripts/tron" > "$TMP/mutant/scripts/tron"
 chmod +x "$TMP/mutant/scripts/tron"
+cp "$ROOT/scripts/tron-node" "$TMP/mutant/scripts/"
+cp "$ROOT/.node-version" "$TMP/mutant/"
 if grep -q '^export PYTHONDONTWRITEBYTECODE=1$' "$TMP/mutant/scripts/tron"; then
   fail "mutant control did not remove the flag"
 fi

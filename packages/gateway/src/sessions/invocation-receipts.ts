@@ -1,7 +1,7 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { ChatOrigin, InvocationLifecycle, JsonValue, ResourceInvocation } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
-import { RESOURCE_ARGUMENTS_MAX_BYTES } from "./resource-invocation.js";
+import { MAXIMUM_RESOURCE_INVOCATIONS, RESOURCE_ARGUMENTS_MAX_BYTES } from "./resource-invocation.js";
 
 /** Internal folded lifecycle derived from canonical invocation receipts. */
 export interface InvocationProjection {
@@ -11,9 +11,12 @@ export interface InvocationProjection {
   source: InvocationSource;
   name?: string;
   arguments?: string;
-  /** User-authored text for image-bearing prompts; Pi may append resize notes to its canonical message. */
+  /** User-authored text for image-bearing prompts, whose canonical message Pi may
+   * append resize notes to, and for skill/prompt invocations, whose canonical
+   * message is the expansions followed by this text. */
   submittedText?: string;
-  resourceInvocation?: ResourceInvocation;
+  /** Ordered invoked resources: skills and prompts, or one extension command. */
+  resourceInvocations?: ResourceInvocation[];
   lifecycle: InvocationLifecycle;
   canonicalEntryId?: string;
   origin: ChatOrigin;
@@ -59,10 +62,21 @@ interface InvocationReceiptCommon {
   createdAt: string;
 }
 
+/** One skill or prompt a message invoked; the receipt's `submittedText` carries the message text. */
+export interface InvokedResource {
+  source: "skill" | "prompt";
+  name: string;
+}
+
 interface InvocationStartReceipt extends InvocationReceiptCommon {
   receiptKind: "start";
+  /** The first invoked resource's name for skill/prompt sources. */
   name?: string;
   arguments?: string;
+  /** Every skill and prompt the message invoked, in order (#311). A start
+   * receipt written before multi-resource messages names one resource through
+   * `source`, `name` and `arguments` only, and stays readable as that one. */
+  resources?: InvokedResource[];
   submittedText?: string;
   lifecycle: "staged";
   origin: ChatOrigin;
@@ -115,6 +129,22 @@ function validArguments(value: unknown): value is string {
     && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
 }
 
+function validResources(value: unknown, source: unknown, name: unknown, argumentsText: unknown): value is InvokedResource[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAXIMUM_RESOURCE_INVOCATIONS
+    || argumentsText !== undefined) return false;
+  const seen = new Set<string>();
+  const valid = value.every((resource: unknown) => {
+    if (!resource || typeof resource !== "object" || Array.isArray(resource)) return false;
+    const candidate = resource as Record<string, unknown>;
+    return (candidate.source === "skill" || candidate.source === "prompt")
+      && validText(candidate.name, MAX_NAME_BYTES)
+      && Object.keys(candidate).every(key => key === "source" || key === "name")
+      && seen.add(`${candidate.source}:${candidate.name}`);
+  });
+  const first = value[0] as Record<string, unknown> | undefined;
+  return valid && seen.size === value.length && first?.source === source && first?.name === name;
+}
+
 export function validTimestamp(value: unknown): value is string {
   if (!validText(value, 64)) return false;
   const time = Date.parse(value);
@@ -141,7 +171,7 @@ export function validOrigin(value: unknown): value is ChatOrigin {
 
 function allowedKeys(kind: ReceiptKind): Set<string> {
   const common = ["writer", "version", "receiptId", "receiptKind", "invocationId", "operationId", "sessionId", "source", "sequence", "createdAt"];
-  if (kind === "start") common.push("name", "arguments", "submittedText", "lifecycle", "origin");
+  if (kind === "start") common.push("name", "arguments", "resources", "submittedText", "lifecycle", "origin");
   if (kind === "transition") common.push("lifecycle");
   if (kind === "terminal") common.push("name", "origin", "lifecycle", "retryable", "errorCode");
   if (kind === "binding") common.push("canonicalEntryId", "parentEntryId");
@@ -173,6 +203,7 @@ export function parseInvocationReceipt(value: unknown): InvocationReceiptData | 
   if (r.submittedText !== undefined && (typeof r.submittedText !== "string"
       || Buffer.byteLength(r.submittedText, "utf8") > 192 * 1_024
       || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(r.submittedText))) return undefined;
+  if (r.resources !== undefined && !validResources(r.resources, r.source, r.name, r.arguments)) return undefined;
   if (r.lifecycle !== undefined && (!validText(r.lifecycle, 64) || !LIFECYCLES.has(r.lifecycle as InvocationLifecycle))) return undefined;
   if (r.canonicalEntryId !== undefined && !validText(r.canonicalEntryId, MAX_ID_BYTES)) return undefined;
   if (r.parentEntryId !== undefined && !validText(r.parentEntryId, MAX_ID_BYTES)) return undefined;
@@ -284,9 +315,11 @@ export function invocationProjection(receipts: readonly InvocationReceiptData[])
         source: receipt.source, ...(receipt.name ? { name: receipt.name } : {}),
         ...(receipt.arguments ? { arguments: receipt.arguments } : {}),
         ...(receipt.submittedText === undefined ? {} : { submittedText: receipt.submittedText }),
-        ...(["skill", "prompt", "extension"].includes(receipt.source) && receipt.name !== undefined
-          ? { resourceInvocation: { source: receipt.source as "skill" | "prompt" | "extension", name: receipt.name, arguments: receipt.arguments ?? "" } }
-          : {}),
+        ...(receipt.resources !== undefined
+          ? { resourceInvocations: receipt.resources.map(resource => ({ ...resource, arguments: "" })) }
+          : ["skill", "prompt", "extension"].includes(receipt.source) && receipt.name !== undefined
+            ? { resourceInvocations: [{ source: receipt.source as "skill" | "prompt" | "extension", name: receipt.name, arguments: receipt.arguments ?? "" }] }
+            : {}),
         lifecycle: receipt.lifecycle ?? "accepted",
         origin: receipt.origin ?? { kind: receipt.source === "extension" ? "extension" : "user", confidence: "receipt" },
         sequence: receipt.sequence, updatedAt: receipt.createdAt,

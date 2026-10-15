@@ -191,7 +191,7 @@ async function temporaryRoot(prefix: string): Promise<string> {
   return root;
 }
 
-describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
+describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
   const syntheticTranscriptSizes = new Map<string, number>();
@@ -8935,9 +8935,9 @@ export default function (pi) {
     subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
-    await expect(slot.prompt("/skill:review configurations", [], undefined, {
+    await expect(slot.prompt("configurations", [], undefined, {
       text: "configurations",
-      resourceInvocation: { source: "skill", name: "review", arguments: "configurations" },
+      resourceInvocations: [{ source: "skill", name: "review", arguments: "" }],
       attachmentEnvelope: "", attachmentCount: 0,
     })).resolves.toEqual({ operationId: expect.any(String) });
     await waitFor(() => !slot.isBusy, "the slot to go idle");
@@ -8945,12 +8945,12 @@ export default function (pi) {
     let receipts = entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE).map(entry => entry.data);
     expect(receipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "binding", "terminal"]);
     expect(receipts.find(receipt => receipt.receiptKind === "binding")).not.toHaveProperty("name");
-    expect(snapshots.some(snapshot => snapshot.pendingPrompt?.resourceInvocation?.name === "review")).toBe(true);
-    expect(slot.snapshot().transcript.some(item => item.semantic?.resourceInvocation?.name === "review")).toBe(true);
+    expect(snapshots.some(snapshot => snapshot.pendingPrompt?.resourceInvocations?.[0]?.name === "review")).toBe(true);
+    expect(slot.snapshot().transcript.some(item => item.semantic?.resourceInvocations?.[0]?.name === "review")).toBe(true);
 
-    await expect(slot.prompt("/summarize configurations", [], undefined, {
+    await expect(slot.prompt("configurations", [], undefined, {
       text: "configurations",
-      resourceInvocation: { source: "prompt", name: "summarize", arguments: "configurations" },
+      resourceInvocations: [{ source: "prompt", name: "summarize", arguments: "" }],
       attachmentEnvelope: "", attachmentCount: 0,
     })).resolves.toEqual({ operationId: expect.any(String) });
     await waitFor(() => !slot.isBusy, "the slot to go idle");
@@ -8959,7 +8959,7 @@ export default function (pi) {
     const promptReceipts = receipts.filter(receipt => receipt.source === "prompt");
     expect(promptReceipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "binding", "terminal"]);
     expect(promptReceipts.find(receipt => receipt.receiptKind === "binding")).not.toHaveProperty("name");
-    expect(slot.snapshot().transcript.some(item => item.semantic?.resourceInvocation?.name === "summarize")).toBe(true);
+    expect(slot.snapshot().transcript.some(item => item.semantic?.resourceInvocations?.[0]?.name === "summarize")).toBe(true);
     expect(failures).toEqual([]);
   });
 
@@ -9213,9 +9213,9 @@ export default function (pi) {
       attachmentEnvelope: "",
       attachmentCount: 0,
     });
-    await slot.prompt("/skill:review queued skill", [], "steer", {
+    await slot.prompt("queued skill", [], "steer", {
       text: "queued skill",
-      resourceInvocation: { source: "skill", name: "review", arguments: "queued skill" },
+      resourceInvocations: [{ source: "skill", name: "review", arguments: "" }],
       attachmentEnvelope: "",
       attachmentCount: 0,
     });
@@ -9242,14 +9242,12 @@ export default function (pi) {
       { id: skill!.id, behavior: "followUp", text: "edited skill" },
     ]);
     expect(replaced.items[2]?.attachments).toEqual([attachment]);
-    expect(replaced.items[3]?.resourceInvocation).toEqual({
-      source: "skill", name: "review", arguments: "edited skill",
-    });
+    expect(replaced.items[3]?.resourceInvocations).toEqual([{ source: "skill", name: "review", arguments: "" }]);
     const afterEditEntries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
     const skillInvocationReceipts = afterEditEntries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE
       && entry.data?.operationId === skill!.id).map(entry => entry.data);
     expect(skillInvocationReceipts.filter(receipt => receipt.receiptKind === "start")
-      .map(receipt => receipt.arguments)).toEqual(["queued skill", "edited skill"]);
+      .map(receipt => receipt.submittedText)).toEqual(["queued skill", "edited skill"]);
     expect(skillInvocationReceipts.some(receipt => receipt.receiptKind === "terminal"
       && receipt.lifecycle === "interrupted" && receipt.errorCode === "queue-edited")).toBe(true);
     const queuedRuntime = (slot as unknown as {
@@ -11912,7 +11910,7 @@ export default function (pi) {
     expect(command).toMatchObject({
       semantic: {
         lifecycle: "failed",
-        resourceInvocation: { source: "extension", name: "fail-command" },
+        resourceInvocations: [{ source: "extension", name: "fail-command" }],
       },
     });
   });

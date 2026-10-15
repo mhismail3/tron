@@ -288,7 +288,8 @@ export interface ChatSemanticMetadata {
   operationId?: string;
   sequence: number;
   lifecycle?: InvocationLifecycle;
-  resourceInvocation?: ResourceInvocation;
+  /** Ordered resources this message invoked: skills and prompts in chip order, or one exclusive extension command. */
+  resourceInvocations?: ResourceInvocation[];
   /** Authored text retained for image prompts whose SDK history includes generated resize notes. */
   submittedText?: string;
   /** Set only on a command row a fork inherited from its origin, whose lifecycle settled there. */
@@ -841,7 +842,9 @@ export interface ResourceInvocation {
   source: "skill" | "prompt" | "extension";
   /** Canonical resource name; skills omit the `skill:` transport prefix. */
   name: string;
-  /** Exact visible arguments, bounded to 5,000 UTF-8 bytes for receipt safety. Empty is valid. */
+  /** Exact visible arguments, bounded to 5,000 UTF-8 bytes for receipt safety. Empty is valid.
+   * An extension command's arguments are the message text; a chat skill or prompt
+   * carries none (the message text follows every expansion once). */
   arguments: string;
 }
 
@@ -857,7 +860,7 @@ export interface QueuedMessageState {
   fileAttachmentCount?: number;
   /** Bounded exact descriptors; payload bytes remain outside snapshots. */
   attachments?: PromptAttachmentState[];
-  resourceInvocation?: ResourceInvocation;
+  resourceInvocations?: ResourceInvocation[];
 }
 
 /** A prompt admitted before its canonical user entry exists, usually while
@@ -875,7 +878,7 @@ export interface PendingPromptState {
   fileAttachmentCount?: number;
   /** Bounded exact descriptors; payload bytes remain outside snapshots. */
   attachments?: PromptAttachmentState[];
-  resourceInvocation?: ResourceInvocation;
+  resourceInvocations?: ResourceInvocation[];
 }
 
 export interface ContextWindowLimits {
@@ -1203,10 +1206,10 @@ export interface HomeStatus {
   /** Process-owned task recovery projection; refusal fences only task surfaces
    * until the next Gateway start, never ordinary session readiness. */
   taskRecovery: { available: true } | { available: false; reason: string };
-  /** Host pressure at this read (#915, docs/host-load.md): queued Home workers do not start while it is `critical`. */
+  /** Host pressure at this read (#915, docs/host-load.md); informational: workers are never held back. */
   hostPressure: { level: "normal" | "elevated" | "critical"; load1PerCpu: number; eventLoopUtilization: number; sampledAt: string };
-  /** The Home worker budget: tasks running (or launching), tasks queued for a slot, and the limit. */
-  workers: { running: number; queued: number; limit: number };
+  /** Home workers running (or launching) now; there is no running cap (#1023). */
+  workers: { running: number };
   /** Derived from the durable designation, runtime presence, memory and current/last activation. */
   phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "rollover-pending" | "blocked" | "paused" | "active" | "ready";
   /** Current or last activation evidence; never includes message or memory-view bodies. */
@@ -1368,6 +1371,7 @@ export interface HomeTaskSummary extends HomeTaskDisplay {
   outcome: "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown" | null;
   spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
   attention: boolean;
+  checkins: import("../home/home-task-checkin.js").HomeTaskCheckin[];
   pendingGrant: boolean;
 }
 export interface HomeTaskPage {

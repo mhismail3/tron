@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# The one repository resolver for the pinned development Node (#242).
+#
+#   scripts/tron-node              print the absolute path of the pinned `node`
+#   scripts/tron-node exec CMD...  run CMD with that Node's directory first on PATH
+#
+# `.node-version` is the only version authority. Candidates, in order:
+#   1. TRON_NODE_BIN (absolute; an explicit choice that fails loudly),
+#   2. the exact nvm directory ($NVM_DIR or ~/.nvm)/versions/node/v<pin>,
+#   3. each `node` on PATH in order, then Homebrew,
+# each accepted only when it reports exactly v<pin>, has a sibling `npm`, and is
+# a development toolchain rather than a signed Gateway runtime. A shell spawned
+# by a Gateway has that Gateway's payload runtime first on PATH; it answers the
+# pinned version and has an npm alias, but its hardened runtime refuses the
+# unsigned native add-ons development loads (Vitest's Rolldown, node-pty) and it
+# ships no npx, so it is never chosen here.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+VERSION_FILE="$ROOT/.node-version"
+
+die() {
+  echo "tron-node: $*" >&2
+  exit 127
+}
+
+[[ -f "$VERSION_FILE" ]] || die "missing canonical Node version file: $VERSION_FILE"
+NODE_VERSION="$(<"$VERSION_FILE")"
+[[ "$(awk 'END { print NR }' "$VERSION_FILE")" == 1 && "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  || die "canonical Node version must be one strict x.y.z line: $VERSION_FILE"
+[[ -z "${NVM_DIR:-}" || "$NVM_DIR" == /* ]] || die "relative NVM_DIR is not allowed: $NVM_DIR"
+
+INSTALL_HINT="install it with \`nvm install $NODE_VERSION\` or set TRON_NODE_BIN to an absolute Node v$NODE_VERSION that has a sibling npm"
+
+# Why `$1` is a Gateway runtime rather than a development toolchain, or nothing.
+gateway_runtime_reason() {
+  local real
+  real="$(realpath "$1" 2>/dev/null)" || real="$1"
+  case "$real" in
+    *.app/Contents/*) echo "it is inside an app bundle"; return ;;
+  esac
+  # A staged or installed Gateway payload: <payload>/runtime/node-<arch> beside
+  # <payload>/manifest.json (packages/mac-app/scripts/bundle-gateway.sh).
+  if [[ "$(basename "$(dirname "$real")")" == runtime && -f "$(dirname "$(dirname "$real")")/manifest.json" ]]; then
+    echo "it is a Gateway payload runtime"
+    return
+  fi
+  # The cause itself, wherever the binary was copied: a hardened runtime without
+  # disable-library-validation cannot load unsigned native add-ons.
+  if [[ -x /usr/bin/codesign ]]; then
+    local signature
+    if signature="$(/usr/bin/codesign -d --verbose=1 --entitlements - --xml "$real" 2>&1)" \
+      && [[ "$signature" == *"(runtime)"* && "$signature" != *com.apple.security.cs.disable-library-validation* ]]; then
+      echo "its hardened-runtime signature refuses unsigned native add-ons"
+    fi
+  fi
+}
+
+REJECTED=()
+# Prints nothing and returns 1 with the reason in REASON when `$1` is not usable.
+admit() {
+  local candidate="$1" actual runtime
+  REASON=""
+  [[ "$candidate" == /* ]] || { REASON="not an absolute path"; return 1; }
+  [[ -x "$candidate" && ! -d "$candidate" ]] || { REASON="not an executable file"; return 1; }
+  actual="$("$candidate" --version 2>/dev/null || true)"
+  [[ "$actual" == "v$NODE_VERSION" ]] || { REASON="reports ${actual:-no version}, not v$NODE_VERSION"; return 1; }
+  [[ -x "$(dirname "$candidate")/npm" ]] || { REASON="has no sibling npm"; return 1; }
+  runtime="$(gateway_runtime_reason "$candidate")"
+  [[ -z "$runtime" ]] || { REASON="$runtime; development needs a toolchain that loads unsigned native add-ons and ships npx"; return 1; }
+}
+
+resolve() {
+  local candidate
+  if [[ -n "${TRON_NODE_BIN:-}" ]]; then
+    admit "$TRON_NODE_BIN" || die "TRON_NODE_BIN=$TRON_NODE_BIN is refused: $REASON"
+    printf '%s\n' "$TRON_NODE_BIN"
+    return
+  fi
+  local candidates=("${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v$NODE_VERSION/bin/node")
+  local entry entries=() seen=" "
+  IFS=: read -r -a entries <<<"${PATH:-}"
+  for entry in ${entries[@]+"${entries[@]}"}; do
+    [[ "$entry" == /* ]] && candidates+=("$entry/node")
+  done
+  candidates+=(/opt/homebrew/bin/node /usr/local/bin/node)
+  for candidate in "${candidates[@]}"; do
+    [[ -e "$candidate" && "$seen" != *" $candidate "* ]] || continue
+    seen+="$candidate "
+    if admit "$candidate"; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+    REJECTED+=("  $candidate: $REASON")
+  done
+  {
+    echo "tron-node: no usable Node v$NODE_VERSION; $INSTALL_HINT"
+    ((${#REJECTED[@]} == 0)) || { echo "rejected:"; printf '%s\n' "${REJECTED[@]}"; }
+  } >&2
+  exit 127
+}
+
+case "${1:-}" in
+  "")
+    resolve
+    ;;
+  exec)
+    shift
+    (($#)) || die "usage: scripts/tron-node exec COMMAND [ARGUMENTS...]"
+    node="$(resolve)"
+    # npm's launchers use `/usr/bin/env node`; the resolved directory goes first
+    # so every child runs this toolchain. npm's node-gyp runs Python inside the
+    # pinned npm tree, which must not gain __pycache__ (#638).
+    export PATH="$(dirname "$node"):$PATH" PYTHONDONTWRITEBYTECODE=1
+    exec "$@"
+    ;;
+  -h|--help)
+    sed -n '2,5p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    ;;
+  *)
+    die "usage: scripts/tron-node [exec COMMAND [ARGUMENTS...]]"
+    ;;
+esac

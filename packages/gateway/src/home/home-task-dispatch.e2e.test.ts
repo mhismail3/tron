@@ -3,7 +3,8 @@ import { spawnSync } from "node:child_process";
 import os from "node:os";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, cp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -807,126 +808,114 @@ describe("Home task cold reconciliation", () => {
   }, 20_000);
 });
 
-// #915/#930: at most three workers run; further tasks wait in order with a visible
-// position, Stop settles a waiting task before any worker exists, critical host
-// pressure holds starts back, and a restart settles a waiting task without replay.
-describe("Home worker budget", () => {
-  // Workers whose model turn waits on a per-task gate, so the test decides when each finishes.
-  function gatedWorkers(f: Awaited<ReturnType<typeof fixture>>) {
-    const gates = new Map<string, () => void>();
-    const started: string[] = [];
-    const response = async (context: unknown) => {
-      const brief = JSON.stringify(context);
-      const id = /Budget work (\d+)/u.exec(brief)?.[1];
-      if (!id) return fauxAssistantMessage("Home reply");
-      started.push(id);
-      await new Promise<void>(resolve => gates.set(id, resolve));
-      return fauxAssistantMessage([reportCall(`report-${id}`)], { stopReason: "toolUse" });
-    };
-    f.faux.setResponses(Array.from({ length: 20 }, () => response));
-    const run = (id: number) => f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: `budget-${id}`, intent: `Budget work ${id}`, target: f.cwd });
-    const finish = async (id: number) => { await waitFor(() => gates.has(String(id)), `worker ${id} is running`); gates.get(String(id))!(); };
-    return { run, finish, started };
-  }
+// #1023: Home workers have no running cap. Their memory-heavy steps wait in the host heavy
+// queue (tools/work/heavy.py, docs/host-load.md), which admits by expected RSS, while every
+// worker keeps running and light work never waits.
+describe("Home workers without a cap", () => {
+  const heavyQueue = fileURLToPath(new URL("../../../../tools/work/heavy.py", import.meta.url));
 
-  it("runs three workers at once and starts waiting tasks in order as slots free", async () => {
+  it("runs six workers at once; their heavy steps are admitted by memory while a light worker finishes", async () => {
     const f = await fixture();
     const owner = f.registry.homeOwner();
-    const workers = gatedWorkers(f);
-    const handles = [];
-    for (let id = 1; id <= 5; id++) handles.push(await workers.run(id));
-    expect(handles.map(handle => handle.queuePosition)).toEqual([null, null, null, 1, 2]);
-    expect(handles.slice(3).every(handle => handle.sessionId === null && handle.operationId === null)).toBe(true);
-    await waitFor(() => workers.started.length === 3, "three workers running");
-    const status = await owner.status();
-    expect(status.workers).toEqual({ running: 3, queued: 2, limit: 3 });
-    expect(await owner.taskResult("budget-4")).toMatchObject({ lifecycle: "pending", sessionId: null, queuedAt: expect.any(String) });
-    expect(f.signals.filter(signal => signal.event === "home.task.queue" && signal.decision === "deferred-limit")).toHaveLength(2);
-    await workers.finish(2);
-    await waitFor(() => workers.started.length === 4, "the oldest waiting task takes the freed slot");
-    expect(workers.started).toEqual(["1", "2", "3", "4"]);
-    expect((await owner.status()).workers).toEqual({ running: 3, queued: 1, limit: 3 });
-    for (const id of [1, 3, 4]) await workers.finish(id);
-    await workers.finish(5);
-    const settled = await Promise.all(handles.map(handle => handle.completion));
-    expect(settled.map(task => task.terminalEvidence?.outcome)).toEqual(["final", "final", "final", "final", "final"]);
-    expect(workers.started).toEqual(["1", "2", "3", "4", "5"]);
-    await waitFor(async () => (await owner.status()).workers.running === 0, "budget released");
-    evidence.push({ case: "worker-budget-order", started: workers.started, queuedPositions: [1, 2] });
-  }, 60_000);
+    const root = await mkdtemp(join(os.tmpdir(), "tron-heavy-workers-"));
+    let sampler: NodeJS.Timeout | undefined;
+    try {
+      const log = join(root, "heavy.log");
+      await writeFile(log, "");
+      // Budget 7000 MB and 3000 MB per step: at most two heavy steps fit at once, whatever
+      // the slot count. The available-memory override keeps admission deterministic.
+      // An inherited lease (a gate shard running this file) must not let the steps skip the queue.
+      const queueEnv = `env -u TRON_HEAVY_LEASE_HELD TRON_HEAVY_DIR=${root}/queue TRON_HEAVY_SLOTS=8 TRON_HEAVY_MEMORY_BUDGET_MB=7000 `
+        + "TRON_HEAVY_AVAILABLE_MB=1000000 TRON_HEAVY_RESERVE_MB=0 TRON_HEAVY_MAX_LOAD=100000";
+      // One heavy step: record its start, hold until the test releases it, record its end.
+      await writeFile(join(root, "step.py"), ["import pathlib, sys, time",
+        "log, name, release = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3])",
+        "with log.open('a') as f: f.write(f'start {name}\\n')",
+        "while not release.exists(): time.sleep(0.05)",
+        "with log.open('a') as f: f.write(f'end {name}\\n')", ""].join("\n"));
+      const turns = new Map<string, number>();
+      const response = (context: unknown) => {
+        const brief = JSON.stringify(context);
+        const heavy = /Heavy work (\d+)/u.exec(brief)?.[1];
+        const light = /Light work (\d+)/u.exec(brief)?.[1];
+        const id = heavy ?? light;
+        if (!id) return fauxAssistantMessage("Home reply");
+        const turn = (turns.get(id) ?? 0) + 1;
+        turns.set(id, turn);
+        if (turn > 1) return fauxAssistantMessage([reportCall(`report-${id}`)], { stopReason: "toolUse" });
+        const command = heavy
+          ? `${queueEnv} python3 ${heavyQueue} run --owner worker-${id} --need-mb 3000 -- python3 ${root}/step.py ${log} ${id} ${root}/release-${id}`
+          : `echo done > ${root}/light-${id}`;
+        return fauxAssistantMessage([fauxToolCall("bash", { command }, { id: `step-${id}` })], { stopReason: "toolUse" });
+      };
+      f.faux.setResponses(Array.from({ length: 40 }, () => response));
+      const events = async () => (await readFile(log, "utf8")).split("\n").filter(Boolean);
+      const running = async () => {
+        const live = new Set<string>();
+        for (const line of await events()) { const [kind, id] = line.split(" "); if (kind === "start") live.add(id!); else live.delete(id!); }
+        return live;
+      };
+      let peakRss = process.memoryUsage().rss;
+      let lowestFree = os.freemem();
+      sampler = setInterval(() => { peakRss = Math.max(peakRss, process.memoryUsage().rss); lowestFree = Math.min(lowestFree, os.freemem()); }, 100);
 
-  it("Stop settles a waiting task before any worker or prompt exists", async () => {
+      const handles = [];
+      for (let id = 1; id <= 6; id++) {
+        handles.push(await owner.dispatchTask(f.home.sessionId, { taskId: `heavy-${id}`, intent: `Heavy work ${id}`, target: f.cwd }));
+      }
+      // No cap: every worker has its session and operation at once.
+      expect(handles.every(handle => typeof handle.sessionId === "string" && typeof handle.operationId === "string")).toBe(true);
+      expect((await owner.status()).workers).toEqual({ running: 6 });
+      await waitFor(async () => (await running()).size === 2, "two heavy steps admitted");
+      await waitFor(async () => (await readdir(join(root, "queue/queue"))).length === 4, "four heavy steps waiting for memory");
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      expect((await running()).size).toBe(2);
+
+      // A light worker starts and finishes while the heavy steps still wait.
+      const light = await owner.dispatchTask(f.home.sessionId, { taskId: "light-7", intent: "Light work 7", target: f.cwd });
+      expect((await owner.status()).workers).toEqual({ running: 7 });
+      const lightStarted = performance.now();
+      expect((await light.completion).terminalEvidence).toMatchObject({ outcome: "final" });
+      const lightSeconds = (performance.now() - lightStarted) / 1000;
+      expect(await readFile(join(root, "light-7"), "utf8")).toBe("done\n");
+      expect((await readdir(join(root, "queue/queue"))).length).toBe(4);
+
+      // Release heavy steps as they run: never more than two at once, every one runs.
+      let maxConcurrent = 0;
+      const released = new Set<string>();
+      while (released.size < 6) {
+        const live = await running();
+        maxConcurrent = Math.max(maxConcurrent, live.size);
+        const next = [...live].find(id => !released.has(id));
+        if (next) { released.add(next); await writeFile(join(root, `release-${next}`), ""); }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      const settled = await Promise.all(handles.map(handle => handle.completion));
+      expect(settled.map(task => task.terminalEvidence?.outcome)).toEqual(Array(6).fill("final"));
+      expect(maxConcurrent).toBe(2);
+      expect((await events()).filter(line => line.startsWith("start"))).toHaveLength(6);
+      await waitFor(async () => (await owner.status()).workers.running === 0, "workers settle");
+      evidence.push({ case: "workers-uncapped-heavy-by-memory", workers: 7, maxConcurrentHeavy: maxConcurrent, lightSeconds,
+        gatewayPeakRssMb: Math.round(peakRss / 2 ** 20), hostLowestFreeMb: Math.round(lowestFree / 2 ** 20), heavyOrder: await events() });
+    } finally {
+      clearInterval(sampler);
+      // Releasing every step lets any heavy-queue process still waiting exit before the root goes.
+      for (let id = 1; id <= 6; id++) await writeFile(join(root, `release-${id}`), "").catch(() => {});
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("starts a worker at once under critical host pressure", async () => {
     const f = await fixture();
     const owner = f.registry.homeOwner();
-    const workers = gatedWorkers(f);
-    const handles = [];
-    for (let id = 1; id <= 4; id++) handles.push(await workers.run(id));
-    expect(handles[3]!.queuePosition).toBe(1);
-    await (owner as any).tasks.stop({ taskId: "budget-4", operationId: "queued" });
-    const stopped = await handles[3]!.completion;
-    expect(stopped).toMatchObject({ lifecycle: "terminal", sessionId: null, operationId: null,
-      terminalEvidence: { outcome: "interrupted", reason: "stopped-before-start" } });
-    expect((await owner.status()).workers).toEqual({ running: 3, queued: 0, limit: 3 });
-    for (const id of [1, 2, 3]) await workers.finish(id);
-    await Promise.all(handles.slice(0, 3).map(handle => handle.completion));
-    expect(workers.started).toEqual(["1", "2", "3"]);
-    evidence.push({ case: "worker-budget-stop-waiting", reason: stopped.terminalEvidence?.reason, started: workers.started });
-  }, 60_000);
-
-  it("holds a waiting start under critical host pressure and starts it when pressure falls", async () => {
-    const f = await fixture();
-    const owner = f.registry.homeOwner();
-    const workers = gatedWorkers(f);
-    const load = vi.spyOn(os, "loadavg").mockReturnValue([os.cpus().length * 4, 0, 0]);
-    const handle = await workers.run(1);
-    expect(handle.queuePosition).toBe(1);
+    vi.spyOn(os, "loadavg").mockReturnValue([os.cpus().length * 4, 0, 0]);
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const handle = await owner.dispatchTask(f.home.sessionId, { taskId: "pressured", intent: "Work under pressure", target: f.cwd });
+    expect(typeof handle.sessionId).toBe("string");
     const status = await owner.status();
     expect(status.hostPressure.level).toBe("critical");
-    expect(status.workers).toEqual({ running: 0, queued: 1, limit: 3 });
-    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.queue", decision: "deferred-pressure", level: "critical" }));
-    expect(f.signals).toContainEqual(expect.objectContaining({ event: "host.pressure", level: "critical" }));
-    load.mockReturnValue([0, 0, 0]);
-    await waitFor(() => workers.started.length === 1, "the waiting task starts once pressure falls", { boundMs: 15_000 });
-    await workers.finish(1);
-    expect((await handle.completion).terminalEvidence?.outcome).toBe("final");
-    evidence.push({ case: "worker-budget-pressure", deferred: "critical", started: workers.started });
-  }, 60_000);
-
-  // #1000: utilisation over the few milliseconds after a start is mostly the reading tick
-  // itself, so it read 0.94 to 0.96 on an idle process. A status read cached that as
-  // `critical` and the next dispatch queued with no session, which Home E2Es then failed
-  // to acquire. Load is pinned so only the utilisation input decides the level.
-  it("starts a restarted Gateway's first task at once: a few-millisecond utilisation window is not host pressure", async () => {
-    const f = await fixture();
-    const reply = (context: unknown) => JSON.stringify(context).includes("First work after start")
-      ? fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }) : fauxAssistantMessage("Home reply");
-    f.faux.setResponses([reply, reply]);
-    vi.spyOn(os, "loadavg").mockReturnValue([0, 0, 0]);
-    // One Home turn first, so Home's chat is on disk for the restarted Gateway.
-    await (await f.registry.acquire(f.home.sessionId)).prompt("Hello");
-    const cold = await f.restart();
-    const owner = cold.homeOwner();
-    // Synchronous startup work just before the first read, as a starting Gateway does.
-    const busyUntil = performance.now() + 20;
-    while (performance.now() < busyUntil) { /* the reading tick stays busy */ }
-    expect((await owner.status()).hostPressure.level).toBe("normal");
-    const handle = await owner.dispatchTask(f.home.sessionId, { taskId: "first-after-start", intent: "First work after start", target: f.cwd });
-    expect(handle).toMatchObject({ queuePosition: null, sessionId: expect.any(String) });
-    expect(f.signals).not.toContainEqual(expect.objectContaining({ event: "home.task.queue", decision: "deferred-pressure" }));
     expect((await handle.completion).terminalEvidence).toMatchObject({ outcome: "final" });
-    evidence.push({ case: "worker-budget-start-window", started: handle.sessionId !== null });
-  }, 60_000);
-
-  it("settles a waiting task at restart without replaying it", async () => {
-    const f = await fixture();
-    const workers = gatedWorkers(f);
-    for (let id = 1; id <= 4; id++) await workers.run(id);
-    for (const id of [1, 2, 3]) await workers.finish(id);
-    const recovered = await f.restart();
-    const task = await (recovered.homeOwner() as any).tasks.store.read("budget-4");
-    expect(task).toMatchObject({ lifecycle: "terminal", sessionId: null, terminalEvidence: { outcome: "unknown", reason: "cold-queued-not-started" } });
-    expect(workers.started).not.toContain("4");
-    evidence.push({ case: "worker-budget-restart", reason: task.terminalEvidence.reason });
+    evidence.push({ case: "worker-starts-under-pressure", level: status.hostPressure.level });
   }, 60_000);
 });
 
@@ -1317,7 +1306,7 @@ describe("Home task production dispatch", () => {
       .rejects.toMatchObject({ code: "conflict", details: { reason: "sealed-chapter" } });
     const upload = await uploads.save("notes.txt", "text/plain", Buffer.from("attached notes"));
     // Extension commands never carry attachments, on the logical route as well.
-    await expect(service.invoke(client, "home.prompt", { commandId: "extension-attachment-command", text: "", uploadIds: [upload.id], resourceInvocation: { source: "extension", name: "goal", arguments: "" } }))
+    await expect(service.invoke(client, "home.prompt", { commandId: "extension-attachment-command", text: "", uploadIds: [upload.id], resourceInvocations: [{ source: "extension", name: "goal", arguments: "" }] }))
       .rejects.toMatchObject({ code: "invalid_request" });
     f.faux.setResponses([fauxAssistantMessage("attachment received")]);
     const accepted = await service.invoke(client, "home.prompt", { commandId: "attachment-command-one", text: "Review the attachment", uploadIds: [upload.id] }) as unknown as { sessionId: string; operationId: string; logicalSessionId: string };

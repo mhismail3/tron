@@ -124,7 +124,7 @@ The exact bounded body is:
 `category` is allowlisted: its only value is `settings-approval`, accepted only
 with `notificationKind` `waiting`, and the relay maps it to `aps.category` so
 the iOS app shows its Approve and Decline actions (Gateway
-[settings-model.md decision 35](../gateway/docs/settings-model.md#101-decisions)).
+[settings-model.md decision 35](../gateway/docs/settings-model.md#81-decisions)).
 Any other value, or the field on another kind, is `invalid_request`.
 
 `GET /v3/capabilities` is unauthenticated, reads no state, and returns
@@ -212,9 +212,10 @@ npm run build:sandbox   # isolated sandbox-config dry-run only
 ```
 
 Tests run in the Workers Vitest pool and exercise the real SQLite Durable Object
-boundary. Outbound APNs requests are intercepted locally. CI runs the pinned install,
-type check, tests, production dependency audit, and production-config Wrangler dry run;
-it never receives deployment credentials or deploys either environment.
+boundary. Outbound APNs requests are intercepted locally. Hosted CI
+(`scripts/tron ci relay.check`) runs the pinned install, type check, production-config
+Wrangler dry run and tests; it never receives deployment credentials or deploys either
+environment.
 
 `package.json` `overrides` exist only to clear security advisories in the
 development toolchain, so that `npm audit` stays clean (#489):

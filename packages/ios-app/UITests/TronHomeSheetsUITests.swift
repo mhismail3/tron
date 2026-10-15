@@ -9,6 +9,62 @@ final class TronHomeSheetsUITests: XCTestCase {
     private var timings: [String: Double] = [:]
 
     @MainActor
+    func testHostPressureNormalAndIdleWorkers() {
+        checkHostStatus(level: "Normal", workers: "0 workers running", arguments: [])
+    }
+
+    @MainActor
+    func testHostPressureElevatedAndSingleWorkerInDarkMode() {
+        checkHostStatus(level: "Elevated", workers: "1 worker running",
+                        arguments: ["-host-elevated", "-home-dark"])
+    }
+
+    @MainActor
+    func testHostPressureCriticalAndUncappedWorkersAtLargeText() {
+        checkHostStatus(level: "Critical", workers: "7 workers running",
+                        arguments: ["-host-critical", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+    }
+
+    @MainActor
+    private func checkHostStatus(level: String, workers: String, arguments: [String]) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"] + arguments
+        app.launch(); defer { app.terminate() }
+        let home = app.buttons["home-pinned-row"]
+        XCTAssertTrue(home.waitForExistence(timeout: 15))
+        XCTAssertTrue(home.label.contains("Host \(level.lowercased())"), home.label)
+        XCTAssertTrue(home.label.contains(workers), home.label)
+        let dashboard = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        dashboard.name = "931-\(level)-dashboard"
+        dashboard.lifetime = .keepAlways
+        add(dashboard)
+        home.tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(ring.waitForExistence(timeout: 15))
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        open(app, ring, ready: "home-manage-state", name: "host-status")
+        expand(app, done: "home-sheet-done-manage")
+        let host = element(app, "home-manage-host")
+        // Hittable alone can mean only the title is visible at accessibility
+        // sizes. Bring the whole row, including the status pill, above the edge.
+        for _ in 0..<8 where !host.isHittable || host.frame.maxY > app.frame.maxY - 60 { app.swipeUp() }
+        XCTAssertTrue(host.isHittable, app.debugDescription)
+        XCTAssertLessThanOrEqual(host.frame.maxY, app.frame.maxY - 60, "The complete host status remains visible")
+        XCTAssertTrue(host.label.contains(workers), host.label)
+        XCTAssertTrue(host.label.contains(level), host.label)
+        XCTAssertFalse(host.label.lowercased().contains("queued"), "Home workers have no queue")
+        let memory = element(app, "home-manage-memory-browser")
+        if memory.isHittable {
+            XCTAssertEqual(host.frame.minX, memory.frame.minX, accuracy: 1, "Host uses the shared row alignment")
+            XCTAssertEqual(host.frame.width, memory.frame.width, accuracy: 1, "Host uses the shared row width")
+        }
+        XCTAssertGreaterThanOrEqual(host.frame.minX, 0)
+        XCTAssertLessThanOrEqual(host.frame.maxX, app.frame.maxX)
+        keep("931-\(level)-manage")
+    }
+
+    @MainActor
     func testHomeSheetsJourney() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -137,6 +193,8 @@ final class TronHomeSheetsUITests: XCTestCase {
         let tasksTitle = app.navigationBars.staticTexts["Tasks"].firstMatch.frame, firstTask = element(app, "home-task-active").frame
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == 'Tasks'")).allElementsBoundByIndex
             .filter { $0.frame.minY > tasksTitle.maxY && $0.frame.maxY <= firstTask.minY }.isEmpty, "No section header repeats the title")
+        XCTAssertTrue(element(app, "home-task-active").label.contains("Validating settings changes"))
+        XCTAssertFalse(element(app, "home-task-active").label.contains("Optional("), "The timestamp renders as a relative date, not Swift debug text")
         keep("08-tasks")
         open(app, element(app, "home-task-active"), ready: "home-task-detail", name: "task")
         expand(app, done: "home-sheet-done-task")
@@ -152,6 +210,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         let brief = element(app, "home-task-brief")
         XCTAssertTrue(brief.exists)
         XCTAssertFalse(app.buttons["Show all"].exists, "The brief never expands in place")
+        let checkin = element(app, "home-task-checkin")
+        XCTAssertTrue(checkin.exists)
+        XCTAssertTrue(checkin.label.contains("Latest check-in") && checkin.label.contains("Gateway journey passed") && checkin.label.contains("Review native screenshots"), checkin.label)
         keep("09-task-detail")
         open(app, element(app, "home-task-brief-view-all"), ready: "home-reading-text", name: "brief")
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'settings model doc'")).firstMatch.exists, "View All shows the whole brief")
@@ -171,8 +232,9 @@ final class TronHomeSheetsUITests: XCTestCase {
     }
 
     /// Home's composer offers the user-level skills and prompt templates its Gateway
-    /// catalog lists, through the same `@` and `/` pickers as an ordinary chat, and an
-    /// inserted prompt is sent on the logical Home route as that message's resource (#936).
+    /// catalog lists, through the same `@` and `/` pickers as an ordinary chat, and the
+    /// inserted skills and prompts are sent together, in pick order, on the logical
+    /// Home route as that message's resources (#936, #311).
     @MainActor
     func testHomeComposerOffersUserSkillsAndPrompts() {
         continueAfterFailure = false
@@ -198,14 +260,33 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("11-home-composer-prompts")
 
         prompt.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["composer.staged-chip"].waitForExistence(timeout: 5), app.debugDescription)
+        let stagedChips = app.descendants(matching: .any).matching(identifier: "composer.staged-chip")
+        XCTAssertTrue(stagedChips.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+
+        // Each pick appends a chip in order; picking a staged resource again adds
+        // nothing, and one chip is removed alone (#311).
+        func pick(_ trigger: String, _ name: String) {
+            composer.typeText(trigger)
+            let entry = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS 'User'", name)).firstMatch
+            XCTAssertTrue(entry.waitForExistence(timeout: 5), app.debugDescription)
+            entry.tap()
+        }
+        pick("@", "wordcraft")
+        pick("/", "weekly-review")
+        pick("/", "daily-brief")
+        pick("@", "jev")
+        XCTAssertTrue(waitFor(stagedChips, count: 4, timeout: 5), app.debugDescription)
+        app.buttons["Remove resource, Jev"].tap()
+        XCTAssertTrue(waitFor(stagedChips, count: 3, timeout: 5), app.debugDescription)
         composer.typeText("inbox")
-        keep("12-home-composer-prompt-inserted")
+        keep("12-home-composer-resources-inserted")
         let send = app.buttons["Send message"]
         XCTAssertTrue(waitFor(send, "enabled == true", timeout: 5))
         send.tap()
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-prompt-route"], "label CONTAINS 'prompt-route:home.prompt:prompt:daily-brief:inbox'"),
+        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-prompt-route"],
+                              "label CONTAINS 'prompt-route:home.prompt:prompt:daily-brief+skill:wordcraft+prompt:weekly-review:inbox'"),
                       app.staticTexts["fixture.home-prompt-route"].label)
+        keep("13-home-composer-resources-sent")
     }
 
     /// Every Home tool call opens its purpose-built detail from the Home transcript, and
@@ -272,6 +353,7 @@ final class TronHomeSheetsUITests: XCTestCase {
             self.assertMarkdown(self.element(app, "home-tool-text-report"), contains: "PR #773")
         }
         toolSheet(app, "task-status", chip: "Task, Completed", index: 2, outcome: "Active") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Latest check-in").label.contains("Gateway journey passed"))
             XCTAssertTrue(self.element(app, "home-tool-row-Tokens").label.contains("in"))
             XCTAssertTrue(self.element(app, "home-tool-row-Subagents").label.contains("3 started"))
             XCTAssertTrue(self.element(app, "home-tool-row-Model").label.contains("Claude Opus 5.5"))
@@ -523,6 +605,10 @@ final class TronHomeSheetsUITests: XCTestCase {
 
     private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
+    }
+
+    private func waitFor(_ query: XCUIElementQuery, count: Int, timeout: TimeInterval = 10) -> Bool {
+        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == %d", count), object: query)], timeout: timeout) == .completed
     }
 
     /// The average color of an element's saturated (inked) pixels: a title's

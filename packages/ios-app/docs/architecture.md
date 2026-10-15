@@ -208,7 +208,17 @@ model and context window, Home context, memory (settings, browser, pause/resume)
 bounded chapter metadata, tasks and permissions, and disable/check-completion —
 and opens each existing Home destination as a managed child sheet with its own
 read owner. `HomeStatusLinePresentation` is the one source of the sheet's state
-and memory lines. Mutations go through the `HomeMutationCoordinator` authority.
+and memory lines, and the host/worker summary. The pinned Home row shows the
+Gateway's `home.status.hostPressure.level` and `workers.running`; Manage Home's
+rows card shows the same facts in a read-only `TronSettingsRow` with a
+`TronStatusPill` (normal/emerald, elevated/warning, critical/error). These fields
+are required process facts in the typed status projection, including before Home
+is designated; they use the existing managed read and retirement fences. iOS
+never samples the Mac or counts session rows to derive them. Home workers have
+no queue or cap (#1033); the tooling's memory-aware heavy-step queue is separate
+and is not presented as queued Home workers. The Home dashboard's floating
+button and existing sections remain unchanged; its context ring opens Manage
+Home. Mutations go through the `HomeMutationCoordinator` authority.
 The sheet subsumed the former Home header bar and its overflow menu (#740); the
 composer's Stop is the only Stop (#811), and Manage Home has no Stop row. The
 Chapters child sheet reads `home.chapterList` (gated on `home-chapter-list.v1`),
@@ -720,8 +730,7 @@ and one read per actual invalidation rather than feeding its own reload loop.
 construction, and trust inspection/mutation; it keeps no settings projection. Settings are read
 only through `settings.resolve` (the generic renderer's `resolveForRenderer`, or one resolve for a
 single served key, reading `value` or the target's own layer through `ResolvedSetting.value(at:)`)
-and written only through the Gateway's one change path, `settings.change` (gateway
-`docs/settings-model.md`). Hand-built screens send schema keys with `SettingsTarget.keyChange`, so
+and written only through the Gateway's one change path, `settings.change` (`packages/gateway/docs/settings-model.md`). Hand-built screens send schema keys with `SettingsTarget.keyChange`, so
 iOS holds no pi-document path table. A trust decision is the `permissions.projectTrust` key for the
 project target, and its change outcome carries the resulting trust inspection; clearing a saved
 decision is an `unset`, while `true` and `false` remain distinct decisions. It uses the shared
@@ -735,7 +744,7 @@ decisions. `TronProjectTrustUITests` exercises the real controls against the `HO
 `HostedProjectTrustFixture`: an older accepted receipt and older inspection value/error cannot replace
 a later canonical Block, with ordered/single decisions, foreground receipt reconciliation and a
 replacement Mac with the same cwd as controls. The fixture changes no actual trust or resources.
-The settings risk gate's iPhone half (gateway `docs/settings-model.md` 5.4 and 5.5) has the same
+The settings risk gate's iPhone half (`packages/gateway/docs/settings-model.md` 5.4 and 5.5) has the same
 owner. `SettingsApprovalsSection` shows pending changes in Manage Home (Home's and its task
 workers') and Manage Session (this chat's): it re-reads `settings.approvals` on the
 `settings.approvalsChanged` revision and decides with `settings.decide` through the receipt
@@ -791,7 +800,7 @@ Changes separates disposable history errors from action failures. An undo confli
 
 `SettingsValueEditors` supplies the generic numeric-map list editor as well as secret and string-list editors. A numeric map takes every field name, label and numeric range from the served metadata; unknown fields or unsafe numeric representations stay read-only. Save sends a typed object through the ordinary preview/receipt path, and dismissal never submits a draft. The existing secret/list E2E journey also checks offered bounds, untouched-field preservation and numeric-map save/reopen/cancel; the Gateway journey proves an unoffered field cannot erase the stored map. Project settings reuse the scoped package and Hooks owners rather than returning to a Mac/Project picker. Settings › Projects opens the existing workspace browser, so a folder needs no chat to acquire defaults. Its sheet handoff samples current presentation authority at dismissal (not a cached active flag) and retains the exact Mac identity. New Session resolves its model default through the same schema and shows the shared served source badge; choosing an override removes that default-source claim. The dashboard/no-chat journey proves a Project default remains inherited at creation. Manage Session shows automatic-compaction policy once, in the generic Context group; manual Compact Now remains a separate receipt-owning Context action rather than a repeated policy footer in the model card.
 
-The generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is
+The generic settings renderer (`packages/gateway/docs/settings-model.md` F1, 7.5, 7.5a) is
 `SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
 in `TronPresentation.swift`. It restores the pre-schema Settings design language
 (#876): primary surfaces are titled section cards, each with that section's glyph and
@@ -1759,7 +1768,7 @@ with the same bracketed line. The idle period is the Gateway-declared
 
 ### Mac Terminal
 
-Settings › Accounts › **Mac Terminal** opens the session terminal's own chrome and
+Settings › Tools & Diagnostics › **Mac Terminal** opens the session terminal's own chrome and
 emulator (`TerminalSheetChrome`, `TerminalSurface`, the control bar and extended
 keys) on a login shell on the paired Mac, reached with SSH through macOS Remote
 Login over Tailscale. Only enrollment and removal use the Gateway (its contract is
@@ -1809,7 +1818,16 @@ also checks Project/catalog sheet ownership while proving inheritance. Layout
 assertions use bounded tolerances only for the identified width/chrome risks;
 screenshots are diagnostic evidence, not substitutes for successful interaction.
 State-boundary integration tests supplement these journeys where the native
-fixture cannot establish store/runtime behavior.
+fixture cannot establish store/runtime behavior. Nested native menus are covered
+by `TronSheetTintUITests`: Settings → Sessions changes and restores retention,
+and Manage Session → Session History opens navigation, fork and bookmark
+presentations at sheet depth two in light and dark. These controls work on the
+iOS 26.5 simulator without changing production presentation ownership (#877).
+The earlier Manage Session → Settings → Sessions route is no longer current:
+the chat gear opens Mac/iPhone Settings directly, while Manage Session owns
+Chat Settings. Do not infer a platform-wide menu failure or rewrite working
+controls from the historical report; physical-device behavior remains a separate
+qualification. Schema choices continue to use the shared picker-sheet design.
 
 Shared Settings conventions (#939):
 
@@ -1834,12 +1852,14 @@ Shared Settings conventions (#939):
   `TronTypography.settingsRowSubtext`, the size settings rows and
   `TronSettingsCaption` use.
 - Settings opens with Accounts (Connections, Model Providers, Custom Models,
-  Connected Services), then Agent, Tools & Extensions and, last, This iPhone (Push
-  Notifications, Appearance, Sessions, Logs, Setup; #956). `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst`
+  Connected Services), then Agent, Tools & Extensions, This iPhone (Push
+  Notifications, Appearance, Sessions; #956) and, last, Tools & Diagnostics (Mac
+  Terminal, Experimental, Setup, Logs; #1030). `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst`
   proves the order, pill wording, Done commit and add-value guidance against a real
   Gateway, and keeps one screenshot per sheet; the hosted
   `TronSmokeUITests/testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor` asserts
-  the top-level group membership and order.
+  the top-level group membership and order, that each moved row is the shared
+  row in its card, and that each still opens its own sheet.
 
 `ProjectSettingsContent` is the shared Project card behind Settings' Project row
 (from a chat) and Projects row (from the dashboard), the dashboard workspace
@@ -1859,11 +1879,15 @@ a root or replays audit.
 Settings (the gear) is this Mac and this iPhone. Its toolbar holds Notifications
 and Changes beside each other; the sheet is one row per destination in the shared `SettingsGroupKind` palette: Accounts (indigo:
 Connections, Model Providers, Custom Models, Connected Services), Agent (purple: Model, Context, Run,
-Permissions), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks) and, last, This iPhone
-(emerald: Push Notifications, Appearance, Sessions, Logs, Setup with Import). This iPhone gathers the
-phone's own surfaces; Push Notifications' policy, Logs' Gateway records and export, and Setup's session
-folder and telemetry still live on the Mac, so the group makes no device-only caption. Schema sections the
-app does not place join More, above This iPhone. Every sheet a row opens inherits its card's accent
+Permissions), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks), This iPhone
+(emerald: Push Notifications, Appearance, Sessions) and, last, Tools & Diagnostics (slate: Mac Terminal,
+Experimental, Setup with Import, Logs). This iPhone gathers the phone's own surfaces; Push Notifications'
+policy still lives on the Mac, so the group makes no device-only caption. Tools & Diagnostics holds the
+utilities that span both: Mac Terminal reaches the Mac without the Gateway, Experimental is this iPhone's,
+and Logs' Gateway records and Setup's session folder and telemetry live on the Mac; each row's summary
+names its scope. These groups are the app's (`SettingsGroupKind`), not Gateway-declared: the Gateway serves
+schema sections, which the app places in them. Schema sections the app does not place join More, above
+This iPhone. Every sheet a row opens inherits its card's accent
 through `TronProgressiveSheetLink`, and a sheet's toolbar icons take the same tint as its title: every toolbar
 action uses `tronToolbarAction(accent:role:)` with the accent the sheet gives `TronSheetTitle`,
 and both resolve through `TronSheetTint` (inherited Settings tint, else the sheet's accent, else
@@ -2114,6 +2138,10 @@ Document-style sheets use the shared `TronDocumentSheet` for the standard
 the concrete content surface owns any custom blur overlay. Default detents remain
 unchanged; a caller may explicitly provide an initial detent, in which case the
 shared owner keeps the other configured detents available for native dragging.
+Its navigation chrome is the shared `tronDocumentSheetChrome` modifier. Content
+that owns its own stacks (an interpreted Swift app whose root is a TabView) uses
+`hostsNavigation: false` and applies that modifier at each stack root, so the
+chrome is never nested inside a second NavigationStack.
 Video display sheets open at medium with large available and use native safe-area
 placement without a content-level custom blur surface. Playback at medium and
 expansion to large are covered by hosted UI tests. Paused-control icon rendering
@@ -3232,17 +3260,21 @@ The Tasks sheet uses the task contract in
 `packages/gateway/docs/home.md` (task persistence, authorization, task recovery,
 inbox/redelivery and shared control). `home.taskList` is a bounded newest-first
 summary, not a native task catalog; `home.taskStatus` supplies exact detail and
-execution authority. One page replaces another. Dates are store-reported Unix
+execution authority. The latest check-in is also shown in a task-status tool result,
+using the same progress text and shared row owner. Historical canonical tool results
+without a check-in field remain readable; absence means no recorded progress, not
+invalid task state. One page replaces another. Dates are store-reported Unix
 milliseconds; spend shows the task's input and output token counts, or is unavailable when the Gateway reports none. Neither
 an unknown outcome nor a last assistant reply is labeled success.
 
 `HomeTaskSheet` uses the same managed chrome, glass cards, typography, loading,
 placeholder and action owners as the other Home sheets. Task rows are standard
 rows: a state glyph, a title (the worker's name, else the brief's first line,
-else the project), the project and relative update time, and a state pill, with
-no spend. The task detail shows a header card (title, state pill, project and
+else the project), the project and relative update time, the latest check-in step
+and its own relative timestamp when present, and a state pill, with no spend. The task detail shows a header card (title, state pill, project and
 relative dates), the Brief group (six lines, then Show all), the result, the
-Worker group (model, subagent launches, token spend when reported, and live runs
+Worker group (latest durable check-in with timestamp, step/done/next and optional
+blocker using the shared multiline settings row; model, subagent launches, token spend when reported, and live runs
 with their state pills), and Redeliver when offered. Its toolbar's Open Session
 opens the worker's own chat, where the task is stopped or steered (#911); the
 detail has no Stop, Steer or Reload. Task

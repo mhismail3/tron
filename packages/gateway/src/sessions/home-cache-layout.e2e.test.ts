@@ -238,7 +238,7 @@ function sharedViewBytes(previous: Captured, next: Captured): { shared: number; 
   return { shared: Buffer.byteLength(a.slice(0, index)), previous: Buffer.byteLength(a) };
 }
 
-describe.sequential("Tron Home prompt caching on the wire", () => {
+describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
   it("OpenAI Responses preserves Home's stable prefix, tool loop and cache affinity", async () => {
     const f = await fixture(true);
     await f.service.invoke(client, "home.designate", { commandId: "responses-designate", model: MODEL });

@@ -32,6 +32,7 @@ const BUILD_INPUT_FILES = [
   "scripts/gateway_protocol_contract.py",
   "scripts/hash-npm-runtime.py",
   "scripts/install-ci-tools.sh",
+  "scripts/tron-node",
   "scripts/validate-push-service-config.sh",
   "scripts/verify-gateway-protocol-contract.py",
 ];

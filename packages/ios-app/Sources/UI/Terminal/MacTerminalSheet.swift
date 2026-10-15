@@ -1,7 +1,7 @@
 import SwiftUI
 import TronMobileCore
 
-/// The Settings › Accounts row. Mac Terminal is the terminal sheet itself,
+/// The Settings › Tools & Diagnostics row. Mac Terminal is the terminal sheet itself,
 /// presented directly like Manage Session's terminal, not wrapped in a
 /// settings destination's navigation stack and Done.
 struct MacTerminalSettingsRow: View {
@@ -25,7 +25,7 @@ struct MacTerminalSettingsRow: View {
     }
 }
 
-/// Mac Terminal (Settings › Accounts): a login shell on the paired Mac over
+/// Mac Terminal (Settings › Tools & Diagnostics): a login shell on the paired Mac over
 /// Tailscale through macOS Remote Login, in the session terminal's chrome and
 /// emulator. Only enabling and removing it use the Gateway; the shell itself
 /// connects straight to the Mac, so it works while Tron.app or the Gateway is

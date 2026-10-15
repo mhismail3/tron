@@ -93,11 +93,11 @@ describe("Home system prompt at the request seam", () => {
     await waitFor(() => requests.length === 1, "plain request");
     await settle("plain settled");
     await service.invoke(client, "home.prompt", { commandId: "composer-skill-0001", text: "apply it",
-      resourceInvocation: { source: "skill", name: "global-skill", arguments: "apply it" } });
+      resourceInvocations: [{ source: "skill", name: "global-skill", arguments: "" }] });
     await waitFor(() => requests.length === 2, "skill request");
     await settle("skill settled");
     await service.invoke(client, "home.prompt", { commandId: "composer-prompt-0001", text: "argument",
-      resourceInvocation: { source: "prompt", name: "global-prompt", arguments: "argument" } });
+      resourceInvocations: [{ source: "prompt", name: "global-prompt", arguments: "" }] });
     await waitFor(() => requests.length === 3, "prompt request");
     await settle("prompt settled");
 
@@ -106,7 +106,8 @@ describe("Home system prompt at the request seam", () => {
     expect(requests[1]!.user).toContain('<skill name="global-skill"');
     expect(requests[1]!.user).toContain("GLOBAL SKILL BODY");
     expect(requests[1]!.user.endsWith("apply it")).toBe(true);
-    expect(requests[2]!.user).toBe("GLOBAL PROMPT BODY argument");
+    // A prompt chip expands without arguments; the typed text follows it once (#311).
+    expect(requests[2]!.user).toBe("GLOBAL PROMPT BODY\n\nargument");
     // Home's system prompt is unchanged: no skill or prompt is listed or loaded into it.
     for (const request of requests) {
       expect(request.system).toHaveLength(1);

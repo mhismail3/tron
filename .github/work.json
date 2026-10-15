@@ -157,7 +157,7 @@
     "defaultBranchType": "feat"
   },
   "verify": {
-    "prelude": "export PATH=\"$HOME/.nvm/versions/node/v$(cat .node-version)/bin:$PATH\" PYTHONDONTWRITEBYTECODE=1",
+    "prelude": "TRON_NODE=\"$(scripts/tron-node)\"; export PATH=\"${TRON_NODE%/*}:$PATH\" PYTHONDONTWRITEBYTECODE=1",
     "scrubCommand": "scripts/personal-info-guard.sh --stdin"
   },
   "land": {

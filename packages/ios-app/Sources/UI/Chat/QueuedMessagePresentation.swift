@@ -432,7 +432,7 @@ struct QueuedMessageRow: View {
     }
 
     private var displayText: String {
-        UserPromptPresentationPolicy.promptDisplayText(message.resourceInvocation) ?? message.text
+        message.text
     }
 
     var body: some View {
@@ -465,9 +465,7 @@ struct QueuedMessageRow: View {
     private var card: some View {
         let attachmentChips = QueuedMessageAttachmentPresentation.chips(for: message)
         return VStack(alignment: .trailing, spacing: 4) {
-            if let resource = message.resourceInvocation, !resource.isExtensionCommand {
-                CanonicalResourceChip(resource: resource)
-            }
+            CanonicalResourceChips(resources: message.resourceInvocations ?? [])
             if let parsed = ChatAnnotationEnvelope.parse(displayText) {
                 ChatSentAnnotationChips(annotations: parsed.annotations)
             }

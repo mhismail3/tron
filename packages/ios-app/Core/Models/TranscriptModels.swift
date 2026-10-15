@@ -288,14 +288,15 @@ package struct ChatSemanticMetadata: Codable, Hashable, Sendable {
     package let operationId: String?
     let sequence: Int
     package let lifecycle: InvocationLifecycle?
-    package let resourceInvocation: ComposerResourceInvocation?
+    /// Ordered resources the message invoked: skills and prompts, or one extension command.
+    package let resourceInvocations: [ComposerResourceInvocation]?
     package let submittedText: String?
     /// Present only on a command row a fork inherited, whose lifecycle settled in its origin session.
     package let settledInOriginSession: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case version, direction, contextEffect, delivery, visibility, kind, origin,
-             invocationId, operationId, sequence, lifecycle, resourceInvocation, submittedText,
+             invocationId, operationId, sequence, lifecycle, resourceInvocations, submittedText,
              settledInOriginSession
     }
 
@@ -311,14 +312,14 @@ package struct ChatSemanticMetadata: Codable, Hashable, Sendable {
         operationId: String? = nil,
         sequence: Int,
         lifecycle: InvocationLifecycle? = nil,
-        resourceInvocation: ComposerResourceInvocation? = nil,
+        resourceInvocations: [ComposerResourceInvocation]? = nil,
         submittedText: String? = nil,
         settledInOriginSession: Bool? = nil
     ) {
         self.version = version; self.direction = direction; self.contextEffect = contextEffect
         self.delivery = delivery; self.visibility = visibility; self.kind = kind; self.origin = origin
         self.invocationId = invocationId; self.operationId = operationId; self.sequence = sequence
-        self.lifecycle = lifecycle; self.resourceInvocation = resourceInvocation; self.submittedText = submittedText
+        self.lifecycle = lifecycle; self.resourceInvocations = resourceInvocations; self.submittedText = submittedText
         self.settledInOriginSession = settledInOriginSession
     }
 
@@ -335,14 +336,15 @@ package struct ChatSemanticMetadata: Codable, Hashable, Sendable {
         operationId = try values.decodeIfPresent(String.self, forKey: .operationId)
         sequence = try values.decode(Int.self, forKey: .sequence)
         lifecycle = try values.decodeIfPresent(InvocationLifecycle.self, forKey: .lifecycle)
-        resourceInvocation = try values.decodeIfPresent(ComposerResourceInvocation.self, forKey: .resourceInvocation)
+        resourceInvocations = try values.decodeIfPresent([ComposerResourceInvocation].self, forKey: .resourceInvocations)
         submittedText = try values.decodeIfPresent(String.self, forKey: .submittedText)
         settledInOriginSession = try values.decodeIfPresent(Bool.self, forKey: .settledInOriginSession)
         guard version == 1, sequence >= 0,
               submittedText.map({ $0.utf8.count <= 192 * 1_024 }) ?? true,
               invocationId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,
               operationId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,
-              resourceInvocation.map(\.isTransportValid) ?? true else {
+              resourceInvocations.map({ !$0.isEmpty && $0.count <= ComposerResourceInvocation.maximumMessageResources
+                  && $0.allSatisfy(\.isTransportValid) }) ?? true else {
             throw DecodingError.dataCorruptedError(
                 forKey: .version,
                 in: values,
