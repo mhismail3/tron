@@ -294,6 +294,11 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             approvals.remove(at: index)
             decisions.append("\(approved ? "approved" : "declined"):\(requestID)")
             result = .object(["requestId": .string(requestID), "approved": .bool(approved)])
+        case "session.history.list":
+            result = try JSONValue.encode(SessionHistoryPage(runtimeGeneration: snapshot.runtimeGeneration,
+                nodes: [SessionTreeNode(id: "fixture-prompt", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+                    kind: "message", label: nil, preview: "Nested history prompt", role: .user,
+                    depth: 0, childCount: 0, isCurrentPath: true)], older: nil, newer: nil, totalEntries: 1))
         case "model.list": result = .object(["models": .array([])])
         case "provider.list": result = .object(["providers": .array([])])
         case "session.workspace.inspect": result = .object(["cwd": .string("/workspace"), "exists": .bool(true), "isGitRepository": .bool(false)])
@@ -346,7 +351,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         if hello {
             hello = false
-            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1","session-history-pages.v1"]}"#.utf8)
         }
         if !pending.isEmpty { return pending.removeFirst() }
         return try await withCheckedThrowingContinuation { receiver = $0 }

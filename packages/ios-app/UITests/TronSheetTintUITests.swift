@@ -5,6 +5,8 @@ import XCTest
 /// Knowledge sheets, and Manage Home with a sub-sheet that takes its row's tint.
 /// The paired-device sheet, reachable only with a real Gateway, is covered by
 /// `RealGatewayPairAndChatUITests.testSettingsClarityPillsTextDoneAndAccountsFirst`.
+/// The nested-menu journeys retain the native Settings/History presentations
+/// that #877 reported as inert; both now open on iOS 26.5 without a UI rewrite.
 final class TronSheetTintUITests: XCTestCase {
     @MainActor
     func testSettingsSheetToolbarsTakeTheirTitleTint() {
@@ -42,6 +44,8 @@ final class TronSheetTintUITests: XCTestCase {
             let retention = app.buttons["Show finished subagents"]
             XCTAssertTrue(retention.waitForExistence(timeout: 5), app.debugDescription)
             let previous = retention.value as? String
+            XCTAssertNotNil(previous)
+            assertToolbarTint(app, title: "Sessions")
             retention.tap()
             let choice = app.buttons[previous == "Only active" ? "1 minute" : "Only active"]
             XCTAssertTrue(choice.waitForExistence(timeout: 5), "The control must open at sheet depth two: \(app.debugDescription)")
@@ -51,10 +55,57 @@ final class TronSheetTintUITests: XCTestCase {
             choice.tap()
             XCTAssertTrue(retention.waitForExistence(timeout: 5))
             XCTAssertEqual(retention.value as? String, selected)
+            let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.filter(\.isHittable)
+            XCTAssertEqual(done.count, 1)
+            done.first?.tap()
+            XCTAssertTrue(sessions.waitForExistence(timeout: 5)); sessions.tap()
+            XCTAssertTrue(retention.waitForExistence(timeout: 5))
+            XCTAssertEqual(retention.value as? String, selected, "The value survives reopening Sessions")
             retention.tap()
             let restore = app.buttons[previous ?? "Only active"]
             XCTAssertTrue(restore.waitForExistence(timeout: 5)); restore.tap()
             XCTAssertEqual(retention.value as? String, previous)
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testNestedHistoryMenuOpensEveryDestinationInLightAndDark() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
+            app.launch(); defer { app.terminate() }
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+            app.buttons["Stop session"].tap()
+            let history = app.buttons["Session History"]
+            for _ in 0..<12 where !history.isHittable { app.swipeUp() }
+            XCTAssertTrue(history.isHittable, app.debugDescription); history.tap()
+            let actions = app.buttons["Actions for Nested history prompt"]
+            XCTAssertTrue(actions.waitForExistence(timeout: 10), app.debugDescription)
+            assertToolbarTint(app, title: "Session History")
+            for (action, destination) in [("Edit From This Prompt", "Edit From This Prompt"),
+                                           ("Fork New Session", "Fork Session"), ("Add Bookmark", "Bookmark")] {
+                actions.tap()
+                let menuAction = app.buttons[action]
+                XCTAssertTrue(menuAction.waitForExistence(timeout: 5), app.debugDescription)
+                if action == "Edit From This Prompt" {
+                    let capture = XCTAttachment(screenshot: app.screenshot())
+                    capture.name = "877-history-\(appearance)"; capture.lifetime = .keepAlways; add(capture)
+                }
+                menuAction.tap()
+                if action == "Add Bookmark" {
+                    XCTAssertTrue(app.alerts[destination].waitForExistence(timeout: 5))
+                    XCTAssertTrue(app.alerts[destination].textFields["Label"].exists)
+                    app.alerts[destination].buttons["Cancel"].tap()
+                } else {
+                    XCTAssertTrue(app.navigationBars.staticTexts[destination].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+                    let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.filter(\.isHittable)
+                    XCTAssertEqual(done.count, 1, "Only the current sheet owns Done")
+                    done.first?.tap()
+                }
+                XCTAssertTrue(actions.waitForExistence(timeout: 5), "Dismissal returns to the same history row")
+            }
             app.terminate()
         }
     }
