@@ -206,6 +206,8 @@ enum HostedSwiftAppFixtureSource {
 
     struct ExpensesView: View {
         @EnvironmentObject var store: BudgetStore
+        @Environment(\.dismiss) private var dismiss
+        @State private var planningTrip = false
 
         var body: some View {
             NavigationStack {
@@ -227,6 +229,31 @@ enum HostedSwiftAppFixtureSource {
                     }
                 }
                 .navigationTitle("Expenses")
+                .toolbar {
+                    Button("Plan trip") { planningTrip = true }
+                    Button("Leave app") { dismiss() }
+                }
+                .sheet(isPresented: $planningTrip) {
+                    TripSheet()
+                }
+            }
+        }
+    }
+
+    struct TripSheet: View {
+        @EnvironmentObject var store: BudgetStore
+        @Environment(\.dismiss) private var dismiss
+
+        var body: some View {
+            NavigationStack {
+                Text("A train ticket for 12.25")
+                    .navigationTitle("New trip")
+                    .toolbar {
+                        Button("Save trip") {
+                            store.add(.travel)
+                            dismiss()
+                        }
+                    }
             }
         }
     }
@@ -247,9 +274,25 @@ enum HostedSwiftAppFixtureSource {
                     }
                     Text(String(format: "Total $%.2f across %d expenses", store.total, store.expenses.count))
                         .accessibilityIdentifier("budget.total")
+                    NavigationLink("Biggest expense") {
+                        BiggestView()
+                    }
                 }
                 .navigationTitle("Summary")
             }
+        }
+    }
+
+    struct BiggestView: View {
+        @EnvironmentObject var store: BudgetStore
+        @Environment(\.dismiss) private var dismiss
+
+        var body: some View {
+            VStack {
+                Text(store.expenses.sorted { $0.amount > $1.amount }[0].title)
+                Button("Back to summary") { dismiss() }
+            }
+            .navigationTitle("Biggest")
         }
     }
     """#
