@@ -177,9 +177,10 @@ describe("Home memory browser at scale", () => {
             return result;
           } catch (error) {
             report.failedStage = currentStage;
-            const candidate = error as { code?: unknown; data?: { reason?: unknown } };
+            const candidate = error as { code?: unknown; details?: { reason?: unknown; cause?: unknown } };
             report.failedCode = candidate.code;
-            report.failedReason = candidate.data?.reason;
+            report.failedReason = candidate.details?.reason;
+            report.failedCause = candidate.details?.cause;
             throw error;
           }
         };
@@ -282,6 +283,23 @@ describe("Home memory browser at scale", () => {
       markStage("reprove after navigation");
       expect(await view(g, { limit: 30 })).toEqual(navigated);
 
+      // A start without its durable catalog document (the first start after an upgrade, or
+      // a corrupt document) publishes its first catalog cut only after reconciling the
+      // folder. A browser read that arrives first must wait for that cut: it read the
+      // missing cut as a sealed chapter with no file and refused the read (#968).
+      const beforeColdCatalog = await view(g, { limit: 30 });
+      markStage("close for a restart without the catalog document");
+      await closeGateway(g);
+      await rm(join(root, "tron", "gateway", "catalog-metadata-v2.json"));
+      g = openGateway(root, runtime);
+      await g.registry.initialize();
+      const cutBeforeRead = (g.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
+      markStage("restart without the catalog document: first page");
+      const coldCatalog = await view(g, { limit: 30 });
+      report.coldCatalogRestart = { cutBeforeRead };
+      expect(coldCatalog.totalMessages).toBe(beforeColdCatalog.totalMessages);
+      expect(coldCatalog.lines.map(line => line.start)).toEqual(beforeColdCatalog.lines.map(line => line.start));
+
       const steady = [again.ms.firstPage, ...again.ms.pages, again.ms.chapter, again.ms.part, again.ms.evidence, afterRetry.ms, appended.ms];
       Object.assign(report, {
         chapters: CHAPTERS, totalMessages: first.totalMessages, sourceBytes, buildMs,
@@ -298,12 +316,13 @@ describe("Home memory browser at scale", () => {
       const fullProof = [full.ms.firstPage, ...full.ms.pages, full.ms.chapter, full.ms.part, full.ms.evidence];
       expect(median(steady) * 10).toBeLessThan(median(fullProof));
     } catch (error) {
-      const candidate = error as { code?: unknown; data?: { reason?: unknown } };
+      const candidate = error as { code?: unknown; details?: { reason?: unknown; cause?: unknown } };
       report.failure = {
         stage: currentStage,
         type: error instanceof Error ? error.constructor.name : typeof error,
         ...(candidate.code !== undefined ? { code: candidate.code } : {}),
-        ...(candidate.data?.reason !== undefined ? { reason: candidate.data.reason } : {}),
+        ...(candidate.details?.reason !== undefined ? { reason: candidate.details.reason } : {}),
+        ...(candidate.details?.cause !== undefined ? { cause: candidate.details.cause } : {}),
       };
       throw error;
     } finally {
