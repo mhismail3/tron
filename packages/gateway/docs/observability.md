@@ -597,7 +597,7 @@ through their existing diagnostic envelopes.
 
 | Signal | Owner | Interpretation | Regression |
 | --- | --- | --- | --- |
-| `home.taskStatus.ownerSettlement` | `home-task-dispatcher.ts`, read-only canonical cut | For terminal `unknown:no-report`, a non-null proof binds exact task/session/operation and marker, invocation-terminal and successful child-settlement entry IDs. `null` is unproven, not live or successful. Terminal `subagentRuns.total: 0` alone is synthetic and cannot diagnose settlement. Identity/lifecycle changes during inspection refuse the read. | `home-task-subagents.e2e.test.ts` exercises stopped/naturally completed children, corrupt and mismatched receipts, missing/failed settlement and replacement races; `scripts/test-work-handoff.py` exercises helper status rechecks and unchanged claims on refusal. |
+| `home.taskStatus.ownerSettlement` | `home-task-dispatcher.ts`, read-only canonical cut | For terminal `unknown:no-report`, a non-null proof binds exact task/session/operation and marker, invocation-terminal and successful child-settlement entry IDs. `null` is unproven, not live or successful. Terminal `subagentRuns.total: 0` alone is synthetic and cannot diagnose settlement. Identity/lifecycle changes during inspection refuse the read. | `home-task-subagents-*.e2e.test.ts` exercises stopped/naturally completed children, corrupt and mismatched receipts, missing/failed settlement and replacement races; `scripts/test-work-handoff.py` exercises helper status rechecks and unchanged claims on refusal. |
 
 ## Getting a diagnostic bundle
 

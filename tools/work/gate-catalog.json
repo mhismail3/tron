@@ -302,41 +302,9 @@
       "class": "heavy",
       "expectedRssMb": 3000,
       "pass": "exit 0, no failed test",
-      "unlocks": "gateway.affected-nested",
+      "unlocks": "gateway.nested",
       "artifacts": [],
       "reports": "test-results/gate/gateway-affected-<shard>-of-<shards>.json (per-file durations for shard balancing)"
-    },
-    {
-      "id": "gateway.affected-nested",
-      "summary": "Nested-SDK vitest files related to the changed Gateway files (serial config), sharded",
-      "trigger": {
-        "paths": [
-          "packages/gateway/**"
-        ],
-        "code": true,
-        "select": "gateway-affected"
-      },
-      "after": [
-        "gateway.typecheck"
-      ],
-      "command": "cd packages/gateway && npx vitest related --run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-affected-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts --shard={shard}/{shards} {select}",
-      "shards": 3,
-      "supersededBy": "gateway.full-nested",
-      "inputs": [
-        "packages/gateway",
-        ".node-version"
-      ],
-      "budgetSeconds": 180,
-      "timeoutSeconds": 300,
-      "class": "heavy",
-      "expectedRssMb": 2000,
-      "knownFlakes": [
-        "#1016 home-task-subagents nested settlement can outlive its 60 s bound under heavy host load"
-      ],
-      "pass": "exit 0, no failed test",
-      "unlocks": "gateway.full",
-      "artifacts": [],
-      "reports": "test-results/gate/gateway-affected-nested-<shard>-of-<shards>.json (per-file durations for shard balancing)"
     },
     {
       "id": "gateway.scripts",
@@ -402,29 +370,24 @@
       "class": "heavy",
       "expectedRssMb": 3000,
       "pass": "exit 0, no failed test",
-      "unlocks": "gateway.full-nested",
+      "unlocks": "gateway.nested",
       "artifacts": [],
       "reports": "test-results/gate/gateway-full-<shard>-of-<shards>.json (per-file durations for shard balancing)"
     },
     {
-      "id": "gateway.full-nested",
-      "summary": "The whole nested-SDK vitest suite in shards",
+      "id": "gateway.nested",
+      "summary": "The nested-SDK vitest pass (serial per process; real pi children). It has no affected-only form, so every Gateway code change runs it whole, in four named shards balanced by measured file time; new nested files land in [rest]",
       "trigger": {
         "paths": [
-          "packages/gateway/package-lock.json",
-          "packages/gateway/package.json",
-          "packages/gateway/vitest*.ts",
-          "packages/gateway/test-support/**",
-          "packages/gateway/tsconfig*.json",
+          "packages/gateway/**",
           "config/GatewayProtocol.json",
           ".node-version"
-        ]
+        ],
+        "code": true
       },
       "after": [
         "gateway.typecheck"
       ],
-      "command": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-full-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts --shard={shard}/{shards}",
-      "shards": 6,
       "inputs": [
         "packages/gateway",
         "config/GatewayProtocol.json",
@@ -440,7 +403,14 @@
       "pass": "exit 0, no failed test",
       "unlocks": "relay",
       "artifacts": [],
-      "reports": "test-results/gate/gateway-full-nested-<shard>-of-<shards>.json (per-file durations for shard balancing)"
+      "reports": "test-results/gate/gateway-full-nested-<shard>-of-<shards>.json (per-file durations for shard balancing)",
+      "shardCommands": {
+        "subagents-settlement": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts src/home/home-task-subagents-settlement.e2e.test.ts",
+        "subagents-reports": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts src/home/home-task-subagents-reports.e2e.test.ts",
+        "subagents-controls": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts src/home/home-task-subagents-controls.e2e.test.ts",
+        "rest": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts --exclude 'src/home/home-task-subagents-*.e2e.test.ts'"
+      },
+      "parallelShards": true
     },
     {
       "id": "gateway.payload",

@@ -140,7 +140,7 @@ owns skill routing and the policy-fixture validation commands.
 ```bash
 scripts/tron gate plan          # the ordered gate steps this change needs
 scripts/tron gate run           # run them; the first failure stops with its log
-scripts/tron gate run gateway.full gateway.full-nested   # the whole suite, in shards
+scripts/tron gate run gateway.full gateway.nested   # the whole suite, in shards
 cd packages/gateway && npx vitest run src/sessions/runtime-registry.integration.test.ts  # one file while diagnosing
 cd packages/gateway && npm audit --omit=dev
 ```

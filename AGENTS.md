@@ -249,7 +249,7 @@ cd packages/gateway && npx vitest run <owning-test-file>      # diagnosis only
 scripts/tron-ios-test run --only-testing TronMobileUITests/<Suite>/<test>  # diagnosis only
 ```
 
-Run the full suites (`scripts/tron gate run gateway.full gateway.full-nested`,
+Run the full suites (`scripts/tron gate run gateway.full gateway.nested`,
 `ios.journeys`) at cross-module checkpoints or when an owner asks. The [Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests)
 owns the TronMac commands.
 
