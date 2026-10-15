@@ -147,7 +147,7 @@ limit`. Every finished shard appends to `<git common dir>/work/gate/metrics.json
 
 **Heavy steps.** A `heavy` shard waits in the host-wide heavy queue
 (`heavy.py`, `scripts/tron-heavy status`;
-[host load management](../../packages/gateway/docs/host-load.md#1-heavy-run-queue-work-tooling))
+[host load management](../../packages/gateway/docs/host-load.md#1-heavy-queue-work-tooling))
 with its catalog `expectedRssMb`, so admission accounts for memory; the shard's
 tree holds the lease descriptor and inherits it (`TRON_HEAVY_LEASE_HELD`), so a
 journey that runs `scripts/tron-ios-test` does not wait on itself. Light shards never
