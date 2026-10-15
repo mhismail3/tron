@@ -802,6 +802,7 @@ build_tests() {
   "$repo_root/scripts/generate-xcode-project" ios
   run_bounded "$attempt" 70 "${TRON_IOS_E2E_BUILD_TIMEOUT_SECONDS:-1800}" \
     "${TRON_IOS_E2E_BUILD_NO_OUTPUT_SECONDS:-300}" "$derived_data/Build/Products" \
+    python3 "$repo_root/scripts/ios-build-cache.py" run -- \
     xcodebuild build-for-testing \
       -project "$ios_dir/TronMobile.xcodeproj" \
       -scheme "$scheme" \

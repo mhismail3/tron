@@ -554,7 +554,8 @@
         "paths": [
           "packages/ios-app/**",
           "config/GatewayProtocol.json",
-          "config/PushService.xcconfig"
+          "config/PushService.xcconfig",
+          "scripts/ios-build-cache.py"
         ],
         "code": true
       },
@@ -562,6 +563,7 @@
       "inputs": [
         "packages/ios-app",
         "config",
+        "scripts/ios-build-cache.py",
         ".node-version"
       ],
       "keyExtra": [
@@ -585,7 +587,8 @@
           "packages/ios-app/**",
           "config/GatewayProtocol.json",
           "config/PushService.xcconfig",
-          "scripts/tron-ios-device"
+          "scripts/tron-ios-device",
+          "scripts/ios-build-cache.py"
         ],
         "code": true
       },
@@ -593,7 +596,8 @@
       "inputs": [
         "packages/ios-app",
         "config",
-        "scripts/tron-ios-device"
+        "scripts/tron-ios-device",
+        "scripts/ios-build-cache.py"
       ],
       "keyExtra": [
         "xcode"

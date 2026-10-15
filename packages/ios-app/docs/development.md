@@ -560,6 +560,48 @@ Compare implementations by `Frontend.NumInstructionsExecuted` from
 varies with the other work on this Mac. Remove the DerivedData directory
 afterwards.
 
+### Shared compilation cache
+
+Every script that builds the app (`scripts/tron-ios-test build`,
+`scripts/tron-ios-device install|share|compile`, `scripts/tron-ios-simulator
+install` and `scripts/ios-gateway-e2e-test build`) runs xcodebuild through
+`scripts/ios-build-cache.py run`, so worktrees share compilation work (#1077).
+It turns on Xcode's compilation cache (`COMPILATION_CACHE_ENABLE_CACHING`)
+with one content-addressed store per Xcode and Swift compiler under
+`~/Library/Developer/Tron/ios/build-cache/cas/`. A cache key covers the
+compiler, the full command line and the contents of every input, so an edit,
+setting, SDK or toolchain change compiles instead of replaying.
+
+Keys also contain absolute paths. Xcode's prefix mapping cannot hide the
+DerivedData path in this project (the AppIntents metadata step rejects mapped
+package source paths, and several DerivedData paths stay unmapped), so each
+build runs at one of three stable slot paths
+(`build-cache/slots/<n>/DerivedData`): the worktree's own DerivedData is
+renamed into a free slot for the build and back afterwards, and a worktree
+prefers its previous slot so incremental builds stay incremental. Swift package
+checkouts live inside DerivedData, so every worktree replays the packages
+(SwiftNIO, swift-nio-ssh, swift-crypto, SwiftTerm and their dependencies, over
+half of a clean build's compiler work); the app, `Core` and the local
+`MacTerminalSSH` package sit at worktree paths and replay only within their own
+worktree. `-file-compilation-dir .` keeps the project directory out of the keys;
+debug info keeps absolute source paths.
+
+Each build ends with one summary line, for example `ios-build-cache: 1180
+cache hits, 410 misses (slot 0, 120s); cache … 2.10 GB of 12 GB`.
+`scripts/ios-build-cache.py status` lists the caches and slots, and `clean`
+removes every cache no build is using. The store is bounded: a build that
+leaves it above 12 GB (`TRON_IOS_BUILD_CACHE_LIMIT_GB`) removes it once no
+other build holds it, and a store for another Xcode or Swift compiler is
+removed the same way. Concurrent builds share the store under a shared lock;
+removal needs the exclusive lock. Each build first validates the store with
+`llvm-cas --validate`: a corrupt store is discarded with a warning and the
+build runs cold, or without the cache while another build is using it, and a
+failed build that leaves the store invalid is retried once without it. A build
+killed while its DerivedData sits in a slot is moved back by the worktree's
+next build or the slot's next user. `TRON_IOS_BUILD_CACHE=0` builds without
+any of this. `scripts/test-ios-build-cache.py` proves these paths with real
+xcodebuild builds of a small project shaped like the app.
+
 ### Build matrix
 
 | Configuration | Intended workflow | Bundle identity | Push environment |
@@ -1016,11 +1058,7 @@ does not prove the shipping app compiles. Changes to app views or their model AP
 also require a non-hosted compile using the canonical device configuration:
 
 ```bash
-scripts/tron ios generate
-(cd packages/ios-app && xcodebuild build -project TronMobile.xcodeproj \
-  -scheme 'Tron Device' -configuration LocalDevice \
-  -destination 'generic/platform=iOS' -derivedDataPath build/device-compile-derived-data \
-  CODE_SIGNING_ALLOWED=NO)
+scripts/tron-ios-device compile
 ```
 
 To inspect the effective optimized settings without compiling (including the
