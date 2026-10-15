@@ -283,6 +283,9 @@ extension HomeToolDetailPresentation {
         if let queue = details["queuePosition"]?.intValue { state.append(Row(icon: "list.number", title: "Queue position", value: "\(queue)")) }
         if let operation = task.operationId { state.append(Row(icon: "gearshape.2", title: "Operation", value: operation)) }
         var worker: [Row] = []
+        if let checkin = task.checkins?.last {
+            worker.append(Row(icon: "text.bubble", title: "Latest check-in", value: HomeTaskPresentation.checkinText(checkin)))
+        }
         if let model = task.workerModel { worker.append(Row(icon: "cpu", title: "Model", value: model.displayName)) }
         if let spend = task.spend {
             worker.append(Row(icon: "gauge.with.dots.needle.33percent", title: "Tokens",

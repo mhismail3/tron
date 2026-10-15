@@ -13,6 +13,7 @@ import { HomeTaskAuthorization, HomeTaskAuthorizationError, type HomeTaskAuthori
 import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
 import { homeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
+import { HOME_TASK_ATTENTION_INTERVAL_MS, HOME_TASK_CHECKIN_LIMIT, HOME_TASK_CHECKIN_VISIBLE, type HomeTaskCheckin } from "./home-task-checkin.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, homeTaskOperationSpan, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
 import type { HomeTaskWorkerChoice } from "./home-task-worker-choice.js";
 import type { FixedSetting } from "../admin/settings-resolver.js";
@@ -34,6 +35,7 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.detached-work"; taskHash: string; operationHash: string; reason: "detached-work-outlived-task" }
   | { event: "home.task.subagents"; taskHash: string; operationHash: string; started: number; stoppedAtEnd: number | null; noticesUndelivered: number }
   | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null; errorCode?: string }
+  | { event: "home.task.checkin"; taskHash: string; operationHash: string; revision: number; attention: HomeTaskCheckin["attention"] }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; outputTokens: number }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
   | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
@@ -68,6 +70,7 @@ export interface HomeTaskControlRow {
   resumes?: string;
   continuedAs?: string;
   updatedAt: string;
+  checkins: HomeTaskCheckin[];
   actions: Array<"status" | "report" | "steer" | "stop" | "resume">;
 }
 
@@ -402,6 +405,8 @@ export class HomeTaskDispatcher {
       intent: { text: brief }, intentDigest: taskIntentDigest(brief), target: previous.target,
       grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
       stopIntent: null, spend: null, reportRef: null, terminalEvidence: null,
+      ...(previous.checkins ? { checkins: previous.checkins } : {}),
+      ...(previous.lastAttentionAt ? { lastAttentionAt: previous.lastAttentionAt } : {}),
       resumes: { taskId: previous.taskId, operationId: previous.operationId!, ...(text ? { instruction: text } : {}) },
       ...(budget && Object.keys(budget).length ? { budget } : {}),
     }, null), created => { this.transition(created, "created"); void this.refuseAdmission(created, "admission-cancelled").catch(() => {}); });
@@ -482,6 +487,22 @@ export class HomeTaskDispatcher {
         });
         this.diagnostic?.({ event: "home.task.control", taskHash: hash(task.taskId), operationHash: hash(operationId), action: "stop", disposition: "persisted" });
         await cancellation("task-stop");
+      }, async (sessionId, request) => {
+        let accepted!: HomeTaskCheckin;
+        const saved = await this.store.update(task.taskId, current => {
+          if (current.lifecycle !== "active" || current.stopIntent || current.operationId !== operationId || current.sessionId !== sessionId) throw new GatewayError("conflict", "Check-in operation is no longer active");
+          const now = Date.now();
+          const attention = !request.needsAttention ? "none"
+            : current.lastAttentionAt && now - Date.parse(current.lastAttentionAt) < HOME_TASK_ATTENTION_INTERVAL_MS ? "rate-limited"
+              : current.attention && !["acknowledged", "blocked", "outcome-unknown"].includes(current.attention.wake.state) ? "pending" : "requested";
+          accepted = { ...request, id: randomUUID(), taskId: current.taskId, sessionId, operationId, at: new Date(now).toISOString(), attention };
+          return { ...current, checkins: [...current.checkins ?? [], accepted].slice(-HOME_TASK_CHECKIN_LIMIT),
+            ...(attention === "requested" ? { lastAttentionAt: accepted.at, attention: { checkin: accepted, wake: this.inbox.attentionEvent(current, accepted) } } : {}) };
+        });
+        this.diagnostic?.({ event: "home.task.checkin", taskHash: hash(saved.taskId), operationHash: hash(operationId), revision: saved.revision, attention: accepted.attention });
+        // The durable outbox owns the wake. Publication never changes acceptance.
+        if (accepted.attention === "requested") await this.inbox.publishAttention(saved.taskId).catch(() => {});
+        return accepted;
       });
       reports.limitBudget(async entries => {
         const current = await this.sessions.homeTaskBudget().catch(() => undefined);
@@ -553,7 +574,7 @@ export class HomeTaskDispatcher {
       deadline = dispatch.armDeadline();
       const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation }, deadline);
       work.transition("foreground-agent-operation");
-      const admitted = dispatch.admit(slot, `${task.intent.text}${appliedChoice}\n\nThis is a finite Home task. Use report with explicit evidence to finish. A normal reply is not a task result.`, launch.resume?.images ?? [], undefined, undefined, undefined,
+      const admitted = dispatch.admit(slot, `${task.intent.text}${appliedChoice}\n\nThis is a finite Home task. Send a short checkin at milestones and about every 30 minutes (step, done, next; optional blocker/refs). It does not pause or finish work. Use needsAttention only for blockers needing Home; it is rate-limited. Use report with explicit evidence to finish. A normal reply is not a task result.`, launch.resume?.images ?? [], undefined, undefined, undefined,
         { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
       void admitted.catch(async () => {
         await cancellation("admission-refused").catch(() => {});
@@ -740,7 +761,7 @@ export class HomeTaskDispatcher {
     const evidence = task.terminalEvidence;
     return { taskId: task.taskId, title: (await this.display(task)).title, state, outcome: evidence?.outcome ?? null,
       ...(evidence ? { reason: evidence.reason } : {}), ...(evidence?.detail ? { detail: evidence.detail } : {}),
-      sessionId: task.sessionId, operationId: task.operationId,
+      sessionId: task.sessionId, operationId: task.operationId, checkins: (task.checkins ?? []).slice(-HOME_TASK_CHECKIN_VISIBLE),
       ...(task.resumes ? { resumes: task.resumes.taskId } : {}),
       ...(continuedAs ? { continuedAs } : {}), updatedAt: new Date(task.updatedAt).toISOString(), actions };
   }
@@ -782,7 +803,7 @@ export class HomeTaskDispatcher {
   async status(taskId: string): Promise<HomeTaskStatus> {
     const task = await this.result(taskId);
     const workerModel = task.sessionId ? await this.sessions.taskWorkerModel(task.sessionId) ?? null : null;
-    const status = { ...task, ...await this.display(task), workerModel, subagents: await this.subagents(task),
+    const status = { ...task, checkins: (task.checkins ?? []).slice(-HOME_TASK_CHECKIN_VISIBLE), ...await this.display(task), workerModel, subagents: await this.subagents(task),
       subagentRuns: await this.liveSubagentRuns(task), ownerSettlement: await this.ownerSettlement(task) };
     // Neither a transcript read nor a prior terminal projection fences a replaced
     // task identity. Recheck after every projection await, without updating spend.
@@ -883,7 +904,7 @@ export class HomeTaskDispatcher {
         taskId: task.taskId, createdAt: task.createdAt, updatedAt: task.updatedAt, sessionId: task.sessionId, target: task.target,
         lifecycle: task.lifecycle, outcome: task.terminalEvidence?.outcome ?? null, spend: task.spend,
         attention: task.terminalEvidence?.outcome === "needs-input" || task.terminalEvidence?.outcome === "unknown",
-        pendingGrant, ...await this.display(task),
+        checkins: (task.checkins ?? []).slice(-HOME_TASK_CHECKIN_VISIBLE), pendingGrant, ...await this.display(task),
       });
     }
     return { items, counts: page.counts, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
