@@ -44,6 +44,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         // The lone inline image is the same thumbnail component grouped displays use.
         XCTAssertEqual(button.identifier, "display-inline-thumbnail")
         XCTAssertEqual(button.frame.width, 64 * 1.7, accuracy: 1)
+        keepScreenshot(app, "998-inline-display-thumbnail")
         button.tap()
         let image = app.images["Red above blue, with the close badge at top right."]
         XCTAssertTrue(image.waitForExistence(timeout: 10))

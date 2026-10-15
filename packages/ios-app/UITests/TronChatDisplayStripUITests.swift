@@ -33,23 +33,26 @@ final class TronChatDisplayStripUITests: XCTestCase {
         XCTAssertGreaterThan(second.frame.minX, first.frame.maxX, "Chips run left to right in invocation order")
         keepScreenshot(app, "998-display-thumbnail-row")
 
-        // The row scrolls horizontally to reach later thumbnails.
+        // The row scrolls horizontally: the trailing non-image display starts
+        // off screen and is reached by dragging the row itself.
         let last = thumbnail(app, titles[3])
         XCTAssertTrue(last.exists)
-        // Drag on the thumbnails themselves: the row, not the transcript, scrolls.
+        let document = app.buttons["Open Release notes"]
+        XCTAssertTrue(document.exists, app.debugDescription)
+        XCTAssertFalse(document.isHittable, "The fifth thumbnail starts beyond the screen edge")
         let rowY = first.frame.midY
-        for _ in 0..<3 where !last.isHittable {
+        for _ in 0..<3 where !document.isHittable {
             let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 360, dy: rowY))
             start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: -320, dy: 0)))
         }
-        XCTAssertTrue(waitHittable(last), "The last thumbnail scrolls into reach")
-        XCTAssertEqual(last.frame.midY, first.frame.midY, accuracy: 1)
-        // A non-image display keeps the same card with its kind's face.
-        let document = app.buttons["Open Release notes"]
-        XCTAssertTrue(document.exists, app.debugDescription)
-        XCTAssertEqual(document.identifier, "display-inline-thumbnail")
+        XCTAssertTrue(waitHittable(document), "The last thumbnail scrolls into reach")
+        XCTAssertLessThan(first.frame.minX, 0, "The row, not the transcript, scrolled")
         XCTAssertEqual(document.frame.midY, first.frame.midY, accuracy: 1)
+        // A non-image display keeps the same card with its kind's face.
+        XCTAssertEqual(document.identifier, "display-inline-thumbnail")
         XCTAssertEqual(document.frame.width, Self.thumbnailSide, accuracy: 1)
+        XCTAssertEqual(document.frame.height, Self.thumbnailSide, accuracy: 1)
+        XCTAssertTrue(waitHittable(last))
         keepScreenshot(app, "998-display-thumbnail-row-scrolled")
 
         // One tap opens that display's preview sheet; no grouped tool sheet.
