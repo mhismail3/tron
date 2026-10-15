@@ -1793,7 +1793,10 @@ works while Tron.app or the Gateway is quit, crashed or being replaced.
   SSH window-change; output is decoded on whole UTF-8 sequences and its retained
   replay is bounded. A dropped or ended shell keeps its output, says so in the
   terminal, offers ⋯ › Reconnect, and reconnects by itself when the app returns to
-  the foreground. Closing the sheet ends the shell.
+  the foreground. One sheet presentation keeps one emulator: a new shell
+  (Reconnect, New Shell, or the automatic one) continues below the earlier output
+  instead of clearing it. Closing the sheet ends the shell; SwiftUI rebuilding the
+  sheet's content does not ([Presentation-scoped state](#presentation-scoped-state)).
 - **Removal** unsets the key on the Mac first and only then deletes it here; without
   the Gateway it refuses and names the `tron-mac-terminal` line to delete by hand.
 
@@ -1802,6 +1805,51 @@ sshd on this Mac's Tailscale address (synthetic Gateway, real key, client, PTY a
 shell): enrollment, typed input and Ctrl-C proved by the Mac, PTY resize, a new
 shell with the Gateway stopped, removal, Remote Login off and host-key mismatch.
 Screenshots land in `packages/ios-app/test-results/mac-terminal/`.
+
+## Presentation-scoped state
+
+Returning to the app, reconnecting, resyncing or reloading never dismisses a
+presented sheet, re-presents it, or clears what it holds: drafts, text fields,
+terminal output and scrollback, scroll position, selection, or a nested sheet
+(#1073). Data updates in place.
+
+On iOS 26.4 and later, SwiftUI rebuilds the content of a presented sheet when the
+app returns from the background, with fresh `@State`, while the sheet stays on
+screen. A Mac Terminal sheet's content over the chat's Settings was rebuilt three
+times on one return. Its `onDisappear` and `task` hooks also run again, as if the
+sheet had closed and reopened. The owner of a presentation's lifetime is therefore
+the managed sheet modifier, not its content (`PresentationScopedState.swift`):
+
+- `tronManagedSheet` gives each presentation a `PresentationStateScope`, kept in the
+  scene's `PresentationStateStore` (`TronPresentationStateRoot` on the scene root)
+  under its identity path: the presenter's scope path plus the sheet identity, and
+  for an item sheet the item's `id`. A rebuilt content finds the same scope. Only
+  an actual dismissal (or a replacement item) retires it, together with every
+  scope presented from inside it.
+- Sheet content declares the state that must outlive a rebuild with
+  `@PresentationState` instead of `@State`. Outside a managed sheet it is ordinary
+  view-local state. A view that appears more than once in one sheet passes
+  `key:` (`TronProgressiveSheetLink` keys its presentation flag by identity).
+- Teardown that must run only on dismissal goes in
+  `PresentationScopedResource.presentationDidRetire()` (a terminal's attachment, a
+  Mac Terminal shell) or `.onPresentationRetire { }`, never in `onDisappear`.
+  Start hooks (`task`, `onAppear`) are idempotent, because a rebuild runs them again.
+- `TerminalEmulatorHost` keeps a sheet's SwiftTerm view. A rebuilt `NativeTerminal`
+  adopts the same view, so the screen, scrollback, scroll position and selection
+  survive and no output is replayed.
+
+`scripts/presentation-source-policy.py` makes this the default: a view constructed
+as managed-sheet content (a `tronManagedSheet` closure or a progressive link's
+destination) may not declare `@State` unless the line says why it is view-local
+(`// view-local: <reason>`). The repeated JSON inspector rows are the current
+exceptions. A rebuild still resigns keyboard focus. The real-Gateway journey
+`RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent`
+proves the invariant from the real interface. It keeps an unsent composer draft
+and opens the session terminal over Manage Session, Mac Terminal over the chat's
+Settings, and MCP Servers › Add Server with a typed draft. For each, it returns
+from Safari and forces a reconnect through the fixture proxy, then asserts the
+sheet never closes, reloads or loses content. For the terminal, the assertion
+compares its rendered pixels.
 
 ## Presentation parity
 
@@ -3123,7 +3171,7 @@ The stack is never persisted and is not a second state authority.
 
 `IntegrationsRPCClient` and `IntegrationsSettingsView` expose the Gateway connection-owner contract as a native management surface. Connected Services and MCP Servers share the Providers-style Configured/Available row layout; each configured row shows its service, verified account display name (or plain account ID), connection status, and only a supported X balance, while capability names and effect-specific diagnostics remain in the selected connection sheet. Definitions, account instances, capability status, setup operations, and Raindrop collection-role mappings are redacted projections: the instance ID is the identity used by every action, never a provider name or account key. Same-provider accounts therefore retain independent policy, health, and disconnect state, and configured services keep their add-account action in instance details. Snapshot reads are fenced by the selected Gateway profile, lifecycle generation, connection epoch, presentation activity, and a latest-load ticket; X balance reads additionally fence each presentation result to the current profile identity and request. A balance read never blocks the list and a failed read leaves no balance line.
 
-Connected Services presents definitions owned by `ConnectionOwner` and uses its instance-scoped setup, policy, and disconnect receipts. Setup is owner-typed (`oauth` or `token`) and uses the Gateway's confirmed mutation receipt executor. The iOS form accepts only opaque Mac Keychain credential references, never token values or generic agent-readable secret fields. X setup is a public-client OAuth 2.0 PKCE flow: the user enters their public client ID and registered HTTPS callback, opens X consent, and pastes the redirected URL or code; the Gateway owns state verification, code exchange, refresh-token rotation, and Keychain storage, while iOS never receives tokens. Policy controls (enabled, writes, paid, and recurring) are independent and instance-scoped; capability availability is effect-specific. Dismissing a sheet retires only presentation reads; an accepted setup, policy, or disconnect mutation continues with its owner, and reconnect never replays it. The open setup draft (typed inputs, an accepted begin's consent step and its in-flight mutation) and the selected connection live in `IntegrationSheetRoutes`, which Settings owns above the presented Connected Services content and resets only when that sheet is actually dismissed: on iOS 26.4 and later, returning from the background makes SwiftUI rebuild the content of a sheet nested under a `navigationDestination` chat route (twice, with fresh view state) while it stays presented, which would otherwise drop the setup sheet and its draft (#932).
+Connected Services presents definitions owned by `ConnectionOwner` and uses its instance-scoped setup, policy, and disconnect receipts. Setup is owner-typed (`oauth` or `token`) and uses the Gateway's confirmed mutation receipt executor. The iOS form accepts only opaque Mac Keychain credential references, never token values or generic agent-readable secret fields. X setup is a public-client OAuth 2.0 PKCE flow: the user enters their public client ID and registered HTTPS callback, opens X consent, and pastes the redirected URL or code; the Gateway owns state verification, code exchange, refresh-token rotation, and Keychain storage, while iOS never receives tokens. Policy controls (enabled, writes, paid, and recurring) are independent and instance-scoped; capability availability is effect-specific. Dismissing a sheet retires only presentation reads; an accepted setup, policy, or disconnect mutation continues with its owner, and reconnect never replays it. The open setup draft (typed inputs, an accepted begin's consent step and its in-flight mutation) and the selected connection live in `IntegrationSheetRoutes`, which Settings owns above the presented Connected Services content and resets only when that sheet is actually dismissed: on iOS 26.4 and later, returning from the background makes SwiftUI rebuild the content of a sheet nested under a `navigationDestination` chat route (twice, with fresh view state) while it stays presented, which would otherwise drop the setup sheet and its draft (#932). Every other sheet gets the same protection by default from [presentation-scoped state](#presentation-scoped-state) (#1073).
 
 MCP Servers is a separate surface over Pi's `mcp.json`: it reads global or trust-approved project configuration, decodes Pi CLI `state`, `scope`, exposure, transport, tool and bounded error fields, and shows only project rows in project scope. Needs-auth uses the sign-in warning treatment; bearer values remain transient while the Mac Keychain owner stores them. The scope switch is the shared `TronSegmentedControl` (as in the Workspace sheet), Reload is the leading toolbar button, Add Server is a glass row button below the list, and each server row is a `TronSettingsRow` whose `Manage` menu holds sign-in, on/off, exposure, token, sign-out and remove. Extensions Settings shows the Built-in Extensions switches and Default Tools as standard toggle and selection rows over the served `sources.extensions`, `tools.active` and `tools.codemode.mode` keys; they read the scope's own layer, write only on an explicit change (a switch adds or removes its `-builtin:<name>` entry), and keep entries they do not manage. MCP sign-in adopts the exact `{ kind: "mcp", sessionId, server }` operation into the provider-auth event coordinator, including events arriving while the start RPC is pending; cancellation uses only the MCP-specific cancel command. Its callback remains in the iOS listener and is relayed only to Pi's loopback listener. Accepted mutations and authentication operations retain their Gateway owners and reconnect never replays them.
 

@@ -989,8 +989,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         assertStays(app, presented: name, never: nil, "Add Server after reconnecting")
         XCTAssertEqual(name.value as? String, "draft-1073", "Add Server lost its draft after reconnecting")
         keepScreenshot(app, name: "1073-mcp-add-after-reconnect")
-        // Add Server has no Done: the keyboard's Done, then a drag down closes it.
-        name.typeText("\n")
+        // Add Server has no Done: a drag down closes it.
         let grabber = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
         grabber.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
         XCTAssertTrue(waitForAbsence(name, timeout: 10), "Add Server did not close: \(app.debugDescription)")
