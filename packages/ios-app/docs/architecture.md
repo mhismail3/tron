@@ -1770,11 +1770,11 @@ with the same bracketed line. The idle period is the Gateway-declared
 
 Settings › Tools & Diagnostics › **Mac Terminal** opens the session terminal's own chrome and
 emulator (`TerminalSheetChrome`, `TerminalSurface`, the control bar and extended
-keys) on a login shell on the paired Mac, reached with SSH through macOS Remote
+keys) on login shells on the paired Mac, reached with SSH through macOS Remote
 Login over Tailscale. Only enrollment and removal use the Gateway (its contract is
 the Gateway README's
-[Mac Terminal](../../gateway/README.md#mac-terminal)); the shell never does, so it
-works while Tron.app or the Gateway is quit, crashed or being replaced.
+[Mac Terminal](../../gateway/README.md#mac-terminal)); the shells never do, so they
+work while Tron.app or the Gateway is quit, crashed or being replaced.
 
 - **Key.** `MacTerminalEnrollmentStore` creates one Secure Enclave P-256 key per
   paired Mac and keeps only its Secure Enclave-wrapped `dataRepresentation` in this
@@ -1786,21 +1786,47 @@ works while Tron.app or the Gateway is quit, crashed or being replaced.
   `settings.change` (the tap is the approval), and caches the MagicDNS name,
   Tailscale addresses, login user and **pinned host keys** in defaults. Host keys
   are never replaced silently; a Mac with none is refused before anything is written.
+- **Shells live on the Mac** (#1075). The SSH session runs the Mac's shell host
+  (the Gateway README's `hostCommand`) on an exec channel; `MacTerminalHostLink`
+  speaks its one-JSON-object-per-line protocol. Closing the sheet or the app
+  leaving the foreground only closes that link: the shell, its programs and its
+  output stay on the Mac until the user types `exit` or chooses ⋯ › Quit Shell, or
+  the #479 idle policy closes it. `AppModel.macTerminal` (`MacTerminalController`)
+  is app-scoped, so a reopened sheet shows the retained output at once, then
+  reattaches after the last sequence it saw and appends what the shell printed
+  meanwhile (a `reset` replay replaces it). Output that races an attach is held
+  until the replay is installed.
+- **Several shells.** ⋯ › New Shell opens another; the menu lists **Open shells**
+  and **Recent shells** in the chat terminal's shape (standard menu items, the
+  current one checkmarked, a Recent item's subtitle being its exit status or the
+  host's closure reason). Selecting one detaches the other and replays the
+  selected shell into a fresh emulator. Shells are shared by every enrolled
+  iPhone of that Mac user.
 - **Connection** (`MacTerminalSSH`) refuses early and specifically: no Tailscale
   address on this device, the Mac unreachable, Remote Login off (connection
   refused), a host key that is not pinned (with its `SHA256:` fingerprint), the key
-  refused (revoked or removed), or a handshake that never completes. Resize sends
-  SSH window-change; output is decoded on whole UTF-8 sequences and its retained
-  replay is bounded. A dropped or ended shell keeps its output, says so in the
-  terminal, offers ⋯ › Reconnect, and reconnects by itself when the app returns to
-  the foreground. Closing the sheet ends the shell.
+  refused (revoked or removed), or a handshake that never completes. Resize goes
+  to the selected shell; retained output is bounded (1 MiB; the host's replay is
+  the authority). A dropped link says in the terminal that the shell is still
+  running, offers ⋯ › Reconnect, and reattaches by itself when the app returns to
+  the foreground. While the Gateway answers, the cached `hostCommand` is refreshed
+  (host keys never are).
+- **Lifeline.** A Mac whose Tron reports no `hostCommand`, or whose host does not
+  answer, still gets a plain PTY login shell, and the terminal says it ends with
+  its connection.
 - **Removal** unsets the key on the Mac first and only then deletes it here; without
   the Gateway it refuses and names the `tron-mac-terminal` line to delete by hand.
 
 `scripts/ios-mac-terminal-journey` runs `TronMacTerminalUITests` against a real
-sshd on this Mac's Tailscale address (synthetic Gateway, real key, client, PTY and
-shell): enrollment, typed input and Ctrl-C proved by the Mac, PTY resize, a new
-shell with the Gateway stopped, removal, Remote Login off and host-key mismatch.
+sshd on this Mac's Tailscale address and this checkout's compiled shell host
+(synthetic Gateway, real key, client, host, PTY and shell): enrollment, typed input
+and Ctrl-C proved by the Mac, PTY resize, a new shell with the Gateway stopped,
+removal, Remote Login off and host-key mismatch; the same output and `$$` after
+dismiss/reopen and after the app returns from the background (with output printed
+while it was away); two independent shells switched from the menu, `exit` ending
+only one and listing it under Recent shells; and the plain-shell lifeline. Each
+launch gets its own host, which the script stops afterwards. The emulator text the
+journeys read is a `HOSTED_TEST`-only accessibility value.
 Screenshots land in `packages/ios-app/test-results/mac-terminal/`.
 
 ## Presentation parity

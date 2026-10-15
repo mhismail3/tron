@@ -149,7 +149,8 @@ export class MacTerminalShellHost {
         idleLimitMs: () => macTerminalIdleLimitMs(this.tronHome),
         isAttached: (terminalId) => [...this.connections].some(connection => connection.attached.has(terminalId)),
       },
-      log: (_level, _message, metadata) => this.options.log?.(metadata.event, { reason: metadata.reason, elapsedMs: metadata.elapsedMs, error: metadata.error }),
+      // The message names the shell id and the reason; never shell content.
+      log: (_level, message, metadata) => this.options.log?.(metadata.event, { message, reason: metadata.reason, elapsedMs: metadata.elapsedMs, error: metadata.error }),
     });
     this.exitTimer = setInterval(() => this.exitWhenIdle(), HOST_EXIT_CHECK_MS);
     this.exitTimer.unref();
