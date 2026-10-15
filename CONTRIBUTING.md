@@ -132,9 +132,12 @@ implementations.
 Node is pinned exactly by `.node-version`; CI and Mac packaging read that file.
 `scripts/tron-node` is the one resolver for the pinned development Node: it
 prints the chosen `node` (`TRON_NODE_BIN`, then the exact nvm directory, then
-each `node` on `PATH`, then Homebrew), and `scripts/tron-node exec COMMAND` runs a command with
-that Node first on `PATH`. It refuses a signed Gateway payload or app-bundle
-runtime, which Tron agent shells have first on `PATH` but which cannot load
+the checksum-verified cache, then each `node` on `PATH`, then Homebrew), and
+`scripts/tron-node exec COMMAND` runs a command with that Node first on `PATH`.
+`scripts/tron-node install` fills the cache from the official archive checked
+against `config/ci-toolchain.env` (`scripts/install-ci-tools.sh node`). It uses
+the primary checkout's `.ci-tools`, so one install serves every linked worktree.
+It refuses a signed Gateway payload or app-bundle runtime, which Tron agent shells have first on `PATH` but which cannot load
 unsigned native add-ons and has no `npx`. Packaging, `scripts/tron dev`,
 `scripts/tron ci|chat|diagnose`, the iOS Gateway E2E harness, the profiler and
 `scripts/tron work verify` all use it.
@@ -154,6 +157,30 @@ remain intentional Apple-toolchain pins. Run
 navigation, commands, repository paths, or backticked paths in source
 comments. Run `scripts/check-agent-policy.sh` after changing agent guidance. The [agent guidance index](.agents/README.md)
 owns skill routing and the policy-fixture validation commands.
+
+**Node update rule.** Tron runs the current Active LTS major of Node.
+
+- **Check:** `scripts/tron-node status --online` reports newer patches of the
+  pinned major (and which are security releases), the major's LTS, maintenance
+  and end-of-life dates, and a newer Active LTS major. Plain `status` stays
+  offline. Neither command edits anything.
+- **Patch:** Take patch releases monthly, or at once for a security release. Use
+  `scripts/tron-node pin X.Y.Z`. It checks both macOS archives against
+  `SHASUMS256.txt` and rewrites `.node-version` with the archive, runtime and
+  npm-tree digests in `config/ci-toolchain.env`. Then run
+  `scripts/tron-node install` and `scripts/tron gate run`.
+- **Major:** Adopt a new LTS major within six months of its LTS date, as its own
+  change. The same `pin` also needs `engines.node` and `@types/node` in
+  `packages/gateway/package.json`, and evidence that native modules (`node-pty`)
+  and `node:sqlite` load under the new runtime. Don't combine it with unrelated
+  dependency upgrades.
+- **Packages:** A Pi package whose `engines.node` needs a newer major is a
+  reason to schedule the major move, not to run that package unsupported.
+- **Rollback:** Revert the pin commit, or `pin` the earlier version.
+- **Shipping:** The signed Gateway carries its own runtime, so an installed
+  Gateway changes Node only through a newly signed Tron build that the
+  maintainer installs. Gateway rollback to the previous payload restores the
+  previous runtime. Agents never rebuild, restart or promote it.
 
 ### Gateway
 
