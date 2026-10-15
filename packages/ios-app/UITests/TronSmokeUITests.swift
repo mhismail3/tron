@@ -2228,7 +2228,8 @@ final class TronSmokeUITests: XCTestCase {
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
         app.launch()
         defer { app.terminate() }
-        let subtitle = app.staticTexts["Paired Macs, devices, and push"]
+        // A one-line row subtitle at this size is the unit the intro is measured in.
+        let subtitle = app.staticTexts["Your own model definitions"]
         XCTAssertTrue(subtitle.waitForExistence(timeout: 10), app.debugDescription)
         let line = subtitle.frame.height
         XCTAssertGreaterThan(line, 8)
