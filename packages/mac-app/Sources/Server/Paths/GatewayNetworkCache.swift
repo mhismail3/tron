@@ -97,9 +97,4 @@ enum GatewayNetworkCacheWriter {
             throw NSError(domain: "GatewayNetworkCache", code: 2, userInfo: [NSLocalizedDescriptionKey: "cache destination is not an owner-only regular file"])
         }
     }
-
-    static func deleteCache(at path: URL) throws {
-        guard FileManager.default.fileExists(atPath: path.path) else { return }
-        try FileManager.default.removeItem(at: path)
-    }
 }
