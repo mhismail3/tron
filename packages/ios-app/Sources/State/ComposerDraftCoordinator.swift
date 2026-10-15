@@ -551,7 +551,10 @@ final class ComposerDraftCoordinator {
         sendOperation = send
         self.admitsLifecycleGeneration = admitsLifecycleGeneration
     }
+}
 
+// Behavior stays out of the @Observable class body; see AppModel (#1066).
+extension ComposerDraftCoordinator {
     func prepareDraft(
         profileID: String,
         sessionID: String,

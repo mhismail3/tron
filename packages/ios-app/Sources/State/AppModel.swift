@@ -513,6 +513,23 @@ final class AppModel {
     private var mountedOptionalRefreshLifecycleGeneration: Int?
     private var mountedOptionalRefreshConnectionID: Int?
 
+    #if HOSTED_TEST
+    var hostedSessionOpenAdmissionOverride: Bool?
+    var hostedAfterSessionCreateResult: (@MainActor () async -> Void)?
+    var hostedBeforeNewSessionSubmission: (@MainActor () async -> Void)?
+    var hostedAfterNewSessionTrustResult: (@MainActor () async -> Void)?
+    #endif
+
+    @ObservationIgnored private var recordedSceneTransition: AppScenePhase = .active
+    /// Whether `recordedSceneTransition` came from a real transition. The launch
+    /// seed may only fill in the scene's starting point while nothing has moved:
+    /// a transition that arrived during startup is newer than the phase the
+    /// launch sampled, and overwriting it would suppress the next record.
+    @ObservationIgnored private var hasRecordedSceneTransition = false
+    /// Scene records are chained so their order in the log is the order the
+    /// scene moved, not the order three tasks happened to reach the log actor.
+    @ObservationIgnored private var sceneRecordTask: Task<Void, Never>?
+
     init(
         client: GatewayClient = GatewayClient(),
         profiles: GatewayProfileStore = GatewayProfileStore(),
@@ -818,7 +835,14 @@ final class AppModel {
             }
         }
     }
+}
 
+// Behavior lives in this extension, not the class body: @Observable expands its
+// member-attribute macro once per class member, and each expansion carries the
+// whole class body, so every compile job that references AppModel paid ~2 s
+// while the 5,000-line implementation sat inside it (#1066). Stored properties
+// and the designated initializer must stay in the class.
+extension AppModel {
     func authoritativeSnapshot(for sessionID: String) -> SessionSnapshot? {
         sessionPresentation.authoritativeSnapshot(for: sessionID)
     }
@@ -948,11 +972,6 @@ final class AppModel {
             profileID: profileID, target: target, lifecycleGeneration: generation
         )
     }
-
-    var hostedSessionOpenAdmissionOverride: Bool?
-    var hostedAfterSessionCreateResult: (@MainActor () async -> Void)?
-    var hostedBeforeNewSessionSubmission: (@MainActor () async -> Void)?
-    var hostedAfterNewSessionTrustResult: (@MainActor () async -> Void)?
 
     func connectHostedGateway(profile: GatewayProfile, token: String) async throws {
         try await lifecycle.connectHosted(profile: profile, token: token)
@@ -1623,16 +1642,6 @@ final class AppModel {
 
         var isActive: Bool { self == .active }
     }
-
-    @ObservationIgnored private var recordedSceneTransition: AppScenePhase = .active
-    /// Whether `recordedSceneTransition` came from a real transition. The launch
-    /// seed may only fill in the scene's starting point while nothing has moved:
-    /// a transition that arrived during startup is newer than the phase the
-    /// launch sampled, and overwriting it would suppress the next record.
-    @ObservationIgnored private var hasRecordedSceneTransition = false
-    /// Scene records are chained so their order in the log is the order the
-    /// scene moved, not the order three tasks happened to reach the log actor.
-    @ObservationIgnored private var sceneRecordTask: Task<Void, Never>?
 
     /// Records the scene's own transitions once, at the instant each happened.
     /// `.inactive` arriving from `.background` is the scene re-entering the
