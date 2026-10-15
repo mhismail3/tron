@@ -167,13 +167,13 @@ extension SwiftAppRuntime {
     func binding(named name: String, in scope: SwiftAppScope) throws -> SwiftAppBinding {
         if let box = scope.local("$" + name), case .binding(let binding) = box.value { return binding }
         if let box = scope.local(name) {
-            return SwiftAppBinding(get: { box.value }, set: { box.value = $0 })
+            return SwiftAppBinding(get: { box.value }, set: { [weak self] in self?.set(box, to: $0) })
         }
         if case .view(let instance) = scope.selfReference,
            let property = instance.declaration.stored.first(where: { $0.name == name }) {
             if let wrapper = property.wrapper, Self.stateWrappers.contains(wrapper) {
                 let state = instance.state
-                return SwiftAppBinding(get: { state.values[name] ?? .nilValue }, set: { state.values[name] = $0 })
+                return SwiftAppBinding(get: { state.values[name] ?? .nilValue }, set: { [weak self] in self?.set(state, name, to: $0) })
             }
             if property.wrapper == "Binding", case .binding(let binding)? = instance.properties[name] { return binding }
             if property.wrapper == "EnvironmentObject", let object = instance.environmentObjects[property.typeName ?? ""] {
@@ -181,7 +181,7 @@ extension SwiftAppRuntime {
             }
         }
         if let receiver = scope.selfReference, case .object(_, let object) = receiver, object.fields[name] != nil {
-            return SwiftAppBinding(get: { object.fields[name] ?? .nilValue }, set: { object.fields[name] = $0 })
+            return SwiftAppBinding(get: { object.fields[name] ?? .nilValue }, set: { [weak self] in self?.set(object, name, to: $0) })
         }
         throw SwiftAppRuntimeError("Cannot make a binding to '\(name)'; declare it with @State")
     }
@@ -232,7 +232,7 @@ extension SwiftAppRuntime {
             record.fields[name] = try setting(record.fields[name] ?? .nilValue, path: rest, to: value)
             return .record(record)
         case (.object(let object), .field(let name)):
-            object.fields[name] = try setting(object.fields[name] ?? .nilValue, path: rest, to: value)
+            set(object, name, to: try setting(object.fields[name] ?? .nilValue, path: rest, to: value))
             return .object(object)
         case (.array(var values), .index(let index)):
             guard values.indices.contains(index) else { throw SwiftAppRuntimeError("Index \(index) is out of range") }
@@ -248,7 +248,7 @@ extension SwiftAppRuntime {
         switch root {
         case .identifier(let identifier, _):
             if let box = scope.local(identifier) {
-                if case .binding(let binding) = box.value { binding.set(value) } else { box.value = value }
+                if case .binding(let binding) = box.value { binding.set(value) } else { set(box, to: value) }
                 return
             }
             if let box = scope.local("$" + identifier), case .binding(let binding) = box.value { binding.set(value); return }
@@ -259,20 +259,20 @@ extension SwiftAppRuntime {
             throw SwiftAppRuntimeError("Cannot assign to this expression")
         }
         if let receiver = scope.selfReference, try assignMember(of: receiver, name, value) { return }
-        if let box = globals.local(name) { box.value = value; return }
+        if let box = globals.local(name) { set(box, to: value); return }
         throw SwiftAppRuntimeError("Cannot assign to '\(name)'")
     }
 
     private func assignMember(of receiver: SwiftAppSelf, _ name: String, _ value: SwiftAppValue) throws -> Bool {
         let declaration = receiver.declaration
         let key = "\(declaration.name).\(name)"
-        if staticStorage[key] != nil { staticStorage[key] = value; return true }
+        if staticStorage[key] != nil { setStatic(key, to: value); return true }
         switch receiver {
         case .view(let instance):
             guard let property = declaration.stored.first(where: { $0.name == name }) else { return false }
             switch property.wrapper {
             case let wrapper? where Self.stateWrappers.contains(wrapper):
-                instance.state.values[name] = value
+                set(instance.state, name, to: value)
             case "Binding":
                 guard case .binding(let binding)? = instance.properties[name] else { return false }
                 binding.set(value)
@@ -283,11 +283,11 @@ extension SwiftAppRuntime {
         case .record(_, let box):
             guard case .record(var record) = box.value, record.fields[name] != nil else { return false }
             record.fields[name] = value
-            box.value = .record(record)
+            set(box, to: .record(record))
             return true
         case .object(_, let object):
             guard object.fields[name] != nil else { return false }
-            object.fields[name] = value
+            set(object, name, to: value)
             return true
         case .enumCase, .type:
             return false
@@ -357,7 +357,7 @@ extension SwiftAppRuntime {
         case .builtin(let name, let receiver):
             return try SwiftAppBuiltins.call(name, receiver: receiver, arguments, runtime: self)
         case .dismiss(let action):
-            action?()
+            dismissAfterCommit(action)
             return .void
         case .member(let name, nil):
             return .member(name, arguments)

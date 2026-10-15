@@ -85,8 +85,22 @@ the presentation the program created around that view (its `sheet` or a
 `NavigationLink` destination, through `SwiftAppPresentedContent`); in the
 program's root view it does nothing, so a program never closes the runner. Unsupported syntax shows a readable message with
 its line number instead of running; an unsupported view or a failing body
-renders an inline diagnostic beside the working views; a failing action shows
-its message over the app, and the next successful action clears it.
+renders an inline diagnostic beside the working views. Diagnostics reuse the
+shared `TronInfoCard` with semantic error accent, typography and glass surface;
+the runner keeps `tronDocumentSheetChrome`.
+
+Actions (including `onAppear`, `onChange`, and gesture callbacks) are
+transactional. A budget stop or any thrown runtime error restores every written
+interpreted storage slot to its pre-action value before showing
+“Action cancelled; state restored” and the cause over the app (with its source
+line when available).
+This includes nested/derived state, projected `@Binding` values, arrays,
+`@Published` and aliased object fields, globals and static storage. The runtime
+journals first writes at storage owners, so reference identity is preserved;
+rollback does not evaluate code or spend the exhausted budget. Native dismiss
+effects wait until commit. A successful action commits all writes and clears
+the previous action error. Direct native control binding writes remain single
+slot updates; their subsequent `onChange` is a separate action.
 
 Every entry from SwiftUI (a view body, an action, a container's content
 closure) runs under one work budget. Exhausting any limit stops that entry
@@ -208,7 +222,10 @@ fixture (`-readonly-preview-scenario display-swift…`):
   growth, a self-reading computed property, `Int.min / -1`, comparing and
   describing a value with 2^40 shared leaves, a hostile format string, and a
   view that contains itself. Each ends in a diagnostic or a bounded value while
-  the app stays responsive.
+  the app stays responsive. The same journey verifies rollback of nested binding
+  records/arrays, derived totals, published arrays and aliased object fields on
+  budget failure; scalar state and object writes on arithmetic failure; successful
+  commit afterward; and the shared info card’s primary text ink and visible bounds.
 
 ```bash
 scripts/tron-ios-test build
