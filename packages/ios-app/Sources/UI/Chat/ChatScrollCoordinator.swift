@@ -147,7 +147,10 @@ final class ChatScrollCoordinator {
         self.orientation = orientation
         self.clock = clock
     }
+}
 
+// Behavior stays out of the @Observable class body; see AppModel (#1066).
+extension ChatScrollCoordinator {
     func configureInteractionTrace(_ trace: ChatInteractionTrace, context: Int) {
         interactionTrace = trace
         interactionTraceContext = context
