@@ -189,6 +189,16 @@ enum SwiftAppBuiltins {
         runtime: SwiftAppRuntime
     ) throws -> SwiftAppValue {
         guard let receiver else { return try callFree(name, arguments, runtime: runtime) }
+        // Optional.map/flatMap: nil stays nil; a non-collection value is
+        // passed to the closure. Arrays, ranges and strings keep their own map.
+        if SwiftAppRuntime.optionalMethods.contains(name), let transform = arguments.last?.value {
+            switch receiver.resolved {
+            case .nilValue: return .nilValue
+            case .int, .double, .bool, .record, .object, .member(_, nil), .tuple:
+                return try invoke(transform, [receiver.resolved], runtime: runtime)
+            default: break
+            }
+        }
         switch receiver.resolved {
         case .view(var node):
             node.modifiers.append((name, arguments))

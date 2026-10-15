@@ -152,8 +152,9 @@ extension SwiftAppRuntime {
             if let element = elements.first(where: { $0.label == name }) { return element.value }
             if let index = Int(name), elements.indices.contains(index) { return elements[index].value }
         case .nilValue:
-            // Optional chaining reads through nil.
-            return .nilValue
+            // Optional.map/flatMap on nil is nil; any other member is
+            // optional chaining, which reads through nil.
+            return Self.optionalMethods.contains(name) ? .builtin(name, base) : .nilValue
         default:
             break
         }
@@ -299,6 +300,15 @@ extension SwiftAppRuntime {
         let arguments = try argumentExpressions.map { argument in
             SwiftAppLabeledValue(label: argument.label, value: try evaluate(argument.value, in: scope))
         }
+        // `first`/`last` are properties on arrays, but `first(where:)` and
+        // `first { … }` are calls to the method of the same name.
+        if case .member(let base, let name) = callee, !arguments.isEmpty, ["first", "last"].contains(name) {
+            let receiver = try evaluate(base, in: scope).resolved
+            switch receiver {
+            case .array, .range: return try apply(.builtin(name, receiver), arguments)
+            default: break
+            }
+        }
         if case .member(let base, let name) = callee, let target = try lvalue(base, in: scope) {
             let receiver = try evaluate(base, in: scope)
             let resolved = receiver.resolved
@@ -441,6 +451,10 @@ extension SwiftAppRuntime {
         }
         return try entered { try run(body, in: SwiftAppScope(parent: globals, selfReference: .view(instance))) }
     }
+
+    /// Optional's own methods. Values carry no Optional wrapper, so these
+    /// apply to nil and to values that have no `map` of their own.
+    static let optionalMethods: Set<String> = ["map", "flatMap"]
 
     private static let builtinTypes: Set<String> = [
         "String", "Int", "Double", "Float", "CGFloat", "Bool", "Array", "UUID", "Color", "Font", "Date", "Set",
