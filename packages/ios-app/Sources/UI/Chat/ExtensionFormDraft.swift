@@ -81,10 +81,6 @@ struct ExtensionFormDraft: Codable, Equatable, Sendable {
         return !value.optionIDs.isEmpty || !value.other.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    func isComplete(_ form: ExtensionFormDescriptor) -> Bool {
-        form.questions.allSatisfy(isAnswered)
-    }
-
     func answer(for form: ExtensionFormDescriptor) -> ExtensionFormAnswer {
         ExtensionFormAnswer(
             version: 1,

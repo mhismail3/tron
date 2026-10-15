@@ -526,25 +526,3 @@ package enum SessionProcessProjection {
         return lhs.processId < rhs.processId
     }
 }
-
-/// Local rendering deadline only. Gateway snapshots/deltas remain authoritative;
-/// this may hide stale recent chrome but can never extend or promote it.
-struct SessionProcessVisualDeadline: Sendable {
-    let visibility: SessionProcessOverviewVisibility
-    let deadline: ContinuousClock.Instant?
-
-    init(overview: SessionProcessOverview, now: ContinuousClock.Instant = .now, wallNow: Date = .now) {
-        visibility = overview.visibility
-        if overview.visibility == .recent,
-           let expiry = overview.nearestExpiry.flatMap(GatewayTimestamp.parse) {
-            let remaining = max(0, Int(expiry.timeIntervalSince(wallNow) * 1_000))
-            deadline = remaining > 0 ? now.advanced(by: .milliseconds(remaining)) : now
-        } else {
-            deadline = nil
-        }
-    }
-
-    func expired(at now: ContinuousClock.Instant = .now) -> Bool {
-        visibility == .recent && deadline.map { now >= $0 } ?? false
-    }
-}
