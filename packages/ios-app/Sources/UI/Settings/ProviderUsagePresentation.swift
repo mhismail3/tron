@@ -357,18 +357,32 @@ struct ProviderUsageSummaryHeader: View {
 }
 
 struct ProviderUsageProgress: View {
+    static let height: CGFloat = 5
+
     let percent: Double
     let accent: Color
+    /// The hosted layout journey's key for the fill's frame; nothing otherwise.
+    var fillProbe: String? = nil
+
+    /// A capsule narrower than it is tall loses its rounded ends, so any
+    /// non-zero fill is at least one bar height wide: a small share reads as a
+    /// round dot with the same left end as every other bar. Zero stays empty.
+    static func fillWidth(percent: Double, trackWidth: CGFloat, height: CGFloat = height) -> CGFloat {
+        let clamped = min(max(percent, 0), 100)
+        guard clamped > 0, trackWidth > 0 else { return 0 }
+        return min(trackWidth, max(height, trackWidth * clamped / 100))
+    }
 
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Capsule().fill(accent.opacity(0.16))
                 Capsule().fill(accent)
-                    .frame(width: proxy.size.width * min(max(percent, 0), 100) / 100)
+                    .frame(width: Self.fillWidth(percent: percent, trackWidth: proxy.size.width, height: proxy.size.height))
+                    .homeUsageLayoutProbe(fillProbe)
             }
         }
-        .frame(height: 5)
+        .frame(height: Self.height)
         .accessibilityHidden(true)
     }
 }

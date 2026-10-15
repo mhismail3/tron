@@ -32,7 +32,6 @@ enum GatewayDisposableReadPolicy {
         "session.transcript",
         "session.history.list",
         "session.history.entry",
-        "session.search",
         "model.list",
         "provider.list",
         "provider.usage"

@@ -2554,21 +2554,6 @@ export class RuntimeRegistry {
     return { summary: info, entries: selectedFile, ...(info.fileIdentity ? { fileIdentity: info.fileIdentity } : {}), ...(forkBoundary ? { forkBoundary } : {}), ...(selectedLeafId ? { leafEntryId: selectedLeafId } : {}) };
   }
 
-  async readSearchTranscriptPage(sessionId: string, before: number, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string): Promise<TranscriptPage> {
-    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
-    return slot.transcriptPage(before, undefined, expectedRuntimeGeneration, expectedLeafEntryId);
-  }
-
-  async readSearchTranscriptPageAtEntry(sessionId: string, entryID: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string, windowEnd?: number): Promise<TranscriptPage> {
-    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
-    return slot.transcriptPageAtEntry(entryID, expectedRuntimeGeneration, expectedLeafEntryId, windowEnd);
-  }
-
-  async readSearchTranscriptPageAfter(sessionId: string, after: number, expectedPreviousEntryId?: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string): Promise<TranscriptPage> {
-    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
-    return slot.transcriptPageAfter(after, expectedPreviousEntryId, expectedRuntimeGeneration, expectedLeafEntryId);
-  }
-
   async catalog(scope: "user" | "all" = "user"): Promise<{
     sessions: SessionSummary[];
     listRevision: number;

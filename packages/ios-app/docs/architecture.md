@@ -3162,44 +3162,12 @@ no prompt is replayed or automatically sent.
 
 ### Session search
 
-The dashboard keeps title/path filtering local for immediate feedback. Content
-search fans out only to the first eight eligible Gateway profiles selected by the
-managed server filter; omitted profiles remain visible as skipped states. Local
-catalog matches and remote passage matches are unioned into profile-qualified
-session groups, with each profile reporting ready, partial, offline, error, or
-skipped coverage independently. Content search uses the optional
-`session-search.v1` capability and is request-fenced by the active Gateway
-connection/profile; selected-profile requests use the foreground lifecycle
-client, while background profiles use the dashboard connection pool. A short
-input debounce coalesces remote fanout, and dismissal, reconnect, and profile
-changes cancel owned disposable requests without cancelling accepted commands.
-Neither a stale request nor a stale presentation activity may publish results.
-Optional Jev reranking is
-explicitly disclosed as sending the query and selected snippets to the
-configured provider, and is never enabled without the user's consent and
-allowance state.
-
-Search results retain the canonical session, entry ID, branch/file anchor
-revision, and nested passage identity. Each result also carries the Gateway's own archive projection,
-so a row for an archived session is labeled **Archived** without a second read or an index change, and
-opening a result never unarchives it. Selecting a result asks
-`session.search.anchor` for a revision-checked bounded historical window, then
-uses the existing presentation store and scroll coordinator; results never own
-a second transcript cache or scroll position. The historical window carries its
-own exact global ordinals/runtime/leaf identity and is explicitly separate from
-the live tail, with a return-to-latest action. Branch, reconnect, or identity
-changes expire it rather than mixing disconnected rows. Historical page values
-and failures revalidate the exact presentation, subscription, connection, and
-window after the final await; a same-session remount cannot inherit old work.
-Render scroll is admitted after the mounted projection exposes the target
-semantic ID and the viewport reports its current layout. Offscreen lazy rows
-are materialized without requiring their not-yet-existing frame; relative
-position restoration still requires frame evidence. Missing render targets
-expire without issuing a stale scroll; anchor admission failures surface retry
-guidance. Per-profile persisted policy is restored via
-fenced `session.search.policy.get` after lifecycle/pool admission, with false-
-safe visible errors. A Gateway that reports partial or unavailable semantic
-coverage is displayed as such while lexical results remain usable.
+Dashboard search and the Home View All sheets filter by session title on the
+iPhone with `SessionTitleSearch` (`Sources/UI/Chat/SessionTitleSearch.swift`), a
+synchronous ranking over the catalog rows the dashboard already holds; it makes no
+Gateway request. Results are the dashboard's standard session rows. Content
+search over transcripts belongs to Home's `session_search` research tool on the
+Gateway, not the dashboard.
 
 Inline expanded display cards share the message menu's native source-owned
 interaction. The card itself, before disclosure opacity/scale and the row's

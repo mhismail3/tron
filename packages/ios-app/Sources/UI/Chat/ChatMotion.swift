@@ -82,7 +82,6 @@ enum ChatMotion {
     static func historyScroll(reduceMotion: Bool) -> ChatScrollAnimation {
         reduceMotion ? .disabled : .smooth(duration: 0.30)
     }
-    static let semanticRowScroll = ChatScrollAnimation.smooth(duration: 0.25)
 
     // ChatLayoutTransaction keeps its geometry/keyboard API and uses these values.
     static let layoutSmoothDuration: TimeInterval = 0.34

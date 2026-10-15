@@ -112,9 +112,6 @@ final class AppModel {
         /// Optional exact history entry requested by an evidence citation. It
         /// is route identity so a second citation cannot reuse a mounted chat.
         let initialHistoryEntryID: String?
-        /// Full search evidence is retained through route replacement so the
-        /// anchor RPC can validate branch/file identity before paging.
-        let initialSearchResult: SessionSearchResult?
         /// The Home conversation's logical route. Its `sessionID` is the physical
         /// chapter it currently opens; sends go through `home.prompt`, and the
         /// route follows Home to the chapter Home names next.
@@ -125,10 +122,7 @@ final class AppModel {
             let base = gatewayProfileID.map { "\($0):\(sessionID)" } ?? sessionID
             let home = isHome ? "home" : nil
             let history = initialHistoryEntryID.map { "history:\($0)" }
-            let evidence = initialSearchResult.map { result in
-                "search:\(result.anchorRevision.indexRevision):\(result.anchorRevision.fileIdentity):\(result.anchorRevision.branchDigest):\(result.anchorRevision.entryOrdinal)"
-            }
-            return [base, home, history, evidence].compactMap { $0 }.joined(separator: ":")
+            return [base, home, history].compactMap { $0 }.joined(separator: ":")
         }
 
         init(
@@ -136,7 +130,6 @@ final class AppModel {
             editorText: String?,
             initialModel: ModelRef? = nil,
             initialHistoryEntryID: String? = nil,
-            initialSearchResult: SessionSearchResult? = nil,
             isHome: Bool = false,
             gatewayProfileID: String? = nil,
             gatewayLifecycleGeneration: Int? = nil
@@ -145,14 +138,13 @@ final class AppModel {
             self.editorText = editorText
             self.initialModel = initialModel
             self.initialHistoryEntryID = initialHistoryEntryID
-            self.initialSearchResult = initialSearchResult
             self.isHome = isHome
             self.gatewayProfileID = gatewayProfileID
             self.gatewayLifecycleGeneration = gatewayLifecycleGeneration
         }
 
         func withEditorText(_ text: String?) -> SessionNavigationRoute {
-            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, initialHistoryEntryID: initialHistoryEntryID, initialSearchResult: initialSearchResult, isHome: isHome, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
+            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, initialHistoryEntryID: initialHistoryEntryID, isHome: isHome, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
         }
 
         func withInitialModel(_ model: ModelRef?) -> SessionNavigationRoute {
@@ -161,7 +153,6 @@ final class AppModel {
                 editorText: editorText,
                 initialModel: model,
                 initialHistoryEntryID: initialHistoryEntryID,
-                initialSearchResult: initialSearchResult,
                 isHome: isHome,
                 gatewayProfileID: gatewayProfileID,
                 gatewayLifecycleGeneration: gatewayLifecycleGeneration
@@ -258,11 +249,6 @@ final class AppModel {
     var gatewayConnectionID: Int? { lifecycle.connectionID }
     private var sessionCatalog = SessionCatalogCoordinator()
     private let dashboardConnections: DashboardGatewayConnectionPool
-    private let sessionSearch = SessionSearchCoordinator()
-    private var sessionSearchConsentByProfile: [String: Bool] = [:]
-    private var sessionSearchPolicyRequestGeneration: [String: Int] = [:]
-    private var sessionSearchPolicyMutationTails: [String: (id: UUID, task: Task<SessionSearchPolicy, Error>)] = [:]
-    private var sessionSearchPolicyLoadedConnections: [String: String] = [:]
     let automationCatalog: AutomationCatalogCoordinator
     /// Focused-profile, disposable Home status; never a mirror of Home storage.
     let homeStatus = HomeStatusPresentationOwner()
@@ -379,7 +365,6 @@ final class AppModel {
     var sessionTree: [SessionTreeNode] { sessionPresentation.sessionTree }
     var loadingEarlierTranscript: Bool { sessionPresentation.loadingEarlierTranscript }
     var transcriptLoadState: SessionTranscriptLoadState { sessionPresentation.transcriptLoadState }
-    var isShowingHistoricalTranscript: Bool { sessionPresentation.isShowingHistoricalTranscript }
     /// Foreground reconciliation is an aggregate install, not a live insertion
     /// stream; mounted chats use this fact to suppress entrance replay. The
     /// generation remains stable until its first aggregate projection installs,
@@ -1179,194 +1164,6 @@ final class AppModel {
     /// failed read can never change reconnect behaviour.
     func recoverTransientTransportFailure() {
         lifecycle.requestTransportRecovery()
-    }
-
-    func sessionPresentationGeneration(for sessionID: String) -> Int? {
-        sessionPresentation.presentationGeneration(for: sessionID)
-    }
-
-    func searchSessions(
-        query: String,
-        targets: [SessionSearchProfileTarget],
-        maxResults: Int = 25,
-        remoteRanking: Bool = false
-    ) async -> SessionSearchAggregate {
-        let consent = Dictionary(uniqueKeysWithValues: targets.map { ($0.profileID, sessionSearchConsent(for: $0.profileID)) })
-        return await sessionSearch.searchAll(query: query, targets: targets, connections: dashboardConnections, maxResults: maxResults, remoteRanking: remoteRanking, consentByProfile: consent, lifecycle: lifecycle)
-    }
-
-    func searchSessions(query: String, profileID: String, maxResults: Int = 25, remoteRanking: Bool = false) async throws -> SessionSearchResponse? {
-        guard gatewayInfo?.capabilities.contains("session-search.v1") == true || dashboardConnections.infoSnapshot(for: profileID)?.capabilities.contains("session-search.v1") == true else { return nil }
-        return try await sessionSearch.search(query: query, profileID: profileID, connections: dashboardConnections, maxResults: maxResults, remoteRanking: remoteRanking, remoteConsent: sessionSearchConsent(for: profileID), lifecycle: lifecycle)
-    }
-
-    func sessionSearchConsent(for profileID: String) -> Bool {
-        guard let identity = sessionSearchPolicyConnectionIdentity(for: profileID),
-              sessionSearchPolicyLoadedConnections[profileID] == identity else { return false }
-        return sessionSearchConsentByProfile[profileID] ?? false
-    }
-
-    func sessionSearchPolicyMutationIsInFlight(for profileID: String) -> Bool {
-        sessionSearchPolicyMutationTails[profileID] != nil
-    }
-
-    private func sessionSearchPolicyConnectionIdentity(for profileID: String) -> String? {
-        if lifecycle.selectedProfileID == profileID {
-            guard let admission = lifecycle.admission, let connectionID = admission.connectionID else { return nil }
-            return "focused:\(admission.generation):\(connectionID)"
-        }
-        return dashboardConnections.requestIdentity(for: profileID)
-    }
-
-    /// The visible search surface refreshes once per exact profile/connection
-    /// demand, not whenever an unrelated dashboard summary changes.
-    var sessionSearchPolicyDemandIdentity: String {
-        "\(lifecycle.selectedProfileID ?? "none"):\(lifecycle.currentLifecycleGeneration):\(gatewayConnectionID.map(String.init) ?? "offline")"
-    }
-
-    func restoreSessionSearchPolicy(profileID: String, force: Bool = false) async {
-        guard !Task.isCancelled, !sessionSearchPolicyMutationIsInFlight(for: profileID),
-              let identity = sessionSearchPolicyConnectionIdentity(for: profileID) else { return }
-        if !force, sessionSearchPolicyLoadedConnections[profileID] == identity { return }
-        let request = beginSessionSearchPolicyRequest(profileID: profileID)
-        do {
-            let policy: SessionSearchPolicy
-            if lifecycle.selectedProfileID == profileID {
-                guard let admission = lifecycle.admission else { throw CancellationError() }
-                policy = try await sessionSearch.getPolicy(profileID: profileID, connections: dashboardConnections, lifecycle: lifecycle, admission: admission)
-                guard lifecycle.selectedProfileID == profileID, lifecycle.admits(admission) else { throw CancellationError() }
-            } else {
-                guard let admission = dashboardConnections.requestAdmission(for: profileID) else { throw CancellationError() }
-                policy = try await sessionSearch.getPolicy(profileID: profileID, connections: dashboardConnections, expectedConnection: admission)
-                guard dashboardConnections.requestAdmission(for: profileID) == admission else { throw CancellationError() }
-            }
-            guard !Task.isCancelled, sessionSearchPolicyRequestGeneration[profileID] == request,
-                  sessionSearchPolicyConnectionIdentity(for: profileID) == identity,
-                  !sessionSearchPolicyMutationIsInFlight(for: profileID) else { return }
-            sessionSearchConsentByProfile[profileID] = policy.enabled
-            sessionSearchPolicyLoadedConnections[profileID] = identity
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled, sessionSearchPolicyRequestGeneration[profileID] == request,
-                  sessionSearchPolicyConnectionIdentity(for: profileID) == identity,
-                  !sessionSearchPolicyMutationIsInFlight(for: profileID) else { return }
-            sessionSearchConsentByProfile[profileID] = false
-            sessionSearchPolicyLoadedConnections[profileID] = nil
-            surface(error)
-        }
-    }
-
-    private func beginSessionSearchPolicyRequest(profileID: String) -> Int {
-        let next = (sessionSearchPolicyRequestGeneration[profileID] ?? 0) + 1
-        sessionSearchPolicyRequestGeneration[profileID] = next
-        return next
-    }
-
-    func setSessionSearchRemoteRanking(_ enabled: Bool, profileID: String) async throws -> SessionSearchPolicy {
-        try Task.checkCancellation()
-        guard let identity = sessionSearchPolicyConnectionIdentity(for: profileID) else { throw CancellationError() }
-        let predecessor = sessionSearchPolicyMutationTails[profileID]?.task
-        let leaseID = UUID()
-        let task = Task<SessionSearchPolicy, Error> { @MainActor [weak self] in
-            // A cancelled presentation waiter must not cancel an accepted
-            // predecessor or allow a later intent to overtake it on the wire.
-            _ = try? await predecessor?.value
-            guard let self else { throw CancellationError() }
-            defer {
-                if self.sessionSearchPolicyMutationTails[profileID]?.id == leaseID {
-                    self.sessionSearchPolicyMutationTails[profileID] = nil
-                }
-            }
-            // Admission belongs to the user intent, not the time its queue
-            // predecessor finishes. Never move a queued write to a new socket.
-            guard self.sessionSearchPolicyConnectionIdentity(for: profileID) == identity else { throw CancellationError() }
-            return try await self.performSessionSearchRemoteRankingMutation(enabled, profileID: profileID, identity: identity)
-        }
-        sessionSearchPolicyMutationTails[profileID] = (leaseID, task)
-        return try await task.value
-    }
-
-    private func performSessionSearchRemoteRankingMutation(
-        _ enabled: Bool,
-        profileID: String,
-        identity: String
-    ) async throws -> SessionSearchPolicy {
-        let policyRequest = beginSessionSearchPolicyRequest(profileID: profileID)
-        let generation = lifecycle.currentLifecycleGeneration
-        let policy: SessionSearchPolicy
-        if lifecycle.selectedProfileID == profileID {
-            guard let admission = lifecycle.admission else { throw CancellationError() }
-            policy = try await sessionSearch.setPolicy(profileID: profileID, enabled: enabled, connections: dashboardConnections, lifecycle: lifecycle, admission: admission)
-            guard lifecycle.selectedProfileID == profileID, lifecycle.currentLifecycleGeneration == generation, lifecycle.admits(admission) else { throw CancellationError() }
-        } else {
-            policy = try await sessionSearch.setPolicy(profileID: profileID, enabled: enabled, connections: dashboardConnections)
-        }
-        guard sessionSearchPolicyRequestGeneration[profileID] == policyRequest,
-              sessionSearchPolicyConnectionIdentity(for: profileID) == identity else { throw CancellationError() }
-        sessionSearchConsentByProfile[profileID] = policy.enabled
-        sessionSearchPolicyLoadedConnections[profileID] = identity
-        return policy
-    }
-
-    func dismissSessionSearch() { sessionSearch.dismiss() }
-
-    /// Validates a search citation against the owning Gateway and admits one
-    /// bounded historical window containing the canonical entry. The
-    /// presentation generation and selected profile fence every await.
-    func navigateToSearchResult(_ result: SessionSearchResult, profileID: String) async throws -> Bool {
-        guard lifecycle.selectedProfileID == profileID,
-              let generation = sessionPresentation.presentationGeneration(for: result.sessionId),
-              let snapshot = sessionPresentation.authoritativeSnapshot(for: result.sessionId) else { throw CancellationError() }
-        // The anchor response is the exact canonical page proof. Transcript
-        // installation remains owned by SessionPresentationStore: it admits
-        // contiguous older pages under its mounted coverage lease rather than
-        // grafting a detached search response into the live snapshot.
-        let anchor = try await sessionSearch.anchor(
-            result: result,
-            profileID: profileID,
-            runtimeGeneration: snapshot.runtimeGeneration,
-            leafEntryID: snapshot.leafEntryId,
-            connections: dashboardConnections,
-            lifecycle: lifecycle,
-            windowEnd: result.ordinal + 128
-        )
-        guard SessionSearchNavigationAdmission.admits(
-                  result: result,
-                  anchor: anchor,
-                  expectedProfileID: profileID,
-                  currentProfileID: lifecycle.selectedProfileID ?? "",
-                  expectedGeneration: generation,
-                  currentGeneration: sessionPresentation.presentationGeneration(for: result.sessionId) ?? -1,
-                  expectedRuntimeGeneration: snapshot.runtimeGeneration,
-                  currentRuntimeGeneration: snapshot.runtimeGeneration,
-                  expectedLeafEntryID: snapshot.leafEntryId
-              ) else { throw CancellationError() }
-        guard lifecycle.selectedProfileID == profileID,
-              sessionPresentation.presentationGeneration(for: result.sessionId) == generation else { throw CancellationError() }
-        // The bounded anchor window is installed by the presentation owner as
-        // historical mode; it never masquerades as the live tail or grafts a
-        // disconnected bridge into the mounted transcript.
-        return sessionPresentation.installHistoricalSearchWindow(
-            anchor,
-            sessionID: result.sessionId,
-            presentationGeneration: generation
-        )
-    }
-
-    func returnToLatestTranscript(sessionID: String) {
-        guard let generation = sessionPresentation.presentationGeneration(for: sessionID) else { return }
-        _ = sessionPresentation.returnToLatestTranscript(sessionID: sessionID, presentationGeneration: generation)
-    }
-
-    func loadHistoricalEarlierTranscript(sessionID: String) async -> Bool {
-        guard let generation = sessionPresentation.presentationGeneration(for: sessionID) else { return false }
-        return await sessionPresentation.loadHistoricalEarlier(sessionID: sessionID, presentationGeneration: generation)
-    }
-
-    func loadHistoricalLaterTranscript(sessionID: String) async -> Bool {
-        guard let generation = sessionPresentation.presentationGeneration(for: sessionID) else { return false }
-        return await sessionPresentation.loadHistoricalLater(sessionID: sessionID, presentationGeneration: generation)
     }
 
     /// Last authenticated success of a secondary profile, never a guessed last-seen time.
@@ -3554,14 +3351,13 @@ final class AppModel {
     /// Opens an authoritative session returned by an Automation run. The
     /// profile is part of the route identity because the same session ID may
     /// exist on multiple Gateways; no dashboard cache lookup is used here.
-    func navigationRoute(profileID: String, sessionID: String, historyEntryID: String? = nil, searchResult: SessionSearchResult? = nil) async throws -> SessionNavigationRoute {
+    func navigationRoute(profileID: String, sessionID: String, historyEntryID: String? = nil) async throws -> SessionNavigationRoute {
         let owner = try await activateDashboardProfile(profileID)
         guard !sessionID.isEmpty else { throw CancellationError() }
         return SessionNavigationRoute(
             sessionID: sessionID,
             editorText: nil,
-            initialHistoryEntryID: searchResult?.entryId ?? historyEntryID,
-            initialSearchResult: searchResult,
+            initialHistoryEntryID: historyEntryID,
             gatewayProfileID: owner.profileID,
             gatewayLifecycleGeneration: owner.lifecycleGeneration
         )
@@ -5700,8 +5496,8 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         state: DashboardServerConnectionState,
         stopReason: String?
     ) {
-        // A retired secondary cannot invalidate the focused owner's rows or
-        // consent after the same profile has acquired its replacement socket.
+        // A retired secondary cannot invalidate the focused owner's rows after
+        // the same profile has acquired its replacement socket.
         guard profileID != profiles.selected?.id,
               profiles.profiles.contains(where: { $0.id == profileID }) else { return }
         // A stop message is retained only while its entry is stopped: a
@@ -5711,14 +5507,6 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         let stopReasonChanged = dashboardStopReasonsByProfile[profileID] != publishedStopReason
         dashboardStopReasonsByProfile[profileID] = publishedStopReason
         let previousState = dashboardStatesByProfile[profileID]
-        if state != .connected {
-            sessionSearchPolicyLoadedConnections[profileID] = nil
-        } else if previousState != .connected,
-                  sessionSearchPolicyLoadedConnections[profileID] != sessionSearchPolicyConnectionIdentity(for: profileID) {
-            // A connection transition is a real policy demand. Summary rows are
-            // not: they must never amplify this optional read.
-            Task { @MainActor [weak self] in await self?.restoreSessionSearchPolicy(profileID: profileID) }
-        }
         if dashboardStatesByProfile[profileID] != state {
             automationCatalog.invalidate(profileID: profileID)
         }
