@@ -88,7 +88,7 @@ adapter.
 
 - macOS 15 or newer
 - The Xcode and XcodeGen versions pinned in `config/ci-toolchain.env`
-- Node 22.22.0 for gateway development (the exact pin is `.node-version`)
+- The Node pinned in `.node-version` for gateway development (`scripts/tron-node install` installs it)
 - Tailscale on the Mac and iPhone for mobile operation
 
 Production dependencies are exact-pinned. The shipped Mac app bundles exact

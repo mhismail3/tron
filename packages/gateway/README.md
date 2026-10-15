@@ -408,7 +408,9 @@ predecessor also binds registry integrity. A partial rollback record is rejected
 dependency records and versions, with a root derived from that archive's manifest;
 no development dependency versions are inferred. Source archives and lockfiles
 are retained under `artifacts/`; build the deterministic closure with `npm run
-build:pi-subagents-closure` using the pinned Node 22/npm toolchain. The builder
+build:pi-subagents-closure` using the Node/npm toolchain the pin records
+(`nodeVersion`/`npmVersion`, which may predate `.node-version`; select it with
+`TRON_NODE_BIN`). The builder
 reads the top-level pin selection; rebuild a predecessor in a disposable copy
 with its version and artifact inputs selected, never by changing a live install.
 `npm ci` validates even omitted development dependencies, so the builder removes

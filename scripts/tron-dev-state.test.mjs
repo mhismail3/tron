@@ -6,6 +6,9 @@ import { join } from "node:path";
 import { once } from "node:events";
 import { test } from "node:test";
 
+/** The fixture Node answers the repository pin, which scripts/tron-node requires. */
+const PINNED_NODE = readFileSync(new URL("../.node-version", import.meta.url), "utf8").trim();
+
 const run = (state, command, ...argumentsList) => execFileSync(process.execPath, [helper, command, state, ...argumentsList], { encoding: "utf8" });
 const runAsync = (state, command, ...argumentsList) => new Promise((resolve, reject) => {
   execFile(process.execPath, [helper, command, state, ...argumentsList], (error, stdout, stderr) => {
@@ -516,7 +519,7 @@ const stopFixture = ({ child, identity, childIsOwned }) => {
     mkdirSync(home, { recursive: true });
     mkdirSync(fakeBin, { recursive: true });
     writeFileSync(fakeNode, `#!/bin/sh
-if [ "${"$"}{1:-}" = "--version" ]; then echo v22.22.0; exit 0; fi
+if [ "${"$"}{1:-}" = "--version" ]; then echo v${PINNED_NODE}; exit 0; fi
 command="${"$"}{2:-}";
 count_file="${root}/pid-current.count";
 case "${"$"}command" in
@@ -594,7 +597,7 @@ test("Debug lifecycle commands never see the caller's Stable Gateway environment
     mkdirSync(join(home, ".tron-dev", "gateway"), { recursive: true });
     mkdirSync(fakeBin, { recursive: true });
     writeFileSync(fakeNode, `#!/bin/sh
-if [ "${"$"}{1:-}" = "--version" ]; then echo v22.22.0; exit 0; fi
+if [ "${"$"}{1:-}" = "--version" ]; then echo v${PINNED_NODE}; exit 0; fi
 /usr/bin/env > "${seen}"
 echo '{"lifecycle":"stopped"}'
 `);

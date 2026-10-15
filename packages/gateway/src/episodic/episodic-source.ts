@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, type Stats } from "node:fs";
 import { open } from "node:fs/promises";
 import { redactCredentials } from "../util/credential-redaction.js";
 import {
@@ -34,7 +34,7 @@ export class EpisodicSourceChangedError extends Error {
 
 /** Whether the file a handle reads is unchanged between two stats: identity, size
  * and times, which a rewrite or an append changes. */
-export function sameSnapshot(start: Awaited<ReturnType<import("node:fs/promises").FileHandle["stat"]>>, end: Awaited<ReturnType<import("node:fs/promises").FileHandle["stat"]>>): boolean {
+export function sameSnapshot(start: Stats, end: Stats): boolean {
   return start.dev === end.dev && start.ino === end.ino && start.size === end.size
     && start.mtimeMs === end.mtimeMs && start.ctimeMs === end.ctimeMs;
 }
@@ -172,7 +172,7 @@ export async function readCanonicalSession(options: {
   const handle = await open(options.path, constants.O_RDONLY).catch((error: NodeJS.ErrnoException) => {
     throw new EpisodicMemoryError("source", `Canonical session ${options.path} cannot be read: ${error.code ?? error.message}`);
   });
-  let start: Awaited<ReturnType<typeof handle.stat>> | undefined;
+  let start: Stats | undefined;
   try {
     const info = start = await handle.stat();
     if (!info.isFile()) throw new EpisodicMemoryError("source", "Canonical session is not a regular file");
