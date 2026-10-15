@@ -1521,7 +1521,7 @@ planned for it.
 
 ## 9. Slices
 
-Each slice is a Proposed issue under epic #758; the maintainer moves a slice to Ready.
+Each slice is an issue under epic #758.
 The maintainer-approved #758 integration branch collects these dependent slices;
 individual acceptance remains explicit and every required dependency must be
 satisfied before its draft integration PR can land. Size is S, M or L. Slice 14
