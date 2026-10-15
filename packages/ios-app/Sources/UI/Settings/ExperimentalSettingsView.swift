@@ -12,7 +12,7 @@ struct ExperimentalSettingsView: View {
                     TronToggleRow(
                         icon: "play.rectangle",
                         title: "Run Swift files",
-                        detail: "Adds a Run button to .swift previews. Sandboxed; validated in the simulator only.",
+                        detail: "Adds a Run button to .swift previews. Sandboxed; simulator-tested only.",
                         isOn: $swiftApps.isEnabled
                     )
                     .accessibilityIdentifier("settings-experimental-swift-apps")
