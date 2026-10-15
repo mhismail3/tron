@@ -408,7 +408,7 @@ export class HomeMemory {
       signal?.throwIfAborted();
       await binding.memory.ingestForRead(this.options.sessionId, signal);
       signal?.throwIfAborted();
-      if (binding.memory.status().blocked?.reason === "source-unavailable") throw homeMemorySourceUnavailable();
+      if (binding.memory.status().blocked?.reason === "source-unavailable") throw homeMemorySourceUnavailable("store-source-unavailable");
       return binding.memory.withBrowserRead(async () => {
         signal?.throwIfAborted();
         const revision = binding.memory.browserRevision();
