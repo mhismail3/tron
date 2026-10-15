@@ -147,10 +147,11 @@ function diagnosticErrorCode(error: unknown): string {
   return "unknown";
 }
 
-function diagnosticErrorDetails(error: unknown): { operationId?: string; ageMs?: number } {
-  if (!(error instanceof GatewayError) || error.diagnosticReason !== "attention-pending"
-    || !error.details || typeof error.details !== "object" || Array.isArray(error.details)) return {};
+function diagnosticErrorDetails(error: unknown): { operationId?: string; ageMs?: number; cause?: string } {
+  if (!(error instanceof GatewayError) || !error.details || typeof error.details !== "object" || Array.isArray(error.details)) return {};
   const details = error.details as Record<string, unknown>;
+  if (error.diagnosticReason === "home-memory-source-unavailable") return typeof details.cause === "string" ? { cause: details.cause } : {};
+  if (error.diagnosticReason !== "attention-pending") return {};
   return {
     ...(typeof details.operationId === "string" ? { operationId: details.operationId } : {}),
     ...(typeof details.ageMs === "number" && Number.isFinite(details.ageMs) ? { ageMs: details.ageMs } : {}),

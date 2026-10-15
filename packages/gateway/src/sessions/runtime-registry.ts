@@ -2157,12 +2157,13 @@ export class RuntimeRegistry {
     return ids;
   }
 
-  /** Automation admission and recovery run at startup, before the owner may have
-   * published a cut: `initialize()` starts the owner and returns. Wait for its
-   * first pass, then require the cut — a catalog that still has none is deferred
-   * retryably instead of being reported as a missing session, so a slow first
-   * read cannot fail startup or turn into a terminal automation outcome. */
-  private async awaitAutomationCatalogCut(): Promise<void> {
+  /** Automation admission and recovery, and Home's chapter files, are read at
+   * startup, before the owner may have published a cut: `initialize()` starts the
+   * owner and returns. Wait for its first pass, then require the cut — a catalog
+   * that still has none is deferred retryably instead of being reported as a
+   * missing session, so a slow first read cannot fail startup, turn into a
+   * terminal automation outcome, or read as a Home chapter with no file. */
+  private async awaitFirstCatalogCut(): Promise<void> {
     if (!this.sessionCatalog.hasCompleteCut()) {
       await Promise.race([this.sessionCatalog.whenPublished(), this.sessionCatalog.whenReconciled()]);
     }
@@ -2231,7 +2232,7 @@ export class RuntimeRegistry {
   }
 
   async requirePersistedUserSession(sessionId: string): Promise<void> {
-    await this.awaitAutomationCatalogCut();
+    await this.awaitFirstCatalogCut();
     const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     if (!entry) throw this.unprovenSessionRefusal(sessionId)
@@ -2271,7 +2272,7 @@ export class RuntimeRegistry {
   }> {
     // The scheduler's recovery runs at startup: wait for the owner's first pass
     // rather than deciding an automation's outcome on an unready catalog.
-    await this.awaitAutomationCatalogCut();
+    await this.awaitFirstCatalogCut();
     const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     if (!entry || entry.structuralSubagent) return {};
@@ -4836,12 +4837,15 @@ export class RuntimeRegistry {
   /** One session's indexed file, by direct row lookup on the published cut.
    * Home task list/status call this per task row; building the whole catalog
    * acquisition here made every row O(catalog) and timed out `home.taskList`
-   * for the work owner check (#905). Admission matches `catalogMembership`:
-   * no cut or an ambiguous ID yields no file. */
+   * for the work owner check (#905). An ambiguous ID yields no file; a read
+   * before the first cut joins it, and refuses retryably if none arrives. */
   private async homeSessionFile(sessionId: string): Promise<string | undefined> {
     const live = this.slots.get(sessionId)?.sessionFile;
     if (live) return live;
-    if (!this.sessionCatalog.hasCompleteCut()) return undefined;
+    // No cut is not "no file": every Home caller reads undefined as a chapter whose
+    // file was never created, so the first read after a restart refused Home memory
+    // as having no canonical source (#968). Join the first cut instead.
+    await this.awaitFirstCatalogCut();
     const indexed = () => {
       if (this.indexAmbiguousSessionIds().has(sessionId)) return undefined;
       const row = this.sessionCatalog.rows().find((candidate) => candidate.id === sessionId);
