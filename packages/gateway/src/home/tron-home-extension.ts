@@ -174,10 +174,9 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
       executionMode: "sequential", execute: async (_id, request, signal) => {
         // Stop ends this turn at every admission step (#919); the dispatcher settles
         // any task record it already created and refuses a late worker.
-        const { taskId, sessionId, operationId, queuePosition, worker } = await abortableRead(signal, () => delegate(request, signal));
-        const text = queuePosition === null ? "Task admitted; a report is required for its result."
-          : `Task admitted and queued at position ${queuePosition}: it starts when a worker slot frees. Stop it with task stop {taskId}.`;
-        return { content: [{ type: "text", text }], details: { taskId, sessionId, operationId, queuePosition, ...(worker ? { worker } : {}) } };
+        const { taskId, sessionId, operationId, worker } = await abortableRead(signal, () => delegate(request, signal));
+        const text = "Task admitted; a report is required for its result.";
+        return { content: [{ type: "text", text }], details: { taskId, sessionId, operationId, ...(worker ? { worker } : {}) } };
       },
     });
     pi.registerTool({ name: "task", label: "Task", annotations: { openWorldHint: false }, description: HOME_TASK_TOOL_DESCRIPTION,
