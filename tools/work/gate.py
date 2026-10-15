@@ -261,7 +261,9 @@ def plan(catalog: dict, change: Change) -> List[Shard]:
                     label = _label(trigger.get("select"), selection, index)
                 expanded.append(Shard(step, index, len(selections), _render(step["command"], change, selection, index, len(selections)), label))
         selected.extend(expanded)
-    return selected
+    # A whole-suite step covers its affected-only subset, which would only repeat its tests.
+    chosen = {shard.step["id"] for shard in selected}
+    return [shard for shard in selected if shard.step.get("supersededBy") not in chosen]
 
 
 def _label(select: Optional[str], selection: str, index: int) -> str:
