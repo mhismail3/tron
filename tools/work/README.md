@@ -160,8 +160,9 @@ cancelled shard and anything a passing shard left running are stopped the same w
 (`heavy.py`, `scripts/tron-heavy status`;
 [host load management](../../packages/gateway/docs/host-load.md#1-heavy-queue-work-tooling))
 with its catalog `expectedRssMb` and `expectedCores` (and `coresMin` when it can build
-with fewer cores, `pool: xcode` when it runs xcodebuild or a simulator), so admission
-accounts for memory, CPU, the Xcode pool and the number of gate runs with heavy work in
+with fewer cores; `pool: xcode` when it runs xcodebuild or a simulator, `pool: serial`
+for timing-sensitive real-process suites that slow each other beyond CPU), so admission
+accounts for memory, CPU, those pools and the number of gate runs with heavy work in
 flight: a run takes a gate job slot at its first heavy shard and keeps it until it ends.
 While a shard waits it prints its position, what it waits for and the host's CPU and
 memory now. Its budget and hard limit start when it is admitted: queue time never counts

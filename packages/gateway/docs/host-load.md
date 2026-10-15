@@ -50,6 +50,12 @@ command still runs. A step is admitted only when all of these fit:
   simulator other than the Development simulator. A lane's simulator stays booted
   only while its command runs, or until the iOS tooling's sweep reclaims an orphan,
   so a booted simulator is Xcode work in flight whether or not the queue admitted it.
+- **Serial pool.** At most `TRON_HEAVY_SERIAL_SLOTS` (default 1) timing-sensitive
+  real-process suites (`pool: serial`: `gateway.scripts`, `gateway.nested`) at once.
+  They spawn npm, git and Pi children and churn files; they slow each other through
+  that, not CPU: `gateway.scripts[update-rest]` passed alone in 158 s, took 336 s two
+  at a time, and four at a time hit its 420 s hard limit with the host's CPU about
+  half idle (#1083).
 - **Gate jobs.** At most `TRON_HEAVY_JOBS` (default one per six cores, at least
   two: 3 on this Mac) gate runs have heavy work in flight. A `gate run` or `land`
   takes a job slot (a flock its runner holds) at its first heavy shard and keeps it
