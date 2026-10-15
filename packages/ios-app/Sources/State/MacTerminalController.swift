@@ -149,7 +149,9 @@ final class MacTerminalController {
             stage = .terminal
             refreshHostCommand(model: model)
             connect()
-        } else {
+        } else if stage == .loading {
+            // A setup notice already shown stays as it is when the app returns
+            // or the sheet is rebuilt (#1073); "Check Again" re-reads it.
             Task { await refreshSetup(model: model) }
         }
     }
