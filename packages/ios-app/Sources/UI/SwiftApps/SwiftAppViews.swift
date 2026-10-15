@@ -22,6 +22,43 @@ struct SwiftAppPresentedContent: View {
     }
 }
 
+/// What the runner gives the program's root (#909): until the program's
+/// first non-container view, `swiftAppHostChrome` is set, and that view is
+/// wrapped in a `SwiftAppHostStack`.
+struct SwiftAppHostChrome {
+    /// The sheet title when the program sets no root `navigationTitle`.
+    let title: String
+
+    /// Containers the program's root passes through before its first real view.
+    @MainActor static func passesThrough(_ node: SwiftAppViewNode) -> Bool {
+        node.declaration != nil || ["WindowGroup", "TabView"].contains(node.name)
+            || (node.name == "Group" && node.modifiers.isEmpty)
+    }
+    static let tabModifiers: Set<String> = ["tabItem", "badge", "tag"]
+}
+
+/// One navigation stack the runner owns, with the shared document sheet
+/// chrome (`tronDocumentSheetChrome`): the program's root `navigationTitle`
+/// (else the file name), and Done, which closes the runner. A root TabView
+/// gets one per tab, because a stack around a TabView would hide each tab's
+/// own toolbar.
+struct SwiftAppHostStack<Content: View>: View {
+    let chrome: SwiftAppHostChrome
+    @ViewBuilder let content: () -> Content
+    @State private var programTitle: String?
+
+    var body: some View {
+        NavigationStack {
+            content()
+                .environment(\.swiftAppHostChrome, nil)
+                .environment(\.swiftAppHostsNavigation, true)
+                .environment(\.swiftAppHostedRoot, true)
+                .onPreferenceChange(SwiftAppRootTitleKey.self) { programTitle = $0 }
+                .tronDocumentSheetChrome(title: programTitle ?? chrome.title)
+        }
+    }
+}
+
 /// The program's outermost `NavigationStack` merges into the runner's shared
 /// `TronDocumentSheet` stack, so its title, toolbar and pushes use the sheet's
 /// navigation bar instead of nesting a second stack inside it (#909). Any other
@@ -92,9 +129,24 @@ struct SwiftAppModifiedView: View {
         }
     }
 
+    @Environment(\.swiftAppHostChrome) private var hostChrome
+
     private func build() throws -> AnyView {
-        var view = try base()
-        for modifier in node.modifiers {
+        // The program's first view that is not a pass-through container gets
+        // the runner's navigation stack and shared chrome (#909). A tab's own
+        // tabItem/badge/tag stay outside it so the TabView still reads them.
+        guard let hostChrome, !SwiftAppHostChrome.passesThrough(node) else {
+            return try modified(try base(), node.modifiers)
+        }
+        let tabLevel = node.modifiers.filter { SwiftAppHostChrome.tabModifiers.contains($0.name) }
+        let inner = node.modifiers.filter { !SwiftAppHostChrome.tabModifiers.contains($0.name) }
+        let inside = try modified(try base(), inner)
+        return try modified(AnyView(SwiftAppHostStack(chrome: hostChrome) { inside }), tabLevel)
+    }
+
+    private func modified(_ base: AnyView, _ modifiers: [(name: String, arguments: [SwiftAppLabeledValue])]) throws -> AnyView {
+        var view = base
+        for modifier in modifiers {
             view = try apply(modifier.name, modifier.arguments, to: view)
         }
         return view

@@ -48,16 +48,15 @@ struct SwiftAppLaunch: Identifiable {
 /// Runs one interpreted single-file SwiftUI app in a large sheet. Dismissing
 /// the sheet discards the program and all of its state.
 ///
-/// The program is hosted in Tron's shared `TronDocumentSheet` (#909): its title
-/// (the program's root `navigationTitle`, else the file name), Done control,
-/// detents, sheet material, tint and typography. Its outermost NavigationStack
-/// merges into the sheet's (`SwiftAppNavigationStack`), and Tron's theme is the
-/// environment default, so plain SwiftUI looks like Tron. Anything the program
-/// sets explicitly is applied closer to its views and wins.
+/// The program is hosted in Tron's shared `TronDocumentSheet` (#909): detents,
+/// sheet material, tint and typography. Its first real view sits in a
+/// `SwiftAppHostStack` with the shared sheet chrome (title, Done); a root
+/// TabView gets one per tab. Tron's theme is the environment default, so plain
+/// SwiftUI looks like Tron, and anything the program sets explicitly is applied
+/// closer to its views and wins.
 struct SwiftAppRunnerSheet: View {
     let launch: SwiftAppLaunch
     @State private var runtime: Result<SwiftAppRuntime, Error>
-    @State private var programTitle: String?
 
     init(launch: SwiftAppLaunch) {
         self.launch = launch
@@ -71,7 +70,7 @@ struct SwiftAppRunnerSheet: View {
     var body: some View {
         switch runtime {
         case .success(let runtime):
-            TronDocumentSheet(title: programTitle ?? fileTitle) {
+            TronDocumentSheet(title: fileTitle, hostsNavigation: false) {
                 running(runtime)
             }
         case .failure(let error):
@@ -94,12 +93,10 @@ struct SwiftAppRunnerSheet: View {
         if let root = runtime.rootDeclaration {
             SwiftAppCustomView(runtime: runtime, node: SwiftAppViewNode(name: root.name, arguments: [], declaration: root))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .environment(\.swiftAppHostedRoot, true)
-                .environment(\.swiftAppHostsNavigation, true)
+                .environment(\.swiftAppHostChrome, SwiftAppHostChrome(title: fileTitle))
                 // Lists and Forms show the shared sheet material, like Tron's
                 // own sheets; a program's own scrollContentBackground wins.
                 .scrollContentBackground(.hidden)
-                .onPreferenceChange(SwiftAppRootTitleKey.self) { programTitle = $0 }
                 .overlay(alignment: .bottom) {
                     if let message = runtime.actionError {
                         SwiftAppErrorView(message: message)
