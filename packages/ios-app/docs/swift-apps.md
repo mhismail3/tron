@@ -254,5 +254,7 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftRunControlRequiresFlagAndCompletePreview \
   --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testDisplayedSwiftStoreAppSharesStateAcrossTabs \
   --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftAppFailuresStayContainedInTheRunner \
-  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSettingsSwitchAddsAndRemovesSwiftRunControlLive
+  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSettingsSwitchAddsAndRemovesSwiftRunControlLive \
+  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftDiagnosticsPreserveSiblingViews \
+  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftUnsupportedDiagnosticsAreBoundedAndMalformedSyntaxStops
 ```

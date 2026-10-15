@@ -382,6 +382,8 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         malformed.buttons["Run Malformed.swift"].tap()
         XCTAssertTrue(malformed.staticTexts.matching(NSPredicate(format: "label CONTAINS \"Unbalanced '{'\"")).firstMatch.waitForExistence(timeout: 10),
                       "Malformed delimiters are fatal, not speculative recovery points")
+        XCTAssertTrue(malformed.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 2: Custom initializers'")).firstMatch.exists,
+                      "A fatal syntax error retains independent unsupported diagnostics already collected")
     }
 
     /// The shared info card uses neutral primary copy and a separate semantic

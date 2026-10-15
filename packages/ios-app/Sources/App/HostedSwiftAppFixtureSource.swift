@@ -360,6 +360,7 @@ enum HostedSwiftAppFixtureSource {
             return values[4]
         }
     }
+    protocol Marker {}
     """#
 
     /// Runaway and hostile programs and an unsupported view. Each must end

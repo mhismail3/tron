@@ -21,7 +21,13 @@ struct SwiftAppParser {
 
     static func parse(_ source: String) throws -> SwiftAppProgramSyntax {
         var parser = SwiftAppParser(tokens: try SwiftAppLexer.tokenize(source))
-        return try parser.parseProgram()
+        do { return try parser.parseProgram() }
+        catch let error as SwiftAppSyntaxError {
+            // A fatal syntax error ends recovery, but must not erase the
+            // independent unsupported constructs already found before it.
+            guard !parser.unsupported.isEmpty else { throw error }
+            throw SwiftAppUnsupportedSyntax(diagnostics: parser.unsupported + [error], reachedLimit: false)
+        }
     }
 
     static func parseArguments(_ source: String, line: Int, nesting: Int) throws -> [SwiftAppArgument] {
@@ -166,9 +172,12 @@ struct SwiftAppParser {
             case "struct", "class", "enum", "extension":
                 try parseType(keyword: keyword, into: &program)
             case "protocol":
-                try recordUnsupported("Protocols with requirements are not supported", line: current.line)
+                let line = current.line
                 advance(); _ = try expectIdentifier()
                 while !current.isSymbol("{"), !atEnd { advance() }
+                if !peek(1).isSymbol("}") {
+                    try recordUnsupported("Protocols with requirements are not supported", line: line)
+                }
                 try skipBalanced(open: "{", close: "}")
             case "func":
                 let function = try parseFunction(isStatic: isStatic, isMutating: false)
@@ -266,7 +275,7 @@ struct SwiftAppParser {
                 advance()
                 // The signature and body have explicit delimiters. Do not
                 // guess a new declaration boundary after malformed syntax.
-                if consumeSymbol("?") || consumeSymbol("!") {}
+                _ = consumeSymbol("?") || consumeSymbol("!")
                 if current.isSymbol("(") { try skipBalanced(open: "(", close: ")") }
                 while current.isIdentifier("throws") || current.isIdentifier("async") { advance() }
                 try skipBalanced(open: "{", close: "}")

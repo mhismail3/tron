@@ -331,7 +331,7 @@ extension SwiftAppRuntime {
 
     private func applyNamed(_ value: SwiftAppValue, _ arguments: [SwiftAppLabeledValue], callee: SwiftAppExpr) throws -> SwiftAppValue {
         switch value.resolved {
-        case .typeReference, .closure, .function, .builtin, .dismiss, .member:
+        case .typeReference, .closure, .function, .builtin, .dismiss, .member(_, nil):
             return try apply(value, arguments)
         default:
             switch callee {
