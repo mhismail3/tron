@@ -140,8 +140,8 @@ characters maximum), lowercase-slug categories, `ages`/`stable` decay classes,
 `active`/`retired`/`merged` state, and up to 8,000 characters of free-text
 guidelines. A merged tag names an active target; cycles and dangling chains are
 rejected. Existing configurations gain an empty vocabulary without changing
-their other settings. The decay accessor `knowledgeTagDecayClass(config,
-id)` reads that same canonical vocabulary. K6 freshness treats only active
+their other settings. Each tag's decay class lives in that same canonical
+vocabulary. K6 freshness treats only active
 selections as policy inputs; a merged/retired selection is explicitly unknown
 until the K3 re-tag process replaces it.
 

@@ -202,7 +202,6 @@ package enum KnowledgeRecordContent: Codable, Hashable, Sendable {
 extension KnowledgeRecordContent {
     package var sourcePreviewHash: String? { if case .source(let source) = self { return source.preview?.hash }; return nil }
 }
-struct KnowledgeImportReview: Codable, Hashable, Sendable { let batch: String?; let auditId: String?; let receiptId: String?; let resultRevision: String?; let basis: String? }
 package struct KnowledgeRecord: Codable, Hashable, Identifiable, Sendable {
     let schemaVersion: Int; package let id: String; package let revisionId: String; package let kind: KnowledgeRecordKind; package let scope: KnowledgeScope; package let createdAt: String; package let updatedAt: String
     package let provenance: KnowledgeProvenance; package let temporal: KnowledgeTemporalQualification?; package let relations: [KnowledgeRelation]; package let content: KnowledgeRecordContent
@@ -438,31 +437,6 @@ package enum KnowledgeSourcePresentationPolicy {
         return source.text?.isEmpty == false ? "Captured text available" : "Captured object retained; extracted text unavailable"
     }
 
-    static func coverageDetail(_ source: KnowledgeSourceContent) -> String {
-        if let reason = source.captureReason, !reason.isEmpty { return reason }
-        switch source.captureDisposition {
-        case .complete: return source.text?.isEmpty == false ? "The retained extraction may be read below." : "A complete retained object exists, but no extracted text is available to display."
-        case .partial: return "Only part of the source was captured; retained text must not be treated as complete."
-        case .metadataOnly: return "Metadata or media was retained without extracted text."
-        case .inaccessible: return "The original reference was retained, but its content was not available to capture."
-        case .failed: return "Capture did not complete; no unavailable content was read."
-        case .referenceOnly: return "Only the original reference was retained; no source content was fetched."
-        }
-    }
-
-    static func coverageSummary(_ source: KnowledgeSourceContent) -> String {
-        if let domain = domain(source.uri) { return "\(coverageTitle(source)) · \(domain)" }
-        return coverageTitle(source)
-    }
-
-    static func admissionLabel(_ admission: KnowledgeSourceAdmissionState?) -> String? {
-        guard let admission else { return nil }
-        switch admission.status {
-        case .pending: return "Pending intake"
-        case .retained: return "Retained"
-        case .archived: return "Archived"
-        }
-    }
 }
 
 package enum KnowledgeDraftHandoffPolicy {

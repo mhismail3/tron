@@ -324,7 +324,10 @@ final class SessionPresentationStore {
         self.performanceSignposts = performanceSignposts
         self.clock = clock
     }
+}
 
+// Behavior stays out of the @Observable class body; see AppModel (#1066).
+extension SessionPresentationStore {
     var mountedTarget: SessionPresentationIdentity? {
         guard let target, owns(target) else { return nil }
         return target
@@ -385,8 +388,6 @@ final class SessionPresentationStore {
     var visibleTranscriptTotal: Int? {
         snapshot.map { visibleTranscriptProjection(for: $0).total } ?? nil
     }
-    var hasEarlierTranscript: Bool { (visibleTranscriptStart ?? 0) > 0 }
-    var hasLoadedTranscriptPrefix: Bool { mountedTranscriptWindow?.prefixItems.isEmpty == false }
 
     func transcriptSnapshot(for sessionID: String) -> SessionSnapshot? {
         guard ownsSession(sessionID), let snapshot, snapshot.sessionId == sessionID else { return nil }

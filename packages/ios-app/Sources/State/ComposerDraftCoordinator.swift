@@ -294,24 +294,6 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
     }
 }
 
-struct ChatSubmissionLifecycle: Equatable, Sendable {
-    enum Phase: Equatable, Sendable {
-        case idle
-        case staged
-        case committed
-        case transported
-        case canonical(String)
-    }
-
-    let phase: Phase
-    let submission: ComposerSubmissionSnapshot?
-    let attachments: [PendingAttachment]
-
-    static let idle = Self(phase: .idle, submission: nil, attachments: [])
-
-    var id: String? { submission?.presentationID }
-}
-
 struct ComposerAttachmentUploadCandidate: Sendable {
     let name: String
     let mimeType: String
@@ -551,7 +533,10 @@ final class ComposerDraftCoordinator {
         sendOperation = send
         self.admitsLifecycleGeneration = admitsLifecycleGeneration
     }
+}
 
+// Behavior stays out of the @Observable class body; see AppModel (#1066).
+extension ComposerDraftCoordinator {
     func prepareDraft(
         profileID: String,
         sessionID: String,
@@ -915,39 +900,6 @@ final class ComposerDraftCoordinator {
         outgoingSubmission(for: target) != nil
     }
 
-    /// One derived presentation read over the existing admission facts. Views
-    /// use this value instead of racing transport, queue, and canonical queries.
-    /// Canonical identity remains authoritative and is exposed only after the
-    /// exact reconciliation receipt has been created.
-    func submissionLifecycle(for target: SessionPresentationIdentity) -> ChatSubmissionLifecycle {
-        guard let scope = scope(for: target) else { return .idle }
-        if let admission = submissionByScope[scope] {
-            let phase: ChatSubmissionLifecycle.Phase
-            if let canonicalID = admission.canonicalHandoffID {
-                phase = .canonical(canonicalID)
-            } else if admission.transportState == .accepted {
-                phase = .transported
-            } else if admission.operationID != nil {
-                phase = .committed
-            } else {
-                phase = .staged
-            }
-            return ChatSubmissionLifecycle(
-                phase: phase,
-                submission: admission.snapshot,
-                attachments: admission.submittedAttachments.map { $0.frozenForHandoff() }
-            )
-        }
-        if let receipt = canonicalHandoffReceipts[target], let submission = receipt.submission {
-            return ChatSubmissionLifecycle(
-                phase: .canonical(receipt.canonicalID),
-                submission: submission,
-                attachments: receipt.attachments
-            )
-        }
-        return .idle
-    }
-
     /// Returns the optimistic identity only for the exact accepted operation or
     /// one unique, current-snapshot provisional candidate. Provisional identity
     /// is visual continuity only: it never retires the admission or establishes
@@ -1126,11 +1078,6 @@ final class ComposerDraftCoordinator {
             submissionByScope[scope] = admission
         }
         return settledQueueReconciliation
-    }
-
-    func submissionSnapshot(for target: SessionPresentationIdentity) -> ComposerSubmissionSnapshot? {
-        guard let scope = scope(for: target) else { return nil }
-        return submissionByScope[scope]?.snapshot
     }
 
     /// A sequenced Gateway failure is terminal for the exact accepted operation.

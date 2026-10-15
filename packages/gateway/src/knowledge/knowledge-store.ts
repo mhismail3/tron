@@ -18,7 +18,7 @@ import {
   type KnowledgeSourceRow, type KnowledgeSourceRowListResponse, type KnowledgeSourceRowSearchResponse, type KnowledgeSourceTakeRequest, type SourceFreshness,
   type SourceAdmission, type SourceContent,
   type KnowledgeCurationItem, type KnowledgeCurationOperation, type KnowledgeCurationStored,
-  type KnowledgeRelation, type SourceCurationProducer, type SourceVerdictState, assertKnowledgeTagId,
+  type KnowledgeRelation, type SourceCurationProducer, type SourceVerdictState,
   KnowledgeCurationRefusal, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_TAGS,
   type KnowledgeNoteMutationRequest, type KnowledgeCoverageDismissRequest,
   type KnowledgeConnectorState, type ObservationCoverage, type ObservationCoverageDisposition, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig,
@@ -778,15 +778,6 @@ export class KnowledgeStore {
     state.catalog.setControl(this.control(state));
     state.catalog.commit();
   }
-  private async inspect<T>(action: (state: KnowledgeState, paths: StorePaths, present: boolean) => Promise<T>): Promise<T> {
-    return this.mutex.run(async () => {
-      const paths = await this.paths(false);
-      const loaded = await this.load(paths, false);
-      try { return await action(loaded.state, paths, loaded.present); }
-      finally { loaded.state.catalog?.close(); }
-    });
-  }
-
   /** Mutex-free read projection. Each catalog query sees committed state, and
    * the connection closes as soon as the action settles, so a reader never
    * holds a lock a mutation would have to wait for. Page selection resolves its
@@ -1130,7 +1121,6 @@ export class KnowledgeStore {
     if (cursor === undefined) return undefined;
     try { const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { id?: unknown; revision?: unknown }; if (typeof parsed.id !== "string" || parsed.revision !== revision || this.tagCursor(parsed.id, revision) !== cursor) throw new Error(); return parsed.id; } catch { throw invalid("Knowledge tag cursor is invalid or belongs to another vocabulary revision"); }
   }
-  private tagRewriteCommand(commandId: string, recordId: string): string { return `${commandId.slice(0, 96)}:${createHash("sha256").update(`${commandId}\\0${recordId}`).digest("hex").slice(0, 32)}`.slice(0, 160); }
   private applyTagEdit(current: KnowledgeTagVocabularyConfig, edit: KnowledgeTagEditRequest["edit"]): KnowledgeTagVocabularyConfig {
     if (!edit || typeof edit !== "object") throw invalid("A typed Knowledge tag edit is required");
     const next = structuredClone(current);

@@ -136,8 +136,6 @@ struct ModelCatalogAccumulator {
     private var pageCount = 0
     private var stringBytes = 0
 
-    var nextPageNumber: Int { pageCount + 1 }
-
     mutating func append(_ page: [ModelSummary], hasNextPage: Bool) throws {
         guard pageCount < ModelCatalogPolicy.maximumPages,
               !(hasNextPage && pageCount + 1 == ModelCatalogPolicy.maximumPages),
@@ -363,7 +361,10 @@ final class ProviderAuthCoordinator {
         self.mutationExecutor = mutationExecutor
         self.uuidSource = uuidSource
     }
+}
 
+// Behavior stays out of the @Observable class body; see AppModel (#1066).
+extension ProviderAuthCoordinator {
     func catalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
         catalogByTarget[target]
     }
@@ -898,18 +899,6 @@ final class ProviderAuthCoordinator {
                 self.pendingCompletionRefresh = nil
                 await self.finishCompletion(pending)
             }
-        }
-    }
-
-    func handleCompletion(_ payload: JSONValue) async {
-        // AuthBroker starts login before the async request dispatcher flushes
-        // auth.begin. An already-resolved login can therefore complete first.
-        guard let completion = parseCompletion(payload) else { return }
-        if activeAuthOperationID == completion.operationID
-            || targetByAuthOperation[completion.operationID] != nil {
-            await processCompletion(completion)
-        } else if !inFlightAuthBeginGenerations.isEmpty {
-            quarantine(completion: completion)
         }
     }
 

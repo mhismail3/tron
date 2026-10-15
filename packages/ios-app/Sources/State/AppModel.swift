@@ -176,7 +176,6 @@ final class AppModel {
 
     typealias SessionPresentationTarget = SessionPresentationIdentity
 
-    typealias SessionOpenResponse = GatewaySessionOpenResponse
     typealias PairingCommit = GatewayPairingCommit
     typealias ProfileTokenLookup = GatewayProfileTokenLookup
 
@@ -380,12 +379,6 @@ final class AppModel {
     var commands: [CommandInfo] { sessionPresentation.commands }
     var commandCatalogTarget: SessionPresentationIdentity? { sessionPresentation.commandCatalogTarget }
     var resources: JSONValue? { sessionPresentation.resources }
-    /// Identity for global read-only inventories. It changes whenever the
-    /// selected profile, transport epoch, or foreground reconciliation owner
-    /// changes, so a late read cannot remain visible under a new Gateway.
-    var globalHooksPresentationIdentity: String {
-        "\(profileRevision):\(lifecycle.selectedProfileID ?? "none"):\(gatewayConnectionID.map(String.init) ?? "offline"):\(foregroundReconciliationGeneration):\(connectionState)"
-    }
     /// Keeps the root setup sheet from reacting to the transient connection
     /// state used while the Connections sheet adds a secondary server.
     var isAddingServer = false
@@ -489,10 +482,6 @@ final class AppModel {
     private var catalogDeferredFollowUpKey: SessionCatalogLoadKey?
     private var sceneAllowsCatalogRefresh = true
     private var cacheCheckpointTask: Task<Void, Never>?
-    /// The save drain that is writing checkpoints now, exposed for callers that
-    /// must await it before delivering the next summary. It exposes the existing
-    /// drain with no new behavior.
-    var inFlightCacheCheckpoint: Task<Void, Never>? { cacheCheckpointTask }
     private var cacheCheckpointTaskGeneration = 0
     /// Present only while a trailing summary checkpoint waits for its window
     /// and no save is draining; `startCacheCheckpointDrain` retires it.
@@ -512,6 +501,23 @@ final class AppModel {
     private var mountedOptionalRefreshTask: Task<Void, Never>?
     private var mountedOptionalRefreshLifecycleGeneration: Int?
     private var mountedOptionalRefreshConnectionID: Int?
+
+    #if HOSTED_TEST
+    var hostedSessionOpenAdmissionOverride: Bool?
+    var hostedAfterSessionCreateResult: (@MainActor () async -> Void)?
+    var hostedBeforeNewSessionSubmission: (@MainActor () async -> Void)?
+    var hostedAfterNewSessionTrustResult: (@MainActor () async -> Void)?
+    #endif
+
+    @ObservationIgnored private var recordedSceneTransition: AppScenePhase = .active
+    /// Whether `recordedSceneTransition` came from a real transition. The launch
+    /// seed may only fill in the scene's starting point while nothing has moved:
+    /// a transition that arrived during startup is newer than the phase the
+    /// launch sampled, and overwriting it would suppress the next record.
+    @ObservationIgnored private var hasRecordedSceneTransition = false
+    /// Scene records are chained so their order in the log is the order the
+    /// scene moved, not the order three tasks happened to reach the log actor.
+    @ObservationIgnored private var sceneRecordTask: Task<Void, Never>?
 
     init(
         client: GatewayClient = GatewayClient(),
@@ -818,7 +824,14 @@ final class AppModel {
             }
         }
     }
+}
 
+// Behavior lives in this extension, not the class body: @Observable expands its
+// member-attribute macro once per class member, and each expansion carries the
+// whole class body, so every compile job that references AppModel paid ~2 s
+// while the 5,000-line implementation sat inside it (#1066). Stored properties
+// and the designated initializer must stay in the class.
+extension AppModel {
     func authoritativeSnapshot(for sessionID: String) -> SessionSnapshot? {
         sessionPresentation.authoritativeSnapshot(for: sessionID)
     }
@@ -948,11 +961,6 @@ final class AppModel {
             profileID: profileID, target: target, lifecycleGeneration: generation
         )
     }
-
-    var hostedSessionOpenAdmissionOverride: Bool?
-    var hostedAfterSessionCreateResult: (@MainActor () async -> Void)?
-    var hostedBeforeNewSessionSubmission: (@MainActor () async -> Void)?
-    var hostedAfterNewSessionTrustResult: (@MainActor () async -> Void)?
 
     func connectHostedGateway(profile: GatewayProfile, token: String) async throws {
         try await lifecycle.connectHosted(profile: profile, token: token)
@@ -1096,10 +1104,6 @@ final class AppModel {
     /// outage (#878).
     var isConnectionRecoveryVisible: Bool { recoveryDisplayNoticeEpisode != nil }
 
-    func sessionStructureRevision(for sessionID: String) -> Int {
-        sessionPresentation.structureRevision(for: sessionID)
-    }
-
     func sessionContextRevision(for sessionID: String) -> Int {
         sessionPresentation.contextRevision(for: sessionID)
     }
@@ -1108,16 +1112,8 @@ final class AppModel {
         sessionPresentation.resourceRevision(for: sessionID)
     }
 
-    func sessionResourcesError(for sessionID: String) -> String? {
-        sessionPresentation.resourcesError(for: sessionID)
-    }
-
     func sessionResources(for sessionID: String) -> JSONValue? {
         sessionPresentation.resources(for: sessionID)
-    }
-
-    func sessionPresentationIdentity(for sessionID: String) -> SessionPresentationIdentity? {
-        sessionPresentation.presentationTarget(for: sessionID)
     }
 
     func providerCatalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
@@ -1623,16 +1619,6 @@ final class AppModel {
 
         var isActive: Bool { self == .active }
     }
-
-    @ObservationIgnored private var recordedSceneTransition: AppScenePhase = .active
-    /// Whether `recordedSceneTransition` came from a real transition. The launch
-    /// seed may only fill in the scene's starting point while nothing has moved:
-    /// a transition that arrived during startup is newer than the phase the
-    /// launch sampled, and overwriting it would suppress the next record.
-    @ObservationIgnored private var hasRecordedSceneTransition = false
-    /// Scene records are chained so their order in the log is the order the
-    /// scene moved, not the order three tasks happened to reach the log actor.
-    @ObservationIgnored private var sceneRecordTask: Task<Void, Never>?
 
     /// Records the scene's own transitions once, at the instant each happened.
     /// `.inactive` arriving from `.background` is the scene re-entering the

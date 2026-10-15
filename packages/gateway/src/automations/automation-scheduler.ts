@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { GatewayError, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { automationOperationId } from "./automation-contract.js";
 import { AutomationStore, settleAutomationRun } from "./automation-store.js";
-import { advanceAfterOccurrence, automationOccurrenceId, classifyDueOccurrence } from "./schedule.js";
+import { automationOccurrenceId, classifyDueOccurrence } from "./schedule.js";
 import type { AutomationRecord, AutomationRun, AutomationRunState } from "./types.js";
 
 const MAXIMUM_CONCURRENT_AUTOMATIONS = 4;

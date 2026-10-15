@@ -30,7 +30,6 @@ import { trustedExtensionOriginKind } from "../extensions/owner-attribution.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { boundedUtf8Prefix, boundedUtf8Suffix, TRUNCATION_MARKER } from "../util/bounded-text.js";
 import type { BlobStore } from "./blob-store.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
 import { projectForkBoundary, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { ChatOrigin, ChatSemanticMetadata, InvocationLifecycle, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, NestedToolCallsProjection, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptForkBoundary, TranscriptItem } from "../protocol/types.js";
 import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
@@ -1238,7 +1237,7 @@ function projectContent(
         // Unreachable for the pinned SDK: every block type is a projected row
         // above. A new SDK block type fails this assignment, so it cannot be
         // silently dropped from the transcript.
-        const unclassified: never = part;
+        part satisfies never;
         break;
       }
     }
@@ -1467,7 +1466,7 @@ export function projectMessage(
     default: {
       // Unreachable for the pinned SDK: every message role is classified above.
       // A new SDK role fails this assignment instead of silently dropping a row.
-      const unclassified: never = message;
+      message satisfies never;
       return undefined;
     }
   }
@@ -1611,7 +1610,7 @@ function projectEntry(
       // Unreachable for the pinned SDK: every entry type is classified above.
       // A new SDK entry type fails this assignment instead of silently
       // disappearing from the transcript.
-      const unclassified: never = entry;
+      entry satisfies never;
       return undefined;
     }
   }
@@ -1735,7 +1734,7 @@ function validContentPart(value: unknown): boolean {
     case "toolCall": return typeof part.id === "string" && typeof part.name === "string"
       && Object.prototype.hasOwnProperty.call(part, "arguments");
     default: {
-      const unclassified: never = type;
+      void (type satisfies never);
       return false;
     }
   }
@@ -1788,7 +1787,7 @@ function validMessage(value: unknown): boolean {
     default: {
       // Unreachable for the pinned SDK: every role is validated above. A new SDK
       // role fails this assignment; a foreign runtime role still fails closed.
-      const unclassified: never = role;
+      role satisfies never;
       return false;
     }
   }
@@ -1852,7 +1851,7 @@ function validateCanonicalEntry(value: unknown): void {
       // Unreachable for the pinned SDK: every entry type is validated above. A
       // new SDK entry type fails this assignment; a foreign runtime type still
       // fails closed.
-      const unclassified: never = type;
+      void (type satisfies never);
       valid = false;
     }
   }
@@ -1895,7 +1894,7 @@ function outlineNodeKind(entry: SessionEntry, item: TranscriptItem | undefined):
     case "thinking_level_change": case "label":
       return rowKind(item);
     default: {
-      const unclassified: never = entry;
+      entry satisfies never;
       return "sessionInfo";
     }
   }
@@ -1970,7 +1969,7 @@ function omittedFromTreeOutline(
     case "compaction": case "branch_summary": case "context_edit": case "label": case "session_info":
       return false;
     default: {
-      const unclassified: never = entry;
+      entry satisfies never;
       return false;
     }
   }
@@ -2060,7 +2059,7 @@ function projectableMessageRole(message: AgentMessage): boolean {
     case "system":
       return false;
     default: {
-      const unclassified: never = message;
+      message satisfies never;
       return false;
     }
   }
@@ -2092,7 +2091,7 @@ function transcriptRowFor(
     case "session_info": case "context_edit": case "usage":
       return false;
     default: {
-      const unclassified: never = entry;
+      entry satisfies never;
       return false;
     }
   }

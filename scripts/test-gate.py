@@ -14,8 +14,11 @@ Evidence: test-results/gate.json.
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -70,6 +73,49 @@ class Repo:
         return result
 
 
+IOS_DECLARATIONS = '''import XCTest
+
+@MainActor
+final class TronFixtureUITests: XCTestCase, @unchecked Sendable {
+    let label = "func testInString() {"
+    var computed: Int { 1 }
+
+    @MainActor func testMainActor() async throws {}
+
+    @available(iOS 17, *)
+    @MainActor
+    func testAttributed() {
+        func testLocal() {}
+    }
+
+    nonisolated func testNonisolated() throws {}
+    override func testOverridden() {}
+    // func testCommented() {}
+    /* func testBlockCommented() {} */
+    private func testPrivateHelper() {}
+    static func testStatic() {}
+    func testWithArgument(_ value: Int) {}
+    func helper() {}
+
+    struct Nested {
+        func testNested() {}
+    }
+}
+
+final class Helper {
+    func testNotACase() {}
+}
+'''
+IOS_EXTENSION = '''extension TronFixtureUITests {
+    @MainActor func testExtended() {}
+}
+
+class TronDerivedUITests: TronFixtureUITests {
+    func testDerived() {}
+}
+'''
+
+
 def plans(base: Path, env: dict) -> None:
     cases = {
         "gateway-only": ({"packages/gateway/src/home/x.ts": "export const x = 1;\n"},
@@ -83,9 +129,17 @@ def plans(base: Path, env: dict) -> None:
                       "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]"]),
         "ios-only": ({"packages/ios-app/Sources/UI/View.swift": "// view\n",
                       "packages/ios-app/UITests/TronHomeSheetsUITests.swift":
-                          "final class TronHomeSheetsUITests {\n    func testA() {}\n    func testB() {}\n    func testC() {}\n}\n"},
+                          "final class TronHomeSheetsUITests: XCTestCase {\n    func testA() {}\n    func testB() {}\n    func testC() {}\n}\n"},
                      ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile", "ios.journeys[TronHomeSheetsUITests.testA+1]",
                       "ios.journeys[TronHomeSheetsUITests.testC]"]),
+        # Every method XCTest runs is selected whatever its attributes, modifiers or file, and
+        # nothing XCTest does not run is (#1069).
+        "ios-declarations": ({
+            "packages/ios-app/UITests/TronFixtureUITests.swift": IOS_DECLARATIONS,
+            "packages/ios-app/UITests/TronFixtureUITests+Extension.swift": IOS_EXTENSION},
+            ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile",
+             "ios.journeys[TronFixtureUITests.testExtended+1]", "ios.journeys[TronFixtureUITests.testAttributed+1]",
+             "ios.journeys[TronFixtureUITests.testOverridden]", "ios.journeys[TronDerivedUITests.testDerived]"]),
         "mac-only": ({"packages/mac-app/Sources/App.swift": "// app\n"},
                      ["repo.privacy", "repo.whitespace", "mac.build", "mac.test"]),
         "gateway-and-config": ({"packages/gateway/src/home/x.ts": "export const x = 1;\n", "packages/gateway/vitest.config.ts": "export {};\n"},
@@ -104,9 +158,16 @@ def plans(base: Path, env: dict) -> None:
         repo.commit(name)
         result = repo.gate("plan", "--json")
         assert result.returncode == 0, result.stderr
-        actual = [row["shard"] for row in json.loads(result.stdout)["plan"]]
+        rows = json.loads(result.stdout)["plan"]
+        actual = [row["shard"] for row in rows]
         evidence.append({"case": f"plan {name}", "plan": actual})
         assert actual == expected, f"{name}: {actual} != {expected}"
+        if name == "ios-declarations":
+            selected = re.findall(r"--only-testing (\S+)", " ".join(row["command"] for row in rows))
+            assert selected == [f"TronMobileUITests/{test}" for test in (
+                "TronFixtureUITests/testExtended", "TronFixtureUITests/testMainActor", "TronFixtureUITests/testAttributed",
+                "TronFixtureUITests/testNonisolated", "TronFixtureUITests/testOverridden",
+                "TronDerivedUITests/testDerived")], selected
 
 
 FIXTURE_CATALOG = {
@@ -291,6 +352,88 @@ def boundary_plans(base: Path, env: dict) -> None:
     assert "gateway.pi-sdk-rollback" not in names and all(name in names for name in expected), names
 
 
+TREE_FIXTURE = '''import os, signal, subprocess, sys, time
+from pathlib import Path
+out = Path(os.environ["TREE_DIR"])
+role = sys.argv[1] if len(sys.argv) > 1 else "step"
+(out / role).write_text(str(os.getpid()))
+
+
+def spawn(child):
+    return subprocess.Popen([sys.executable, __file__, child], start_new_session=True)
+
+
+if role == "step":
+    spawn("detacher")
+elif role == "holder":
+    # The command of the real iOS lane lease holder, which starts it in its own session: a
+    # child in another one, and a release that runs only if it is signalled, not killed.
+    child = spawn("stubborn")
+
+    def release(_signum, _frame):
+        (out / "released").write_text("1")
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, release)
+elif role == "stubborn":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+elif role == "detacher":
+    # Its child is adopted by launchd before the step times out.
+    spawn("orphan")
+    time.sleep(1)
+    sys.exit(0)
+while True:
+    time.sleep(1)
+'''
+
+
+def timed_out_tree(base: Path, env: dict) -> None:
+    """A step past its hard timeout stops its whole process tree: processes in their own
+    sessions and ones launchd adopted get SIGTERM and time for their own cleanup, then
+    SIGKILL; none survives the run, and the iOS lane lease the step held is free (#1071)."""
+    tree = base / "tree-pids"
+    tree.mkdir()
+    lane = base / "lane" / "lease.lock"
+    holder = f"python3 {ROOT / 'scripts/ios-test-lock.py'} --lock {lane} --resource 'fixture lane' -- python3 tree.py holder"
+    catalog = {"version": 1, "codeExclude": [], "steps": [
+        {"id": "tree", "trigger": {"always": True}, "command": f"python3 tree.py & {holder}", "inputs": ["tree.py"],
+         "budgetSeconds": 2, "timeoutSeconds": 3, "class": "light", "expectedRssMb": 10, "pass": "exit 0",
+         "unlocks": "land"}]}
+    path = base / "tree-catalog.json"
+    path.write_text(json.dumps(catalog))
+    repo = Repo(base / "tree", {**env, "TRON_GATE_CATALOG": str(path), "TREE_DIR": str(tree),
+                                "TRON_GATE_STOP_GRACE_SECONDS": "2"})
+    repo.write("tree.py", TREE_FIXTURE)
+    repo.commit("tree")
+
+    def alive(pid: int) -> bool:
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        return bool(state) and not state.startswith("Z")
+
+    roles = ("step", "holder", "stubborn", "detacher", "orphan")
+    try:
+        result = repo.gate("run")
+        pids = {role: int((tree / role).read_text()) for role in roles}
+        survivors = {role: pid for role, pid in pids.items() if alive(pid)}
+        log = "\n".join(p.read_text() for p in (repo.root / ".git/work/logs").rglob("*.log"))
+        evidence.append({"case": "a timed-out step leaves no descendant process", "seconds": result.seconds,
+                         "pids": pids, "survivors": survivors, "stdout": result.stdout[-1500:], "log": log[-1500:]})
+        assert result.returncode == 1 and "TIMEOUT tree exceeded its hard limit of 3s" in result.stdout, result.stdout
+        assert not survivors, f"descendants outlived the timed-out step: {survivors}"
+        assert (tree / "released").exists(), "the holder must get SIGTERM and run its release before any SIGKILL"
+        assert f"were killed: {pids['stubborn']}" in log, log
+        assert result.seconds < 20, "stopping the tree is bounded by its grace"
+        with lane.open("a") as handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise AssertionError("the timed-out step's lane lease must be free for the next run") from None
+    finally:
+        for role in roles:
+            with contextlib.suppress(OSError, ValueError):
+                os.kill(int((tree / role).read_text()), 9)
+
+
 def hosted_cli(base: Path, env: dict) -> None:
     repo = Repo(base / "hosted", env)
     for path in ("scripts/tron", "scripts/tron-node", "tools/work/gate.py", "tools/work/heavy.py",
@@ -385,6 +528,7 @@ def main() -> None:
                    "HOME": str(base / "home"), "TMPDIR": str(base / "tmp"), "TRON_HEAVY_DIR": str(base / "heavy"),
                    "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                    "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
+            timed_out_tree(base, env)
             plans(base, env)
             boundary_plans(base, env)
             hosted_cli(base, env)

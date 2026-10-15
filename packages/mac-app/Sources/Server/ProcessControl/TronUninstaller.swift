@@ -11,42 +11,61 @@ enum TronUninstaller {
         static let preserveUserData = Options()
     }
 
+    struct Result {
+        let outcome: LaunchAgentOutcome
+        /// Local state the uninstall was asked to remove but could not. A
+        /// requested reset that left a file behind must not read as complete.
+        let remainingPaths: [URL]
+    }
+
     @discardableResult
     static func unregisterAndClean(
         setup: EnvironmentSetup,
         options: Options = .preserveUserData
-    ) async -> LaunchAgentOutcome {
+    ) async -> Result {
         guard setup.canManageLaunchAgent else {
-            return .launchdRefused(
+            return Result(outcome: .launchdRefused(
                 message: "This Xcode Debug wrapper is in companion mode and cannot uninstall the production Tron Agent."
-            )
+            ), remainingPaths: [])
         }
         // The old authenticated wrapper must finish native retirement before
         // changing either service; Gateway departure alone is not capture Stop.
         do { try await setup.unregisterNativeHost() }
-        catch { return .launchdRefused(message: "Tron's native helper could not be retired. Gateway registration and local state were preserved.") }
+        catch { return Result(outcome: .launchdRefused(message: "Tron's native helper could not be retired. Gateway registration and local state were preserved."), remainingPaths: []) }
 
         let outcome = await setup.launchAgentManager.unload(label: setup.launchAgentLabel)
         guard outcome.isSuccessfulUninstall else {
-            return outcome
+            return Result(outcome: outcome, remainingPaths: [])
         }
 
         // Stable uninstall owns only the stable services. Developer-owned
         // Debug registration, data, credentials, and sessions are untouched.
-        cleanLocalState(setup: setup, options: options)
-        return outcome
+        return Result(outcome: outcome, remainingPaths: removeLocalState(at: localStatePaths(setup: setup, options: options)))
     }
 
-    static func cleanLocalState(setup: EnvironmentSetup, options: Options) {
-        let fm = FileManager.default
-        for path in runtimeCleanupPaths(setup: setup) {
-            try? fm.removeItem(at: path)
-        }
-        if options.resetSettings {
-            try? GatewayNetworkCacheWriter.deleteCache(at: setup.networkCachePath)
-        }
-        if options.resetCredentials {
-            try? fm.removeItem(at: setup.bearerTokenPath)
+    static func localStatePaths(setup: EnvironmentSetup, options: Options) -> [URL] {
+        var paths = runtimeCleanupPaths(setup: setup)
+        if options.resetSettings { paths.append(setup.networkCachePath) }
+        if options.resetCredentials { paths.append(setup.bearerTokenPath) }
+        return paths
+    }
+
+    /// Removes each path and returns those still present. Only an already
+    /// absent file counts as removed; every other failure is logged and kept.
+    static func removeLocalState(at paths: [URL], fileManager: FileManager = .default) -> [URL] {
+        paths.filter { path in
+            do {
+                try fileManager.removeItem(at: path)
+                return false
+            } catch let error as CocoaError where error.code == .fileNoSuchFile {
+                return false
+            } catch {
+                TronLog.shared.record(
+                    .warning, event: "launch-agent.uninstall-cleanup", source: "launch-agent",
+                    message: "Could not remove \(path.path): \(error.localizedDescription)", outcome: "failed"
+                )
+                return true
+            }
         }
     }
 
