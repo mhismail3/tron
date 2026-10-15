@@ -320,11 +320,7 @@ struct SwiftAppErrorView: View {
     let message: String
 
     var body: some View {
-        Label(message, systemImage: "exclamationmark.triangle.fill")
-            .font(.footnote)
-            .foregroundStyle(.red)
-            .padding(8)
-            .background(.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        TronInfoCard(icon: "exclamationmark.triangle", text: message, accent: .tronError, usesSemanticAccent: true)
             .accessibilityIdentifier("swiftApp.error")
     }
 }

@@ -100,7 +100,7 @@ struct SwiftAppRunnerSheet: View {
                 .overlay(alignment: .bottom) {
                     if let message = runtime.actionError {
                         SwiftAppErrorView(message: message)
-                            .padding()
+                            .padding(TronSpacing.xlarge)
                     }
                 }
                 // No identifier here: on a container SwiftUI pushes it onto
