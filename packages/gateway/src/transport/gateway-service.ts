@@ -2,7 +2,6 @@ import type { MacTerminalHost } from "../security/mac-terminal.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { offLoop, stage } from "./request-span.js";
 import { join } from "node:path";
-import { performance } from "node:perf_hooks";
 import type { AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
@@ -77,7 +76,7 @@ import { AutomationPaginationStore } from "../automations/automation-pagination.
 import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
 import { ProviderUsageOwner, providerUsageSupported, providerUsageLentTo, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
-import { assertNewModelChoice, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
+import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStoreError, KNOWLEDGE_PREVIEW_BATCH_BYTES, KNOWLEDGE_PREVIEW_BATCH_ITEMS, KNOWLEDGE_PREVIEW_MAX_BYTES } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
@@ -1252,7 +1251,6 @@ export class GatewayService {
         if (Object.keys(params).some((key) => key !== "commandId")) {
           throw new GatewayError("invalid_request", "Gateway stop accepts only commandId");
         }
-        const priorDrain = this.dependencies.sessions.administrativeDrainSnapshot();
         let ownsSchedule = false;
         try {
           return await this.mutation(client, method, params, async () => {
@@ -1588,7 +1586,8 @@ export class GatewayService {
         return { synchronized: true };
       }
       case "session.transcript": {
-        const sessionId = string(params.sessionId, "sessionId", { max: 200 });
+        // Validate the shape here; openedSlot resolves the session itself.
+        string(params.sessionId, "sessionId", { max: 200 });
         const before = params.before === undefined
           ? undefined
           : integer(params.before, "before", 0, Number.MAX_SAFE_INTEGER);

@@ -5,11 +5,11 @@ import type {
   KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeRaindropReadRequest,
   KnowledgeCurationCode, KnowledgeCurationJobRequest, KnowledgeCurationJobResponse, KnowledgeCurationOutcome,
   KnowledgeCurationRequest, KnowledgeCurationResponse, KnowledgeRecord, KnowledgeSourceSummaryStart, ObservationCoverageDisposition,
-  KnowledgeTagEdit, KnowledgeTagEditRequest, KnowledgeTagReconcileRequest, KnowledgeTagRetagRequest,
+  KnowledgeTagEdit, KnowledgeTagReconcileRequest, KnowledgeTagRetagRequest,
   KnowledgeTagRequest, KnowledgeTagRunRequest, KnowledgeTagBudgetRequest, KnowledgeTagCostEstimateRequest,
   SourceAssessment, SourceCurationProducer,
 } from "./knowledge-contract.js";
-import { KNOWLEDGE_CURATION_MAX_ITEMS, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_TAGS, KnowledgeCurationRefusal } from "./knowledge-contract.js";
+import { KNOWLEDGE_CURATION_MAX_ITEMS, KnowledgeCurationRefusal } from "./knowledge-contract.js";
 import { curationCommandId, curationFailureOutcome, curationItemRefusal, curationToolText, KnowledgeCurationJobs, validateCurationRequest } from "./knowledge-curation.js";
 import { curationInputsDigest, curationStored, sourceEvidenceDigest, type KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, type ObservationSettlement } from "./knowledge-observation.js";
