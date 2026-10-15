@@ -19,7 +19,7 @@ enum ChatOpeningSurfacePolicy {
     static func showsOpaqueCover(phase: ChatOpenPresentationPhase) -> Bool {
         switch phase {
         case .opening, .positioning, .revealing, .presenting: true
-        case .presented, .ready, .failed: false
+        case .waitingForConnection, .presented, .ready, .failed: false
         }
     }
 
@@ -129,6 +129,10 @@ final class ChatSessionPresentation {
     private(set) var openingTaskRevision = 0
     private var openingTaskGeneration = 0
     private var cancelledOpeningTaskGeneration: Int?
+    /// The opening generation whose current first-ready frame was validated.
+    /// From that frame its task only drains; it owns no work that cover,
+    /// background or deadline cancellation could interrupt or resume (#935).
+    @ObservationIgnored private var readyOpeningTaskGeneration: Int?
 
     init(sessionID: String) {
         self.sessionID = sessionID
@@ -209,6 +213,21 @@ final class ChatSessionPresentation {
         return openingTaskGeneration
     }
 
+    /// Whether an installed opening task still owns unfinished presentation
+    /// work. A task past its ready frame is settled even before it drains.
+    var ownsUnsettledOpening: Bool {
+        openingTask != nil && readyOpeningTaskGeneration != openingTaskGeneration
+    }
+
+    /// Called by the exact opening at its validated first-ready frame, before
+    /// it admits parent-covering interaction sheets. A sheet that covers the
+    /// chat in the remaining drain must not mark that ready opening for a
+    /// resume, which would hide and re-reveal the transcript on uncover.
+    func markOpeningReady() {
+        guard openingTask != nil else { return }
+        readyOpeningTaskGeneration = openingTaskGeneration
+    }
+
     func openingTaskWasCancelled(_ generation: Int) -> Bool {
         cancelledOpeningTaskGeneration == generation
     }
@@ -228,14 +247,15 @@ final class ChatSessionPresentation {
     /// that lease instead of overlapping a second session.open.
     @discardableResult
     func expireOpeningTask(_ generation: Int) -> Bool {
-        guard openingTaskGeneration == generation, let openingTask else { return false }
+        guard openingTaskGeneration == generation, ownsUnsettledOpening,
+              let openingTask else { return false }
         cancelledOpeningTaskGeneration = generation
         openingTask.cancel()
         return true
     }
 
     func cancelOpeningTask() {
-        guard let openingTask else { return }
+        guard ownsUnsettledOpening, let openingTask else { return }
         cancelledOpeningTaskGeneration = openingTaskGeneration
         openingTask.cancel()
     }

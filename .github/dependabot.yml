@@ -4,7 +4,12 @@ updates:
     directory: /packages/gateway
     schedule:
       interval: weekly
-    labels: ["dependencies"]
+    labels: ["kind:maintenance", "area:gateway"]
+    ignore:
+      # The Node types follow the runtime's major (.node-version); a Node major
+      # moves through its own runbook (#245), not a types-only bump.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       pi-sdk:
         patterns:
@@ -13,4 +18,4 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    labels: ["dependencies"]
+    labels: ["kind:maintenance", "area:tooling"]

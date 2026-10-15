@@ -9,7 +9,6 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { DeviceStore } from "../security/device-store.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
-import { SessionSearchAllowanceLedger } from "../sessions/session-search-allowance.js";
 import { SessionSearchIndex } from "../sessions/session-search-index.js";
 import { SessionSearchService } from "../sessions/session-search-service.js";
 import { CommandReceiptStore } from "./command-receipts.js";
@@ -76,10 +75,9 @@ async function fixture(options: {
   extensions?: Array<{ name: string; source: (root: string) => string }>;
   /** Writes `${agentDir}/settings.json` before the first runtime starts. */
   settings?: Record<string, unknown>;
-  /** Wires a real search index and service into GatewayService. */
+  /** Builds a real search index and service over the registry, the owner
+   * Home's session_search research tool reads. */
   search?: boolean;
-  /** Delayed Jev boundary used by search-publication integration cases. */
-  jev?: { evaluate: (...args: any[]) => Promise<any> };
   /** Runs after startup admission but before attention recovery, which is the
    * window the real Gateway already serves from. */
   duringStartupRecovery?: (registry: RuntimeRegistry, cwd: string) => Promise<void>;
@@ -122,7 +120,6 @@ async function fixture(options: {
   let current: Stack | undefined;
   let server: GatewayServer | undefined;
   let searchService: SessionSearchService | undefined;
-  let searchAllowance: SessionSearchAllowanceLedger | undefined;
   const start = async (): Promise<Stack> => {
     server = undefined;
     const registry = new RuntimeRegistry({
@@ -153,8 +150,7 @@ async function fixture(options: {
     // The search owner is optional in the Gateway, so only the traversal that
     // exercises the search projection pays for a real index and coordinator.
     if (options.search) {
-      if (options.jev) searchAllowance = await SessionSearchAllowanceLedger.open(join(root, "gateway", "session-search-jev-allowance.sqlite"));
-      searchService = new SessionSearchService(registry, await SessionSearchIndex.open(join(root, "gateway", "session-search.sqlite")), options.jev as never, searchAllowance);
+      searchService = new SessionSearchService(registry, await SessionSearchIndex.open(join(root, "gateway", "session-search.sqlite")));
     }
     const uploads = {
       acquire: vi.fn(),
@@ -171,7 +167,6 @@ async function fixture(options: {
       terminals: { belongsToSession: () => false },
       logger: { log: captureLog },
       sessionDeleted: (sessionId: string) => server?.revokeSessionTerminals(sessionId),
-      ...(searchService ? { sessionSearch: searchService } : {}),
     } as never);
     server = new GatewayServer({
       host: "127.0.0.1",
@@ -196,7 +191,6 @@ async function fixture(options: {
       await current.server.close();
       await searchService?.close();
       searchService = undefined;
-      searchAllowance = undefined;
       await current.registry.dispose();
       await current.receipts.dispose();
       current = undefined;
@@ -224,7 +218,7 @@ async function fixture(options: {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await waitFor(() => socket.readyState === WebSocket.OPEN, "socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 7 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 8 }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "hello");
     const send = (id: string, method: string, params: object) => socket.send(JSON.stringify({ type: "request", id, method, params }));
     return {
@@ -445,88 +439,25 @@ const runningInRegistry = (registry: RuntimeRegistry, sessionId: string): boolea
 const latestSnapshot = (client: Client, sessionId: string) =>
   snapshotFrames(client, sessionId).at(-1)?.payload as { archivedAt?: string } | undefined;
 
-const search = async (client: Client, query: string) => {
-  const response = await client.request(`search-${Math.random().toString(36).slice(2, 8)}`, "session.search", { query, maxResults: 10 });
-  expect(response.ok, JSON.stringify(response)).toBe(true);
-  return response.result as {
-    coverage: { omittedSessions: number };
-    results: Array<{ sessionId: string; entryId: string; archived: boolean; anchorRevision: unknown }>;
-  };
-};
+/** Session search as Home's research tool reads it: the in-process owner. */
+const search = async (service: SessionSearchService, query: string) => service.search({ query, maxResults: 10 });
 
 describe("session archive over the real Gateway", () => {
-  for (const change of ["unrelated", "appended", "deleted"] as const) {
-    const changedCandidate = change !== "unrelated";
-    const name = change === "deleted" ? "drops a deleted candidate after delayed ranking"
-      : changedCandidate ? "revalidates a changed candidate after delayed ranking" : "publishes search after an unrelated session append during ranking";
-    archiveCase(name, async () => {
-      let rankStarted!: () => void;
-      let releaseRank!: () => void;
-      const started = new Promise<void>((resolve) => { rankStarted = resolve; });
-      const delayed = new Promise<void>((resolve) => { releaseRank = resolve; });
-      const f = await fixture({
-        search: true,
-        jev: { evaluate: async () => {
-          rankStarted();
-          await delayed;
-          return { answers: { r0: { type: "score", score: 2 } }, estimatedCostCents: 0 };
-        } },
-      });
-      f.searchService().setPolicy({ enabled: true, perQueryMicroCents: 300_000, dailyMicroCents: 300_000, policyRevision: 1 });
-      const candidate = await f.rawSession("publication-candidate", "publication-candidate-session");
-      const before = await f.searchService().search({ query: "publication-candidate", maxResults: 10 });
-      const beforeHit = before.results.find((item) => item.sessionId === candidate.id)!;
-      const unrelated = changedCandidate ? undefined : await f.rawSession("unrelated-before-search", "publication-unrelated-session");
-      const target = changedCandidate ? candidate : unrelated!;
-      const slot = await f.current().registry.acquire(target.id);
-      const pending = f.searchService().search({ query: "publication-candidate", maxResults: 10, remoteRanking: true, remoteConsent: true });
-      try {
-        await started;
-        if (change === "deleted") await f.current().registry.delete(target.id);
-        else {
-          await slot.prompt("appended while ranking");
-          await waitFor(() => !slot.snapshot().isStreaming && slot.snapshot().configurationBlocker === null, "concurrent append settles");
-        }
-      } finally {
-        releaseRank();
-      }
-      const result = await pending;
-      const hit = result.results.find((item) => item.sessionId === candidate.id);
-      if (change === "deleted") expect(hit).toBeUndefined();
-      else {
-        expect(hit, JSON.stringify(result)).toBeDefined();
-        expect(hit?.anchorRevision.branchDigest).not.toBeUndefined();
-        if (changedCandidate) expect(hit?.anchorRevision.branchDigest).not.toBe(beforeHit.anchorRevision.branchDigest);
-      }
-      return { changedCandidate, resultCount: result.results.length, candidateReturned: Boolean(hit), refreshedRevision: hit?.anchorRevision.branchDigest !== beforeHit.anchorRevision.branchDigest };
-    });
-  }
   archiveCase("keeps an archived session searchable and marked archived", async () => {
     const f = await fixture({ search: true });
     const client = await f.connect();
     const session = await f.rawSession("searchable", "searchable-archive-session");
-    // The pinned SDK records its effective thinking level the first time a
-    // runtime opens a canonical file. One warm query and anchor settle that
-    // write before the measured revisions below.
-    const warm = await search(client, "searchable");
-    const warmHit = warm.results.find((result) => result.sessionId === session.id);
-    expect(warmHit, JSON.stringify(warm)).toBeDefined();
-    const warmAnchor = await client.request("search-anchor-warmup", "session.search.anchor", {
-      sessionId: session.id, entryId: session.entryId, anchorRevision: warmHit!.anchorRevision,
-    });
-    expect(warmAnchor.ok, JSON.stringify(warmAnchor)).toBe(true);
+    // One warm query settles any first-read write before the measured revisions below.
+    const warm = await search(f.searchService(), "searchable");
+    expect(warm.results.find((result) => result.sessionId === session.id), JSON.stringify(warm)).toBeDefined();
     const canonicalBytes = await readFile(session.file, "utf8");
 
-    const visible = await search(client, "searchable");
+    const visible = await search(f.searchService(), "searchable");
     const visibleHit = visible.results.find((result) => result.sessionId === session.id);
     expect(visibleHit, JSON.stringify(visible)).toBeDefined();
     expect(visibleHit?.archived).toBe(false);
     expect(visibleHit?.entryId).toBe(session.entryId);
     expect(visible.coverage.omittedSessions).toBe(0);
-    const anchor = await client.request("search-anchor-visible", "session.search.anchor", {
-      sessionId: session.id, entryId: session.entryId, anchorRevision: visibleHit!.anchorRevision,
-    });
-    expect(anchor.ok, JSON.stringify(anchor)).toBe(true);
 
     const archived = await client.request("search-archive", "session.archive.set", {
       commandId: "search-archive-command", sessionId: session.id, archived: true,
@@ -535,9 +466,9 @@ describe("session archive over the real Gateway", () => {
     expect((await list(client, "exclude")).sessions.map((row) => row.id)).not.toContain(session.id);
 
     // Search reads archive state beside the index: the same canonical passage
-    // and content revision come back, only relabeled, and the session stays
-    // anchorable while its dashboard row is hidden.
-    const hidden = await search(client, "searchable");
+    // and content revision come back, only relabeled, while its dashboard row
+    // is hidden.
+    const hidden = await search(f.searchService(), "searchable");
     const hiddenHit = hidden.results.find((result) => result.sessionId === session.id);
     expect(hiddenHit, JSON.stringify(hidden)).toBeDefined();
     expect(hiddenHit?.archived).toBe(true);
@@ -545,22 +476,17 @@ describe("session archive over the real Gateway", () => {
     expect(hiddenHit?.anchorRevision.branchDigest).toBe(visibleHit!.anchorRevision.branchDigest);
     expect(hiddenHit?.anchorRevision.fileIdentity).toBe(visibleHit!.anchorRevision.fileIdentity);
     expect(await readFile(session.file, "utf8")).toBe(canonicalBytes);
-    const anchorWhileArchived = await client.request("search-anchor-archived", "session.search.anchor", {
-      sessionId: session.id, entryId: session.entryId, anchorRevision: hiddenHit!.anchorRevision,
-    });
-    expect(anchorWhileArchived.ok, JSON.stringify(anchorWhileArchived)).toBe(true);
 
     const restored = await client.request("search-unarchive", "session.archive.set", {
       commandId: "search-unarchive-command", sessionId: session.id, archived: false,
     });
     expect(restored.ok, JSON.stringify(restored)).toBe(true);
-    const afterUnarchive = await search(client, "searchable");
+    const afterUnarchive = await search(f.searchService(), "searchable");
     expect(afterUnarchive.results.find((result) => result.sessionId === session.id)?.archived).toBe(false);
     return {
       entryId: hiddenHit?.entryId,
       archivedResult: hiddenHit?.archived,
       unchangedContentRevision: hiddenHit?.anchorRevision.branchDigest === visibleHit!.anchorRevision.branchDigest,
-      anchorableWhileArchived: anchorWhileArchived.ok,
       archivedAfterUnarchive: afterUnarchive.results.find((result) => result.sessionId === session.id)?.archived,
     };
   });

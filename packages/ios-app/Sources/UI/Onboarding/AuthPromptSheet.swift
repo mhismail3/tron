@@ -298,9 +298,7 @@ private struct AuthEventContent: View {
         VStack(alignment: .leading, spacing: TronSpacing.section) {
             switch event.kind {
             case .progress:
-                OnboardingCard {
-                    TronLoadingState(label: event.message ?? "Waiting for the provider…")
-                }
+                TronSheetLoadingState(label: event.message ?? "Waiting for the provider…", accent: .tronEmerald)
             case .authURL:
                 authURLContent
             case .deviceCode:

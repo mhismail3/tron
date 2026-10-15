@@ -3,6 +3,9 @@ import TronMobileCore
 
 struct ProjectTrustSummary: Equatable, Sendable {
     let cwd: String
+    /// The Project root the decision is recorded for (the Git worktree root, else
+    /// the workspace itself). A chat in a subdirectory shares its root's decision.
+    let projectDir: String
     let requiresDecision: Bool
     let savedDecision: Bool?
     let defaultDecision: String
@@ -11,6 +14,7 @@ struct ProjectTrustSummary: Equatable, Sendable {
     init(_ value: JSONValue?) {
         let object = value?.objectValue ?? [:]
         cwd = object["cwd"]?.stringValue ?? "Unknown workspace"
+        projectDir = object["projectDir"]?.stringValue ?? cwd
         requiresDecision = object["requiresDecision"]?.boolValue ?? false
         savedDecision = object["savedDecision"]?.boolValue
         defaultDecision = object["defaultDecision"]?.stringValue ?? "ask"
@@ -48,6 +52,7 @@ struct ProjectTrustSummary: Equatable, Sendable {
 }
 
 private struct TrustDefaultDraft: Equatable {
+    static let key = "permissions.defaultProjectTrust"
     var decision = "ask"
 
     init() {}
@@ -57,7 +62,7 @@ private struct TrustDefaultDraft: Equatable {
     }
 
     func patch(comparedTo baseline: Self) -> JSONValue {
-        decision == baseline.decision ? .object([:]) : .object(["defaultProjectTrust": .string(decision)])
+        decision == baseline.decision ? .object([:]) : .object([Self.key: .string(decision)])
     }
 }
 
@@ -185,13 +190,22 @@ struct TrustSettingsView: View {
         let ticket = defaultLoadGeneration
         let target = SettingsTarget.global
         _ = defaultDrafts.seedBaselineIfMissing(defaultDraft, for: target)
-        guard await model.refreshSettings(target: target),
-              ticket == defaultLoadGeneration,
+        let resolution: SettingsResolution
+        do {
+            resolution = try await model.resolveSettingsForRenderer(target: target.gatewayTarget, keys: [TrustDefaultDraft.key])
+        } catch is CancellationError {
+            return
+        } catch {
+            guard ticket == defaultLoadGeneration, identity == model.knowledgePresentationIdentity,
+                  presentationActivity.allowsPresentationPublication, !Task.isCancelled else { return }
+            model.presentError(error)
+            return
+        }
+        guard ticket == defaultLoadGeneration,
               identity == model.knowledgePresentationIdentity,
               presentationActivity.allowsPresentationPublication,
               !Task.isCancelled,
-              let value = model.settings(for: target)?.objectValue?["effective"]?.objectValue,
-              let decision = value["defaultProjectTrust"]?.stringValue else { return }
+              let decision = resolution.setting(TrustDefaultDraft.key)?.value?.stringValue else { return }
         let loaded = TrustDefaultDraft(decision: decision)
         guard defaultDrafts.install(loaded, for: target, ifCurrent: defaultDraft) else { return }
         defaultDraft = loaded
@@ -222,6 +236,9 @@ struct TrustSettingsView: View {
 
             Divider().overlay(accent.opacity(0.18))
             trustMetadataRow("Workspace", summary.cwd)
+            if summary.projectDir != summary.cwd {
+                trustMetadataRow("Applies to project root", summary.projectDir)
+            }
             trustMetadataRow("Default policy", summary.defaultDecisionLabel)
             trustMetadataRow("Saved decision", summary.savedDecisionLabel)
         }

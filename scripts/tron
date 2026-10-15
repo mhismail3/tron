@@ -20,7 +20,10 @@ Commands:
                                     every mutating Gateway lifecycle transition
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
-  ci [check|test|all]               Validate the gateway and repository policy
+  ci [<step>...]                    Run hosted CI's steps (all, in order, without
+                                    arguments); each step is one CI job step:
+                                    repo.policy relay.check gateway.build
+                                    gateway.integration (scripts/tron ci --list)
   diagnose [--since <1..9999><s|m|h|d>] [--out <path>]
                                     Write one read-only redacted diagnostic bundle
                                     to <path>, or to a new file in the system temp
@@ -29,36 +32,64 @@ Commands:
   ios generate                      Regenerate iOS with pinned XcodeGen
   mac generate                      Regenerate macOS with pinned XcodeGen
   mac verify [--require-bundled]    Verify installed app, payload, LaunchAgent, and PID
+  mac replace --plan|--start|--status [--follow] [--json]
+                                    One-tap app replacement (also from iPhone Settings)
   mac reinstall --app <Release.app> [--select-bundled-offline|--confirm-offline|--verify|--status|--restart|--abandon|--finish]
   mac reinstall --recovery-relocate --operation-id <id> --source <root>
   mac reinstall --recovery-verify --operation-id <id>
                                     Resumable preparation or archive-only recovery
-                                    registration; app replacement remains manual
+                                    registration (manual path)
   version                           Print the canonical Tron version
-  work bootstrap [--apply] [--report <path>]
+  gate plan [--tests "<command>"]... [--json]
+                                    Print the ordered gate steps this change needs
+                                    (tools/work/gate-catalog.json)
+  gate run [<step>...] [--tests "<command>"]... [--force]
+                                    Run the plan (or named steps) with live progress;
+                                    stops at the first failure; reuses valid passes
+  gate next                         Run only the next step without a valid pass
+  gate report [--json] | gate catalog
+                                    Measured wall time and peak RSS per step; the catalog
+  work bootstrap [--apply [--prune]] [--report <path>]
                                     Plan or converge GitHub labels and the tracking
-                                    Project to .github/work.json (tools/work)
-  work start <issue> [--session <id>]
+                                    Project to .github/work.json (tools/work); reports
+                                    undeclared labels, fields and options as drift;
+                                    --prune deletes the ones no open work uses
+  work start <issue> [--session <id>] [--integration] [--base <remote-branch>]
                                     Claim an open, unclaimed issue: remote branch,
-                                    Project status, claim comment, and its worktree
+                                    Project status, claim comment, and its worktree;
+                                    --integration explicitly admits epics, --base records
+                                    the exact configured-remote starting branch
+  work handoff <issue> --reason <text> [--session <id>] [--force-maintainer]
+                                    Transfer an existing claim in place; unknown owner
+                                    state refuses; force requires exact TTY confirmation
+  work recover <issue> --expected-local <SHA> --expected-remote <SHA> --reason <text>
+                                    Publish a clean settled-owner descendant as unverified
+                                    work; exact heads required; handoff remains separate
+  work release <issue> --reason <text> [--force-maintainer] | --stale [--dry-run]
+                                    Give up a stale claim after preserving its work;
+                                    --stale sweeps claims idle over 72h whose owner is
+                                    absent; force (TTY) only for a legacy non-Gateway owner
   work verify [--tests "<command>"]...
                                     Run the local checks the branch diff requires,
                                     plus each --tests command, on the current commit
   work dashboard [--html <path>] [--json <path>]
                                     Read-only live view of all work: epics, claims,
-                                    queue, stale, orphans
+                                    queue, stale, paused epics, past exit dates, orphans
   work comment <issue> --body-file <md>
                                     Privacy-check and audit a public issue comment
-  work issue create --title <t> --body-file <md> [--kind <label>]
-                     [--visibility <label>] [--area <label>]... [--type task|epic]
-                                    File a task or epic; labels are optional
+  work issue create --title <t> --body-file <md> --kind <label> --area <label>...
+                     [--status Ready|Blocked] [--priority P0..P3] [--exit-by YYYY-MM-DD]
+                     [--type epic]
+                                    File a classified task (or an epic) onto the Project
+  work issue edit <issue> [--title <t>] [--body-file <md>]
+                                    Replace a title or body, e.g. its remaining scope
   work issue labels <issue> [--add <label>] [--remove <label>]
                                     Change only declared work labels
   work issue close <issue> --reason completed|not_planned --comment-file <md>
                                     Comment, close, and set Status Done
   work project add <issue>
                                     Add an issue to the configured work Project
-  work project set <issue> [--status Proposed|Ready|Blocked]
+  work project set <issue> [--status Ready|Blocked]
                      [--priority P0|P1|P2|P3]
                                     Set work classification fields
   work issue parent <issue> --epic <epic>
@@ -96,16 +127,51 @@ case "$cmd" in
     exec node "$GATEWAY/dist/client/terminal-chat.js" "$@"
     ;;
   ci)
-    scope="${1:-all}"
-    case "$scope" in
-      check) (cd "$GATEWAY" && npm ci && npm run build && npm audit --omit=dev) ;;
-      test) (cd "$GATEWAY" && npm test) ;;
-      all)
-        (cd "$GATEWAY" && npm ci && npm run build && npm test && npm audit --omit=dev)
-        "$ROOT/scripts/personal-info-guard.sh"
-        ;;
-      *) echo "unknown ci scope: $scope" >&2; exit 64 ;;
-    esac
+    # Hosted CI (.github/workflows/ci.yml) runs exactly these steps, one workflow step
+    # each, so a red CI step is reproduced by the same command here. Only deterministic
+    # checks belong here; E2E journeys, the nested SDK pass and native builds run in
+    # the local landing gate. Seam for #1022: once `scripts/tron gate` lands, each step
+    # becomes `gate run <id>` of the catalog's hosted-safe steps.
+    ci_step() {
+      case "$1" in
+        repo.policy)
+          # `if ci_step` disables errexit inside the function, so every step chains with &&.
+          "$ROOT/scripts/personal-info-guard.sh" \
+            && "$ROOT/scripts/tron" version check \
+            && "$ROOT/scripts/check-agent-policy.sh" \
+            && python3 "$ROOT/scripts/check-documentation-policy.py" \
+            && python3 "$ROOT/scripts/verify-gateway-protocol-contract.py" ;;
+        relay.check)
+          (cd "$ROOT/packages/push-relay" && npm ci --no-audit --no-fund && npm run check && npm run build && npm test) ;;
+        gateway.build)
+          (cd "$GATEWAY" && npm ci --no-audit --no-fund && npm run check:pi-sdk && npm run build) ;;
+        gateway.integration)
+          # On this Mac the suite is a heavy run and waits for a host-wide slot (#915);
+          # a hosted runner is a dedicated VM.
+          if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+            (cd "$GATEWAY" && npx vitest run --config vitest.hosted.config.ts)
+          else
+            python3 "$ROOT/tools/work/heavy.py" run --owner "tron ci gateway.integration in $(basename "$ROOT")" \
+              -- bash -c 'cd "$1" && npx vitest run --config vitest.hosted.config.ts' _ "$GATEWAY"
+          fi ;;
+        *) echo "unknown ci step: $1 (steps: $CI_STEPS)" >&2; return 64 ;;
+      esac
+    }
+    CI_STEPS="repo.policy relay.check gateway.build gateway.integration"
+    if [[ "${1:-}" == --list ]]; then echo "$CI_STEPS"; exit 0; fi
+    steps=("$@"); [[ ${#steps[@]} -gt 0 ]] || read -r -a steps <<<"$CI_STEPS"
+    for step in "${steps[@]}"; do
+      echo "==> ci $step"
+      started=$SECONDS
+      if ci_step "$step"; then
+        echo "==> ci $step passed in $((SECONDS - started))s"
+      else
+        status=$?
+        # GitHub renders ::error as an annotation on the run summary; locally it is one plain line.
+        echo "::error title=ci $step failed::ci $step failed (exit $status) after $((SECONDS - started))s. Reproduce: scripts/tron ci $step"
+        exit "$status"
+      fi
+    done
     ;;
   diagnose)
     if [[ ! -f "$GATEWAY/dist/admin/diagnose.js" ]]; then
@@ -115,6 +181,7 @@ case "$cmd" in
     fi
     exec node "$GATEWAY/dist/admin/diagnose.js" "$@"
     ;;
+  gate) exec python3 "$ROOT/tools/work/gate.py" "$@" ;;
   work)
     exec python3 "$ROOT/tools/work/cli.py" "$@"
     ;;
@@ -136,6 +203,9 @@ case "$cmd" in
         ;;
       reinstall)
         exec python3 "$ROOT/scripts/tron_mac_reinstall.py" "${@:2}"
+        ;;
+      replace)
+        exec /usr/bin/python3 "$ROOT/scripts/tron_mac_replace.py" "${@:2}"
         ;;
       *) usage >&2; exit 64 ;;
     esac

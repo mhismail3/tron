@@ -9,6 +9,8 @@ installation registration, HMAC grant capabilities, per-grant and
 per-installation quota, a durable SQLite request ledger, and one fixed APNs
 alert. APNs provider responses are read under a byte cap before their reason is
 parsed, so an oversized or unreadable response falls back to the HTTP status.
+A static capabilities read names the allowlisted notification categories
+([Notification categories](#notification-categories)).
 
 ## Ownership and trust boundary
 
@@ -110,11 +112,41 @@ The exact bounded body is:
   "title": "optional product title, at most 256 UTF-8 bytes",
   "sessionId": "optional exact session route",
   "machineId": "required with sessionId",
+  "category": "optional: settings-approval, only with notificationKind waiting",
   "expiresAt": "RFC 3339 within 24 hours"
 }
 ```
 
 `title`, `sessionId`, and `machineId` are omitted for generic alerts. The relay accepts the two route fields only as a pair and projects them as fixed top-level APNs custom data; clients admit them as opaque identifiers and resolve the machine against an already-paired Gateway profile. The model cannot provide these fields.
+
+### Notification categories
+
+`category` is allowlisted: its only value is `settings-approval`, accepted only
+with `notificationKind` `waiting`, and the relay maps it to `aps.category` so
+the iOS app shows its Approve and Decline actions (Gateway
+[settings-model.md decision 35](../gateway/docs/settings-model.md#81-decisions)).
+Any other value, or the field on another kind, is `invalid_request`.
+
+`GET /v3/capabilities` is unauthenticated, reads no state, and returns
+`{"version":1,"notificationCategories":["settings-approval"]}`. A relay
+predating categories answers it 404 and refuses the field as `unknown_field`,
+so the Gateway reads it before queuing a categorized push and sends the field
+only to a relay that lists the category. The choice is fixed into the queued
+request: its retries resend the identical body the ledger requires.
+
+Release order:
+
+1. Deploy this relay (sandbox, then production, as below). Until then the
+   Gateway sends the push without the field and the iPhone decides from the
+   rows in Manage Home and Manage Session.
+2. The Gateway and iOS app may ship in either order after that: a Gateway reads
+   the capability per push, and an app without the category shows the push
+   without actions.
+
+Rolling the relay back below this release needs nothing from the Gateway, whose
+next push reads the capability again. A categorized push queued before the
+rollback and retried after it is refused as `unknown_field` and ends ambiguous;
+the pending change stays in the rows.
 
 Grant revocation signs an empty body with method `DELETE` and exact path
 `/v3/grants/{grantId}`. It is idempotent. Disabled grants are never re-enabled
@@ -180,9 +212,10 @@ npm run build:sandbox   # isolated sandbox-config dry-run only
 ```
 
 Tests run in the Workers Vitest pool and exercise the real SQLite Durable Object
-boundary. Outbound APNs requests are intercepted locally. CI runs the pinned install,
-type check, tests, production dependency audit, and production-config Wrangler dry run;
-it never receives deployment credentials or deploys either environment.
+boundary. Outbound APNs requests are intercepted locally. Hosted CI
+(`scripts/tron ci relay.check`) runs the pinned install, type check, production-config
+Wrangler dry run and tests; it never receives deployment credentials or deploys either
+environment.
 
 `package.json` `overrides` exist only to clear security advisories in the
 development toolchain, so that `npm audit` stays clean (#489):

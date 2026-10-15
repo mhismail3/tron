@@ -1,9 +1,20 @@
 import { Type } from "@earendil-works/pi-ai";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { FileEntry, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { AsyncMutex } from "../util/async-mutex.js";
 
 export const HOME_TASK_MARKER = "tron-home-task";
 export const HOME_TASK_REPORT = "tron-home-task-report";
+/** One operation's canonical span: the entries after its marker, up to the next task
+ * marker. A resumed task continues in its predecessor's session (#929), so a later
+ * operation's entries are never this operation's evidence. `index` is -1 without a marker. */
+export function homeTaskOperationSpan<T extends FileEntry>(entries: readonly T[], operationId: string): { index: number; run: T[] } {
+  const isMarker = (entry: T) => entry.type === "custom" && entry.customType === HOME_TASK_MARKER;
+  const index = entries.findIndex(entry => isMarker(entry) && (entry as { data?: { operationId?: unknown } }).data?.operationId === operationId);
+  if (index < 0) return { index, run: [] };
+  const next = entries.findIndex((entry, position) => position > index && isMarker(entry));
+  return { index, run: entries.slice(index + 1, next < 0 ? undefined : next) };
+}
+
 export interface HomeTaskWorkerIdentity {
   taskId: string;
   homeId: string;
@@ -88,6 +99,18 @@ export class HomeTaskReportOwner {
     this.admission = { interrupt };
   }
 
+  /** The task's budget check at a worker turn boundary (settings-model.md 6.1),
+   * set by the dispatcher; `budgetExceeded` is its settlement evidence. */
+  private budget: ((entries: readonly FileEntry[]) => Promise<boolean>) | undefined;
+  private exceeded = false;
+  limitBudget(check: (entries: readonly FileEntry[]) => Promise<boolean>): void { this.budget = check; }
+  get budgetExceeded(): boolean { return this.exceeded; }
+  /** True once the run's canonical spend reached its budget; the run then ends at this boundary. */
+  async exceedsBudget(entries: readonly FileEntry[]): Promise<boolean> {
+    if (!this.exceeded && this.budget && await this.budget(entries)) this.exceeded = true;
+    return this.exceeded;
+  }
+
   get controlsActive(): boolean { return this.admission !== undefined; }
   /** The report is sealed: the run ends at its turn boundary and runs no more tools. */
   get reportSealed(): boolean { return this.sealed !== undefined; }
@@ -127,7 +150,7 @@ export class HomeTaskReportOwner {
    * worker session shows no aborted reply. */
   tool(sessionId: () => string, operationId: () => string | undefined,
     append: (report: HomeTaskReport) => Promise<string>): ToolDefinition {
-    return { name: "report", label: "Report", description: "Seal the task's explicit immutable result with acceptance evidence. Ends this task immediately; do no work afterwards. Refused while a subagent run this task started is still live: wait for it or stop it first.",
+    return { name: "report", label: "Report", annotations: { openWorldHint: false }, description: "Seal the task's explicit immutable result with acceptance evidence. Ends this task immediately; do no work afterwards. Refused while a subagent run this task started is still live: wait for it or stop it first.",
       parameters: PARAMETERS, executionMode: "sequential",
       execute: async (_id, request) => {
         const entryId = await this.accept(sessionId(), operationId(), request, append);

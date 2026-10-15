@@ -164,6 +164,9 @@ struct NativeTerminal: UIViewRepresentable {
         }
         keyboard.attach(terminal)
         applySoftEdges(to: terminal)
+        #if HOSTED_TEST
+        terminal.getTerminal().setCursorStyle(.steadyBlock)
+        #endif
         return terminal
     }
 
@@ -357,6 +360,12 @@ final class TronNativeTerminalView: TerminalView {
 
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
+        #if HOSTED_TEST
+        // A blinking caret is a repeating Core Animation, so XCUI never sees
+        // the app idle and every query in a live-shell journey would wait out
+        // its quiescence timeout. Hosted journeys keep the caret steady.
+        getTerminal().setCursorStyle(.steadyBlock)
+        #endif
         if result { focusDidChange?(true) }
         return result
     }

@@ -22,8 +22,8 @@ settings:
     DEVELOPMENT_TEAM: MYGKXH6TY4
     CODE_SIGN_STYLE: Automatic
     ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
-    TRON_GATEWAY_PROTOCOL_VERSION: "7"
-    TRON_GATEWAY_MIN_PROTOCOL_VERSION: "7"
+    TRON_GATEWAY_PROTOCOL_VERSION: "8"
+    TRON_GATEWAY_MIN_PROTOCOL_VERSION: "8"
 
 packages:
   TronComputerControl:
@@ -258,6 +258,18 @@ targets:
       - path: Tests/Fixtures/SingleInstanceLockProbe
         createIntermediateGroups: true
 
+  NativeHostRetirementProbe:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/Support/Onboarding/NativeHostProtocol.swift
+      - path: Tests/Fixtures/NativeHostRetirementProbe
+        createIntermediateGroups: true
+    dependencies:
+      - target: TronNativeCaptureHost
+      - package: TronComputerControl
+        product: TronComputerControl
+
   # Real-boundary tests only (spawned processes, loopback sockets, the built
   # launcher). Unit tests are not kept; see docs/development.md.
   TronMacIntegrationTests:
@@ -270,6 +282,7 @@ targets:
     dependencies:
       - target: TronMac
       - target: SingleInstanceLockProbe
+      - target: NativeHostRetirementProbe
       - target: TronNativeCaptureHost
       - package: TronComputerControl
         product: TronComputerControl
@@ -299,6 +312,7 @@ schemes:
         # log writer); keep every test run out of the user's real home.
         TRON_DATA_DIR: "$(BUILT_PRODUCTS_DIR)/TronMacIntegrationTests-home"
         TRON_SINGLE_INSTANCE_LOCK_PROBE: "$(BUILT_PRODUCTS_DIR)/SingleInstanceLockProbe"
+        TRON_NATIVE_HOST_RETIREMENT_PROBE: "$(BUILT_PRODUCTS_DIR)/NativeHostRetirementProbe"
       targets:
         - TronMacIntegrationTests
     profile:

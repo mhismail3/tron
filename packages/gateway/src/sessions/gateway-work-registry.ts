@@ -102,6 +102,14 @@ export class GatewayWorkRegistry {
     return [...this.entries.values()].some((entry) => entry.sessionId === sessionId && entry.token !== exceptToken);
   }
 
+  /** The distinct kinds of live work on one session, for an admission that must
+   * name what refused it. Same exclusion rule as `hasSessionWork`. */
+  sessionWorkKinds(sessionId: string, exceptToken?: string): GatewayWorkKind[] {
+    return [...new Set([...this.entries.values()]
+      .filter((entry) => entry.sessionId === sessionId && entry.token !== exceptToken)
+      .map((entry) => entry.kind))];
+  }
+
   observeSessions(observer: (sessionId: string) => void): () => void {
     this.sessionObservers.add(observer);
     return () => { this.sessionObservers.delete(observer); };

@@ -5,7 +5,7 @@ import { GatewayError } from "../errors.js";
 import type { ExtensionRunLifecycleState } from "../protocol/types.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../sessions/context-delivery-receipts.js";
 import { delegatedArtifactPathAllowed, DELEGATED_PROVIDER_TOOL_NAME } from "../sessions/delegated-provider.js";
-import { HOME_TASK_MARKER } from "./home-task-report.js";
+import { homeTaskOperationSpan } from "./home-task-report.js";
 import { HOME_TASK_PRODUCER_REFUSAL_REASON, HOME_TASK_SEALED_REASON } from "./home-task-worker-extension.js";
 
 /** The worker's canonical settlement fact: the Gateway's own task-end stops of its
@@ -72,10 +72,11 @@ function customMessageText(content: unknown): string {
 const SETTLED_RUN_STATES = new Set(["complete", "failed", "partial", "stopped", "rejected"]);
 const MAXIMUM_STATUS_BYTES = 64 * 1024;
 
-/** A launch is a `subagent` call with no `action` that the task admitted: the gate
- * blocked the others before the provider saw them. A provider that then rejects the
- * launch before creating a run still counts as admitted, because its result carries
- * no run identity to tell the two apart. Management calls never count. */
+/** A launch is a `subagent` call with no `action` that the task admitted, or a `resume`
+ * the task admitted (on its own run, which starts a new run the task then owns): the gate
+ * blocked the others before the provider saw them. A provider that then rejects an admitted
+ * call before creating a run still counts as admitted, because its result carries no run
+ * identity to tell the two apart. Other management calls never count. */
 export function homeTaskSubagentLaunches(runEntries: readonly FileEntry[]): Array<{ toolCallId: string; asyncDir: string | undefined }> {
   const launchCalls = new Set<string>();
   for (const entry of runEntries) {
@@ -83,7 +84,7 @@ export function homeTaskSubagentLaunches(runEntries: readonly FileEntry[]): Arra
     for (const block of entry.message.content as unknown as Array<Record<string, unknown>>) {
       if (block.type !== "toolCall" || block.name !== DELEGATED_PROVIDER_TOOL_NAME || typeof block.id !== "string") continue;
       const args = block.arguments as Record<string, unknown> | null;
-      if (args && typeof args === "object" && args.action === undefined) launchCalls.add(block.id);
+      if (args && typeof args === "object" && (args.action === undefined || args.action === "resume")) launchCalls.add(block.id);
     }
   }
   const launches: Array<{ toolCallId: string; asyncDir: string | undefined }> = [];
@@ -118,9 +119,7 @@ export function parseHomeTaskSubagentsEntry(data: unknown, operationId: string):
 /** The operation's subagent facts from one canonical cut. Entries after the
  * operation's marker are the only ones that belong to it. */
 export function homeTaskSubagentsProjection(entries: readonly FileEntry[], operationId: string): HomeTaskSubagents {
-  const marker = entries.findIndex(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER
-    && (entry.data as { operationId?: unknown } | undefined)?.operationId === operationId);
-  const runEntries = marker < 0 ? [] : entries.slice(marker + 1);
+  const runEntries = homeTaskOperationSpan(entries, operationId).run;
   const launches = homeTaskSubagentLaunches(runEntries);
   const facts = runEntries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_SUBAGENTS);
   if (facts.length > 1) throw new GatewayError("conflict", "Conflicting task subagent evidence");

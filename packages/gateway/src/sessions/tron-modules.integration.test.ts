@@ -14,7 +14,7 @@ function inlineModuleNames(resources: Record<string, any>): string[] {
     .filter((extension: any) => extension.builtin !== true);
 }
 
-describe.sequential("RuntimeSlot Tron module registration", () => {
+describe("RuntimeSlot Tron module registration", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
   const roots: string[] = [];

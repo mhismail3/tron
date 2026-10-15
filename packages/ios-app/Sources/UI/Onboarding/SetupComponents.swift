@@ -330,7 +330,7 @@ struct ProviderConfigurationSheet: View {
                     Button { close() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .disabled(beginningMethod != nil || clearing)
                     .accessibilityLabel("Done")
@@ -953,7 +953,7 @@ struct ModelPicker: View {
                     Button { beginSearch() } label: {
                         Image(systemName: "magnifyingglass")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                            .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Search models")
                     #if HOSTED_TEST
@@ -1088,67 +1088,12 @@ struct ModelPicker: View {
     private func row(_ model: ModelSummary) -> some View {
         let summary = ModelCardFacts.rowSummary(model)
         let identity = model.pickerIdentity
-        return Button { select(model.ref) } label: {
-            HStack(spacing: 12) {
-                Group {
-                    if selection == model.ref && selectionAvailability.isApplying {
-                        TronPulseLoadingIndicator(accent: accent, size: 14)
-                    } else {
-                        Image(systemName: selection == model.ref ? "checkmark.circle.fill" : "cpu")
-                            .foregroundStyle(
-                                settingsTheme?.accent
-                                    ?? (selection == model.ref ? Color.tronEmerald : Color.tronSlate)
-                            )
-                    }
-                }
-                .frame(width: 22)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(model.displayName)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronTextPrimary)
-                        if model.virtual == true {
-                            Text("Virtual route")
-                                .font(TronTypography.secondaryDescription)
-                                .foregroundStyle(Color.tronTextSecondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.tronCyan.opacity(0.12), in: Capsule())
-                        }
-                    }
-                    // One line each keeps rows a uniform height, so the lazy
-                    // stack's estimates for unbuilt rows stay right and the
-                    // scroll position does not jump when scrolling back.
-                    if let summary {
-                        Text(summary)
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .lineLimit(1)
-                    }
-                    Text(identity)
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer(minLength: 8)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .tronScrollSurface(
-            accent: rowAccent(isSelected: selection == model.ref),
-            cornerRadius: 14,
-            tintOpacity: selection == model.ref ? 0.18 : 0.08
+        return TronCatalogOptionRow(
+            title: model.displayName, summary: summary, detail: identity,
+            badge: model.virtual == true ? "Virtual route" : nil,
+            isSelected: selection == model.ref, isApplying: selectionAvailability.isApplying,
+            isEnabled: selectionAvailability.canSelect, action: { select(model.ref) }
         )
-        .disabled(!selectionAvailability.canSelect)
-        .accessibilityLabel([model.displayName, summary, identity]
-            .compactMap { $0 }.joined(separator: ", "))
-        .accessibilityValue(selection == model.ref && selectionAvailability.isApplying
-            ? "Applying configuration" : selection == model.ref ? "Selected" : "")
         #if HOSTED_TEST
         .modifier(ModelPickerHostedActionModifier(
             id: "picker.row.\(model.provider)/\(model.id)",

@@ -258,7 +258,9 @@ final class TerminalController {
 }
 
 enum TerminalConnectionPhase: Equatable {
-    case connecting, connected, reconnecting, unavailable
+    /// `notConnected` is Mac Terminal before it is set up or after its shell
+    /// ended: nothing failed, so the dot is neutral rather than an error.
+    case connecting, connected, reconnecting, unavailable, notConnected
 
     var label: String {
         switch self {
@@ -266,6 +268,7 @@ enum TerminalConnectionPhase: Equatable {
         case .connected: "Connected"
         case .reconnecting: "Reconnecting"
         case .unavailable: "Unavailable"
+        case .notConnected: "Not connected"
         }
     }
 
@@ -274,6 +277,7 @@ enum TerminalConnectionPhase: Equatable {
         case .connected: .tronEmerald
         case .connecting, .reconnecting: .tronAmber
         case .unavailable: .tronError
+        case .notConnected: .tronTextSecondary
         }
     }
 }

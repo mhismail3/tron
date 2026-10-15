@@ -96,7 +96,9 @@ struct PackageDetailSheet: View {
     let package: PackageSummary
     let providesDiagnostic: String?
     @Environment(\.dismiss) private var dismiss
-    private let accent = Color.tronBlue
+    /// The opening group's accent (Tools & Extensions); blue only when opened alone (#939).
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronBlue }
 
     private var content: PackageProvidesContent {
         PackageProvidesPresentation.content(from: package.provides)
@@ -142,7 +144,7 @@ struct PackageDetailSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }

@@ -35,7 +35,7 @@ struct MCPAuthSheet: View {
             .tronNavigationTitle("MCP Sign In", accent: .tronCyan)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", role: .cancel) { Task { await cancel() } }
+                    Button("Cancel", role: .cancel) { Task { await cancel() } }.tronToolbarAction(accent: .tronCyan)
                 }
             }
             .tronPresentation()

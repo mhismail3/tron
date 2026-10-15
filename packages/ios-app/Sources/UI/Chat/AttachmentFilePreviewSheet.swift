@@ -228,6 +228,7 @@ struct AttachmentFilePreviewSheet: View {
     @State private var phase: Phase = .loading
     @State private var loadGeneration = 0
     @State private var loadedSourceID: String?
+    @State private var swiftApp: SwiftAppLaunch?
 
     private enum Phase {
         case loading
@@ -236,7 +237,8 @@ struct AttachmentFilePreviewSheet: View {
     }
 
     var body: some View {
-        TronDocumentSheet(title: title ?? name) { content }
+        TronDocumentSheet(title: title ?? name, leadingAction: runAction) { content }
+        .tronManagedSheet(item: $swiftApp, identity: { "attachment.swift-app.\($0.id)" }) { launch in SwiftAppRunnerSheet(launch: launch) }
         .task(id: PresentationActivityTaskID(
             source: "\(source.loadID)-\(model.knowledgePresentationIdentity)-ready:\(model.connectionState == .connected)",
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -248,12 +250,22 @@ struct AttachmentFilePreviewSheet: View {
         .onDisappear { cancelRemoteLoad() }
     }
 
+    /// Experimental: a displayed `.swift` file can run as an interpreted app (#889).
+    private var runAction: TronDocumentSheetAction? {
+        guard SwiftAppExperiment.shared.canRun(fileNamed: name),
+              case .prepared(let preview) = phase,
+              case .code(let source) = preview.content,
+              !preview.isTruncated else { return nil }
+        return TronDocumentSheetAction(systemImage: "play.fill", accessibilityLabel: "Run \(name)") {
+            swiftApp = SwiftAppLaunch(name: name, source: source)
+        }
+    }
+
     @ViewBuilder
     private var content: some View {
         switch phase {
         case .loading:
-            TronLoadingState(label: "Preparing file preview…", accent: .tronBlue)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            TronSheetLoadingState(label: "Preparing file preview…", accent: .tronBlue)
         case .unavailable(let message):
             TronInfoCard(icon: "doc.text.magnifyingglass", text: fallbackText ?? message, accent: .tronBlue)
                 .padding(TronSpacing.xlarge)

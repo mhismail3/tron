@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -11,6 +11,7 @@ import type { PushRelayClient } from "../src/notifications/relay-client.js";
 import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import { ManagedSubagents } from "../src/sessions/managed-subagents.js";
 import { delegatedArtifactRoot, ensureDelegatedArtifactRoot } from "../src/sessions/delegated-provider.js";
+import { HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
 
 // Registered runtime roots of the current test file. Each file's afterEach calls
 // disposeFixtures(), so a fixture is retired with the file that created it.
@@ -26,13 +27,46 @@ export async function disposeFixtures(): Promise<void> {
       try {
         await fixture.registry.dispose();
         await fixture.registry.administrativeWorkRegistry.waitUntilSettled();
+        const outlived = await awaitRunnersExited(fixture.root).then(() => undefined, (error: unknown) => error);
         await rm(fixture.root, { recursive: true, force: true });
+        if (outlived) throw outlived;
       } catch (error) { failures.push(error); }
     }
   } finally {
     vi.unstubAllEnvs();
   }
   if (failures.length) throw failures[0];
+}
+
+/** Detached async runners outlive the Gateway by design, and one still writes its final
+ * status and mission records after the run reads `complete`. Removing the root under it
+ * failed teardown with ENOTEMPTY (#950). Every runner the fixture started (each run
+ * directory's `status.json` records its pid) must exit before the root goes; one that
+ * outlives the bound is killed and fails the test that left it running. */
+async function awaitRunnersExited(root: string): Promise<void> {
+  const pids = new Map<number, string>();
+  const visit = async (directory: string, depth: number): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory() && depth < 8) await visit(path, depth + 1);
+      else if (entry.name === "status.json") {
+        const pid = (JSON.parse(await readFile(path, "utf8").catch(() => "{}")) as { pid?: unknown }).pid;
+        // A foreground run executes in this process and records its pid; only detached runners are awaited.
+        if (Number.isInteger(pid) && pid !== process.pid) pids.set(pid as number, directory);
+      }
+    }
+  };
+  await visit(delegatedArtifactRoot(join(root, "tron")), 0);
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  try {
+    await waitFor(() => [...pids.keys()].every(pid => !alive(pid)), "every async runner the fixture started exits", { boundMs: HOOK_HANG_BOUND_MS });
+  } catch (error) {
+    const outliving = [...pids].filter(([pid]) => alive(pid));
+    for (const [pid] of outliving) { try { process.kill(pid, "SIGKILL"); } catch { /* exited meanwhile */ } }
+    await waitFor(() => outliving.every(([pid]) => !alive(pid)), "killed async runners exit", { boundMs: HOOK_HANG_BOUND_MS });
+    throw new Error(`async runners outlived their fixture: ${outliving.map(([pid, dir]) => `${pid} (${dir})`).join(", ")}`, { cause: error });
+  }
 }
 
 // A same-named user package. The producer gate admits a provider only by managed
@@ -42,12 +76,15 @@ const UNMANAGED_PROVIDER_VERSION = "0.76.1-tron.4";
 export const TASK_REASONING_MODEL_ID = "tron-task-reasoning";
 export const TASK_VIRTUAL_MODEL_ID = "tron-task-router";
 
-export async function fixture(unmanagedProvider = false, codemode = false, contextWindow?: number, managed = false) {
+/** `models` is written as the agent directory's models.json before any runtime starts, for a
+ * provider the faux one cannot stand in for (a local wire-protocol endpoint). */
+export async function fixture(unmanagedProvider = false, codemode = false, contextWindow?: number, managed = false, models?: Record<string, unknown>) {
   const root = await mkdtemp(join(tmpdir(), "tron-task-dispatch-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
   const tronHome = join(root, "tron");
   await mkdir(agentDir); await mkdir(cwd);
+  if (models) await writeFile(join(agentDir, "models.json"), JSON.stringify(models));
   // jiti transpiles pi and managed extensions into os.tmpdir(). Keep that cache in this
   // fixture's root so disposal removes it instead of leaking into the host's temp.
   const temporary = join(root, "tmp");
@@ -64,7 +101,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   const model = faux.getModel();
   // The Gateway-wide runtime that admits Home's delegate choices (production passes it
   // as `gatewayModelRuntime`). It also holds a virtual router, which must be refused.
-  const gateway = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+  const gateway = await ModelRuntime.create({ modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
   gateway.registerNativeProvider(faux.provider);
   gateway.registerVirtualModel({ provider: model.provider, id: TASK_VIRTUAL_MODEL_ID, name: "Fixture router",
     route: () => ({ model: gateway.getModel(model.provider, model.id)!, thinkingLevel: "off" }) });
@@ -114,9 +151,9 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     ...(managed ? { delegatedArtifactRoot: delegatedArtifactRoot(tronHome) } : {}),
     gatewayModelRuntime: gateway,
     modelRuntimeFactory: async () => {
-      // Managed fixtures read the agent directory's models.json, as production does, so a
-      // scripted child model is registered for the worker's own subagent launches.
-      const runtime = await ModelRuntime.create({ modelsPath: managed ? join(agentDir, "models.json") : null, refreshOnCreate: false });
+      // Every runtime reads the agent directory's models.json, as production does, so a test
+      // can register a scripted child model or a local wire-protocol endpoint there.
+      const runtime = await ModelRuntime.create({ modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
       runtime.registerNativeProvider(faux.provider); return runtime;
     },
     broadcast: (_sessionId: string, topic: string, payload: unknown) => { events.push({ topic, payload }); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},

@@ -37,7 +37,7 @@ describe("Gateway HTTP admission and retirement", () => {
     const port = await unusedPort();
     const gateway = new GatewayServer({
       host: "127.0.0.1", port, maxFrameBytes: 16_384, devices, uploads: {} as any, sessions: {} as any,
-      auth: {} as any, service: { info: () => ({ protocolVersion: 7 }) } as any, logger: { log: () => {} } as any,
+      auth: {} as any, service: { info: () => ({ protocolVersion: 8 }) } as any, logger: { log: () => {} } as any,
     });
     await gateway.listen();
     cleanups.push(async () => { await awaitsWithin(gateway.close(), "pair gateway close", HOOK_HANG_BOUND_MS); await rm(root, { recursive: true, force: true }); });
@@ -63,7 +63,7 @@ describe("Gateway HTTP admission and retirement", () => {
     const headers = new Promise<void>(resolve => { received = resolve; });
     const gateway = new GatewayServer({
       host: "127.0.0.1", port, maxFrameBytes: 16_384, devices, uploads: {} as any, sessions: {} as any,
-      auth: {} as any, service: { info: () => ({ protocolVersion: 7 }) } as any, logger: { log: () => {} } as any,
+      auth: {} as any, service: { info: () => ({ protocolVersion: 8 }) } as any, logger: { log: () => {} } as any,
     });
     (gateway as unknown as { server: import("node:http").Server }).server.once("connection", socket => socket.once("data", received));
     let peer: ReturnType<typeof createConnection> | undefined;
@@ -106,7 +106,7 @@ describe("Gateway HTTP admission and retirement", () => {
     const gateway = new GatewayServer({
       host: "127.0.0.1", port, maxFrameBytes: 16_384, devices, uploads: {} as any,
       sessions: { unsubscribeClient: vi.fn() } as any, auth: { detachClient: vi.fn() } as any,
-      service: { info: () => ({ protocolVersion: 7 }), releaseClient: vi.fn(), invoke } as any,
+      service: { info: () => ({ protocolVersion: 8 }), releaseClient: vi.fn(), invoke } as any,
       logger: logger as any,
     });
     await gateway.listen();
@@ -153,7 +153,7 @@ describe("Gateway HTTP admission and retirement", () => {
       devices, uploads: {} as any, sessions: sessions as any,
       auth: { detachClient: vi.fn() } as any,
       service: {
-        info: () => ({ protocolVersion: 7 }), releaseClient: vi.fn(),
+        info: () => ({ protocolVersion: 8 }), releaseClient: vi.fn(),
       } as any,
       logger: logger as any,
     });

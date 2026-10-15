@@ -1,10 +1,15 @@
 import * as fileSystem from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import os from "node:os";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, cp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { HomeTaskStore, taskIntentDigest } from "./home-task-store.js";
+import { HOME_TASK_DISPATCH_STAGE_DEADLINE_MS } from "./home-task-dispatcher.js";
 import { HomeMemoryRefusal } from "./home-request-policy.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { EpisodicMemoryError } from "../episodic/episodic-contract.js";
@@ -88,7 +93,10 @@ describe("Home task authorization RPC", () => {
   }
   async function refused(f: Awaited<ReturnType<typeof fixture>>, taskId: string, intent = "Finite work") {
     let refusal: any;
-    try { const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent, target: f.cwd }); await run.completion; }
+    // These durable-authorization journeys also run after an unmaterialized Home
+    // has been evicted. Choose a model explicitly rather than reading that absent chat.
+    const model = f.faux.getModel();
+    try { const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent, target: f.cwd, model: { provider: model.provider, id: model.id } }); await run.completion; }
     catch (error) { refusal = error; }
     expect(refusal).toMatchObject({ code: "grant-required", requestId: expect.any(String) });
     expect(refusal.requestId.length).toBeGreaterThan(0);
@@ -118,9 +126,17 @@ describe("Home task authorization RPC", () => {
     await home.prompt("Try the finite work");
     await waitFor(() => home.snapshot().configurationBlocker === null, "Home authorization refusal terminal");
     expect(modelRefusal).toMatchObject({ isError: true });
-    expect(JSON.stringify(modelRefusal)).toContain(requestId);
+    // The model entrypoint fixes its worker choice into the authorized brief.
+    // Bind the error to that exact durable request, not the lower-level raw brief.
+    const modelTask = await f.registry.homeOwner().taskResult("model-grant-request");
+    expect(modelTask.intent.text).toContain("Finite work");
+    expect(modelTask.intent.text).toContain("Worker choice: model");
+    const modelRequest = (await list()).requests.find((pending: any) => pending.request.intentDigest === modelTask.intentDigest);
+    expect(modelRequest).toBeDefined();
+    expect(JSON.stringify(modelRefusal)).toContain(modelRequest.id);
     expect(JSON.stringify(modelRefusal)).toContain("grant-required");
-    evidence.push({ case: "rpc-scope-revocation", requestId, permissions, modelRefusal });
+    expect(await refused(f, "model-grant-retry", modelTask.intent.text)).toBe(modelRequest.id);
+    evidence.push({ case: "rpc-scope-revocation", requestId, permissions, modelRefusal, modelRequest });
   });
   it("approves an exact one-use grant through RPC and refuses mismatches expiry and reuse", async () => {
     const { f, rpc, list } = await controls();
@@ -241,7 +257,10 @@ describe("Home task bounded backlogs", () => {
     // The user's oversized input starves the inbox. When that activation settles, Home is idle and
     // the backlog is delivered by wakes: each bounded activation takes what fits, in order.
     const collect = (context: unknown) => {
-      batches.push([...JSON.stringify(context).matchAll(/Home task (backlog-\d)/g)].map(match => match[1]!));
+      // Task identity is metadata, not raw record JSON in the model text. Match
+      // the verbatim report bodies that actually reached this provider request.
+      const request = JSON.stringify(context);
+      batches.push(tasks.filter((_task, index) => request.includes(String(index).repeat(1000))).map(task => task.taskId));
       expect(JSON.stringify(context)).not.toContain("u".repeat(1000));
       return fauxAssistantMessage("Reviewed results");
     };
@@ -264,7 +283,8 @@ describe("Home task bounded backlogs", () => {
   }, 30_000);
 
   it("delivers a never-fit report by reference before its successor and reads immutable bounded pages", async () => {
-    const f = await fixture(undefined, false, 6_500); const model = f.faux.getModel();
+    // A window the fixed Home prefix fits with room for one small result: the 64 KB report never does.
+    const f = await fixture(undefined, false, 8_000); const model = f.faux.getModel();
     const owner = f.registry.homeOwner();
     await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
     f.faux.setResponses([fauxAssistantMessage([reportCall("large", "🦊".repeat(16384))], { stopReason: "toolUse" })]);
@@ -277,6 +297,7 @@ describe("Home task bounded backlogs", () => {
     const messages = home.canonicalSessionEntries().filter(e => e.type === "custom_message" && e.customType === "tron.home-task-result.v1") as any[];
     expect(messages.map(m => m.details.taskId)).toEqual([large.taskId, small.taskId]);
     expect(messages[0].content).toMatch(/immutable report.*task.*report/s);
+    expect(messages[0].content).toContain(`taskId=${large.taskId}`);
     expect(messages[0].content).not.toContain("x".repeat(100));
     expect(request).toContain("Small complete report");
     const pages: any[] = []; let offset = 0;
@@ -435,7 +456,8 @@ describe("Home task cold reconciliation", () => {
     expect(await readFile(authorizationPath, "utf8")).toBe(beforeAuthority);
     expect(providers).toBe(2);
     expect(f.notifications).toHaveLength(1);
-    await expect(recovered.homeOwner().dispatchTask(f.home.sessionId, { taskId: run.taskId, intent: "Finite work", target: f.cwd })).rejects.toThrow(/already exists/);
+    await expect(recovered.homeOwner().dispatchTask(f.home.sessionId, { taskId: run.taskId, intent: "Finite work", target: f.cwd,
+      model: { provider: f.faux.getModel().provider, id: f.faux.getModel().id } })).rejects.toThrow(/already exists/);
     const again = await f.restart();
     expect(await again.homeOwner().taskResult(run.taskId)).toEqual(task);
     expect(f.notifications).toHaveLength(1);
@@ -786,6 +808,117 @@ describe("Home task cold reconciliation", () => {
   }, 20_000);
 });
 
+// #1023: Home workers have no running cap. Their memory-heavy steps wait in the host heavy
+// queue (tools/work/heavy.py, docs/host-load.md), which admits by expected RSS, while every
+// worker keeps running and light work never waits.
+describe("Home workers without a cap", () => {
+  const heavyQueue = fileURLToPath(new URL("../../../../tools/work/heavy.py", import.meta.url));
+
+  it("runs six workers at once; their heavy steps are admitted by memory while a light worker finishes", async () => {
+    const f = await fixture();
+    const owner = f.registry.homeOwner();
+    const root = await mkdtemp(join(os.tmpdir(), "tron-heavy-workers-"));
+    let sampler: NodeJS.Timeout | undefined;
+    try {
+      const log = join(root, "heavy.log");
+      await writeFile(log, "");
+      // Budget 7000 MB and 3000 MB per step: at most two heavy steps fit at once, whatever
+      // the slot count. The available-memory override keeps admission deterministic.
+      // An inherited lease (a gate shard running this file) must not let the steps skip the queue.
+      const queueEnv = `env -u TRON_HEAVY_LEASE_HELD TRON_HEAVY_DIR=${root}/queue TRON_HEAVY_SLOTS=8 TRON_HEAVY_MEMORY_BUDGET_MB=7000 `
+        + "TRON_HEAVY_AVAILABLE_MB=1000000 TRON_HEAVY_RESERVE_MB=0 TRON_HEAVY_MAX_LOAD=100000";
+      // One heavy step: record its start, hold until the test releases it, record its end.
+      await writeFile(join(root, "step.py"), ["import pathlib, sys, time",
+        "log, name, release = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3])",
+        "with log.open('a') as f: f.write(f'start {name}\\n')",
+        "while not release.exists(): time.sleep(0.05)",
+        "with log.open('a') as f: f.write(f'end {name}\\n')", ""].join("\n"));
+      const turns = new Map<string, number>();
+      const response = (context: unknown) => {
+        const brief = JSON.stringify(context);
+        const heavy = /Heavy work (\d+)/u.exec(brief)?.[1];
+        const light = /Light work (\d+)/u.exec(brief)?.[1];
+        const id = heavy ?? light;
+        if (!id) return fauxAssistantMessage("Home reply");
+        const turn = (turns.get(id) ?? 0) + 1;
+        turns.set(id, turn);
+        if (turn > 1) return fauxAssistantMessage([reportCall(`report-${id}`)], { stopReason: "toolUse" });
+        const command = heavy
+          ? `${queueEnv} python3 ${heavyQueue} run --owner worker-${id} --need-mb 3000 -- python3 ${root}/step.py ${log} ${id} ${root}/release-${id}`
+          : `echo done > ${root}/light-${id}`;
+        return fauxAssistantMessage([fauxToolCall("bash", { command }, { id: `step-${id}` })], { stopReason: "toolUse" });
+      };
+      f.faux.setResponses(Array.from({ length: 40 }, () => response));
+      const events = async () => (await readFile(log, "utf8")).split("\n").filter(Boolean);
+      const running = async () => {
+        const live = new Set<string>();
+        for (const line of await events()) { const [kind, id] = line.split(" "); if (kind === "start") live.add(id!); else live.delete(id!); }
+        return live;
+      };
+      let peakRss = process.memoryUsage().rss;
+      let lowestFree = os.freemem();
+      sampler = setInterval(() => { peakRss = Math.max(peakRss, process.memoryUsage().rss); lowestFree = Math.min(lowestFree, os.freemem()); }, 100);
+
+      const handles = [];
+      for (let id = 1; id <= 6; id++) {
+        handles.push(await owner.dispatchTask(f.home.sessionId, { taskId: `heavy-${id}`, intent: `Heavy work ${id}`, target: f.cwd }));
+      }
+      // No cap: every worker has its session and operation at once.
+      expect(handles.every(handle => typeof handle.sessionId === "string" && typeof handle.operationId === "string")).toBe(true);
+      expect((await owner.status()).workers).toEqual({ running: 6 });
+      await waitFor(async () => (await running()).size === 2, "two heavy steps admitted");
+      await waitFor(async () => (await readdir(join(root, "queue/queue"))).length === 4, "four heavy steps waiting for memory");
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      expect((await running()).size).toBe(2);
+
+      // A light worker starts and finishes while the heavy steps still wait.
+      const light = await owner.dispatchTask(f.home.sessionId, { taskId: "light-7", intent: "Light work 7", target: f.cwd });
+      expect((await owner.status()).workers).toEqual({ running: 7 });
+      const lightStarted = performance.now();
+      expect((await light.completion).terminalEvidence).toMatchObject({ outcome: "final" });
+      const lightSeconds = (performance.now() - lightStarted) / 1000;
+      expect(await readFile(join(root, "light-7"), "utf8")).toBe("done\n");
+      expect((await readdir(join(root, "queue/queue"))).length).toBe(4);
+
+      // Release heavy steps as they run: never more than two at once, every one runs.
+      let maxConcurrent = 0;
+      const released = new Set<string>();
+      while (released.size < 6) {
+        const live = await running();
+        maxConcurrent = Math.max(maxConcurrent, live.size);
+        const next = [...live].find(id => !released.has(id));
+        if (next) { released.add(next); await writeFile(join(root, `release-${next}`), ""); }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      const settled = await Promise.all(handles.map(handle => handle.completion));
+      expect(settled.map(task => task.terminalEvidence?.outcome)).toEqual(Array(6).fill("final"));
+      expect(maxConcurrent).toBe(2);
+      expect((await events()).filter(line => line.startsWith("start"))).toHaveLength(6);
+      await waitFor(async () => (await owner.status()).workers.running === 0, "workers settle");
+      evidence.push({ case: "workers-uncapped-heavy-by-memory", workers: 7, maxConcurrentHeavy: maxConcurrent, lightSeconds,
+        gatewayPeakRssMb: Math.round(peakRss / 2 ** 20), hostLowestFreeMb: Math.round(lowestFree / 2 ** 20), heavyOrder: await events() });
+    } finally {
+      clearInterval(sampler);
+      // Releasing every step lets any heavy-queue process still waiting exit before the root goes.
+      for (let id = 1; id <= 6; id++) await writeFile(join(root, `release-${id}`), "").catch(() => {});
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("starts a worker at once under critical host pressure", async () => {
+    const f = await fixture();
+    const owner = f.registry.homeOwner();
+    vi.spyOn(os, "loadavg").mockReturnValue([os.cpus().length * 4, 0, 0]);
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const handle = await owner.dispatchTask(f.home.sessionId, { taskId: "pressured", intent: "Work under pressure", target: f.cwd });
+    expect(typeof handle.sessionId).toBe("string");
+    const status = await owner.status();
+    expect(status.hostPressure.level).toBe("critical");
+    expect((await handle.completion).terminalEvidence).toMatchObject({ outcome: "final" });
+    evidence.push({ case: "worker-starts-under-pressure", level: status.hostPressure.level });
+  }, 60_000);
+});
+
 describe("Home task list RPC", () => {
   it("pages durable summaries across new arrivals and refuses foreign cursors and recovery fences", async () => {
     const f = await fixture();
@@ -805,13 +938,17 @@ describe("Home task list RPC", () => {
     }
     const first = await service.invoke(client, "home.taskList", { limit: 2 }) as any;
     expect(first.items.map((row: any) => row.taskId)).toEqual(["list-4", "list-3"]);
+    // The result counts the whole store, not the page: five pending tasks, two on this page.
+    expect(first.counts).toEqual({ active: 5, finished: 0 });
     expect(first.items[0]).toMatchObject({ createdAt: expect.any(Number), updatedAt: expect.any(Number), title: "Finite work", lifecycle: "pending", spend: null });
     const oldestPath = await taskFile(f, "list-0");
     const oldestBytes = await readFile(oldestPath);
     try {
+      // Exact counts read every record, so one torn record refuses the list rather than hiding it.
       await writeFile(oldestPath, "{torn", { mode: 0o600 });
-      expect((await service.invoke(client, "home.taskList", { limit: 1 }) as any).items[0].taskId).toBe("list-4");
+      await expect(service.invoke(client, "home.taskList", { limit: 1 })).rejects.toMatchObject({ code: "conflict" });
     } finally { await writeFile(oldestPath, oldestBytes, { mode: 0o600 }); }
+    expect((await service.invoke(client, "home.taskList", { limit: 1 }) as any).counts).toEqual({ active: 5, finished: 0 });
     const base = (await store.read("list-4"))!;
     await store.put({ ...base, taskId: "arrived", revision: 1 }, null);
     const second = await service.invoke(client, "home.taskList", { limit: 2, cursor: first.nextCursor }) as any;
@@ -827,6 +964,82 @@ describe("Home task list RPC", () => {
     await expect(fenced.invoke(client, "home.taskList", {})).rejects.toMatchObject({ code: "conflict", details: { reason: "unsafe-state" } });
     evidence.push({ case: "task-list-pages", first, second, third, staleCursorRefused: true, recoveryFenceRefused: true });
   }, 20_000);
+
+  // #906: on Stable (100 records, most of them delivered results) a Home prompt
+  // waited minutes in admission while the phone re-read the task list: every scan
+  // re-read the store several times, recovery re-finished every historical wake
+  // operation, and each list read re-read every record, behind the same mutex.
+  // Counting record reads at the file boundary makes that cost exact.
+  it("reads the task store once per list and per Home admission, however many lists are in flight", async () => {
+    const f = await fixture();
+    await f.registry.homeOwner().configureMemory({ model: { provider: f.faux.getModel().provider, id: f.faux.getModel().id } });
+    const owner = f.registry.homeOwner();
+    const store = (owner as any).tasks.store as HomeTaskStore;
+    f.faux.setResponses([fauxAssistantMessage([reportCall("seed", "Seed result")], { stopReason: "toolUse" }), fauxAssistantMessage("Wake reply")]);
+    const seed = await dispatch(f, "seed");
+    await seed.completion;
+    await waitFor(async () => (await owner.taskResult("seed")).wake?.state === "acknowledged", "seed result acknowledged");
+    const delivered = (await store.read("seed"))!;
+    // History like Stable's: each record a result some earlier wake delivered and acknowledged.
+    for (let i = 0; i < 99; i++) {
+      const { createdAt: _c, updatedAt: _u, ...write } = structuredClone(delivered);
+      await store.put({ ...write, taskId: `history-${i}`, revision: 1,
+        wake: { ...write.wake!, eventId: `task-result-${createHash("sha256").update(`history-${i}`).digest("hex")}`, delivery: { ...write.wake!.delivery!, operationId: `history-operation-${i}` } } }, null);
+    }
+    const directory = join(f.tronHome, "gateway/home/tasks");
+    const records = new Set<string>();
+    for (const name of await readdir(directory)) {
+      if (name === "authorization.json") continue;
+      const info = await fileSystem.stat(join(directory, name));
+      records.add(`${info.dev}:${info.ino}`);
+    }
+    expect(records.size).toBe(100);
+    const anchor = await fileSystem.open(f.cwd, "r");
+    const prototype = Object.getPrototypeOf(anchor); const stat = prototype.stat;
+    await anchor.close();
+    let reads = 0;
+    // A secure record read stats its open handle twice: before and after the read.
+    vi.spyOn(prototype, "stat").mockImplementation(async function(this: import("node:fs/promises").FileHandle, ...args: unknown[]) {
+      const info = await stat.apply(this, args);
+      if (records.has(`${info.dev}:${info.ino}`)) reads += 0.5;
+      return info;
+    });
+    const service = new GatewayService({ sessions: f.registry, home: owner } as unknown as GatewayServiceDependencies);
+    const client = { clientId: "task-list-reader" } as ClientContext;
+    reads = 0;
+    const lists = await Promise.all(Array.from({ length: 20 }, () => service.invoke(client, "home.taskList", { limit: 50 }))) as Array<{ items: unknown[]; counts: { finished: number } }>;
+    expect(lists.every(page => page.items.length === 50 && page.counts.finished === 100)).toBe(true);
+    const listReads = reads;
+    const home = await f.registry.acquire(f.home.sessionId);
+    // One whole Home turn: lane admission, the run, and its inbox settlement.
+    const turn = async (text: string) => {
+      f.faux.setResponses([fauxAssistantMessage("Home answered")]);
+      reads = 0;
+      await home.prompt(text);
+      const admission = reads;
+      await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle");
+      return { admission, turn: reads };
+    };
+    // The first turn after startup proves the inbox quiet with one validating and one
+    // reading pass; every later turn reads no task record until a task write (#922).
+    const first = await turn("are you there?");
+    const quiet = await turn("still there?");
+    // A new result is a task write, so the quiet proof no longer holds: its wake
+    // delivers it, the next turn proves the inbox quiet again, and the one after reads nothing.
+    f.faux.setResponses([fauxAssistantMessage([reportCall("late", "Late result")], { stopReason: "toolUse" }), fauxAssistantMessage("Late result read")]);
+    await (await dispatch(f, "late")).completion;
+    await waitFor(async () => (await owner.taskResult("late")).wake?.state === "acknowledged", "late result delivered once");
+    await waitFor(() => home.snapshot().phase === "idle" && home.snapshot().operation === undefined, "Home idle after wake");
+    const reproved = await turn("anything new?");
+    const quietAgain = await turn("and now?");
+    evidence.push({ case: "task-store-reads-per-list-and-admission", records: records.size + 1, listReads, first, quiet, reproved, quietAgain });
+    // Twenty identical reads in flight share one pass over the records.
+    expect(listReads).toBe(100);
+    expect(first.turn).toBeLessThanOrEqual(200);
+    expect(quiet).toEqual({ admission: 0, turn: 0 });
+    expect(reproved.turn).toBeLessThanOrEqual(202);
+    expect(quietAgain).toEqual({ admission: 0, turn: 0 });
+  }, 60_000);
 });
 
 describe("Home task production dispatch", () => {
@@ -1528,6 +1741,100 @@ describe("Home task production dispatch", () => {
     await waitFor(() => homeCalls === 3, "wake request for the settled result");
     evidence.push({ case: "production-delegate", taskOutcome: "final", homeRequests: homeCalls });
   }, 20_000);
+  // #919: a dispatch step that never returns once the task record exists. Stop must
+  // end Home's turn, the task must settle terminal with the stage named, and no
+  // worker prompt may start. The held step ignores the signal, as a stalled store does.
+  it.each(["authorize", "restore-epoch", "create-worker"] as const)("Stop ends a Home turn held in delegate dispatch at %s and settles the task", async stage => {
+    const f = await fixture();
+    const model = f.faux.getModel();
+    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    const tasks = (f.registry.homeOwner() as any).tasks;
+    let entered = false; let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    // The held step's late completion is joined before disposal removes its files.
+    let late: Promise<unknown> | undefined;
+    const hold = <T>(run: () => Promise<T>) => { entered = true; const step = gate.then(run); late = step.catch(() => {}); return step; };
+    const created = () => f.signals.some(signal => signal.event === "home.task.transition" && signal.reason === "created");
+    if (stage === "authorize") {
+      const authorize = tasks.authorization.authorize.bind(tasks.authorization);
+      vi.spyOn(tasks.authorization, "authorize").mockImplementation((request: any) => hold(() => authorize(request)));
+    } else if (stage === "restore-epoch") {
+      const restoreEpoch = tasks.store.restoreEpoch.bind(tasks.store);
+      vi.spyOn(tasks.store, "restoreEpoch").mockImplementation(() => created() ? hold(restoreEpoch) : restoreEpoch());
+    } else {
+      const createWorker = OwnedSessionDispatch.prototype.createWorker;
+      vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(function (this: OwnedSessionDispatch, ...args) { return hold(() => createWorker.apply(this, args)); });
+    }
+    let workerPrompts = 0; let homeRequests = 0;
+    const response = (context: unknown) => {
+      if (JSON.stringify(context).includes("This is a finite Home task")) { workerPrompts += 1; return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }); }
+      homeRequests += 1;
+      // Later Home requests are the refused task's one result wake.
+      return homeRequests > 1 ? fauxAssistantMessage("Dispatch was stopped")
+        : fauxAssistantMessage([fauxToolCall("delegate", { taskId: "task-held", title: "Held dispatch", intent: "Finite work", target: f.cwd })], { stopReason: "toolUse" });
+    };
+    f.faux.setResponses([response, response, response]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const prompting = home.prompt("Delegate this finite work"); void prompting.catch(() => {});
+    try {
+      await waitFor(() => entered, `dispatch held at ${stage}`, { boundMs: 10_000 });
+      expect(created(), "the task record exists before the held step").toBe(true);
+      const operation = home.snapshot().operation;
+      expect(operation?.kind).toBe("prompt");
+      const stopping = home.abort("agent", operation!.id); void stopping.catch(() => {});
+      await waitFor(() => !home.snapshot().operation, "Stop ends the Home turn held in delegate dispatch", { boundMs: 5_000 });
+      await stopping;
+      await waitFor(async () => (await tasks.store.read("task-held"))?.lifecycle === "terminal", "held task settles terminal", { boundMs: 5_000 });
+      const task = await tasks.store.read("task-held");
+      expect(task).toMatchObject({ lifecycle: "terminal", sessionId: null, operationId: null,
+        terminalEvidence: { outcome: "unknown", reason: "admission-cancelled" } });
+      expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.dispatch-stage", stage, outcome: "cancelled" }));
+      expect(workerPrompts).toBe(0);
+      evidence.push({ case: `held-dispatch-stop-${stage}`, reason: task.terminalEvidence.reason, workerPrompts, homeRequests });
+    } finally { release(); await prompting.catch(() => {}); await late; }
+    // Like every terminal task, the refusal wakes Home once with its result. The held
+    // step's late result goes back to its owner, never into the cancelled admission.
+    await waitFor(async () => (await tasks.store.read("task-held"))?.wake?.state === "acknowledged", "refusal result consumed once", { boundMs: 5_000 });
+    await waitFor(() => !home.snapshot().operation, "wake turn settled", { boundMs: 5_000 });
+    expect(homeRequests).toBe(2);
+    expect(workerPrompts, "a released step never starts the cancelled task's worker").toBe(0);
+    expect(await tasks.store.read("task-held")).toMatchObject({ lifecycle: "terminal", terminalEvidence: { reason: "admission-cancelled" } });
+  }, 30_000);
+
+  it("refuses a dispatch step that outlives its deadline and settles the task with the stage", async () => {
+    const f = await fixture();
+    const tasks = (f.registry.homeOwner() as any).tasks;
+    const originalTimer = globalThis.setTimeout;
+    let expire: (() => void) | undefined;
+    // Test-only deadline seam, as the 24-hour task deadline journey uses.
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: any, ms: number, ...args: any[]) => {
+      if (ms === HOME_TASK_DISPATCH_STAGE_DEADLINE_MS) expire = callback;
+      return originalTimer(callback, ms, ...args);
+    }) as typeof setTimeout);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const authorize = tasks.authorization.authorize.bind(tasks.authorization);
+    let entered = false; let late: Promise<unknown> | undefined;
+    vi.spyOn(tasks.authorization, "authorize").mockImplementation((request: any) => {
+      entered = true; const step = gate.then(() => authorize(request)); late = step.catch(() => {}); return step;
+    });
+    const run = dispatch(f, "task-deadline"); void run.catch(() => {});
+    try {
+      await waitFor(() => entered && expire !== undefined, "authorize held under its deadline", { boundMs: 10_000 });
+      expire!();
+      await expect(run).rejects.toMatchObject({ code: "busy" });
+      await waitFor(async () => (await tasks.store.read("task-deadline"))?.lifecycle === "terminal", "expired task settles terminal", { boundMs: 5_000 });
+      const task = await tasks.store.read("task-deadline");
+      expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown", reason: "admission-timeout" } });
+      expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.dispatch-stage", stage: "authorize", outcome: "timeout" }));
+      evidence.push({ case: "held-dispatch-deadline", reason: task.terminalEvidence.reason });
+    } finally { release(); await late; }
+    // The late grant decision never revives the expired admission.
+    expect(await tasks.store.read("task-deadline")).toMatchObject({ lifecycle: "terminal", sessionId: null, terminalEvidence: { reason: "admission-timeout" } });
+    // Home is idle and unmaterialized here, so the result goes out as its one push.
+    await waitFor(async () => (await tasks.store.read("task-deadline"))?.wake?.push === "decided", "expired task result published once", { boundMs: 5_000 });
+  }, 30_000);
+
   it("admits once, seals exact canonical report evidence and refuses replay or conflicting reports", async () => {
     const f = await fixture();
     let postReport = 0;
@@ -1623,7 +1930,7 @@ describe("Home task production dispatch", () => {
     evidence.push({ case: "ordinary-negative-control", taskTools: false, taskSignals: 0, ordinaryNotification: true });
   }, 20_000);
 
-  it.each(["no-effect", "successful-read", "blocked-provider", "foreground-process"] as const)("task deadline cancels and joins %s with spend-correlated diagnostic", async scenario => {
+  it.each(["no-effect", "successful-read", "blocked-provider", "foreground-process", "foreground-process-publication-gap"] as const)("task deadline cancels and joins %s with spend-correlated diagnostic", async scenario => {
     const f = await fixture();
     const originalTimer = globalThis.setTimeout;
     let expire: (() => void) | undefined;
@@ -1636,15 +1943,20 @@ describe("Home task production dispatch", () => {
     let turns = 0;
     let aborted = false;
     let providerStarted = false;
+    const foreground = scenario.startsWith("foreground-process");
     const pidPath = join(f.cwd, "child.pid");
+    const releasePath = join(f.cwd, "publish-pid");
     await writeFile(join(f.cwd, "readable.txt"), "real tool effect\n");
     if (scenario === "blocked-provider") {
       f.faux.setResponses([(_context, options) => new Promise((_resolve, reject) => {
         providerStarted = true;
         options?.signal?.addEventListener("abort", () => { aborted = true; reject(new Error("faux aborted")); }, { once: true });
       })]);
-    } else if (scenario === "foreground-process") {
-      f.faux.setResponses([fauxAssistantMessage([fauxToolCall("bash", { command: `sleep 120 & echo $! > ${JSON.stringify(pidPath)}; wait` })], { stopReason: "toolUse" })]);
+    } else if (foreground) {
+      // Expose the real open(O_TRUNC) -> write interval without loading the Mac.
+      const publicationGate = scenario === "foreground-process-publication-gap"
+        ? `: > ${JSON.stringify(pidPath)}; while [ ! -f ${JSON.stringify(releasePath)} ]; do sleep 0.01; done; ` : "";
+      f.faux.setResponses([fauxAssistantMessage([fauxToolCall("bash", { command: `sleep 120 & owned=$!; ${publicationGate}echo $owned > ${JSON.stringify(pidPath)}; wait` })], { stopReason: "toolUse" })]);
     } else {
       const response = () => {
         turns += 1;
@@ -1655,7 +1967,29 @@ describe("Home task production dispatch", () => {
     }
     const run = await dispatch(f);
     expect(expire).toBeDefined();
-    await waitFor(() => scenario === "blocked-provider" ? providerStarted : scenario === "foreground-process" ? existsSync(pidPath) : turns >= 3, "task adversary live");
+    let childPid: number | undefined;
+    let unpublishedObserved = false;
+    // File creation is not PID publication: cancellation in between used to
+    // turn Number("") into PID 0 and probe the test runner's process group.
+    await waitFor(async () => {
+      if (!foreground) return scenario === "blocked-provider" ? providerStarted : turns >= 3;
+      const text = await readFile(pidPath, "utf8").catch(() => undefined);
+      if (text === undefined) return false;
+      if (!/^[1-9]\d*\s*$/.test(text) || !Number.isSafeInteger(Number(text))) {
+        if (scenario === "foreground-process-publication-gap") {
+          expect(text).toBe("");
+          unpublishedObserved = true;
+          await writeFile(releasePath, "release");
+        }
+        return false;
+      }
+      childPid = Number(text);
+      return true;
+    }, "task adversary live with published process identity");
+    if (scenario === "foreground-process-publication-gap") expect(unpublishedObserved).toBe(true);
+    const processState = () => childPid === undefined ? null : spawnSync("ps", ["-p", String(childPid), "-o", "pid=,ppid=,pgid=,stat=,lstart=,comm="], { encoding: "utf8", timeout: 2_000 }).stdout.trim();
+    const processAtAdmission = processState();
+    if (foreground) expect(processAtAdmission).toMatch(/sleep/);
     expire!();
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "limited", reason: "deadline" });
@@ -1666,20 +2000,30 @@ describe("Home task production dispatch", () => {
     await new Promise(resolve => originalTimer(resolve, 40));
     expect(turns).toBe(turnsAtStop); expect(slot.canonicalSessionEntries()).toHaveLength(entriesAtStop);
     if (scenario === "blocked-provider") expect(aborted).toBe(true);
-    if (scenario === "foreground-process") {
+    if (foreground) {
       expect(existsSync(pidPath)).toBe(true);
-      const pid = Number(await readFile(pidPath, "utf8"));
+      const pid = childPid!;
+      expect(Number(await readFile(pidPath, "utf8"))).toBe(pid);
       // The stop SIGKILLs the shell's process group and joins the shell. The
       // background child is killed too, but the OS reaps the orphaned zombie
       // asynchronously, and `kill(pid, 0)` succeeds on a zombie, so wait for
       // the reap within the hang bound instead of sampling once.
-      await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, "the killed background child to be reaped");
+      try {
+        await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, "the killed background child to be reaped");
+      } catch (error) {
+        // One-step evidence distinguishes a live owned process, an orphaned
+        // zombie and PID reuse, without logging the fixture's private path.
+        const diagnostic = { case: scenario, childPid, processAtAdmission, processAtFailure: processState(), unpublishedObserved };
+        evidence.push(diagnostic);
+        throw new Error(`Owned child reap failed: ${JSON.stringify(diagnostic)}`, { cause: error });
+      }
     } else if (scenario !== "blocked-provider") expect(turns).toBeGreaterThanOrEqual(3);
     const signal = f.signals.find(record => record.event === "home.task.runaway-stop");
     expect(signal).toMatchObject({ taskHash: expect.stringMatching(/^[a-f0-9]{16}$/), spendReference: expect.any(String), cancelAndJoin: "joined", elapsedMs: expect.any(Number) });
     expect(JSON.stringify(signal)).not.toContain(f.cwd);
     expect(result.spend!.inputTokens + result.spend!.outputTokens).toBeGreaterThanOrEqual(scenario === "blocked-provider" ? 0 : 1);
-    evidence.push({ case: scenario, turnsAtStop, entriesAtStop, spend: result.spend, signal, noFurtherEffects: true });
+    evidence.push({ case: scenario, turnsAtStop, entriesAtStop, spend: result.spend, signal, noFurtherEffects: true,
+      ...(foreground ? { childPid, processAtAdmission, processAtStop: processState(), unpublishedObserved } : {}) });
   }, 20_000);
 
   it("records a failed exact deadline join as unknown with durable correlated evidence", async () => {

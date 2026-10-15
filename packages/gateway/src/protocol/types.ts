@@ -76,6 +76,9 @@ export interface SessionSummary {
   parentSessionId?: string;
   /** Immutable creation provenance derived from canonical session receipts. */
   creationOrigin?: SessionCreationOrigin;
+  /** The Home task that created this worker session, from the task ledger.
+   * Absent for every session no Home task dispatched. */
+  homeTaskId?: string;
   createdAt: string;
   updatedAt: string;
   /** Stable Gateway-observed start of the current active dashboard period. */
@@ -899,7 +902,7 @@ export interface CompactionConfiguration {
   keepRecentTokens: number;
   thinkingLevel: "inherit" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   instructions: string;
-  source: Record<"enabled" | "reserveTokens" | "keepRecentTokens" | "thinkingLevel" | "instructions", "global" | "project" | "default">;
+  source: Record<"enabled" | "reserveTokens" | "keepRecentTokens" | "thinkingLevel" | "instructions", "chat" | "global" | "project" | "default">;
 }
 export interface ResolvedCompactionConfiguration extends CompactionConfiguration {
   model?: ModelRef;
@@ -1047,9 +1050,36 @@ export type HooksProjection = HookRegistrationProjection;
 /** The capability string `hello`/`system.info` advertise for Tron Home. */
 export const HOME_CAPABILITY = "home.v1";
 /** Native browser reads are separately gated; older home.v1 servers lack them. */
-export const HOME_MEMORY_BROWSER_CAPABILITY = "home-memory-browser.v1";
+export const HOME_MEMORY_VIEW_CAPABILITY = "home-memory-view.v1";
 /** The full chapter-list read (#740); older home.v1 servers lack it. */
 export const HOME_CHAPTER_LIST_CAPABILITY = "home-chapter-list.v1";
+/** The learned-profile read (`home.profileList`); advertised only with a Knowledge owner. */
+export const HOME_PROFILE_LIST_CAPABILITY = "home-profile-list.v1";
+/** The maintainer's learned-profile changes (`home.profileChange`, profile entries in
+ * `settings.undo`); advertised with `home-profile-list.v1`. Older Gateways keep the
+ * Profile sheet read-only. */
+export const HOME_PROFILE_EDIT_CAPABILITY = "home-profile-edit.v1";
+
+/** One learned-profile item as `home.profileList` answers it: the Knowledge note's
+ * identity, its kind label, its one-line text and whether the maintainer confirmed it.
+ * `status` is derived the way Home's instructions derive it: only `active` applies. */
+export interface HomeProfileListItem {
+  id: string;
+  revisionId: string;
+  kind: "preference" | "standing-decision" | "delegation-default" | "fact";
+  text: string;
+  confirmed: boolean;
+  status: "active" | "superseded" | "retired";
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** `home.profileList`: every profile-tagged personal note, classified, in Home's
+ * order (kind, then creation); `unclassified` counts notes without one kind label. */
+export interface HomeProfileList {
+  items: HomeProfileListItem[];
+  unclassified: number;
+}
 
 /** One ledger chapter as `home.chapterList` answers it. Sealed chapters carry
  * exactly their recorded seal metrics (a disable-sealed chapter has none); the
@@ -1066,6 +1096,24 @@ export interface HomeChapterSummary {
   sealedAt?: string;
   bytes?: number;
   entries?: number;
+  /** What the chapter holds, read from its canonical history and memory. Absent when the
+   * chapter's history could not be read; a chapter with no file has zero counts. */
+  contents?: HomeChapterContents;
+}
+
+/** A chapter's contents as `home.chapterList` answers them. Counts are canonical entries:
+ * `userMessages` are maintainer messages, `homeReplies` Home's replies, and `tasksDelegated`
+ * the `delegate` calls the chapter's history accepted. */
+export interface HomeChapterContents {
+  /** Canonical timestamps of the chapter's first and last entries. */
+  firstAt?: string;
+  lastAt?: string;
+  userMessages: number;
+  homeReplies: number;
+  tasksDelegated: number;
+  /** At most 8 useful recent merged memory summaries, each at most 1000 characters
+   * with its lines kept (markdown). Empty when Home's memory is not open. */
+  topics: string[];
 }
 
 /** `home.chapterList`: the whole chapter ledger in ledger (ordinal) order, with
@@ -1098,12 +1146,25 @@ export interface HomeMemoryItem {
   summary: { format: "memory-summary"; text: string; truncated: boolean } | null;
 }
 
-/** home.memory.page: at most 50 rows and 128 KiB encoded JSON. */
-export interface HomeMemoryPage {
+/** One range in Home's rendered memory view. Leaf messages carry the same
+ * bounded projection/evidence object as the independent evidence read. */
+export interface HomeMemoryViewLine {
+  start: number;
+  span: number;
+  text: string | null;
+  truncated: boolean;
+  kind?: "user" | "talk" | "echo" | "event";
+  firstAt?: string;
+  lastAt?: string;
+  item?: HomeMemoryItem;
+}
+
+/** home.memory.view: at most 50 lines and 128 KiB encoded JSON. */
+export interface HomeMemoryView {
   homeId: string;
   revision: string;
-  totalItems: number;
-  items: HomeMemoryItem[];
+  totalMessages: number;
+  lines: HomeMemoryViewLine[];
   nextCursor?: string;
 }
 
@@ -1142,6 +1203,10 @@ export interface HomeStatus {
   /** Process-owned task recovery projection; refusal fences only task surfaces
    * until the next Gateway start, never ordinary session readiness. */
   taskRecovery: { available: true } | { available: false; reason: string };
+  /** Host pressure at this read (#915, docs/host-load.md); informational: workers are never held back. */
+  hostPressure: { level: "normal" | "elevated" | "critical"; load1PerCpu: number; eventLoopUtilization: number; sampledAt: string };
+  /** Home workers running (or launching) now; there is no running cap (#1023). */
+  workers: { running: number };
   /** Derived from the durable designation, runtime presence, memory and current/last activation. */
   phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "rollover-pending" | "blocked" | "paused" | "active" | "ready";
   /** Current or last activation evidence; never includes message or memory-view bodies. */
@@ -1169,9 +1234,12 @@ export interface HomeStatus {
   };
   live: boolean;
   sessionPresent: boolean;
+  /** True while Home's live openable chapter is blocked on a semantic user
+   * interaction (a pending ask_user question). Absent on an undesignated Home. */
+  waitingForUser?: boolean;
   /** Home's memory, once a record names one. There are no memory defaults
    * (decision D4), so a Home whose memory is unconfigured refuses its
-   * activations until `home.configureMemory`. */
+   * activations until the memory model is set (`model.ref[role=memory]`). */
   memory: HomeMemoryStatus;
 }
 
@@ -1242,10 +1310,30 @@ export type HomeContextProjection =
     viewBytes?: number;
     effectiveTokens?: number;
     contextWindow?: number;
+    /** The request's effective size by section, present with the sizes above. */
+    breakdown?: HomeContextBreakdown;
     /** This activation's own refusal, when it was refused. */
     lastRefusalReason?: string;
     lastRefusalDetail?: string;
   };
+
+/** One section of a Home request's effective size. Tokens are estimates; the sections
+ * sum to the breakdown's `effectiveTokens`. */
+export interface HomeContextSection {
+  id: "instructions" | "profile" | "memory" | "chapter" | "results" | "input";
+  tokens: number;
+  /** The section's own unit: profile notes, memory summary lines, chapter entries or
+   * task results. Absent for instructions and input. */
+  count?: number;
+}
+
+/** The last request an activation prepared, by section. */
+export interface HomeContextBreakdown {
+  activation: { state: "running" | "settled"; kind: "user" | "wake"; startedAt: string };
+  contextWindow: number;
+  effectiveTokens: number;
+  sections: HomeContextSection[];
+}
 
 export interface HomeDesignation {
   homeId: string;
@@ -1253,13 +1341,28 @@ export interface HomeDesignation {
   generation: number;
 }
 
+/** The name a task is shown by: its worker session's name when set, else its brief's first
+ * non-empty line, and at most 80 characters. */
+export interface HomeTaskDisplay {
+  title: string;
+  /** The target directory's last path component. */
+  project: string;
+}
+
+/** Exact task counts over the whole task store, independent of any page. `active` covers every
+ * non-terminal lifecycle (`pending` and `active`); `finished` covers `terminal`. */
+export interface HomeTaskCounts {
+  active: number;
+  finished: number;
+}
+
 /** home.taskList: bounded newest-first task metadata; no canonical reports. */
-export interface HomeTaskSummary {
+export interface HomeTaskSummary extends HomeTaskDisplay {
   taskId: string;
   createdAt: number;
   updatedAt: number;
-  /** At most 160 Unicode code points from the immutable intent. */
-  title: string;
+  /** The worker session the task dispatched (the task's `sessionId`), or null before dispatch. */
+  sessionId: string | null;
   target: string;
   lifecycle: "pending" | "active" | "terminal";
   outcome: "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown" | null;
@@ -1270,4 +1373,6 @@ export interface HomeTaskSummary {
 export interface HomeTaskPage {
   items: HomeTaskSummary[];
   nextCursor?: string;
+  /** Exact counts for the whole store, read with this page; never capped by `limit`. */
+  counts: HomeTaskCounts;
 }

@@ -1,8 +1,9 @@
+import { MacTerminalHost, MacTerminalKeys } from "./security/mac-terminal.js";
 import { ManagedSubagents } from "./sessions/managed-subagents.js";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, renameSync, writeFileSync, rmSync } from "node:fs";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.js";
 import { GatewayError } from "./errors.js";
@@ -11,9 +12,14 @@ import { TrustService } from "./admin/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
-import { SettingsService } from "./admin/settings-service.js";
+import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
+import { SettingsRiskEvaluator } from "./admin/settings-risk.js";
+import { SettingsChangeRecord } from "./admin/settings-record.js";
+import { OutsideChanges } from "./admin/settings-outside.js";
+import { SettingsApprovals } from "./admin/settings-approvals.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
+import { ScopeToolCatalog } from "./admin/tool-catalog.js";
 import { HookResources } from "./admin/hook-resources.js";
 import { AuthBroker } from "./admin/auth-broker.js";
 import { MacKeychainMcpCredentialOwner, McpAdminService } from "./admin/mcp-admin-service.js";
@@ -25,7 +31,7 @@ import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { logHomeDiagnostic } from "./home/home-diagnostic.js";
-import { homeChapterObservationExcluded } from "./home/home-owner.js";
+import { homeChapterObservationExcluded, homeWorkspaceDirectory } from "./home/home-owner.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
@@ -50,6 +56,7 @@ import { GatewayAutomationExecutor } from "./automations/automation-executor.js"
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
+import { HomeProfileItems } from "./home/home-profile.js";
 import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
@@ -61,7 +68,6 @@ import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
 import { JevDecisionClient } from "./knowledge/jev-client.js";
 import { KnowledgeTaggingBudget, KnowledgeTaggingEngine } from "./knowledge/knowledge-tagger.js";
 import { SessionSearchIndex } from "./sessions/session-search-index.js";
-import { SessionSearchAllowanceLedger } from "./sessions/session-search-allowance.js";
 import { SessionSearchService } from "./sessions/session-search-service.js";
 import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./sessions/session-search-embedding.js";
 import { KnowledgeConnectorExtension } from "./knowledge/connectors.js";
@@ -146,7 +152,7 @@ let transport: GatewayServer;
 const devices = new DeviceStore(config.tronHome, config.machineId);
 await devices.initialize();
 startupCheckpoint("devices");
-const notifications = new NotificationService(
+const notifications: NotificationService = new NotificationService(
   new NotificationGrantStore(config.tronHome),
   new PushRelayClient(config.pushServiceOrigin),
   Date.now,
@@ -159,6 +165,7 @@ const notifications = new NotificationService(
     `Push notification ${outcome}`,
     { event: `notification.push.${outcome.replaceAll("_", "-")}`, source: "notifications", kind, outcome, reason: relayReason },
   ),
+  (sessionId) => sessions.homeOwner().chapterStateFor(sessionId).homeId !== undefined,
 );
 await notifications.initialize();
 startupCheckpoint("notifications");
@@ -174,11 +181,28 @@ const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime
 openAIModelEligibility.attachRuntime(modelRuntime);
 startupCheckpoint("model-runtime");
 const globalSettingsManager = SettingsManager.create(homedir(), config.agentDir, { projectTrusted: false });
-const trust = new TrustService(config.agentDir);
+const trust = new TrustService(config.agentDir, { standaloneDirectories: [homeWorkspaceDirectory(config.tronHome)] });
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
-const settings = new SettingsService(config.agentDir, modelRuntime, false);
+// Mac Terminal's store is the Gateway user's own ~/.ssh/authorized_keys.
+const macTerminalKeys = new MacTerminalKeys(join(homedir(), ".ssh"));
+const settingsModel = new SettingsModel({
+  macTerminalKeys,
+  agentDir: config.agentDir,
+  tronHome: config.tronHome,
+  trust,
+  modelRuntime,
+  homeMemoryModel: async () => (await sessions.homeOwner()?.memoryStatus())?.model,
+  toolCatalog: async (target) => target.kind === "session"
+    ? sessions.liveToolCatalog(target.sessionId)
+    : scopeToolCatalog.list(target.kind === "project" ? target.cwd : undefined),
+});
+const settingsRecord = new SettingsChangeRecord(config.tronHome);
+// Outside changes (docs/settings-model.md 5.6): every settings read compares the
+// Mac and Project stores with what Tron last observed; file events only prompt.
+const outsideSettings = new OutsideChanges(config.tronHome, config.agentDir, settingsRecord, settingsModel.observedReaders);
+settingsModel.observeOutside(outsideSettings);
 const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
@@ -360,7 +384,8 @@ const sessions = new RuntimeRegistry({
   ),
   homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
   homeTaskDiagnostic: record => logger.log(record.event === "home.task.runaway-stop" || record.event === "home.task.detached-work"
-    || record.event === "home.task.producer-refused" || record.event === "home.task.store-refused"
+    || record.event === "home.task.producer-refused" || record.event === "home.task.store-refused" || record.event === "home.inbox.admission-slow"
+    || record.event === "home.task.dispatch-stage" || (record.event === "host.pressure" && record.level === "critical")
     || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
     "Home task lifecycle", { source: "home", ...record }),
   machineId: config.machineId,
@@ -420,11 +445,8 @@ let sessionSearch: SessionSearchService | undefined;
 let sessionSearchIndex: SessionSearchIndex | undefined;
 try {
   sessionSearchIndex = await SessionSearchIndex.open(join(config.tronHome, "gateway", "session-search.sqlite"));
-  let sessionSearchAllowance: SessionSearchAllowanceLedger | undefined;
-  try { sessionSearchAllowance = await SessionSearchAllowanceLedger.open(join(config.tronHome, "gateway", "session-search-jev-allowance.sqlite")); }
-  catch (error) { logger.log("warning", "Optional Jev allowance is unavailable; remote ranking disabled", { event: "session-search.jev-ledger-unavailable", source: "search", error }); }
-  sessionSearch = new SessionSearchService(sessions, sessionSearchIndex, jevClient, sessionSearchAllowance);
-  // Home's session_search research tool reads the same owner, late-bound.
+  sessionSearch = new SessionSearchService(sessions, sessionSearchIndex);
+  // Home's session_search research tool is this owner's only reader, late-bound.
   sessions.setSessionSearchService(sessionSearch);
 } catch (error) {
   sessionSearchIndex?.close();
@@ -514,10 +536,12 @@ const packages = new PackageService(
   (topic, payload) => transport?.broadcast(topic, payload),
   workRegistry,
   managedSubagents,
+  outsideSettings,
 );
 // Hook listings load extensions for a scope without a session; the owner never
 // touches a runtime, so no session or global registration is involved.
 const hookResources = new HookResources(config.agentDir, trust, workRegistry, managedSubagents);
+const scopeToolCatalog = new ScopeToolCatalog(config.agentDir, trust, workRegistry, managedSubagents);
 const automationStore = new AutomationStore(config.tronHome, {
   changed: (automationId) => transport?.broadcast("automation.changed", {
     catalogRevision: automationStore.status().catalogRevision,
@@ -578,12 +602,14 @@ function recordShutdownStep(step: string, durationMs: number): void {
 async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false): Promise<void> {
   if (stopping) return;
   stopping = true;
+  const stopDrainId = drainAcceptedWork ? sessions.administrativeDrainSnapshot().drainId : undefined;
   service.dispose();
+  outsideSettings.dispose();
   const stoppingAt = performance.now();
   // The last record of this process: the next process's gateway.started
   // follows after launchd and the launcher.
   const recordStopped = (code: number): void => logger.log(code === 0 ? "info" : "warning", `Gateway stopped (exit ${code}) after ${Math.round(performance.now() - stoppingAt)} ms of shutdown`, {
-    event: "gateway.stopped", source: "lifecycle", code: String(code), durationMs: performance.now() - stoppingAt,
+    event: "gateway.stopped", source: "lifecycle", code: String(code), pid: process.pid, durationMs: performance.now() - stoppingAt,
   });
   logger.log("info", `Stopping gateway (${reason})`, { event: "gateway.stopping", source: "lifecycle" });
   const forced = drainAcceptedWork ? undefined : setTimeout(() => { recordStopped(1); exitAfterShutdown(1, gatewayLogPath); }, 15_000);
@@ -633,6 +659,22 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     await shutdownStep("command-receipts-dispose", () => receipts.dispose(), recordShutdownStep);
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     if (forced) clearTimeout(forced);
+    if (exitCode === 0 && stopDrainId) {
+      // One atomic receipt survives transport retirement and log rotation. The
+      // accepted drain UUID plus Mac's captured PID/start identity exclude stale
+      // processes/attempts; this is completion, never permission to SIGKILL exit 0.
+      const path = join(config.tronHome, "gateway", "stop-completed.json");
+      const temporary = `${path}.${process.pid}.tmp`;
+      try {
+        writeFileSync(temporary, JSON.stringify({ version: 1, pid: process.pid, drainId: stopDrainId }), { mode: 0o600 });
+        renameSync(temporary, path);
+      } catch (error) {
+        try { rmSync(temporary, { force: true }); } catch {}
+        logger.log("error", "Could not publish intentional-stop completion; wrapper must report observation uncertainty", {
+          event: "gateway.stop-completion.failed", source: "lifecycle", error,
+        });
+      }
+    }
     recordStopped(exitCode);
     exitAfterShutdown(exitCode, gatewayLogPath);
   } catch (error) {
@@ -765,6 +807,34 @@ async function runStopDrain(): Promise<void> {
   }
 }
 
+// The one settings change path (docs/settings-model.md 5). Agents reach it
+// through the `settings` tool; the slots read it late-bound from the registry.
+const settingsRisk = new SettingsRiskEvaluator(jevClient);
+const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, new SettingsApprovals(config.tronHome), {
+  assessRisk: async (input, signal) => {
+    try { return await settingsRisk.assess(input, signal); }
+    catch (error) {
+      logger.log("warning", "Settings risk evaluation did not complete; deterministic tier retained", {
+        event: "settings.risk.failed", source: "settings", kind: input.key, reason: signal.aborted ? "timeout" : "unavailable",
+      });
+      throw error;
+    }
+  },
+  setTrust: async (project, decision) => trust.setAndApply(
+    project,
+    decision,
+    async (inspection) => sessions.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false),
+    async (inspection) => sessions.commitProjectReload(inspection.projectDir),
+  ),
+  configureHomeMemory: async (model) => {
+    const home = sessions.homeOwner();
+    if (!home) throw new GatewayError("unsupported", "Tron Home is not available");
+    await home.configureMemory({ model });
+  },
+  profile: new HomeProfileItems(() => knowledge),
+}, config.agentDir);
+sessions.setSettings(settingsModel, settingsChanges);
+
 const service = new GatewayService({
   config,
   modelRuntime,
@@ -774,7 +844,9 @@ const service = new GatewayService({
   uploads,
   terminals: terminal,
   trust,
-  settings,
+  settingsModel,
+  settingsChanges,
+  macTerminal: new MacTerminalHost(macTerminalKeys),
   modelConfig,
   packages,
   hookResources,
@@ -800,8 +872,10 @@ const service = new GatewayService({
     new MacKeychainMcpCredentialOwner(),
     (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
   ),
-  ...(sessionSearch ? { sessionSearch } : {}),
 });
+outsideSettings.startWatching(error => logger.log("warning", "Outside settings comparison failed", {
+  event: "settings.outside.failed", source: "settings", error: error instanceof Error ? error.message : String(error),
+}));
 transport = new GatewayServer({
   host: config.host,
   port: config.port,

@@ -91,9 +91,8 @@ const DISPOSABLE_READ_METHODS: ReadonlySet<string> = new Set([
   "session.transcript",
   "session.history.list",
   "session.history.entry",
-  "home.memory.page",
+  "home.memory.view",
   "home.memory.evidence",
-  "session.search",
   "model.list",
   "provider.list",
   "provider.usage",
@@ -115,13 +114,11 @@ const SHED_RETRY_AFTER_MS = 1_000;
  * prompt is deliberately absent: its owner settles it durably whatever the
  * client does with its wait.
  *
- * Four disposable reads are absent because their own owners allow longer than
- * any bound a client would tolerate, and shedding below the owner's own bound
- * would throw away an answer the owner is about to produce: `session.search`
- * spends up to Jev's 20 s on a remote-ranked evaluation the user paid for, and
- * `provider.usage` answers a typed "timed out" snapshot after up to 10 s per
- * fetch. A read outside this table is never shed, so the phone's single retry
- * after a shed hint can never buy a second paid search.
+ * Three disposable reads (`model.list`, `provider.list`, `provider.usage`) are
+ * absent because their own owners allow longer than any bound a client would
+ * tolerate, and shedding below the owner's own bound would throw away an answer
+ * the owner is about to produce: `provider.usage` answers a typed "timed out"
+ * snapshot after up to 10 s per fetch. A read outside this table is never shed.
  */
 export const DISPOSABLE_READ_DEADLINES_MS: ReadonlyMap<string, number> = new Map([
   ["session.open", SESSION_OPEN_DEADLINE_MS],
@@ -129,7 +126,7 @@ export const DISPOSABLE_READ_DEADLINES_MS: ReadonlyMap<string, number> = new Map
   ["session.transcript", DISPOSABLE_READ_DEADLINE_MS],
   ["session.history.list", DISPOSABLE_READ_DEADLINE_MS],
   ["session.history.entry", DISPOSABLE_READ_DEADLINE_MS],
-  ["home.memory.page", DISPOSABLE_READ_DEADLINE_MS],
+  ["home.memory.view", DISPOSABLE_READ_DEADLINE_MS],
   ["home.memory.evidence", DISPOSABLE_READ_DEADLINE_MS],
 ]);
 /** An upgrade that reaches hello within this bound is debug detail; every
@@ -150,10 +147,11 @@ function diagnosticErrorCode(error: unknown): string {
   return "unknown";
 }
 
-function diagnosticErrorDetails(error: unknown): { operationId?: string; ageMs?: number } {
-  if (!(error instanceof GatewayError) || error.diagnosticReason !== "attention-pending"
-    || !error.details || typeof error.details !== "object" || Array.isArray(error.details)) return {};
+function diagnosticErrorDetails(error: unknown): { operationId?: string; ageMs?: number; cause?: string } {
+  if (!(error instanceof GatewayError) || !error.details || typeof error.details !== "object" || Array.isArray(error.details)) return {};
   const details = error.details as Record<string, unknown>;
+  if (error.diagnosticReason === "home-memory-source-unavailable") return typeof details.cause === "string" ? { cause: details.cause } : {};
+  if (error.diagnosticReason !== "attention-pending") return {};
   return {
     ...(typeof details.operationId === "string" ? { operationId: details.operationId } : {}),
     ...(typeof details.ageMs === "number" && Number.isFinite(details.ageMs) ? { ageMs: details.ageMs } : {}),

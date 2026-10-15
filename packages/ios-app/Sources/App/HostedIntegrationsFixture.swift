@@ -43,6 +43,7 @@ struct HostedIntegrationsFixtureView: View {
     @State private var presentationTrace = HostedIntegrationPresentationTrace()
     @State private var productionXLogs = ""
     @State private var showingOllamaDetails = false
+    @State private var integrationRoutes = IntegrationSheetRoutes()
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
@@ -87,7 +88,9 @@ struct HostedIntegrationsFixtureView: View {
 
     var body: some View {
         Group {
-            if let recoveryScenario {
+            if recoveryScenario == "connection-secondary" {
+                HostedSecondaryRecoveryFixture()
+            } else if let recoveryScenario {
                 HostedConnectionRetryFixture(scenario: recoveryScenario)
             } else if ready {
                 if parentOAuthScenario == "parent-oauth-chat-reconnect" {
@@ -132,7 +135,7 @@ struct HostedIntegrationsFixtureView: View {
                                 Text(mcpOriginalCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-original")
                                 Text(mcpReplacementCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-replacement")
                                 Text(model.knowledgeDestinationIdentity.profileID ?? "none").font(.caption2).accessibilityIdentifier("fixture.destination")
-                            } else { IntegrationsSettingsView() }
+                            } else { IntegrationsSettingsView(routes: integrationRoutes) }
                             Text(oauthCounters).font(.caption2).lineLimit(2).frame(height: 32)
                                 .accessibilityIdentifier("fixture.oauth-counters")
                         }
@@ -171,12 +174,18 @@ struct HostedIntegrationsFixtureView: View {
             @unknown default: break
             }
         }
-        .task(id: "\(oauthCounters)|\(model.knowledgeDestinationIdentity)|\(model.knowledgePresentationIdentity.connectionID ?? -1)|\(presentationTrace.summary)") {
-            await Task.yield()
-            let records = await model.appLog.snapshot().filter { $0.event.hasPrefix("xsetup.") }
-            productionXLogs = records.map { record in
-                "\(record.event) outcome=\(record.outcome ?? "-") generation=\(record.lifecycleGeneration.map(String.init) ?? "-") connection=\(record.connectionID.map(String.init) ?? "-") \(record.message)"
-            }.joined(separator: "|")
+        .task {
+            // Diagnostics reach the AppLog actor asynchronously and the last one (for
+            // example xsetup.observer.published) can land after every visible state
+            // change, so follow the log itself rather than re-reading on UI changes.
+            while !Task.isCancelled {
+                let records = await model.appLog.snapshot().filter { $0.event.hasPrefix("xsetup.") }
+                let projected = records.map { record in
+                    "\(record.event) outcome=\(record.outcome ?? "-") generation=\(record.lifecycleGeneration.map(String.init) ?? "-") connection=\(record.connectionID.map(String.init) ?? "-") \(record.message)"
+                }.joined(separator: "|")
+                if projected != productionXLogs { productionXLogs = projected }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
         }
         .task {
             guard recoveryScenario == nil else { return }
@@ -289,6 +298,9 @@ actor HostedIntegrationsGateway {
     func attach(_ socket: HostedIntegrationsSocket) { sockets.append(socket) }
 
     func handle(method: String, params: [String: JSONValue]) async -> (JSONValue?, JSONValue?) {
+        if method == "session.list" {
+            return (.object(["sessions": .array([]), "listRevision": .number(1), "projectionToken": .string("fixture-catalog"), "archivedCount": .number(0)]), nil)
+        }
         if method == "session.open" {
             let sessionID = params["sessionId"]?.stringValue ?? "integration-fixture-chat"
             let snapshot = SessionSnapshot(
@@ -553,12 +565,12 @@ actor HostedIntegrationsSocket: GatewaySocketConnection {
     private var inbound: [Data]
     private var receivers: [CheckedContinuation<Data, Error>] = []
     private var closed = false
-    init(gateway: HostedIntegrationsGateway, machineID: String = "fixture-integrations") {
+    init(gateway: HostedIntegrationsGateway, machineID: String = "fixture-integrations", machineGroupID: String? = nil) {
         self.gateway = gateway
         inbound = [try! JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("hello"), "gatewayVersion": .string("fixture"), "piVersion": .string("fixture"),
-            "protocolVersion": .number(7), "minProtocolVersion": .number(7), "machineId": .string(machineID),
-            "machineName": .string("Studio server"), "gatewayChannel": .string("stable"), "capabilities": .array([.string("connections.v1")])]))]
+            "protocolVersion": .number(8), "minProtocolVersion": .number(8), "machineId": .string(machineID),
+            "machineName": .string("Studio server"), "machineGroupID": .string(machineGroupID ?? machineID), "gatewayChannel": .string("stable"), "capabilities": .array([.string("connections.v1")])]))]
         Task { await gateway.attach(self) }
     }
     func send(_ data: Data) async throws {
@@ -590,6 +602,12 @@ actor HostedIntegrationsSocket: GatewaySocketConnection {
         return try await withCheckedThrowingContinuation { receivers.append($0) }
     }
     func close() async { closed = true; let pending = receivers; receivers.removeAll(); pending.forEach { $0.resume(throwing: CancellationError()) } }
+    func loseNetworkConnection() {
+        closed = true
+        let pending = receivers
+        receivers.removeAll()
+        pending.forEach { $0.resume(throwing: URLError(.networkConnectionLost)) }
+    }
     private func deliver(_ data: Data) { if receivers.isEmpty { inbound.append(data) } else { receivers.removeFirst().resume(returning: data) } }
 }
 
@@ -597,10 +615,13 @@ actor HostedIntegrationsSocket: GatewaySocketConnection {
 private struct HostedConnectionRetryFixture: View {
     private let profile = GatewayProfile(id: "recovery-fixture", label: "Recovery server", host: "localhost", port: 9847, machineId: "fixture-integrations")
     @State private var model: AppModel
+    private let factory: HostedRecoverySocketFactory
+    @State private var failedSockets = 0
 
     init(scenario: String) {
-        let failures = scenario == "connection-unreachable" ? 2 : 1
-        let factory = HostedRecoverySocketFactory(failures: failures)
+        let failures = scenario == "connection-retry" ? 1 : 2
+        let factory = HostedRecoverySocketFactory(failures: failures, dropsEstablishedConnection: scenario == "connection-loss-unreachable", openedFailures: scenario == "connection-opened-failure")
+        self.factory = factory
         let origin = ContinuousClock().now
         let clock = MonotonicClock(now: { ContinuousClock().now }, sleep: { duration in
             // First unreachable attempt advances; the next delay is parked until Retry cancels it.
@@ -618,35 +639,206 @@ private struct HostedConnectionRetryFixture: View {
     }
 
     var body: some View {
-        NavigationStack { GatewayConnectionDetailView(profile: profile) }
+        NavigationStack {
+            GatewayConnectionDetailView(profile: profile)
+                .overlay(alignment: .bottom) {
+                    Text("failed sockets \(failedSockets)").accessibilityIdentifier("failed-socket-count")
+                }
+        }
             .environment(model)
             .tronPresentation()
             .tronSettingsLayout()
             .tronSettingsVisualTheme(accent: .tronEmerald)
-            .task { await model.start() }
+            .task {
+                await model.start()
+                for _ in 0..<200 {
+                    failedSockets = factory.failedSocketCount
+                    if failedSockets >= 2 { break }
+                    do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                }
+            }
     }
 }
 
 private final class HostedRecoverySocketFactory: @unchecked Sendable {
     private let lock = NSLock()
     private var failures: Int
-    init(failures: Int) { self.failures = failures }
+    private var producedFailures = 0
+    var failedSocketCount: Int { lock.withLock { producedFailures } }
+    private var dropsEstablishedConnection: Bool
+    private let openedFailures: Bool
+    init(failures: Int, dropsEstablishedConnection: Bool = false, openedFailures: Bool = false) {
+        self.failures = failures
+        self.dropsEstablishedConnection = dropsEstablishedConnection
+        self.openedFailures = openedFailures
+    }
     func next() -> any GatewaySocketConnection {
         lock.lock()
-        let shouldFail = failures > 0
-        failures -= 1
+        let shouldDropEstablishedConnection = dropsEstablishedConnection
+        let shouldFail = failures > 0 && !shouldDropEstablishedConnection
+        if shouldFail { failures -= 1; producedFailures += 1 }
+        dropsEstablishedConnection = false
         lock.unlock()
-        if shouldFail { return HostedRecoveryFailedSocket() }
-        return HostedIntegrationsSocket(gateway: HostedIntegrationsGateway(scenario: "default"))
+        if shouldFail {
+            if openedFailures { return HostedOpenedFailureSocket() }
+            return HostedRecoveryFailedSocket()
+        }
+        let socket = HostedIntegrationsSocket(gateway: HostedIntegrationsGateway(scenario: "default"))
+        if shouldDropEstablishedConnection {
+            Task {
+                try? await Task.sleep(for: .seconds(3))
+                await socket.loseNetworkConnection()
+            }
+        }
+        return socket
     }
 }
 
-private actor HostedRecoveryFailedSocket: GatewaySocketConnection {
-    func send(_ data: Data) async throws {
-        throw GatewayFailure(code: "timeout", message: "Scripted transport unavailable", retryable: true, details: nil)
+private actor HostedOpenedFailureSocket: GatewaySocketConnection {
+    func send(_ data: Data) async throws { throw URLError(.networkConnectionLost) }
+    func receive() async throws -> Data { throw URLError(.networkConnectionLost) }
+    func ping() async throws { throw URLError(.networkConnectionLost) }
+    func close() async {}
+    func metadata() async -> GatewaySocketMetadata {
+        GatewaySocketMetadata(closeCode: nil, httpStatusCode: 101, transportOpenMilliseconds: 1)
     }
-    func receive() async throws -> Data { throw CancellationError() }
-    func ping() async throws { throw CancellationError() }
+}
+
+/// A byte transport that never opens or yields handshake bytes. The production
+/// GatewayClient's transport-open deadline, not a fixture error, ends the attempt.
+private actor HostedRecoveryFailedSocket: GatewaySocketConnection {
+    private var receiver: CheckedContinuation<Data, Error>?
+    private var sender: CheckedContinuation<Void, Error>?
+    private var closed = false
+    func send(_ data: Data) async throws {
+        if closed { throw CancellationError() }
+        try await withCheckedThrowingContinuation { sender = $0 }
+    }
+    func receive() async throws -> Data {
+        if closed { throw CancellationError() }
+        return try await withCheckedThrowingContinuation { receiver = $0 }
+    }
+    func ping() async throws {}
+    func close() async {
+        closed = true
+        receiver?.resume(throwing: CancellationError())
+        receiver = nil
+        sender?.resume(throwing: CancellationError())
+        sender = nil
+    }
+}
+
+/// Drives the real pool and byte-level client through the scene's retirement boundary.
+/// Only elapsed time and the remote socket are controlled; status comes from the pool.
+private struct HostedSecondaryRecoveryFixture: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var owner = HostedSecondaryRecoveryOwner()
+    var body: some View {
+        VStack {
+            Text(owner.state).accessibilityIdentifier("secondary-state")
+            Text(owner.delay).accessibilityIdentifier("secondary-delay")
+            Text(owner.waitHistory).accessibilityIdentifier("secondary-waits")
+            Text(owner.lastConnected).accessibilityIdentifier("secondary-last-connected")
+            Text(owner.primary).accessibilityIdentifier("primary-state")
+            Button("Lose secondary") { owner.lose() }
+            Button("Restore secondary") { owner.transport.setOnline(true) }
+            Button("Retry secondary") { owner.retry() }
+        }
+        .task { await owner.start() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { owner.pool.retire() }
+            if phase == .active, owner.started { owner.reconcile() }
+        }
+    }
+}
+
+@MainActor @Observable
+private final class HostedSecondaryRecoveryOwner: DashboardGatewayConnectionPoolDelegate {
+    let secondary = GatewayProfile(id: "secondary", label: "Secondary", host: "secondary.example.test", port: 9847, machineId: "secondary-machine", machineGroupID: "secondary-group")
+    let selected = GatewayProfile(id: "primary", label: "Primary", host: "primary.example.test", port: 9847, machineId: "primary-machine", machineGroupID: "primary-group")
+    let transport = HostedSecondaryTransport()
+    var state = "not started"
+    var delay = "no wait"
+    var waitHistory = ""
+    var lastConnected = "never connected"
+    var primary = "not connected"
+    var started = false
+    @ObservationIgnored private var primaryClient: GatewayClient?
+    @ObservationIgnored lazy var pool = DashboardGatewayConnectionPool(clientFactory: { [transport] in
+        GatewayClient(socketFactory: GatewaySocketFactory { _ in transport.next() })
+    }, clock: MonotonicClock(now: { ContinuousClock().now }, sleep: { [weak self] duration in
+        let seconds = Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+        if seconds >= 2 {
+            await MainActor.run {
+                self?.delay = "wait \(seconds)"
+                if let self, self.waitHistory.count < 500 { self.waitHistory += "\(seconds)," }
+            }
+        }
+        try await Task.sleep(for: .seconds(seconds / 100))
+    }, gridOrigin: ContinuousClock().now))
+
+    func start() async {
+        guard !started else { return }
+        let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in
+            HostedIntegrationsSocket(gateway: HostedIntegrationsGateway(scenario: "default"), machineID: "primary-machine", machineGroupID: "primary-group")
+        })
+        primaryClient = client
+        do {
+            let identity = try await client.connectForLifecycle(profile: selected, token: "fixture-token")
+            try await client.activateEvents(connectionID: identity.id)
+            primary = "primary connected \(identity.id)"
+            pool.delegate = self
+            started = true
+            reconcile()
+        } catch { primary = "primary failed \(error)" }
+    }
+    func reconcile() {
+        waitHistory = ""
+        pool.reconcile(profiles: [selected, secondary], selectedProfileID: selected.id, token: { _ in "fixture-token" })
+    }
+    func retry() {
+        waitHistory = ""
+        pool.retry(profileID: secondary.id)
+    }
+    func lose() {
+        waitHistory = ""
+        transport.setOnline(false)
+        Task { await transport.lose() }
+    }
+    func dashboardPoolDidUpdate(profileID: String, sessions: [SessionSummary], state: DashboardServerConnectionState, stopReason: String?) {
+        self.state = String(describing: state)
+        lastConnected = pool.lastConnectedAt(for: secondary.id).map { "last connected \($0.timeIntervalSince1970)" } ?? "never connected"
+        Task {
+            if await primaryClient?.activeConnectionID() == nil { primary = "primary disconnected" }
+        }
+    }
+    func dashboardPoolNotificationInboxChanged(profileID: String, change: NotificationInboxChanged?) {}
+    func dashboardPoolDidUpdateArchivedCount(profileID: String, count: Int?) {}
+    func dashboardPoolDidPublishAuthoritativeCatalog(profileID: String) {}
+}
+
+private final class HostedSecondaryTransport: @unchecked Sendable {
+    private let lock = NSLock()
+    private var online = true
+    private var socket: HostedIntegrationsSocket?
+    func setOnline(_ value: Bool) { lock.withLock { online = value } }
+    func next() -> any GatewaySocketConnection {
+        lock.withLock {
+            guard online else { return HostedSecondaryUnavailableSocket() }
+            let socket = HostedIntegrationsSocket(gateway: HostedIntegrationsGateway(scenario: "default"), machineID: "secondary-machine", machineGroupID: "secondary-group")
+            self.socket = socket
+            return socket
+        }
+    }
+    func lose() async {
+        let socket = lock.withLock { self.socket }
+        await socket?.loseNetworkConnection()
+    }
+}
+private actor HostedSecondaryUnavailableSocket: GatewaySocketConnection {
+    func send(_ data: Data) async throws { throw URLError(.cannotConnectToHost) }
+    func receive() async throws -> Data { throw URLError(.cannotConnectToHost) }
+    func ping() async throws { throw URLError(.cannotConnectToHost) }
     func close() async {}
 }
 #endif

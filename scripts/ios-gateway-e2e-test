@@ -8,6 +8,15 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+# Host-wide heavy-run queue (#915, tools/work/heavy.py): every real-Gateway run
+# waits for a slot unless it inherited one (for example from `work land`).
+case "${1:-all}" in
+  prepare|build|run|run-lan|run-ui|iterate|all)
+    if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
+      exec python3 "$repo_root/tools/work/heavy.py" run --owner "ios-gateway-e2e-test ${1:-all} in $(basename "$repo_root")" -- "$0" "$@"
+    fi
+    ;;
+esac
 gateway_dir="$repo_root/packages/gateway"
 ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091
@@ -111,6 +120,14 @@ die() { echo "error: $*" >&2; exit 1; }
 ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSurfacesServeEveryKeyAndEditAtItsLayer"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testMacReplacementRowAndProgressFollowTheJournal"
 )
 
 ui_journey_is_owned() {
@@ -309,8 +326,11 @@ when it inherits an iOS test lease that does not cover its lane.
 USAGE
 }
 
+# The Pi release the fixture Gateway reports, from its own built version owner
+# (dist/version.js), which also resolves Tron's declared patched tarball.
 manifest_pi_version() {
-  "$NODE_BIN" -e 'const value=require(process.argv[1]).dependencies["@earendil-works/pi-coding-agent"]; if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value)) process.exit(1); process.stdout.write(value)' "$gateway_dir/package.json"
+  "$NODE_BIN" --input-type=module -e 'import { pathToFileURL } from "node:url"; const { PI_VERSION } = await import(pathToFileURL(process.argv[1]).href); process.stdout.write(PI_VERSION)' "$gateway_dir/dist/version.js" \
+    || die "the fixture Gateway's Pi version could not be read from its build"
 }
 
 # node-pty's own search order (its lib/utils.js loadNativeModule): the package
@@ -507,7 +527,27 @@ const faux = fauxProvider({
   models: [{ id: "e2e-model", name: "Tron E2E Model", reasoning: true, input: ["text", "image"], contextWindow: 32768, maxTokens: 4096 }],
   tokensPerSecond: 8,
 });
-faux.setResponses([
+// A prompt carrying the codemode journey marker asks its question from inside codemode
+// (#929); its turns are decided by what the model sees, not by a script position.
+const CODEMODE_MARKER = "CODEMODE-ASK-USER-JOURNEY";
+const textOf = (message) => typeof message?.content === "string" ? message.content
+  : (message?.content ?? []).map((part) => part.type === "text" ? part.text : "").join("");
+const codemodeTurn = (context) => {
+  const last = context.messages.at(-1);
+  if (last?.role === "toolResult" && last.toolName === "codemode") {
+    const output = textOf(last);
+    const choice = ["Approve it", "Hold it"].find((label) => output.includes('"' + label + '"'));
+    return fauxAssistantMessage("Codemode question answered: " + (choice ?? "no answer in: " + output.replace(/[ \n\t]+/g, " ").slice(-200)));
+  }
+  if (last?.role === "user" && textOf(last).includes(CODEMODE_MARKER)) {
+    return fauxAssistantMessage([fauxToolCall("codemode", { code: 'text(await tools.ask_user({ title: "Codemode approval", questions: [{ header: "Approve", question: "Approve the codemode step?", options: [{ label: "Approve it" }, { label: "Hold it" }] }] }));' }, { id: "e2e-codemode-ask" })], { stopReason: "toolUse" });
+  }
+  return undefined;
+};
+// Ordinary prompts consume this script in order. A prompt carrying the ask
+// journey marker consumes its own script instead, so the real-UI ask journey
+// (#935) cannot shift the responses every other journey and boundary case expects.
+const ordinary = [
   async () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     return fauxAssistantMessage("Streaming response starts now and remains active until the phone disconnects. Detached response complete");
@@ -520,9 +560,63 @@ faux.setResponses([
     fauxToolCall("bash", { command: "printf third-output" }, { id: "e2e-tool-3" }),
   ], { stopReason: "toolUse" }),
   fauxAssistantMessage("Tool response complete after all three tools."),
-]);
+];
+const askJourneyMarker = "Fixture ask journey";
+const askJourney = [
+  fauxAssistantMessage([
+    fauxText("One decision is needed before continuing."),
+    fauxToolCall("ask_user", {
+      title: "Fixture deployment",
+      questions: [{
+        header: "Target",
+        question: "Where should the fixture deploy?",
+        options: [{ label: "Staging" }, { label: "Production" }],
+      }],
+    }, { id: "e2e-ask-1" }),
+  ], { stopReason: "toolUse" }),
+  fauxAssistantMessage("Ask journey answered: the fixture received the form answer."),
+];
+// A prompt carrying the steer journey marker holds its turn until the phone
+// has queued a message, then ends it, so Pi delivers the queued steer (#974).
+// The steered photo has no text; its turn is recognised by its image.
+const steerJourneyMarker = "Fixture steer journey";
+let steerContext;
+const holdUntilSteerQueued = async () => {
+  const deadline = Date.now() + 180000;
+  while (!steerContext?.hasPendingMessages() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  // Keep the run going briefly so the phone presents the queued steer.
+  await new Promise((resolve) => setTimeout(resolve, 4000));
+  return fauxAssistantMessage("Steer journey turn finished.");
+};
+const lastUserHasImage = (context) => {
+  const last = context.messages.at(-1);
+  return last?.role === "user" && Array.isArray(last.content) && last.content.some((part) => part.type === "image");
+};
+const latestUserText = (context) => {
+  for (let index = context.messages.length - 1; index >= 0; index -= 1) {
+    const message = context.messages[index];
+    if (message.role !== "user") continue;
+    if (typeof message.content === "string") return message.content;
+    return message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+  }
+  return "";
+};
+const scripted = (context, options, state, model) => {
+  if (latestUserText(context).includes(CODEMODE_MARKER)) return codemodeTurn(context) ?? fauxAssistantMessage("", { stopReason: "error", errorMessage: "Unexpected codemode journey turn" });
+  if (lastUserHasImage(context)) return fauxAssistantMessage("Steer journey saw the photo.");
+  if (latestUserText(context).includes(steerJourneyMarker)) return holdUntilSteerQueued();
+  const step = (latestUserText(context).includes(askJourneyMarker) ? askJourney : ordinary).shift();
+  if (step === undefined) {
+    return fauxAssistantMessage("", { stopReason: "error", errorMessage: "No more faux responses queued" });
+  }
+  return typeof step === "function" ? step(context, options, state, model) : step;
+};
+faux.setResponses(Array.from({ length: 64 }, () => scripted));
 export default function (pi) {
   pi.registerProvider(faux.provider);
+  pi.on("agent_start", (_event, ctx) => { steerContext = ctx; });
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
     const choice = await ctx.ui.select("Allow this test command?", ["Yes", "No"]);
@@ -535,6 +629,7 @@ EOF
   "defaultProvider": "tron-e2e",
   "defaultModel": "e2e-model",
   "defaultThinkingLevel": "low",
+  "defaultTools": ["+codemode"],
   "defaultProjectTrust": "never",
   "enableAnalytics": false,
   "enableInstallTelemetry": false
@@ -679,6 +774,7 @@ PY
     printf 'TRON_E2E_GATEWAY_HOME=%q\n' "$gateway_home"
     printf 'TRON_E2E_TRON_HOME=%q\n' "$tron_home"
     printf 'TRON_E2E_AGENT_DIR=%q\n' "$agent_dir"
+    printf 'TRON_E2E_SETTINGS_INVENTORY=%q\n' "$(settings_inventory_json)"
   } >"$state_file"
   chmod 600 "$state_file"
   echo "Gateway fixture upstream 127.0.0.1:$upstream_port (pid $(<"$pid_file")); fault proxy 127.0.0.1:$port (pid $proxy_pid)"
@@ -697,10 +793,25 @@ if runs:
 PY
 }
 
+# The fixture Gateway's own settings schema (its built settings-schema.ts), one row
+# per key with its section, layers, label and qualifier, plus the provenance pill wording
+# (LAYER_SOURCE_LABELS) each row's layer badge carries.
+settings_inventory_json() {
+  "$NODE_BIN" --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const dir = process.argv[1];
+    const schema = await import(pathToFileURL(`${dir}/settings-schema.js`).href);
+    const types = await import(pathToFileURL(`${dir}/settings-types.js`).href);
+    const keys = schema.KEYS.map(key => ({ id: key.id, label: key.label, group: key.group, layers: Object.keys(key.layers),
+      qualifier: key.qualifier ?? null }));
+    process.stdout.write(JSON.stringify({ layerLabels: types.LAYER_SOURCE_LABELS, keys }));
+  ' "$gateway_dir/dist/admin"
+}
+
 patch_xctestrun() {
   local xctestrun="$1" target="$2"
   python3 "$repo_root/scripts/patch-ios-gateway-e2e-xctestrun.py" \
-    "$xctestrun" "$target" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "$TRON_E2E_PI_VERSION" "$TRON_E2E_PROXY_TOKEN"
+    "$xctestrun" "$target" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "$TRON_E2E_PI_VERSION" "$TRON_E2E_PROXY_TOKEN" "$TRON_E2E_SETTINGS_INVENTORY" "$TRON_E2E_AGENT_DIR"
 }
 
 build_tests() {

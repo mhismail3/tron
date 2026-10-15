@@ -1,4 +1,5 @@
 import type { ManagedSubagents } from "./managed-subagents.js";
+import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { createHash, randomUUID } from "node:crypto";
 import { getHeapStatistics } from "node:v8";
 import { realpathSync } from "node:fs";
@@ -11,6 +12,7 @@ import {
   parseSessionEntries,
   SessionManager,
   type FileEntry,
+  type SessionEntry,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
@@ -94,7 +96,9 @@ import {
   type CatalogMetadataIndexFailure,
   type CatalogMetadataIndexSummary,
 } from "./catalog-metadata-index.js";
-import { branchFromParsedSession } from "./session-branch.js";
+import { branchFromParsedSession, branchFromSessionEntries } from "./session-branch.js";
+import { appendChatSettingsSnapshot } from "./chat-settings.js";
+import { appendContextWindowSnapshot } from "../providers/context-window-policy.js";
 import {
   SessionCatalog,
   SUBAGENT_RUN_DIRECTORY,
@@ -470,6 +474,7 @@ interface CatalogPageSeed {
   readonly kind: SessionSummary["kind"];
   readonly parentSessionId?: string;
   readonly creationOrigin?: SessionCreationOrigin;
+  readonly homeTaskId?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly activeSince?: string;
@@ -593,6 +598,7 @@ export class RuntimeRegistry {
   private readonly workspace: TronWorkspace;
   private knowledgeService: KnowledgeService | undefined;
   private sessionSearchService: import("./session-search-service.js").SessionSearchService | undefined;
+  private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
@@ -644,6 +650,11 @@ export class RuntimeRegistry {
    * generation keys immutable compact page seeds without making them catalog
    * authority. */
   private catalogProjectionGeneration = 0;
+  /** Worker session id → the Home task that created it. The task ledger is the
+   * authority; the dispatcher seeds this from its recovery pass and adds each
+   * bind, so the dashboard learns which rows are Home workers from the catalog
+   * it already syncs instead of querying the ledger. */
+  private readonly homeTaskWorkers = new Map<string, string>();
   private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
   private readonly pendingSlotStarts = new Map<string, PendingColdLoad>();
   private reservedSlotStarts = 0;
@@ -846,6 +857,7 @@ export class RuntimeRegistry {
         },
         sessionFile: (sessionId) => this.homeSessionFile(sessionId),
         hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
+        waitingForUser: (sessionId) => this.slots.get(sessionId)?.catalogWaitingForUser ?? false,
         chapterMetrics: async (sessionId) => {
           const slot = this.slots.get(sessionId);
           if (!slot) return this.coldHomeChapterMetrics(sessionId);
@@ -935,6 +947,13 @@ export class RuntimeRegistry {
     this.sessionSearchService = service;
   }
 
+  /** Installs the settings model and its change path for the `settings` tool.
+   * Both are built over this registry, so slots read them late-bound. */
+  setSettings(model: import("../admin/settings-model.js").SettingsModel, changes: import("../admin/settings-model.js").SettingsChangePath): void {
+    if (this.settingsOwners && this.settingsOwners.changes !== changes) throw new Error("Settings are already installed");
+    this.settingsOwners = { model, changes };
+  }
+
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
   /** The Home designation owner for this installation. */
@@ -1011,6 +1030,19 @@ export class RuntimeRegistry {
       throw new GatewayError("conflict", "Home recovery is blocked because its recorded chapter path is absent");
     }
 
+    // Resolve the sealed predecessor before reserving a new durable path. A
+    // failed read must not strand an otherwise absent materialization attempt.
+    const previousId = scan.action === "absent" ? this.home.settingsPredecessor(sessionId) : undefined;
+    // A never-prompted live predecessor can still have SDK-staged choices and
+    // no physical file. Its sealed slot is the canonical owner; cold reads must
+    // instead prove the exact durable file and may not treat absence as defaults.
+    const livePrevious = previousId ? this.slots.get(previousId) : undefined;
+    const previousFromLive = livePrevious !== undefined && !livePrevious.isDisposed;
+    const previousEntries = previousId ? previousFromLive
+      ? livePrevious.canonicalSessionEntries() : await this.canonicalSessionEvidenceCut(previousId) : undefined;
+    if (previousId && !previousEntries) throw new GatewayError("conflict", "Home settings predecessor is missing");
+    const previousBranch = previousEntries ? branchFromSessionEntries(previousEntries.filter((entry): entry is SessionEntry => entry.type !== "session")) : undefined;
+    if (previousId && !previousBranch) throw new GatewayError("conflict", "Home settings predecessor is invalid");
     const finishAdmission = this.beginSlotAdmission();
     let reserved = false;
     let slot: RuntimeSlot | undefined;
@@ -1040,6 +1072,12 @@ export class RuntimeRegistry {
         manager = SessionManager.create(cwd.cwd, sessionDirectory);
         const createdPath = manager.newSession({ id: sessionId });
         if (!createdPath) throw new GatewayError("internal", "Home chapter creation did not reserve a session path");
+        // These metadata-only appends stage in Pi. Validate and stage the
+        // inherited policy before committing the new path to the Home ledger.
+        if (previousBranch) {
+          appendChatSettingsSnapshot(previousBranch, manager);
+          appendContextWindowSnapshot(previousBranch, manager);
+        }
         await this.home.recordReservedChapterPath(sessionId, attemptId, createdPath);
         expectedPath = createdPath;
       }
@@ -1058,6 +1096,7 @@ export class RuntimeRegistry {
       if (slot.id !== sessionId || slot.sessionFile !== manager.getSessionFile()) {
         throw new GatewayError("conflict", "Home chapter runtime identity differs from its reservation");
       }
+      if (previousBranch) this.options.homeDiagnostic?.({ outcome: "chapter-recovery", reason: previousFromLive ? "settings-from-live" : "settings-from-cold" });
       const transcriptBytes = await sessionFileBytes(slot.persistedSessionFile);
       await this.mutex.run(() => {
         if (this.slots.has(sessionId)) throw new GatewayError("conflict", "Reserved Home chapter runtime is already active");
@@ -1409,7 +1448,10 @@ export class RuntimeRegistry {
         recovery: boolean,
         observed: boolean,
       ) => this.attentionLane.run(async () => {
-        const result = await this.attention.complete(sessionId, completion.id, !recovery && observed);
+        // A Home worker's completions are read by construction (#1003). Startup
+        // recovery runs before the worker index is seeded; seeding acknowledges those.
+        const read = (!recovery && observed) || this.homeTaskWorkers.has(sessionId);
+        const result = await this.attention.complete(sessionId, completion.id, read);
         if (result.changed) await this.publishAttentionSummary(sessionId, result.projection);
       }),
       closed: (sessionId: string, slot: RuntimeSlot) => {
@@ -1955,6 +1997,7 @@ export class RuntimeRegistry {
       ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
       sessionSearch: () => this.sessionSearchService,
+      settings: () => this.settingsOwners,
       ...(this.options.homeWebTransport ? { homeWebTransport: this.options.homeWebTransport } : {}),
       ...(this.options.jev ? { jev: this.options.jev } : {}),
       ...(this.options.connections ? { connections: this.options.connections } : {}),
@@ -1969,8 +2012,8 @@ export class RuntimeRegistry {
       homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => this.home.assertChapterAdmission(sessionId, metrics),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
-      homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => this.home.taskTool(sessionId, request),
-      homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => this.home.dispatchTask(sessionId, request),
+      homeTask: (sessionId: string, request: unknown) => this.home.taskTool(sessionId, request),
+      homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => this.dispatchHomeTask(sessionId, request, signal),
       validateTaskMarker: (sessionId: string, marker: unknown) => this.home.validateTaskMarker(sessionId, marker),
       ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),
       homeModelChanged: (sessionId: string, model: { provider: string; id: string }) => this.home.noteModelApplied(sessionId, model).catch(() => {
@@ -2037,7 +2080,7 @@ export class RuntimeRegistry {
       path: row.path,
       cwd: row.cwd,
       ...(row.parentSessionPath ? { parentSessionPath: row.parentSessionPath } : {}),
-      ...(row.name ? { name: row.name } : {}),
+      ...(this.home.chapterStateFor(row.id).homeId ? { name: "Home" } : row.name ? { name: row.name } : {}),
       created: new Date(row.createdAt),
       modified: new Date(row.updatedAt),
       messageCount: row.messageCount,
@@ -2114,12 +2157,13 @@ export class RuntimeRegistry {
     return ids;
   }
 
-  /** Automation admission and recovery run at startup, before the owner may have
-   * published a cut: `initialize()` starts the owner and returns. Wait for its
-   * first pass, then require the cut — a catalog that still has none is deferred
-   * retryably instead of being reported as a missing session, so a slow first
-   * read cannot fail startup or turn into a terminal automation outcome. */
-  private async awaitAutomationCatalogCut(): Promise<void> {
+  /** Automation admission and recovery, and Home's chapter files, are read at
+   * startup, before the owner may have published a cut: `initialize()` starts the
+   * owner and returns. Wait for its first pass, then require the cut — a catalog
+   * that still has none is deferred retryably instead of being reported as a
+   * missing session, so a slow first read cannot fail startup, turn into a
+   * terminal automation outcome, or read as a Home chapter with no file. */
+  private async awaitFirstCatalogCut(): Promise<void> {
     if (!this.sessionCatalog.hasCompleteCut()) {
       await Promise.race([this.sessionCatalog.whenPublished(), this.sessionCatalog.whenReconciled()]);
     }
@@ -2188,7 +2232,7 @@ export class RuntimeRegistry {
   }
 
   async requirePersistedUserSession(sessionId: string): Promise<void> {
-    await this.awaitAutomationCatalogCut();
+    await this.awaitFirstCatalogCut();
     const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     if (!entry) throw this.unprovenSessionRefusal(sessionId)
@@ -2199,6 +2243,16 @@ export class RuntimeRegistry {
     if (!await this.attentionEntryStillAdmitted(entry)) {
       throw new GatewayError("busy", "Automation target changed during validation", true);
     }
+  }
+
+  /** The leased worker of a task resumed in place (#929). Viewing the session never blocks
+   * this: an open slot keeps its subscribers and is rebound, not replaced. */
+  async resumeTaskWorker(sessionId: string, report: import("../home/home-task-report.js").HomeTaskReportOwner, exceptWorkToken?: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
+    const lease = await this.acquireOwnedSessionLease(sessionId);
+    try {
+      await lease.slot.bindTaskWorker(report, exceptWorkToken);
+      return lease;
+    } catch (error) { lease.release(); throw error; }
   }
 
   async acquireOwnedSessionLease(sessionId: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
@@ -2218,7 +2272,7 @@ export class RuntimeRegistry {
   }> {
     // The scheduler's recovery runs at startup: wait for the owner's first pass
     // rather than deciding an automation's outcome on an unready catalog.
-    await this.awaitAutomationCatalogCut();
+    await this.awaitFirstCatalogCut();
     const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     if (!entry || entry.structuralSubagent) return {};
@@ -2500,21 +2554,6 @@ export class RuntimeRegistry {
     return { summary: info, entries: selectedFile, ...(info.fileIdentity ? { fileIdentity: info.fileIdentity } : {}), ...(forkBoundary ? { forkBoundary } : {}), ...(selectedLeafId ? { leafEntryId: selectedLeafId } : {}) };
   }
 
-  async readSearchTranscriptPage(sessionId: string, before: number, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string): Promise<TranscriptPage> {
-    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
-    return slot.transcriptPage(before, undefined, expectedRuntimeGeneration, expectedLeafEntryId);
-  }
-
-  async readSearchTranscriptPageAtEntry(sessionId: string, entryID: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string, windowEnd?: number): Promise<TranscriptPage> {
-    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
-    return slot.transcriptPageAtEntry(entryID, expectedRuntimeGeneration, expectedLeafEntryId, windowEnd);
-  }
-
-  async readSearchTranscriptPageAfter(sessionId: string, after: number, expectedPreviousEntryId?: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string): Promise<TranscriptPage> {
-    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
-    return slot.transcriptPageAfter(after, expectedPreviousEntryId, expectedRuntimeGeneration, expectedLeafEntryId);
-  }
-
   async catalog(scope: "user" | "all" = "user"): Promise<{
     sessions: SessionSummary[];
     listRevision: number;
@@ -2794,6 +2833,7 @@ export class RuntimeRegistry {
         kind,
         ...(parentSessionId ? { parentSessionId } : {}),
         ...(session.creationOrigin ? { creationOrigin: session.creationOrigin } : {}),
+        ...(this.homeTaskWorkers.has(session.id) ? { homeTaskId: this.homeTaskWorkers.get(session.id)! } : {}),
         createdAt: session.created.toISOString(),
         updatedAt: latest?.updatedAt ?? session.modified.toISOString(),
         ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
@@ -2828,6 +2868,7 @@ export class RuntimeRegistry {
           ...(automationOwner ? {
             creationOrigin: { kind: "automation", automationId: automationOwner.automationId },
           } as const : {}),
+          ...(this.homeTaskWorkers.has(id) ? { homeTaskId: this.homeTaskWorkers.get(id)! } : {}),
           createdAt: slot.catalogCreatedAt,
           updatedAt: latest?.updatedAt ?? slot.catalogCreatedAt,
           ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
@@ -2867,6 +2908,7 @@ export class RuntimeRegistry {
       + (seed.parentSessionId ? Buffer.byteLength(seed.parentSessionId) : 0)
       + (seed.creationOrigin ? Buffer.byteLength(seed.creationOrigin.kind)
         + Buffer.byteLength(seed.creationOrigin.automationId) : 0)
+      + (seed.homeTaskId ? Buffer.byteLength(seed.homeTaskId) : 0)
       // Object/reference, number, and boolean storage for the seed and captured
       // summary/attention revision fields. String payloads are counted above.
       + 160, 0);
@@ -2882,6 +2924,7 @@ export class RuntimeRegistry {
         kind: seed.kind,
         ...(seed.parentSessionId ? { parentSessionId: seed.parentSessionId } : {}),
         ...(seed.creationOrigin ? { creationOrigin: seed.creationOrigin } : {}),
+        ...(seed.homeTaskId ? { homeTaskId: seed.homeTaskId } : {}),
         createdAt: seed.createdAt,
         updatedAt: seed.updatedAt,
         ...(seed.activeSince ? { activeSince: seed.activeSince } : {}),
@@ -2905,8 +2948,8 @@ export class RuntimeRegistry {
   private async projectTrustReloading(cwdInput: string): Promise<boolean> {
     if (this.trustReloadProjects.size === 0) return false;
     try {
-      const cwd = await this.options.trust.canonicalDirectory(cwdInput);
-      return this.trustReloadProjects.has(cwd);
+      const { projectDir } = await this.options.trust.inspect(cwdInput);
+      return this.trustReloadProjects.has(projectDir);
     } catch (error) {
       if (this.trustReloadProjects.size > 0) return true;
       throw error;
@@ -2938,7 +2981,7 @@ export class RuntimeRegistry {
       // pass: there is no room to make for it.
       const existing = await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         const current = this.slots.get(sessionId);
@@ -2969,7 +3012,7 @@ export class RuntimeRegistry {
       const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       return await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Automation session was retired before publication", true);
         }
         if (this.slots.has(sessionId)) {
@@ -3006,6 +3049,79 @@ export class RuntimeRegistry {
     return inspection.cwd;
   }
 
+  /** The Home profile's task budget (settings-model.md 6.1), read through the one
+   * resolver: at task admission (fixed at start) and at each worker turn boundary
+   * (a lowered budget applies live). Undefined is no limit. */
+  async homeTaskBudget(): Promise<{ inputTokens?: number; outputTokens?: number } | undefined> {
+    const settings = this.settingsOwners?.model;
+    if (!settings) return undefined;
+    const resolution = await settings.resolve({ kind: "home" }, undefined, ["permissions.budget.task"], { storeState: false });
+    return resolution.keys.find(key => key.key === "permissions.budget.task")?.value as { inputTokens?: number; outputTokens?: number } | undefined;
+  }
+
+  /** Home resolves its typed worker profile at the delegate boundary. The selected
+   * values are copied into this task only; later Home/profile changes cannot retarget it. */
+  private async dispatchHomeTask(sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) {
+    if ((request.model !== undefined || request.thinking !== undefined) && !request.reason?.trim()) {
+      throw new GatewayError("invalid_request", "An explicit worker model or thinking choice needs a short reason");
+    }
+    const settings = this.settingsOwners?.model;
+    const homeSlot = await this.acquire(sessionId);
+    const home = homeSlot.snapshot();
+    const resolution = settings ? await settings.resolve({ kind: "home" }, undefined,
+      ["model.ref[role=worker]", "model.thinking[role=worker]"]) : undefined;
+    const profileModel = resolution?.keys.find(key => key.key === "model.ref[role=worker]")?.value as
+      { provider: string; id: string } | { sameAs: "home" } | undefined;
+    const profileThinking = resolution?.keys.find(key => key.key === "model.thinking[role=worker]")?.value as
+      string | { sameAs: "home" } | undefined;
+    const fromProfileModel = request.model === undefined;
+    const fromProfileThinking = request.thinking === undefined;
+    const candidateModel = request.model ?? (profileModel && "provider" in profileModel ? profileModel : home.model);
+    const candidateThinking = request.thinking ?? (typeof profileThinking === "string" ? profileThinking : home.thinkingLevel);
+    let choice: HomeTaskWorkerChoice = {
+      ...(candidateModel ? { model: candidateModel } : {}),
+      ...(candidateThinking && candidateModel ? { thinking: candidateThinking as NonNullable<HomeTaskWorkerChoice["thinking"]> } : {}),
+    };
+    let fallback: string | undefined;
+    let clampNote: string | undefined;
+    if (choice.model) {
+      const model = this.options.gatewayModelRuntime?.getModel(choice.model.provider, choice.model.id);
+      const supported = model ? getSupportedThinkingLevels(model) : [];
+      if (choice.thinking && model && supported.length) {
+        const requested = choice.thinking;
+        choice.thinking = clampThinkingLevel(model, requested);
+        if (choice.thinking !== requested) clampNote = `${requested} clamped to ${choice.thinking}`;
+      }
+    }
+    if (fromProfileModel && choice.model) {
+      try { await this.admitTaskWorkerChoice({ model: choice.model }); }
+      catch (error) {
+        const reason = error instanceof GatewayError && error.details && typeof error.details === "object"
+          ? (error.details as { reason?: unknown }).reason : undefined;
+        if (!(error instanceof GatewayError) || !["unavailable-model", "unregistered-model", "virtual-model"].includes(String(reason))) throw error;
+        fallback = `Profile worker model ${choice.model.provider}/${choice.model.id} unavailable; worker default used (${String(reason)})`;
+        choice = candidateThinking ? { thinking: candidateThinking as NonNullable<HomeTaskWorkerChoice["thinking"]> } : {};
+      }
+    }
+    const modelText = choice.model ? `${choice.model.provider}/${choice.model.id}` : "Gateway default";
+    const thinkingText = choice.thinking ?? "Gateway default";
+    const explicitReason = request.model || request.thinking ? request.reason!.trim() : undefined;
+    const modelSource = request.model ? `explicit: ${explicitReason}`
+      : fallback ?? (profileModel && "provider" in profileModel ? "Home profile" : "same as Home");
+    const thinkingSource = request.thinking ? `explicit: ${explicitReason}`
+      : typeof profileThinking === "string" ? "Home profile" : "same as Home";
+    const choiceNotes = [clampNote].filter(Boolean).join("; ");
+    const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.`;
+    const { model: _model, thinking: _thinking, ...input } = request;
+    const worker = { model: modelText, thinking: thinkingText, modelSource, thinkingSource, ...(choiceNotes ? { note: choiceNotes } : {}) };
+    const handle = await this.home.dispatchTask(sessionId, { ...input, ...choice, intent: brief,
+      provenance: {
+        model: { via: fallback ? "home-fallback" : !fromProfileModel ? "home-explicit" : profileModel && "provider" in profileModel ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
+        thinking: { via: !fromProfileThinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
+      } }, signal);
+    return { ...handle, worker };
+  }
+
   /** Admits a delegation's model and thinking level against the Gateway's own model
    * runtime, the one designation validates against. Read-only. */
   async admitTaskWorkerChoice(choice: HomeTaskWorkerChoice): Promise<HomeTaskWorkerChoice> {
@@ -3027,7 +3143,7 @@ export class RuntimeRegistry {
       // pass: there is no room to make for it.
       await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         this.requireLiveSlotCapacity();
@@ -3041,7 +3157,7 @@ export class RuntimeRegistry {
       );
       const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       await this.mutex.run(() => {
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Session creation was retired before publication", true);
         }
         if (this.slots.has(manager.getSessionId())) {
@@ -3309,6 +3425,14 @@ export class RuntimeRegistry {
     return slot.retainLease();
   }
 
+  /** A live chat's selectable tools, for its settings tool selection. The caller
+   * has already opened the chat. */
+  liveToolCatalog(sessionId: string): Array<{ name: string; description?: string; resource: Record<string, unknown> }> {
+    const slot = this.slots.get(sessionId);
+    if (!slot || slot.isDisposed) throw new GatewayError("busy", "Session runtime is no longer available", true);
+    return slot.settingsToolCatalog();
+  }
+
   async acquire(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot> {
     this.assertSlotAdmissionOpen();
     if (this.homePublicationUncertain && this.home.chapterStateFor(sessionId).homeId) {
@@ -3433,8 +3557,12 @@ export class RuntimeRegistry {
   private async scanHomeBeforeManager(sessionId: string, path: string): Promise<void> {
     const chapter = this.home.chapterStateFor(sessionId);
     if (!chapter.homeId) return;
-    if (chapter.sealed || chapter.materializing || chapter.expectedPath && resolve(chapter.expectedPath) !== resolve(path)) {
-      throw new GatewayError("conflict", "Home chapter cannot be opened as a writable runtime");
+    // A sealed chapter opens cold exactly as a warm one does: read-only. The caller's
+    // header read refuses an unstable tail before the SDK can repair it, and the slot's
+    // chapter state refuses every write (`assertChapterWritable`). Only an in-progress
+    // materialization or a path the ledger does not name is refused.
+    if (chapter.materializing || chapter.expectedPath && resolve(chapter.expectedPath) !== resolve(path)) {
+      throw new GatewayError("conflict", "Home chapter cannot be opened as a runtime");
     }
     const canonicalPath = resolve(path);
     // The exact file owns its evidence directory. Re-encoding cwd can select
@@ -3521,7 +3649,7 @@ export class RuntimeRegistry {
       ));
       await this.mutex.run(() => {
         if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration
-            || this.trustReloadProjects.has(entry.canonicalCwd)) {
+            || this.trustReloadProjects.has(slot!.projectDir)) {
           throw new GatewayError("busy", "Session runtime start was retired before publication", true);
         }
         const ambiguous = this.indexAmbiguousSessionIds();
@@ -3571,7 +3699,7 @@ export class RuntimeRegistry {
       // is a mutation whose owner settles it.
       return await this.coldLoadGate.run(undefined, () => this.mutex.run(async () => {
         this.assertSlotAdmissionOpen();
-        if (this.trustReloadProjects.has(trust.cwd)) {
+        if (this.trustReloadProjects.has(trust.projectDir)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         this.requireLiveSlotCapacity();
@@ -3613,17 +3741,19 @@ export class RuntimeRegistry {
     }
   }
 
-  async reloadProject(cwdInput: string, projectTrusted?: boolean, publish = true): Promise<void> {
-    const cwd = await this.options.trust.canonicalDirectory(cwdInput);
+  /** Reload every live runtime of one Project root (`TrustInspection.projectDir`),
+   * including chats in its subdirectories. */
+  async reloadProject(projectDirInput: string, projectTrusted?: boolean, publish = true): Promise<void> {
+    const projectDir = await this.options.trust.canonicalDirectory(projectDirInput);
     const transactional = !publish;
     const slots = await this.mutex.run(() => {
-      const current = [...this.slots.values()].filter((slot) => slot.cwd === cwd);
+      const current = [...this.slots.values()].filter((slot) => slot.projectDir === projectDir);
       if (current.some((slot) => slot.isBusy)) {
         throw new GatewayError("busy", "Stop active sessions before changing project trust", true);
       }
       if (transactional) {
         current.forEach((slot) => slot.beginTrustReload());
-        this.trustReloadProjects.add(cwd);
+        this.trustReloadProjects.add(projectDir);
       }
       return current;
     });
@@ -3662,18 +3792,27 @@ export class RuntimeRegistry {
     if (publish) slots.forEach((slot) => slot.commitReload());
   }
 
-  refreshCompactionPolicies(scope: "global" | "project", cwd: string): void {
+  refreshCompactionPolicies(scope: "global" | "project", projectDir: string): void {
     for (const slot of this.slots.values()) {
-      if (scope === "global" || slot.cwd === cwd) slot.refreshCompactionPolicy();
+      if (scope === "global" || slot.projectDir === projectDir) slot.refreshCompactionPolicy();
     }
   }
 
-  async commitProjectReload(cwdInput: string): Promise<void> {
-    const cwd = await this.options.trust.canonicalDirectory(cwdInput);
+  /** An approved/tapped image-policy widening releases only the fixed inherited
+   * pin in already-open chats at the affected default scope. A Project scope is
+   * its canonical Project root, which every chat of that root shares. */
+  async releaseInheritedImageBlock(projectDir?: string): Promise<void> {
+    const slots = [...this.slots.values()].filter(slot => !slot.isDisposed && (projectDir === undefined || slot.projectDir === projectDir));
+    await Promise.all(slots.map(slot => slot.releaseInheritedImageBlock(projectDir === undefined ? "mac" : "project")));
+  }
+
+  async commitProjectReload(projectDirInput: string): Promise<void> {
+    // The key reloadProject added must leave even if the root vanished since.
+    const projectDir = await this.options.trust.canonicalDirectory(projectDirInput).catch(() => projectDirInput);
     await this.mutex.run(() => {
-      const slots = [...this.slots.values()].filter((slot) => slot.cwd === cwd);
+      const slots = [...this.slots.values()].filter((slot) => slot.projectDir === projectDir);
       slots.forEach((slot) => slot.commitReload());
-      this.trustReloadProjects.delete(cwd);
+      this.trustReloadProjects.delete(projectDir);
     });
   }
 
@@ -4695,14 +4834,27 @@ export class RuntimeRegistry {
   /** The canonical file behind one session id: the live runtime's when it has
    * one, else the catalog's exact path. Home's memory must open across an idle
    * eviction, so a live runtime is not required. */
+  /** One session's indexed file, by direct row lookup on the published cut.
+   * Home task list/status call this per task row; building the whole catalog
+   * acquisition here made every row O(catalog) and timed out `home.taskList`
+   * for the work owner check (#905). An ambiguous ID yields no file; a read
+   * before the first cut joins it, and refuses retryably if none arrives. */
   private async homeSessionFile(sessionId: string): Promise<string | undefined> {
     const live = this.slots.get(sessionId)?.sessionFile;
     if (live) return live;
-    try {
-      return (await this.catalogMembership(sessionId)).entry?.path;
-    } catch {
-      return undefined;
-    }
+    // No cut is not "no file": every Home caller reads undefined as a chapter whose
+    // file was never created, so the first read after a restart refused Home memory
+    // as having no canonical source (#968). Join the first cut instead.
+    await this.awaitFirstCatalogCut();
+    const indexed = () => {
+      if (this.indexAmbiguousSessionIds().has(sessionId)) return undefined;
+      const row = this.sessionCatalog.rows().find((candidate) => candidate.id === sessionId);
+      return row ? resolve(row.path) : undefined;
+    };
+    const found = indexed();
+    if (found) return found;
+    await this.sessionCatalog.awaitQueuedChanges();
+    return indexed();
   }
 
   /** The model a task worker's transcript recorded last (`model_change`). A live worker
@@ -4711,6 +4863,83 @@ export class RuntimeRegistry {
   async taskWorkerModel(sessionId: string): Promise<{ provider: string; id: string } | undefined> {
     const change = (await this.taskWorkerEntries(sessionId)).findLast(entry => entry.type === "model_change");
     return change?.type === "model_change" ? { provider: change.provider, id: change.modelId } : undefined;
+  }
+
+  /** Record which Home task created each worker session. The first task to
+   * name a session owns it (a resumed task rebinds the same worker). A change
+   * invalidates catalogs once per call, so recovery publishes one batch.
+   *
+   * Home workers never read as unread (#1003): their result reports back to
+   * Home, so only sessions the maintainer started himself join the Unread
+   * queue. Every completion of a recorded worker is admitted read. A worker
+   * newly recorded here, which recovery does for every worker in the ledger at
+   * startup, also has any earlier completion acknowledged: that clears unread
+   * left by builds before this rule and completions recovered at startup
+   * before this index was seeded. An explicit mark-unread is kept. */
+  recordTaskWorkers(workers: Iterable<readonly [sessionId: string, taskId: string]>): void {
+    let changed = false;
+    const acknowledge: string[] = [];
+    for (const [sessionId, taskId] of workers) {
+      if (this.homeTaskWorkers.has(sessionId)) continue;
+      this.homeTaskWorkers.set(sessionId, taskId);
+      changed = true;
+      if (this.attention.hasUnacknowledgedCompletion(sessionId)) acknowledge.push(sessionId);
+    }
+    if (acknowledge.length > 0) void this.acknowledgeTaskWorkers(acknowledge);
+    if (!changed) return;
+    this.catalogProjectionGeneration += 1;
+    this.options.sessionListChanged();
+  }
+
+  private async acknowledgeTaskWorkers(sessionIds: readonly string[]): Promise<void> {
+    await this.attentionLane.run(async () => {
+      let cold = false;
+      for (const sessionId of sessionIds) {
+        try {
+          const result = await this.attention.acknowledgeCompletions(sessionId);
+          if (!result.changed) continue;
+          const latest = this.latestSummaries.get(sessionId);
+          if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
+          else cold = true;
+        } catch {
+          // The worker stays unread until the next startup's seeding retries it.
+          this.options.persistenceDiagnostic?.(sessionId, "home-worker-attention-failed");
+        }
+      }
+      if (cold) {
+        this.catalogProjectionGeneration += 1;
+        this.options.sessionListChanged();
+      }
+    });
+  }
+
+  /** A Home task settled: its worker session gains one attention completion,
+   * keyed by the task, admitted read (#1003) so the worker never joins the
+   * Unread queue; the completion still advances the row's attention revision.
+   * A worker ends through its `report` tool call, which is never a successful
+   * final assistant reply, so the ordinary completion path cannot see it. */
+  taskWorkerSettled(sessionId: string, taskId: string): Promise<void> {
+    return this.attentionLane.run(async () => {
+      const result = await this.attention.complete(sessionId, `task:${taskId}`, true);
+      if (!result.changed) return;
+      const latest = this.latestSummaries.get(sessionId);
+      if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
+      else {
+        // A cold worker has no retained summary: invalidate catalogs, as
+        // `session.attention.set` does, rather than fabricating one.
+        this.catalogProjectionGeneration += 1;
+        this.options.sessionListChanged();
+      }
+    });
+  }
+
+  /** A worker's display name: the live session's own name, else its catalog row.
+   * A list shows it for every row, so it is never a session snapshot build (#905, #906). */
+  async taskWorkerName(sessionId: string): Promise<string | undefined> {
+    const live = this.slots.get(sessionId);
+    if (live) return live.displayName;
+    const path = await this.homeSessionFile(sessionId);
+    return path ? this.sessionCatalog.row(path)?.name : undefined;
   }
 
   /** The worker's subagent facts for one operation, read like its model. */
@@ -4730,7 +4959,7 @@ export class RuntimeRegistry {
   private async taskWorkerEntries(sessionId: string): Promise<FileEntry[]> {
     const live = this.slots.get(sessionId);
     if (live) return live.canonicalSessionEntries();
-    if (await this.homeSessionFile(sessionId)) return await this.taskEvidenceFileCut(sessionId) ?? [];
+    if (await this.homeSessionFile(sessionId)) return await this.canonicalSessionEvidenceCut(sessionId) ?? [];
     return [];
   }
 
@@ -4738,7 +4967,7 @@ export class RuntimeRegistry {
    * resources or repairs the canonical file. Sync and identity checks precede
    * immutable terminal/outbox publication and operation acknowledgement. */
   async readTaskEvidence(sessionId: string): Promise<FileEntry[]> {
-    const entries = await this.taskEvidenceFileCut(sessionId);
+    const entries = await this.canonicalSessionEvidenceCut(sessionId);
     if (!entries) throw new GatewayError("conflict", "Task canonical session is missing");
     return entries;
   }
@@ -4753,19 +4982,19 @@ export class RuntimeRegistry {
       const slot = this.slots.get(sessionId);
       if (!slot) throw new GatewayError("conflict", "Task runtime is missing");
       return slot.inspectTaskSettlement(operationId, async operationSettled => {
-        const entries = await this.taskEvidenceFileCut(sessionId);
+        const entries = await this.canonicalSessionEvidenceCut(sessionId);
         return entries ? { state: "present" as const, entries, branch: slot.canonicalSessionEntries() }
           : { state: "absent" as const, operationSettled };
       });
     });
   }
 
-  private async taskEvidenceFileCut(sessionId: string): Promise<FileEntry[] | null> {
-    // Recovery publishes a permanent result. A loaded previous catalog cut or
-    // a not-yet-ready projection cannot decide whether its report exists.
+  private async canonicalSessionEvidenceCut(sessionId: string): Promise<SessionEntry[] | null> {
+    // Task settlement and Home carry-forward publish durable results. A stale
+    // catalog cut or a not-yet-ready projection cannot decide source presence.
     await this.sessionCatalog.whenReconciled();
     const path = await this.homeSessionFile(sessionId);
-    if (!path) throw new GatewayError("conflict", "Task canonical session is missing");
+    if (!path) throw new GatewayError("conflict", "Canonical session is missing");
     const before = await lstat(path).catch(error => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;
@@ -4780,10 +5009,10 @@ export class RuntimeRegistry {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
         throw error;
       });
-      if (after) throw new GatewayError("conflict", "Task canonical session changed during inspection");
+      if (after) throw new GatewayError("conflict", "Canonical session changed during inspection");
       return null;
     }
-    if (!before.isFile() || before.isSymbolicLink()) throw new GatewayError("conflict", "Task canonical session is unsafe");
+    if (!before.isFile() || before.isSymbolicLink()) throw new GatewayError("conflict", "Canonical session is unsafe");
     for (const durablePath of [path, dirname(path)]) {
       const handle = await open(durablePath, "r");
       try { await syncDurably(handle); } finally { await handle.close(); }
@@ -4791,8 +5020,8 @@ export class RuntimeRegistry {
     const entries = await readCanonicalSessionFile({ path, sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes });
     const after = await lstat(path);
     if (after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
-      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new GatewayError("conflict", "Task canonical session changed during inspection");
-    return entries.map(entry => entry.raw as unknown as FileEntry);
+      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new GatewayError("conflict", "Canonical session changed during inspection");
+    return entries.map(entry => entry.raw as unknown as SessionEntry);
   }
 
   /** Whether Home's recorded session still exists: a live runtime, or a

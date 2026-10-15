@@ -13,6 +13,26 @@ extension EnvironmentValues {
     }
 }
 
+/// The transcript's horizontally scrolling chip row: prompt photo/file chips and
+/// a grouped run's display chips share one layout, spacing and scroll policy.
+/// Chips scroll past the row's margins rather than clipping at them.
+struct ChatChipStrip<Content: View>: View {
+    var alignment: HorizontalAlignment = .leading
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        let frameAlignment: Alignment = alignment == .trailing ? .trailing : .leading
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) { content }
+                .frame(maxWidth: .infinity, alignment: frameAlignment)
+                .chatSecondaryScrollContent()
+        }
+        .scrollClipDisabled()
+        .defaultScrollAnchor(alignment == .trailing ? .trailing : .leading)
+        .frame(maxWidth: .infinity, alignment: frameAlignment)
+    }
+}
+
 extension View {
     /// Apply to CONTENT inside a secondary scroll, never the scroll's background
     /// outside its native hierarchy. Other screens keep their existing policy.

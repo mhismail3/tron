@@ -19,7 +19,8 @@ implementation detail; all user-facing language calls the agent Tron.
 | `Sources/UI/Automations` | dashboard selector, chronological agenda, inventory, detail/run presentations, and schedule editor |
 | `Sources/UI/Onboarding` | pairing/setup flow, reusable onboarding chrome, workspace, provider, and default setup |
 | `Sources/UI/Settings` | settings shell plus appearance, connection, provider, agent-default, on-demand package/resource, trust, custom-model, and diagnostic presentations |
-| `Sources/UI/Terminal` | sheet composition, presentation lifecycle, and SwiftTerm renderer |
+| `Sources/UI/Terminal` | sheet composition (the shared `TerminalSheetChrome`/`TerminalSurface` for the session terminal and Mac Terminal), presentation lifecycle, and SwiftTerm renderer |
+| `MacTerminalSSH` | local Swift package: Mac Terminal's SSH client on swift-nio-ssh, and the `mac-terminal-probe` the real-sshd journey drives |
 | `Sources/UI/Theme` | historical Tron colors and descriptor-based bundled typography |
 | `ShareExtension` | app-group share handoff |
 
@@ -160,7 +161,7 @@ both success and failure publication; ordinary disconnect retirement therefore c
 response from the predecessor update a successor projection. Provider authentication retains its separate retire/resume owner, and
 accepted mutations remain outside this optional-read fence. A non-selecting pairing commit adds a server without
 changing the focused profile; the dashboard pool owns shallow catalog connections for the other
-paired profiles, admitting at most one enabled profile per verified physical-machine group, each with an independent failure boundary. Pairing responses, WebSocket hellos, and authenticated `system.info` values must carry a bounded `stable` or `dev` Gateway channel; pairing and every initial/reconnect handshake fail closed unless that asserted identity matches the saved profile endpoint’s expected channel. Port selects the expected profile, but never substitutes for the Gateway’s authenticated assertion. Pool handshakes also validate the paired machine identity; mismatches stop retrying until pairing metadata changes, while malformed bounded catalogs enter the normal retry path. Pairing responses and hellos also carry the private-LAN lanes the Mac serves (`lanEndpoints`) with the pin their certificate must match (`lanPin`); the paired profile keeps the endpoints this phone can actually dial and a pin that is a 32-byte digest, and replaces both on every hello, so a Mac that moved or switched its LAN lane off never leaves a stale address to race. No LAN value is ever read from an unauthenticated route. An epoch that lane carried also routes that connection's authenticated HTTP requests — live view, media/blob reads and attachment staging — through the same pinned endpoint, so a home network does not hang an image or an upload on the Tailscale path the race lost; an epoch without one, and every request made while no epoch is connected, keeps the saved endpoint. Each pool connection epoch owns one reader of its client's event stream, retired with that epoch, and every connection that connects starts one: a reconnect after an initial connect that failed keeps consuming its socket's `session.summary`, `system.stopping` and `transport.disconnected` rather than delivering them to nobody. Connections uses those profile-owned clients for per-server gateway metadata and authorized-device discovery. Its visible order is paired Macs, authorized devices, then this iPhone's push-notification readiness. Authorized-device names come from the Gateway's effective label projection: custom label, last exact Mac-observed name, then pairing fallback. A focused server advertising `device-label.v1` enables a leading Rename action in the authorized-device detail sheet. It opens the shared native text-entry popup used by Manage Session; cancelling changes nothing, while saving a bounded label updates the custom label and saving an empty value explicitly restores the observed default name. Label receipt completion stays with the mutation owner; presentation/read-generation fences prevent retired reads or saves from replacing visible errors or names, and accepted mutations are reconciled from the authoritative response after the popup closes. `devices.changed` from focused and secondary servers advances a presentation invalidation revision; only active Connections/detail surfaces reload, without exposing physical identifiers or awaiting a catalog read on the control-event lane. Every authorized-device row opens a device-owned detail sheet rather than nesting revocation inside the row. Administrative source/install controls still require the lifecycle-owned focused profile: a device on another server first presents **Use This Server**, preserving receipt ownership instead of adding mutations to the shallow dashboard pool. A capable supervised macOS Gateway advertises `ios-device-install.v3`; its detail sheet reuses the remote workspace browser for a separately validated Tron source checkout and confirms a fixed **Tron Device** + **LocalDevice** overwrite install for the authorized device itself. A one-time Mac-local `scripts/tron-ios-device-bind.mjs` command binds the intended connected Developer Mode physical device through the local-only Gateway control plane; subsequent installs revalidate that exact owner-only binding and fail closed when it is unavailable instead of substituting another device. CoreDevice identifiers never enter iOS models, caches, logs, or RPC projections. The detached Mac helper owns Xcode/device execution and durable requested/running/succeeded/failed status, so installation continues across the initiating socket's replacement and the rebuilt app can recover status after relaunch. Gateway update, rollback, restart, and iOS installation are mutually exclusive administrative transitions. The action cannot select Release, DevicePerformance, an executable, scheme, bundle ID, or arbitrary command; Stable remains Mac-first and app/Keychain data is never intentionally erased. Revocation removes the owner-side install mapping. Log history is isolated in a separate top-level Settings destination and Gateway records are fetched only while that sheet is presented, keeping connection and server-detail presentation independent of the bounded log payload. Typed Gateway response decode failures also enter a 200-record, in-memory-only iOS client ring and are merged into that sheet with an explicit `iOS client` source; the in-app notification action links directly to Logs. This local projection is never written to canonical sessions or Gateway logs and disappears when the app exits. Gateway update status/config reads and restart/update/rollback mutations use only the lifecycle-owned focused profile so receipt handling remains authoritative; a non-focused detail must first choose **Use This Server** and never reads update state through the dashboard pool. Runtime source/fingerprint/epoch fields remain optional, while channel identity is required. An exact provenance-bound Debug candidate plus `gateway-update.v1` enables the confirmed **Promote Debug to Stable** action and pins its version and fingerprint. The separate generic maintenance action is always **Rebuild from Source** and is user-initiated only: repository agents may prepare and validate source but never press the action or submit its RPC. It requires a valid configured source root and sends source mode; its copy explicitly does not claim that an update is pending, and an arbitrary available artifact never becomes an automatic promotion fallback. A failed deployment exposes one equally confirmed **Roll Back** action, sending only channel and command ID to the supervised helper through the same receipt path. Bounded `gateway.update.status` and `gateway.update.config.status` projections place live deployment state directly under connection state; a terminal ready state with no candidate is labeled **Installed and running**, while a verified candidate takes precedence as **Update available**. Source revision, runtime epoch, and payload identity stay behind the per-server sheet's leading info button, which presents the standard metadata tables under **Server Info**; the server sheet itself keeps no inline gateway metadata, and its lifecycle actions render in paired columns, with a lone trailing action (such as Disable) filling the same content width as the full-width, error-accent pairing action below. Source configuration is one row with a selected-path capsule that reuses the Gateway-backed workspace selector, redacts the accepted Mac path to useful trailing components, and saves only that typed source-root mutation through the same admission/receipt path. Build/update and rollback remain separate confirmed actions outside the configuration container. Status polling is command-ID-bound, bounded to roughly one second, and stops at terminal state, reconnect, or view disappearance; reconnect starts a fresh authoritative read. Missing capability or malformed/unsupported status fails closed without presenting an approval action. `GatewayClient` centrally translates typed-response `DecodingError` values into bounded `invalid_response` failures containing only the RPC method, reason category, and sanitized coding path—never response values—before presentation or local diagnostics. Session-open admission identifies the rejected bounded projection (`session.extensionPresentation`, `session.extensionActivities`, or `session.processOverview`) instead of collapsing every cross-field failure to `session`, so diagnostics remain actionable without logging payload data. Session synchronization retries a malformed authoritative open response at most twice from a fresh `session.open`; a third failure surfaces a persistent actionable in-app notification with a View Logs action and byte-bounded local diagnostic instead of Foundation's generic decode text. It composes `GatewayClient` without copying that actor's
+paired profiles, admitting at most one enabled profile per verified physical-machine group, each with an independent failure boundary. Pairing responses, WebSocket hellos, and authenticated `system.info` values must carry a bounded `stable` or `dev` Gateway channel; pairing and every initial/reconnect handshake fail closed unless that asserted identity matches the saved profile endpoint’s expected channel. Port selects the expected profile, but never substitutes for the Gateway’s authenticated assertion. Pool handshakes also validate the paired machine identity; mismatches stop retrying until pairing metadata changes, while malformed bounded catalogs enter the normal retry path. Pairing responses and hellos also carry the private-LAN lanes the Mac serves (`lanEndpoints`) with the pin their certificate must match (`lanPin`); the paired profile keeps the endpoints this phone can actually dial and a pin that is a 32-byte digest, and replaces both on every hello, so a Mac that moved or switched its LAN lane off never leaves a stale address to race. No LAN value is ever read from an unauthenticated route. An epoch that lane carried also routes that connection's authenticated HTTP requests — live view, media/blob reads and attachment staging — through the same pinned endpoint, so a home network does not hang an image or an upload on the Tailscale path the race lost; an epoch without one, and every request made while no epoch is connected, keeps the saved endpoint. Each pool connection epoch owns one reader of its client's event stream, retired with that epoch, and every connection that connects starts one: a reconnect after an initial connect that failed keeps consuming its socket's `session.summary`, `system.stopping` and `transport.disconnected` rather than delivering them to nobody. Connections uses those profile-owned clients for per-server gateway metadata and authorized-device discovery. Its visible order is paired Macs then authorized devices; this iPhone's push-notification readiness and alert policy are their own Settings destination, Push Notifications, beside Connections in Accounts. Authorized-device names come from the Gateway's effective label projection: custom label, last exact Mac-observed name, then pairing fallback. A focused server advertising `device-label.v1` enables a leading Rename action in the authorized-device detail sheet. It opens the shared native text-entry popup used by Manage Session; cancelling changes nothing, while saving a bounded label updates the custom label and saving an empty value explicitly restores the observed default name. Label receipt completion stays with the mutation owner; presentation/read-generation fences prevent retired reads or saves from replacing visible errors or names, and accepted mutations are reconciled from the authoritative response after the popup closes. `devices.changed` from focused and secondary servers advances a presentation invalidation revision; only active Connections/detail surfaces reload, without exposing physical identifiers or awaiting a catalog read on the control-event lane. Every authorized-device row opens a device-owned detail sheet rather than nesting revocation inside the row. Administrative source/install controls still require the lifecycle-owned focused profile: a device on another server first presents **Use This Server**, preserving receipt ownership instead of adding mutations to the shallow dashboard pool. A capable supervised macOS Gateway advertises `ios-device-install.v3`; its detail sheet reuses the remote workspace browser for a separately validated Tron source checkout and confirms a fixed **Tron Device** + **LocalDevice** overwrite install for the authorized device itself. A one-time Mac-local `scripts/tron-ios-device-bind.mjs` command binds the intended connected Developer Mode physical device through the local-only Gateway control plane; subsequent installs revalidate that exact owner-only binding and fail closed when it is unavailable instead of substituting another device. CoreDevice identifiers never enter iOS models, caches, logs, or RPC projections. The detached Mac helper owns Xcode/device execution and durable requested/running/succeeded/failed status, so installation continues across the initiating socket's replacement and the rebuilt app can recover status after relaunch. Gateway update, rollback, restart, and iOS installation are mutually exclusive administrative transitions. The action cannot select Release, DevicePerformance, an executable, scheme, bundle ID, or arbitrary command; Stable remains Mac-first and app/Keychain data is never intentionally erased. Revocation removes the owner-side install mapping. Log history is isolated in a separate top-level Settings destination and Gateway records are fetched only while that sheet is presented, keeping connection and server-detail presentation independent of the bounded log payload. Typed Gateway response decode failures also enter a 200-record, in-memory-only iOS client ring and are merged into that sheet with an explicit `iOS client` source; the in-app notification action links directly to Logs. This local projection is never written to canonical sessions or Gateway logs and disappears when the app exits. Gateway update status/config reads and restart/update/rollback mutations use only the lifecycle-owned focused profile so receipt handling remains authoritative; a non-focused detail must first choose **Use This Server** and never reads update state through the dashboard pool. Runtime source/fingerprint/epoch fields remain optional, while channel identity is required. An exact provenance-bound Debug candidate plus `gateway-update.v1` enables the confirmed **Promote Debug to Stable** action and pins its version and fingerprint. The separate generic maintenance action is always **Rebuild from Source** and is user-initiated only: repository agents may prepare and validate source but never press the action or submit its RPC. It requires a valid configured source root and sends source mode; its copy explicitly does not claim that an update is pending, and an arbitrary available artifact never becomes an automatic promotion fallback. A failed deployment exposes one equally confirmed **Roll Back** action, sending only channel and command ID to the supervised helper through the same receipt path. Bounded `gateway.update.status` and `gateway.update.config.status` projections place live deployment state directly under connection state; a terminal ready state with no candidate is labeled **Installed and running**, while a verified candidate takes precedence as **Update available**. Source revision, runtime epoch, and payload identity stay behind the per-server sheet's leading info button, which presents the standard metadata tables under **Server Info**; the server sheet itself keeps no inline gateway metadata, and its lifecycle actions render in paired columns, with a lone trailing action (such as Disable) filling the same content width as the full-width, error-accent pairing action below. Source configuration is one row with a selected-path capsule that reuses the Gateway-backed workspace selector, redacts the accepted Mac path to useful trailing components, and saves only that typed source-root mutation through the same admission/receipt path. Build/update and rollback remain separate confirmed actions outside the configuration container. Status polling is command-ID-bound, bounded to roughly one second, and stops at terminal state, reconnect, or view disappearance; reconnect starts a fresh authoritative read. Missing capability or malformed/unsupported status fails closed without presenting an approval action. `GatewayClient` centrally translates typed-response `DecodingError` values into bounded `invalid_response` failures containing only the RPC method, reason category, and sanitized coding path—never response values—before presentation or local diagnostics. Session-open admission identifies the rejected bounded projection (`session.extensionPresentation`, `session.extensionActivities`, or `session.processOverview`) instead of collapsing every cross-field failure to `session`, so diagnostics remain actionable without logging payload data. Session synchronization retries a malformed authoritative open response at most twice from a fresh `session.open`; a third failure surfaces a persistent actionable in-app notification with a View Logs action and byte-bounded local diagnostic instead of Foundation's generic decode text. It composes `GatewayClient` without copying that actor's
 byte-transport epoch. `AppModel` supplies narrow projection hooks for cache installation, refresh,
 session/terminal reconciliation, and synchronous retirement; it no longer stores a parallel lifecycle
 phase, reconnect task, pairing attempt, connection identity, or transition waiters. A dedicated
@@ -187,12 +188,20 @@ changed revisions still force fresh canonical occurrence reads. The dashboard ha
 `automation.changed`. No second mutation-reconciliation algorithm or Automation event journal exists.
 `HomeStatusPresentationOwner` is an observable owner of only the focused Gateway's in-memory Home status projection. The surface's mount owns the status read, so a dashboard mounted before pairing reads Home once pairing configures a profile; a profile transition forgets the advertised capability, while a dropped connection keeps it so the row does not flicker. A read that the Gateway answers with a status this client cannot admit publishes a typed `isStatusUnavailable` state, which the row shows instead of loading. `SessionShellView` registers its exact `PresentationSurfaceToken` with the shared `PresentationActivityCoordinator`; every status read and post-await publication checks that token's current managed activity, profile, authenticated connection and latest read generation. Retirement must name the exact token, so a delayed callback from an older dashboard cannot clear a replacement. The owner does not persist status, session identity, or memory data. Its typed DTO decodes exactly the fields the app reads: it requires the phase, activation, readiness gaps, recovery reason and memory sections, rejects an unknown phase rather than guessing, and ignores every other Gateway field. `AppModel` retires status with lifecycle connection ownership, clears it on loss, then admits a fresh status read from the authenticated reconnect callback only if the current profile advertises `home.v1`. Backgrounding suspends the read and clears status; foreground reconciliation re-admits it. Matching Home-session summaries and session-list invalidations trigger an immediate refresh, while the active Home dashboard or its mounted chat route runs one sequential fallback no more frequently than every five seconds. A chat opened before status is known takes a `connectionOnly(HomeChatRouteKey)` probe: it reads on each connection admission and retries once after a covering discards its read, but it never polls and is not refreshed by invalidations or mutations. The key is one predicate (`HomeChatRouteKey.matches`): a Home route always claims the Home status, even with no openable chapter, so its recovery state stays reachable from the context ring; an ordinary chat matches only the chapter it is (`sessionId`), so an ordinary chat on the sealed predecessor during a rollover (or an open read-only chapter) never claims the status or manages Home. The first published status decides the claim. A matching route promotes the surface to the mounted cadence; any other route releases it, which keeps the published status for the dashboard and makes no further reads. A known status decides the chat by the same key alone. Cover/uncover activity is observed on the exact mounted surface so covering sheets retire disposable reads and dismissal resumes convergence.
 
+Moving the Home status read between dashboard and chat retires the old surface's
+requests and publication fence, not the last admitted status or capability. The
+same authenticated connection therefore keeps its pinned row while the new
+surface refreshes. Profile/connection retirement and capability loss still clear
+the projection; authoritative status changes publish normally. This is one
+in-memory projection, not a second row cache or a delayed refresh.
+
 A chat that claims the Home status manages Home from the composer's context ring
 (#748), through `ChatView.presentManageHome`: the `manage` destination (the **Manage
 Home** sheet, #725) replaces the ordinary Manage Session sheet, whose
 compaction/tool/fork/resource controls are refused for Home, and opens at the
 medium detent with drag to large, like Manage Session (#799); its child Home
-sheets open full height. The gear opens Settings in every chat, Home included
+sheets also open at the medium detent and drag to large (#807,
+`testManageHomeSubSheetsOpenAtMedium`). The gear opens Settings in every chat, Home included
 (#799). Every other chat keeps Manage Session on the ring, and the ring's
 accessibility label names the sheet it opens. The sheet presents one `home.status` read as sections — state, chat
 model and context window, Home context, memory (settings, browser, pause/resume),
@@ -200,22 +209,51 @@ bounded chapter metadata, tasks and permissions, and disable/check-completion �
 and opens each existing Home destination as a managed child sheet with its own
 read owner. `HomeStatusLinePresentation` is the one source of the sheet's state
 and memory lines. Mutations go through the `HomeMutationCoordinator` authority.
-The sheet subsumed the former Home header bar and its overflow menu (#740):
-Stop response lives in its state card, bound to the chat's live canonical
-operation authority. The Chapters child sheet reads `home.chapterList`
-(gated on `home-chapter-list.v1`) and shows the whole ledger — state, size
-against the shared soft/hard limits via `HomeChapterPresentation`, date range —
-and opens a present chapter read-only through a profile-fenced ordinary route
-staged on sheet dismissal (`ChatRoutes.completeStagedNavigationAfterDismissal`).
-The next-prompt preview, delivered-context viewing and the learned-profile view
-are follow-up Gateway reads.
+The sheet subsumed the former Home header bar and its overflow menu (#740); the
+composer's Stop is the only Stop (#811), and Manage Home has no Stop row. The
+Chapters child sheet reads `home.chapterList` (gated on `home-chapter-list.v1`),
+lists one row per chapter, and its detail shows the chapter's contents, size
+against the shared soft limit, Browse this chapter's memory, and — for a sealed
+chapter only — the read-only transcript, staged as a profile-fenced ordinary
+route on sheet dismissal (`ChatRoutes.completeStagedNavigationAfterDismissal`).
+The Profile row sits directly above Memory (gated on `home-profile-list.v1`); its
+subtitle counts the active items and how many are confirmed, from `home.profileList`
+read with the main sheet's load (a refused read reads "Unavailable" and never fails
+Manage Home). Its child sheet lists every active item grouped by kind
+(`HomeProfilePresentation`), then superseded and retired items under "No longer
+applied"; an item's detail (full Markdown text, kind, state, note ID, dates) comes
+shows the row already loaded, then re-reads the profile, so a change made there shows at
+once. With `home-profile-edit.v1` the maintainer changes items here
+(`HomeProfileSheets.swift`). The list and the detail share these patterns:
+- **States.** An inferred item has a sparkle glyph and an Inferred pill. A confirmed
+  item has a filled seal and a Confirmed pill.
+- **Confirm.** A list row only opens its item, so its text keeps the full width;
+  an item is confirmed from its detail. Confirm all sits above the list and uses the
+  shared `TronConfirmationSheet`.
+- **Change group.** The detail's Change group has Confirm, Edit and Retire. Edit and
+  Retire are progressive sheets in the Settings value-editor pattern:
+  - Edit has Save (`tronSaveToolbar`), a text field, `TronChoiceRow` for the kind and
+    `TronToggleRow` for Replace (a supersede).
+  - Retire has an optional reason and a destructive Retire toolbar action.
+- **Undo.** After a change, a row offers Undo.
+- **Commands.** `home.profileChange` and the undo (`settings.undo`) run through
+  `HomeMutationCoordinator` under the sheet's admission. A child editor's Save runs
+  while the sheet presents it.
+- **Refresh.** A change re-reads the sheet, and `onChanged` makes the Profile sheet
+  and Manage Home re-read when they are uncovered.
 
-`HomeSheetReadOwner` owns one disposable manage/settings/context/browser/evidence read
-per managed sheet. Its idle/loading/loaded/failed state carries the request's
+An older Gateway keeps the sheet read-only. Profile entries show in Home Settings ›
+Changes through the generic history row and detail. `TronHomeSheetsUITests/testProfileConfirmEditRetireAndUndo` drives the flow
+on the hosted fixture. The next-prompt preview and
+delivered-context viewing are follow-up Gateway reads.
+
+`HomeSheetReadOwner` owns one disposable manage/context/chapter/memory/task/evidence read
+per managed sheet; the main sheet's load carries status, context, chapters, the first
+task page and permissions together. Its idle/loading/loaded/failed state carries the request's
 identity and the caller's request-intent ID; changing intent invalidates success,
 error and loading even before SwiftUI starts the replacement task.
-`AppModel.readHomeSheet` admits only the typed status, memory-page and canonical-
-evidence queries, capturing and rechecking the focused profile, connection and
+`AppModel.readHomeSheet` admits only the typed manage, context, chapter, memory-page,
+task, permission and canonical-evidence queries, capturing and rechecking the focused profile, connection and
 lifecycle generation. The sheet additionally checks its exact managed token and
 current activity across every await. Cover/background retires pending reads;
 uncover/reconnect starts a fresh request. Installed parent frames can remain
@@ -250,7 +288,7 @@ rejects more than 50 pages/25,000 identities, duplicate IDs, cursor cycles, and 
 publishes only a complete catalog. A mixed revision from an older Gateway or an expired continuation lease restarts silently once from a nil
 cursor; it is expected optimistic invalidation, not the former actionable “Sessions changed while loading
 the dashboard” alert. The bounded warning budget is consumed only by a current-owner request/schema/bounds failure; cancellation, stale admission, publication races, and a catalog that keeps moving are retained without warning. Repeated RPC timeouts or application-level disconnect errors still exhaust this projection budget even when the socket remains active; they never independently retire that transport epoch. This matters when a parent run spawns active subagents: their structural notifications may invalidate the Gateway generation even though the user-scoped dashboard rows are unchanged. Known revisioned `session.summary` events apply synchronously without a list read,
-and mounted transcript snapshots cannot overwrite those global row fields. The shallow summary carries aggregate `phase` plus optional `foregroundPhase` and `hasActiveSubagents` facts: a live row whose foreground has settled while subagents remain active uses a circle-sized native solving orb instead of the foreground pulse, while older summaries fall back to the pulse. Read, unread, foreground-active, delegated-active, resuming, and interrupted indicator replacements share one stable icon column and animate with an overlapping scale/fade transition; Reduce Motion keeps only the short fade. Dashboard ordering keeps active rows first and uses the Gateway-observed `activeSince` boundary to hold their relative positions while progress and heartbeats continue; settled history orders parsed `updatedAt` instants with profile-qualified identity as the deterministic tie-breaker, so equivalent whole/fractional ISO representations never become chronology. Older Gateways that omit the additive boundary use profile-qualified identity among active rows instead of their volatile live timestamp. Visible rows use a `TimelineView` gated by surface, scene, and viewport visibility, so relative labels keep aging after completion even when no catalog event occurs. The whole row re-renders so its accessibility label ages too. Live Gateway summary heartbeats independently advance active foreground and detached-extension freshness without moving those active rows. An empty, actively converging session catalog uses the same centered accent pulse as chat opening; the first complete projection cross-fades into place, and later focused or background-Gateway row insertions, removals, and layout changes use one Reduce-Motion-aware dashboard animation instead of abrupt list replacement. Switching between Sessions and Automations replaces the owning surface atomically rather than overlapping two full-dashboard transitions, so top blur and bottom glass chrome are never double-composited during the handoff. Completion attention is one
+and mounted transcript snapshots cannot overwrite those global row fields. The shallow summary carries aggregate `phase` plus optional `foregroundPhase` and `hasActiveSubagents` facts: a live row whose foreground has settled while subagents remain active uses a circle-sized native solving orb instead of the foreground pulse, while older summaries fall back to the pulse. Read, unread, foreground-active, delegated-active, resuming, and interrupted indicator replacements share one stable icon column and animate with an overlapping scale/fade transition; Reduce Motion keeps only the short fade. Dashboard ordering keeps active rows first and uses the Gateway-observed `activeSince` boundary to hold their relative positions while progress and heartbeats continue; settled history orders parsed `updatedAt` instants with profile-qualified identity as the deterministic tie-breaker, so equivalent whole/fractional ISO representations never become chronology. Older Gateways that omit the additive boundary use profile-qualified identity among active rows instead of their volatile live timestamp. Visible rows use a `TimelineView` gated by surface, scene, and viewport visibility, so relative labels keep aging after completion even when no catalog event occurs. The whole row re-renders so its accessibility label ages too. The shared `GatewayTimestamp.relativeDescription` formatter never reads future-tense: future instants (Gateway clock skew) and the first five seconds read "now", then "5s ago", "3m ago" and so on. The row's trailing label (`SessionRowRelativeTime`) uses monospaced digits and reserves the widest realistic label in its own font at the current Dynamic Type size, so the title keeps one truncation point while the label ticks (#975; `TronSessionRowClockUITests`). Live Gateway summary heartbeats independently advance active foreground and detached-extension freshness without moving those active rows. An empty, actively converging session catalog uses the same centered accent pulse as chat opening; the first complete projection cross-fades into place, and later focused or background-Gateway row insertions, removals, and layout changes use one Reduce-Motion-aware dashboard animation instead of abrupt list replacement. Switching between Sessions and Automations replaces the owning surface atomically rather than overlapping two full-dashboard transitions, so top blur and bottom glass chrome are never double-composited during the handoff. Completion attention is one
 of those Gateway-canonical row fields: only final settled prompt responses advance it, Mark Read/Unread
 uses an absolute command-receipt mutation whose complete attention projection applies immediately even
 for cold rows, and a successful open acknowledges only its returned completion revision after the
@@ -322,7 +360,7 @@ metadata nor credential failure can leave selected metadata without its owned se
 lifecycle admission. Mutation receipt reconciliation captures generation-only admission so it may
 resolve across a same-profile reconnect, but profile replacement invalidates it before any poll or
 replay. Connection-owned terminal-open results that resolve after a same-lifecycle reconnect must attach
-again on the current connection before replay can publish; a profile-generation change discards them. Each reconnect executor owns one `GatewayReconnectSchedule` and keeps retrying retryable transport failures while the app is foregrounded on a satisfied path. The selected profile's nominal delay starts at 2 seconds, grows by ×1.7 to 15 seconds, and receives independent 80–120% jitter with a hard 15-second cap; a dashboard pool entry follows that progression without jitter, and once three of its consecutive attempts have failed it escalates by ×4 from the delay it reached to a five-minute cap, so an unreachable secondary profile costs one attempt every five minutes. The pool counts its own failed attempts, of which only a successful attempt clears the count, so a secondary Mac that drops after connecting, a handshake the Gateway never answers and a 503 keep backing off. Foreground, a real path change, and explicit Retry cancel one pending delay; a path change — the interfaces the monitored route uses changing, or an unsatisfied path becoming satisfied — also restarts the backoff curve and, while an attempt is on the wire, is consumed by the attempt that follows it, so the route that came back is attempted at once rather than after the wait the route that went away had grown; a background transition pauses admission. An unsatisfied path hint parks recovery, but never silently: the park is recorded (`reconnect.parked`), its resume is scheduled at `PARKED_RETRY_BOUND` (30 seconds), and that bound probes the possibly stale hint with one attempt, so a missed path callback cannot leave a foregrounded phone disconnected. A foreground activation probes the stale hint the same way, because the app waking is itself evidence the monitor's last reading is old. A parked episode therefore always has an attempt in flight or scheduled, and is never reported as a stall. A replacement attempt ends at the authenticated handshake plus event activation: mounted restoration, terminal reattachment and catalog/provider/settings/device reconciliation run beneath that connected socket, owned by the presentation that implements them, and the socket's loss cancels them. Slow projection work therefore never delays the next attempt, and a drop during restoration starts recovery at once instead of waiting restoration out. That handshake therefore publishes Connected, and only the socket's loss returns the status to Reconnecting: a slow or failed restoration never relabels a live socket. A mounted restoration owns only the treatment its own chat shows — the in-flight notice after a two-second grace, the retained-transcript warning when it fails — never the connection status. That treatment is scoped to the restoring chat and retired against it, so a restoration the user leaves or replaces neither posts onto whatever screen took over nor leaves its notice behind. Every early return of the reconnect request names its refusing guard once (`reconnect.skipped`), so no guard can silently park recovery again. Only unauthenticated, forbidden, protocol-mismatch, and identity-mismatch failures stop automatic recovery, until explicit Retry clears that stop. Retryable failures keep the status Reconnecting; Offline means recovery is stopped. After two consecutive failed connects whose L-10 records show `stage=transport-open` and `transportOpened=false`, the dashboard and delayed recovery notice say **Mac unreachable**, adding the known interface (for example, **Mac unreachable over Wi-Fi**). Failed handshakes do not prove absence of an OS route, even when the interface reports a satisfied path. Mac details offer **Retry Connection** while reconnecting or unreachable as well as when recovery has stopped: the existing selected/pool owner accelerates a pending delay, and refuses competing attempts while its socket is in flight. Retry is a client transport action, not a Gateway restart or a replay of accepted domain commands. `TronIntegrationSheetsUITests.testRetryConnectionRecoversReconnectingDetails` and `.testRetryConnectionRecoversUnreachableDetails` mount the real Mac detail UI through the existing HOSTED_TEST fixture, tap Retry, and verify a connected replacement. Run them with `scripts/tron-ios-test run --only-testing TronMobileUITests/TronIntegrationSheetsUITests`; the owned runner retains screenshots and results in its reported `TestResults.xcresult`. Any attempt that opened a transport, or a recovery episode that began with `ping_timeout`, stays **Reconnecting**. Successful connection clears the presentation. This classification does not change retry timing or ownership. Every attempt bounds the WebSocket open and the hello after it separately: a socket that never opens gives up at the 5-second transport-open deadline, and a socket that opened may spend the 15-second hello deadline on hello and authentication, so a down path is named in one step and a slow Mac is not mistaken for one. The controlled monotonic clock and injected unit-interval source make delay and acceleration behavior deterministic in tests. Background scene transition cancels disposable foreground/catalog reconciliation, preserves the route and bounded profile-owned projections, retires the transport epoch before suspension, and gates event-triggered catalog reads until the next active scene starts one authoritative reconnect pass. After event activation, reconnect and foreground
+again on the current connection before replay can publish; a profile-generation change discards them. Each reconnect executor owns one `GatewayReconnectSchedule` and keeps retrying retryable transport failures while the app is foregrounded on a satisfied path. The selected profile's nominal delay starts at 2 seconds, grows by ×1.7 to 15 seconds, and receives independent 80–120% jitter with a hard 15-second cap; a dashboard pool entry follows that progression without jitter, and once three of its consecutive attempts have failed it escalates by ×4 from the delay it reached to a five-minute cap, so an unreachable secondary profile costs one attempt every five minutes. The pool keeps one profile-owned consecutive-failure count and last successful connection time across background transport retirement; profile identity replacement/removal invalidates both, success clears the count and updates the timestamp, and explicit Retry clears only the count. That same count selects both the next retry delay and **Offline** after three consecutive failures; the pool has no second unreachable counter. The last-connected value records only an authenticated handshake/event-activation success. Token, admission or profile identity changes invalidate the retained state. Nonretryable stops and their reasons survive scene retirement and still require explicit Retry. A backgrounded secondary therefore does not revert to a fresh fast-retry loop or lose its last-connected breadcrumb. The selected Mac remains owned by its lifecycle. A secondary Mac that drops after connecting, a handshake the Gateway never answers and a 503 therefore continue the same backoff episode. For the selected lifecycle, foreground, a real path change, and explicit Retry cancel one pending delay; a path change — the interfaces the monitored route uses changing, or an unsatisfied path becoming satisfied — also restarts the backoff curve and, while an attempt is on the wire, is consumed by the attempt that follows it, so the route that came back is attempted at once rather than after the wait the route that went away had grown; a background transition pauses admission. An unsatisfied path hint parks recovery, but never silently: the park is recorded (`reconnect.parked`), its resume is scheduled at `PARKED_RETRY_BOUND` (30 seconds), and that bound probes the possibly stale hint with one attempt, so a missed path callback cannot leave a foregrounded phone disconnected. A foreground activation probes the stale hint the same way, because the app waking is itself evidence the monitor's last reading is old. A parked episode therefore always has an attempt in flight or scheduled, and is never reported as a stall. A replacement attempt ends at the authenticated handshake plus event activation: mounted restoration, terminal reattachment and catalog/provider/settings/device reconciliation run beneath that connected socket, owned by the presentation that implements them, and the socket's loss cancels them. Slow projection work therefore never delays the next attempt, and a drop during restoration starts recovery at once instead of waiting restoration out. That handshake therefore publishes Connected, and only the socket's loss returns the status to Reconnecting: a slow or failed restoration never relabels a live socket. A mounted restoration owns only the treatment its own chat shows — the in-flight notice after a two-second grace, the retained-transcript warning when it fails — never the connection status. That treatment is scoped to the restoring chat and retired against it, so a restoration the user leaves or replaces neither posts onto whatever screen took over nor leaves its notice behind. Every early return of the reconnect request names its refusing guard once (`reconnect.skipped`), so no guard can silently park recovery again. Only unauthenticated, forbidden, protocol-mismatch, and identity-mismatch failures stop automatic recovery, until explicit Retry clears that stop. Selected-profile retryable failures keep Reconnecting; selected-profile Offline means recovery is stopped. A secondary profile instead becomes Offline after three consecutive failures while its low-frequency retries continue. After two consecutive failed connects whose L-10 records show `stage=transport-open` and `transportOpened=false`, the selected profile's dashboard status and delayed recovery notice say **Mac unreachable**, adding the known interface (for example, **Mac unreachable over Wi-Fi**). Failed handshakes do not prove absence of an OS route, even when the interface reports a satisfied path. Mac details offer **Retry Connection** while reconnecting or unreachable as well as when recovery has stopped: the existing selected/pool owner accelerates a pending delay, and refuses competing attempts while its socket is in flight. Retry is a client transport action, not a Gateway restart or a replay of accepted domain commands. `TronIntegrationSheetsUITests.testRetryConnectionRecoversReconnectingDetails` and `.testRetryConnectionRecoversUnreachableDetails` mount the real Mac detail UI through the existing HOSTED_TEST fixture, tap Retry, and verify a connected replacement. Run them with `scripts/tron-ios-test run --only-testing TronMobileUITests/TronIntegrationSheetsUITests`; the owned runner retains screenshots and results in its reported `TestResults.xcresult`. A failed reconnect attempt whose handshake diagnostic proves the transport opened keeps its recovery episode **Reconnecting**, rather than claiming the Mac cannot be reached. An established socket loss starts recovery; it is not itself a failed transport-open attempt and cannot suppress the next failed-open classification. Successful connection clears the presentation. The selected classifier does not change retry timing or ownership. Secondary foreground reconstruction schedules the count-derived delay rather than an immediate new burst; a real path change may accelerate one pending attempt without clearing that count. Every attempt bounds the WebSocket open and the hello after it separately: a socket that never opens gives up at the 5-second transport-open deadline, and a socket that opened may spend the 15-second hello deadline on hello and authentication, so a down path is named in one step and a slow Mac is not mistaken for one. The controlled monotonic clock and injected unit-interval source make delay and acceleration behavior deterministic in tests. Background scene transition cancels disposable foreground/catalog reconciliation, preserves the route and bounded profile-owned projections, retires the transport epoch before suspension, and gates event-triggered catalog reads until the next active scene starts one authoritative reconnect pass. After event activation, reconnect and foreground
 reconciliation starts dashboard convergence concurrently with mounted-session restoration; terminal
 reattachment follows exact mounted-session synchronization because the Gateway requires that connection's
 subscription before terminal attach. Handshake plus event activation ends planned maintenance and admits exact session-route preparation. Mounted restoration, terminal reattachment, and final live-transport validation own the generation-bound reconciliation aggregate. The complete catalog traversal is independent optional work through the existing connection-refresh task. That owner preserves staged loading: catalog first, then provider/settings/device reads only after revalidating the exact live connection; neither stage gates mounted chat readiness. This also lets initial startup finish transport admission while the catalog's own loading state and retained rows remain in place. Background retirement cancels that optional owner. Already-cancelled catalog demand cannot acquire an owner, and an already-cancelled retry cannot reopen the exhausted failure budget. These are not per-read connection-epoch fences after launch. Catalog failures never write a late mounted-projection failure flag. A projection failure leaves the responsive epoch connected and exposes its own retry surface instead of recycling transport or blocking another session from opening. Focused or background dashboard catalog/schema/application failures retry their projection read without replacing an otherwise responsive exact socket; only observed transport epoch loss enters reconnect. Final teardown cancels and joins the event listener and shares one
@@ -678,12 +716,15 @@ Global settings, provider/model catalog, package, and custom-model event hints e
 advance a dedicated invalidation generation. Successful reads publish their projection
 without advancing that generation, so a visible `.task(id:)` performs one initial read
 and one read per actual invalidation rather than feeding its own reload loop.
-`SettingsTrustCoordinator` is the sole owner of target-keyed disposable settings values,
-per-target read admission, settings and trust event revisions, settings request/mutation
-construction, and trust inspection/mutation. Clearing a saved trust decision sends an explicit
-JSON `null`, while `true` and `false` remain distinct decisions. It uses the shared
-confirmed-mutation executor, and profile retirement synchronously revokes suspended work
-and clears settings projections. Project Trust treats an accepted decision receipt as command
+`SettingsTrustCoordinator` owns settings and trust event revisions, request/mutation
+construction, and trust inspection/mutation; it keeps no settings projection. Settings are read
+only through `settings.resolve` (the generic renderer's `resolveForRenderer`, or one resolve for a
+single served key, reading `value` or the target's own layer through `ResolvedSetting.value(at:)`)
+and written only through the Gateway's one change path, `settings.change` (`packages/gateway/docs/settings-model.md`). Hand-built screens send schema keys with `SettingsTarget.keyChange`, so
+iOS holds no pi-document path table. A trust decision is the `permissions.projectTrust` key for the
+project target, and its change outcome carries the resulting trust inspection; clearing a saved
+decision is an `unset`, while `true` and `false` remain distinct decisions. It uses the shared
+confirmed-mutation executor, and profile retirement synchronously revokes suspended work. Project Trust treats an accepted decision receipt as command
 outcome, not the latest visible inspection: under its original presentation namespace it rejoins a
 current canonical trust read. Event and post-command inspection reads share one leaf-owned latest
 request ticket, independent of global trust-default reads; values and errors require matching
@@ -693,6 +734,166 @@ decisions. `TronProjectTrustUITests` exercises the real controls against the `HO
 `HostedProjectTrustFixture`: an older accepted receipt and older inspection value/error cannot replace
 a later canonical Block, with ordered/single decisions, foreground receipt reconciliation and a
 replacement Mac with the same cwd as controls. The fixture changes no actual trust or resources.
+The settings risk gate's iPhone half (`packages/gateway/docs/settings-model.md` 5.4 and 5.5) has the same
+owner. `SettingsApprovalsSection` shows pending changes in Manage Home (Home's and its task
+workers') and Manage Session (this chat's): it re-reads `settings.approvals` on the
+`settings.approvalsChanged` revision and decides with `settings.decide` through the receipt
+executor, bound to the request's digest; a Chat-layer change carries the chat's last read
+runtime fence. Every word a row shows is Gateway text (`requester`, `label`, `display`,
+`confirm`), with the raw `before` and `after` one tap away, and it renders nothing when nothing
+is pending. Settings › Permissions renders every `permissions.floor` instance through the
+generic renderer: Gateway labels, qualifiers, choices, source badges and reset actions remain
+authoritative. A dry run precedes a write; lowering a floor displays the Gateway's `confirm`
+text and sends only after the maintainer confirms. The duplicate floor picker and its Mac-only
+read/write adapters are removed, not retained as a second editor. The real hosted floor journey
+now drives this same generic control and preserves lowering-confirmation and direct-raising proof.
+The "Approval needed" push carries the `settings-approval` category (decision 35), registered by
+`AppDelegate` with Approve and Decline as foreground actions. `PushNotificationTap` admits the
+action only with that category and an admitted route; `AppModel.stageSettingsDecision` holds it
+for two minutes while push navigation opens the requester's chat, `ChatView` opens the Manage
+sheet its context control would, and `SettingsApprovalsSection` consumes it after its read: one matching
+request gets a confirmation dialog over its row (nothing is decided without that tap, because the
+push names no request or digest), several leave the rows, none says it is no longer waiting.
+Hosted journeys: `TronSmokeUITests.testManageHomeSettingsApprovalsApproveAndDecline`,
+`testManageSessionSettingsApprovalDecline` and `testSettingsApprovalPushApproveConfirmsTheRow` /
+`testSettingsApprovalPushDeclineConfirmsTheRow` (the `-home-settings-approvals` and
+`-session-settings-approvals` fixture flags, each with a request from another scope that must not
+show; the push flags stage the relay's payload through `PushNotificationTap.admit`), and `TronProjectTrustUITests.testPermissionFloorsLowerNeedsConfirmAndRaiseApplies` (the
+`floors` scenario of `HostedProjectTrustFixture`).
+
+`SettingsChangesView` is the native audit-feed owner for Settings, Manage Session and Manage Home.
+It reads one Gateway `settings.history` page at a time (an empty page with a cursor still enables
+continuation), intersects server actor/layer/section/key/status filters with the surface's Home or
+chat lineage, and pins current approvals above newest-first history. Its managed sheet owns
+navigation/Done chrome. Last-look is per paired Mac and scope: badges compare against the previous
+visit while the current visit is saved only after a successful read. It never becomes audit truth.
+Feed and detail reads carry managed activity, profile/presentation identity, foreground generation
+and settings invalidation fences through every await. Details preserve key qualifiers when reading
+history and show the recorded tier basis, task/chat attribution and staging state; absent timestamps
+remain absent. Requesting-chat links capture the entry’s paired Mac and return a canonical navigation
+route to the owning Settings/Manage navigation callback. Task links reuse the managed Home task
+detail owner for the exact actor task ID. Neither route infers ownership from the currently selected
+Mac after a switch; hosted chat-route and task-detail journeys exercise both links. Undo and approval decisions use the existing receipt-backed
+`SettingsTrustCoordinator` paths. Undo validates per-change refusal and captures the Chat
+configuration admission when applicable, so an acknowledged envelope cannot hide a failed change.
+An outside entry that replaced Tron's value offers Apply again, an ordinary receipt-backed
+`settings.applyAgain` change; outside MCP server and custom-model entries show their name and
+whether it was added, changed or removed, never the definition.
+`TronSmokeUITests.testSettingsChangesFeedOpensKeyHistoryAndUndoesThroughGatewayReceipt`
+exercises an empty page with a continuation cursor, then the feed/detail/undo journey against
+the hosted socket, including its exact `settings.undo` request. Additional hosted journeys cover
+previous-visit markers, refused undo retaining the current diff, a redacted entry shown as Not
+undoable with no Undo action, intersected scope/filter pages and
+exact-digest approve/decline receipts. Their recorded red runs distinguish the last-look and undo
+regressions from subsequent successful validation.
+Changes separates disposable history errors from action failures. An undo conflict renders the Gateway’s formatted current/applied values without replacing the historical entry; both RPC and per-change failures retain that structured detail, even when an earlier outcome succeeded. The existing undo-conflict journey exercises both envelopes.
+
+`SettingsValueEditors` supplies the generic numeric-map list editor as well as secret and string-list editors. A numeric map takes every field name, label and numeric range from the served metadata; unknown fields or unsafe numeric representations stay read-only. Save sends a typed object through the ordinary preview/receipt path, and dismissal never submits a draft. The existing secret/list E2E journey also checks offered bounds, untouched-field preservation and numeric-map save/reopen/cancel; the Gateway journey proves an unoffered field cannot erase the stored map. Project settings reuse the scoped package and Hooks owners rather than returning to a Mac/Project picker. Settings › Projects opens the existing workspace browser, so a folder needs no chat to acquire defaults. Its sheet handoff samples current presentation authority at dismissal (not a cached active flag) and retains the exact Mac identity. New Session resolves its model default through the same schema and shows the shared served source badge; choosing an override removes that default-source claim. The dashboard/no-chat journey proves a Project default remains inherited at creation. Manage Session shows automatic-compaction policy once, in the generic Context group; manual Compact Now remains a separate receipt-owning Context action rather than a repeated policy footer in the model card.
+
+The generic settings renderer (`packages/gateway/docs/settings-model.md` F1, 7.5, 7.5a) is
+`SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
+in `TronPresentation.swift`. It restores the pre-schema Settings design language
+(#876): primary surfaces are titled section cards, each with that section's glyph and
+accent (`SettingsSectionStyle`), holding the section's essential keys as standard
+two-line rows with right-aligned controls, pending approvals, hand-built supplement
+rows, and one full-row link that opens the section on a standard progressive sub-sheet.
+Primary rows show only title and control; the sub-sheet rows add the source line, help
+and actions. Nothing expands or collapses in place, and primary surfaces carry no search.
+Section cards stay mounted in an ordinary vertical stack, like Settings: lazy eviction of
+glass cards can continuously invalidate SwiftUI's layout graph during a scroll. The
+fixture-schema and secret/list journeys exercise scrolling and subsequent editing; a
+main-thread sample distinguishes this layout hang from a Gateway request timeout.
+It sends
+`SettingsRendererContract` (version 1; `toggle`, `choice`, `number`, `text`, `secret`,
+`list`, `catalog`, `readOnly`) with `settings.resolve` and renders whatever comes back: sections in Gateway order
+with their essential rows, waiting approvals and a link whose secondary line names the latest
+agent change (else remaining essential values or the key count); the section sub-sheet holds
+every key (essential, then each subgroup and Advanced as titled groups) and search over label,
+id, help and display. A control it
+does not implement, or a missing presentation, renders the `display` read-only; an unknown
+badge kind is neutral; a group no section declares is shown under its id, so a value is never
+hidden. Choices with an `optionsSource` and catalogs come from `settings.options`, re-requested
+when a key in `dependsOn` changes. Any other `choice` opens a picker sheet of the shared
+`TronCatalogOptionRow`s, and the string-list editor uses direct per-item move/remove actions:
+section sub-sheets are presented from other sheets, where SwiftUI menus fail to open (#877).
+`orderedChoice` uses `SettingsChoiceSlider.swift`, and bounded integer `number`
+settings use `SettingsNumberSlider.swift`; both use the same anchored
+`ConfigurationSliderContainer` and track as existing thinking and context-window
+rows. The Gateway supplies number bounds, unit and step as well as choice values
+and labels. Dynamic number ranges replace static metadata and are re-requested
+with their dependencies. Unsupported numeric representations stay read-only.
+The number journey proves that a served 0–10 range wins over a static 0–100
+range, opening does not write, and an unrepresentable future range remains visible.
+Editors use the established motion, Dynamic Type, VoiceOver adjustment,
+cancellation and commit-on-dismiss lifecycle. `SettingsNumberSlider` owns both
+stepped numbers and continuous reference-valued numbers, including their row,
+draft, detents, reset action and editor. The context-window wrapper supplies only
+its inheritance conversion, labels and served limits; it has no second editor or
+presentation lifecycle. `SettingsNumberSliderScale` owns numeric landmarks, and
+`SettingsConfigurationValueRow` preserves the established full-size value row
+and compact settings-row layout. The real Manage Home context-window journey
+checks open/dismiss without a setting write and retains simulator row/editor captures.
+Catalog destinations share `TronCatalogOptionRow`, extracted without changing
+ModelPicker's row layout, fact typography, selection/applying treatment or tint.
+ModelPicker keeps its domain-owned Recent/Latest rails, provider expansion and
+local search; the generic catalog takes opaque values, labels, disabled reasons
+and cursor pages from `settings.options`. Both use the existing selected-value
+sheet entry and managed chrome, not a second row wrapper. The generic catalog's
+Load more carries the returned cursor; search, target, connection, foreground
+and presentation changes retire the old page chain. Every page completion is
+fenced before publishing options, errors or loading state. Overlapping pages
+preserve existing row identity, and repeated cursors stop rather than loop.
+Hosted coverage opens and dismisses a served catalog without writing, selects a
+model and verifies dependent thinking options refresh, and reaches a second page
+then searches without carrying the old cursor or applying any setting. `SettingsValueEditors.swift` hosts write-only
+secret replacement and string-list add/remove in standard
+progressive sheets, fields, groups, rows and action capsules. Secret drafts
+start empty and are cleared on submission/disappearance; list drafts have local row
+identity and write only on Save. Unknown item kinds stay read-only. The
+`testSettingsRendererSecretAndListEditors` journey reopens both editors against the
+fixture socket to prove redaction and persisted values. A `checklist` row opens
+the shared `TronChecklistPicker` over its served options and saves the chosen set
+from the toolbar; the Gateway stores it in the layer's own form.
+`testSettingsRendererOrderedChoiceUsesSharedSlider` exercises a served choice and
+`testSettingsRendererNumberUsesSharedSlider` exercises a served number through selection
+and persistence; the legacy Agent Defaults journey protects the existing
+AgentConfigurationControls callers, which share the same choice and value-row primitives.
+Source badges render as the sub-sheet row's source line (labels joined by " · ";
+the row's accessibility value adds each badge's detail). They may carry
+`useCurrentDefault` or `followDefault` actions. The sub-sheet row
+renders the Gateway's label with the shared inline action capsule and routes an
+unset through the same change owner; it contains no per-key reset logic. Unknown
+actions remain display-only badges, and a negotiated read-only row cannot reset.
+A `Changed outside Tron` state badge may carry `applyAgain` with the outside
+change's `changeId`; the row offers it wherever the Gateway serves it (it acts on
+the change record, like Undo in Changes) and sends `settings.applyAgain` through
+the renderer's command owner, then rereads. Changes detail offers the same action
+for an outside entry that refers to the Tron change it replaced.
+`testSettingsRendererUsesCurrentDefaultSourceAction` proves one applied unset
+against the hosted socket and preserves the unknown badge without dispatching it.
+This is primitive coverage; session-surface adoption still owns the runtime fence.
+The ring opens Manage Session or Manage Home: the chat's live state, its direct
+controls (the shared Chat card for model, thinking and context window; Compact Now
+with automatic compaction; on Home, the memory model) and its curated rows. In
+Manage Session a separate emerald card holds Project Settings and Chat Settings;
+Manage Home holds Home Settings in its own container below its sub-sheet rows. The chat's gear opens Settings.
+Chat Settings and Home Settings open `ChatSettingsView`: the chat's Changes, then
+each section as it applies to the chat. The
+Chat card edits through its session receipt/revision adapter; the same keys in the
+chat's sections edit through `settings.change` at the Chat layer, with the same
+controls (the model picker, the thinking and context sliders) everywhere. Disposable previews own separate busy state
+from accepted mutations. Exact request, surface-token, target, foreground and
+profile fences reject stale responses; retirement releases preview state without
+cancelling a receipt. The controlled hosted preview journey holds a response
+across a covering sheet, proving no stale write and a usable row after rejoin.
+Active-child selections remain admitted when the child dismisses to its parent.
+Every edit is a `settings.change` dry run first: a refusal
+shows under its row and nothing is applied, and a change with `confirm` text asks first.
+`SettingsTrustCoordinator` owns the generic reads and the receipt-bound change, which the
+Permissions floors view also uses for its Mac target. Surfaces adopt the renderer in slices 8
+and 11 (#766, #769); until then its proof is `TronSmokeUITests.testSettingsRendererRendersAFixtureSchema`
+and `testSettingsRendererDarkLargeType` over `HostedSettingsRendererFixture`, which serves a
+fixture schema with a section, subgroup, key, control and badge kind the app has never seen.
 `ProviderAuthCoordinator` likewise solely owns typed-target
 provider/model catalogs, per-target paging admission, event-only provider invalidation,
 auth prompt/event parsing, browser-callback submission, and operation-to-target retention through
@@ -910,14 +1111,37 @@ owning scrolling. Only extension command source has a local excerpt limit: 480 c
 whichever is reached first. Short extension content remains complete. A muted-gray footer appears only when
 content was actually omitted locally or by the Gateway. The 96-KiB transport admission, invocation identity,
 canonical resource, and loaded byte-count facts are unchanged.
+
+**Quote annotations (#899).** A completed assistant text block in the transcript renders through
+`ChatSelectableInlineText`, a non-editable TextKit 2 `UITextView` with the same typography, link
+tint, and wrapping as the SwiftUI text it replaces. This gives native range selection with drag
+handles, which SwiftUI `Text` lacks on iOS 26. Streaming text and every other Markdown surface keep
+the SwiftUI reveal renderer. The transcript row opts in through the `chatAnnotationSource`
+environment, so sheets and previews are unchanged. The edit menu puts **Annotate** first.
+`ChatAnnotationPresenter` (owned by `ChatView`, bound to the current `ComposerDraftScope`) holds
+only the open floating bubble. That bubble sits in the transcript's usable region above the composer
+and keyboard, and it follows the selection by the region's bottom-edge shift. Staged annotations
+belong to `ComposerDraftCoordinator` alongside the selected resource: presentation-lifetime, not
+persisted, cleared at admission, and restored with the draft on definitive rejection. They render
+as `ComposerAnnotationChip`s on the shared `ComposerStagedChip` (also behind `ComposerResourceChip`)
+in the one staged-chip strip, and each opens `ChatAnnotationSheet` (quote in the Markdown
+`ChatQuoteBlock` style plus an editable comment, with the queued-message editor's toolbar). Staged
+ranges get a subtle amber highlight. On send, `ChatAnnotationEnvelope` composes
+`<annotation>` blocks (a Markdown blockquote of the selected text, a blank line, then the comment)
+ahead of the typed message or resource arguments. This text is exactly what the model receives and
+what the canonical user message stores; there is no Gateway field. User, pending, outgoing, and
+queued prompt rows parse that envelope back into read-only `ChatSentAnnotationChip`s above the
+bubble, and text that does not parse exactly is shown unchanged. Extension commands refuse
+annotations, as they refuse attachments. `TronChatAnnotationUITests` owns the
+select → annotate → chip → edit → send journey and the shared-chip assertions.
 surface.
-Unsent attachment bytes and metadata belong to draft scope. Prepared previews, concurrent upload admissions, editor requests, and canonical presentation handoffs remain exact-presentation scoped; the one bounded pre-canonical queue recovery handoff is keyed by `ComposerDraftScope`, while admitted submission transport is keyed by that scope plus lifecycle generation. Its original presentation target is origin metadata only: route revocation/remount projects the same sending or accepted lifecycle and never resends it. Exact canonical/queue settlement, definitive rejection, lifecycle/profile/session retirement, or bounded safe eviction retires that owner. Revocation cancels upload work and discards disposable Gateway upload IDs without erasing the scoped strip. Fresh photo and file selection installs one stable local chip and its bounded exact bytes before starting HTTP; Gateway upload identity is a disposable field on that chip, never SwiftUI or draft identity. Capacity, network, cancellation, and unknown transport failure therefore leave one upload-required chip rather than losing or duplicating user input. A newly admitted mount restores chips only for that exact profile/session target, rebuilds bounded thumbnails through the existing off-main preparation seam, and reacquires every Gateway upload ID before enabling submission. Restore never auto-sends; transient re-upload failure retains the payload and chip for a later mount/retry. Definitive rejection merges by stable chip ID, preferring the remount's current fresh/missing upload representation; a captured chip absent after route replacement becomes upload-required rather than reusing its stale Gateway ID. In-flight bytes remain recoverable through a definitive rejection, while transport acceptance or authoritative queue/canonical settlement removes the captured submission from the durable draft without disturbing newer edits. Until canonical delivery, one bounded local queue handoff retains enough accepted input to restore explicit user review if the authoritative runtime generation is replaced; it never replays transport automatically. The system photo picker and its import loop share the draft's 10-item selection ceiling. Completed plus active uploads are still admitted against one 10-item/25 MiB draft budget before network work; selecting photos does not bypass capacity already occupied by files or other attachments. Each image chip uses
+Unsent attachment bytes and metadata belong to draft scope. Prepared previews, concurrent upload admissions, editor requests, and canonical presentation handoffs remain exact-presentation scoped; the one bounded pre-canonical queue recovery handoff is keyed by `ComposerDraftScope`, while admitted submission transport is keyed by that scope plus lifecycle generation. Its original presentation target is origin metadata only: route revocation/remount projects the same sending or accepted lifecycle and never resends it. Exact canonical/queue settlement, definitive rejection, lifecycle/profile/session retirement, or bounded safe eviction retires that owner. Revocation cancels in-flight upload work without erasing the scoped strip. A staged Gateway upload ID belongs to the draft scope, whose profile is one paired Mac, so it survives presentation revocation, remount and reconnects to that Mac and is never uploaded again (#916); it is never persisted, and deleting or evicting the scope discards it. Fresh photo and file selection installs one stable local chip and its bounded exact bytes before starting HTTP; Gateway upload identity is a field on that chip, never SwiftUI or draft identity. Capacity, network, cancellation, and unknown transport failure therefore leave one upload-required chip rather than losing or duplicating user input. A newly admitted mount restores chips only for that exact profile/session target, rebuilds bounded thumbnails through the existing off-main preparation seam, and uploads only chips that are neither staged nor in flight before enabling submission; restoring the mounted presentation after a reconnect resumes the same uploads, so a transfer an outage interrupted is retried without restarting from the first photo. Restore never auto-sends; transient re-upload failure retains the payload and chip for a later mount/retry. Definitive rejection merges by stable chip ID, preferring the remount's current fresh/missing upload representation; a captured chip absent after route replacement keeps its staged ID. A prompt the Gateway rejects as `not_found` (expired, reset or unknown staging) makes every restored submitted chip upload again from its retained bytes, so the next send carries only fresh staging. In-flight bytes remain recoverable through a definitive rejection, while transport acceptance or authoritative queue/canonical settlement removes the captured submission from the durable draft without disturbing newer edits. Until canonical delivery, one bounded local queue handoff retains enough accepted input to restore explicit user review if the authoritative runtime generation is replaced; it never replays transport automatically. The system photo picker and its import loop share the draft's 10-item selection ceiling. Completed plus active uploads are still admitted against one 10-item/25 MiB draft budget before network work; selecting photos does not bypass capacity already occupied by files or other attachments. Each image chip uses
 an orientation-correct 192-pixel PNG preview with 1 MiB decoded/encoded ceilings, so normal composer rendering
 never decodes the full attachment. The original bounded payload remains scope-owned for persistence and the existing
 explicit preview sheet, which installs the thumbnail immediately and prepares at most one 4,096-pixel/64 MiB image
 off-main through the same cancellation-aware media preparation slot before publication. HTTP response bodies
 have a separate 64 KiB ceiling and must return on the captured connection epoch. Uploads are independent;
-local invocation order owns chip order while each completion updates only its exact stable chip. An exact-target active upload disables send and is rechecked synchronously at submission admission; a failed upload releases that active gate but its upload-required chip blocks only a prompt that still includes it. Removing a fresh or restored actively uploading chip cancels and retires only that chip's admission immediately, so discarded work cannot keep send disabled; every late successful HTTP completion that can no longer claim its exact chip/presentation discards the resulting Gateway staging ID. A multi-photo selection stages every chip in order before the proven serial HTTP transport begins, avoiding global Gateway body-capacity contention while keeping chip publication immediate. Transport failure releases the active gate and never starts another blocking upload from a send attempt; exact bytes remain available for explicit removal or remount retry. Text remains editable, removal and later remount retry remain available, and no transport failure clears text, attachments, or the staged skill. A confirmed prompt removes only the IDs captured by its submission and never clears newer text or attachments. Admission installs one exact-target,
+local invocation order owns chip order while each completion updates only its exact stable chip. An exact-target active upload disables send and is rechecked synchronously at submission admission; a failed upload releases that active gate but its upload-required chip blocks only a prompt that still includes it. Removing a fresh or restored actively uploading chip cancels and retires only that chip's admission immediately, so discarded work cannot keep send disabled; every late successful HTTP completion that can no longer claim its exact chip/presentation discards the resulting Gateway staging ID. A multi-photo selection stages every chip in order before the proven serial HTTP transport begins, avoiding global Gateway body-capacity contention while keeping chip publication immediate. Transport failure releases the active gate and never starts another blocking upload from a send attempt; exact bytes remain available for explicit removal, reconnect or remount retry. Text remains editable, removal and later remount retry remain available, and no transport failure clears text, attachments, or the staged skill. A confirmed prompt removes only the IDs captured by its submission and never clears newer text or attachments. Admission installs one exact-target,
 bounded outgoing presentation row immediately; submitted attachments leave the composer strip and remain owned by
 that row until the exact tagged canonical projection installs, including Gateway pending-prompt snapshots. The
 frame gate keeps one complete lifecycle representation visible until its direct canonical replacement is ready. The
@@ -1139,13 +1363,21 @@ its Script and then its Result show their first eight lines (`ToolTextHeadPrevie
 Admitted display descriptors use the existing session-bound display presentation route; no nested call becomes a
 canonical transcript row or independent receipt. MCP tool names use the projected server/tool identity, resource
 and search tools remain generic result cards. Manage Session → Available Tools turns tools on or off for one chat
-(`session.setTools`); it groups `session.resources` tools as Built-in, Tron, each package, local extensions and each
+(a Chat-layer `tools.active` change through `settings.change`); it groups `session.resources` tools as Built-in, Tron, each package, local extensions and each
 MCP server (from the `namespace` object), omits hidden exposures, and is the only Manage Session list of tools. Its rows carry no icon and a two-line description; only the switch toggles a tool, and the rest of the row opens the shared resource detail sheet with the full description and the tool's declared inputs. Routed assistant rows use physical provider/model attribution;
 virtual model names are marked in the model and session selectors without replacing physical attribution. Bash keeps
 Pi's empty result empty rather than inventing `(no output)`. Bash commands wrap to the available width
 using word-preserving line breaks while outputs and other string metadata wrap; all previews bound pathological
 line count, total characters, and per-line length with explicit head/tail omission markers. Small numeric
-and boolean metadata remains unchanged. Every tool detail sheet opens Technical details from the top-leading info
+and boolean metadata remains unchanged. Home's own tools (`delegate`, `task`, `settings`, `profile`, `zoom`,
+`date`, `memory_search`, from a Tron inline module only) replace the generic sections with a purpose-built body:
+`HomeToolDetailPresentation` reads the call's arguments and typed result details into a header (the call's
+outcome pill), a failure section (a schema rejection lists its issues; a refusal states its reason), rows,
+Markdown texts and memory lines, and `HomeToolDetailSections` renders them with the shared settings group, row,
+pill and Markdown views in the tool sheet's accent. A long brief, report, message or memory line opens whole in
+the shared `HomeTextReader`, as a Manage Home brief does. A shape the builder does not recognize keeps the generic
+detail. `TronHomeSheetsUITests/testHomeToolDetailSheetsAndProfile` opens each call, success and error, from the
+hosted Home transcript. Every tool detail sheet opens Technical details from the top-leading info
 button (`TronSheetInfoButton`, the one info affordance every sheet with technical or metadata details uses); the
 sub-sheet starts with larger, compact selectable
 execution metadata, then exposes bounded Request JSON and Result JSON containers in that order. Tapping either
@@ -1174,7 +1406,7 @@ next revision, ignore only equal-revision duplicates, and request an authoritati
 lower/reordered revision, malformed mutation, or epoch mismatch. Fitted snapshots retain bounded omitted
 surface ID/revision baselines and leased/actionable state so later exact-next full frames converge; a complete
 snapshot replaces the whole projection. Unknown surface kinds decode to a readable plain-text fallback; malformed upserts never erase an existing
-surface, and removal is an explicit ID list. Ambient extension statuses, widgets, and service activity are not transcript or composer content. Retained extension *state* is reachable only through one explicit user-opened **Activity** sheet: one compact composer control appears while presentable retained content or admitted subagent activity exists, renders nothing inline, and opens a read-only list ordered as running subagents, non-subagent retained state, and completed subagents. String widgets, bounded read-only widget frames, and owner-attributed keyed statuses are grouped by producer; retained widgets/status owners and captured-frame provenance whose Gateway-admitted `kind` is `subagent` are excluded here because the native subagent tracker owns that presentation. Source and title are provenance, never a native classification parser; absent or future provider kinds remain visible. Discrete extension events remain notification pills, so a status counter update never becomes a chat row. The semantic extension host remains the transport owner for interactive prompts, editor leases, and form v1 interactions. A form is one authoritative, epoch/revision-scoped batch of one to four choice questions. The app keeps a bounded device-local ID-keyed draft for only pending interactions and presents each question as an independent horizontally swipeable page beneath fixed page dots and index; each page owns its own vertical scroll and direct option/Other rows. Closing the sheet preserves that draft and never settles or cancels the Gateway interaction. The mounted chat route is the sole sheet owner: pending interactions are withheld until the transcript crosses its first ready frame, then presented once, so a sheet can never cover and cancel session opening. Its managed item-sheet identity includes the exact session, interaction ID, host epoch, and presentation revision; a same-ID successor therefore retires the old presentation token before replacement. Post-await sheet effects consult that shared token authority; a coordinator without a token fails closed, while only standalone sheets use ambient activity. Local dismissal records an exact scope suppression, while the pending Tron-owned or explicitly admitted compatibility `ask_user` tool chip sends an explicit reopen intent to that same route and matches by operation plus extension owner (with one unambiguous admitted-owner fallback for cold canonical segments). After submission, canonical tool-result details reconstruct the questions and answers read-only, reuse the form title in the sheet chrome, tint the completed sheet green, and keep the submitted choices selected. The toolbar submits every answer atomically only after the whole form is complete, then clears the draft. Drafts survive navigation and app restart but cannot outlive authoritative interaction retirement or a Gateway process loss, because the in-memory extension promise itself is not durable. The app never mirrors or replays the authoritative form; read-only extension presentation does not create a Manage Session destination.
+surface, and removal is an explicit ID list. Ambient extension statuses, widgets, and service activity are not transcript or composer content. Retained extension *state* is reachable only through one explicit user-opened **Activity** sheet: one compact composer control appears while presentable retained content or admitted subagent activity exists, renders nothing inline, and opens a read-only list ordered as running subagents, non-subagent retained state, and completed subagents. String widgets, bounded read-only widget frames, and owner-attributed keyed statuses are grouped by producer; retained widgets/status owners and captured-frame provenance whose Gateway-admitted `kind` is `subagent` are excluded here because the native subagent tracker owns that presentation. Source and title are provenance, never a native classification parser; absent or future provider kinds remain visible. Discrete extension events remain notification pills, so a status counter update never becomes a chat row. The semantic extension host remains the transport owner for interactive prompts, editor leases, and form v1 interactions. A form is one authoritative, epoch/revision-scoped batch of one to four choice questions. The app keeps a bounded device-local ID-keyed draft for only pending interactions and presents each question as an independent horizontally swipeable page beneath fixed page dots and index; each page owns its own vertical scroll and direct option/Other rows. Question and context text are agent-authored Markdown rendered by the shared `TronMarkdownView` in its selectable mode: native range selection with the system Copy menu, detected tappable URLs, and the transcript's code block with its Copy control; option rows stay plain tap targets. Closing the sheet preserves that draft and never settles or cancels the Gateway interaction. The mounted chat route is the sole sheet owner: pending interactions are withheld until the transcript crosses its first ready frame, then presented once, so a sheet can never cover and cancel session opening. That frame settles the opening lease even while its task drains, so coverage after it neither cancels the opening nor marks it for a resume that would hide and re-reveal the transcript when the answered sheet dismisses. Its managed item-sheet identity includes the exact session, interaction ID, host epoch, and presentation revision; a same-ID successor therefore retires the old presentation token before replacement. Post-await sheet effects consult that shared token authority; a coordinator without a token fails closed, while only standalone sheets use ambient activity. Local dismissal records an exact scope suppression, while the pending Tron-owned or explicitly admitted compatibility `ask_user` tool chip sends an explicit reopen intent to that same route and matches by operation plus extension owner (with one unambiguous admitted-owner fallback for cold canonical segments). After submission, canonical tool-result details reconstruct the questions and answers read-only, reuse the form title in the sheet chrome, tint the completed sheet green, and keep the submitted choices selected. The toolbar submits every answer atomically only after the whole form is complete, then clears the draft. Drafts survive navigation and app restart but cannot outlive authoritative interaction retirement or a Gateway process loss, because the in-memory extension promise itself is not durable. The app never mirrors or replays the authoritative form; read-only extension presentation does not create a Manage Session destination.
 
 Subagent activity is a separate package-neutral, disposable projection. Only admitted synchronous/asynchronous subagent lifecycle producers publish bounded `SessionProcessActivity` rows plus one shallow `SessionProcessOverview`; assistant bash remains ordinary transcript/tool activity. `processOverview` is the shallow snapshot authority; `processActivities` carries its bounded nonempty rows and is omitted when the overview is hidden. Compact `session.processActivity` deltas carry an optional exact upsert, bounded explicit removals, and the overview's same revision and observation time so replacement and output churn cannot tear composer visibility. `SessionPresentationStore` applies that set atomically, sequence-latches rows, prevents terminal resurrection, resynchronizes on a rejected row/overview pairing, and deliberately does not rebuild transcript presentation or issue a scroll command. The Gateway owns the exact five-minute recent boundary and publishes expiry; a local monotonic deadline may only hide a stale recent button early and can never extend authority.
 
@@ -1372,12 +1604,19 @@ keeps the keyboard visible. Menu selections enter one cancellation-aware queue a
 the active camera, photo, or file destination only after the native menu dismissal settles,
 preventing a competing presentation controller from dropping the selection on physical
 iOS. Camera, photo, and file importers share that enum-valued presentation state rather
-than independent Booleans. `CameraModel` owns only UI-facing state and depends on narrow
+than independent Booleans. `CameraModel` owns the sheet's feed phase (`starting`, `live`,
+`switching`, `captured`, `resuming`, `denied`, `unavailable`) and depends on narrow
 camera-authorization and capture-session providers; the system provider alone touches static
 AVFoundation authorization, device discovery, running sessions, and torch configuration.
-Capture configuration and photo request are the two explicitly unchecked Sendable envelopes
-required to move AVFoundation resources across the provider's serial queue boundary. Test providers
-exercise the same owner without camera hardware and do not model a second capture runtime.
+One `AVCaptureSession` serves the sheet: a camera switch swaps the device input inside
+`beginConfiguration`/`commitConfiguration` on the provider's session queue, and pause/resume only
+stop and start it, so the preview layer stays mounted on the same session throughout. A video data
+output keeps the latest frame and reports the first frame from the input a start, switch or retake
+waits for; events carry the model's request token so a superseded request is ignored. Only
+`starting` shows the shared sheet loading state; a switch or retake holds the outgoing frame (or the
+discarded photo), blurred, and cross-fades to the next feed, while the control row keeps its
+position and the torch control follows the live camera (#937). Test providers exercise the same
+owner without camera hardware and do not model a second capture runtime.
 Images become native image input. Other files remain agent-readable
 through a deterministic canonical path envelope, while the mobile projection
 removes that path and exposes only display-safe name/type/size metadata. Sent
@@ -1456,7 +1695,7 @@ never origins, identifiers, tokens, proofs, grants, response bodies, certificate
 Registration reconciles on connection, foreground, profile, permission, and APNs-token changes;
 Worker failure leaves push pending.
 The app accepts no relay URL or private push credential from settings. Remote alerts
-have no app-icon badge, background content fetch, or notification actions. They request the bundled `tron-notification.caf` custom sound; iOS falls back to its default alert behavior if that resource cannot be resolved. A foreground synchronized chat anywhere on the active lineage—including while one of its descendant detail sheets is visible—retains the exact Gateway presentation lease that suppresses its product-authored agent-terminal alert globally before relay or inbox admission; explicit model `notify` remains independent, and input-needed alerts retain their interaction-admission policy. Notification Settings exposes Gateway-owned Input needed, Finished, and Waiting toggles. The switches start enabled and apply through `push.registration.upsert`, with the authoritative policy returned by `push.registration.status`; local toggle state rolls back if the request fails or its owning profile changes. The Settings leading toolbar bell opens a profile-aggregated inbox backed by Gateway's bounded `notification-inbox.v1` resource; `NotificationInboxCoordinator` retains only a bounded local projection, while Gateway list pages and command-receipt read mutations remain authoritative. Each profile bucket holds two server-backed windows, `all` and `unread`, and the Unread list renders the server's `unread` page rather than filtering `all` locally, so the bell's summed Gateway unread count and the Unread list agree even when the newest `all` rows are already read. Connect, invalidation, and pull-to-refresh load the first page of both windows and merge them into the loaded projection by id: changed rows update in place, new rows insert in canonical order, rows the refreshed range no longer shows are dropped, and already-loaded older rows and their keyset cursors survive because a keyset cursor stays valid across inbox changes. Each window pages independently through the mounted history scroll sentinel, whose identity includes its `(profile, filter, cursor)` keyset position so it re-arms after every appended page, and older-page reads stay fenced to their captured connection. The bell uses `bell.badge.fill` and an exact unread accessibility count. The primary sheet shows at most the newest 15 rows of its current window, then one View More container opens the full bounded history whenever that window has more rows than the prefix or still has older pages. Both sheets share one row-list component: primary rows retain their glass container, while history uses a lazy stack of plain tinted rows so large retained projections do not create one glass compositor per row. Unread rows use an emerald icon/container; read rows use muted gray, with no redundant dot or disclosure chevron. Opening a notification detail marks that row read; opening a synchronized chat acknowledges all notifications in that session's opening cut through the existing visible-presentation lease. Gateway-owned retries persist captured IDs even after navigation or socket loss, without consuming newer notifications, and the existing inbox invalidation reloads authoritative read state. No client-side session-read mirror or second RPC is added. Mark Read sends every profile holding unread rows a Gateway `readAll` cut at that profile's newest shown row, so rows the user has not seen stay unread; its toolbar button disables only while that mutation is in flight or when the aggregate count is zero, never during background refreshes. Details use standard Tron sheet/glass/metadata presentation with Open Chat in the leading toolbar. The primary inbox defaults to Unread; All and full history remain available. The All/Unread control sits directly in each list sheet without a redundant outer card or section label; each empty filter uses explicit Tron icon, headline, and body typography rather than the system `ContentUnavailableView` style. The persisted `agent_finished` kind covers successful, limited, failed, stopped, and uncertain terminal outcomes; its neutral “Agent finished” label and stop icon do not imply success. The separate `waiting` kind means the session still owns live background work and is labeled “Waiting on background work” with an hourglass icon; its count/body is fixed Gateway copy. Ask pushes carry the fixed Time Sensitive APNs interruption level, and the app's Development, LocalDevice, and Release entitlement files declare the Time Sensitive entitlement. The fixed body names the outcome without exposing provider errors or partial response text. Agent-terminal
+have no app-icon badge, background content fetch, or notification actions. They request the bundled `tron-notification.caf` custom sound; iOS falls back to its default alert behavior if that resource cannot be resolved. A foreground synchronized chat anywhere on the active lineage—including while one of its descendant detail sheets is visible—retains the exact Gateway presentation lease that suppresses its product-authored agent-terminal alert globally before relay or inbox admission; explicit model `notify` remains independent, and input-needed alerts retain their interaction-admission policy. Notification Settings exposes Gateway-owned Input needed, Finished, and Waiting toggles. The switches start enabled and apply through `push.registration.upsert`, with the authoritative policy returned by `push.registration.status`; local toggle state rolls back if the request fails or its owning profile changes. The Settings leading toolbar bell opens a profile-aggregated inbox backed by Gateway's bounded `notification-inbox.v1` resource; `NotificationInboxCoordinator` retains only a bounded local projection, while Gateway list pages and command-receipt read mutations remain authoritative. Each profile bucket holds two server-backed windows, `all` and `unread`, and the Unread list renders the server's `unread` page rather than filtering `all` locally, so the bell's summed Gateway unread count and the Unread list agree even when the newest `all` rows are already read. Connect, a background Gateway's reconnect, invalidation, and opening the sheet load the first page of both windows and merge them into the loaded projection by id: changed rows update in place, new rows insert in canonical order, rows the refreshed range no longer shows are dropped, and already-loaded older rows and their keyset cursors survive because a keyset cursor stays valid across inbox changes. Each window pages independently through the mounted history scroll sentinel, whose identity includes its `(profile, filter, cursor)` keyset position so it re-arms after every appended page, and older-page reads stay fenced to their captured connection. The bell uses `bell.badge.fill` and an exact unread accessibility count. The primary sheet shows at most the newest 15 rows of its current window, then one View More container opens the full bounded history whenever that window has more rows than the prefix or still has older pages. Both sheets share one lazy row list of `TronSettingsRow` feed-variant rows (`feedTrailing`), each on the shared `tronGlassSurface` Liquid Glass row surface (#956): the chat's catalog name as a one-line title with the relative time trailing on its line, preceded by the Gateway's name only when more than one Mac feeds the inbox (the Gateway's title when the chat is not in the loaded catalog, "Chat" when that title is only the kind), one line of message below in body type, and the kind once as the icon; the detail sheet shows the whole message. Unread rows add the emerald accent tint to their glass and an emerald icon; read rows are clear glass with muted text, with no redundant dot or disclosure chevron. Neither sheet has pull-to-refresh or its own connection/failure row: rows follow `notification.inbox.changed` live, a failed read keeps the last rows, and an offline Gateway is the app-global reconnect notice's to present (#938). Opening a notification detail marks that row read; opening a synchronized chat acknowledges all notifications in that session's opening cut through the existing visible-presentation lease. Gateway-owned retries persist captured IDs even after navigation or socket loss, without consuming newer notifications, and the existing inbox invalidation reloads authoritative read state. No client-side session-read mirror or second RPC is added. Mark Read sends every profile holding unread rows a Gateway `readAll` cut at that profile's newest shown row, so rows the user has not seen stay unread; its toolbar button disables only while that mutation is in flight or when the aggregate count is zero, never during background refreshes. Details use standard Tron sheet/glass/metadata presentation with Open Chat in the leading toolbar. The primary inbox defaults to Unread; All and full history remain available. The All/Unread control sits directly in each list sheet without a redundant outer card or section label; each empty filter uses explicit Tron icon, headline, and body typography rather than the system `ContentUnavailableView` style. The persisted `agent_finished` kind covers successful, limited, failed, stopped, and uncertain terminal outcomes; its neutral “Agent finished” label and stop icon do not imply success. The separate `waiting` kind means the session still owns live background work and is labeled “Waiting on background work” with an hourglass icon; its count/body is fixed Gateway copy. Ask pushes carry the fixed Time Sensitive APNs interruption level, and the app's Development, LocalDevice, and Release entitlement files declare the Time Sensitive entitlement. The fixed body names the outcome without exposing provider errors or partial response text. Agent-terminal
 alerts carry a bounded APNs request ID and machine/session identity pair in addition to fixed product
 copy and the session title. Tap admission rejects partial, oversized, or non-opaque
 routes and request IDs, resolves the machine only against an already-paired profile, and marks the matching canonical inbox item read without delaying navigation. The route joins an in-flight same-profile foreground reconnect at the exact activated-transport boundary instead of replacing it or waiting for unrelated dashboard, settings, device, terminal, or mounted-session reconciliation. A different owning profile still transitions through the sole lifecycle owner. The admitted payload identity creates the route directly; canonical `session.open` owns existence and permission, while paginated catalog convergence remains independent. The currently mounted chat stays visible while transport preparation runs, an exact same-route tap is a navigation no-op, and only a genuinely different target pops and pushes through the ordinary navigation owner. A tap from Knowledge or Automations first switches the shell to the Sessions dashboard before mounting the route, retiring any dashboard-owned conflicting sheet instead of leaving a pending route until the user selects Sessions. A background or cold-launch tap is retained only in memory until the scene installs that owner; activation generations prevent stale work from committing after another scene transition. The tap is never persisted as navigation truth. On launch and foreground
@@ -1505,12 +1744,203 @@ Project trust UI states explicitly that trust controls project resource loading
 and is not a sandbox. Device settings list gateway-authorized devices and support
 immediate revocation; revoking this iPhone also removes its local profile.
 
+### Mac Terminal
+
+Settings › Tools & Diagnostics › **Mac Terminal** opens the session terminal's own chrome and
+emulator (`TerminalSheetChrome`, `TerminalSurface`, the control bar and extended
+keys) on a login shell on the paired Mac, reached with SSH through macOS Remote
+Login over Tailscale. Only enrollment and removal use the Gateway (its contract is
+the Gateway README's
+[Mac Terminal](../../gateway/README.md#mac-terminal)); the shell never does, so it
+works while Tron.app or the Gateway is quit, crashed or being replaced.
+
+- **Key.** `MacTerminalEnrollmentStore` creates one Secure Enclave P-256 key per
+  paired Mac and keeps only its Secure Enclave-wrapped `dataRepresentation` in this
+  device's Keychain (`AfterFirstUnlockThisDeviceOnly`); the private key is never
+  exported. The Simulator, which has no Secure Enclave, uses a software key in the
+  same item; device builds cannot.
+- **Enrollment** (`MacTerminalController.enroll`) reads `macTerminal.status`,
+  sends the public key as `permissions.macTerminalKey[device]` through
+  `settings.change` (the tap is the approval), and caches the MagicDNS name,
+  Tailscale addresses, login user and **pinned host keys** in defaults. Host keys
+  are never replaced silently; a Mac with none is refused before anything is written.
+- **Connection** (`MacTerminalSSH`) refuses early and specifically: no Tailscale
+  address on this device, the Mac unreachable, Remote Login off (connection
+  refused), a host key that is not pinned (with its `SHA256:` fingerprint), the key
+  refused (revoked or removed), or a handshake that never completes. Resize sends
+  SSH window-change; output is decoded on whole UTF-8 sequences and its retained
+  replay is bounded. A dropped or ended shell keeps its output, says so in the
+  terminal, offers ⋯ › Reconnect, and reconnects by itself when the app returns to
+  the foreground. Closing the sheet ends the shell.
+- **Removal** unsets the key on the Mac first and only then deletes it here; without
+  the Gateway it refuses and names the `tron-mac-terminal` line to delete by hand.
+
+`scripts/ios-mac-terminal-journey` runs `TronMacTerminalUITests` against a real
+sshd on this Mac's Tailscale address (synthetic Gateway, real key, client, PTY and
+shell): enrollment, typed input and Ctrl-C proved by the Mac, PTY resize, a new
+shell with the Gateway stopped, removal, Remote Login off and host-key mismatch.
+Screenshots land in `packages/ios-app/test-results/mac-terminal/`.
+
 ## Presentation parity
+
+Settings/Manage/Project changes reuse `TronSettingsGroup`, `TronSettingsRow`,
+`TronSelectionRow`, `TronGlassCard`, shared typography/colors and the managed or
+progressive sheet owner; do not substitute local rounded-card backgrounds or
+duplicate navigation/Done chrome. `SessionModelSummaryCard` remains the shared
+Models/thinking/context presentation owner for both Manage surfaces.
+Prefer the existing real-app journeys over source-string checks or broad golden
+snapshots: `TronSmokeUITests` owns single-Done nesting, light/dark full-width
+loading/error material, medium Manage Home entry and pending/confirmed/refused
+Models behavior. `TronNewSessionUITests.testProjectDefaultBeforeFirstChatIsInheritedWithoutChatOverride`
+also checks Project/catalog sheet ownership while proving inheritance. Layout
+assertions use bounded tolerances only for the identified width/chrome risks;
+screenshots are diagnostic evidence, not substitutes for successful interaction.
+State-boundary integration tests supplement these journeys where the native
+fixture cannot establish store/runtime behavior. Nested native menus are covered
+by `TronSheetTintUITests`: Settings → Sessions changes and restores retention,
+and Manage Session → Session History opens navigation, fork and bookmark
+presentations at sheet depth two in light and dark. These controls work on the
+iOS 26.5 simulator without changing production presentation ownership (#877).
+The earlier Manage Session → Settings → Sessions route is no longer current:
+the chat gear opens Mac/iPhone Settings directly, while Manage Session owns
+Chat Settings. Do not infer a platform-wide menu failure or rewrite working
+controls from the historical report; physical-device behavior remains a separate
+qualification. Schema choices continue to use the shared picker-sheet design.
+
+Shared Settings conventions (#939):
+
+- **Provenance pills** are served badges rendered by `TronTag`/`TronTagList` as a
+  row's last content, under its subtext. Their words come only from the Gateway
+  (`LAYER_SOURCE_LABELS`: Set in this chat, Set in Home profile, Set in project,
+  Set on Mac, Tron default; a per-model value reads "For <model name>"). iOS never
+  rewrites them.
+- **Text entry** ends through `tronTextEntryDone`: a single-line field's return key
+  reads Done and commits; a multi-line field or a keyboard without return (number
+  pad) shows Done above the keyboard. Every settings text, secret, number and
+  add-value field uses it, so commit and approval stay on each field's owner.
+- **Entry guidance** for a text key or a list's new value is the schema's `entry`
+  (`hint`, `example`): the example is the field's placeholder and the add-value row's
+  caption states the format. iOS writes no per-key guidance.
+- **Group accents** flow from `SettingsGroupCard` through every progressive sheet. A
+  destination that also opens elsewhere reads the inherited theme and names only
+  its standalone fallback (`tronSettingsVisualTheme(inheriting:)` or
+  `theme?.accent ?? fallback`); it never paints a fixed colour over its group's.
+- **New Session setup cards** (Server, Workspace, Project Settings, Source Control,
+  Model, Project Trust) are one `TronSetupCardLabel`, whose subtext uses
+  `TronTypography.settingsRowSubtext`, the size settings rows and
+  `TronSettingsCaption` use.
+- Settings opens with Accounts (Connections, Model Providers, Custom Models,
+  Connected Services), then Agent, Tools & Extensions, This iPhone (Push
+  Notifications, Appearance, Sessions; #956) and, last, Tools & Diagnostics (Mac
+  Terminal, Experimental, Setup, Logs; #1030). `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst`
+  proves the order, pill wording, Done commit and add-value guidance against a real
+  Gateway, and keeps one screenshot per sheet; the hosted
+  `TronSmokeUITests/testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor` asserts
+  the top-level group membership and order, that each moved row is the shared
+  row in its card, and that each still opens its own sheet.
+
+`ProjectSettingsContent` is the shared Project card behind Settings' Project row
+(from a chat) and Projects row (from the dashboard), the dashboard workspace
+header's context-menu action, and New Session's selected-workspace row. The last route edits a project before its
+first chat. Every route captures the Gateway and exact workspace; another Mac
+requires explicit Use This Server before any settings read/write. The card
+composes the generic Project-layer renderer with existing trust review and a
+bounded Git header. Workspace dirtiness is not a per-setting staging badge.
+The read carries managed activity, identity and a latest-request fence through
+trust and Git awaits. Native no-chat save/rejoin/create and real RuntimeRegistry
+inheritance journeys prove a project default remains Project provenance, not an
+explicit Chat override or Mac default. The Project store is the Gateway-served
+Project root (`TrustInspection.projectDir`), and its rows carry the resolver's
+git-state and Changed outside Tron badges with Apply again; this UI never infers
+a root or replays audit.
+
+Settings (the gear) is this Mac and this iPhone. Its toolbar holds Notifications
+and Changes beside each other; the sheet is one row per destination in the shared `SettingsGroupKind` palette: Accounts (indigo:
+Connections, Model Providers, Custom Models, Connected Services), Agent (purple: Model, Context, Run,
+Permissions), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks), This iPhone
+(emerald: Push Notifications, Appearance, Sessions) and, last, Tools & Diagnostics (slate: Mac Terminal,
+Experimental, Setup with Import, Logs). This iPhone gathers the phone's own surfaces; Push Notifications'
+policy still lives on the Mac, so the group makes no device-only caption. Tools & Diagnostics holds the
+utilities that span both: Mac Terminal reaches the Mac without the Gateway, Experimental is this iPhone's,
+and Logs' Gateway records and Setup's session folder and telemetry live on the Mac; each row's summary
+names its scope. These groups are the app's (`SettingsGroupKind`), not Gateway-declared: the Gateway serves
+schema sections, which the app places in them. Schema sections the app does not place join More, above
+This iPhone. Every sheet a row opens inherits its card's accent
+through `TronProgressiveSheetLink`, and a sheet's toolbar icons take the same tint as its title: every toolbar
+action uses `tronToolbarAction(accent:role:)` with the accent the sheet gives `TronSheetTitle`,
+and both resolve through `TronSheetTint` (inherited Settings tint, else the sheet's accent, else
+emerald). Only a `.destructive` action (red) and a `.neutral` Close/Cancel (grey) differ, and a
+disabled action greys itself; never paint toolbar icons directly. `TronSheetTintUITests` and the
+real-Gateway paired-device step of `testSettingsClarityPillsTextDoneAndAccountsFirst` compare
+each enabled toolbar icon's rendered ink with its title's (`assertToolbarTint`). A chat's settings are one row away in Manage Session and
+Manage Home (`ChatSettingsView`): Changes for that chat, then every section for
+the chat's target with each value's source tag. The Project
+card shows the project's sections and its MCP Servers, Extensions and Hooks.
+`SettingsTrustCoordinator` owns one bounded `SettingsSnapshot` per target (the
+resolution and its rows' served options, read together); every renderer for a
+target reads it, so a section sheet opens on what its parent shows and refreshes
+only when a settings event or foregrounding makes it stale. The dashboard warms
+the Mac snapshot on connection. `testSettingsSheetsOpenStably` (real Gateway)
+proves section sheets open on their content and keeps each sheet's first frames.
+
+Manage Session's bounded cards use an ordinary stack so the
+shared Models presenter's lifetime cannot be ended by lazy eviction behind a
+nested sheet. The original popup acknowledgement/failure journeys reproduce the
+lazy-container failure and pass without relaxed assertions after that correction.
+Fixed-source actions and live overrides go through the existing
+settings mutation receipt owner, with runtime/model/revision captured from the
+admitted session and rechecked immediately before a send. Opening or dismissing
+never writes. The renderer uses the resolver's allowed layer list: other-layer
+rows remain read-only and link to the Project or Mac editor rather than attempting
+a Chat write. Gateway settings-gate coverage owns persistence and provider-effect proof.
+Manage Session keeps Agent Instructions, Available Tools and Project Resources as
+its own rows. Available Tools and the `tools.active` settings editor share the
+same grouped tool rows and resource-detail surface; Settings edits the complete
+selected-name array through the renderer mutation path, while Manage Session
+continues to own live per-chat toggles. Its options carry the Gateway's tool
+record so settings details do not require a live session.
+Manage Home's top card is Home's context (state pill, last activation, the section-segmented
+window); there is no separate Home Context sheet. Memory, chapters, tasks and permission requests
+retain their established domain owners. A Home sub-sheet takes the tint of the Manage Home row that
+opened it through the shared settings visual theme (`HomeSheet.present(_:rowAccent:)`), so its
+title, Done, loading pulse and its own children share that row's color
+(`TronHomeSheetsUITests` samples the drawn title against the row's icon). A long Home text (a task
+brief, a chapter topic) previews its opening lines and opens whole from a row into
+`HomeTextReader`, the shared `TronDocumentSheet` with the chat's markdown renderer.
+
+An interrupted initial chat open has a distinct `waitingForConnection` phase.
+The opening owner starts no open lease or timeout without lifecycle admission;
+Retry while disconnected remains waiting rather than turning a cancellation into
+an unexplained spinner. Retirement of the opening's captured transport is
+resumable on the existing connected callback, not a second reconnect loop.
+A same-session installed transcript with a retained authoritative snapshot stays
+visible independently of subscription admission. Its persistent recovery treatment
+is one Liquid Glass capsule that takes the chat title's place in the navigation
+chrome, so the bar and transcript viewport never change geometry—a
+tone-colored reason and a Retry label, the whole capsule being the Retry control
+(`ChatRecoveryStatusLine`), matching the bar's own controls—never a control floating over transcript rows, inside the
+flipped transcript, or a new structural inset (#878). Like the system bar items
+beside it, it stops growing at the largest standard text size; its large content
+viewer and VoiceOver value carry the reason beyond that. A missing transport is
+shown only once the app-scoped recovery episode has outlived its two-second grace
+(`AppModel.isConnectionRecoveryVisible`). Background retirement ends that episode
+and every scheduled reconnect, including the one each foreground performs, starts
+the grace, so an ordinary foreground stays quiet unless it is slow. A rejected
+credential, Gateway rejections and the synchronization owner's existing
+exact-target, connection-generation failure latch show at once; transient app
+notices do not own this state. Retry while disconnected retries the selected
+Mac's connection; on a failed mounted synchronization it uses that owner's retry operation. A
+fresh route without a snapshot keeps the full empty-state treatment and never
+claims retention. Gateway failures on an unchanged admitted transport remain
+explicit failures; replacing the transport makes interrupted opens resumable.
+The real-UI pairing/chat journey checks pinned and anchored continuity, draft and
+responder preservation, persistent inline failures, disconnected Retry, and a
+transport replacement while a previous open response is still held.
 
 Home uses the ordinary `ChatView` transcript, composer, route and focus owners;
 there is no Home header bar (#740). The composer context ring of a
-chat that claims the Home status opens Manage Home (its gear opens Settings, #799), where the state line, memory line, Stop and every Home
-control live. The mounted composer scope supplies the sheet's immutable profile
+chat that claims the Home status opens Manage Home (its gear opens Settings, #799), where the state pill, memory line and every Home
+control live; the composer keeps the only Stop (#811). The mounted composer scope supplies the sheet's immutable profile
 identity. Both rendered admission and delayed callbacks use that owner identity,
 never the profile selected later; the mutation coordinator then captures and
 fences the lifecycle generation before asynchronous work. Gateway `active`
@@ -1523,37 +1953,105 @@ holds: a connection change clears the Home projection, but a presented sheet
 stays with the chat and re-reads from its profile/connection identity when the
 connection returns. Selecting another profile ends the chat route through the
 dashboard's profile route owner, which releases the sheet with it.
-Stop response and the composer invoke the same `ChatView.abortCurrentOperation`
-using the current canonical operation ID; Pause/Resume never substitute for Stop.
+The composer's Stop invokes `ChatView.abortCurrentOperation` with the current
+canonical operation ID; Pause/Resume never substitute for Stop.
 Pause memory, Resume memory and Disable Home use `HomeMutationCoordinator` and
-refresh the mounted status owner only on accepted terminal completion. Stop stays
-reachable while a Home mutation is running. Unresolved completion stays explicit,
+refresh the mounted status owner only on accepted terminal completion. The
+composer's Stop stays reachable while a Home mutation is running. Disable Home asks
+for confirmation first, like every destructive Manage Session action. Unresolved completion stays explicit,
 permits only receipt checks rather than replacement controls, and survives
 background/reconnect in the live invocation. An unresolved Disable retains the
 completion control even after authoritative status says Disabled; confirmed
 Disable returns the ring to Manage Session without replacing chat.
 App restart reads current Gateway status, without claiming or replaying an old
-command. Memory model configuration uses the same receipt path; its settings UI
-is a separate sheet. Manage Home opens Memory Settings, Chapters, Home Context
-and Browse Memory through the shared managed-sheet chrome. The browser
-additionally requires authenticated `home-memory-browser.v1` and the chapter
-list `home-chapter-list.v1`; settings/context require only `home.v1`. Memory Settings
-uses the existing progressive model-selection row and ModelPicker, filtered to
-registered, available physical models. Selection captures the mounted picker
-profile/lifecycle before sending `configureMemory` through the existing receipt
-owner. Choices stay Applying until the exact latest canonical status read
-converges, not merely until the configure receipt is terminal; an old installed
-model frame cannot admit a duplicate choice during that gap. It shows spend as
-information, configuration/pause/block state and explicit
-unresolved receipt checks, never budgets or cache/storage controls. The context
-inspector shows the activation's effective token/window, memory line/byte counts,
-start entry and refusal metadata from `home.status`, not SDK canonical usage or
-prompt/memory bodies. Browser cards distinguish summary, capped/omitted projection
-and canonical evidence, label attribution/date/omissions and expose source
-session/entry identity. Pagination replaces one page; canonical text is selectable.
-Loading, empty, blocked and retryable error states use shared presentation owners.
+command. Manage Home keeps the shared live Chat model/context card, including
+active-lineage receipt/snapshot reconciliation and its session-scoped notice above
+Models. The embedded generic renderer resolves Home's Chat and Profile layers,
+preferring Chat when both allow a key. Schema source/reset rows do not duplicate
+the shared Chat card's value editors. Profile controls, qualifiers, options,
+badges, source actions and reset stay schema-driven, with no per-key native
+Profile picker.
+A mounted renderer accepts selections from its active child catalog/editor even
+while that child suspends the parent's presentation reads. The physical
+memory-model selection/reopen/cancel journey protects this boundary. Any future
+consolidation of the live Chat card must preserve receipt plus applied-revision
+acknowledgement with Models open, not replace it with optimistic catalog dismissal.
+Manage Home uses `SessionContextUsageCard` for stats with the state pill on its
+header row, the shared Chat card, Profile settings, its Home sub-sheet rows, the
+Home Settings container, and the bottom pause/resume and disable container. The settings-approvals section
+(#758) inserts between the stats card and shared Chat card. Manage Session mounts the same
+section on its usage card with the exact session scope; Home-only mounting would
+hide ordinary chat approval requests and push decisions. The hosted decline and
+push-approve/decline journeys protect that shared mount.
+Every Home sub-sheet
+opens at medium and drags to large, through the shared managed-sheet chrome.
+Its Memory row, Chapters, Tasks and Permissions read the same single load. Task
+recovery appears in Tasks and Permissions only when it needs attention; an
+available recovery is the normal state and has no row. The browser
+additionally requires authenticated `home-memory-view.v1` and the chapter
+list `home-chapter-list.v1`; the context sheet requires only `home.v1`. The memory
+picker is the schema's catalog control, whose Gateway option source excludes
+virtual/unavailable models. It sends the Profile key through `settings.change`,
+then reloads canonical resolution; dismissal alone does not save a selection.
+Home pause/disable retain their existing mutation and unresolved-receipt owner.
+No budget or authorization semantics are inferred by the renderer. The Home Context
+sheet reads `home.context` into one `SessionContextUsageCard`: the activation's
+state pill and start as its header, a bar split by the breakdown sections
+(instructions, about you, memory, this chapter, task results, input) in their dot
+colors, a compact two-column legend of those sections (the header already states
+the tokens left, so the free remainder has no line), then the Home chat's
+cache, input, output and cost metrics (`SessionContextSegments` is the card's only
+extension; Manage Session passes none). It shows no entry IDs or byte counts, and
+falls back to the plain request sizes when the Gateway omits `breakdown`. The
+breakdown is an estimate, never SDK canonical usage or prompt/memory bodies.
+The memory browser reads `home.memory.view`: the lines Home's memory view holds,
+newest first, as standard rows in Manage Home's accent without chevrons or raw
+kind prefixes. "Recent messages" are per-message lines (speaker glyph and label,
+text, relative time); "Summaries" are the older ranges Home sees as one summary
+line each ("Summary of N messages" and their dates). A summary opens a sheet with
+its text and the two lines it covers (a `part` read), down to single messages.
+A message opens its detail: the message as recorded, "Home remembers" only when
+its summary says something else, and one row to Exact Evidence. Evidence shows
+its speaker and time, the canonical text in a reading group, and its entry
+reference. Pagination replaces one page; a chapter's memory is the same browser
+filtered by `sessionId`. Canonical text is selectable. Chapters list rows with a
+state pill; a chapter's detail is built from the row already loaded (no read):
+a header card with dates and the size bar and line, its counts, Topics from Home's
+merged summaries, Browse memory, and Open chapter transcript only for a sealed
+chapter (the current chapter is the chat itself). A Home sheet uncovered by its
+child keeps its installed page (`HomeSheetReadOwner.holds`); only Manage Home
+refreshes behind its frame. Loading, empty, blocked and retryable error states use
+shared presentation owners.
+Whole-content sheet loading is a `TronSheetLoadingState` preference that the enclosing
+`TronPresentationSurface` (every managed sheet and registered surface, else the app root) draws as one centered
+pulse and consumes, so nested surfaces never repeat it. Manage Home sends its independent
+`home.status`, `home.context`, `home.chapterList` and `home.profileList` reads together, then task and permission
+reads together once status admits them.
+The shared `tronTopBlurSurface` establishes full available width **before** attaching
+edge chrome. `tronScrollEdgeChrome` and document underlap delegate to that same
+owner: a native scroll viewport can fill a sheet while SwiftUI otherwise sizes its
+overlay to a short loading row, producing a sharp central tint column. Do not fix
+that by replacing the native material, painting an opaque page, or sizing each
+screen's placeholder. The native sheet retains safe areas, rounded clipping,
+detents and toolbar ownership; loading changes only content, not chrome geometry.
 
 
+
+Inbound Context details present the full message in the existing Markdown reading
+card. Known `tron.home-task-result.v1` report envelopes use their typed `details.report`
+when present, otherwise the released one-header/one-JSON-envelope text format;
+only version 1 with complete report identity, text, evidence and an admitted report
+outcome is unpacked. Final report is not a success claim. Plain, malformed and
+unknown shapes remain verbatim. The standard toolbar Info button opens technical
+metadata tables, evidence and complete report/context/content JSON inspectors;
+no canonical text, model input, or stored context is changed. This remains compatible
+with readable Gateway delivery text without introducing a second delivery format.
+
+Notification reading cards establish full content width before applying their
+existing surface. Contiguous notification runs omit only repeated eight-point
+turn clearance, using one policy in live and read-only transcripts. Each event
+retains its ID, order, individual accessibility action and 44-point target;
+conversation and tool rows end the run. This is not event deduplication.
 
 Subagent context uses the shared seafoam compact inbound pill: supervisor progress
 keeps **Subagent · Progress Update**, per-child workflow notes use **Subagent ·
@@ -1618,6 +2116,10 @@ Document-style sheets use the shared `TronDocumentSheet` for the standard
 the concrete content surface owns any custom blur overlay. Default detents remain
 unchanged; a caller may explicitly provide an initial detent, in which case the
 shared owner keeps the other configured detents available for native dragging.
+Its navigation chrome is the shared `tronDocumentSheetChrome` modifier. Content
+that owns its own stacks (an interpreted Swift app whose root is a TabView) uses
+`hostsNavigation: false` and applies that modifier at each stack root, so the
+chrome is never nested inside a second NavigationStack.
 Video display sheets open at medium with large available and use native safe-area
 placement without a content-level custom blur surface. Playback at medium and
 expansion to large are covered by hosted UI tests. Paused-control icon rendering
@@ -1631,8 +2133,14 @@ search, segmented choices, fields, editors, toolbar typography, row actions,
 icon buttons, loading labels, and prominent actions use shared semantic
 components. Toolbar and sheet action icons use Tron emerald while their
 container geometry and Liquid Glass remain default iOS styling rather than
-receiving a second app-drawn container. The chat toolbar's trailing gear opens
-app Settings; Manage Session is owned by the composer's context ring. Its principal title
+receiving a second app-drawn container. In ordinary chats, both the toolbar's
+trailing gear and the composer's context ring open Manage Session at its existing
+medium detent; its Settings row opens the Mac-layer Settings child sheet,
+whose dismissal returns to Manage Session. Settings retains its own category
+palette rather than inheriting the Session destinations' teal theme. Home's
+route keeps its direct Settings gear even while Home status loads; its context
+ring still opens Manage Home, with the existing leading terminal button.
+The chat toolbar's principal title
 is explicitly bounded from the mounted chat viewport and clipped after tail truncation,
 so a cancelled interactive-pop transition cannot temporarily restore intrinsic-width text
 across the back or Settings controls. App-owned workspace
@@ -1643,10 +2151,7 @@ very tall scrolling collections use the shared static scroll surface instead:
 it preserves tint, border, geometry, and hit regions without installing a live
 backdrop filter for every row or a multi-screen card. Long settings screens use
 lazy outer stacks, while their small divider-owned sections remain eager. The main Settings sheet places its
-divider-owned rows in four category containers rather than one backdrop per destination, grouped by what the user
-configures: emerald This iPhone (Connections, Appearance, Sessions), purple Agent (Model Providers,
-Custom Models, Agent Defaults, Compaction), cyan Tools & Extensions (Extensions, MCP Servers, Connected
-Services, Project Trust, Locations and Overrides), and blue Data & Diagnostics (dashboard-only Import, Logs). Row icons and dividers use the owning
+divider-owned rows in its `SettingsGroupKind` containers (listed above) rather than one backdrop per destination. Row icons and dividers use the owning
 container accent. Connections retains the authorized-device detail identity across a server switch and refreshes its content in place; a transient device-list projection cannot dismiss the nested settings stack. Each progressive destination installs that row accent as an environment-owned visual theme
 for ordinary titles, controls, icons, dividers, fields, and containers, including nested sheets; informational
 text cards mix the same hue toward slate. Settings action text resolves to white against dark Liquid Glass and to
@@ -1781,7 +2286,9 @@ horizontal navigation pushes; Appearance uses the custom Liquid Glass segmented
 color-mode control with a compact 40-point color-mode height and keeps font axes directly beneath each
 font choice before its preview. Every font-selection title renders through `TronFontLoader` with that candidate family (and Recursive's mono axis in the code list), while the description retains the selected reading typography. Text and code previews share the same 14-point row padding without an
 extra code-only minimum height. Passive Settings explanations use `TronSettingsCaption`: reading-family
-secondary text directly on the sheet, without a card, icon, or tap affordance. `tronSettingsCaption`
+secondary text directly on the sheet, without a card, icon, or tap affordance. It is the one component for
+sheet intros, key help, group details and captions, and renders in the settings row subtitle's size and
+colour (`TronTypography.settingsRowSubtext`), so explanatory copy never reads smaller than its rows. `tronSettingsCaption`
 attaches that copy eight points below the group or action it explains. Actionable failures instead use
 `TronSettingsNotice`, with standard row/icon geometry and a right-aligned Retry capsule. Main Settings and progressive
 sub-sheets apply `tronSettingsLayout`: Manage Session's icon column, row/divider insets, reading-family
@@ -2529,7 +3036,16 @@ owners and are not cancelled merely because a surface is covered.
 Manage Session's semantic projection contains no causal revision. Context-window
 commands read the current authoritative revision/runtime at admission, while
 pending settings retain exact request/runtime identity and wait for both RPC
-confirmation and authoritative agreement. Native controls retain runtime/model
+confirmation and authoritative agreement (or a newer revision that supersedes the
+confirmed choice). The shared model card publishes bounded configuration data and
+retires pending receipts while its Models descendant is open, using
+`allowsDataPublication`, not the topmost-only load/presentation permission. Its
+binding reads the current authoritative configuration rather than the covered
+Manage Session frame. This applies equally to Manage Home without resuming parent
+polls, transcript work, or changing dismissal behavior. Rejected model choices
+clear only their exact request and surface the standard session-scoped notice
+above the popup; a retired runtime's failure cannot replace the current choice.
+Native controls retain runtime/model
 identity rather than being recreated on every progress revision. History, process,
 queue, and tool-detail selectors belong to the session presentation store and
 publish only changed bounded facts, never another canonical journal. A visible
@@ -2585,9 +3101,9 @@ The stack is never persisted and is not a second state authority.
 
 `IntegrationsRPCClient` and `IntegrationsSettingsView` expose the Gateway connection-owner contract as a native management surface. Connected Services and MCP Servers share the Providers-style Configured/Available row layout; each configured row shows its service, verified account display name (or plain account ID), connection status, and only a supported X balance, while capability names and effect-specific diagnostics remain in the selected connection sheet. Definitions, account instances, capability status, setup operations, and Raindrop collection-role mappings are redacted projections: the instance ID is the identity used by every action, never a provider name or account key. Same-provider accounts therefore retain independent policy, health, and disconnect state, and configured services keep their add-account action in instance details. Snapshot reads are fenced by the selected Gateway profile, lifecycle generation, connection epoch, presentation activity, and a latest-load ticket; X balance reads additionally fence each presentation result to the current profile identity and request. A balance read never blocks the list and a failed read leaves no balance line.
 
-Connected Services presents definitions owned by `ConnectionOwner` and uses its instance-scoped setup, policy, and disconnect receipts. Setup is owner-typed (`oauth` or `token`) and uses the Gateway's confirmed mutation receipt executor. The iOS form accepts only opaque Mac Keychain credential references, never token values or generic agent-readable secret fields. X setup is a public-client OAuth 2.0 PKCE flow: the user enters their public client ID and registered HTTPS callback, opens X consent, and pastes the redirected URL or code; the Gateway owns state verification, code exchange, refresh-token rotation, and Keychain storage, while iOS never receives tokens. Policy controls (enabled, writes, paid, and recurring) are independent and instance-scoped; capability availability is effect-specific. Dismissing a sheet retires only presentation reads; an accepted setup, policy, or disconnect mutation continues with its owner, and reconnect never replays it.
+Connected Services presents definitions owned by `ConnectionOwner` and uses its instance-scoped setup, policy, and disconnect receipts. Setup is owner-typed (`oauth` or `token`) and uses the Gateway's confirmed mutation receipt executor. The iOS form accepts only opaque Mac Keychain credential references, never token values or generic agent-readable secret fields. X setup is a public-client OAuth 2.0 PKCE flow: the user enters their public client ID and registered HTTPS callback, opens X consent, and pastes the redirected URL or code; the Gateway owns state verification, code exchange, refresh-token rotation, and Keychain storage, while iOS never receives tokens. Policy controls (enabled, writes, paid, and recurring) are independent and instance-scoped; capability availability is effect-specific. Dismissing a sheet retires only presentation reads; an accepted setup, policy, or disconnect mutation continues with its owner, and reconnect never replays it. The open setup draft (typed inputs, an accepted begin's consent step and its in-flight mutation) and the selected connection live in `IntegrationSheetRoutes`, which Settings owns above the presented Connected Services content and resets only when that sheet is actually dismissed: on iOS 26.4 and later, returning from the background makes SwiftUI rebuild the content of a sheet nested under a `navigationDestination` chat route (twice, with fresh view state) while it stays presented, which would otherwise drop the setup sheet and its draft (#932).
 
-MCP Servers is a separate surface over Pi's `mcp.json`: it reads global or trust-approved project configuration, decodes Pi CLI `state`, `scope`, exposure, transport, tool and bounded error fields, and shows only project rows in project scope. Needs-auth uses the sign-in warning treatment; bearer values remain transient while the Mac Keychain owner stores them. The scope switch is the shared `TronSegmentedControl` (as in the Workspace sheet), Reload is the leading toolbar button, Add Server is a glass row button below the list, and each server row is a `TronSettingsRow` whose `Manage` menu holds sign-in, on/off, exposure, token, sign-out and remove. Extensions Settings shows Built-in Extensions and Default Tools as standard toggle and selection rows; they read the active scope's document, write only on an explicit change, and keep `defaultTools` entries they do not manage. MCP sign-in adopts the exact `{ kind: "mcp", sessionId, server }` operation into the provider-auth event coordinator, including events arriving while the start RPC is pending; cancellation uses only the MCP-specific cancel command. Its callback remains in the iOS listener and is relayed only to Pi's loopback listener. Accepted mutations and authentication operations retain their Gateway owners and reconnect never replays them.
+MCP Servers is a separate surface over Pi's `mcp.json`: it reads global or trust-approved project configuration, decodes Pi CLI `state`, `scope`, exposure, transport, tool and bounded error fields, and shows only project rows in project scope. Needs-auth uses the sign-in warning treatment; bearer values remain transient while the Mac Keychain owner stores them. The scope switch is the shared `TronSegmentedControl` (as in the Workspace sheet), Reload is the leading toolbar button, Add Server is a glass row button below the list, and each server row is a `TronSettingsRow` whose `Manage` menu holds sign-in, on/off, exposure, token, sign-out and remove. Extensions Settings shows the Built-in Extensions switches and Default Tools as standard toggle and selection rows over the served `sources.extensions`, `tools.active` and `tools.codemode.mode` keys; they read the scope's own layer, write only on an explicit change (a switch adds or removes its `-builtin:<name>` entry), and keep entries they do not manage. MCP sign-in adopts the exact `{ kind: "mcp", sessionId, server }` operation into the provider-auth event coordinator, including events arriving while the start RPC is pending; cancellation uses only the MCP-specific cancel command. Its callback remains in the iOS listener and is relayed only to Pi's loopback listener. Accepted mutations and authentication operations retain their Gateway owners and reconnect never replays them.
 
 Knowledge Jev is not a ConnectionOwner capability. It uses the TypeSafe classifier credential in Provider Settings; a configured key is the consent for paid Jev work, bounded by a fixed monthly cap (user decision, 2026-09-30). MCP configuration and Jev credentials are not mirrored into connection rows.
 
@@ -2664,44 +3180,12 @@ no prompt is replayed or automatically sent.
 
 ### Session search
 
-The dashboard keeps title/path filtering local for immediate feedback. Content
-search fans out only to the first eight eligible Gateway profiles selected by the
-managed server filter; omitted profiles remain visible as skipped states. Local
-catalog matches and remote passage matches are unioned into profile-qualified
-session groups, with each profile reporting ready, partial, offline, error, or
-skipped coverage independently. Content search uses the optional
-`session-search.v1` capability and is request-fenced by the active Gateway
-connection/profile; selected-profile requests use the foreground lifecycle
-client, while background profiles use the dashboard connection pool. A short
-input debounce coalesces remote fanout, and dismissal, reconnect, and profile
-changes cancel owned disposable requests without cancelling accepted commands.
-Neither a stale request nor a stale presentation activity may publish results.
-Optional Jev reranking is
-explicitly disclosed as sending the query and selected snippets to the
-configured provider, and is never enabled without the user's consent and
-allowance state.
-
-Search results retain the canonical session, entry ID, branch/file anchor
-revision, and nested passage identity. Each result also carries the Gateway's own archive projection,
-so a row for an archived session is labeled **Archived** without a second read or an index change, and
-opening a result never unarchives it. Selecting a result asks
-`session.search.anchor` for a revision-checked bounded historical window, then
-uses the existing presentation store and scroll coordinator; results never own
-a second transcript cache or scroll position. The historical window carries its
-own exact global ordinals/runtime/leaf identity and is explicitly separate from
-the live tail, with a return-to-latest action. Branch, reconnect, or identity
-changes expire it rather than mixing disconnected rows. Historical page values
-and failures revalidate the exact presentation, subscription, connection, and
-window after the final await; a same-session remount cannot inherit old work.
-Render scroll is admitted after the mounted projection exposes the target
-semantic ID and the viewport reports its current layout. Offscreen lazy rows
-are materialized without requiring their not-yet-existing frame; relative
-position restoration still requires frame evidence. Missing render targets
-expire without issuing a stale scroll; anchor admission failures surface retry
-guidance. Per-profile persisted policy is restored via
-fenced `session.search.policy.get` after lifecycle/pool admission, with false-
-safe visible errors. A Gateway that reports partial or unavailable semantic
-coverage is displayed as such while lexical results remain usable.
+Dashboard search and the Home View All sheets filter by session title on the
+iPhone with `SessionTitleSearch` (`Sources/UI/Chat/SessionTitleSearch.swift`), a
+synchronous ranking over the catalog rows the dashboard already holds; it makes no
+Gateway request. Results are the dashboard's standard session rows. Content
+search over transcripts belongs to Home's `session_search` research tool on the
+Gateway, not the dashboard.
 
 Inline expanded display cards share the message menu's native source-owned
 interaction. The card itself, before disclosure opacity/scale and the row's
@@ -2734,6 +3218,20 @@ false. A resource sheet presented by a composer chip/catalog must regain its own
 primary scroll eligibility rather than inherit the covered chat's exclusion.
 and their native document scrolls; without the reset both variants fail.
 
+### Home display identity and terminal
+
+The Home chat header presents **Home** rather than a generated conversation name;
+ordinary chat headers retain their canonical titles. The Gateway also projects the
+role title on snapshots and notification admission, preserving opaque route IDs.
+Manage Home's top-left terminal action shares `SessionTerminalToolbarButton` with
+Manage Session and presents the existing managed `TerminalSheet(sessionID:)`.
+It disables when the Gateway lacks `terminal.v1` or no Home session is bound.
+The terminal controller continues to own loading, shell reuse and unavailable
+states; Home does not add a second terminal lifecycle. The context circle still
+opens Manage Home at medium, and the gear still opens Settings. Hosted UI journeys
+cover the role title, leading placement, exact Home terminal request and unavailable
+capability alongside the existing routing/detent journey.
+
 ### Home task sheets
 
 The Tasks sheet uses the task contract in
@@ -2745,7 +3243,17 @@ milliseconds; spend shows the task's input and output token counts, or is unavai
 an unknown outcome nor a last assistant reply is labeled success.
 
 `HomeTaskSheet` uses the same managed chrome, glass cards, typography, loading,
-placeholder and action owners as the other Home sheets. It first reads status to
+placeholder and action owners as the other Home sheets. Task rows are standard
+rows: a state glyph, a title (the worker's name, else the brief's first line,
+else the project), the project and relative update time, and a state pill, with
+no spend. The task detail shows a header card (title, state pill, project and
+relative dates), the Brief group (six lines, then Show all), the result, the
+Worker group (model, subagent launches, token spend when reported, and live runs
+with their state pills), and Redeliver when offered. Its toolbar's Open Session
+opens the worker's own chat, where the task is stopped or steered (#911); the
+detail has no Stop, Steer or Reload. Task
+permissions are a Manage Home row: standing scopes, one-use grants and pending
+requests, each a row with a state pill, and Revoke asks for confirmation. It first reads status to
 show the task-only recovery fence and reason without issuing a fenced list or
 permission read. An empty uninitialized task list does not imply a permission
 grant: permission listing may refuse `not-initialized`. The menu requires the
@@ -2759,8 +3267,7 @@ installed read; accepted commands remain with `HomeMutationCoordinator` and its
 command ID/receipt invocation after dismissal. Unknown completion allows only
 receipt checks, never automatic mutation replay.
 
-Stop and steer capture task and operation from detail; the operation is the control fence;
-there is no transfer/takeover or successor targeting. Permissions list standing
+Permissions list standing
 scopes and one-use grant states/expiry. Revocation does not stop admitted work.
 Grant review displays the exact stored target, intent revision/digest, scope,
 restore epoch. Native DatePicker requires the

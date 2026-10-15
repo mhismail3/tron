@@ -493,11 +493,20 @@ validates the extracted object, then each consumer validates its existing schema
 and bounds. Prose alone is never evidence. Reflector and synthesis remain plain
 text. Provider errors/aborts and empty replies still fail before JSON parsing.
 
-The pinned Pi `ModelRuntime.completeSimple` has no typed JSON response-format
-contract; its constrained sampling is for tools, not text replies. Raw
-`samplingParams`/`onPayload` overrides are not a portable enforced contract across
-OpenAI API and subscription transports. Knowledge therefore uses the strict
-extractor, not provider-specific overrides or permissive repair. The retained
+A prompt alone does not hold that contract: `openai/gpt-6-luna` answered the
+summary prompt with a prose preamble before the object (#292). The extractor
+refuses any structural delimiter in surrounding prose, such as a quoted
+`[unknown]` evidence marker, so prompt-only compliance is not dependable. The pinned Pi `completeSimple` has no provider-neutral JSON response
+format, so `knowledgeJsonRequest` adds the provider's own enforced contract where
+one exists: on OpenAI-operated Responses endpoints (`openai`, `azure`,
+`openai-codex`) each JSON request carries a strict `text.format` json_schema
+that mirrors its consumer's validation. Every other provider keeps the prompt
+contract. Parsing stays strict on every path, so a provider that ignores the
+format still fails as `model-output-invalid`, and a well-formed summary object
+outside its schema is `model-output-invalid` too, never `unavailable`.
+`knowledge-summary-model-contract.integration.test.ts` drives the real summary
+job and OpenAI Responses adapter over a socket with the recorded reply shape and
+the rejected shapes. There is no permissive repair. The retained
 `knowledge.model-failed` shape diagnostic identifies rejected replies without
 retaining source/model text; each field occurs once in the failure reason.
 
@@ -637,7 +646,9 @@ validate them, and an owner alone gives them meaning. Tron Home's learned profil
 `retired: true` marks a note that has left active use; its earlier revisions stay in
 the ledger. An update or correction that omits `tags` or `retired` keeps the current
 revision's values, because native typed drafts do not model them; naming `tags`
-replaces them. `provenance.reason` (at most 2,000 characters) records why a revision
+replaces them. A draft may name `retired: false` to return a retired note to use (the
+learned profile's undo, [settings-model.md 6.4](settings-model.md#64-learned-profile-changes));
+a stored revision never holds `false`. `provenance.reason` (at most 2,000 characters) records why a revision
 was written. It is ledger metadata, never evidence. All three fields are optional
 under schema v1, so no schema bump is needed. A Gateway that predates them ignores
 them when it reads a note, but it does not carry them forward when it writes the same
@@ -748,7 +759,7 @@ Source keeps exact referring POST/REPLY evidence, and synthesis must cite that
 Source separately from X author commentary.
 
 Private X bookmarks are discovered only through the explicitly invoked,
-paid-gated OAuth X connector. The global `tron-x` skill provides bounded
+paid-gated OAuth X connector. The global `x-posts` skill provides bounded
 newest-first queue discovery, page checkpoints, and identity/coverage
 validation. Browser state is never used to enumerate or sync private bookmarks;
 there is no cookie store, background sync, automatic browser login, or remote

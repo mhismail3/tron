@@ -19,7 +19,9 @@
     "test:pi-subagents-scripts": "node --test --test-concurrency=1 scripts/check-pi-subagents.integration.test.mjs scripts/build-pi-subagents-closure.integration.test.mjs scripts/fixture-process-owner.integration.test.mjs scripts/update-pi-subagents.integration.test.mjs",
     "update:pi-subagents": "node scripts/update-pi-subagents.mjs",
     "update:pi-sdk": "node scripts/update-pi-sdk.mjs",
+    "reproduce:pi-coding-agent": "node scripts/build-pi-coding-agent-patch.mjs",
     "test:pi-sdk-rollback": "node scripts/check-pi-sdk-rollback.mjs",
+    "test:pi-sdk-scripts": "node --test scripts/check-pi-sdk.integration.test.mjs",
     "test:sdk-behavior-trace": "vitest run src/sessions/sdk-behavior-trace.integration.test.ts",
     "update:sdk-behavior-trace": "TRON_UPDATE_SDK_BEHAVIOR_TRACE=1 vitest run src/sessions/sdk-behavior-trace.integration.test.ts",
     "record:pi-corpus": "vitest run --config vitest.corpus.config.ts",
@@ -27,7 +29,8 @@
     "check": "tsc -p tsconfig.json --noEmit && npm run check:test-support",
     "check:test-support": "tsc -p tsconfig.test-support.json",
     "test:device-binding": "node --import ./test-support/tron-home-environment-preflight.mjs --test ../../scripts/tron-ios-device-bind.test.mjs",
-    "test": "vitest run && vitest run --config vitest.nested.config.ts && npm run test:pi-subagents-scripts && npm run test:device-binding",
+    "test": "vitest run && vitest run --config vitest.nested.config.ts && npm run test:pi-subagents-scripts && npm run test:pi-sdk-scripts && npm run test:device-binding",
+    "test:mac-terminal": "vitest run --config vitest.mac-terminal.config.ts",
     "test:watch": "vitest",
     "start": "node dist/index.js",
     "chat": "node dist/client/terminal-chat.js"
@@ -35,17 +38,17 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.0.4",
     "@earendil-works/pi-ai": "1.0.4",
-    "@earendil-works/pi-coding-agent": "1.0.4",
+    "@earendil-works/pi-coding-agent": "file:third_party/pi-coding-agent/pi-coding-agent-1.0.4-tron.2.tgz",
     "@earendil-works/pi-tui": "1.0.4",
     "node-pty": "1.1.0",
     "proper-lockfile": "4.1.2",
-    "ws": "8.21.3"
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@types/node": "22.20.4",
     "@types/proper-lockfile": "4.1.4",
-    "@types/ws": "8.18.1",
-    "typescript": "5.9.3",
-    "vitest": "4.1.11"
+    "@types/ws": "8.18.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
   }
 }

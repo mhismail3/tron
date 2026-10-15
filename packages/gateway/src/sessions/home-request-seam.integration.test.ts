@@ -283,7 +283,7 @@ async function open(label: string, options: FixtureOptions = {}) {
 
 /** Rationale for the case names: the prototype's numbering (#412) is kept, so
  * this file's rows line up with the qualification evidence it ports. */
-describe.sequential("Home request seam inside the Gateway runtime", () => {
+describe("Home request seam inside the Gateway runtime", { concurrent: false }, () => {
   it("single-flights a reserved Home materialization and records its path before returning", async () => {
     const item = await open("reserved-materialization-single-flight", { home: true });
     const owner = item.registry.homeOwner() as unknown as {
@@ -449,12 +449,16 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await coldRegistry.recoverCanonicalAttention();
     expect(coldRegistry.homeOwner().profileFor(item.slot.id)).toBe("ordinary");
     const callsBefore = item.faux.state.callCount;
-    // Disabled changes the profile, not sealed evidence ownership. A cold
-    // chapter must never enter the writer-capable SDK constructor at all.
-    await expect(coldRegistry.acquire(item.slot.id)).rejects.toMatchObject({ code: "conflict" });
+    // Disabled changes the profile, not sealed evidence ownership. A cold sealed
+    // chapter opens read-only (#911): the catalog header proved its tail complete
+    // before the SDK opened it, opening writes nothing, and every write refuses.
+    const cold = await coldRegistry.acquire(item.slot.id);
+    expect(JSON.stringify(cold.canonicalSessionEntries())).toContain("canonical baseline");
+    expect(await item.jsonl()).toBe(oldBytes);
+    await expect(cold.prompt("write to a sealed chapter")).rejects.toThrow();
     expect(item.faux.state.callCount).toBe(callsBefore);
     expect(await item.jsonl()).toBe(oldBytes);
-    item.record("disabled-sealed-chapter", { profile: "ordinary", refusedBeforeConstruction: true, bytesUnchanged: true });
+    item.record("disabled-sealed-chapter", { profile: "ordinary", openedReadOnly: true, bytesUnchanged: true });
   });
 
   it("refuses sealed Slot mutation paths before changing SDK state or the canonical file", async () => {
@@ -651,7 +655,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await item.slot.prompt(longInput("C22 prior input"));
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const policy = item.policy()!;
-    policy.admit("c22", null);
+    policy.admit("c22", null, item.session.systemPrompt, "user");
     const prepared = policy.wrapPrepareRequest(item.session, undefined);
     const projection = item.session.sessionManager.buildSessionProjection();
     const update = await prepared({ context: { messages: projection.messages }, model: item.faux.getModel(), thinkingLevel: "off" });
@@ -1117,7 +1121,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     let innerStreamCalls = 0;
     const inner = ((() => { innerStreamCalls += 1; return { [Symbol.asyncIterator]: async function* () {} }; }) as unknown as StreamFn);
     const guard = policy.wrapStreamFunction(inner);
-    policy.admit("c8a", guarded.session.sessionManager.getLeafId() ?? null);
+    policy.admit("c8a", guarded.session.sessionManager.getLeafId() ?? null, guarded.session.systemPrompt, "user");
     const model = guarded.faux.getModel();
     let guardOutcome = "returned";
     try {
@@ -1417,7 +1421,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const enteredBefore = item.compactor.entered;
 
     const policy = item.policy()!;
-    policy.admit("c19", item.session.sessionManager.getLeafId() ?? null);
+    policy.admit("c19", item.session.sessionManager.getLeafId() ?? null, item.session.systemPrompt, "user");
     const prepared = policy.wrapPrepareRequest(item.session, undefined);
     const projection = item.session.sessionManager.buildSessionProjection();
     const extra = { role: "user", content: "NOT-THE-PROJECTION", timestamp: 0 } as unknown as AgentMessage;

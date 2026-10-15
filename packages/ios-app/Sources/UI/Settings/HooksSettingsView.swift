@@ -137,15 +137,19 @@ enum HooksSettingsPresentation {
 struct HooksSettingsView: View {
     let projectCWD: String?
     @Environment(AppModel.self) private var model
+    /// The opening group's accent (Tools, or the Project card's); teal only when opened alone (#939).
+    @Environment(\.tronSettingsVisualTheme) private var theme
+    private var accent: Color { theme?.accent ?? .tronSessionTeal }
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var scope: SettingsScope = .global
+    private var scope: SettingsScope { projectCWD == nil ? .global : .project }
     @State private var mode: HookViewMode = .byEvent
     @State private var showUnregisteredEvents = false
     @State private var selected: HookExtensionRecord?
     @State private var selectedEvent: HookEventRecord?
     @State private var projection: JSONValue?
     @State private var loadError: String?
-    @State private var loading = false
+    /// A surface starts loading: its empty state waits for the first read.
+    @State private var loading = true
     @State private var refreshGeneration = 0
     @State private var trust: ProjectTrustSummary?
 
@@ -159,7 +163,6 @@ struct HooksSettingsView: View {
         let foregroundGeneration: Int
     }
 
-    private var allowsProjectScope: Bool { projectCWD != nil }
     private var trustTarget: TrustTarget? { projectCWD.flatMap(TrustTarget.init(cwd:)) }
 
     private var loadID: HooksLoadID {
@@ -188,7 +191,7 @@ struct HooksSettingsView: View {
         )
         return ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
-                scopeGroup
+                TronSettingsCaption(scopeExplanation)
                 if HooksProjectTrustNote.isRequired(projectCWD: projectCWD, trust: trust) {
                     untrustedProjectRow
                 }
@@ -203,7 +206,7 @@ struct HooksSettingsView: View {
                 if !content.sections.isEmpty {
                     sections(content)
                 } else if loading {
-                    TronLoadingState(label: "Loading registered hooks…", accent: .tronSessionTeal)
+                    TronLoadingState(label: "Loading registered hooks…", accent: accent)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 36)
                 } else if loadError == nil {
@@ -211,7 +214,7 @@ struct HooksSettingsView: View {
                         title: "Hooks Unavailable",
                         detail: unavailableDetail,
                         icon: "bolt.horizontal.circle",
-                        accent: .tronSessionTeal
+                        accent: accent
                     )
                 }
             }
@@ -249,23 +252,11 @@ struct HooksSettingsView: View {
             HookExtensionDetailView(
                 record: record,
                 title: displayName(for: record, in: content),
-                accent: .tronSessionTeal
+                accent: accent
             )
         }
         .tronManagedSheet(item: $selectedEvent, identity: { "settings.hook-event.\($0.id)" }) { event in
-            HookEventDetailView(event: event, accent: .tronSessionTeal)
-        }
-    }
-
-    private var scopeGroup: some View {
-        TronSettingsGroup("Scope", detail: scopeExplanation, accent: .tronSessionTeal) {
-            SettingsScopeRow(
-                icon: "scope",
-                title: "Hooks Scope",
-                scope: scope,
-                allowsProjectScope: allowsProjectScope,
-                accent: .tronSessionTeal
-            ) { selectScope($0) }
+            HookEventDetailView(event: event, accent: accent)
         }
     }
 
@@ -318,18 +309,18 @@ struct HooksSettingsView: View {
                 TronSegmentedControl(
                     options: HookViewMode.allCases.map { (label: $0.title, value: $0) },
                     selection: $mode,
-                    accent: .tronSessionTeal,
-                    foreground: .tronSessionTeal,
+                    accent: accent,
+                    foreground: accent,
                     minimumHeight: 40
                 )
                 .accessibilityLabel("Hook view")
             case .unregisteredEvents:
-                TronSettingsGroup("Display", accent: .tronSessionTeal, surfaceStyle: .scrollOptimized) {
+                TronSettingsGroup("Display", accent: accent, surfaceStyle: .scrollOptimized) {
                     TronToggleRow(
                         icon: "bolt.horizontal.circle",
                         title: "Show unregistered events",
                         detail: "Include supported lifecycle events without registered handlers",
-                        accent: .tronSessionTeal,
+                        accent: accent,
                         isOn: $showUnregisteredEvents
                     )
                 }
@@ -338,7 +329,7 @@ struct HooksSettingsView: View {
                     title: "No registered hooks",
                     detail: "The selected runtime reported no extension registrations.",
                     icon: "bolt.horizontal.circle",
-                    accent: .tronSessionTeal
+                    accent: accent
                 )
             case .registeredExtensions:
                 extensionList(content)
@@ -357,13 +348,13 @@ struct HooksSettingsView: View {
         TronSettingsGroup(
             "Registered Extensions",
             detail: "\(content.handlerCount) registered handlers · grouped by owning extension",
-            accent: .tronSessionTeal,
+            accent: accent,
             surfaceStyle: .scrollOptimized
         ) {
             VStack(spacing: 0) {
                 ForEach(Array(content.extensionRows.enumerated()), id: \.element.id) { index, row in
                     let record = row.record
-                    if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
+                    if index > 0 { TronSettingsDivider(accent: accent) }
                     Button { selected = record } label: {
                         TronSettingsRow(
                             icon: "bolt.horizontal.circle",
@@ -371,10 +362,9 @@ struct HooksSettingsView: View {
                             subtitle: record.handlers.isEmpty
                                 ? "No registered handlers · tool/command registration only"
                                 : "\(record.handlerCount) registered handler\(record.handlerCount == 1 ? "" : "s") · \(record.eventCount) event\(record.eventCount == 1 ? "" : "s")",
-                            subtitleLineLimit: 2,
-                            accent: .tronSessionTeal
+                            accent: accent
                         ) {
-                            ComposerResourceBadges(hookProvenance: record.provenance, accent: .tronSessionTeal)
+                            ComposerResourceBadges(hookProvenance: record.provenance, accent: accent)
                         }
                     }
                     .buttonStyle(.plain)
@@ -391,12 +381,12 @@ struct HooksSettingsView: View {
             detail: showUnregisteredEvents
                 ? "Registered and supported events · zero counts are not registrations"
                 : "Registered events grouped by lifecycle",
-            accent: .tronSessionTeal,
+            accent: accent,
             surfaceStyle: .scrollOptimized
         ) {
             VStack(spacing: 0) {
                 ForEach(Array(content.events.enumerated()), id: \.element.id) { index, event in
-                    if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
+                    if index > 0 { TronSettingsDivider(accent: accent) }
                     Button { selectedEvent = event } label: {
                         TronSettingsRow(
                             icon: event.descriptor.isSupported ? "bolt.horizontal.circle" : "questionmark.circle",
@@ -404,8 +394,7 @@ struct HooksSettingsView: View {
                             subtitle: event.providers.isEmpty
                                 ? "No registered handlers · supported event"
                                 : "\(event.handlerCount) handler\(event.handlerCount == 1 ? "" : "s") · \(event.providers.count) provider\(event.providers.count == 1 ? "" : "s")",
-                            subtitleLineLimit: 2,
-                            accent: event.descriptor.isSupported ? .tronSessionTeal : .tronAmber
+                            accent: event.descriptor.isSupported ? accent : .tronAmber
                         )
                     }
                     .buttonStyle(.plain)
@@ -442,11 +431,6 @@ struct HooksSettingsView: View {
         content.extensionRows.first { $0.record.id == record.id }?.label ?? record.friendlyName
     }
 
-    private func selectScope(_ newScope: SettingsScope) {
-        guard newScope != scope, newScope == .global || allowsProjectScope else { return }
-        scope = newScope
-    }
-
     private func refreshHooks(_ request: HooksLoadID) async {
         guard hooksReadIsCurrent(request) else { return }
         guard let list = HooksListRequest.make(
@@ -456,6 +440,7 @@ struct HooksSettingsView: View {
         ) else {
             projection = nil
             loadError = nil
+            loading = false
             return
         }
         loading = projection == nil

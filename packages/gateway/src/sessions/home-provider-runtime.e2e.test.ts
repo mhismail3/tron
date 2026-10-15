@@ -1,11 +1,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { settingsDependencies } from "../../test-support/settings-dependencies.js";
+import { homeMemoryChange } from "../../test-support/chat-settings-change.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, type AssistantMessage } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { fileURLToPath } from "node:url";
-import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { GatewayConfig } from "../config.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
@@ -84,7 +85,9 @@ async function fixture(options: { shareGatewayRuntime: boolean }) {
   cleanups.push(async () => { await registry.dispose(); });
   const service = new GatewayService({
     config: { tronHome } as unknown as GatewayConfig, modelRuntime: gateway, sessions: registry, home: registry.homeOwner(),
-    receipts: new CommandReceiptStore(join(tronHome, "receipts")), settings: new SettingsService(agentDir, gateway),
+    receipts: new CommandReceiptStore(join(tronHome, "receipts")),
+    broadcast: () => {},
+    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: gateway, sessions: registry, home: () => registry.homeOwner() }),
     trust: new TrustService(agentDir), sessionDeleted: () => {}, uploads: { removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);
   await registry.initialize();
@@ -105,14 +108,14 @@ async function homeTurn(f: Awaited<ReturnType<typeof fixture>>, text: string): P
   return lastAssistant(sessionOf(home));
 }
 
-describe.sequential("Home's chat runtime", () => {
+describe("Home's chat runtime", { concurrent: false }, () => {
   // A1, A2, A3.
   it("reaches a provider only the Gateway-wide runtime has, through every Home lifecycle step", async () => {
     trackCase(0);
     const f = await fixture({ shareGatewayRuntime: true });
     f.packaged.setResponses(Array.from({ length: 3 }, (_unused, index) => fauxAssistantMessage(`package reply ${index}`)));
     await f.service.invoke(client, "home.designate", { commandId: "provider-designate", model: PACKAGE });
-    await f.service.invoke(client, "home.configureMemory", { commandId: "provider-memory", model: PACKAGE });
+    await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "provider-memory", model: PACKAGE }));
     const first = await homeTurn(f, "first");
     expect(first?.stopReason).toBe("stop");
     expect(first?.provider).toBe(PACKAGE.provider);
@@ -202,7 +205,7 @@ describe.sequential("Home's chat runtime", () => {
     f.packaged.setResponses([fauxAssistantMessage("never sent")]);
     const outcome = await f.service.invoke(client, "home.designate", { commandId: "isolated-designate", model: PACKAGE })
       .then(async () => {
-        await f.service.invoke(client, "home.configureMemory", { commandId: "isolated-memory", model: PACKAGE });
+        await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "isolated-memory", model: PACKAGE }));
         return await homeTurn(f, "first");
       })
       .catch((error: Error) => error);

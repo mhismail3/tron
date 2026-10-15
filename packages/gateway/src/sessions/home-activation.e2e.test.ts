@@ -12,6 +12,8 @@
  * Retained artifacts are `test-results/home-activation/report.json` and
  * `test-results/terminal-chat-home/transcript.json`.
  */
+import { settingsDependencies } from "../../test-support/settings-dependencies.js";
+import { homeMemoryChange } from "../../test-support/chat-settings-change.js";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
@@ -61,7 +63,6 @@ vi.mock("../home/home-session-recovery.js", async importOriginal => {
   };
 });
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
-import { SettingsService } from "../admin/settings-service.js";
 import { TrustService } from "../admin/trust-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { EpisodicMemory } from "../episodic/episodic-memory.js";
@@ -70,7 +71,7 @@ import type { HomeRecord } from "../home/home-owner.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
 import { scanReservedHomeSession } from "../home/home-session-recovery.js";
 import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-policy.js";
-import type { HomeContextProjection, HomeMemoryStatus, HomeStatus, HomeMemoryPage, HomeMemoryEvidencePage } from "../protocol/types.js";
+import type { HomeContextProjection, HomeMemoryStatus, HomeStatus, HomeMemoryView, HomeMemoryEvidencePage } from "../protocol/types.js";
 import { DEFAULT_MAX_UPLOAD_BYTES, type GatewayConfig } from "../config.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { INLINE_IMAGE_BASE64_LIMIT_BYTES, UploadStore } from "../machine/upload-store.js";
@@ -283,7 +284,8 @@ function openRegistry(f: Fixture): void {
     sessions: registry,
     home: registry.homeOwner(),
     receipts,
-    settings: new SettingsService(f.agentDir, f.runtime),
+    broadcast: () => {},
+    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner() }),
     trust: new TrustService(f.agentDir),
     sessionDeleted: () => {},
     uploads: f.uploads ?? {
@@ -376,10 +378,10 @@ async function designateHome(
 ): Promise<Awaited<ReturnType<RuntimeRegistry["acquire"]>>> {
   await f.service.invoke(client, "home.designate", { commandId, model: MODEL });
   if (options.configure !== false) {
-    await f.service.invoke(client, "home.configureMemory", {
+    await f.service.invoke(client, "settings.change", homeMemoryChange({
       commandId: `${commandId}-memory`,
       model: MEMORY_MODEL,
-    });
+    }));
   }
   const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
   return await f.registry.acquire(status.sessionId!);
@@ -1437,7 +1439,8 @@ describe("Tron Home activations end to end", () => {
       return { f, old, current, canonical, entryId };
     }
     const page = async (f: Fixture, params: Record<string, unknown> = {}) =>
-      await f.service.invoke(client, "home.memory.page", params) as unknown as HomeMemoryPage;
+      await f.service.invoke(client, "home.memory.view", params) as unknown as HomeMemoryView;
+    const memoryItems = (view: HomeMemoryView) => view.lines.flatMap(line => line.item ? [line.item] : []);
 
     it("bounds and replays pages across chapters, separating projection from exact canonical evidence", async () => {
       const { f, old, current, canonical, entryId } = await browserFixture("pages");
@@ -1445,19 +1448,19 @@ describe("Tron Home activations end to end", () => {
       const first = await page(f, { limit: 2 });
       expect(first.nextCursor).toBeDefined();
       const continuationBeforeRestart = await page(f, { limit: 2, cursor: first.nextCursor });
-      const items = [...first.items];
+      const items = [...memoryItems(first)];
       let next = first.nextCursor;
       for (let step = 0; next && step < 30; step += 1) {
         const result = await page(f, { limit: 2, cursor: next });
         expect(await page(f, { limit: 2, cursor: next })).toEqual(result);
-        expect(result.items.length).toBeLessThanOrEqual(2);
+        expect(result.lines.length).toBeLessThanOrEqual(2);
         expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(128 * 1024);
         expect(result.revision).toBe(first.revision);
-        items.push(...result.items); next = result.nextCursor;
+        items.push(...memoryItems(result)); next = result.nextCursor;
       }
       expect(next).toBeUndefined();
       expect(new Set(items.map(item => item.index)).size).toBe(items.length);
-      expect(items).toHaveLength(first.totalItems);
+      expect(items).toHaveLength(first.totalMessages);
       expect(new Set(items.map(item => item.evidence.sessionId))).toEqual(new Set([old.id, current.id]));
       const projected = items.find(item => item.evidence.entryId === entryId)!;
       expect(projected).toMatchObject({ kind: "echo", attribution: "tool", projection: { format: "memory-projection" } });
@@ -1479,7 +1482,7 @@ describe("Tron Home activations end to end", () => {
       expect(exact).toBe(canonical);
       await expect(f.service.invoke(client, "home.memory.evidence", { evidence: projected.evidence, offset: canonical.length + 1 })).rejects.toMatchObject({ code: "invalid_request" });
       await expect(page(f, { limit: 1, cursor: first.nextCursor })).rejects.toMatchObject({ code: "invalid_request" });
-      const outOfRange = Buffer.from(JSON.stringify({ revision: first.revision, offset: first.totalItems + 1, limit: 2 })).toString("base64url");
+      const outOfRange = Buffer.from(JSON.stringify({ revision: first.revision, offset: first.totalMessages + 1, limit: 2 })).toString("base64url");
       await expect(page(f, { limit: 2, cursor: outOfRange })).rejects.toMatchObject({ code: "conflict" });
       for (const invalid of [ { ...projected.evidence, sessionId: old.id }, { ...projected.evidence, entryId: "missing" },
         { ...projected.evidence, sourceDigest: "0".repeat(64) } ]) {
@@ -1499,24 +1502,24 @@ describe("Tron Home activations end to end", () => {
       current.sessionManager.appendContextEdit(entryId, { content: [{ type: "text", text: "edited projection" }] });
       await expect(page(f, { limit: 1, cursor: first.nextCursor })).rejects.toMatchObject({ code: "conflict", details: { reason: "home-memory-revision-changed" } });
       const edited = await page(f, { limit: 50 });
-      const item = edited.items.find(candidate => candidate.evidence.entryId === entryId)!;
+      const item = memoryItems(edited).find(candidate => candidate.evidence.entryId === entryId)!;
       expect(item.projection.text).toContain("edited projection");
       expect(item.projection.omissions).toContain("context-edit");
       const continued = await page(f, { limit: 1 });
       current.sessionManager.appendMessage({ role: "user", content: "new appended evidence", timestamp: Date.now() });
       await expect(page(f, { limit: 1, cursor: continued.nextCursor })).rejects.toMatchObject({ code: "conflict" });
       current.sessionManager.appendContextEdit(entryId, null);
-      const omitted = (await page(f, { limit: 50 })).items.find(candidate => candidate.evidence.entryId === entryId)!;
+      const omitted = memoryItems(await page(f, { limit: 50 })).find(candidate => candidate.evidence.entryId === entryId)!;
       expect(omitted).toMatchObject({ index: item.index, projection: { omitted: true, text: "[omitted]" } });
       expect(omitted.projection.omissions).toContain("context-edit");
       // Evidence stays canonical even after a projected context edit/exclusion.
       const evidence = await f.service.invoke(client, "home.memory.evidence", { evidence: item.evidence }) as unknown as HomeMemoryEvidencePage;
       expect(evidence.text).toContain("fixture-token");
       await rm(current.sessionFile!);
-      for (const [method, params] of [["home.memory.page", {}], ["home.memory.evidence", { evidence: first.items[0]!.evidence }]] as const) {
+      for (const [method, params] of [["home.memory.view", {}], ["home.memory.evidence", { evidence: memoryItems(first)[0]!.evidence }]] as const) {
         const error = await f.service.invoke(client, method, params).then(() => undefined, error => error);
         expect(error).toMatchObject({ code: "busy", diagnosticReason: "home-memory-source-unavailable" });
-        expect(error.details).toEqual({ reason: "home-memory-source-unavailable" });
+        expect(error.details).toEqual({ reason: "home-memory-source-unavailable", cause: expect.stringMatching(/^[a-z-]+$/u) });
         expect(error.message).not.toContain(".jsonl");
       }
       report.cases.push({ case: "memory-browser-revision-and-source-failure", editsInvalidate: true, appendInvalidates: true, partialSuccess: false });
@@ -1532,7 +1535,7 @@ describe("Tron Home activations end to end", () => {
       await f.service.invoke(client, "home.pauseMemory", { commandId: "browser-canonical-freeze" });
       const calls = f.compactor.calls;
       const first = await page(f, { limit: 50 });
-      const original = first.items.find(item => item.evidence.entryId === entryId)!;
+      const original = memoryItems(first).find(item => item.evidence.entryId === entryId)!;
       expect(original.summary).not.toBeNull();
       const lines = (await readFile(current.sessionFile!, "utf8")).trimEnd().split("\n");
       const timestamp = "2024-01-01T12:00:00.000Z";
@@ -1541,7 +1544,7 @@ describe("Tron Home activations end to end", () => {
         return entry.id === entryId ? JSON.stringify({ ...entry, timestamp }) : line;
       }).join("\n") + "\n");
       const revised = await page(f, { limit: 50 });
-      const updated = revised.items.find(item => item.evidence.entryId === entryId)!;
+      const updated = memoryItems(revised).find(item => item.evidence.entryId === entryId)!;
       expect(updated.projection.text).toBe(original.projection.text);
       expect(updated.timestamp).toBe(timestamp);
       expect(updated.evidence.sourceDigest).not.toBe(original.evidence.sourceDigest);
@@ -1549,7 +1552,7 @@ describe("Tron Home activations end to end", () => {
       await expect(f.service.invoke(client, "home.memory.evidence", { evidence: original.evidence })).rejects.toMatchObject({ code: "conflict" });
       expect((await f.service.invoke(client, "home.memory.evidence", { evidence: updated.evidence }) as unknown as HomeMemoryEvidencePage).metadata.timestamp).toBe(timestamp);
       current.sessionManager.appendContextEdit(entryId, { content: [{ type: "text", text: canonical }] });
-      const sameTextEdited = (await page(f, { limit: 50 })).items.find(item => item.evidence.entryId === entryId)!;
+      const sameTextEdited = memoryItems(await page(f, { limit: 50 })).find(item => item.evidence.entryId === entryId)!;
       expect(sameTextEdited.projection.text).toBe(updated.projection.text);
       expect(sameTextEdited.projection.omissions).toContain("context-edit");
       expect(sameTextEdited.summary).toEqual(original.summary);
@@ -1568,15 +1571,15 @@ describe("Tron Home activations end to end", () => {
         current.sessionManager.appendMessage({ role: "user", content: `row ${index}: ${"\u0001".repeat(5000)}`, timestamp: Date.now() });
       }
       let result = await page(f, { limit: 50 });
-      const count = result.totalItems;
+      const count = result.totalMessages;
       const indexes = new Set<number>();
       let byteLimited = false;
       for (let step = 0; step < 100; step += 1) {
         expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(128 * 1024);
-        expect(result.items.length).toBeLessThanOrEqual(50);
-        for (const item of result.items) { expect(indexes.has(item.index)).toBe(false); indexes.add(item.index); }
+        expect(result.lines.length).toBeLessThanOrEqual(50);
+        for (const item of result.lines) { expect(indexes.has(item.start)).toBe(false); indexes.add(item.start); }
         if (!result.nextCursor) break;
-        byteLimited ||= result.items.length < 50;
+        byteLimited ||= result.lines.length < 50;
         result = await page(f, { limit: 50, cursor: result.nextCursor });
       }
       expect(result.nextCursor).toBeUndefined();
@@ -1606,7 +1609,14 @@ describe("Tron Home activations end to end", () => {
         await expect(page(f, { limit: 1, cursor: pending.nextCursor })).rejects.toMatchObject({ code: "conflict" });
         const built = await page(f, { limit: 50 });
         expect(built.revision).not.toBe(initial.revision);
-        expect(built.items.some(item => item.summary?.text.includes(SUMMARY_MARKER))).toBe(true);
+        expect(built.lines.some(line => line.item?.summary?.text.includes(SUMMARY_MARKER))).toBe(true);
+        expect(built.lines.map(line => line.start)).toEqual([...built.lines.map(line => line.start)].sort((a, b) => b - a));
+        // A part read answers the two halves the summary above them covers, with items at span 1.
+        const children = await page(f, { part: { start: 0, span: 2 } });
+        expect(children.lines.map(line => [line.start, line.span])).toEqual([[0, 1], [1, 1]]);
+        expect(children.lines.every(line => line.item !== undefined)).toBe(true);
+        await expect(page(f, { part: { start: 1, span: 2 } })).rejects.toMatchObject({ code: "invalid_request" });
+        await expect(page(f, { part: { start: 0, span: 3 } })).rejects.toMatchObject({ code: "invalid_request" });
         expect(f.faux.state.callCount).toBe(1);
         report.cases.push({ case: "memory-browser-summary-settlement", revisionChanged: true, providerReplay: false });
       } finally { f.compactor.release?.(); }
@@ -1630,7 +1640,7 @@ describe("Tron Home activations end to end", () => {
       try {
         await waitUntil(() => entered);
         const queuedController = new AbortController();
-        const queued = f.service.invoke({ ...client, signal: queuedController.signal }, "home.memory.page", {})
+        const queued = f.service.invoke({ ...client, signal: queuedController.signal }, "home.memory.view", {})
           .then(() => undefined, error => error);
         // The first read keeps its proof gate. Cancellation must remove this
         // queued read without waiting for that unrelated request to settle.
@@ -1646,8 +1656,8 @@ describe("Tron Home activations end to end", () => {
       } finally { releaseProof(); f.compactor.release?.(); await reading; spy.mockRestore(); }
       const controller = new AbortController();
       controller.abort();
-      await expect(f.service.invoke({ ...client, signal: controller.signal }, "home.memory.page", {})).rejects.toBeDefined();
-      expect((await page(f)).items.length).toBeGreaterThan(0);
+      await expect(f.service.invoke({ ...client, signal: controller.signal }, "home.memory.view", {})).rejects.toBeDefined();
+      expect((await page(f)).lines.length).toBeGreaterThan(0);
       report.cases.push({ case: "memory-browser-read-fence", stalePublication: false, cancelledReadRetired: true });
     });
 
@@ -1666,7 +1676,7 @@ describe("Tron Home activations end to end", () => {
       await new Promise<void>(resolve => setImmediate(resolve));
       expect(f.compactor.calls).toBe(calls);
       expect(f.faux.state.callCount).toBe(1);
-      expect(result.items.some(item => item.projection.text.includes("unbuilt input") && item.summary === null)).toBe(true);
+      expect(memoryItems(result).some(item => item.projection.text.includes("unbuilt input") && item.summary === null)).toBe(true);
       const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
       expect(status).toMatchObject({ enabled: false, memory: { episodic: { pump: { busy: 0 } } } });
       report.cases.push({ case: "memory-browser-disabled-restart", noCompactorAdmission: true, noChatReplay: true });
@@ -1712,17 +1722,17 @@ describe("Tron Home activations end to end", () => {
         });
       });
       try {
-        for (const [index, method] of ["home.memory.page", "home.memory.evidence"].entries()) {
+        for (const [index, method] of ["home.memory.view", "home.memory.evidence"].entries()) {
           const id = `browser-cancel-${index}`;
           socket.send(JSON.stringify({ type: "request", id, method,
-            params: method === "home.memory.page" ? {} : { evidence: first.items[0]!.evidence } }));
+            params: method === "home.memory.view" ? {} : { evidence: memoryItems(first)[0]!.evidence } }));
           await waitUntil(() => started === index + 1);
           socket.send(JSON.stringify({ type: "cancel", id }));
           await waitUntil(() => records.some(record => record.event === "rpc.cancelled" && record.requestID === id));
           expect(frames.some(frame => frame.id === id)).toBe(false);
         }
       } finally { for (const release of releases) release(); spy.mockRestore(); }
-      const wrong = { ...first.items[0]!.evidence, sourceDigest: "0".repeat(64) };
+      const wrong = { ...memoryItems(first)[0]!.evidence, sourceDigest: "0".repeat(64) };
       socket.send(JSON.stringify({ type: "request", id: "wrong-evidence", method: "home.memory.evidence", params: { evidence: wrong } }));
       await waitUntil(() => frames.some(frame => frame.id === "wrong-evidence"));
       expect(frames.find(frame => frame.id === "wrong-evidence")!.error).toMatchObject({ code: "conflict" });
@@ -1739,8 +1749,9 @@ describe("Tron Home activations end to end", () => {
       const f = await fixture("browser-malformed");
       disposals.push(async () => { f.service.dispose(); await f.receipts.dispose(); await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
       for (const params of [{ limit: 0 }, { limit: 51 }, { limit: 1.5 }, { limit: "2" }, { cursor: "invalid" },
-        { cursor: "x".repeat(1025) }, { limit: 2, unknown: true }]) {
-        await expect(f.service.invoke(client, "home.memory.page", params)).rejects.toMatchObject({ code: "invalid_request" });
+        { cursor: "x".repeat(1025) }, { limit: 2, unknown: true },
+        { part: { start: 1, span: 2 } }, { part: { start: 0, span: 3 } }, { part: { start: 0, span: 2 }, cursor: "x" }]) {
+        await expect(f.service.invoke(client, "home.memory.view", params)).rejects.toMatchObject({ code: "invalid_request" });
       }
       for (const params of [{}, { evidence: {} }, { evidence: { index: -1 } }, { evidence: null },
         { evidence: {}, offset: -1 }, { evidence: {}, offset: 0.5 }, { evidence: {}, extra: true }]) {
@@ -1819,7 +1830,7 @@ describe("Tron Home activations end to end", () => {
         phase: "paused", readiness: { ready: false, gaps: ["memory-paused"] },
         recovery: { action: "resume-memory" }, memory: { paused: true },
       });
-      await f.service.invoke(client, "home.configureMemory", { commandId: "pause-configure", model: OTHER_MEMORY_MODEL });
+      await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "pause-configure", model: OTHER_MEMORY_MODEL }));
       await f.registry.homeOwner().disable();
       await f.registry.homeOwner().designate({}, () => MODEL);
       await restart(f);
@@ -2238,10 +2249,10 @@ describe("Tron Home activations end to end", () => {
     const refusals = refusedReasons(f);
     const context = await f.service.invoke(client, "home.context", {}) as unknown as HomeContextProjection;
 
-    await f.service.invoke(client, "home.configureMemory", {
+    await f.service.invoke(client, "settings.change", homeMemoryChange({
       commandId: "e2e-configure-memory",
       model: MEMORY_MODEL,
-    });
+    }));
     f.faux.setResponses([responsesOf(f, requests)("configured activation response")]);
     await slot.prompt(longInput("configured activation input"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
@@ -2675,7 +2686,7 @@ describe("Tron Home activations end to end", () => {
       terminal.stdin.write("/home status\n");
       await waitUntil(() => stdout.includes("configure-memory"), 10_000).catch(() => { throw new Error(`missing status; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
       await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 6, 10_000);
-      await f.service.invoke(client, "home.configureMemory", { commandId: "terminal-configure-memory", model: MEMORY_MODEL });
+      await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "terminal-configure-memory", model: MEMORY_MODEL }));
       const requests: CapturedRequest[] = [];
       f.faux.setResponses([responsesOf(f, requests)("TERMINAL-STREAMED-REPLY")]);
       terminal.stdin.write("ordinary reply\n");
@@ -2977,9 +2988,9 @@ describe("Tron Home activations end to end", () => {
     const second = slot.prompt(longInput("race activation two"));
     await waitUntil(() => activationOpen(f));
     // The operator's change lands while the activation is inside its first step.
-    const configured = await f.service.invoke(client, "home.configureMemory", {
+    const configured = await f.service.invoke(client, "settings.change", homeMemoryChange({
       commandId: "e2e-configure-race", model: OTHER_MEMORY_MODEL,
-    }).then(() => "accepted", (error: unknown) => (error as { message?: string }).message ?? "failed");
+    })).then(() => "accepted", (error: unknown) => (error as { message?: string }).message ?? "failed");
     f.compactor.release?.();
     await second.catch(() => undefined);
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
@@ -3071,7 +3082,7 @@ describe("Tron Home activations end to end", () => {
     const f = await fixture("configure-validation", { virtualModel: true });
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     await f.service.invoke(client, "home.designate", { commandId: "e2e-designate-validation", model: MODEL });
-    const attempt = (params: Record<string, unknown>): Promise<string> => f.service.invoke(client, "home.configureMemory", params)
+    const attempt = (params: Record<string, unknown>): Promise<string> => f.service.invoke(client, "settings.change", homeMemoryChange(params))
       .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
     const outcomes = {
       unregisteredModel: await attempt({ commandId: "configure-validation-1", model: { provider: MEMORY_PROVIDER, id: "missing" } }),
@@ -3081,7 +3092,7 @@ describe("Tron Home activations end to end", () => {
       missingModel: await attempt({ commandId: "configure-validation-5" }),
     };
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
-    const accepted = await f.service.invoke(client, "home.configureMemory", { commandId: "configure-validation-6", model: MEMORY_MODEL })
+    const accepted = await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "configure-validation-6", model: MEMORY_MODEL }))
       .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
     const after = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     report.cases.push({ case: "configure-validation", outcomes, memoryAfterRefusals: status.memory, accepted, memoryAfterAccept: after.memory });

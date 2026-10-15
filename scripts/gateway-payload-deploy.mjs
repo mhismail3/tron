@@ -60,8 +60,8 @@ const MANIFEST_KEYS = [
 ];
 const PAYLOAD_PI_CLI = "app/node_modules/.bin/pi";
 const PAYLOAD_PI_ALIAS_TARGET = "../../app/node_modules/.bin/pi";
-const PROTOCOL_VERSION = 7;
-const MIN_PROTOCOL_VERSION = 7;
+const PROTOCOL_VERSION = 8;
+const MIN_PROTOCOL_VERSION = 8;
 export const PINNED_XCODEGEN_VERSION = "2.45.3";
 export const PINNED_NPM_VERSION = "10.9.4";
 export const PINNED_NPM_TREE_SHA256 = "adc24b0737566f66bc2ce18251f0bb8168c9cc9177c20fa3379cf129d6091cff";
@@ -2617,10 +2617,24 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
       // the clean revision after those edits are reverted.
       sourceRevision = await gitRevision(config.sourceRoot);
       const installVerifierPath = join(config.sourceRoot, "scripts", "gateway-install-inputs.mjs");
-      const { gatewayBuildInputFingerprint, verifyGatewayInstallInputs } = await import(pathToFileURL(installVerifierPath).href);
+      const { gatewayBuildInputFingerprint, ensureGatewayInstallInputs } = await import(pathToFileURL(installVerifierPath).href);
       sourceInputFingerprint = await gatewayBuildInputFingerprint(config.sourceRoot);
+      // A changed lock needs a newly signed build; refuse that before repairing
+      // anything, so npm ci only ever restores the lock the payload already runs.
       source = await captureReusableSourcePackage(active.root, gatewayRoot);
-      await verifyGatewayInstallInputs(gatewayRoot);
+      // The checkout's compile-only install drifts whenever main moves its lock
+      // without a reinstall; repair it with the active payload's pinned npm (#1010).
+      const startedAt = Date.now();
+      const install = await ensureGatewayInstallInputs(gatewayRoot, {
+        runtimeBin: join(active.root, "runtime", `bin-${process.arch}`),
+        onRepair: ({ drift }) => paths.timeline?.mark("deploy.source-install-repair",
+          "Source checkout install drifted from package-lock; running npm ci", "warning", { drift }),
+      });
+      if (install.repaired) {
+        paths.timeline?.mark("deploy.source-install-repaired", "Source checkout install restored with npm ci", "info", {
+          durationMs: Date.now() - startedAt,
+        });
+      }
       await runCommand(process.execPath, [
         join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"),
         "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput,
@@ -2652,6 +2666,13 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
         await cp(compilerOutput, join(temporary, "app", "dist"), { recursive: true, errorOnExist: true, force: false });
         await writeFile(join(temporary, "app", "package.json"), source.packageBytes);
         await writeFile(join(temporary, "app", "package-lock.json"), source.lockBytes);
+        // The patched pi-coding-agent declaration explains this exact lock, which a
+        // source update cannot change; refresh it so its metadata is the revision's.
+        const patchDeclaration = await readFile(join(gatewayRoot, "pi-coding-agent-patch.json")).catch((error) => {
+          if (error?.code === "ENOENT") return undefined;
+          throw error;
+        });
+        if (patchDeclaration) await writeFile(join(temporary, "app", "pi-coding-agent-patch.json"), patchDeclaration);
         if (await validatePayloadPushConfiguration(temporary, paths.channel) !== activePushConfiguration) {
           throw new Error("source update changed the active product PushService.xcconfig");
         }

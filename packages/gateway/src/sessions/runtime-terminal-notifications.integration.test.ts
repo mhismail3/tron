@@ -24,7 +24,7 @@ function barrier() {
   return { promise, release };
 }
 
-describe.sequential("automatic terminal notifications with the pinned runtime", () => {
+describe("automatic terminal notifications with the pinned runtime", { concurrent: false }, () => {
   const cleanup: Array<() => Promise<void>> = [];
   const originalEnvironment = Object.fromEntries([
     "PI_CODING_AGENT_DIR", DELEGATED_PROVIDER_ROOT_ENV, "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT", "PI_SUBAGENT_CHILD",
@@ -152,6 +152,78 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
     expect(value.suppressAutomatic).not.toHaveBeenCalled();
     (value.slot as unknown as { onEvent(event: { type: "agent_settled" }): void }).onEvent({ type: "agent_settled" });
     expect(value.enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([true, false])("presents Home by its role in snapshots and relay payloads without renaming ordinary sessions (previews: %s)", async (previewsEnabled) => {
+    const root = await mkdtemp(join(tmpdir(), "tron-home-title-"));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const payloads: Array<Record<string, unknown>> = [];
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      payloads.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ status: "accepted_by_apns", apnsId: "fixture-apns" }));
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    cleanup.push(async () => { server.close(); await once(server, "close"); });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("relay not bound");
+    const relay = new PushRelayClient("https://push.example.test", async (_url, init) =>
+      await fetch(`http://127.0.0.1:${address.port}/v3/notifications`, init) as never);
+    const store = new NotificationGrantStore(root);
+    let registry: RuntimeRegistry | undefined;
+    const notifications = new NotificationService(store, relay, Date.now, undefined, undefined, undefined,
+      (sessionId) => registry?.homeOwner().chapterStateFor(sessionId).homeId !== undefined);
+    cleanup.push(async () => notifications.dispose());
+    await notifications.initialize();
+    await notifications.upsertGrant({ deviceId: "device_abcdefgh", installationId: "install_abcdefgh",
+      grantId: "grant_abcdefgh", secret: Buffer.alloc(32, 9).toString("base64url"), previewsEnabled,
+      relayOrigin: "https://push.example.test", notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true });
+    const value = await fixture([], { notifications });
+    registry = value.registry;
+    const model = value.faux.getModel();
+    const designation = await registry.homeOwner().designate({ model: { provider: model.provider, id: model.id } }, () => model);
+    const home = await registry.acquire(designation.sessionId);
+    await home.rename("Generated Home conversation title");
+    await value.slot.rename("Ordinary project title");
+    expect(home.snapshot().name).toBe("Home");
+    expect(value.slot.snapshot().name).toBe("Ordinary project title");
+    // All producers, including input-needed and settings notifications, pass
+    // through this real admission/store/HTTP boundary. No APNs connection occurs.
+    await notifications.enqueue({ sessionId: home.id, sourceId: "home-title-explicit", kind: "explicit",
+      title: "Generated Home conversation title", message: "Home update",
+      route: { sessionId: home.id, machineId: "machine-terminal-test" } });
+    await notifications.userInputRequired({ sessionId: home.id, interactionId: "home-title-input", observed: false,
+      machineId: "machine-terminal-test" });
+    for (const kind of ["waiting", "agent_finished"] as const) {
+      await notifications.enqueue({ sessionId: home.id, sourceId: `home-title-${kind}`, kind,
+        title: "Generated Home conversation title", message: "Home outcome",
+        route: { sessionId: home.id, machineId: "machine-terminal-test" } });
+    }
+    await notifications.enqueue({ sessionId: value.slot.id, sourceId: "ordinary-title-explicit", kind: "explicit",
+      title: "Ordinary project title", message: "Ordinary update",
+      route: { sessionId: value.slot.id, machineId: "machine-terminal-test" } });
+    await waitFor(() => payloads.length === 5, "five title payloads at the local relay");
+    expect(payloads.filter(item => item.sessionId === home.id).map(item => item.title)).toEqual(["Home", "Home", "Home", "Home"]);
+    expect(payloads.find(item => item.sessionId === value.slot.id)?.title).toBe(previewsEnabled ? "Ordinary project title" : "Tron");
+    expect(payloads.find(item => item.sessionId === home.id && item.notificationKind === "explicit")?.message)
+      .toBe(previewsEnabled ? "Home update" : "Tron has an update. Open Tron to view it.");
+    expect((await notifications.inbox()).notifications.filter(item => item.sessionId === home.id).map(item => item.title))
+      .toEqual(["Home", "Home", "Home", "Home"]);
+    // A previously admitted row keeps its durable receipt but not an obsolete
+    // user-visible Home title. Reading never rewrites that historical evidence.
+    await store.update(document => {
+      for (const entry of document.inbox) if (entry.sessionId === home.id) entry.title = "Historical generated Home title";
+      return document;
+    });
+    expect((await notifications.inbox()).notifications.filter(item => item.sessionId === home.id).map(item => item.title))
+      .toEqual(["Home", "Home", "Home", "Home"]);
+    expect((await store.snapshot()).inbox.filter(item => item.sessionId === home.id).every(item => item.title === "Historical generated Home title")).toBe(true);
+    const report = join(process.cwd(), `test-results/home-title-payloads-${previewsEnabled ? "preview" : "redacted"}.json`);
+    await mkdir(dirname(report), { recursive: true });
+    await writeFile(report, JSON.stringify({ passed: true, physicalAPNsDelivery: false, payloads }, null, 2));
   });
 
   it("sends terminal and input notifications through the Gateway store to a local fake relay", async () => {

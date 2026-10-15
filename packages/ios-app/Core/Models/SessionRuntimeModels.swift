@@ -478,7 +478,7 @@ package struct CompactionConfiguration: Codable, Hashable, Sendable {
             && (effectiveThinkingLevel.map { levels.contains($0) } ?? (model == nil))
             && instructions.utf16.count <= 4_000
             && Set(source.keys) == Set(["enabled", "reserveTokens", "keepRecentTokens", "thinkingLevel", "instructions"])
-            && source.values.allSatisfy { ["global", "project", "default"].contains($0) }
+            && source.values.allSatisfy { ["chat", "global", "project", "default"].contains($0) }
     }
 }
 

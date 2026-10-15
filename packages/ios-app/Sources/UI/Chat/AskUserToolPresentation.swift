@@ -42,8 +42,8 @@ enum PendingExtensionInteractionToolPresentation {
             return tools.contains { tool in
                 tool.isRunning
                     && toolOperationID(tool) == operationID
-                    && ownersMatch(interaction: interaction, tool: tool)
-                    && (interaction.method != .form || isAskUser(tool))
+                    && (ownersMatch(interaction: interaction, tool: tool) || hostsNestedAskUserForm(interaction, tool))
+                    && (interaction.method != .form || isAskUser(tool) || hostsNestedAskUserForm(interaction, tool))
             }
         }
         if operationMatches.count == 1 { return operationMatches[0] }
@@ -53,11 +53,12 @@ enum PendingExtensionInteractionToolPresentation {
         // admitted owner and one pending form are an unambiguous fallback when a
         // cold canonical tool segment no longer exposes the live operation ID.
         let askUserTools = tools.filter { tool in
-            tool.isRunning && isAskUser(tool)
+            tool.isRunning && (isAskUser(tool) || tool.hostsRunningNestedAskUser)
         }
         guard askUserTools.count == 1, let tool = askUserTools.first else { return nil }
         let formMatches = pendingInteractions.filter { interaction in
-            interaction.method == .form && ownersMatch(interaction: interaction, tool: tool)
+            interaction.method == .form
+                && (ownersMatch(interaction: interaction, tool: tool) || hostsNestedAskUserForm(interaction, tool))
         }
         return formMatches.count == 1 ? formMatches[0] : nil
     }
@@ -65,6 +66,15 @@ enum PendingExtensionInteractionToolPresentation {
     private static func isAskUser(_ tool: ChatToolDescriptor) -> Bool {
         tool.toolName == "ask_user"
             && AskUserToolPresentation.isAskUserSource(tool.extensionOrigin?.owner?.source)
+    }
+
+    /// A question asked by `ask_user` from inside another call (codemode) is owned by the
+    /// Ask User capability, not by the enclosing call, so it matches the enclosing row
+    /// while that row reports the nested `ask_user` call still running (#929).
+    private static func hostsNestedAskUserForm(_ interaction: ExtensionInteraction, _ tool: ChatToolDescriptor) -> Bool {
+        interaction.method == .form
+            && tool.hostsRunningNestedAskUser
+            && AskUserToolPresentation.isAskUserSource(interaction.owner?.source)
     }
 
     private static func toolOperationID(_ tool: ChatToolDescriptor) -> String? {
@@ -304,15 +314,26 @@ struct AskUserCompletedFormView: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 if let context = question.context, !context.isEmpty {
-                    Text(context)
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    TronMarkdownView(
+                        text: context,
+                        streaming: false,
+                        textStyle: ChatSelectableTextStyle(
+                            size: TronTypography.sizeBodySM,
+                            color: .tronTextSecondary
+                        ),
+                        selectableText: true
+                    )
                 }
-                Text(question.question)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
+                TronMarkdownView(
+                    text: question.question,
+                    streaming: false,
+                    textStyle: ChatSelectableTextStyle(
+                        size: TronTypography.sizeBodyLG,
+                        weight: .semibold,
+                        color: .tronTextPrimary
+                    ),
+                    selectableText: true
+                )
                 VStack(spacing: 10) {
                     ForEach(question.options) { option in
                         readOnlyOption(option, question: question, selected: answer?.optionIds.contains(option.id) == true)

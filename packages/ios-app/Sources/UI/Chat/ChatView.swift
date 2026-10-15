@@ -9,7 +9,6 @@ struct ChatView: View {
     private let initialEditorText: String?
     private let initialModel: ModelRef?
     private let initialHistoryEntryID: String?
-    private let initialSearchResult: SessionSearchResult?
     /// The Home conversation's logical route: sends go through `home.prompt`,
     /// and Manage Home belongs to this chat whichever chapter it opens.
     private let isHomeRoute: Bool
@@ -47,6 +46,7 @@ struct ChatView: View {
     @State private var composerHeightLedger = ChatComposerHeightLedger()
     @State private var interactionTraceLedger = ChatInteractionTraceLedger()
     @State private var composerResponder = ChatComposerResponder()
+    @State private var annotationPresenter = ChatAnnotationPresenter()
     @State private var keyboardObserver = ChatKeyboardObserver()
     @State private var layoutTransaction = ChatLayoutTransaction()
     @State private var installedComposerResourceCatalog: (
@@ -65,6 +65,13 @@ struct ChatView: View {
     /// is rebased exactly once for the replacement tree.
     @State private var viewportActivation = 0
     @State private var homeSheet: HomeSheetRoute?
+    #if HOSTED_TEST
+    /// Test-only lifecycle evidence for real-UI journeys: how many opening
+    /// attempts this mounted route began, and how often its transcript left
+    /// the ready phase (hidden, unscrollable, then revealed again).
+    @State private var hostedOpeningAttempts = 0
+    @State private var hostedReadyExits = 0
+    #endif
 
     #if HOSTED_TEST
     init(
@@ -72,7 +79,6 @@ struct ChatView: View {
         initialEditorText: String? = nil,
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
-        initialSearchResult: SessionSearchResult? = nil,
         isHomeRoute: Bool = false,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         hostedProbe: ChatHostedProbe? = nil,
@@ -84,7 +90,6 @@ struct ChatView: View {
         self.initialEditorText = initialEditorText
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
-        self.initialSearchResult = initialSearchResult
         self.isHomeRoute = isHomeRoute
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
@@ -110,7 +115,6 @@ struct ChatView: View {
         initialEditorText: String? = nil,
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
-        initialSearchResult: SessionSearchResult? = nil,
         isHomeRoute: Bool = false,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
@@ -121,7 +125,6 @@ struct ChatView: View {
         self.initialEditorText = initialEditorText
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
-        self.initialSearchResult = initialSearchResult
         self.isHomeRoute = isHomeRoute
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
@@ -154,6 +157,22 @@ struct ChatView: View {
                     onOpenSheet: { sessionPresentation.presentDisplay(.showSheet($0)) }
                 )
             }
+            // Same usable region as the floating display: the bubble stays
+            // above the composer and keyboard without measuring either.
+            .overlay { ChatAnnotationBubbleHost(presenter: annotationPresenter) }
+            #if HOSTED_TEST
+            .overlay(alignment: .topLeading) {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityLabel("Hosted presentation lifecycle")
+                    .accessibilityIdentifier("chat.hosted.presentation-lifecycle")
+                    .accessibilityValue("attempts=\(hostedOpeningAttempts) ready-exits=\(hostedReadyExits)")
+            }
+            .onChange(of: sessionPresentation.open.phase) { previous, current in
+                if previous == .ready, current != .ready { hostedReadyExits += 1 }
+            }
+            #endif
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // The complete composer is the sole structural inset owner, so
                 // the keyboard, multiline text, and attachment chips push the
@@ -176,6 +195,10 @@ struct ChatView: View {
         }
         .background { TronBackdrop().ignoresSafeArea(.all) }
         .environment(\.canonicalResourceSessionID, sessionID)
+        .environment(\.chatAnnotationPresenter, annotationPresenter)
+        .onChange(of: composerScope, initial: true) { _, scope in
+            annotationPresenter.bind(drafts: model.composerDrafts, scope: scope)
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -187,7 +210,6 @@ struct ChatView: View {
         }
         .modifier(ChatRoutes(
             sessionID: sessionID,
-            projectCWD: model.sessionContextPresentation(for: sessionID)?.cwd,
             initialHistoryEntryID: initialHistoryEntryID,
             onForkCreated: onForkCreated,
             showContext: $sessionPresentation.showContext,
@@ -223,13 +245,7 @@ struct ChatView: View {
                 guard let target = presentationTarget else { return }
                 model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
             },
-            homeSheet: $homeSheet,
-            // Manage Home's Stop reads the chat's canonical operation authority
-            // live, never an ID captured when the sheet was presented (#740).
-            homeStop: HomeSheetStopControl(
-                canStop: { admitsLiveSessionCommands && selectedAuthoritativeSnapshot?.operation != nil },
-                perform: abortCurrentOperation
-            )
+            homeSheet: $homeSheet
         ))
         .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in
@@ -264,7 +280,15 @@ struct ChatView: View {
             guard activity.allowsPresentationPublication else { return }
             admitPendingFloatingDisplay()
         }
-        .task(id: "search-anchor:\(sessionID):\(initialHistoryEntryID ?? "")") { await navigateToInitialSearchResult() }
+        .onChange(of: model.stagedSettingsDecision?.id, initial: true) { _, _ in openManageForStagedSettingsDecision() }
+    }
+
+    /// A settings-approval push action opens this chat's Manage sheet; the approvals
+    /// section consumes the staging, so this only opens the sheet and never decides.
+    private func openManageForStagedSettingsDecision() {
+        guard model.freshStagedSettingsDecision()?.sessionID == sessionID,
+              homeSheet == nil, !sessionPresentation.showContext else { return }
+        if !presentManageHome() { sessionPresentation.showContext = true }
     }
 
     private var completedDisplayPresentations: [DisplayProjection] {
@@ -462,26 +486,6 @@ struct ChatView: View {
         reconcileComposerResourcePicker()
     }
 
-    private func navigateToInitialSearchResult() async {
-        guard let entryID = initialHistoryEntryID,
-              let searchResult = initialSearchResult,
-              let profileID = model.profiles.selected?.id else { return }
-        // The mounted presentation is the admission fence; the owning
-        // scroll coordinator waits for the exact historical row's layout.
-        guard let generation = model.sessionPresentationGeneration(for: sessionID) else { return }
-        do {
-            guard try await model.navigateToSearchResult(searchResult, profileID: profileID) else {
-                model.presentError(NSError(domain: "TronSearchNavigation", code: 1, userInfo: [NSLocalizedDescriptionKey: "The searched message could not be loaded. Try searching again."]))
-                return
-            }
-            guard generation == model.sessionPresentationGeneration(for: sessionID), !Task.isCancelled else { return }
-            scrollCoordinator.requestHistoricalEntryScroll(semanticID: entryID, installed: transcriptPresentation.installed)
-        } catch is CancellationError { return } catch {
-            guard !Task.isCancelled else { return }
-            model.presentError(error)
-        }
-    }
-
     private func handleAppear() {
         if floatingDisplayCompletionTracker.baseline == nil {
             _ = floatingDisplayCompletionTracker.transition(
@@ -537,7 +541,7 @@ struct ChatView: View {
             viewportActivation &+= 1
             scrollCoordinator.viewportActivationChanged(viewportActivation)
             scrollCoordinator.viewportObservationChanged(isActive: false)
-            if sessionPresentation.openingTask != nil {
+            if sessionPresentation.ownsUnsettledOpening {
                 // A covered transcript cannot publish the native geometry
                 // needed to finish positioning. Cancel the exact opening and
                 // scroll leases now so uncovering resumes with a fresh epoch;
@@ -1240,7 +1244,13 @@ struct ChatView: View {
             orientation: transcriptOrientation,
             scrollPosition: $transcriptScrollPosition,
             earlierRow: { installed in earlierMessagesChip(installed: installed) },
-            openingSurface: { openingSurface },
+            openingSurface: {
+                Group {
+                    // A retained transcript reports recovery in the
+                    // navigation chrome instead (`retainedRecoveryStatus`).
+                    if !hasRetainedTranscript { openingPhaseSurface }
+                }
+            },
             onEditQueuedMessage: { sessionPresentation.queuedMessageEditor = .init(id: $0) },
             onClearQueuedMessages: { Task { await clearQueuedMessages() } },
             onMoveQueuedMessage: { id, offset in
@@ -1587,6 +1597,11 @@ struct ChatView: View {
         presentationTarget.map(model.composerDrafts.submittedAttachments(for:)) ?? []
     }
 
+    private var composerAnnotations: [ChatAnnotation] {
+        guard let composerScope else { return [] }
+        return model.composerDrafts.annotations(for: composerScope)
+    }
+
     private var selectedComposerResource: ComposerResourceEntry? {
         guard let composerScope,
               let command = model.composerDrafts.selectedResource(for: composerScope) else { return nil }
@@ -1792,7 +1807,7 @@ struct ChatView: View {
         switch sessionPresentation.open.phase {
         case .revealing, .presenting, .presented, .ready:
             true
-        case .opening, .positioning, .failed:
+        case .waitingForConnection, .opening, .positioning, .failed:
             false
         }
     }
@@ -1822,7 +1837,55 @@ struct ChatView: View {
         presentationActivity.allowsViewportObservation
     }
 
-    @ViewBuilder private var openingSurface: some View {
+    /// Display continuity belongs to the same-session snapshot, not to the
+    /// disposable subscription that is replaced while reconnecting.
+    private var hasRetainedTranscript: Bool {
+        guard let installed = transcriptPresentation.installed,
+              installed.tag.sessionID == sessionID,
+              model.authoritativeSnapshot(for: sessionID)?.sessionId == sessionID,
+              composerScope.map({ $0.profileID == model.profiles.selected?.id }) ?? true else { return false }
+        return true
+    }
+
+    /// Persistent recovery for a retained same-session transcript. It is route
+    /// chrome in the title's place, never a control floating over readable rows.
+    /// A missing transport is shown only once the app's recovery episode says
+    /// it outlived the grace: every foreground reconnects after background
+    /// retirement, and that expected replacement is not an outage (#878).
+    /// Gateway and synchronization failures stay visible until resolved.
+    private var retainedRecoveryStatus: ChatRetainedRecoveryStatus? {
+        guard hasRetainedTranscript else { return nil }
+        if !model.admitsSessionPresentationOpen {
+            // A rejected credential stops automatic recovery: it is a failure
+            // to explain at once, not a reconnect to wait out.
+            if model.connectionState == .unauthorized {
+                return .unavailable("The Mac no longer accepts this iPhone. Pair again in Settings.")
+            }
+            return model.isConnectionRecoveryVisible ? .waitingForConnection : nil
+        }
+        if model.hasFailedConversationSynchronization(sessionID: sessionID) {
+            return .unavailable("The conversation could not catch up. Retry to reconnect the live view.")
+        }
+        if case .failed(let message) = sessionPresentation.open.phase { return .unavailable(message) }
+        return nil
+    }
+
+    /// One Retry for every recovery treatment. A missing transport retries the
+    /// selected Mac's connection; the opening resumes on its connected callback.
+    @MainActor
+    private func retryRecovery() async {
+        if !model.admitsSessionPresentationOpen {
+            if let profile = model.profiles.selected { model.retryGatewayConnection(for: profile) }
+            await beginOpeningPresentation(retryingFailure: true)
+        } else if model.hasFailedConversationSynchronization(sessionID: sessionID),
+                  let target = model.presentationTarget(for: sessionID) {
+            _ = await model.retryConversationSynchronization(target: target)
+        } else {
+            await beginOpeningPresentation(retryingFailure: true)
+        }
+    }
+
+    @ViewBuilder private var openingPhaseSurface: some View {
         switch sessionPresentation.open.phase {
         case .opening, .positioning, .revealing, .presenting:
             ZStack {
@@ -1844,29 +1907,38 @@ struct ChatView: View {
             .transition(.opacity.animation(
                 ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)
             ))
+        case .waitingForConnection:
+            openingEmptyUnavailableSurface(
+                title: "Waiting for connection",
+                message: "This conversation will open when the Mac reconnects."
+            )
         case .failed(let message):
-            VStack(spacing: 12) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(Color.tronError)
-                Text("Conversation unavailable")
-                    .font(TronTypography.body)
-                Text(message)
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .multilineTextAlignment(.center)
-                Button("Retry") { Task { await beginOpeningPresentation(retryingFailure: true) } }
-                    .buttonStyle(.plain)
-                    .chatTranscriptPill()
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.tronBackground)
-            .transition(.opacity.animation(
-                ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)
-            ))
+            openingEmptyUnavailableSurface(title: "Conversation unavailable", message: message)
         case .presented, .ready:
             EmptyView()
         }
+    }
+
+    private func openingEmptyUnavailableSurface(title: String, message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.tronError)
+            Text(title)
+                .font(TronTypography.body)
+            Text(message)
+                .font(TronTypography.bodySM)
+                .foregroundStyle(Color.tronTextSecondary)
+                .multilineTextAlignment(.center)
+            Button("Retry") { Task { await retryRecovery() } }
+                .buttonStyle(.plain)
+                .chatTranscriptPill()
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.tronBackground)
+        .transition(.opacity.animation(
+            ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion)
+        ))
     }
 
     @MainActor
@@ -1899,6 +1971,14 @@ struct ChatView: View {
 
     @MainActor
     private func beginOpeningPresentation(retryingFailure: Bool = false) async {
+        // An absent transport admits neither an opening lease nor its deadline.
+        // Cancellation for that absence must not become an endless spinner.
+        guard model.admitsSessionPresentationOpen else {
+            if sessionPresentation.open.phase != .ready {
+                sessionPresentation.open.waitForConnection(sessionID: sessionID, epoch: sessionPresentation.open.epoch)
+            }
+            return
+        }
         if let active = sessionPresentation.activeOpeningTaskLease {
             await active.task.value
             _ = sessionPresentation.finishOpeningTask(active.generation)
@@ -1978,6 +2058,7 @@ struct ChatView: View {
 
     @MainActor
     private func performOpeningPresentation() async {
+        let openingConnectionID = model.gatewayConnectionID
         sessionPresentation.permitsExtensionInteractionPresentation = false
         // Retiring/restarting presentation authority cancels any local page
         // admission; late model/scroll completions are token-gated.
@@ -1991,6 +2072,7 @@ struct ChatView: View {
             )
         }
         #if HOSTED_TEST
+        hostedOpeningAttempts += 1
         defer { hostedProbe?.recordReadyFrameCompletion() }
         #endif
         performanceTracker.discardScroll()
@@ -2203,7 +2285,9 @@ struct ChatView: View {
             openedGeneration = nil
         } catch {
             let result = PerformanceResult.forFailure(error)
-            let retainCommittedPresentation = result == .cancelled
+            let transportRetired = !model.admitsSessionPresentationOpen
+                || openingConnectionID != model.gatewayConnectionID
+            let retainCommittedPresentation = result == .cancelled || transportRetired
             if let generation = openedGeneration {
                 await retireOpeningGeneration(
                     generation,
@@ -2211,6 +2295,10 @@ struct ChatView: View {
                 )
             }
             performanceSignposts.end(interval, result: result, metrics: .none)
+            if transportRetired {
+                sessionPresentation.open.waitForConnection(sessionID: sessionID, epoch: epoch)
+                return
+            }
             if result == .cancelled { return }
             model.chatInteractionTrace.opening(
                 .failed,
@@ -2354,10 +2442,22 @@ struct ChatView: View {
             // Publish leased interaction/editor routes only after chat opening
             // has crossed a real ready frame. Otherwise their sheet can cover
             // the parent, cancel opening, and create a present/dismiss loop.
+            // This frame settles the opening, so the sheet admitted next can
+            // cover it without cancelling it into a later re-reveal (#935).
+            sessionPresentation.markOpeningReady()
             sessionPresentation.permitsExtensionInteractionPresentation = true
             intakeLatestTranscriptProjectionIfNeeded()
             admitPendingFloatingDisplay()
             #if HOSTED_TEST
+            // #935 journey: keep this opening's tail alive for a bounded number
+            // of frames so the parent-covering form the line above admits lands
+            // while the opening task still exists, the order a loaded device
+            // produces. Cover cancellation ends the hold early.
+            if ProcessInfo.processInfo.arguments.contains("--tron-hosted-hold-opening-tail") {
+                for _ in 0..<120 where !Task.isCancelled {
+                    try? await displayFrameScheduler.nextFrame()
+                }
+            }
             hostedProbe?.markReady()
             let geometry = scrollCoordinator.latestGeometry
             if geometry.isAtCatchUpBoundary {
@@ -2596,6 +2696,7 @@ struct ChatView: View {
             extensionRetainedContent: extensionRetainedContent,
             pendingAttachments: pendingAttachments,
             selectedResource: selectedComposerResource,
+            annotations: composerAnnotations,
             resourcePicker: presentedComposerResourcePicker,
             resourceResults: presentedComposerResourcePicker == nil ? [] : composerResourceResults,
             submissionTransitionID: layoutTransaction.activeSubmissionGenerationID,
@@ -2639,6 +2740,14 @@ struct ChatView: View {
                 guard let composerScope else { return }
                 model.composerDrafts.removeSelectedResource(for: composerScope)
             },
+            onUpdateAnnotation: { id, comment in
+                guard let composerScope else { return }
+                model.composerDrafts.updateAnnotation(id: id, comment: comment, for: composerScope)
+            },
+            onRemoveAnnotation: { id in
+                guard let composerScope else { return }
+                model.composerDrafts.removeAnnotation(id: id, for: composerScope)
+            },
             onSelectResource: selectComposerResource,
             onDismissResourcePicker: dismissComposerResourcePicker,
             onShowContext: {
@@ -2670,7 +2779,8 @@ struct ChatView: View {
             hasContent: ChatComposerPolicy.hasSendableContent(
                 text: composerText,
                 attachmentCount: pendingAttachments.count,
-                hasResource: selectedComposerResource != nil
+                hasResource: selectedComposerResource != nil,
+                annotationCount: composerAnnotations.count
             ),
             isSending: sending
         )
@@ -2693,7 +2803,8 @@ struct ChatView: View {
     }
 
     private var chatTitle: String {
-        selectedAuthoritativeSnapshot?.name
+        if isHomeRoute { return "Home" }
+        return selectedAuthoritativeSnapshot?.name
             ?? model.sessions.first { $0.id == sessionID }?.title
             ?? "Session"
     }
@@ -2708,39 +2819,33 @@ struct ChatView: View {
             .accessibilityLabel("Back")
         }
         ToolbarItem(placement: .principal) {
-            Text(chatTitle)
-                .font(TronTypography.headline)
-                .foregroundStyle(Color.tronEmerald)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(width: titleWidth)
-                .clipped()
-                .accessibilityLabel(chatTitle)
-        }
-        if model.isShowingHistoricalTranscript {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button { Task { _ = await model.loadHistoricalEarlierTranscript(sessionID: sessionID) } } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .accessibilityLabel("Load older history")
-                Button { Task { _ = await model.loadHistoricalLaterTranscript(sessionID: sessionID) } } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .accessibilityLabel("Load newer history")
-                Button { model.returnToLatestTranscript(sessionID: sessionID) } label: {
-                    Image(systemName: "arrow.uturn.down")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+            // Recovery takes the title's place, as messaging apps show
+            // "Connecting" there. The title view keeps one fixed size in both
+            // states: a changed title-view size relays out the bar and its
+            // safe area, which moves an anchored transcript reader (#878).
+            ZStack {
+                if let status = retainedRecoveryStatus {
+                    ChatRecoveryStatusLine(status: status) { Task { await retryRecovery() } }
+                        .transition(.opacity)
+                } else {
+                    Text(chatTitle)
+                        .font(TronTypography.headline)
                         .foregroundStyle(Color.tronEmerald)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(width: titleWidth)
+                        .clipped()
+                        .accessibilityLabel(chatTitle)
+                        .transition(.opacity)
                 }
-                .accessibilityLabel("Return to latest messages")
             }
+            .frame(width: titleWidth, height: ChatToolbarTitleLayout.height)
+            .animation(ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion), value: retainedRecoveryStatus)
         }
         ToolbarItem(placement: .primaryAction) {
-            // The gear opens Settings in every chat, Home included; Manage Home
-            // replaces only the context ring's Manage Session sheet (#799).
-            Button {
-                sessionPresentation.showSettings = true
-            } label: {
+            // Two surfaces: the context ring opens Manage Session/Home (this chat,
+            // its settings and project); the gear opens Settings (this Mac and iPhone).
+            Button { sessionPresentation.showSettings = true } label: {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                     .foregroundStyle(Color.tronEmerald)
@@ -2753,7 +2858,7 @@ struct ChatView: View {
     /// context ring is its one caller; false leaves the ring's Manage Session sheet.
     private func presentManageHome() -> Bool {
         guard let (profileID, _) = manageHomeContext else { return false }
-        homeSheet = HomeSheetRoute(profileID: profileID, destination: .manage)
+        homeSheet = HomeSheetRoute(profileID: profileID, sessionID: sessionID, destination: .manage)
         return true
     }
 
@@ -3606,5 +3711,80 @@ struct ChatView: View {
             catch is CancellationError { return }
             catch { model.presentComposerActionError(error, target: target) }
         }
+    }
+}
+
+/// Why a retained transcript is not live. `ChatView.retainedRecoveryStatus`
+/// is its only producer; transient app notices never own this state.
+enum ChatRetainedRecoveryStatus: Equatable {
+    case waitingForConnection
+    case unavailable(String)
+
+    var title: String {
+        switch self {
+        case .waitingForConnection: "Waiting for connection"
+        case .unavailable: "Conversation unavailable"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .waitingForConnection: "This conversation will resume when the Mac reconnects."
+        case .unavailable(let message): message
+        }
+    }
+
+    var tone: ChatNotificationTone {
+        switch self {
+        case .waitingForConnection: .warning
+        case .unavailable: .error
+        }
+    }
+}
+
+/// A one-line recovery capsule in the chat title's place in the navigation
+/// chrome. The whole capsule is the Retry control, so its touch target is the
+/// visible glass rather than one small word. Liquid Glass matches the bar's own
+/// back and settings controls and keeps the line legible over the scrolled
+/// transcript. VoiceOver reads the reason, its full explanation, then Retry.
+struct ChatRecoveryStatusLine: View {
+    let status: ChatRetainedRecoveryStatus
+    let retry: () -> Void
+
+    var body: some View {
+        Button(action: retry) {
+            HStack(spacing: 6) {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .imageScale(.small)
+                    Text(status.title)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .foregroundStyle(status.tone.primaryColor)
+                Text("Retry")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.tronEmerald)
+                    .fixedSize()
+            }
+            .font(TronTypography.bodySM)
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        // Like the system bar items beside it, the fixed-height bar stops
+        // growing at the largest standard size; the large content viewer and
+        // the VoiceOver value carry the reason beyond it.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .accessibilityShowsLargeContentViewer {
+            Label(status.title, systemImage: "exclamationmark.triangle.fill")
+        }
+        .accessibilityLabel(status.title)
+        .accessibilityValue(status.message)
+        .accessibilityHint("Retries the connection")
+        .accessibilityIdentifier("chat-recovery-status")
     }
 }

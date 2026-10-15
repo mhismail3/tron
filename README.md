@@ -56,6 +56,12 @@ state only.
   with the Mac user's authority.
 - Mobile exposure binds explicitly to the detected Tailscale interface. The
   default developer gateway remains loopback-only.
+- Mac Terminal (Settings › Tools & Diagnostics) opens a login shell on the Mac through
+  macOS Remote Login over Tailscale, without the Gateway. Its per-iPhone key
+  stays in the Secure Enclave, is enrolled into `~/.ssh/authorized_keys` only by
+  the maintainer's tap (restricted to Tailscale source addresses), and the Mac's
+  host key is pinned at enrollment
+  ([Mac Terminal](packages/gateway/README.md#mac-terminal)).
 
 Do not open the same session concurrently in another runtime client: the
 canonical session format does not provide a cross-process session-file lock.
@@ -91,12 +97,9 @@ Node runtimes and the locked gateway production tree.
 ## Development
 
 ```bash
-# Gateway: fast, deterministic checks
-cd packages/gateway
-npm ci
-npm run build
-npm test
-cd ../..
+# Gate a change: the ordered steps it needs, then run them (tools/work/README.md#gate)
+scripts/tron gate plan
+scripts/tron gate run
 
 # Install the repository-pinned native project generator
 scripts/install-ci-tools.sh xcodegen

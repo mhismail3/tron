@@ -5,7 +5,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { disposeFixtures, fixture } from "../../test-support/home-task-fixture.js";
+import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 
 afterEach(disposeFixtures);
 
@@ -57,5 +57,71 @@ describe("Home chapters in the dashboard session list", () => {
     // Opening a chapter by id is the pinned row's and the Chapters sheet's route, so it still resolves.
     expect((await f.registry.acquire(predecessor)).id).toBe(predecessor);
     expect((await f.registry.acquire(accepted.sessionId)).id).toBe(accepted.sessionId);
+
+    // A sealed chapter's transcript opens read-only after its runtime was evicted (#911):
+    // the cold open is the Chapters sheet's route once the chapter has idled out.
+    const registry = f.registry as unknown as { slots: Map<string, unknown>; retireIdleRuntime(input: unknown): Promise<boolean> };
+    const sealedSlot = registry.slots.get(predecessor);
+    expect(await registry.retireIdleRuntime({ sessionId: predecessor, slot: sealedSlot, reason: "idle", eligible: () => true })).toBe(true);
+    expect(registry.slots.has(predecessor)).toBe(false);
+    const reopened = await f.registry.acquire(predecessor);
+    expect(registry.slots.get(predecessor)).toBe(reopened);
+    expect(JSON.stringify(reopened.canonicalSessionEntries())).toContain("Initial Home conversation");
+    // Read-only: the sealed chapter still refuses a prompt.
+    await expect(reopened.prompt("write to a sealed chapter")).rejects.toThrow();
+  }, 30_000);
+
+  it("marks Home task workers on their catalog rows and never unread, while a maintainer's own session completes unread (#973, #1003)", async () => {
+    const f = await fixture();
+    const ordinary = await f.registry.create(f.cwd);
+    f.faux.setResponses([fauxAssistantMessage("Ordinary reply")]);
+    await ordinary.prompt("hello");
+    await waitFor(() => ordinary.snapshot().configurationBlocker === null, "ordinary terminal");
+    // A worker ends through its `report` tool call, never a final assistant reply.
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    const task = await (await dispatch(f, "worker-row")).completion;
+    expect(task.lifecycle).toBe("terminal");
+    const worker = task.sessionId!;
+
+    const rows = async (registry = f.registry) => {
+      const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: registry, home: registry.homeOwner(),
+        uploads: new UploadStore(join(f.root, "worker-uploads"), 1024),
+        receipts: new CommandReceiptStore(join(f.root, "worker-receipts")) } as unknown as GatewayServiceDependencies);
+      const client = { id: "worker-client", identity: "device:worker-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
+      const listed = await service.invoke(client, "session.list", { scope: "user", limit: 500 }) as
+        { sessions: Array<{ id: string; homeTaskId?: string; isUnread?: boolean; completionRevision?: number }> };
+      const status = await service.invoke(client, "home.status", {}) as { waitingForUser?: boolean };
+      return { byId: new Map(listed.sessions.map(row => [row.id, row])), status };
+    };
+    // The settled worker records its completion read; the maintainer's own
+    // chat, finished with nobody watching, is unread.
+    await waitFor(async () => ((await rows()).byId.get(worker)?.completionRevision ?? 0) >= 1, "settled worker records its completion");
+    const live = await rows();
+    expect(live.byId.get(worker)).toMatchObject({ homeTaskId: "worker-row", isUnread: false });
+    expect(live.byId.get(ordinary.id)).toMatchObject({ isUnread: true });
+    expect(live.byId.get(ordinary.id)?.homeTaskId).toBeUndefined();
+    expect(live.status.waitingForUser).toBe(false);
+
+    // A resumed worker reuses its session and settles read again.
+    f.faux.setResponses([fauxAssistantMessage([reportCall("report-two")], { stopReason: "toolUse" })]);
+    const resumed = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "resume", taskId: task.taskId, operationId: task.operationId }) as
+      { taskId: string; sessionId: string };
+    expect(resumed.sessionId).toBe(worker);
+    await waitFor(async () => (await f.registry.homeOwner().taskStatus(resumed.taskId)).lifecycle === "terminal", "resumed worker settles");
+    await waitFor(async () => ((await rows()).byId.get(worker)?.completionRevision ?? 0) >= 2, "resumed worker records its completion");
+    expect((await rows()).byId.get(worker)).toMatchObject({ homeTaskId: "worker-row", isUnread: false });
+
+    // Unread left by an earlier build (a worker completion admitted unread) is
+    // acknowledged when startup recovery seeds the worker index.
+    const attention = (f.registry as unknown as { attention: {
+      complete(id: string, completion: string, observed: boolean): Promise<{ projection: { isUnread: boolean } }>;
+    } }).attention;
+    expect((await attention.complete(worker, "legacy-unread-completion", false)).projection.isUnread).toBe(true);
+    const cold = await f.restart();
+    await waitFor(async () => (await rows(cold)).byId.get(worker)?.isUnread === false, "startup seeding acknowledges the legacy unread worker");
+    const recovered = await rows(cold);
+    expect(recovered.byId.get(worker)).toMatchObject({ homeTaskId: "worker-row", isUnread: false });
+    expect(recovered.byId.get(ordinary.id)).toMatchObject({ isUnread: true });
+    expect(recovered.byId.get(ordinary.id)?.homeTaskId).toBeUndefined();
   }, 30_000);
 });

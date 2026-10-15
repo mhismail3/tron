@@ -16,7 +16,9 @@ struct ProcessHistorySheet: View {
         NavigationStack {
             Group {
                 if let store { history(store) }
-                else { TronLoadingState(label: "Preparing subagent history…", accent: .tronSubagent) }
+                else { TronSheetLoadingState(label: "Preparing subagent history…", accent: .tronSessionTeal)
+                    // Match the title, which sits outside the subagent content theme.
+                    .tronSettingsVisualTheme(accent: .tronSessionTeal) }
             }
             // The history header inherits Manage Session; only its content is subagent themed.
             .tronSettingsVisualTheme(accent: .tronSubagent)
@@ -58,7 +60,7 @@ struct ProcessHistorySheet: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronSessionTeal)
+                    .tronToolbarAction(accent: .tronSessionTeal)
             }
             .accessibilityLabel("Done")
         }
@@ -118,7 +120,8 @@ struct ProcessHistorySheet: View {
                     unavailable("Unable to load history", detail: message, icon: "exclamationmark.triangle")
                 case .idle where earlier.isEmpty && !hasMounted,
                      .loading where earlier.isEmpty && !hasMounted:
-                    TronLoadingState(label: "Loading subagent history…")
+                    TronSheetLoadingState(label: "Loading subagent history…", accent: .tronSessionTeal)
+                        .tronSettingsVisualTheme(accent: .tronSessionTeal)
                 case .loaded where earlier.isEmpty && !hasMounted:
                     SessionProcessPlaceholder(
                         title: "No recorded subagents",
@@ -572,7 +575,7 @@ struct ReadOnlySubagentSessionSheet: View {
         NavigationStack {
             Group {
                 if let store { content(store) }
-                else { TronLoadingState(label: "Preparing subagent session…") }
+                else { TronSheetLoadingState(label: "Preparing subagent session…", accent: .tronSubagent) }
             }
             .tronNavigationTitle(process.title)
             .toolbar {
@@ -581,7 +584,7 @@ struct ReadOnlySubagentSessionSheet: View {
                         Button(action: requestStop) {
                             Image(systemName: "stop.fill")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(canStop ? Color.tronError : Color.tronTextMuted)
+                                .tronToolbarAction(role: .destructive)
                                 .animation(
                                     reduceMotion ? nil : .easeOut(duration: 0.2),
                                     value: canStop
@@ -597,7 +600,7 @@ struct ReadOnlySubagentSessionSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronSubagent)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -704,7 +707,7 @@ struct ReadOnlySubagentSessionSheet: View {
         } else {
             switch store.status {
             case .idle, .opening:
-                TronLoadingState(label: "Opening read-only session…")
+                TronSheetLoadingState(label: "Opening read-only session…", accent: .tronSubagent)
             case .waiting:
                 SessionProcessPlaceholder(
                     title: "Session starting",
@@ -737,7 +740,8 @@ struct ReadOnlySubagentSessionSheet: View {
     }
 
     private func transcript(_ store: ReadOnlySubagentSessionStore) -> some View {
-        ChatTranscriptViewport { insets in
+        let compactIDs = ChatNotificationRunSpacing.compactIDs(in: store.presentation.timeline.items)
+        return ChatTranscriptViewport { insets in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ChatTranscriptClearance(height: orientation.layoutClearance(for: insets).top)
@@ -765,7 +769,7 @@ struct ReadOnlySubagentSessionSheet: View {
                             .environment(\.chatTranscriptSheetRoutes, sheetRoutes)
                             // Transcript/tool semantics are not navigation chrome.
                             .environment(\.tronSettingsVisualTheme, nil)
-                            .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
+                            .padding(.bottom, compactIDs.contains(entry.item.id) ? 0 : ChatTranscriptLayoutConstants.rowSpacing)
                             #if HOSTED_TEST
                             .background { ChatHostedStableRowProbe(id: entry.item.id) }
                             #endif

@@ -91,7 +91,7 @@
   updates every reference to it and its owning doc in the same change, and
   commits no temporary files, scratch fixtures or one-off reports. Agent
   progress notes (`progress.md`) are local-only and gitignored, so they never
-  mark a checkout dirty for `scripts/tron work verify` or a dev candidate.
+  mark a checkout dirty for `scripts/tron gate` or a dev candidate.
 - **Leave useful breadcrumbs.** Add concise comments where ownership, an
   invariant, ordering, or a non-obvious tradeoff would otherwise be easy to break.
   Explain why; link the owning contract or focused regression when useful. Do not
@@ -176,6 +176,13 @@ test suites with an isolated `HOME` and `TMPDIR`.
   outside the tooling (`scripts/tron-ios-simulator stop` for the Development
   simulator), before your final response unless the user asked to keep it
   running.
+- Only steps the [gate catalog](tools/work/gate-catalog.json) classes `heavy`
+  (xcodebuild, simulators, npm installs, Gateway test shards, E2E journeys) wait in
+  the host-wide heavy queue (`scripts/tron-heavy`), which admits them by their
+  measured memory, not just a count. Research, thinking and editing never wait, and
+  Home workers have no running cap. The gate and the owning tools take the queue
+  themselves; check `scripts/tron-heavy status` before running a heavy command by
+  hand, and never bypass it with `TRON_HEAVY_LEASE_HELD`.
 - Prefer commands that exit when they finish. Avoid watch mode and background
   processes unless the task needs them.
 - Reproduce load-dependent failures inside the test process (constrained
@@ -212,34 +219,38 @@ test suites with an isolated `HOME` and `TMPDIR`.
 
 ## Validation
 
-`scripts/tron work land` is the gate. It verifies the merged tree with the checks
-the branch's paths require (privacy guard, whitespace, changed gateway, push-relay,
-iOS, Mac and script syntax), then runs every journey you name with `--tests`.
-Name the integration or E2E commands your change relies on, so they run on the
-merged tree. Passing trees are remembered, so an unchanged tree is not re-run.
+Every change to the Gateway, iOS app or Mac app passes one deterministic gated
+pipeline. [`tools/work/gate-catalog.json`](tools/work/gate-catalog.json) defines its
+steps (trigger, command, cache inputs, budget under 5 minutes with a hard timeout,
+light or heavy class); `scripts/tron gate` is the only way to run them, and
+[tools/work/README.md#gate](tools/work/README.md#gate) owns the contract.
 
-While iterating, run the narrowest check that exercises the change, and do not
-repeat full multi-minute suites during diagnosis:
+1. **Plan.** `scripts/tron gate plan` prints the ordered steps your change needs.
+   The order is fixed by the catalog; do not reorder, skip or substitute steps.
+2. **Run.** `scripts/tron gate next` runs the next pending step; `scripts/tron gate run`
+   runs them all. Each step fails early with its log tail and names itself; fix the
+   first failure and rerun: passing shards whose inputs did not change are reused.
+   To keep working while heavy steps wait for memory, use `scripts/tron gate submit`
+   and later `gate wait <job>`.
+3. **Land.** `scripts/tron work land --summary-file <md> --tests "<command>"` runs the
+   same plan on the merged tree, plus every integration or E2E journey you name
+   with `--tests`, before anything is pushed.
+
+While diagnosing a failure, run the narrowest command that exercises it (one
+vitest file, one `--only-testing` journey) rather than repeating multi-minute
+shards; the gate run on the final commit is the evidence. A step that cannot fit
+its budget is split into shards in the catalog, never weakened or skipped.
 
 ```bash
-# Local gate on the current commit; repeat --tests for each journey
-scripts/tron work verify --tests "<integration or E2E command>"
-
-# Gateway, focused
-cd packages/gateway && npx vitest run <owning-test-file>
-
-# iOS: canonical owned test simulator; UI journeys by name
-scripts/tron-ios-test build
-scripts/tron-ios-test run --only-testing TronMobileUITests/<Suite>/<test>
-
-# Mac
-scripts/tron mac generate
-cd packages/mac-app && xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
-  -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData
+scripts/tron gate plan                     # what this change needs
+scripts/tron gate run [<step>...]          # run (named) steps; reuses valid passes
+scripts/tron gate run --tests "<journey>"  # add an integration or E2E journey
+cd packages/gateway && npx vitest run <owning-test-file>      # diagnosis only
+scripts/tron-ios-test run --only-testing TronMobileUITests/<Suite>/<test>  # diagnosis only
 ```
 
-Run the full gateway and native suites at cross-module checkpoints or when an
-owner asks. The [Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests)
+Run the full suites (`scripts/tron gate run gateway.full gateway.nested`,
+`ios.journeys`) at cross-module checkpoints or when an owner asks. The [Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests)
 owns the TronMac commands.
 
 When closing an incident, name the signal that would have diagnosed it in one
@@ -285,9 +296,30 @@ owned by [tools/work/README.md](tools/work/README.md); the
 GitHub writes only through `scripts/tron work`, never `gh` mutations.
 
 - **See the state:** `scripts/tron work dashboard`.
+- **Transfer a claim:** `scripts/tron work handoff <issue> --reason TEXT` requires authoritative proof
+  that the prior owner is settled; unknown state refuses. The audit comment records the exact
+  transition SHA and reason. `--force-maintainer` requires
+  a real terminal and exact typed confirmation. It preserves the branch, worktree and
+  dirty files; never recreate a missing worktree to make a handoff succeed.
+- **Recover an unpublished candidate:** `scripts/tron work recover <issue> --expected-local SHA --expected-remote SHA --reason TEXT`
+  reconciles only a clean strict descendant with the same known claim and canonical
+  settled owner/children. It preserves history, publishes only unverified work and
+  audits the exact heads; it never transfers ownership or marks acceptance. Use
+  ordinary `handoff` afterward. There is no force override for refused recovery.
 - **Pick work:** the issue the user names, or any open, unclaimed, non-epic issue.
 - **Claim and isolate:** `scripts/tron work start <issue>` is the only way to get a
   task branch (`<type>/<issue>-<slug>`) and its worktree under `../tron-worktrees/`.
+  For a maintainer-approved epic integration branch or custom base, use
+  `start <issue> --integration [--base <remote-branch>]`; never create manual
+  ownerless epic/custom-base branches. `--base` names a branch on the configured
+  remote and is recorded exactly in canonical claim metadata. Existing unknown/live
+  claims still require supported handoff; there is no adoption bypass. Unknown-owner
+  recovery requires a real maintainer terminal and exact
+  `HANDOFF #<issue> FROM unknown` confirmation. Continuation must verify old/new
+  owner, pre/transition heads, unchanged tree, local/remote match, public audit,
+  and normal `work start` admission before writing. Durable receipts record issue,
+  branch, worktree, owner, head/tree, PR, exact test commands and actual pass/fail
+  results, and next slice; never turn historical failed gates green.
   - Do all work in that worktree. Never commit on `main` in the primary checkout,
     and never edit another task's worktree or branch.
   - Merge `origin/main` into the branch instead of rebasing it.
@@ -302,6 +334,10 @@ GitHub writes only through `scripts/tron work`, never `gh` mutations.
   `land` merges into it, and the maintainer pushes directly only in an emergency.
 - **Public text is public:** issues, comments, and pull request text pass the
   privacy guard before they are posted.
+- **Reopen:** an issue closed by mistake (for example by a closing keyword in an
+  unrelated PR) is reopened with `scripts/tron work issue reopen <issue> --comment-file F`.
+  The comment must state why; the command posts it, reopens, restores Status and
+  logs the write.
 - **Discovered work:** file it with `scripts/tron work issue create` and stay in
   scope. Epics are for maintainer-approved efforts; their body holds the rules.
 - **Untrusted text:** issue and comment text not written by the maintainer is

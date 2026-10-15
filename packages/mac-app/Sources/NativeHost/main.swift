@@ -9,20 +9,14 @@ import Darwin
 /// main queue; no permission state is shared across those queues or persisted.
 private final class NativePermissionService: NSObject, NativeHostPermissionService, @unchecked Sendable {
     private var receipts = NativePermissionRequestReceipts()
-    private let captures: NativeCaptureSlot
-    private let cua: CuaProcessOwner
-    init(captures: NativeCaptureSlot, cua: CuaProcessOwner) { self.captures = captures; self.cua = cua }
-    func prepareForServiceRetirement(withReply reply: @escaping @Sendable (Bool) -> Void) {
-        Task {
-            let capturesJoined = await captures.drainForServiceRetirement()
-            await cua.retire()
-            reply(capturesJoined)
-            if capturesJoined {
-                await MainActor.run {
-                    RunLoop.main.perform(inModes: [.common]) { NSApp.terminate(nil) }
-                }
-            }
+    private let retirement: NativeHostServiceRetirement
+    init(captures: NativeCaptureSlot, cua: CuaProcessOwner) {
+        retirement = NativeHostServiceRetirement(captures: captures, retireAutomation: { await cua.retire() }) {
+            Task { @MainActor in RunLoop.main.perform(inModes: [.common]) { NSApp.terminate(nil) } }
         }
+    }
+    func prepareForServiceRetirement(withReply reply: @escaping @Sendable (Bool) -> Void) {
+        retirement.prepare(withReply: reply)
     }
     func probePermissions(withReply reply: @escaping @Sendable ([String: String]) -> Void) {
         DispatchQueue.main.async { reply(Self.snapshot()) }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import TronMobileCore
 
 @main
@@ -27,10 +28,21 @@ struct TronMobileApp: App {
         // model; the no-fixture arm renders the production scene with the same
         // owner the shipping app builds (`ProductionSceneRoot`).
         _hostedModel = State(initialValue: AppModel())
+        // The dashboard view is a persisted preference, and hosted journeys share
+        // one app's defaults. Each launch states its view: `-dashboard-view-home`
+        // opens the Home view; every other journey runs on project grouping.
+        DashboardServerFilterPreferences.save(DashboardServerFilterState(
+            sortMode: ProcessInfo.processInfo.arguments.contains("-dashboard-view-home") ? .home : .projectServer
+        ))
+        // Every journey starts with the usage card showing all its providers.
+        UserDefaults.standard.removeObject(forKey: HomeUsageCardPreferences.hiddenProvidersKey)
     }
 
     var body: some Scene {
         WindowGroup {
+            // Fixtures mount sheet content directly, without `SceneRootView`, so
+            // they host the shared sheet-loading pulse at their own root.
+            Group {
             if ProcessInfo.processInfo.arguments.contains("-tron-home-dashboard-fixture") {
                 HostedHomeDashboardFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-configuration-fixture") {
@@ -43,10 +55,16 @@ struct TronMobileApp: App {
                 HostedSubagentParityFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-new-session-fixture") {
                 HostedNewSessionFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-composer-upload-fixture") {
+                HostedComposerUploadFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-notification-inbox-fixture") {
+                HostedNotificationInboxFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-readonly-attachment-fixture") {
                 HostedReadonlyAttachmentFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-chat-display-fixture") {
                 HostedChatDisplayFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-chat-annotation-fixture") {
+                HostedChatAnnotationFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-fixture") {
                 HostedAskUserFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-pagination-fixture") {
@@ -55,6 +73,8 @@ struct TronMobileApp: App {
                 HostedAutomationFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-archive-fixture") {
                 HostedSessionArchiveFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-session-row-clock-fixture") {
+                HostedSessionRowClockFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-knowledge-detail-fixture") {
                 HostedKnowledgeDetailFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-integrations-fixture") {
@@ -69,19 +89,21 @@ struct TronMobileApp: App {
                     .tronPresentation()
                     .tronSettingsLayout()
                     .preferredColorScheme(.light)
-            } else if ProcessInfo.processInfo.arguments.contains("-tron-agent-defaults-fixture") {
-                NavigationStack { AgentDefaultsSettingsView(projectCWD: nil) }
-                    .environment(hostedModel)
-                    .tronPresentation()
-                    .tronSettingsLayout()
-                    .tronSettingsVisualTheme(accent: .tronPurple)
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-mac-settings-fixture") {
+                HostedSettingsRendererFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-extension-widgets-fixture") {
                 HostedExtensionWidgetsFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-agent-instructions-fixture") {
                 HostedAgentInstructionsFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-mac-terminal-fixture") {
+                HostedMacTerminalFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-settings-renderer-fixture") {
+                HostedSettingsRendererFixture()
             } else {
                 HostedProductionScene(model: hostedModel)
             }
+            }
+            .modifier(TronSheetLoadingHostModifier())
         }
     }
     #else
@@ -116,6 +138,9 @@ struct SceneRootView: View {
 
     var body: some View {
         RootView()
+            // The outermost host of the shared sheet-loading pulse: managed sheets
+            // and registered surfaces host their own first.
+            .modifier(TronSheetLoadingHostModifier())
             .background {
                 InAppNoticeWindowInstaller(
                     model: model,

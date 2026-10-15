@@ -37,7 +37,8 @@ export async function loadSessionFreeExtensions(
 ): Promise<SessionFreeExtensionLoad> {
   const inspection = cwdInput === undefined ? undefined : await trust.inspect(cwdInput);
   const cwd = inspection?.cwd ?? homedir();
-  const settings = SettingsManager.create(cwd, agentDir, {
+  const projectDir = inspection?.projectDir ?? cwd;
+  const settings = SettingsManager.create(projectDir, agentDir, {
     projectTrusted: inspection?.effectiveDecision === true,
   });
   // The SDK reports settings load failures through drainErrors rather than
@@ -48,6 +49,7 @@ export async function loadSessionFreeExtensions(
   const managedOptions = await managedSubagents?.loaderOptions(settings);
   const loader = new DefaultResourceLoader({
     cwd,
+    projectDir,
     agentDir,
     settingsManager: settings,
     ...(managedOptions ?? {}),

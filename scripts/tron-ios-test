@@ -4,6 +4,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Host-wide heavy-run queue (#915, tools/work/heavy.py): builds and suites wait for
+# a slot unless they inherited one (for example from `work land`).
+case "${1:-checkpoint}" in
+  checkpoint|prepare|build|run|diagnose)
+    if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
+      exec python3 "$ROOT/tools/work/heavy.py" run --owner "tron-ios-test ${1:-checkpoint} in $(basename "$ROOT")" -- "$0" "$@"
+    fi
+    ;;
+esac
 IOS="$ROOT/packages/ios-app"
 # shellcheck disable=SC1091
 source "$ROOT/config/ci-toolchain.env"
@@ -52,6 +61,10 @@ Commands:
   lane-remove NAME     Delete one lane's simulator and state, and the test products of the
                        worktree that created it when that worktree no longer exists. Refuses
                        a lane a live process holds (73) and state with no ownership marker (66).
+  clean-unowned UUID NAME
+                       Shut down and delete only this exact simulator after proving no lane
+                       marker, live lane lease, or Development marker claims it. Explicit
+                       maintainer cleanup only; never sweeps or adopts devices.
   reap                 Shut down this repository's owned simulators that are booted
                        with no live lease (orphans of a crash, a kill or --keep-booted),
                        delete lanes no command has used for 7 days or whose creating
@@ -272,7 +285,7 @@ command="${1:-checkpoint}"
 if [[ "$command" == -h || "$command" == --help || "$command" == help ]]; then usage; exit 0; fi
 shift || true
 case "$command" in
-  checkpoint|prepare|build|run|diagnose|status|reap|prune|lanes|lane-remove|clean) ;;
+  checkpoint|prepare|build|run|diagnose|status|reap|prune|lanes|lane-remove|clean-unowned|clean) ;;
   *) usage >&2; die "unknown command: $command" ;;
 esac
 
@@ -280,6 +293,8 @@ selectors=()
 keep_booted=0
 all_simulators=0
 lane_target=""
+unowned_udid=""
+unowned_name=""
 while (($#)); do
   case "$1" in
     --only-testing)
@@ -305,9 +320,16 @@ while (($#)); do
       die "unsupported argument: $1"
       ;;
     *)
-      [[ "$command" == lane-remove ]] || die "unsupported argument: $1"
-      [[ -z "$lane_target" ]] || die "lane-remove takes one lane name"
-      lane_target="$1"
+      if [[ "$command" == lane-remove ]]; then
+        [[ -z "$lane_target" ]] || die "lane-remove takes one lane name"
+        lane_target="$1"
+      elif [[ "$command" == clean-unowned ]]; then
+        if [[ -z "$unowned_udid" ]]; then unowned_udid="$1"
+        elif [[ -z "$unowned_name" ]]; then unowned_name="$1"
+        else die "clean-unowned takes exactly UUID and NAME"; fi
+      else
+        die "unsupported argument: $1"
+      fi
       shift
       ;;
   esac
@@ -327,6 +349,11 @@ fi
 if [[ "$command" == lane-remove ]]; then
   [[ -n "$lane_target" ]] || die "lane-remove requires a lane name"
   validate_lane_name "$lane_target"
+fi
+if [[ "$command" == clean-unowned ]]; then
+  [[ -n "$unowned_udid" && -n "$unowned_name" ]] || die "clean-unowned requires an exact UUID and NAME"
+  [[ "$unowned_udid" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]] || die "clean-unowned requires a canonical simulator UUID"
+  ((all_simulators == 0 && ${#selectors[@]} == 0)) || die "clean-unowned does not take --all or test selectors"
 fi
 
 case "$command" in
@@ -397,6 +424,13 @@ if [[ "$command" == "lanes" ]]; then
   python3 "$SIMULATOR" lanes \
     --discovery-root "$DISCOVERY_ROOT" --default-state-dir "$DEFAULT_STATE_ROOT" \
     --development-state "$DEVELOPMENT_STATE" || exit "$EXIT_DESTINATION"
+  exit 0
+fi
+
+if [[ "$command" == clean-unowned ]]; then
+  python3 "$SIMULATOR" delete-unowned --udid "$unowned_udid" --name "$unowned_name" \
+    --discovery-root "$DISCOVERY_ROOT" --default-state-dir "$DEFAULT_STATE_ROOT" \
+    --development-state "$DEVELOPMENT_STATE" || exit $?
   exit 0
 fi
 

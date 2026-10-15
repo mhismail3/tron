@@ -44,7 +44,7 @@ async function readLog(tronHome: string): Promise<LogRecord[]> {
   });
 }
 
-async function restartSupervisedGateway(options: { hangExit: boolean }) {
+async function restartSupervisedGateway(options: { hangExit: boolean; method?: "gateway.restart" | "gateway.stop" }) {
   const root = await mkdtemp(join(tmpdir(), "tron-exit-after-shutdown-"));
   roots.push(root);
   const tronHome = join(root, "tron");
@@ -97,13 +97,21 @@ async function restartSupervisedGateway(options: { hangExit: boolean }) {
   };
   const token = await readLocalCredential(join(tronHome, "gateway", "local-auth.json"));
   const requestedAt = performance.now();
+  const method = options.method ?? "gateway.restart";
   await authenticatedRequest({
-    host: "127.0.0.1", port, token, timeoutMs: 10_000, method: "gateway.restart", params: { commandId: "exit-after-shutdown-e2e" },
+    host: "127.0.0.1", port, token, timeoutMs: 10_000, method, params: { commandId: "exit-after-shutdown-e2e" },
   });
+  if (method === "gateway.stop" && options.hangExit) {
+    await waitFor(async () => (await readLog(tronHome)).some(record => record.event === "gateway.stopped") || undefined,
+      "the intentional-stop Gateway completed its shutdown", { boundMs: 30_000 });
+    await new Promise(resolve => setTimeout(resolve, 6_000));
+    const records = await readLog(tronHome);
+    return { pid: child.pid, code: child.exitCode, signal: child.signalCode, records, exitMs: Math.round(performance.now() - requestedAt) };
+  }
   const [code, signal] = await waitFor(async () => {
     if (child.exitCode === null && child.signalCode === null) return undefined;
     return await exited;
-  }, "the restarted Gateway left the process table", { boundMs: 60_000 });
+  }, "the Gateway left the process table", { boundMs: 60_000 });
   const records = await readLog(tronHome);
   return { pid: child.pid, code, signal, records, exitMs: Math.round(performance.now() - requestedAt) };
 }
@@ -119,7 +127,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   await mkdir(dirname(reportPath), { recursive: true });
-  await writeFile(reportPath, `${JSON.stringify({ issue: 729, runs: report }, null, 2)}\n`);
+  await writeFile(reportPath, `${JSON.stringify({ issues: [729, 816], runs: report }, null, 2)}\n`);
   await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -144,4 +152,21 @@ describe("Gateway exit after a supervised restart", () => {
     expect(events.indexOf("gateway.exit-stalled")).toBeGreaterThan(events.indexOf("gateway.stopped"));
     expect(stalled).toMatchObject({ pid: result.pid, code: "75" });
   });
+
+  it("exits normally after an intentional stop", async () => {
+    const result = await restartSupervisedGateway({ hangExit: false, method: "gateway.stop" });
+    report.push({ case: "intentional stop exits", code: result.code, signal: result.signal, exitMs: result.exitMs });
+    expect(result.signal).toBeNull();
+    expect(result.code).toBe(0);
+    expect(result.records.some(record => record.event === "gateway.stopped" && record.pid === result.pid && record.code === "0")).toBe(true);
+  });
+
+  it("records intentional stop completion but does not kill a process blocked in exit", async () => {
+    const result = await restartSupervisedGateway({ hangExit: true, method: "gateway.stop" });
+    report.push({ case: "intentional stop exit blocks", code: result.code, signal: result.signal, exitMs: result.exitMs });
+    expect(result.code).toBeNull();
+    expect(result.signal).toBeNull();
+    expect(result.records.some(record => record.event === "gateway.stopped" && record.pid === result.pid && record.code === "0")).toBe(true);
+    expect(result.records.some(record => record.event === "gateway.exit-stalled")).toBe(false);
+  }, 45_000);
 });

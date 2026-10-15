@@ -7,6 +7,11 @@ enum ProviderUsagePresentation {
     /// It shares the usage line's font and stays single-line at ordinary widths
     /// so the resolved text does not change the row height.
     static let loadingPlaceholder = "00% used (5h) · 00% used (Weekly)"
+    /// The same skeleton as window columns (the Home usage card).
+    static let loadingPlaceholderParts = [
+        WindowPart(text: "00% used (5h)", usedPercent: 0),
+        WindowPart(text: "00% used (Weekly)", usedPercent: 0),
+    ]
 
     /// A supported configured row reserves its usage line while the bounded read
     /// is pending. Once the read settles, the snapshot (or its absence) owns the
@@ -46,7 +51,28 @@ enum ProviderUsagePresentation {
             }
             return statusCopy(snapshot.status)
         }
-        var parts: [String] = []
+        var parts = windowParts(snapshot).map(\.text)
+        guard !parts.isEmpty else {
+            return snapshot.stale ? "Usage unavailable · Last known data is stale" : statusCopy(snapshot.status)
+        }
+        if snapshot.status == .rateLimited { parts.insert(statusCopy(snapshot.status), at: 0) }
+        if snapshot.stale { parts.append("Stale") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// One summarized usage window (or the balance a balance-only provider
+    /// shows in its place): its copy and, when it has one, its used percent.
+    struct WindowPart: Equatable {
+        let text: String
+        let usedPercent: Double?
+    }
+
+    /// The first two windows `summary` lists, each on its own, so a surface can
+    /// lay them out as separate columns (the Home usage card). Empty when the
+    /// snapshot has no usage to show; `summary` then owns the copy.
+    static func windowParts(_ snapshot: ProviderUsageSnapshot) -> [WindowPart] {
+        guard snapshot.status == .available || snapshot.status == .rateLimited else { return [] }
+        var parts: [WindowPart] = []
         let windows = snapshot.windows
         for (index, window) in windows.prefix(2).enumerated() {
             guard let value = windowSummary(window) else { continue }
@@ -56,19 +82,24 @@ enum ProviderUsagePresentation {
             // (Codex's single weekly window), not a generic "Primary"/"Usage".
             let shouldLabel = windows.count > 1 || index > 0 || cadenceLabel(window.windowSeconds) != nil
             // The value leads and the window label trails in parentheses: "3% used (5h)".
-            parts.append(shouldLabel ? "\(value) (\(summaryLabel(window.label, windowSeconds: window.windowSeconds)))" : value)
+            let text = shouldLabel ? "\(value) (\(summaryLabel(window.label, windowSeconds: window.windowSeconds)))" : value
+            parts.append(WindowPart(text: text, usedPercent: window.usedPercent))
         }
         if parts.isEmpty, let balance = snapshot.balances.first {
             // A balance-only provider still presents like its window peers: the
             // localized primary amount followed by its label, e.g. "$0.03 Available".
-            parts.append("\(currency(balance.amount, code: balance.currency)) \(balance.label)")
+            parts.append(WindowPart(text: "\(currency(balance.amount, code: balance.currency)) \(balance.label)", usedPercent: nil))
         }
-        guard !parts.isEmpty else {
-            return snapshot.stale ? "Usage unavailable · Last known data is stale" : statusCopy(snapshot.status)
-        }
-        if snapshot.status == .rateLimited { parts.insert(statusCopy(snapshot.status), at: 0) }
-        if snapshot.stale { parts.append("Stale") }
-        return parts.joined(separator: " · ")
+        return parts
+    }
+
+    /// Status a column layout shows beside its window columns: rate limiting
+    /// and stale data, which `summary` folds into its line.
+    static func windowPartsNote(_ snapshot: ProviderUsageSnapshot) -> String? {
+        var notes: [String] = []
+        if snapshot.status == .rateLimited { notes.append(statusCopy(snapshot.status)) }
+        if snapshot.stale { notes.append("Stale") }
+        return notes.isEmpty ? nil : notes.joined(separator: " · ")
     }
 
     static func windowSummary(_ window: UsageWindow) -> String? {
@@ -326,18 +357,32 @@ struct ProviderUsageSummaryHeader: View {
 }
 
 struct ProviderUsageProgress: View {
+    static let height: CGFloat = 5
+
     let percent: Double
     let accent: Color
+    /// The hosted layout journey's key for the fill's frame; nothing otherwise.
+    var fillProbe: String? = nil
+
+    /// A capsule narrower than it is tall loses its rounded ends, so any
+    /// non-zero fill is at least one bar height wide: a small share reads as a
+    /// round dot with the same left end as every other bar. Zero stays empty.
+    static func fillWidth(percent: Double, trackWidth: CGFloat, height: CGFloat = height) -> CGFloat {
+        let clamped = min(max(percent, 0), 100)
+        guard clamped > 0, trackWidth > 0 else { return 0 }
+        return min(trackWidth, max(height, trackWidth * clamped / 100))
+    }
 
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Capsule().fill(accent.opacity(0.16))
                 Capsule().fill(accent)
-                    .frame(width: proxy.size.width * min(max(percent, 0), 100) / 100)
+                    .frame(width: Self.fillWidth(percent: percent, trackWidth: proxy.size.width, height: proxy.size.height))
+                    .homeUsageLayoutProbe(fillProbe)
             }
         }
-        .frame(height: 5)
+        .frame(height: Self.height)
         .accessibilityHidden(true)
     }
 }

@@ -7,11 +7,14 @@ import TronMobileCore
 struct HostedProjectTrustFixture: View {
     @Environment(\.scenePhase) private var phase
     @State private var model: AppModel
+    @State private var presentationActivity = PresentationActivityCoordinator()
     @State private var ready = false
     @State private var error: String?
     @State private var originalCounts = ""
     @State private var replacementCounts = ""
     private let originalGateway: ProjectTrustFixtureGateway
+    /// The `floors` scenario mounts Permissions › Floors instead of Project Trust.
+    private let mountsFloors: Bool
     private let replacementGateway: ProjectTrustFixtureGateway
     private let original = GatewayProfile(id: "trust-original", label: "Original fixture", host: "original.example.test", port: 9847, machineId: "trust-original-machine")
     private let replacement = GatewayProfile(id: "trust-replacement", label: "Replacement fixture", host: "replacement.example.test", port: 9847, machineId: "trust-replacement-machine")
@@ -22,6 +25,7 @@ struct HostedProjectTrustFixture: View {
         let gateway = ProjectTrustFixtureGateway(scenario: scenario, initialDecision: nil)
         let successor = ProjectTrustFixtureGateway(scenario: "ordered", initialDecision: false)
         originalGateway = gateway
+        mountsFloors = scenario == "floors"
         replacementGateway = successor
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
@@ -40,8 +44,13 @@ struct HostedProjectTrustFixture: View {
         TronPresentationSurface(id: "fixture.project-trust") {
             VStack(spacing: 0) {
                 if ready {
-                    NavigationStack { TrustSettingsView(target: TrustTarget(cwd: "/fixture/project")) }
-                        .tronSettingsLayout()
+                    if mountsFloors {
+                        NavigationStack { SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("permissions")) }
+                            .tronSettingsLayout()
+                    } else {
+                        NavigationStack { TrustSettingsView(target: TrustTarget(cwd: "/fixture/project")) }
+                            .tronSettingsLayout()
+                    }
                 } else if let error {
                     Text(error)
                 } else {
@@ -51,6 +60,7 @@ struct HostedProjectTrustFixture: View {
             }
         }
         .environment(model)
+        .environment(\.tronPresentationActivityCoordinator, presentationActivity)
         .tronPresentation()
         .preferredColorScheme(.dark)
         .task {
@@ -109,6 +119,10 @@ private actor ProjectTrustFixtureGateway {
     private var heldReads = 0, releasedReads = 0
     private var streams: [AsyncStream<String>.Continuation] = []
     private var trace: [String] = []
+    /// The maintainer's override; nil is the code floor (approve).
+    private var floorOverride: String?
+    private var floor: String { floorOverride ?? "approve" }
+    private var floorPreviews = 0, floorApplies = 0
 
     init(scenario: String, initialDecision: Bool?) {
         holdFirst = scenario == "held"
@@ -121,11 +135,12 @@ private actor ProjectTrustFixtureGateway {
     private func add(_ c: AsyncStream<String>.Continuation) { streams.append(c); publish() }
     private func record(_ value: String) { trace.append(value); if trace.count > 80 { trace.removeFirst() }; publish() }
     private func publish() {
-        let counts = "sets:\(sets) commands:\(receipts.count) repeats:\(repeats) held:\(held) firstReply:\(firstReply) readsTrue:\(readsTrue) readsFalse:\(readsFalse) canonical:\(decision.map(String.init) ?? "nil") queries:\(queries) wrongCWD:\(wrongCWD) heldReads:\(heldReads) releasedReads:\(releasedReads)"
+        let counts = "sets:\(sets) commands:\(receipts.count) repeats:\(repeats) held:\(held) firstReply:\(firstReply) readsTrue:\(readsTrue) readsFalse:\(readsFalse) canonical:\(decision.map(String.init) ?? "nil") queries:\(queries) wrongCWD:\(wrongCWD) heldReads:\(heldReads) releasedReads:\(releasedReads) floor:\(floor) previews:\(floorPreviews) applies:\(floorApplies)"
         streams.forEach { $0.yield(counts + " | " + trace.joined(separator: " > ")) }
     }
     private func inspection() -> JSONValue {
-        .object(["cwd": .string("/fixture/project"), "requiresDecision": .bool(true),
+        // A chat in a subdirectory: the Gateway records the decision for its Project root.
+        .object(["cwd": .string("/fixture/project"), "projectDir": .string("/fixture"), "requiresDecision": .bool(true),
                  "savedDecision": decision.map(JSONValue.bool) ?? .null,
                  "defaultDecision": .string("ask"), "effectiveDecision": decision.map(JSONValue.bool) ?? .null])
     }
@@ -139,6 +154,43 @@ private actor ProjectTrustFixtureGateway {
     func releaseReads() {
         let waiting = readContinuations; readContinuations.removeAll()
         waiting.forEach { $0.resume() }
+    }
+
+    private func floorRow() -> JSONValue {
+        let labels = ["quiet": "Quiet", "notify": "Notify", "approve": "Approve"]
+        return .object(["key": .string("permissions.floor"),
+            "qualifiers": .object(["direction": .string("widen"), "key": .string("permissions.projectTrust")]),
+            "group": .string("permissions"), "subgroup": .null, "value": .string(floor),
+            "display": .string(labels[floor] ?? floor), "layer": .string(floorOverride == nil ? "builtin" : "mac"), "applied": .bool(true),
+            "layers": .array([.object(["layer": .string("mac")])]),
+            "badges": .array([.object(["kind": .string("layer"), "label": .string(floorOverride == nil ? "Tron default" : "Set on Mac")]),
+                              .object(["kind": .string("scope"), "label": .string("Project trust: loosening")])]),
+            "presentation": .object(["label": .string("Project trust: loosening"),
+                "help": .string("Lowering this floor requires your confirmation."), "order": .number(10), "importance": .string("advanced"),
+                "control": .string("choice"), "valueKind": .string("orderedChoice"), "options": .array(["quiet", "notify", "approve"].map { tier in
+                    .object(["value": .string(tier), "label": .string(labels[tier]!)])
+                })])])
+    }
+
+    /// Lowering a floor is an approve-tier change carrying confirm text; raising
+    /// it applies at quiet tier. A dry run only previews, so the count shows it.
+    private func applyFloor(_ params: [String: JSONValue], _ change: [String: JSONValue]) -> (JSONValue?, JSONValue?) {
+        let rank = ["quiet": 0, "notify": 1, "approve": 2]
+        guard change["op"]?.stringValue == "set", let target = change["value"]?.stringValue, let targetRank = rank[target] else {
+            return (nil, .object(["code": .string("fixture_unsupported"), "message": .string("Floor fixture supports set only"), "retryable": .bool(false)]))
+        }
+        let lowering = targetRank < (rank[floor] ?? 2)
+        if params["dryRun"]?.boolValue == true {
+            floorPreviews += 1
+            record("floor-preview:\(target)")
+            let tier = lowering ? "approve" : "quiet"
+            let confirm: JSONValue = lowering ? .string("Lowering this floor lets agents' project-trust changes apply without your tap.") : .null
+            return (.object(["tier": .string(tier), "changes": .array([.object(["changeId": .string("floor-change"), "tier": .string(tier), "confirm": confirm])])]), nil)
+        }
+        floorApplies += 1
+        floorOverride = target
+        record("floor-apply:\(target)")
+        return (fixtureSettingsChangeResult(key: "permissions.floor"), nil)
     }
 
     func handle(_ method: String, params: [String: JSONValue]) async -> (result: JSONValue?, error: JSONValue?) {
@@ -159,19 +211,27 @@ private actor ProjectTrustFixtureGateway {
                 }
             }
             return (snapshot, nil)
-        case "trust.set":
+        case "settings.resolve":
+            return (.object(["keys": .array([floorRow()])]), nil)
+        case "settings.change":
+            if let floorChange = params["changes"]?.arrayValue?.first?.objectValue, floorChange["key"]?.stringValue == "permissions.floor" {
+                return applyFloor(params, floorChange)
+            }
+            let change = fixtureTrustChange(params)
+            guard change.isTrust else { return (nil, nil) }
             sets += 1
             guard let commandID = params["commandId"]?.stringValue else { return (nil, nil) }
             if let receipt = receipts[commandID] { repeats += 1; record("repeat:\(commandID)"); return (receipt, nil) }
-            if params["cwd"] != .string("/fixture/project") { wrongCWD += 1 }
-            decision = params["decision"]?.boolValue
-            let result = inspection()
+            if change.cwd != .string("/fixture/project") { wrongCWD += 1 }
+            decision = change.decision
+            let canonical = inspection()
+            let result = fixtureSettingsChangeResult(key: "permissions.projectTrust", result: canonical)
             // The real TrustService mutex protects application/commit, not
             // network response delivery. No await separates these fake commits.
             receipts[commandID] = result
             let isFirst = receipts.count == 1
             record("commit:\(decision.map(String.init) ?? "nil"):\(commandID)")
-            for socket in sockets { await socket.emitTrustChanged(result) }
+            for socket in sockets { await socket.emitTrustChanged(canonical) }
             record("changed:\(decision.map(String.init) ?? "nil")")
             if isFirst, holdFirst {
                 held += 1
@@ -179,14 +239,14 @@ private actor ProjectTrustFixtureGateway {
                 firstReply += 1
                 record("typed-first:true")
             } else {
-                record("typed:\(params["decision"]?.boolValue.map(String.init) ?? "nil")")
+                record("typed:\(change.decision.map(String.init) ?? "nil")")
             }
             return (result, nil)
         case "command.status":
             queries += 1
             let commandID = params["commandId"]?.stringValue ?? ""
             record("status:\(commandID)")
-            if params["method"] == .string("trust.set"), let result = receipts[commandID] {
+            if params["method"] == .string("settings.change"), let result = receipts[commandID] {
                 return (.object(["status": .string("completed"), "result": result]), nil)
             }
             return (.object(["status": .string("missing")]), nil)
@@ -205,7 +265,7 @@ private actor ProjectTrustFixtureSocket: GatewaySocketConnection {
     private var closed = false
     init(gateway: ProjectTrustFixtureGateway, machineID: String) {
         self.gateway = gateway
-        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":7,\"minProtocolVersion\":7,\"machineId\":\"\(machineID)\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
+        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":8,\"minProtocolVersion\":8,\"machineId\":\"\(machineID)\",\"machineName\":\"Fixture\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"sessions.v1\"]}".utf8)]
         Task { await gateway.attach(self) }
     }
     func send(_ data: Data) async throws {
@@ -247,4 +307,20 @@ private actor ProjectTrustFixtureSocket: GatewaySocketConnection {
         else { receivers.removeFirst().resume(returning: data) }
     }
 }
+
+/// Reads a fixture `settings.change` that changes project trust.
+func fixtureTrustChange(_ params: [String: JSONValue]) -> (cwd: JSONValue?, decision: Bool?, isTrust: Bool) {
+    let change = params["changes"]?.arrayValue?.first?.objectValue
+    let isTrust = change?["key"]?.stringValue == "permissions.projectTrust"
+    return (params["target"]?.objectValue?["cwd"], change?["op"]?.stringValue == "set" ? change?["value"]?.boolValue : nil, isTrust)
+}
+
+/// A fixture `settings.change` outcome for one applied change.
+func fixtureSettingsChangeResult(key: String, result: JSONValue? = nil, revision: Int? = nil) -> JSONValue {
+    var change: [String: JSONValue] = ["changeId": .string("fixture-change"), "key": .string(key), "status": .string("applied"), "tier": .string("quiet")]
+    if let result { change["result"] = result }
+    if let revision { change["revision"] = .number(Double(revision)) }
+    return .object(["status": .string("applied"), "changes": .array([.object(change)])])
+}
+
 #endif

@@ -5,6 +5,7 @@ import { HOME_PROFILE_BOUND_BYTES } from "../home/home-profile.js";
 const HOME_PROFILE_HEADROOM_TEXT = "x".repeat(HOME_PROFILE_BOUND_BYTES + 1_024);
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { createHash, randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { SessionConfigurationBlocker } from "../protocol/types.js";
 import { boundedSummaryText } from "./summary-text.js";
 import { catalogActivityTimestamp } from "./catalog-metadata-index.js";
@@ -18,13 +19,14 @@ import {
   isInstalledDelegatedTool,
   trustedDelegatedController,
 } from "./delegated-provider.js";
-import type { AgentMessage, AgentTurnDecision } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AgentTurnDecision, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings, readChatRequestPins, readChatFixedSettings, readChatToolChoice } from "./chat-settings.js";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { getCurrentSystemMessage, type ImageContent, type Model } from "@earendil-works/pi-ai";
+import { type ImageContent, type Model } from "@earendil-works/pi-ai";
 import {
   AgentSessionRuntime,
   createAgentSessionFromServices,
@@ -42,6 +44,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
+import { boundToolCancellation } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { HomeRequestPolicy } from "../home/home-request-policy.js";
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
@@ -55,6 +58,10 @@ import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extensio
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProjection, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
+import type { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import type { HomeProfileChangeAccess } from "../home/home-profile.js";
+import type { Actor } from "../admin/settings-record.js";
+import type { SettingsToolAccess } from "../admin/tron-settings-extension.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
@@ -116,7 +123,6 @@ import {
   projectToolResult,
   projectTranscriptPage,
   projectTranscriptPageAfter,
-  projectedTranscriptOrdinal,
   canonicalToolResultCallIDs,
   canonicalToolResultCallIDsFromBranch,
   projectTree,
@@ -167,6 +173,8 @@ import { projectHookRegistrations } from "./hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
 import { boundedUtf8Prefix } from "../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
+import type { ChatStore, FixedSetting } from "../admin/settings-resolver.js";
+import { KEYS, hasCompactionApplier, schemaKey } from "../admin/settings-schema.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
 // admitted the first property from the exact-owned status file. A payload key
@@ -205,6 +213,9 @@ function isEmbeddedLifecycleArtifact(value: unknown): boolean {
 function preserveEmbeddedLifecycleMarker(source: unknown, value: Record<string, unknown>): Record<string, unknown> {
   return isEmbeddedLifecycleArtifact(source) ? markEmbeddedLifecycleArtifact(value) : value;
 }
+
+/** An inbox admission this long holds the Home lane long enough for a person to notice. */
+const HOME_INBOX_ADMISSION_SLOW_MS = 2_000;
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
@@ -435,6 +446,9 @@ export interface OwnedOperationTerminal {
   errorCode?: string;
   assistantCompletionId?: string;
 }
+/** The terminal a task's Stop or deadline reports while the task waits between turns: no turn
+ * was running to interrupt, so the dispatcher reads it as a stop of the waiting task. */
+export const TASK_STOP_WAITING = "task-stop-waiting";
 
 interface RuntimeSlotHooks {
   broadcast: SessionBroadcast;
@@ -508,8 +522,8 @@ type PromptOwnership = AutomationPromptOwnership | HomeWakeOwnership | {
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
-  homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
-  homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
+  homeTask: (sessionId: string, request: unknown) => Promise<unknown>;
+  homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
   managedSubagents?: ManagedSubagents;
@@ -534,6 +548,9 @@ export interface RuntimeSlotDependencies {
   /** Session search for Home's research tools, late-bound: the service is
    * installed on the registry after construction and may be absent. */
   sessionSearch: () => import("./session-search-service.js").SessionSearchService | undefined;
+  /** The settings model and its one change path, late-bound like session search:
+   * installed on the registry after construction (docs/settings-model.md 5.1). */
+  settings: () => { model: SettingsModel; changes: SettingsChangePath } | undefined;
   /** Transport injection for Home's web tools (tests); production omits it. */
   homeWebTransport?: import("../home/home-research-tools.js").HomeResearchTransport;
   connections?: ConnectionOwner;
@@ -679,6 +696,7 @@ function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefin
 
 export class RuntimeSlot {
   private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
+  private readonly newSettingsSessions = new WeakSet<AgentSession>();
   private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
   /** The open Home activation of the live runtime, undefined for every ordinary
    * runtime. Re-resolved in `runtimeFactory`, so a profile change takes effect
@@ -977,6 +995,11 @@ export class RuntimeSlot {
   private homeWakeTrigger: { eventId: string; taskId: string; operationId: string } | undefined;
   /** Whether the admitted operation is a wake, so the activation's idle notice names it. */
   private operationWasHomeWake = false;
+  /** A task worker's operation between turns: its last turn ended with live owned runs and no
+   * report, so the dispatcher's observer is held here instead of settling the task. A provider
+   * wake starts the next turn of the same task (`wakeOperationId` set once that turn runs). Only
+   * this instance holds it: a restart leaves a waiting task to cold reconciliation. */
+  private taskWait: { observer: (terminal: OwnedOperationTerminal) => Promise<void> | void; terminal: OwnedOperationTerminal; wakeOperationId?: string } | undefined;
   /** The curated profile each live runtime was built with. `setModel` and
    * `compact` read this, never the record, so a policy is never applied to a
    * runtime that did not load it. */
@@ -989,7 +1012,8 @@ export class RuntimeSlot {
     interrupted: boolean,
     creationProfile: RuntimeProfile = "ordinary",
     homeMaterializationAuthority?: HomeMaterializationAuthority,
-    private readonly taskWorker?: HomeTaskReportOwner,
+    // Rebound only by `bindTaskWorker` when a settled task resumes in place (#929).
+    private taskWorker?: HomeTaskReportOwner,
   ) {
     this.explicitHomeSessionId = creationProfile === "home" ? sessionManager.getSessionId() : undefined;
     this.homeMaterializationAuthority = homeMaterializationAuthority
@@ -1217,6 +1241,15 @@ export class RuntimeSlot {
     return isBuiltinMcpCommand(this.runtime.session.extensionRunner.getCommand("mcp"));
   }
 
+  /** Whether this is a Home task worker and whether its task operation still runs here.
+   * `settled`: a worker session whose last task stopped or ended; a maintainer message
+   * resumes it in place rather than being refused (#929). */
+  get homeTaskWorkerState(): "none" | "active" | "settled" {
+    if (this.taskWorker?.controlsActive) return "active";
+    return this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)
+      ? "settled" : "none";
+  }
+
   /** Immutable task addresses are file-wide evidence, not the selected model
    * branch. Harmless tree viewing must never lose an already sealed result. */
   canonicalTaskEvidence(): FileEntry[] {
@@ -1284,9 +1317,212 @@ export class RuntimeSlot {
     return this.sessionManager.getCwd();
   }
 
+  /** The Project root the live runtime loaded its Project layer from. Trust and
+   * Project-layer reloads address every chat of one root together. */
+  get projectDir(): string {
+    return this.runtime.session.projectDir;
+  }
+
   get modelRuntime(): ModelRuntime {
     this.assertNoTrustReload();
     return this.runtime.session.modelRuntime;
+  }
+
+  /** A Home chapter has the Profile layer and no Project layer (settings-model.md 3.3). */
+  get isHomeChapter(): boolean {
+    return this.dependencies.homeChapterState(this.id).homeId !== undefined;
+  }
+
+  /**
+   * The `settings` tool's view of this chat (docs/settings-model.md 5.1): its
+   * own session target, recorded as Home, a task worker or an agent. The tool
+   * runs inside this chat's run, and a Chat-layer value changes only while the
+   * chat is idle, so its own Chat layer is refused here rather than waiting on
+   * the lane the run holds; an approved pending change applies it later.
+   */
+  private settingsToolAccess(): SettingsToolAccess | undefined {
+    const owners = this.dependencies.settings();
+    if (!owners) return undefined;
+    const target = { kind: "session" as const, sessionId: this.id };
+    const busy = (): never => { throw new GatewayError("busy", "This chat's own Chat-layer settings change between runs, not during one"); };
+    const source = () => ({
+      cwd: this.cwd,
+      home: this.isHomeChapter,
+      chat: this.settingsChatLayer(),
+      modelRuntime: this.modelRuntime,
+      appliers: {
+        setModel: busy, setThinking: busy, setContextWindow: busy, setTools: busy,
+        // This tool already owns the running lane. It records the override;
+        // request admission applies it, never a mutation of the active request.
+        setSetting: (key: string, value: unknown, allowFixedDirection: boolean, fixedAt?: FixedSetting) => this.persistChatRunSetting(key, value, allowFixedDirection, fixedAt),
+      },
+    });
+    const actor = (toolCallId: string): Actor => {
+      const kind = this.liveProfile() === "home" ? "home" : this.taskWorker ? "worker" : "agent";
+      return { kind, id: this.id, sessionId: this.id, toolCallId, ...(this.taskWorker ? { taskId: this.taskWorker.identity.taskId } : {}) };
+    };
+    return {
+      resolve: (keys) => owners.model.resolve(target, source(), keys),
+      change: (changes, input) => owners.changes.change(target, changes, {
+        actor: actor(input.toolCallId), reason: input.reason, web: input.web, session: source(),
+        ...(input.dryRun ? { dryRun: true } : {}),
+      }),
+      takeOutcomes: () => owners.changes.takeOutcomes(this.id),
+    };
+  }
+
+  /** Home's `profile` tool reaches the change path as Home (docs/settings-model.md 6.4). */
+  private homeProfileChangeAccess(): HomeProfileChangeAccess | undefined {
+    const owners = this.dependencies.settings();
+    if (!owners || this.liveProfile() !== "home") return undefined;
+    return {
+      change: (ops, input) => owners.changes.changeProfile(ops, {
+        actor: { kind: "home", id: this.id, sessionId: this.id, toolCallId: input.toolCallId },
+        author: input.author, commandId: input.commandId, web: input.web, ...(input.reason ? { reason: input.reason } : {}),
+      }),
+    };
+  }
+
+  /** The tools this chat's selection may name: its registry, less hidden tools
+   * (`setTools` refuses those). */
+  settingsToolCatalog(): Array<{ name: string; description?: string; resource: Record<string, unknown> }> {
+    this.assertNoTrustReload();
+    return this.runtime.session.getAllTools().filter(tool => tool.exposure !== "hidden")
+      .map(tool => {
+        const distribution = resourceDistribution(tool.sourceInfo);
+        return {
+          name: tool.name,
+          ...(tool.description ? { description: tool.description } : {}),
+          resource: {
+            name: tool.name,
+            ...(this.toolLabel(tool.name) ? { label: this.toolLabel(tool.name)! } : {}),
+            description: tool.description,
+            parameters: tool.parameters,
+            source: tool.sourceInfo.source,
+            ...(distribution ? { distribution } : {}),
+            ...(tool.namespace ? { namespace: tool.namespace } : {}),
+          },
+        };
+      });
+  }
+
+  /** This chat's Chat layer as its session record holds it (settings-model.md
+   * 3.2): the model, thinking, explicit context window and active tools. */
+  settingsChatLayer(): ChatStore {
+    this.assertNoTrustReload();
+    const session = this.runtime.session;
+    const policy = this.contextPolicies.get(session)?.snapshot();
+    return {
+      ...(session.model ? { model: { provider: session.model.provider, id: session.model.id } } : {}),
+      thinking: session.thinkingLevel,
+      ...(policy && policy.override !== null ? { contextWindow: { model: `${policy.model.provider}/${policy.model.id}`, value: policy.override } } : {}),
+      tools: session.getActiveToolNames(),
+      settings: readChatSettings(session.sessionManager.getBranch()),
+      requestPins: readChatRequestPins(session.sessionManager.getBranch()),
+      fixed: readChatFixedSettings(session.sessionManager.getBranch()),
+    };
+  }
+
+  private async applyLiveRunSettings(session: AgentSession): Promise<ReturnType<SettingsManager["getSettings"]> | undefined> {
+    const owners = this.dependencies.settings();
+    if (!owners) return;
+    if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed before settings application");
+    const branch = session.sessionManager.getBranch();
+    const previousPins = readChatRequestPins(branch);
+    const explicitSettings = readChatSettings(branch);
+    const { requestPins: _pins, ...chat } = this.settingsChatLayer();
+    const { settings, requestPins } = await owners.model.requestSettings(this.id, {
+      cwd: this.cwd, home: this.isHomeChapter,
+      chat: { ...chat, settings: explicitSettings }, modelRuntime: session.modelRuntime,
+    }, previousPins);
+    if (this.runtime.session !== session) throw new GatewayError("conflict", "Runtime changed during settings resolution");
+    if (JSON.stringify(previousPins) !== JSON.stringify(requestPins)) {
+      const receiptId = randomUUID();
+      await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings: explicitSettings, requestPins, fixed: readChatFixedSettings(branch) }), receiptId);
+    }
+    session.settingsManager.applyOverrides(settings);
+    // These SDK controls are copied when Agent is created, not read from its
+    // SettingsManager during queue draining. Never use setters that save defaults.
+    session.agent.steeringMode = session.settingsManager.getSteeringMode();
+    session.agent.followUpMode = session.settingsManager.getFollowUpMode();
+    session.agent.transport = session.settingsManager.getTransport();
+    session.agent.maxRetryDelayMs = session.settingsManager.getProviderRetrySettings().maxRetryDelayMs;
+    return settings;
+  }
+
+  private async persistChatRunSetting(key: string, value: unknown, allowFixedDirection: boolean, fixedAt?: FixedSetting): Promise<number> {
+    this.assertChapterWritable();
+    const branch = this.sessionManager.getBranch();
+    const settings = changeChatSetting(readChatSettings(branch), key, value);
+    const fixed = readChatFixedSettings(branch);
+    if (schemaKey(key).timing === "fixed") {
+      fixed[key] = { ...(fixedAt ?? { from: "chat", at: new Date().toISOString(), ref: randomUUID() }), value };
+    }
+    const requestPins = readChatRequestPins(branch);
+    // Tier admission and timing are separate: lowering a floor must not make
+    // an unapproved widening live. Only an approval or the maintainer's tap
+    // releases the fixed-direction snapshot (including Follow the default).
+    if (typeof schemaKey(key).timing !== "string" && allowFixedDirection) {
+      const owners = this.dependencies.settings();
+      if (!owners) throw new GatewayError("conflict", "Settings owner is unavailable");
+      const { requestPins: _pins, ...chat } = this.settingsChatLayer();
+      const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, {
+        cwd: this.cwd, home: this.isHomeChapter, chat: { ...chat, settings }, modelRuntime: this.runtime.session.modelRuntime,
+      }, [key]);
+      const row = resolved.keys[0];
+      if (!row) throw new GatewayError("conflict", "Settings default is unavailable");
+      requestPins[key] = { value: row.value, from: row.layer, at: new Date().toISOString(), ref: randomUUID(), ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) };
+    }
+    const receiptId = randomUUID();
+    await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId, settings, requestPins, fixed }), receiptId);
+    // The compaction projection follows the Chat value at once; its budgets
+    // reach the SDK at the next idle admission (refreshCompactionPolicy).
+    if (hasCompactionApplier(schemaKey(key))) {
+      try { this.compactionPolicies.get(this.runtime.session)?.refresh(); } catch { /* Published warning is authoritative. */ }
+    }
+    this.revision += 1;
+    this.publishSnapshot();
+    return this.revision;
+  }
+
+  /** Drop a fixed widening pin only after an approved/tapped default change.
+   * The canonical chat entry makes the release survive a cold resume; explicit
+   * Chat values remain the source of truth and are never touched. */
+  async releaseInheritedImageBlock(layer: "mac" | "project"): Promise<void> {
+    await this.lane.run(async () => {
+      if (this.isDisposed) return;
+      const branch = this.sessionManager.getBranch();
+      const pins = readChatRequestPins(branch);
+      const pin = pins["context.images.block"];
+      if (!pin || pin.value !== true) return;
+      const explicit = readChatSettings(branch);
+      const images = explicit.images;
+      if (images && typeof images === "object" && Object.prototype.hasOwnProperty.call(images, "blockImages")) return;
+      const owners = this.dependencies.settings();
+      if (!owners) return;
+      const { requestPins: _pins, ...chat } = this.settingsChatLayer();
+      const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, {
+        cwd: this.cwd, home: this.isHomeChapter, chat, modelRuntime: this.runtime.session.modelRuntime,
+      }, ["context.images.block"]);
+      const row = resolved.keys[0];
+      // Approval of a lower layer is not approval to release a higher layer's
+      // fixed policy, even if that higher store is subsequently edited outside Tron.
+      if (row?.value !== false || row.layer === "chat" || row.layer === "profile"
+        || (layer === "mac" && row.layer === "project")) return;
+      delete pins["context.images.block"];
+      const receiptId = randomUUID();
+      await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId,
+        settings: explicit, requestPins: pins, fixed: readChatFixedSettings(branch) }), receiptId);
+    });
+  }
+
+  async setChatRunSetting(key: string, value: unknown, initiatingWorkToken?: string,
+    expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, allowFixedDirection = false, fixedAt?: FixedSetting): Promise<number> {
+    return this.lane.run(async () => {
+      this.assertConfigurationIdle(initiatingWorkToken);
+      if (expectation) this.assertConfigurationExpectation(expectation);
+      return this.persistChatRunSetting(key, value, allowFixedDirection, fixedAt);
+    });
   }
 
   /** Actionable work only; decorative presentation must not block trust/delete.
@@ -1770,6 +2006,11 @@ export class RuntimeSlot {
     return this.runtime.session.sessionFile;
   }
 
+  /** The name `snapshot()` projects, without building a snapshot: list rows read it per task (#905). */
+  get displayName(): string | undefined {
+    return this.isHomeChapter ? "Home" : this.runtime.session.sessionName || undefined;
+  }
+
   get canonicalEntryCount(): number {
     return this.runtime.session.sessionManager.getEntries().length;
   }
@@ -1881,6 +2122,25 @@ export class RuntimeSlot {
         ? await this.dependencies.homeModelRuntime()
         : { runtime: await this.dependencies.createModelRuntime(), ownership: "owned" as const };
       const modelRuntime = binding.runtime;
+      // The SDK merges initial optional defaults after agent.streamFunction.
+      // Carry this exact request's resolved settings to the final provider cut:
+      // clearing a Chat/Mac value must not resurrect that stale SDK default.
+      // Ordinary runtimes and Home's borrowed *view* are session-owned; unrelated
+      // memory/extension calls outside this stream retain their explicit options.
+      const requestSettings = new AsyncLocalStorage<ReturnType<SettingsManager["getSettings"]>>();
+      const streamSimple = modelRuntime.streamSimple.bind(modelRuntime);
+      modelRuntime.streamSimple = (model, context, options) => {
+        const settings = requestSettings.getStore();
+        if (!settings) return streamSimple(model, context, options);
+        const { timeoutMs: _timeout, maxRetries: _retries, websocketConnectTimeoutMs: _connect, ...rest } = options ?? {};
+        const timeoutMs = settings.retry?.provider?.timeoutMs ?? settings.httpIdleTimeoutMs;
+        return streamSimple(model, context, {
+          ...rest,
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
+          ...(settings.retry?.provider?.maxRetries === undefined ? {} : { maxRetries: settings.retry.provider.maxRetries }),
+          ...(settings.websocketConnectTimeoutMs === undefined ? {} : { websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs }),
+        });
+      };
       // Only the ModelRuntime owner installs filters. Home's borrowed view reads
       // the Gateway's installation without wrapping its providers on rebuild.
       const detachOpenAIEligibility = binding.ownership === "owned"
@@ -1893,7 +2153,11 @@ export class RuntimeSlot {
       this.resourceReloadOptions = {
         // Reload must re-read the canonical decision. Capturing the value from
         // runtime creation would leave project code loaded after trust changes.
-        resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
+        // Home's project layer is never trusted: its loader sees only user-level
+        // skills and prompt templates, never project `.pi/` or `.agents/` ones.
+        resolveProjectTrust: home
+          ? async () => false
+          : async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
       // One-shot: a brand-new Home session's first runtime carries the explicit
       // profile; every later runtime asks the record.
@@ -1942,13 +2206,17 @@ export class RuntimeSlot {
           }
         },
         ...(this.dependencies.homeWebTransport ? { homeWebTransport: this.dependencies.homeWebTransport } : {}),
+        settings: () => this.settingsToolAccess(),
+        homeProfileChanges: () => this.homeProfileChangeAccess(),
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
       // Tron modules plus tron-home.
       // Home delegates only through Home tasks, never through managed pi-subagents.
       const managedSubagents = home ? undefined : this.dependencies.managedSubagents;
-      const settingsManager = home ? undefined : SettingsManager.create(trust.cwd, this.dependencies.agentDir, { projectTrusted: trust.trusted });
+      // The Project layer is the root's `.pi/` (settings-model decision 31); the
+      // chat keeps its cwd for tools, context files and session grouping.
+      const settingsManager = home ? undefined : SettingsManager.create(trust.projectDir, this.dependencies.agentDir, { projectTrusted: trust.trusted });
       const managedLoaderOptions = settingsManager ? await managedSubagents?.loaderOptions(settingsManager,
         (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages)) : undefined;
       const extensionFactories = home
@@ -1973,20 +2241,25 @@ export class RuntimeSlot {
                 taskHash: createHash("sha256").update(this.taskWorker!.identity.taskId).digest("hex").slice(0, 16), reason }),
               reportSealed: () => this.taskWorker!.reportSealed,
               ownsSubagentRun: runId => this.ownsSubagentRun(runId),
+              ownsSupervisorRequest: requestId => this.ownsSupervisorRequest(requestId),
             }) }] : []),
           ];
       const services = await createAgentSessionServices({
         ...(settingsManager ? { settingsManager: managedLoaderOptions?.settingsManager ?? settingsManager } : {}),
         cwd: trust.cwd,
+        projectDir: trust.projectDir,
         agentDir: this.dependencies.agentDir,
         modelRuntime,
         resourceLoaderOptions: {
           ...(managedLoaderOptions ?? {}),
           ...(home ? {
             noExtensions: true,
-            noSkills: true,
-            noPromptTemplates: true,
             noContextFiles: true,
+            // User-level skills and prompt templates load only so the composer can
+            // offer them (`commands()`) and Pi can expand the one the user inserts
+            // into that user message. Each skill is user-invocable only, so none
+            // is listed in Home's system prompt; prompt templates never are.
+            skillsOverride: (base) => ({ ...base, skills: base.skills.map((skill) => ({ ...skill, disableModelInvocation: true })) }),
             // The agent directory's SYSTEM.md and APPEND_SYSTEM.md are not gated
             // by any `no*` option, so Home drops them at the two overrides the
             // loader exposes. Nothing from outside the curated profile reaches
@@ -2045,12 +2318,17 @@ export class RuntimeSlot {
           }
         }
       }
+      const startsNewChat = sessionManager.getEntryCount() === 0;
+      // Pi treats a metadata-only chapter as new because it has no messages.
+      // Canonical thinking is nevertheless an existing Chat choice, not a default.
+      const recordedThinking = sessionManager.getBranch().some(entry => entry.type === "thinking_level_change");
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
         ...(initialModel ? { model: initialModel } : {}),
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
         ...(homeModel ? { model: homeModel } : {}),
+        ...(recordedThinking ? { thinkingLevel: sessionManager.buildSessionContext().thinkingLevel as ThinkingLevel } : {}),
         // The allowlist is Home's executable ceiling. MCP tools cannot appear
         // under it because no MCP extension is loaded, and Tron's direct bash
         // tool is not registered at all for Home.
@@ -2059,7 +2337,7 @@ export class RuntimeSlot {
         // bash schema is nevertheless the exact SDK definition registered here.
         ...(directBashProcesses ? { customTools: [
           directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition,
-          ...(this.taskWorker ? [this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.activeOperationId : undefined,
+          ...(this.taskWorker ? [this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined,
             async report => {
               // A sealed report decides the outcome, so no task-owned run may still be live then: settlement
               // would stop it after the outcome was fixed. Refuse under the liveness rule settlement uses.
@@ -2074,20 +2352,56 @@ export class RuntimeSlot {
             })] : []),
         ] } : {}),
       });
+      if (startsNewChat) this.newSettingsSessions.add(created.session);
       // The transcript owns a chat's tool loadout. Pi's createAgentSession always
       // passes its configured defaults, which skips AgentSession's own transcript
       // restore, so a resumed, forked or reloaded chat would silently fall back
       // to the defaults and the next prompt would persist that (#327). Apply the
       // declared loadout here; a session without one keeps the defaults.
-      const declared = getCurrentSystemMessage(sessionManager.buildSessionContext().messages);
-      if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
+      const toolChoice = readChatToolChoice(sessionManager.getBranch());
+      if (toolChoice) created.session.setActiveToolsByName(toolChoice.tools);
       this.runtimeProfiles.set(created.session, home ? "home" : "ordinary");
       this.homeRequestPolicy = home
         ? this.dependencies.homeRequestPolicy(sessionManager.getSessionId())
         : undefined;
       const homeRequestPolicy = this.homeRequestPolicy;
-      compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir, home ? { disabled: true } : {});
-      const baseStream = created.session.agent.streamFunction;
+      const compactionSession = created.session;
+      compactionPolicy = new CompactionOperationPolicy(compactionSession, this.dependencies.agentDir,
+        home ? { disabled: true } : { chat: () => readChatSettings(compactionSession.sessionManager.getBranch()) });
+      const providerStream = created.session.agent.streamFunction;
+      let admittedSettings: ReturnType<SettingsManager["getSettings"]> | undefined;
+      const baseStream: StreamFn = (model, context, options) => {
+        const settings = admittedSettings;
+        if (!settings) return providerStream(model, context, options);
+        return requestSettings.run(settings, () => providerStream(model, context, {
+          ...options,
+          ...(settings.transport === undefined ? {} : { transport: settings.transport }),
+          ...(settings.retry?.provider?.maxRetryDelayMs === undefined ? {} : { maxRetryDelayMs: settings.retry.provider.maxRetryDelayMs }),
+        }));
+      };
+      const convertToLlm = created.session.agent.convertToLlm;
+      created.session.agent.convertToLlm = async messages => {
+        // Image filtering happens during SDK message conversion, before
+        // prepareRequest. Resolve here too, so a tool's narrowing applies to
+        // the very next request rather than leaking one request of images.
+        await this.applyLiveRunSettings(created.session);
+        return convertToLlm(messages);
+      };
+      const prepareRequest = created.session.agent.prepareRequest;
+      created.session.agent.prepareRequest = async (request, signal) => {
+        if (signal?.aborted) throw new Error("Request cancelled before settings resolution");
+        admittedSettings = await this.applyLiveRunSettings(created.session);
+        if (signal?.aborted) throw new Error("Request cancelled during settings resolution");
+        if (this.dependencies.settings()) {
+          this.emit("session.diagnostic", safeJson({
+            code: "settings-run-applied", retry: created.session.settingsManager.getRetrySettings(),
+            imagesBlocked: created.session.settingsManager.getBlockImages(),
+            transport: created.session.agent.transport,
+            steeringMode: created.session.agent.steeringMode, followUpMode: created.session.agent.followUpMode,
+          }));
+        }
+        return (await prepareRequest?.(request, signal)) ?? undefined;
+      };
       // The guard is INNERMOST, so it validates the exact request the
       // provider-facing base stream receives: after `abortAwareStream` and after
       // the compaction policy's summary-focus rewrite. Installed outermost, it
@@ -2116,9 +2430,11 @@ export class RuntimeSlot {
         const finishTurn = created.session.agent.finishTurn;
         created.session.agent.finishTurn = async (turn, signal): Promise<AgentTurnDecision | undefined> => {
           const decision = await finishTurn?.(turn, signal);
-          if (!taskWorker.reportSealed) return decision ?? undefined;
+          // A task that reached its budget ends here the same way (settings-model.md 6.1).
+          const ending = taskWorker.reportSealed || await taskWorker.exceedsBudget(this.canonicalSessionEntries());
+          if (!ending) return decision ?? undefined;
           if (this.queuedMessages.length > 0) {
-            taskWorker.requestStop(() => this.abort("agent", taskWorker.identity.operationId, "task-report"));
+            taskWorker.requestStop(() => this.abort("agent", taskWorker.identity.operationId, taskWorker.reportSealed ? "task-report" : "task-budget"));
           }
           return { action: "end" };
         };
@@ -2131,11 +2447,13 @@ export class RuntimeSlot {
   }
 
   private async initialize(): Promise<void> {
+    // A task resumed in place appends its own marker after its predecessor's (#929): every
+    // marker must name a distinct operation of a task bound to this session.
     const markers = this.canonicalTaskEvidence().filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
-    if (markers.length > 1) throw new GatewayError("conflict", "Conflicting canonical task markers");
-    if (markers.length) {
-      const marker = markers[0];
-      if (marker?.type !== "custom") throw new GatewayError("conflict", "Task authority is unavailable");
+    const operations = new Set(markers.map(marker => marker.type === "custom" ? (marker.data as { operationId?: unknown } | null)?.operationId : undefined));
+    if (operations.size !== markers.length) throw new GatewayError("conflict", "Conflicting canonical task markers");
+    for (const marker of markers) {
+      if (marker.type !== "custom") throw new GatewayError("conflict", "Task authority is unavailable");
       await this.dependencies.validateTaskMarker(this.id, marker.data);
     }
     this.runtime = await createAgentSessionRuntime(this.runtimeFactory(), {
@@ -2148,9 +2466,51 @@ export class RuntimeSlot {
     await this.bindSession();
   }
 
+  private async captureFixedDefaults(): Promise<void> {
+    const owners = this.dependencies.settings();
+    if (!owners) return;
+    const session = this.runtime.session;
+    const keys = KEYS.filter(key => key.timing === "fixed" && (key.layers.chat?.store === "chat" || key.layers.chat?.store === "chat-settings"));
+    const defaults = await owners.model.resolve({ kind: "session", sessionId: this.id }, {
+      cwd: this.cwd, home: this.isHomeChapter, chat: { settings: {} }, modelRuntime: session.modelRuntime,
+    }, keys.map(key => key.id));
+    const actual = this.settingsChatLayer();
+    const policy = this.contextPolicies.get(session);
+    const context = policy?.snapshot();
+    const fixed: Record<string, FixedSetting> = {};
+    for (const row of defaults.keys) {
+      const binding = schemaKey(row.key).layers.chat;
+      if (binding?.store !== "chat" && binding?.store !== "chat-settings") continue;
+      const value = binding.store === "chat-settings" ? row.value
+        : binding.field === "contextWindow" ? context?.effective : actual[binding.field];
+      if (value === undefined) continue;
+      // Startup fallback/explicit Home choices are not attributed to a default
+      // that did not supply them. Existing chats never acquire invented history.
+      const from = binding.store === "chat" && binding.field === "model" && row.value !== undefined && JSON.stringify(value) !== JSON.stringify(row.value)
+        ? "chat" : row.layer;
+      fixed[row.key] = { value, from, at: new Date().toISOString(), ref: randomUUID(), ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) };
+    }
+    if (context && session.model) policy!.set({ provider: session.model.provider, id: session.model.id }, context.effective);
+    await this.persistFixedSettings(fixed);
+  }
+
+  private async persistFixedSettings(fixed: Record<string, FixedSetting>): Promise<void> {
+    const branch = this.sessionManager.getBranch();
+    const receiptId = randomUUID();
+    await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId,
+      settings: readChatSettings(branch), requestPins: readChatRequestPins(branch), fixed }), receiptId);
+  }
+
+  private async recordFixedSetting(key: string, value: unknown, origin?: FixedSetting): Promise<void> {
+    const fixed = readChatFixedSettings(this.sessionManager.getBranch());
+    fixed[key] = { ...(origin ?? { from: "chat", at: new Date().toISOString(), ref: randomUUID() }), value };
+    await this.persistFixedSettings(fixed);
+  }
+
   private effectiveResourceReloadOptions(): { resolveProjectTrust: () => Promise<boolean> } | undefined {
     const override = this.projectTrustReloadOverride;
-    return override === undefined
+    // A trust transition never admits project resources into Home.
+    return override === undefined || this.liveProfile() === "home"
       ? this.resourceReloadOptions
       : { resolveProjectTrust: async () => override };
   }
@@ -2308,6 +2668,8 @@ export class RuntimeSlot {
     const session = this.runtime.session;
     const nextManager = session.sessionManager;
     const nextId = nextManager.getSessionId();
+    // Stop must settle even when a tool ignores cancellation (#961).
+    boundToolCancellation(session);
     await session.bindExtensions({
       uiContext: this.extensionHost.context(),
       mode: "rpc",
@@ -2369,6 +2731,11 @@ export class RuntimeSlot {
     this.forkBoundary = await this.dependencies.resolveForkBoundary?.(nextManager);
     this.hydrateCanonicalExtensionActivities();
     this.reconcileCanonicalDisplayArtifacts();
+    if (this.newSettingsSessions.has(session)) {
+      await this.captureFixedDefaults();
+      this.newSettingsSessions.delete(session);
+    }
+    await this.applyLiveRunSettings(session);
     this.revision += 1;
     this.publishSnapshot();
   }
@@ -2416,6 +2783,49 @@ export class RuntimeSlot {
    * the idle check, the durable commit and the rebuild: the next prompt always
    * sees the new profile. A busy slot refuses retryably and changes nothing.
    */
+  /** A settled task resumes in place (#929): this session's next task operation is owned by
+   * `report`. Refused while any run, admission, subagent or previous task operation is live,
+   * so the predecessor's operation is never shared. The runtime is rebuilt over the same
+   * session manager, keeping identity, subscribers and presentation, so the task worker's
+   * tools and producer gates belong to the new operation. */
+  async bindTaskWorker(report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<void> {
+    await this.lane.run(async () => {
+      this.assertUsable();
+      this.assertChapterWritable();
+      // Knowledge observation of the stopped turn only reads its already-settled cut, so it
+      // never blocks the rebind (#959). Any other live work refuses it, named.
+      const blocking = this.dependencies.workRegistry.sessionWorkKinds(this.id, exceptWorkToken)
+        .filter(kind => kind !== "knowledge-observation");
+      const drain = this.administrativeDrainBlockers().map(fact => fact.category);
+      if (this.runtime.session.isStreaming || blocking.length || drain.length) {
+        throw new GatewayError("busy", `The worker session is busy (${[...new Set([...blocking, ...drain])].join(", ") || "streaming"}); resume it when that finishes`, true);
+      }
+      if (this.liveProfile() === "home" || this.dependencies.homeChapterState(this.id).homeId) {
+        throw new GatewayError("conflict", "A Home chapter cannot run a task");
+      }
+      if (this.taskWorker?.controlsActive || this.taskWait || this.activeOperationId !== undefined || this.operation !== undefined
+        || this.catalogHasActiveSubagents || this.isAgentAdmissionSettling) {
+        throw new GatewayError("conflict", "The worker session is still running; stop it before resuming");
+      }
+      const markers = this.canonicalTaskEvidence().filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
+      if (!markers.length) throw new GatewayError("conflict", "Only a Home task worker session can resume a task");
+      const work = this.dependencies.workRegistry.begin({
+        kind: "administrative-provider-package-operation",
+        sessionId: this.id,
+        hostEpoch: this.ui.hostEpoch,
+      });
+      try {
+        this.taskWorker = report;
+        await this.replaceRuntime();
+        this.revision += 1;
+        this.emit("session.resourcesChanged", {});
+        this.publishSnapshot();
+      } finally {
+        work.settle();
+      }
+    });
+  }
+
   async replaceRuntimeForProfile(commit: () => Promise<void>): Promise<void> {
     await this.lane.run(async () => {
       this.assertUsable();
@@ -3395,6 +3805,7 @@ export class RuntimeSlot {
   }
 
   private notificationTitle(): string {
+    if (this.isHomeChapter) return "Home";
     // Read canonical input rather than a deferred summary projection so a new
     // session's first terminal notification cannot be titled "New session".
     const rawName = this.sessionManager.getSessionName()?.trim();
@@ -3480,6 +3891,7 @@ export class RuntimeSlot {
       hasActiveSubagents: this.hasDetachedDashboardWork(),
       waitingForUser: this.ui.hasPendingInteractions,
       ...canonical,
+      ...(this.isHomeChapter ? { name: "Home" } : {}),
       updatedAt,
       ...(activeSince ? { activeSince } : {}),
     };
@@ -3708,10 +4120,48 @@ export class RuntimeSlot {
   }
 
   private async notifyOwnedTerminal(terminal: OwnedOperationTerminal): Promise<void> {
-    const observer = this.ownedTerminalObservers.get(terminal.operationId);
+    // A held task's next turn reports to the task, even when Home's steering started that turn;
+    // the steering's own observer still learns its terminal.
+    const own = this.ownedTerminalObservers.get(terminal.operationId);
+    const wake = this.taskWait?.wakeOperationId === terminal.operationId ? this.taskWait.observer : undefined;
+    const observer = wake ?? own;
     if (!observer) return;
     this.ownedTerminalObservers.delete(terminal.operationId);
+    if (wake && own) await own(terminal);
+    // Only the task's own turns (its first operation, then each wake) hold or settle it; a steer
+    // or other owned operation reports to its own observer and never touches the wait.
+    if (this.taskWorker && (terminal.operationId === this.taskWorker.identity.operationId || this.taskWait?.wakeOperationId === terminal.operationId)) {
+      if (this.taskTurnAwaitsWake(terminal)) {
+        this.taskWait = { observer, terminal };
+        return;
+      }
+      this.taskWait = undefined;
+    }
     await observer(terminal);
+  }
+
+  /** A message the maintainer sent, or Home's exact-operation steering, to this worker's task. */
+  private sharedTaskSteering(ownership: PromptOwnership | undefined): boolean {
+    if (!this.taskWorker) return false;
+    if (!ownership) return true;
+    const fence = ownership.taskFence;
+    return !!fence && fence.taskId === this.taskWorker.identity.taskId && fence.operationId === this.taskWorker.identity.operationId;
+  }
+
+  /** The task operation a turn reports under. A wake that continues the held task is the task's
+   * next turn, so its report seals the task's operation, not the wake's own. */
+  private taskTurnOperationId(operationId: string): string {
+    return this.taskWait?.wakeOperationId === operationId && this.taskWorker ? this.taskWorker.identity.operationId : operationId;
+  }
+
+  /** A task turn that completed normally, without a report, while owned runs are live. The
+   * provider's completion or supervisor request wakes the same task for its next turn. A sealed or
+   * stopping task, a length, error or aborted turn, and a task with no live run settle now. */
+  private taskTurnAwaitsWake(terminal: OwnedOperationTerminal): boolean {
+    if (terminal.lifecycle !== "completed" || !this.taskWorker?.acceptsSteering) return false;
+    const last = this.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant");
+    return last?.type === "message" && last.message.role === "assistant" && last.message.stopReason === "stop"
+      && this.hasDetachedDashboardWork();
   }
 
   private async terminalizeInvocation(
@@ -7249,7 +7699,8 @@ export class RuntimeSlot {
       // whether a new prompt can request steer/follow-up delivery right now.
       acceptsQueuedPrompts,
       configurationBlocker: this.configurationBlocker(),
-      ...(session.sessionName ? { name: session.sessionName } : {}),
+      // Home is a role, not a generated conversation title. Never rewrite its canonical name or ID.
+      ...(this.isHomeChapter ? { name: "Home" } : session.sessionName ? { name: session.sessionName } : {}),
       cwd: session.sessionManager.getCwd(),
       ...(session.sessionManager.getHeader()?.parentSession ? { parentSessionId: session.sessionManager.getHeader()!.parentSession } : {}),
       ...(session.model ? { model: { provider: session.model.provider, id: session.model.id } } : {}),
@@ -7319,23 +7770,6 @@ export class RuntimeSlot {
       extensionPresentation: this.ui.state(),
       diagnostics: this.runtime.diagnostics.map((diagnostic) => ({ type: diagnostic.type, message: diagnostic.message })),
     });
-  }
-
-  transcriptPageAtEntry(
-    entryID: string,
-    expectedRuntimeGeneration?: string,
-    expectedLeafEntryID?: string,
-    windowEnd?: number,
-  ): TranscriptPage {
-    this.assertNoTrustReload();
-    const ordinal = projectedTranscriptOrdinal(this.runtime.session.sessionManager, entryID);
-    if (ordinal < 0) throw new GatewayError("not_found", "The canonical entry is not projectable on the active transcript");
-    return this.transcriptPage(
-      Math.max(ordinal + 1, windowEnd ?? ordinal + 1),
-      undefined,
-      expectedRuntimeGeneration,
-      expectedLeafEntryID,
-    );
   }
 
   transcriptPageAfter(
@@ -7573,10 +8007,31 @@ export class RuntimeSlot {
     }
   }
 
-  /** Whether this session's canonical history launched the run. Task controls use it
-   * to refuse a stop or interrupt of any run the task did not start. */
-  ownsSubagentRun(runId: string): boolean {
-    return this.canonicalExtensionRunFacts().has(runId);
+  /** Whether this session owns a run: one its canonical history launched (a launch or a resume
+   * result), or a child run a workflow of this session names in its own provider status. Task
+   * controls use it to refuse a control of any run the task did not start, including a foreign
+   * workflow's child. Only this owner decides, so a control and a reply cannot disagree. */
+  async ownsSubagentRun(runId: string): Promise<boolean> {
+    const facts = this.canonicalExtensionRunFacts();
+    if (facts.has(runId)) return true;
+    for (const fact of facts.values()) {
+      // The status reader opens only a canonical directory: a launch result's path may name a symlinked root.
+      const directory = fact.asyncDir === undefined ? undefined : this.canonicalExtensionArtifactDirectory(fact.asyncDir);
+      if (directory === undefined) continue;
+      const status = await this.readExtensionStatusArtifact(directory, false).catch(() => undefined);
+      if (status?.mode === "workflow" && Array.isArray(status.steps)
+        && status.steps.some(step => (step as { runId?: unknown } | null)?.runId === runId)) return true;
+    }
+    return false;
+  }
+
+  /** Whether a supervisor request came from a run this session owns. The request is canonical
+   * evidence: its `subagent_supervisor_request` message names the child's run. */
+  async ownsSupervisorRequest(requestId: string): Promise<boolean> {
+    const request = this.sessionManager.getBranch().findLast(entry => entry.type === "custom_message"
+      && entry.customType === "subagent_supervisor_request" && (entry.details as { requestId?: unknown } | undefined)?.requestId === requestId);
+    const runId = request?.type === "custom_message" ? (request.details as { runId?: unknown } | undefined)?.runId : undefined;
+    return typeof runId === "string" && await this.ownsSubagentRun(runId);
   }
 
   /** Task-end settlement of this worker's async subagent runs. Every live async run is
@@ -7629,7 +8084,9 @@ export class RuntimeSlot {
    * its run id from the run's status. */
   private async asyncStopTargets(): Promise<string[]> {
     const targets: string[] = [];
-    for (const activity of this.extensionActivities.values()) {
+    // Artifact refresh removes and reinserts rows while the child-status read
+    // below awaits. A live Map iterator can then visit the same run again.
+    for (const activity of [...this.extensionActivities.values()]) {
       const runId = activity.runId;
       const asyncDir = runId === undefined ? undefined : this.extensionRunOwnership.get(runId)?.asyncDir;
       if (runId === undefined || asyncDir === undefined || !this.extensionActivityOwnsLiveWork(activity)) continue;
@@ -7773,8 +8230,18 @@ export class RuntimeSlot {
    * presentation primitive (automatic compaction/retry may have another ID). */
   async cancelHomeTaskOperation(operationId: string, reason: string): Promise<void> {
     if (!this.taskWorker || this.taskWorker.identity.operationId !== operationId) throw new GatewayError("conflict", "Task cancellation owner changed");
-    if (this.activeOperationId !== operationId && this.operation?.id !== operationId) return;
-    await this.abort("agent", operationId, reason);
+    // Between turns no turn runs to abort: the held observer settles the waiting task now. The
+    // runs it still owns are stopped and joined by settlement, as for an interrupted turn.
+    if (this.taskWait && this.taskWait.wakeOperationId === undefined) {
+      const { observer, terminal } = this.taskWait;
+      this.taskWait = undefined;
+      await observer({ lifecycle: "interrupted", operationId, invocationId: terminal.invocationId, errorCode: TASK_STOP_WAITING });
+      return;
+    }
+    // A provider wake's turn is the task's running turn: its abort is the task's Stop.
+    const turnOperationId = this.taskWait?.wakeOperationId ?? operationId;
+    if (this.activeOperationId !== turnOperationId && this.operation?.id !== turnOperationId) return;
+    await this.abort("agent", turnOperationId, reason);
   }
 
   /** Starts one Home wake: the inbox's pending results start the run. */
@@ -8108,8 +8575,15 @@ export class RuntimeSlot {
         if (ownership?.operationId === this.taskWorker.identity.operationId) {
           await this.persistCanonicalCustomEntry(HOME_TASK_MARKER,
             JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...this.taskWorker.identity, sessionId: this.id })), `task:${operationId}`);
+        } else if ((ownership?.kind === "subagentWake" || this.sharedTaskSteering(ownership)) && this.taskWait && this.taskWait.wakeOperationId === undefined
+          && this.taskWorker.acceptsSteering && this.activeOperationId === undefined && this.operation === undefined && !session.isStreaming) {
+          // The provider's wake, or the maintainer's or Home's message (#929), continues the task this
+          // operation holds open between turns; its marker stays the first one.
         } else {
           const fence = ownership?.taskFence;
+          // The maintainer and Home share one ordered steering lane per worker (#929): a maintainer
+          // message to a running task joins that lane whatever behavior the composer chose.
+          if (!ownership && this.taskWorker.acceptsSteering) behavior = "steer";
           if (behavior !== "steer" || this.activeOperationId !== this.taskWorker.identity.operationId
             || !session.isStreaming || !this.taskWorker.acceptsSteering
             || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.activeOperationId))) {
@@ -8160,6 +8634,7 @@ export class RuntimeSlot {
       }
       if (!session.isStreaming) {
         await session.settingsManager.flush();
+        await this.applyLiveRunSettings(session);
         this.compactionPolicies.get(session)?.applyBudgets();
         this.contextPolicies.get(session)?.apply();
       }
@@ -8235,6 +8710,8 @@ export class RuntimeSlot {
       let resolveQueueDisposition: ((disposition: QueueAdmissionDisposition) => void) | undefined;
       let queueDispositionFailure: unknown;
       let startPersisted = false;
+      /** The phase this admission replaced when it marked the session running. */
+      let phaseBeforeAdmission: SessionPhase | undefined;
       try {
         // Retained archive state is cleared here, inside the same lane critical
         // section that admits this run and after every synchronous rejection
@@ -8336,12 +8813,16 @@ export class RuntimeSlot {
           this.publishSnapshot();
         } else if (!queuesIntoActiveRun) {
           this.activeOperationId = operationId;
+          if ((ownership?.kind === "subagentWake" || this.sharedTaskSteering(ownership)) && this.taskWait && this.taskWait.wakeOperationId === undefined) {
+            this.taskWait.wakeOperationId = operationId;
+          }
           // The canonical leaf immediately before Pi sees the input is the exact
           // activation start: the input's own entry is appended inside
           // `session.prompt` below, and steering later inserts entries after it,
           // never before it.
           // Gateway owns preflight even before Pi creates an Agent controller
           // (including auth and compaction preparation). It is not idle work.
+          phaseBeforeAdmission = this.phase;
           this.phase = "running";
           this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
           this.pendingPromptMessage = undefined;
@@ -8353,9 +8834,13 @@ export class RuntimeSlot {
           // Publish before entering Pi preflight. Automatic compaction can begin
           // inside that call before the RPC receives its admission result.
           this.publishSnapshot();
-          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null, session.systemPrompt);
+          this.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null, session.systemPrompt, ownership?.kind === "homeWake" ? "wake" : "user");
           this.operationWasHomeWake = ownership?.kind === "homeWake";
           if (this.homeRequestPolicy) {
+            // Inbox admission runs on this session's lane: every later prompt waits
+            // for it. A slow one is the first thing to name when Home stops answering (#906).
+            const inboxAdmissionStarted = performance.now();
+            try {
             homeWakeTrigger = await this.dependencies.homeInboxAdmission(this.id, operationId, ownership?.kind === "homeWake" ? "wake" : "user", async message => {
               this.inboxAttributedMessages.add(message.details.eventId);
               try { await session.sendCustomMessage(message, { triggerTurn: false }); }
@@ -8376,6 +8861,11 @@ export class RuntimeSlot {
               return { ...headroom, bytes: Math.max(0, HOME_HARD_BYTES - chapterBytes - Buffer.byteLength(JSON.stringify({ text, images })) * 4),
                 entries: Math.max(0, HOME_HARD_ENTRIES - this.canonicalEntryCount) };
             });
+            } finally {
+              const durationMs = Math.round(performance.now() - inboxAdmissionStarted);
+              if (durationMs >= HOME_INBOX_ADMISSION_SLOW_MS) this.dependencies.homeTaskDiagnostic?.({
+                event: "home.inbox.admission-slow", delivery: ownership?.kind === "homeWake" ? "wake" : "user", durationMs });
+            }
           }
         }
 
@@ -8397,7 +8887,7 @@ export class RuntimeSlot {
             // must also revoke this exact pending prompt at SDK admission; an
             // aborted summary alone does not prevent Agent.prompt() starting.
             if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)
-              || (this.taskWorker && operationId !== this.taskWorker.identity.operationId
+              || (this.taskWorker && operationId !== this.taskWorker.identity.operationId && this.taskWait?.wakeOperationId !== operationId
                 && (!this.taskWorker.acceptsSteering || this.activeOperationId !== this.taskWorker.identity.operationId))) {
               preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
             } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
@@ -8439,6 +8929,14 @@ export class RuntimeSlot {
           this.pendingPromptMessage = undefined;
         }
         if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
+        // An admission that failed before any run started gives back the phase it
+        // took (#881): a "running" session with nothing running admits nothing.
+        if (phaseBeforeAdmission !== undefined && this.phase === "running" && !this.hasActiveAgentRun
+          && this.activeOperationId === undefined && this.operation === undefined) {
+          this.phase = phaseBeforeAdmission;
+          this.revision += 1;
+          this.publishSnapshot();
+        }
         if (startPersisted) {
           await this.persistInvocationReceipt(makeInvocationReceipt({
             version: 1,
@@ -8893,9 +9391,9 @@ export class RuntimeSlot {
       ?? (target?.kind === "prompt" || target?.kind === "command" ? target.id : undefined);
     if (invocationOperationId) {
       const invocation = this.invocationForOperation(invocationOperationId);
-      // Only a Gateway-owned stop is attributed on the invocation; it outranks the
-      // SDK's own outcome. A user Stop stays an intent (`abortedOperations`), so
-      // the settled SDK outcome decides the receipt exactly as it does on main.
+      // A Gateway-owned stop reason outranks the SDK outcome. User Stop is
+      // provisional until cancellation settles; a refused attempt cannot claim
+      // a later natural completion as its interruption.
       if (invocation && terminalErrorCode !== "user-abort") {
         // A limit crossing is authoritative even if another Gateway stop races it.
         if (!invocation.stopReason || terminalErrorCode === "chapter-limit") invocation.stopReason = terminalErrorCode;
@@ -8938,6 +9436,9 @@ export class RuntimeSlot {
     const settled = await this.waitForForegroundAbortSettlement(target, agentOperationId);
     if (!settled || this.directBashProcesses?.hasActiveProcesses
       || abortResults.some((result) => result.status === "rejected")) {
+      // Keep the SDK's actual abort outcome authoritative if cancellation partly
+      // succeeded, but withdraw this unconfirmed invocation-level Stop intent.
+      if (invocationOperationId) this.abortedOperations.delete(invocationOperationId);
       throw new GatewayError("conflict", "Foreground work did not stop", true);
     }
 
@@ -9329,7 +9830,7 @@ export class RuntimeSlot {
 
   /** Direct runtime owners may omit expectations; every remote RPC requires
    * the originating runtime/model cut before entering this serialized lane. */
-  async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<number> {
+  async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
     return this.lane.run(async () => {
       this.assertConfigurationIdle(initiatingWorkToken);
       this.assertChapterWritable();
@@ -9342,7 +9843,10 @@ export class RuntimeSlot {
       if (this.liveProfile() === "home" && model.api === VIRTUAL_MODEL_API) {
         throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
       }
+      const previousThinking = this.runtime.session.thinkingLevel;
       await this.runtime.session.setModel(model as Model<never>);
+      await this.recordFixedSetting("model.ref[role=chat]", { provider, id: modelId }, fixedAt);
+      if (this.runtime.session.thinkingLevel !== previousThinking) await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel);
       // The Home record is the single source of truth for the model a re-enable
       // restores, and only an enabled Home's change belongs to it.
       if (this.liveProfile() === "home") {
@@ -9354,8 +9858,8 @@ export class RuntimeSlot {
     });
   }
 
-  async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string): Promise<number> {
-    return this.lane.run(() => {
+  async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<number> {
+    return this.lane.run(async () => {
       this.assertConfigurationIdle(initiatingWorkToken);
       this.assertChapterWritable();
       if (expectedRuntimeGeneration !== this.runtimeGeneration || expectedRevision !== this.revision) {
@@ -9365,6 +9869,7 @@ export class RuntimeSlot {
       if (!policy) throw new GatewayError("conflict", "Session context configuration is unavailable");
       try {
         policy.set({ provider, id: modelId }, contextWindow);
+        await this.recordFixedSetting("model.contextWindow", policy.snapshot()?.effective, fixedAt);
       } finally {
         // Pi may have staged the entry even when its disk append failed. Always
         // project the exact runtime outcome rather than leaving clients stale.
@@ -9376,20 +9881,21 @@ export class RuntimeSlot {
     });
   }
 
-  async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }): Promise<number> {
-    return this.lane.run(() => {
+  async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
+    return this.lane.run(async () => {
       this.assertConfigurationIdle(initiatingWorkToken);
       this.assertChapterWritable();
       if (expectation) this.assertConfigurationExpectation(expectation);
       this.runtime.session.setThinkingLevel(level);
+      await this.recordFixedSetting("model.thinking[role=chat]", this.runtime.session.thinkingLevel, fixedAt);
       this.revision += 1;
       this.publishSnapshot();
       return this.revision;
     });
   }
 
-  async setTools(toolNames: string[], initiatingWorkToken?: string): Promise<void> {
-    await this.lane.run(() => {
+  async setTools(toolNames: string[], initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<void> {
+    await this.lane.run(async () => {
       this.assertIdle(false, initiatingWorkToken);
       const tools = this.runtime.session.getAllTools();
       const known = new Set(tools.map((tool) => tool.name));
@@ -9398,6 +9904,7 @@ export class RuntimeSlot {
       const hidden = toolNames.filter((name) => tools.find((tool) => tool.name === name)?.exposure === "hidden");
       if (hidden.length > 0) throw new GatewayError("invalid_request", `Hidden agent tools cannot be activated: ${hidden.join(", ")}`);
       this.runtime.session.setActiveToolsByName(toolNames);
+      await this.recordFixedSetting("tools.active", this.runtime.session.getActiveToolNames(), fixedAt);
       this.revision += 1;
       this.emit("session.contextChanged", {});
       this.publishSnapshot();
