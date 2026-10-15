@@ -144,6 +144,10 @@ def holders(directory: Path) -> List[dict]:
     return result
 
 
+class Cancelled(Exception):
+    """The waiter's owner gave up before it was admitted."""
+
+
 class Lease:
     def __init__(self, slot: int, handle: IO[str]):
         self.slot = slot
@@ -185,7 +189,8 @@ def memory_state(need_mb: int, holding: List[dict]) -> Optional[str]:
     return None
 
 
-def acquire(owner: str, command: str, report: IO[str] = sys.stderr, need_mb: int = DEFAULT_NEED_MB) -> Optional[Lease]:
+def acquire(owner: str, command: str, report: IO[str] = sys.stderr, need_mb: int = DEFAULT_NEED_MB,
+            cancelled=lambda: False) -> Optional[Lease]:
     """Wait in the queue for a slot and the memory the step needs. None when this process inherited one."""
     if os.environ.get(HELD_ENV):
         return None
@@ -235,6 +240,8 @@ def acquire(owner: str, command: str, report: IO[str] = sys.stderr, need_mb: int
             if state != last:
                 print(state, file=report, flush=True)
                 last = state
+            if cancelled():
+                raise Cancelled()
             time.sleep(POLL_SECONDS)
     finally:
         with contextlib.suppress(FileNotFoundError):

@@ -352,7 +352,7 @@ def _check_environment() -> Dict[str, str]:
 @dataclass
 class Outcome:
     shard: Shard
-    outcome: str  # pass | fail | timeout | cached
+    outcome: str  # pass | fail | timeout | cancelled
     exit_code: int
     seconds: float
     peak_rss_mb: int
@@ -370,18 +370,24 @@ def _last_line(log: Path) -> str:
 
 
 def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Dict[str, str], position: str,
-              print_line=print) -> Outcome:
+              print_line=print, stop: Optional[threading.Event] = None) -> Outcome:
     step = shard.step
+    stop = stop or threading.Event()
     log.parent.mkdir(parents=True, exist_ok=True)
     lease = None
     if step["class"] == "heavy":
-        lease = heavy.acquire(f"gate {shard.name} in {root.name}", shard.command, need_mb=int(step["expectedRssMb"]))
+        try:
+            lease = heavy.acquire(f"gate {shard.name} in {root.name}", shard.command, need_mb=int(step["expectedRssMb"]),
+                                  cancelled=stop.is_set)
+        except heavy.Cancelled:
+            return Outcome(shard, "cancelled", 130, 0.0, 0, 0.0, log)
     env = dict(environment)
     if lease:
         env[heavy.HELD_ENV] = str(lease.slot + 1)
     started = time.monotonic()
     peak = 0
     timed_out = False
+    cancelled = False
     try:
         with log.open("w") as stream:
             stream.write(f"$ {shard.command}\n")
@@ -404,6 +410,11 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
                 while not done.wait(SAMPLE_SECONDS):
                     now = time.monotonic()
                     peak = max(peak, _tree_rss_kb(process.pid))
+                    if stop.is_set():
+                        cancelled = True
+                        _kill_group(process.pid)
+                        done.wait(10)
+                        break
                     if now - started > step["timeoutSeconds"]:
                         timed_out = True
                         _kill_group(process.pid)
@@ -430,6 +441,8 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
     peak = max(peak, (usage.ru_maxrss // 1024) if usage else 0)
     status = result.get("status", -1)
     code = os.waitstatus_to_exitcode(status) if status != -1 else 124
+    if cancelled:
+        return Outcome(shard, "cancelled", 130, seconds, peak // 1024, cpu, log)
     if timed_out:
         with log.open("a") as stream:
             stream.write(f"\ngate: TIMEOUT {shard.name} exceeded its hard limit of {step['timeoutSeconds']}s\n")
@@ -465,50 +478,111 @@ def _record(root: Path, change: Change, key: str, outcome: Outcome) -> None:
 
 def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, force: bool = False,
             only_first_pending: bool = False, require_clean: bool = False) -> bool:
-    """Run shards in order, reusing valid passes; stop at the first failure. True when all pass."""
+    """Run shards in catalog order, reusing valid passes; stop at the first failure. True when all pass.
+
+    Steps run one after another. The pending shards of a step marked `parallelShards`
+    run together, each admitted by the heavy queue on its own memory; the first failing
+    shard stops its siblings.
+    """
     environment = _check_environment()
     prelude = config["verify"]["prelude"]
     head = _git(root, "rev-parse", "HEAD").strip()
     logs = _git_dir(root) / "work" / "logs" / head[:12]
     total = len(shards)
     started = time.monotonic()
-    ran = 0
-    reused = 0
+    counts = {"ran": 0, "reused": 0}
     print(f"gate: {total} shards for {head[:12]} (tree {change.tree[:12]}) against {change.base_ref}", flush=True)
+    groups: List[List[tuple]] = []
     for number, shard in enumerate(shards, 1):
-        position = f"[{number}/{total}]"
-        key = cache_key(root, change, shard)
-        hit = None if force else cached(root, shard, key)
-        if hit:
-            reused += 1
-            print(f"gate: {position} {shard.name}: reused pass from {hit['at']} ({hit['seconds']}s)", flush=True)
+        if groups and groups[-1][0][1].step is shard.step:
+            groups[-1].append((number, shard))
+        else:
+            groups.append([(number, shard)])
+    for group in groups:
+        pending = []
+        for number, shard in group:
+            key = cache_key(root, change, shard)
+            hit = None if force else cached(root, shard, key)
+            if hit:
+                counts["reused"] += 1
+                print(f"gate: [{number}/{total}] {shard.name}: reused pass from {hit['at']} ({hit['seconds']}s)", flush=True)
+            else:
+                pending.append((number, shard, key))
+        if not pending:
             continue
-        if only_first_pending and ran:
-            print(f"gate: next pending is {shard.name}; stopping after one step (gate next)", flush=True)
+        if only_first_pending and counts["ran"]:
+            print(f"gate: next pending is {pending[0][1].name}; stopping after one step (gate next)", flush=True)
             return False
-        safe = re.sub(r"[^\w.#-]+", "_", shard.name)
-        log = logs / f"{safe}.log"
-        step = shard.step
-        print(f"gate: {position} {shard.name} ({step['class']}, budget {step['budgetSeconds']}s, limit {step['timeoutSeconds']}s) "
-              f"log: {log}", flush=True)
-        outcome = run_shard(root, prelude, shard, log, environment, position)
-        ran += 1
-        _record(root, change, key, outcome)
-        verdict = {"pass": "pass", "fail": f"FAIL (exit {outcome.exit_code})", "timeout": "TIMEOUT"}[outcome.outcome]
-        over = " (over budget)" if outcome.seconds > step["budgetSeconds"] else ""
-        print(f"gate: {position} {shard.name}: {verdict} in {outcome.seconds}s{over}, peak rss {outcome.peak_rss_mb} MB, "
-              f"cpu {outcome.cpu_seconds}s", flush=True)
-        if outcome.outcome != "pass":
-            print(f"\n--- {shard.name} failed: {shard.command}\n{_excerpt(log)}\n"
-                  f"gate: stopped at {shard.name}; {total - number} later shards not started. "
-                  f"Fix it and rerun: passing shards whose inputs did not change are reused.", flush=True)
-            for flake in step.get("knownFlakes", []):
-                print(f"gate: known flake for {step['id']}: {flake}", flush=True)
-            return False
+        step = pending[0][1].step
+        if only_first_pending or not step.get("parallelShards"):
+            pending_runs = [[item] for item in pending]
+        else:
+            pending_runs = [pending]
+        for batch in pending_runs:
+            failed = _run_batch(root, prelude, batch, logs, environment, total, change, counts)
+            if failed:
+                number, shard, outcome = failed
+                print(f"\n--- {shard.name} failed: {shard.command}\n{_excerpt(outcome.log)}\n"
+                      f"gate: stopped at {shard.name}; {total - number} later shards not started. "
+                      f"Fix it and rerun: passing shards whose inputs did not change are reused.", flush=True)
+                for flake in step.get("knownFlakes", []):
+                    print(f"gate: known flake for {step['id']}: {flake}", flush=True)
+                return False
+            if only_first_pending:
+                break
         if require_clean and (_git(root, "rev-parse", "HEAD").strip() != head or workspace_tree(root) != change.tree):
             raise GateError("the head or the worktree changed while steps ran; rerun on a stable tree")
-    print(f"gate: all {total} shards passed ({ran} ran, {reused} reused) in {time.monotonic() - started:.0f}s", flush=True)
+        if only_first_pending:
+            remaining = sum(1 for g in groups[groups.index(group) + 1:] for _ in g) + len(pending) - 1
+            if remaining:
+                print(f"gate: one step run; {remaining} shards may remain (gate next again, or gate run)", flush=True)
+                return True
+    print(f"gate: all {total} shards passed ({counts['ran']} ran, {counts['reused']} reused) in "
+          f"{time.monotonic() - started:.0f}s", flush=True)
     return True
+
+
+def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: Dict[str, str], total: int,
+               change: Change, counts: dict) -> Optional[tuple]:
+    """Run shards together; return (number, shard, outcome) of the first failure, else None."""
+    stop = threading.Event()
+    lock = threading.Lock()
+    failures: List[tuple] = []
+
+    def one(number: int, shard: Shard, key: str) -> None:
+        step = shard.step
+        position = f"[{number}/{total}]"
+        log = logs / (re.sub(r"[^\w.#-]+", "_", shard.name) + ".log")
+        print(f"gate: {position} {shard.name} ({step['class']}, budget {step['budgetSeconds']}s, "
+              f"limit {step['timeoutSeconds']}s) log: {log}", flush=True)
+        outcome = run_shard(root, prelude, shard, log, environment, position, stop=stop)
+        _record(root, change, key, outcome)
+        with lock:
+            counts["ran"] += 1
+            if outcome.outcome == "cancelled":
+                print(f"gate: {position} {shard.name}: stopped after a sibling shard failed", flush=True)
+                return
+            verdict = {"pass": "pass", "fail": f"FAIL (exit {outcome.exit_code})", "timeout": "TIMEOUT"}[outcome.outcome]
+            over = " (over budget)" if outcome.seconds > step["budgetSeconds"] else ""
+            print(f"gate: {position} {shard.name}: {verdict} in {outcome.seconds}s{over}, peak rss "
+                  f"{outcome.peak_rss_mb} MB, cpu {outcome.cpu_seconds}s", flush=True)
+            if outcome.outcome != "pass":
+                failures.append((number, shard, outcome))
+                stop.set()
+
+    threads = [threading.Thread(target=one, args=item, daemon=True) for item in batch]
+    for thread in threads:
+        thread.start()
+    try:
+        for thread in threads:
+            while thread.is_alive():
+                thread.join(0.5)
+    except BaseException:
+        stop.set()
+        for thread in threads:
+            thread.join(15)
+        raise
+    return min(failures, key=lambda item: item[0]) if failures else None
 
 
 # ---------------------------------------------------------------- entry points used by work land

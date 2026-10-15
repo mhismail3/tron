@@ -118,6 +118,10 @@ FIXTURE_CATALOG = {
          "pass": "exit 0", "unlocks": "long"},
         {"id": "long", "trigger": {"paths": ["long/**"]}, "command": "echo $$ > \"$GATE_TRACE.pid\"; sleep 30",
          "inputs": ["long"], "budgetSeconds": 40, "timeoutSeconds": 60, "class": "heavy", "expectedRssMb": 10,
+         "pass": "exit 0", "unlocks": "par"},
+        {"id": "par", "trigger": {"paths": ["par/**"]}, "shards": 2, "parallelShards": True,
+         "command": "if [ {shard} = 1 ]; then sleep 1; echo 'shard one fails' >&2; exit 4; fi; sleep 30",
+         "inputs": ["par"], "budgetSeconds": 20, "timeoutSeconds": 60, "class": "heavy", "expectedRssMb": 10,
          "pass": "exit 0", "unlocks": "land"},
     ],
 }
@@ -204,6 +208,18 @@ def runner(base: Path, env: dict) -> None:
     job = result.stdout.split("submitted job ")[1].split()[0]
     waited = repo.gate("wait", job)
     assert waited.returncode == 0 and f"job {job} passed" in waited.stdout and "reused" in waited.stdout, waited.stdout
+    repo.write("slow/file", "slow\n")
+
+    # Parallel shards of one step: the first failure stops its running sibling at once.
+    (repo.root / "slow/file").unlink()
+    repo.write("par/file", "par\n")
+    result = repo.gate("run")
+    evidence.append({"case": "a failing parallel shard stops its sibling", "exit": result.returncode, "seconds": result.seconds,
+                     "stdout": result.stdout[-2000:]})
+    assert result.returncode == 1 and "par#1/2: FAIL (exit 4)" in result.stdout, result.stdout
+    assert "par#2/2: stopped after a sibling shard failed" in result.stdout and "gate: stopped at par#1/2" in result.stdout
+    assert result.seconds < 15, "the sibling must not run its 30 s"
+    (repo.root / "par/file").unlink()
     repo.write("slow/file", "slow\n")
 
     sys.path.insert(0, str(GATE.parent))
