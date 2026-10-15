@@ -1,4 +1,4 @@
-"""`work land`: merge the base in, run the gate, push, squash-merge, close the issue (README.md, `land`).
+"""`work land`: merge the base in, verify, push, squash-merge, close the issue (README.md, `land`).
 
 There is no review or hosted-check gate: the local verify run on the exact commit
 is the gate, and the squash merge names that commit, so GitHub merges only what
@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 import claim as claims
 import tracking
-import gate
+import verify
 from gh import Gh, GhError
 
 # A moved base sends land back to merging it, at most this many times.
@@ -233,8 +233,8 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
             raise LandError(f"nothing to land: {branch} has no commits beyond {remote}/{base}")
         _integrate(root, remote, base, base_tip, branch)
         head = _out(root, "rev-parse", "HEAD")
-        if not gate.verify(root, config, tests, f"{remote}/{base}"):
-            raise LandError("the gate failed; nothing was pushed, opened or merged")
+        if not verify.verify(root, config, tests, f"{remote}/{base}"):
+            raise LandError("verify failed; nothing was pushed, opened or merged")
         if dry_run:
             print(f"dry run: {branch} at {head[:12]} verified; nothing pushed")
             if ready:

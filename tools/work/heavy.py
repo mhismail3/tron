@@ -37,10 +37,11 @@ from typing import IO, Iterator, List, Optional
 
 HELD_ENV = "TRON_HEAVY_LEASE_HELD"
 # Memory, not a slot count, is what limits this Mac (#1023): the slot count is
-# only an upper bound on concurrent heavy steps, and each admission also needs
-# its expected peak RSS (from the gate catalog's measurements) to fit.
+# only an upper bound on concurrent heavy runs, and each admission also needs
+# its expected peak RSS to fit. Measured peaks (#1022): unsharded Gateway vitest
+# 2.9 GB, nested suite 2.1 GB; unmeasured runs claim a conservative 4 GB.
 DEFAULT_SLOTS = 4
-DEFAULT_NEED_MB = 3000
+DEFAULT_NEED_MB = 4000
 POLL_SECONDS = 1.0
 
 

@@ -69,22 +69,16 @@ what it lists:
    that proves it. For a bug, add or extend a test that reproduces it and show it
    failing before the fix. Commit on the task branch; merge `origin/main` rather
    than rebasing.
-4. **Gate and land.** Run `scripts/tron gate plan` to see the ordered steps the change
-   needs, then `scripts/tron gate next` (one step) or `scripts/tron gate run` (all) while
-   iterating; never run the steps' commands by hand as a substitute. A failing step
-   stops the run with its log tail: fix it and rerun, and valid passing shards are
-   reused. Use `scripts/tron gate submit` and `gate wait <job>` to keep working while
-   heavy steps queue. Then write a short Markdown summary (what changed, what was
+4. **Verify and land.** Write a short Markdown summary (what changed, what was
    verified, residual risks) and run:
 
    ```bash
    scripts/tron work land --summary-file <summary.md> --tests "<integration or E2E command>"
    ```
 
-   `land` runs the same plan on the merged tree. Repeat `--tests` for each journey the
-   change relies on. `--dry-run` verifies and stops before any push. A conflict stops
-   `land` with the files to resolve: resolve them on the branch, commit, and run `land`
-   again.
+   Repeat `--tests` for each journey the change relies on. `--dry-run` verifies and
+   stops before any push. A conflict stops `land` with the files to resolve: resolve
+   them on the branch, commit, and run `land` again.
 5. **Clean up.** From the task worktree, run `scripts/tron work cleanup`. Resolve
    any reason it names for keeping the worktree; never delete around it. Stop every
    process you started.

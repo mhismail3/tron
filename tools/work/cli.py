@@ -20,7 +20,7 @@ import release  # noqa: E402
 import handoff  # noqa: E402
 import start  # noqa: E402
 import tracking  # noqa: E402
-import gate  # noqa: E402
+import verify  # noqa: E402
 import warm  # noqa: E402
 from gh import Gh, GhError  # noqa: E402
 
@@ -63,6 +63,9 @@ def main(argv: list) -> int:
     giveup.add_argument("--dry-run", action="store_true", help="with --stale: list what would be released")
     giveup.add_argument("--force-maintainer", action="store_true",
                         help="release a legacy owner no Gateway reports (real terminal and exact confirmation)")
+    check = commands.add_parser("verify", help="run the local checks the branch diff requires")
+    check.add_argument("--tests", action="append", default=[], metavar="COMMAND",
+                       help="integration or E2E command to run from the repository root; repeat for each")
     board = commands.add_parser("dashboard", help="read-only view of all work, fetched live")
     board.add_argument("--html", type=Path, help="write a self-contained HTML dashboard to this path")
     board.add_argument("--json", type=Path, help="write the dashboard model as JSON to this path")
@@ -151,6 +154,9 @@ def main(argv: list) -> int:
             if args.issue is None or not args.reason or args.dry_run:
                 parser.error("release needs <issue> and --reason (or --stale [--dry-run])")
             return release.run(Gh(root), Path.cwd(), config, args.issue, args.reason, args.force_maintainer)
+        if args.command == "verify":
+            base_ref = f"{config['claim']['remote']}/{config['claim']['baseBranch']}"
+            return 0 if verify.verify(root, config, args.tests, base_ref) else 1
         if args.command == "dashboard":
             return dashboard.run(Gh(root), Path.cwd(), config, args.html, args.json)
         if args.command == "comment":
@@ -191,7 +197,7 @@ def main(argv: list) -> int:
             return land.land(Gh(root), root, config, args.title, args.summary_file, args.tests, args.dry_run, args.ready)
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
-    except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, release.ReleaseError, gate.GateError, dashboard.DashboardError,
+    except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, release.ReleaseError, verify.VerifyError, dashboard.DashboardError,
             land.LandError, warm.WarmError, cleanup.CleanupError, tracking.TrackingError, FileNotFoundError,
             json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)

@@ -15,15 +15,15 @@ memory, and agent workers never wait.
 | --- | --- | --- |
 | Interactive | maintainer chat turns, Home's own turns, phone RPCs | never queued |
 | Agent work | Home workers started by `delegate`, their subagents, research, editing | never queued; no running cap |
-| Heavy steps | gate steps classed `heavy` in [`gate-catalog.json`](../../../tools/work/gate-catalog.json): xcodebuild, simulator journeys, npm installs, Gateway test shards, real-Gateway E2E | work tooling: one host-wide, memory-aware heavy queue |
+| Heavy runs | xcodebuild, simulator journeys, full Gateway suites, real-Gateway E2E, `work verify`/`land` builds and journeys | work tooling: one host-wide, memory-aware heavy queue |
 
-Light steps (privacy guard, whitespace, script syntax, tooling journeys, a
-type check: measured under ~1 GB) stay unqueued.
+Light checks (privacy guard, whitespace, script syntax, one focused test file, a
+type check: measured at about 1 GB) stay unqueued.
 
 ## 1. Heavy queue (work tooling)
 
-`tools/work/heavy.py` (`scripts/tron-heavy run [--owner NAME] [--need-mb MB] -- <command>`,
-used by every heavy gate shard with the step's catalog `expectedRssMb`) runs one
+`tools/work/heavy.py` (`scripts/tron-heavy run [--owner NAME] [--need-mb MB] -- <command>`;
+`work verify`/`land`, `scripts/tron-ios-test` and `scripts/ios-gateway-e2e-test` take it) runs one
 command under a host-wide lease, a flock under `/tmp/tron-heavy-runs-<uid>`
 (independent of the per-run `HOME`/`TMPDIR` agents isolate). The holder passes
 the lease descriptor to the command, so the kernel drops it exactly when the
@@ -38,10 +38,12 @@ one while its command still runs.
   interactive agents and the OS (`TRON_HEAVY_RESERVE_MB`, default 6 GB). The
   first heavy step always starts, so a large step progresses on a busy host.
   `TRON_HEAVY_SLOTS` (default 4) only caps how many heavy steps run at once.
-- **Measured needs.** Each catalog step's `expectedRssMb` is its measured peak
-  tree RSS on this Mac (`scripts/tron gate report`), e.g. a Gateway vitest shard
-  about 3 GB, an iOS build about 7 GB. Two Gateway shards run together; an iOS
-  build runs beside a Gateway shard but not beside another native build.
+- **Measured needs.** `--need-mb` is the run's expected peak RSS (default 4 GB).
+  Measured on this Mac (#1022): the unsharded Gateway vitest suite peaks at 2.9 GB,
+  the nested suite at 2.1 GB, a type check at 1 GB. Xcode and simulator work runs in
+  launchd-owned services outside the run's process tree, so `work verify` claims a
+  conservative 6 GB when its plan includes a native build. Three 4 GB runs fit the
+  default budget together; a fourth waits.
 - **Queue.** Waiters hold FIFO tickets (owner, worktree, PID, command, need,
   enqueue time); a waiter prints its position and why it waits (memory, load)
   whenever that changes. `scripts/tron-heavy status` prints the budget, claimed
@@ -49,11 +51,6 @@ one while its command still runs.
 - **Host load.** The head also waits while the 1-minute load average exceeds
   `TRON_HEAVY_MAX_LOAD` (default 2 × CPU count), for at most 20 minutes on load
   alone.
-- **Hand-off.** A worker hands a heavy plan to the queue with `scripts/tron gate
-  submit` and keeps working; `gate jobs` shows the live queue position and step,
-  `gate wait <job>` returns the result to the requesting session, `gate cancel`
-  stops it. Passing shards are cached by content, so a retry or another worktree
-  with the same inputs reuses them.
 - **Inheritance.** A command that inherits a lease (`TRON_HEAVY_LEASE_HELD`)
   takes none, so a journey that runs `scripts/tron-ios-test` does not deadlock on
   itself.

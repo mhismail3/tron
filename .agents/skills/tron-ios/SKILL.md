@@ -40,18 +40,6 @@ before `devicectl` when their signed protocol metadata differs.
 
 ## Commands
 
-Gate a change through the runner, which builds once and runs the affected
-journeys as test-without-building shards from the same stamped products
-([gate](../../../tools/work/README.md#gate)):
-
-```bash
-scripts/tron gate plan                     # ios.build, then ios.journeys[<Class>] shards
-scripts/tron gate run ios.build ios.journeys
-```
-
-The commands below are what the gate steps run; use them directly for
-simulator lifecycle and for diagnosing one journey:
-
 ```bash
 scripts/tron-ios-simulator install
 scripts/tron-ios-simulator start

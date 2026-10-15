@@ -50,7 +50,7 @@ mode="${1:-full}"
 offenders_total=0
 
 if [ "$mode" = "--stdin" ]; then
-    # Public GitHub text (gate evidence, pull request bodies) is outside the repository
+    # Public GitHub text (work verify evidence) is outside the repository
     # inventory, so the same needles run over it before it is posted.
     text=$(mktemp "${TMPDIR:-/tmp}/tron-personal-info-guard.XXXXXX") || {
         echo "personal-info-guard: could not allocate a text buffer" >&2
