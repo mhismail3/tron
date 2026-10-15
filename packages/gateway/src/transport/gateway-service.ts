@@ -53,6 +53,7 @@ import type { GlobalProviderResources } from "../admin/global-provider-resources
 import type { AuthBroker } from "../admin/auth-broker.js";
 import { withMcpAuthInteraction } from "../extensions/extension-adapters.js";
 import type { McpAdminService, McpScope } from "../admin/mcp-admin-service.js";
+import { MAC_REPLACE_CAPABILITY, MacReplaceService } from "../admin/mac-replace-service.js";
 import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";
 import {
   IOS_DEVICE_INSTALL_CAPABILITY,
@@ -301,7 +302,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.stopTask", "home.memory.view", "home.memory.evidence",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "mac.replace.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.stopTask", "home.memory.view", "home.memory.evidence",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -405,6 +406,7 @@ export class GatewayService {
   private readonly sessionListPages = new SessionListPaginationStore();
   private readonly modelCatalogPages = new ModelCatalogPager();
   private readonly updateService: GatewayUpdateService;
+  private readonly macReplace: MacReplaceService;
   private readonly iosDeviceInstallService: IosDeviceInstallService;
   private readonly workRegistry: GatewayWorkRegistry | undefined;
   private readonly mobileIdentityLanes = new Map<string, MobileIdentityLane>();
@@ -422,6 +424,18 @@ export class GatewayService {
     this.updateService = dependencies.updateService ?? new GatewayUpdateService({
       tronHome: dependencies.config?.tronHome ?? process.cwd(),
       runtimeIdentity: runtimeIdentity(),
+    });
+    const home = dependencies.home;
+    const notifications = dependencies.notifications;
+    this.macReplace = new MacReplaceService({
+      tronHome: dependencies.config?.tronHome ?? process.cwd(),
+      channel: this.updateService.channel,
+      sourceRoot: async () => (await this.updateService.configStatus().catch(() => null))?.sourceRoot,
+      ...(notifications ? { notify: async ({ sourceId, message }) => notifications.enqueue({ sessionId: "mac-replace", sourceId, kind: "explicit", title: "Tron Mac", message }) } : {}),
+      ...(home ? {
+        latestWorkerTask: (sessionId: string) => home.latestWorkerTask(sessionId),
+        resumeTask: async (input: { taskId: string; operationId: string; text: string }) => safeJson(await home.resumeTask(input)),
+      } : {}),
     });
     this.iosDeviceInstallService = dependencies.iosDeviceInstallService ?? new IosDeviceInstallService({
       tronHome: dependencies.config?.tronHome ?? process.cwd(),
@@ -610,6 +624,7 @@ export class GatewayService {
         "drain-status.v1",
         PROVIDER_USAGE_CAPABILITY,
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
+        ...(this.updateService.channel === "stable" ? [MAC_REPLACE_CAPABILITY] : []),
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
@@ -936,6 +951,30 @@ export class GatewayService {
             ...validateGatewayUpdateRequest(params),
             commandId,
           }));
+        });
+      case "mac.replace.status":
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Mac replacement status accepts no parameters");
+        return safeJson(await this.macReplace.status());
+      case "mac.replace.plan":
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Mac replacement plan accepts no parameters");
+        return safeJson(await this.macReplace.plan());
+      case "mac.replace.start":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId"], method);
+          await this.requireNoActiveIosDeviceInstall();
+          // A connected client speaks this Gateway's protocol; the orchestrator
+          // refuses a replacement that would strand it.
+          return safeJson(await this.macReplace.start(PROTOCOL_VERSION));
+        });
+      case "mac.replace.complete":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "operationId"], method);
+          return safeJson(await this.macReplace.complete(string(params.operationId, "operationId", { max: 64 })));
+        });
+      case "mac.replace.resumeWorker":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "operationId", "taskId"], method);
+          return safeJson(await this.macReplace.resumeWorker(string(params.operationId, "operationId", { max: 64 }), string(params.taskId, "taskId", { max: 160 })));
         });
       case "gateway.rollback":
         return this.mutation(client, method, params, async () => {

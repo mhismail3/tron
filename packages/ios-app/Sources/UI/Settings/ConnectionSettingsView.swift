@@ -74,6 +74,7 @@ struct ConnectionsSettingsView: View {
     @State private var authorizedDevices: [GatewayAuthorizedDevice] = []
     @State private var dataLoadGeneration = 0
     @State private var showAddServer = false
+    @State private var showingMacReplacement = false
     @State private var addServerDetent: PresentationDetent = .medium
 
     private var pairedProfiles: [GatewayProfile] {
@@ -162,7 +163,8 @@ struct ConnectionsSettingsView: View {
                         profile: selected,
                         thisDevice: authorizedDevices.first {
                             $0.profileID == selected.id && $0.device.id == selected.deviceId
-                        }
+                        },
+                        showReplacement: { showingMacReplacement = true }
                     )
                 }
 
@@ -211,6 +213,14 @@ struct ConnectionsSettingsView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)
                 .presentationContentInteraction(.resizes)
+            }
+        }
+        .tronManagedSheet(
+            isPresented: $showingMacReplacement,
+            identity: "settings.connection.mac-replacement"
+        ) {
+            if let selected = model.profiles.selected {
+                MacReplacementSheet(profile: selected)
             }
         }
         .tronManagedSheet(

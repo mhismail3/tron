@@ -189,6 +189,70 @@ describe("resuming a stopped Home worker in place", () => {
   }, 60_000);
 });
 
+describe("workers stopped by a Mac app replacement (#984)", () => {
+  it("stops a running worker through the orchestrator's real task-stop path and resumes it in place from the replacement", async () => {
+    const f = await fixture();
+    const { port } = await listen(f);
+    const entered = { count: 0 };
+    const seen: string[] = [];
+    f.faux.setResponses([holding(entered), (context: Context) => {
+      seen.push(lastUser(context));
+      return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+    }]);
+    const running = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "replace-worker", intent: "Long work", target: f.cwd });
+    await waitFor(() => entered.count === 1, "worker turn");
+    // The real orchestrator code (scripts/tron_mac_replace.py) drains workers over this Gateway's socket.
+    const operation = randomUUID();
+    const store = join(f.root, ".tron-maintenance", "replace");
+    // Asynchronous: this test process also hosts the Gateway the script talks to.
+    const drain = await promisify(execFile)("/usr/bin/python3", ["-c", `
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from pathlib import Path
+from tron_mac_replace import Runner
+from tron_mac_replace_journal import Journal, write_json_atomic
+from tron_mac_replace_platform import MacPlatform
+class Fixture(MacPlatform):
+    port = int(sys.argv[3])
+    def token(self): return json.loads((Path(sys.argv[4]) / 'gateway/local-auth.json').read_text())['bearerToken']
+    def node(self): return Path(sys.argv[5]), Path(sys.argv[6])
+    def protocol(self): return int(sys.argv[7])
+store, operation = Path(sys.argv[2]), sys.argv[8]
+journal = Journal.create(store / operation, operation, 'full', 'fixture', {'root': '.', 'revision': '0' * 40})
+write_json_atomic(store / 'current.json', {'id': operation})
+journal.start_step('drain-workers')
+stopped = Runner(Fixture(), journal).stop_workers()
+journal.finish_step('drain-workers', f'stopped {len(stopped)}')
+journal.settle('succeeded')
+`, join(REPO, "scripts"), store, String(port), f.tronHome, process.execPath, join(REPO, "packages/gateway/node_modules"),
+      String((await import("../version.js")).PROTOCOL_VERSION), operation], { encoding: "utf8" });
+    expect(drain.stderr).toBe("");
+    expect(await running.completion).toMatchObject({ terminalEvidence: { outcome: "interrupted", reason: "task-stop" } });
+    // The dispatch handle can return before the worker session binds; the task record names it.
+    const sessionId = (await f.registry.homeOwner().taskStatus("replace-worker")).sessionId!;
+    expect(sessionId).toBeTruthy();
+
+    // The journal lists the stopped worker; the Gateway projects it as resumable.
+    const app = new GatewayProtocolClient(`ws://127.0.0.1:${port}/v1/socket`, await readLocalCredential(f.tronHome));
+    await app.connect(5_000);
+    cleanups.push(async () => app.close());
+    const before = await app.request("mac.replace.status", {}) as { operation: { id: string }; workers: Array<{ taskId: string; sessionId: string; state: string }> };
+    expect(before.operation.id).toBe(operation);
+    expect(before.workers).toEqual([expect.objectContaining({ taskId: "replace-worker", sessionId, state: "resumable" })]);
+    const sessionsBefore = (await f.registry.list("all")).length;
+    const resumed = await app.request("mac.replace.resumeWorker", { commandId: randomUUID(), operationId: operation, taskId: "replace-worker" }) as { taskId: string; sessionId: string };
+    expect(resumed).toMatchObject({ taskId: "replace-worker.resume-1", sessionId });
+    await waitFor(async () => (await f.registry.homeOwner().taskStatus("replace-worker.resume-1")).lifecycle === "terminal", "resumed worker settles");
+    expect(seen[0]).toContain("The Mac app was replaced while this task ran");
+    expect((await f.registry.list("all")).length).toBe(sessionsBefore);
+    const after = await app.request("mac.replace.status", {}) as { workers: Array<{ state: string }> };
+    expect(after.workers[0]!.state).toBe("resumed");
+    await expect(app.request("mac.replace.resumeWorker", { commandId: randomUUID(), operationId: operation, taskId: "replace-worker" }))
+      .rejects.toThrow(/already resumed/u);
+    evidence.push({ case: "mac-replace-stop-and-resume", stopped: "replace-worker", resumed: resumed.taskId, sessionId });
+  }, 60_000);
+});
+
 describe("one ordered message lane per Home worker", () => {
   it("orders the maintainer's composer message after Home's steering while the worker runs", async () => {
     const f = await fixture();

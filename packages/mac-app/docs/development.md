@@ -703,6 +703,49 @@ protection against disk loss. Off-device backup requires a separately configured
 protected destination. Restoration and any app/Gateway transition remain
 maintainer actions.
 
+### One-tap Mac app replacement
+
+`scripts/tron mac replace` (started from iPhone Settings → Connections → Quick Rebuild →
+**Replace Mac App**, or from a Mac terminal) replaces the installed app and its bundled Gateway in
+one tracked operation (#984). It is the supported path for changes a source rebuild cannot apply.
+
+```bash
+scripts/tron mac replace --plan              # quick or full, and why
+scripts/tron mac replace --start             # start, retry a failure, or resume an interrupted run
+scripts/tron mac replace --status --follow   # stream the journal until it settles
+```
+
+- **Path.** Quick (the Gateway's own source update) when the active payload's
+  `package-lock.json`, dependency manifest and protocol match the checkout and
+  `packages/mac-app` is unchanged since the installed build; otherwise a full signed Release
+  build and app swap. `none` when the checkout already runs.
+- **Runner.** A launchd job of its own (`com.tron.mac.replace.<id>`) running a private copy of
+  the scripts, so it survives the Gateway and app it replaces. Steps: preflight → build →
+  verify signature → stop running workers → stop Gateway → swap app → start → verify → finish
+  (quick: preflight → stop workers → rebuild → verify → finish).
+- **Preflight** checks source cleanliness and HEAD, disk space, signing identity, Gateway and
+  native-helper registration, protocol compatibility with the requesting iPhone
+  (`--allow-protocol-change` overrides from the Mac), and that no manual `mac reinstall`
+  operation is active. Nothing changes before it passes.
+- **Workers** are stopped through Home's task stop path (sessions, worktrees, branches and claims
+  kept) and listed in the journal; iPhone offers Resume in place for each.
+- **Stop** uses the app's coordinated Quit (an AppKit terminate request), which drains accepted
+  work and retires the native helper; nothing is signaled, killed or disabled.
+- **Swap** takes an APFS clone of `~/.tron` (`state-snapshot`, the data rollback point), moves the
+  external Stable payload channel and the old app into the operation directory, journaling each
+  move first, then installs the verified build.
+- **Failure** stops at its step with the exact message and step log. After the swap the previous
+  app and payload channel are restored and verified automatically; the `~/.tron` snapshot is
+  kept, never restored over newer data. A retry reuses the verified build; a runner that died
+  mid-run is resumed by `--start`, restoring the previous app first if it had swapped.
+- **Verify** requires the running Gateway's revision and protocol, the installed app's cdhash,
+  and `scripts/tron mac verify --require-bundled`; the Gateway then pushes the result.
+
+Builds live in detached worktrees under `~/.tron-maintenance/replace/builds/<revision>` (the
+current and one previous are kept). E2E: `python3 scripts/test-tron-mac-replace.py` drives the
+real runner under launchd against a fixture app and Gateway job (never Stable) and writes
+`test-results/mac-replace-e2e.json`.
+
 ### Gateway payload operations
 
 The installed wrapper owns Stable only. Developer tooling owns Debug. `status` and
