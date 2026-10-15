@@ -301,49 +301,11 @@ struct ConfigurationSliderTrack: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     nonisolated static let inset: CGFloat = 22
 
+    // The rail is assembled from typed helpers: as one GeometryReader closure
+    // its literal-heavy layout arithmetic took ~3.5 s to type-check (#1066).
     var body: some View {
         GeometryReader { geometry in
-            let width = max(1, geometry.size.width - Self.inset * 2)
-            let thumbX = Self.inset + CGFloat(progress) * width
-            ZStack(alignment: .leading) {
-                Capsule().fill(accent.opacity(0.10))
-                    .overlay { Capsule().strokeBorder(accent.opacity(0.12), lineWidth: 0.5) }
-                    .frame(height: 42)
-                Capsule()
-                    .fill(LinearGradient(colors: [accent.opacity(0.24), accent.opacity(0.55)], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: thumbX + Self.inset, height: 42).opacity(showsThumb ? 1 : 0)
-                ForEach(stops, id: \.self) { stop in
-                    Circle().fill(stop == emphasizedStop ? accent : Color.tronTextSecondary.opacity(0.4))
-                        .frame(width: stop == emphasizedStop ? 5 : 3, height: stop == emphasizedStop ? 5 : 3)
-                        .position(x: Self.inset + CGFloat(stop) * width, y: 26)
-                }
-                Circle().fill(accent.opacity(0.16))
-                    .overlay { Circle().strokeBorder(.white.opacity(0.65), lineWidth: 1).padding(1) }
-                    .glassEffect(.regular.tint(accent.opacity(0.16)).interactive(), in: .circle)
-                    .frame(width: 38, height: 38)
-                    .scaleEffect(dragging && !reduceMotion ? 1.12 : 1)
-                    .shadow(color: accent.opacity(0.22), radius: 5, y: 2)
-                    .position(x: thumbX, y: 26).opacity(showsThumb ? 1 : 0)
-            }
-            .frame(height: 52).contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { gesture in
-                    guard actions.admitsInput() else { return }
-                    if dragOrigin == nil {
-                        let start = (gesture.startLocation.x - Self.inset) / width
-                        dragOrigin = showsThumb && abs(gesture.startLocation.x - thumbX) <= 24 ? progress : Double(start)
-                        withAnimation(reduceMotion ? nil : .smooth(duration: 0.16)) { dragging = true }
-                    }
-                    change((dragOrigin ?? progress) + Double(gesture.translation.width / width), Double(width))
-                }
-                .onEnded { _ in
-                    guard actions.admitsInput() else { return }
-                    dragOrigin = nil
-                    withAnimation(reduceMotion ? nil : .spring(duration: 0.22, bounce: 0.08)) {
-                        dragging = false
-                        settle(progress, Double(width))
-                    }
-                })
+            trackSurface(width: max(1, geometry.size.width - Self.inset * 2))
         }
         .frame(height: 52)
         .sensoryFeedback(.selection, trigger: feedback) { _, next in next != nil }
@@ -360,5 +322,63 @@ struct ConfigurationSliderTrack: View {
         .accessibilityAction(named: "Save and close", actions.dismiss)
         .accessibilityFocused(actions.focus)
         .accessibilityIdentifier(identifier)
+    }
+
+    private func trackSurface(width: CGFloat) -> some View {
+        let thumbX: CGFloat = Self.inset + CGFloat(progress) * width
+        return rail(width: width, thumbX: thumbX)
+            .frame(height: 52).contentShape(Rectangle())
+            .gesture(dragGesture(width: width, thumbX: thumbX))
+    }
+
+    private func rail(width: CGFloat, thumbX: CGFloat) -> some View {
+        ZStack(alignment: .leading) {
+            Capsule().fill(accent.opacity(0.10))
+                .overlay { Capsule().strokeBorder(accent.opacity(0.12), lineWidth: 0.5) }
+                .frame(height: 42)
+            Capsule()
+                .fill(LinearGradient(colors: [accent.opacity(0.24), accent.opacity(0.55)], startPoint: .leading, endPoint: .trailing))
+                .frame(width: thumbX + Self.inset, height: 42).opacity(showsThumb ? 1 : 0)
+            ForEach(stops, id: \.self) { stop in
+                stopMark(stop, width: width)
+            }
+            Circle().fill(accent.opacity(0.16))
+                .overlay { Circle().strokeBorder(.white.opacity(0.65), lineWidth: 1).padding(1) }
+                .glassEffect(.regular.tint(accent.opacity(0.16)).interactive(), in: .circle)
+                .frame(width: 38, height: 38)
+                .scaleEffect(dragging && !reduceMotion ? 1.12 : 1)
+                .shadow(color: accent.opacity(0.22), radius: 5, y: 2)
+                .position(x: thumbX, y: 26).opacity(showsThumb ? 1 : 0)
+        }
+    }
+
+    private func stopMark(_ stop: Double, width: CGFloat) -> some View {
+        let emphasized: Bool = stop == emphasizedStop
+        let diameter: CGFloat = emphasized ? 5 : 3
+        let x: CGFloat = Self.inset + CGFloat(stop) * width
+        return Circle().fill(emphasized ? accent : Color.tronTextSecondary.opacity(0.4))
+            .frame(width: diameter, height: diameter)
+            .position(x: x, y: 26)
+    }
+
+    private func dragGesture(width: CGFloat, thumbX: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { gesture in
+                guard actions.admitsInput() else { return }
+                if dragOrigin == nil {
+                    let start = (gesture.startLocation.x - Self.inset) / width
+                    dragOrigin = showsThumb && abs(gesture.startLocation.x - thumbX) <= 24 ? progress : Double(start)
+                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.16)) { dragging = true }
+                }
+                change((dragOrigin ?? progress) + Double(gesture.translation.width / width), Double(width))
+            }
+            .onEnded { _ in
+                guard actions.admitsInput() else { return }
+                dragOrigin = nil
+                withAnimation(reduceMotion ? nil : .spring(duration: 0.22, bounce: 0.08)) {
+                    dragging = false
+                    settle(progress, Double(width))
+                }
+            }
     }
 }

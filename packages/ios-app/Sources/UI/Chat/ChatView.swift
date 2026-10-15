@@ -145,7 +145,11 @@ struct ChatView: View {
     }
     #endif
 
-    private var contentSurface: some View {
+    // The surface is built in stages, each a separate opaque property: one long
+    // modifier chain is solved as a single expression, and ChatView's took ~19 s
+    // to type-check in every compile and module-emit job (#1066). The stages
+    // compose the same modifiers in the same order, so the view tree is unchanged.
+    private var contentLayers: some View {
         transcript
             .overlay(alignment: .top) { topBlur }
             .overlay {
@@ -188,6 +192,10 @@ struct ChatView: View {
                     }
                     #endif
             }
+    }
+
+    private var contentChrome: some View {
+        contentLayers
         .onGeometryChange(for: CGFloat.self) { geometry in
             geometry.size.width
         } action: { width in
@@ -208,7 +216,10 @@ struct ChatView: View {
         .toolbar {
             toolbar(titleWidth: ChatToolbarTitleLayout.width(containerWidth: toolbarContainerWidth))
         }
-        .modifier(ChatRoutes(
+    }
+
+    private var chatRoutes: ChatRoutes {
+        ChatRoutes(
             sessionID: sessionID,
             initialHistoryEntryID: initialHistoryEntryID,
             onForkCreated: onForkCreated,
@@ -246,7 +257,12 @@ struct ChatView: View {
                 model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
             },
             homeSheet: $homeSheet
-        ))
+        )
+    }
+
+    private var contentSurface: some View {
+        contentChrome
+        .modifier(chatRoutes)
         .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in
             attachmentMenuStateChanged(from: previous, to: current)
@@ -266,9 +282,7 @@ struct ChatView: View {
             keyboardObserver.setOwnerWindow(composerResponder.window)
         }
         .environment(\.pendingExtensionInteractionPresenter) { interaction in
-            guard selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions
-                .contains(where: { ExtensionInteractionScope($0) == ExtensionInteractionScope(interaction) }) == true else { return }
-            sessionPresentation.requestInteractionPresentation(interaction)
+            presentPendingExtensionInteraction(interaction)
         }
         .environment(\.displayPresentationHandler) { command in
             sessionPresentation.presentDisplay(command)
@@ -281,6 +295,13 @@ struct ChatView: View {
             admitPendingFloatingDisplay()
         }
         .onChange(of: model.stagedSettingsDecision?.id, initial: true) { _, _ in openManageForStagedSettingsDecision() }
+    }
+
+    private func presentPendingExtensionInteraction(_ interaction: ExtensionInteraction) {
+        let scope = ExtensionInteractionScope(interaction)
+        let pending: [ExtensionInteraction] = selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []
+        guard pending.contains(where: { ExtensionInteractionScope($0) == scope }) else { return }
+        sessionPresentation.requestInteractionPresentation(interaction)
     }
 
     /// A settings-approval push action opens this chat's Manage sheet; the approvals
@@ -353,6 +374,30 @@ struct ChatView: View {
     }
 
     var body: some View {
+        lifecycleSurface
+        .onChange(of: presentationActivity) { previous, current in
+            presentationActivityChanged(from: previous, to: current)
+        }
+        .onChange(of: scrollCoordinator.defersAutomaticLiveProjectionIntake) { _, deferred in
+            automaticLiveProjectionIntakeChanged(deferred: deferred)
+        }
+        .task(id: ChatOpeningSurfaceTaskID(
+            surfaceActive: scenePhase == .active && presentationActivity.allowsPresentationPublication,
+            openingTaskRevision: sessionPresentation.openingTaskRevision
+        )) { await runOpeningSurfaceTask() }
+        .background { activeProjectionObservationDriver }
+        .onChange(of: transcriptPresentation.installed?.tag) { previousTag, _ in
+            installedProjectionChanged(previousTag: previousTag)
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didReceiveMemoryWarningNotification
+        )) { _ in
+            transcriptPresentation.handleMemoryPressure()
+        }
+        .onDisappear(perform: retirePresentation)
+    }
+
+    private var lifecycleSurface: some View {
         contentSurface
         .onAppear { handleAppear() }
         .onChange(of: keyboardObserver.transition) { _, transition in
@@ -388,26 +433,6 @@ struct ChatView: View {
         .onChange(of: model.foregroundReconciliationGeneration) { _, _ in
             foregroundReconciliationCompleted()
         }
-        .onChange(of: presentationActivity) { previous, current in
-            presentationActivityChanged(from: previous, to: current)
-        }
-        .onChange(of: scrollCoordinator.defersAutomaticLiveProjectionIntake) { _, deferred in
-            automaticLiveProjectionIntakeChanged(deferred: deferred)
-        }
-        .task(id: ChatOpeningSurfaceTaskID(
-            surfaceActive: scenePhase == .active && presentationActivity.allowsPresentationPublication,
-            openingTaskRevision: sessionPresentation.openingTaskRevision
-        )) { await runOpeningSurfaceTask() }
-        .background { activeProjectionObservationDriver }
-        .onChange(of: transcriptPresentation.installed?.tag) { previousTag, _ in
-            installedProjectionChanged(previousTag: previousTag)
-        }
-        .onReceive(NotificationCenter.default.publisher(
-            for: UIApplication.didReceiveMemoryWarningNotification
-        )) { _ in
-            transcriptPresentation.handleMemoryPressure()
-        }
-        .onDisappear(perform: retirePresentation)
     }
 
     // Named handlers keep the modifier chains above cheap to type-check:
