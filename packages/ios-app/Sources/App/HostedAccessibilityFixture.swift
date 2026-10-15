@@ -10,7 +10,7 @@ struct HostedAccessibilityFixtureView: View {
 
     private enum Destination: String, Identifiable, CaseIterable {
         case metadata = "Gateway Server Info", maintenance = "Maintenance"
-        case json = "Structured JSON", activity = "Session Activity"
+        case json = "Structured JSON", activity = "Session Activity", macReplacement = "Mac Replacement"
         var id: String { rawValue }
     }
 
@@ -51,6 +51,8 @@ struct HostedAccessibilityFixtureView: View {
                                 destructive: GatewayMaintenanceAction(id: "forget", title: "Forget Server") {}
                             ).padding(20)
                         }
+                    case .macReplacement:
+                        MacReplacementSheet(profile: nil, status: Self.replacement)
                     case .json:
                         NavigationStack {
                             ScrollView {
@@ -93,6 +95,38 @@ struct HostedAccessibilityFixtureView: View {
         currentIdentity: GatewayUpdateIdentity(version: "candidate", gatewayVersion: "1", sourceRevision: "fallback-revision",
                                               runtimeEpoch: "fallback-epoch", payloadFingerprint: "payload-identity"),
         candidateIdentity: nil, candidateAvailable: false, error: nil, updatedAt: nil
+    )
+    /// A replacement that failed after the swap, rolled back, and stopped two workers.
+    private static let replacement = MacReplacementStatus(
+        startable: true,
+        operation: MacReplacementOperation(
+            id: "fixture-operation", path: "full",
+            reason: "Full signed build: the Gateway dependency lock changed", state: "rolled-back", attempt: 2,
+            currentStep: nil,
+            steps: [
+                MacReplacementStep(name: "preflight", title: "Preflight", state: "done",
+                                   detail: "clean a07c51470, 982 GiB free, helper registered, protocol 8 → 8", durationSeconds: 1.2),
+                MacReplacementStep(name: "build", title: "Build signed app", state: "done", detail: "built a07c51470", durationSeconds: 412),
+                MacReplacementStep(name: "verify-signature", title: "Verify signature", state: "done",
+                                   detail: "team MYGKXH6TY4, cdhash 308b4a4fce42", durationSeconds: 38.4),
+                MacReplacementStep(name: "drain-workers", title: "Stop running workers", state: "done", detail: "stopped 2 workers", durationSeconds: 6.1),
+                MacReplacementStep(name: "stop-gateway", title: "Stop Gateway", state: "done",
+                                   detail: "Tron quit; Gateway and native helper retired", durationSeconds: 21.7),
+                MacReplacementStep(name: "swap-app", title: "Swap app", state: "done", detail: "installed a07c51470", durationSeconds: 9.8),
+                MacReplacementStep(name: "start", title: "Start new app", state: "failed",
+                                   detail: "the Gateway did not answer within 300s", durationSeconds: 300.4),
+                MacReplacementStep(name: "verify", title: "Verify Gateway", state: "pending"),
+                MacReplacementStep(name: "finish", title: "Finish", state: "pending"),
+            ],
+            error: MacReplacementError(step: "start", message: "the Gateway did not answer within 300s (unreachable: connect ECONNREFUSED 127.0.0.1:9847)",
+                                       log: "~/.tron-maintenance/replace/3f2a/logs/start.log"),
+            rollback: MacReplacementRollback(state: "restored", detail: "previous app restored; Gateway cbb9006d2 answering on protocol 8"),
+            logPath: "~/.tron-maintenance/replace/3f2a/journal.log"
+        ),
+        workers: [
+            MacReplacementWorker(taskId: "ssh-terminal", sessionId: "s1", title: "iPhone SSH terminal", state: "resumable"),
+            MacReplacementWorker(taskId: "settings-polish", sessionId: "s2", title: "Settings polish", state: "resumed"),
+        ]
     )
     private static let json: JSONValue = .object([
         "activeAsyncCapacity": .object(["mode": .string("single"), "max": .number(4)]),

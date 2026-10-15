@@ -23,9 +23,35 @@ enum QuickRebuildRowState: Equatable {
     }
 }
 
+/// What the Replace Mac App row offers: the path the Mac would take, a running
+/// replacement, or why it is unavailable (#984).
+enum MacReplacementRowState: Equatable {
+    case ready(String)
+    case running(String)
+    case unavailable(String)
+
+    static func resolve(supported: Bool, plan: Result<MacReplacementPlan, GatewayFailure>?,
+                        operation: MacReplacementOperation?, requested: Bool) -> Self {
+        guard supported else { return .unavailable("Not supported by this Gateway") }
+        if let operation, !operation.isTerminal {
+            let step = operation.steps.first { $0.name == operation.currentStep }?.title ?? "Starting"
+            return .running("\(MacReplacementPresentation.stateTitle(operation)) · \(step)")
+        }
+        if requested { return .running("Starting") }
+        switch plan {
+        case .none: return .unavailable("Checking what changed…")
+        case .failure(let failure): return .unavailable(failure.message)
+        case .success(let plan):
+            guard plan.startable else { return .unavailable("Only the Stable Mac app can be replaced from here") }
+            return plan.path == "none" ? .unavailable(plan.reason) : .ready(plan.reason)
+        }
+    }
+}
+
 /// Last group in Connections: two-tap rebuilds of the selected server and of
-/// this iPhone's optimized build from that server. Commands go through the same
-/// model owners as the server and device detail sheets.
+/// this iPhone's optimized build from that server, and the one-tap Mac app
+/// replacement. Commands go through the same model owners as the server and
+/// device detail sheets.
 struct QuickRebuildGroup: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
@@ -34,6 +60,9 @@ struct QuickRebuildGroup: View {
     let profile: GatewayProfile
     /// This iPhone's authorization on `profile`, when the device list has it.
     let thisDevice: GatewayAuthorizedDevice?
+    /// Presents the replacement progress sheet, owned by Connections so it
+    /// stays up while this group's Gateway is down for the swap.
+    let showReplacement: () -> Void
 
     @State private var gatewayConfigured = false
     @State private var gatewayStatus: GatewayUpdateStatus?
@@ -41,6 +70,9 @@ struct QuickRebuildGroup: View {
     @State private var installConfigured = false
     @State private var installStatus: IosDeviceInstallStatus?
     @State private var requesting = false
+    @State private var replacementPlan: Result<MacReplacementPlan, GatewayFailure>?
+    @State private var replacement: MacReplacementOperation?
+    @State private var replacementRequested = false
     @State private var loadGeneration = 0
 
     private var capabilities: [String] { model.gatewayInfo?.capabilities ?? [] }
@@ -61,9 +93,23 @@ struct QuickRebuildGroup: View {
         )
     }
 
+    private var replacementState: MacReplacementRowState {
+        .resolve(
+            supported: AppModel.supportsMacReplacement(capabilities: capabilities),
+            plan: replacementPlan,
+            operation: replacement,
+            requested: replacementRequested
+        )
+    }
+
+    private var replacementRunning: Bool {
+        if case .running = replacementState { return true }
+        return false
+    }
+
     /// Part of the load task identity, so an accepted command starts following
     /// its progress immediately.
-    private var isRunning: Bool { gatewayState == .running || deviceState == .running }
+    private var isRunning: Bool { gatewayState == .running || deviceState == .running || replacementRunning }
 
     var body: some View {
         TronSettingsGroup("Quick Rebuild", detail: "Rebuild from source on \(profile.label).", accent: .tronEmerald) {
@@ -83,6 +129,10 @@ struct QuickRebuildGroup: View {
                     state: deviceState,
                     accessibilityName: "iPhone app"
                 ) { await rebuildDevice() }
+                if AppModel.supportsMacReplacement(capabilities: capabilities) {
+                    TronSettingsDivider(accent: .tronEmerald)
+                    replacementRow
+                }
             }
         }
         .task(id: PresentationActivityTaskID(
@@ -131,6 +181,40 @@ struct QuickRebuildGroup: View {
         }
     }
 
+    private var replacementRow: some View {
+        let detail: String
+        switch replacementState {
+        case .ready(let reason), .running(let reason), .unavailable(let reason): detail = reason
+        }
+        return TronValueRow(icon: "macwindow", title: "Replace Mac App", detail: detail, accent: .tronEmerald) {
+            if replacementRunning {
+                Button(action: showReplacement) {
+                    TronInlineActionLabel("Progress", isWorking: true, accent: .tronEmerald)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show Mac app replacement progress")
+            } else {
+                // Same two-tap pattern as the rebuild rows; the last journal
+                // stays one tap away after it settles.
+                Menu {
+                    if case .ready = replacementState {
+                        Button("Confirm") { Task { await replaceMacApp() } }
+                    }
+                    if replacement != nil {
+                        Button("Show Last Replacement") { showReplacement() }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } label: {
+                    TronInlineActionLabel("Replace", accent: .tronEmerald)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .disabled(requesting || (replacement == nil && { if case .ready = replacementState { return false }; return true }()))
+                .accessibilityLabel("Replace Mac app")
+            }
+        }
+    }
+
     private var admitsRead: Bool {
         !Task.isCancelled
             && presentationActivity.allowsPresentationPublication
@@ -156,6 +240,18 @@ struct QuickRebuildGroup: View {
                 }
             }
         }
+        if AppModel.supportsMacReplacement(capabilities: capabilities) {
+            let status = await model.loadMacReplacementStatus(for: profile)
+            guard current() else { return }
+            replacement = status?.operation
+            if replacement.map({ !$0.isTerminal }) == true { replacementRequested = false }
+            // The plan runs git on the Mac; refresh it only when nothing is running.
+            if !replacementRunning || replacementPlan == nil {
+                let plan = await model.loadMacReplacementPlan(for: profile)
+                guard current() else { return }
+                replacementPlan = plan
+            }
+        }
         guard current(), let thisDevice,
               AppModel.supportsIosDeviceInstall(capabilities: capabilities) else { return }
         do {
@@ -178,6 +274,16 @@ struct QuickRebuildGroup: View {
         defer { requesting = false }
         if let commandID = await model.requestGatewayUpdate(for: profile, mode: "source") {
             gatewayCommandID = commandID
+        }
+    }
+
+    private func replaceMacApp() async {
+        guard !requesting, case .ready = replacementState else { return }
+        requesting = true
+        defer { requesting = false }
+        if await model.startMacReplacement(for: profile) != nil {
+            replacementRequested = true
+            showReplacement()
         }
     }
 

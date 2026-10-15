@@ -524,6 +524,84 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["Opening conversation"].exists)
     }
 
+    /// The Mac replacement (#984) as Connections shows it from the real Gateway:
+    /// the Replace Mac App row follows a running journal, its progress sheet
+    /// lists every step and updates live as the orchestrator writes, then shows
+    /// the settled result. The journal is written where the Gateway reads it,
+    /// beside the fixture's Tron home, exactly as the Mac-side orchestrator does.
+    @MainActor
+    func testMacReplacementRowAndProgressFollowTheJournal() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        guard let agentDirectory = fixture.agentDirectory else { throw XCTSkip("the harness provides the fixture agent directory") }
+        let store = URL(fileURLWithPath: agentDirectory).deletingLastPathComponent().appending(path: ".tron-maintenance/replace")
+        let operation = UUID().uuidString.lowercased()
+        func writeJournal(state: String, current: String?, done: Int, failed: String? = nil) throws {
+            let names = ["preflight", "build", "verify-signature", "drain-workers", "stop-gateway", "swap-app", "start", "verify", "finish"]
+            let titles = ["Preflight", "Build signed app", "Verify signature", "Stop running workers", "Stop Gateway", "Swap app",
+                          "Start new app", "Verify Gateway", "Finish"]
+            let steps: [[String: Any]] = names.enumerated().map { index, name in
+                let stepState = index < done ? "done" : name == current ? "running" : "pending"
+                var step: [String: Any] = ["name": name, "title": titles[index], "state": stepState]
+                if stepState == "done" { step["durationSeconds"] = 2.5; step["detail"] = "\(titles[index]) complete" }
+                return step
+            }
+            let journal: [String: Any] = [
+                "schema": 1, "kind": "tron-mac-replace", "id": operation, "path": "full",
+                "reason": "Full signed build: the Gateway dependency lock changed", "state": state, "attempt": 1,
+                "currentStep": current ?? NSNull(), "steps": steps, "workers": [], "error": NSNull(), "rollback": NSNull(),
+                "logPath": store.appending(path: "\(operation)/journal.log").path,
+            ]
+            let directory = store.appending(path: operation)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: journal).write(to: directory.appending(path: "journal.json"), options: .atomic)
+            try JSONSerialization.data(withJSONObject: ["id": operation]).write(to: store.appending(path: "current.json"), options: .atomic)
+        }
+        try writeJournal(state: "running", current: "build", done: 1)
+        defer { try? FileManager.default.removeItem(at: store) }
+
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
+        gear.tap()
+        let link = app.buttons["settings-link-Connections"]
+        for _ in 0..<20 where !link.isHittable { app.swipeDown() }
+        link.tap()
+
+        // The row sits in Quick Rebuild with the rebuild rows and follows the running step.
+        let progress = app.buttons["Show Mac app replacement progress"]
+        for _ in 0..<8 where !progress.isHittable { app.swipeUp() }
+        XCTAssertTrue(progress.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Replace Mac App"].exists)
+        XCTAssertTrue(app.staticTexts["Step 2 of 9 · Build signed app"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(app.staticTexts["Replace Mac App"].frame.minX, app.staticTexts["Rebuild Gateway"].frame.minX, accuracy: 1,
+                       "the replacement row aligns with the shared rebuild rows")
+        keepScreenshot(app, name: "984-connections-row-running")
+
+        progress.tap()
+        XCTAssertTrue(app.staticTexts["Step 2 of 9"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Full signed build"].exists)
+        keepScreenshot(app, name: "984-progress-running")
+
+        // The orchestrator advances: the open sheet follows without reopening.
+        try writeJournal(state: "running", current: "swap-app", done: 5)
+        XCTAssertTrue(app.staticTexts["Step 6 of 9"].waitForExistence(timeout: 15), app.debugDescription)
+        try writeJournal(state: "succeeded", current: nil, done: 9)
+        XCTAssertTrue(app.staticTexts["Replaced"].waitForExistence(timeout: 15), app.debugDescription)
+        keepScreenshot(app, name: "984-progress-succeeded")
+        dismissTopSheet(app)
+
+        // Settled, the row offers the next replacement's plan and keeps the last journal one tap away.
+        let replace = app.buttons["Replace Mac app"]
+        XCTAssertTrue(replace.waitForExistence(timeout: 15), app.debugDescription)
+        keepScreenshot(app, name: "984-connections-row-settled")
+    }
+
     /// A photo-only message sent while a turn runs is queued as a steer, and
     /// once Pi delivers it the "Steer next" card leaves the composer, also
     /// after the session is reopened (#974). Failure mode: Pi dequeued a
