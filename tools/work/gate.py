@@ -188,16 +188,16 @@ def _script_kind(root: Path, relative: str) -> Optional[str]:
 
 
 IOS_METHODS_PER_SHARD = 2
-SUITE_GROUPS = 3
 SUITE_SPLIT_CLASSES = 6
 
 
 def _suite_shards(root: Path, suite: str) -> List[str]:
-    """One command per suite, or, for a unittest suite with many TestCase classes, one per
-    group of consecutive classes balanced by source lines. Groups are computed from the
-    file every time, so a new class is always in some shard."""
+    """Large unittest suites run one class per shard, including inherited cases.
+
+    Source-line grouping packed unrelated runtime costs past the hard timeout.
+    Class boundaries are deterministic and let retries reuse each completed class.
+    """
     source = (root / suite).read_text(errors="replace")
-    text = source.splitlines()
     # unittest discovers indirect subclasses too (e.g. ReleaseFixture inherits
     # OwnedLaneFixture). Sharding must preserve that complete discovered suite.
     classes = [node for node in ast.parse(source).body if isinstance(node, ast.ClassDef)]
@@ -206,20 +206,9 @@ def _suite_shards(root: Path, suite: str) -> List[str]:
         bases = [ast.unparse(base) for base in node.bases]
         if "unittest.TestCase" in bases or any(base in test_classes for base in bases):
             test_classes.add(node.name)
-    starts = [(node.lineno - 1, node.name) for node in classes if node.name in test_classes]
-    if len(starts) < SUITE_SPLIT_CLASSES:
+    if len(test_classes) < SUITE_SPLIT_CLASSES:
         return [f"python3 -B {suite}"]
-    spans = [(name, (starts[n + 1][0] if n + 1 < len(starts) else len(text)) - i) for n, (i, name) in enumerate(starts)]
-    target = sum(size for _, size in spans) / SUITE_GROUPS
-    groups: List[List[str]] = [[]]
-    filled = 0.0
-    for name, size in spans:
-        if filled >= target and len(groups) < SUITE_GROUPS:
-            groups.append([])
-            filled = 0.0
-        groups[-1].append(name)
-        filled += size
-    return [f"python3 -B {suite} " + " ".join(group) for group in groups]
+    return [f"python3 -B {suite} {node.name}" for node in classes if node.name in test_classes]
 
 
 def _select(name: str, change: Change, code: List[str]) -> List[str]:

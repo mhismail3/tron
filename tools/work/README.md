@@ -125,8 +125,10 @@ plan. Markdown and `docs/` paths never start a build. Representative plans:
 - protocol (`config/GatewayProtocol.json`): `protocol.contract`, `mac.build`, the full
   Gateway suite and `ios.build`;
 - tooling (`tools/work`, `scripts/test-*.py`): `repo.syntax` and one `tooling.tests`
-  shard per affected suite (large unittest suites include every direct and indirect
-  TestCase subclass); `--tests` commands become `journey` shards.
+  shard per affected suite; large unittest suites run one class per shard,
+  including every direct and indirect TestCase subclass. Source-line grouping
+  could pack unrelated costs past the timeout; class shards keep completed work
+  reusable without raising any limit. `--tests` commands become `journey` shards.
 
 **Shards and cache.** Each shard's cache key hashes its expanded command and the
 git tree of its declared inputs (`keyExtra: xcode` adds the Xcode version;
