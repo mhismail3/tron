@@ -467,10 +467,11 @@ enum DisplayInlineLayoutPolicy {
         }
     }
 
-    /// The disclosure host's height between the collapsed pill and the expanded
-    /// card. Progress is clamped, so a stale phase value can never ask the host
-    /// for a height beyond either end.
-    static func disclosureHeight(pill: CGFloat, expanded: CGFloat, progress: CGFloat) -> CGFloat {
+    /// The disclosure host's extent (its height, and its width in an unbounded
+    /// row) between the collapsed pill and the expanded card. Progress is
+    /// clamped, so a stale phase value can never ask the host for a size beyond
+    /// either end.
+    static func disclosureExtent(pill: CGFloat, expanded: CGFloat, progress: CGFloat) -> CGFloat {
         let clamped = progress.isFinite ? min(1, max(0, progress)) : 0
         return pill + (expanded - pill) * clamped
     }
@@ -510,11 +511,11 @@ private struct DisclosureLayout: Layout, Animatable {
         subviews: Subviews,
         cache: inout Cache
     ) -> CGSize {
-        let width = proposal.width ?? Self.naturalWidth(subviews)
+        let width = proposal.width ?? naturalWidth(subviews)
         let measured = measure(width: width, subviews: subviews, cache: &cache)
         return CGSize(
             width: width,
-            height: DisplayInlineLayoutPolicy.disclosureHeight(
+            height: DisplayInlineLayoutPolicy.disclosureExtent(
                 pill: measured.pill,
                 expanded: measured.expanded,
                 progress: progress
@@ -560,8 +561,15 @@ private struct DisclosureLayout: Layout, Animatable {
         return (expanded, pill)
     }
 
-    private static func naturalWidth(_ subviews: Subviews) -> CGFloat {
-        subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+    /// Under an unbounded width (a grouped display row's horizontal scroll) the
+    /// host is as wide as the layer `progress` shows, interpolated like its
+    /// height. Taking the wider of both layers instead made every expanded card's
+    /// slot as wide as its hidden chip's full title (#1012).
+    private func naturalWidth(_ subviews: Subviews) -> CGFloat {
+        let widths = subviews.map { $0.sizeThatFits(.unspecified).width }
+        let expanded = widths.first ?? 0
+        let pill = widths.count > 1 ? widths[1] : 0
+        return DisplayInlineLayoutPolicy.disclosureExtent(pill: pill, expanded: expanded, progress: progress)
     }
 }
 
