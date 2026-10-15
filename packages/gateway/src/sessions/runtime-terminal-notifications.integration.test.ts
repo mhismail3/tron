@@ -24,7 +24,7 @@ function barrier() {
   return { promise, release };
 }
 
-describe.sequential("automatic terminal notifications with the pinned runtime", () => {
+describe("automatic terminal notifications with the pinned runtime", { concurrent: false }, () => {
   const cleanup: Array<() => Promise<void>> = [];
   const originalEnvironment = Object.fromEntries([
     "PI_CODING_AGENT_DIR", DELEGATED_PROVIDER_ROOT_ENV, "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT", "PI_SUBAGENT_CHILD",
