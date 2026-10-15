@@ -45,8 +45,9 @@ one while its command still runs.
   services outside the step's process tree, so they sample the host's memory in use
   above its level at start: Mac build 1.6 GB and tests 2.9 GB (claim 3–3.5 GB), iOS
   build 4.9 GB (6 GB) and a simulator journey 8.5 GB (9 GB). A command without a
-  measurement claims 4 GB. Two Gateway shards, or a Gateway shard beside an iOS
-  build, fit together; a simulator journey runs beside light work only.
+  measurement claims 4 GB. Within the 16.6 GB budget, two Gateway shards and an iOS
+  build fit together, as do a simulator journey and a Gateway shard; two simulator
+  journeys never do. Available host memory can admit fewer.
 - **Queue.** Waiters hold FIFO tickets (owner, worktree, PID, command, need,
   enqueue time); a waiter prints its position and why it waits (memory, load)
   whenever that changes. `scripts/tron-heavy status` prints the budget, claimed
