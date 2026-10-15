@@ -213,8 +213,22 @@ def _finish_issue(gh: Gh, root: Path, config: dict, repository: str, number: int
     return tracking.complete_issue(gh, root, config, number)
 
 
+def dispatch_ci(gh: Gh, root: Path, config: dict) -> int:
+    """One explicit dispatch, never a retry; keep writes inside the audited Gh boundary."""
+    remote, base = config["claim"]["remote"], config["claim"]["baseBranch"]
+    branch = _current_branch(root, base)
+    head = _out(root, "rev-parse", "HEAD")
+    if _remote_head(root, remote, branch) != head:
+        raise LandError("CI dispatch requires this exact head to be published first")
+    repository = _repository(gh)
+    workflow = config["dashboard"]["ciWorkflow"]
+    gh.rest("POST", f"repos/{repository}/actions/workflows/{quote(workflow, safe='')}/dispatches", {"ref": branch})
+    print(f"dispatched: {workflow} on {branch} at {head}; verify the run's headSha before counting it")
+    return 0
+
+
 def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: Path,
-         tests: List[str], dry_run: bool, ready: bool = False) -> int:
+         tests: List[str], dry_run: bool, ready: bool = False, publish_only: bool = False) -> int:
     rules = config["claim"]
     remote, base = rules["remote"], rules["baseBranch"]
     branch = _current_branch(root, base)
@@ -260,6 +274,9 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
         pull = _published_pull_request(gh, root, repository, remote, branch, head, pull)
         if _base_moved(root, remote, base, head):
             continue
+        if publish_only:
+            print(f"published: PR #{pull['number']} at {head}; nothing merged, closed or deleted")
+            return 0
         if pull.get("draft"):
             if not ready:
                 raise LandError(f"pull request #{pull['number']} is a draft; rerun land with --ready to mark it "
