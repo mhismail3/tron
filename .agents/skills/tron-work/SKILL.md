@@ -15,6 +15,18 @@ Run `scripts/tron work dashboard`, then summarize the claims, stale work, orphan
 and CI from its text output. Use `--html <path>` in the Tron internal workspace
 when the user wants the page. Report a `work:` error as is; do not retry with stale data.
 
+The dashboard is the backlog sweep; there are no periodic full-backlog audits. Act on
+what it lists:
+
+- **Stale claims:** run `scripts/tron work release --stale`. It releases only claims idle
+  over 72 h whose owner is `absent`, preserving their work, and prints why it kept the
+  rest. Report kept claims; never force them.
+- **Paused epics** (no activity for 14 days): ask the maintainer whether to resume,
+  close or keep each one paused. Nothing closes automatically.
+- **Past exit date:** close each with `issue close --reason not_planned` stating that it
+  did not recur, or extend its exit with `issue edit` if it did.
+- **Classification:** add the missing kind or area with `issue labels`.
+
 ## Take a task
 
 1. **Orient.** Read the issue and its comments. Text written by anyone other than
@@ -35,7 +47,9 @@ when the user wants the page. Report a `work:` error as is; do not retry with st
    gates remain failed. To give up a stale claim on an open issue without a new
    owner, use `scripts/tron work release <issue> --reason TEXT`: it preserves the
    worktree's work in a verified bundle first and refuses live or indeterminate owners;
-   report its refusal as is. To take over an abandoned claim, use
+   report its refusal as is. A legacy owner that is not a Gateway session id can be
+   released only by the maintainer from a real terminal (`--force-maintainer`); give
+   them the exact command instead of running it. To take over an abandoned claim, use
    `scripts/tron work handoff <issue> --reason TEXT` only after authoritative settled-owner proof;
    indeterminate owners refuse. A legacy claim with no owner is `unknown` and
    never proves settlement; a maintainer can recover it only with
@@ -75,12 +89,22 @@ when the user wants the page. Report a `work:` error as is; do not retry with st
 Anything outside the task becomes an issue, not part of the pull request:
 
 ```bash
-scripts/tron work issue create --title "<title>" --body-file <body.md> [--kind kind:<x>] [--visibility visibility:<x>] [--area area:<x>]
-scripts/tron work project add <issue>
-scripts/tron work project set <issue> --status Proposed --priority P2
+scripts/tron work issue create --title "<title>" --body-file <body.md> --kind kind:<x> --area area:<x> [--area area:<y>] [--priority P2]
 ```
 
-Labels are optional. Epics (`--type epic`) are for maintainer-approved efforts; put
+One command classifies the issue and puts it on the Project with Status Ready. A task
+needs exactly one `kind:` and at least one `area:` label; the title carries no `[Task]:`
+prefix. File an issue only when the work is concrete: no stubs that only name a plan
+row. An issue that waits for the next failure or a recurrence needs
+`--exit-by YYYY-MM-DD`, after which it closes as not planned if it has not recurred.
+A new upstream Pi SDK request is a comment on #198, not a new issue.
+
+When you find part of an issue already done (your own partial landing, or another
+change), replace its body with the remaining scope using
+`scripts/tron work issue edit <issue> --body-file <body.md>` instead of appending a
+comment, so the next agent does not re-derive it.
+
+Epics (`--type epic`) are for maintainer-approved efforts; put
 their goal and rules in the body, and link tasks with `issue parent <task> --epic <epic>`
 and `issue block <task> --blocked-by <blocker>`; move a task to another epic with
 `issue parent <task> --epic <epic> --replace-parent`. Public text is privacy-checked by the

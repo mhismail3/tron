@@ -1,3 +1,0 @@
-# Forces all issues to come in via a structured template — no blank issues.
-# Add `contact_links` here if/when there's a community channel (Discord, etc.).
-blank_issues_enabled: false
