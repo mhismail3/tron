@@ -229,15 +229,23 @@ final class MenuBarActionHandler {
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return }
 
-        let outcome = await TronUninstaller.unregisterAndClean(
+        let result = await TronUninstaller.unregisterAndClean(
             setup: setup,
             options: TronUninstaller.Options(
                 resetSettings: resetSettingsCheckbox.state == .on,
                 resetCredentials: resetCredentialsCheckbox.state == .on
             )
         )
+        let outcome = result.outcome
         switch outcome {
         case .ok, .alreadyLoaded:
+            if !result.remainingPaths.isEmpty {
+                await presentNonBlockingError(
+                    title: "Uninstall incomplete",
+                    message: "Tron was unregistered, but these files could not be removed:\n"
+                        + result.remainingPaths.map(\.path).joined(separator: "\n")
+                )
+            }
             // Uninstall is reached through the async action handler just like
             // Quit; defer termination until its AppKit event has returned.
             ApplicationTermination.request()
