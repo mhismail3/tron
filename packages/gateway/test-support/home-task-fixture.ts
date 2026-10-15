@@ -52,7 +52,8 @@ async function awaitRunnersExited(root: string): Promise<void> {
       if (entry.isDirectory() && depth < 8) await visit(path, depth + 1);
       else if (entry.name === "status.json") {
         const pid = (JSON.parse(await readFile(path, "utf8").catch(() => "{}")) as { pid?: unknown }).pid;
-        if (Number.isInteger(pid)) pids.set(pid as number, directory);
+        // A foreground run executes in this process and records its pid; only detached runners are awaited.
+        if (Number.isInteger(pid) && pid !== process.pid) pids.set(pid as number, directory);
       }
     }
   };
