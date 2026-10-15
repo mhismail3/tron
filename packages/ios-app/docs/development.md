@@ -34,6 +34,19 @@ Home status is an observable disposable projection, separate from the ordinary S
 
 When supported, Sessions puts a pinned Home row above the existing catalogue without changing ordinary row/filter/sort behavior. The row opens only the current enabled session ID from `home.status`; disabled, missing-session, and undesignated states use the confirmed `home.designate` mutation owner and require a fresh status projection before routing. Designation is receipt-only: pending or uncertain receipts keep their command ID and profile ownership in the mutation coordinator (one pending slot per profile), and the next explicit attempt queries that same receipt. A missing receipt on a completion check is final for the admitted Gateway: the change retires as not applied (`home_change_not_found`), the status projection is reloaded, and nothing is replayed. A missing receipt during the original attempt stays uncertain and unresolved. Backgrounding does not replay an accepted mutation, and duplicate in-flight designation is refused. The current route is the profile-qualified `ChatView` with `isHome` set; its exact managed surface owns Home status while open, and route retirement restores dashboard status ownership. The row opens `openSessionId`, so it stays routable while a rollover is pending. Sends from the Home route go through `home.prompt`; a materialized successor replaces the route. The hosted journey `testHomeRolloverPendingRoutesSendAndFollowsSuccessor` opens the sealed predecessor from the row, sends through `home.prompt`, and asserts the chat follows the successor. The hosted journey cannot type a draft between the admitted send and the follow: the composer does not take focus in that window. These journeys assert observable command ownership, stable receipt ID, a fresh status read before the profile-qualified route, and a single designation mutation. The suite also covers status reconnect, refusal, and duplicate admission. Hosted UI route tests mount the production `SessionShellView` with a scripted Gateway-backed `AppModel`, exercise capability absence, ordinary-session `ChatView` routing, real Home designation, and Home `ChatView` routing. A hosted Settings-sheet test verifies status reads remain quiet while covered for longer than the five-second fallback, then resume after dismissal without Gateway events or reconnect. Production-shell UI scenarios separately cover ready, undesignated, disabled, missing-session, and capability-absent profiles. Row appearance captures come from the production dashboard fixture, which renders the same `HomePinnedRow`; blocked-state accessibility is covered separately.
 
+Host status (#931) is covered by `TronHomeSheetsUITests`'s
+`testHostPressureNormalAndIdleWorkers`,
+`testHostPressureElevatedAndSingleWorkerInDarkMode`, and
+`testHostPressureCriticalAndUncappedWorkersAtLargeText`: the production pinned
+row and Manage Home render zero, one and seven running workers with the three
+pressure levels, shared row alignment, dark mode and accessibility text.
+Screenshots are retained as `931-*` xcresult attachments. The real socket/DTO/UI
+boundary is `scripts/ios-gateway-e2e-test run-ui --only-testing
+TronMobileUITests/RealGatewayPairAndChatUITests/testHomeStatusShowsHostPressureAndWorkers`:
+a fresh fixture has zero workers and the actual Mac pressure, even before Home
+is designated. It does not force host load; the hosted cases distinguish the
+levels. Neither journey asserts a Home queue, which no longer exists.
+
 Manage Home's controls share `HomeMutationCoordinator` with designation.
 phases as openable chapters without guessing task states.
 control methods (configure, pause, resume, disable), command IDs, duplicate

@@ -15,6 +15,11 @@ struct HomePinnedRow: View {
         HomePinnedRowPolicy.action(for: status, hasUnresolvedCommand: hasUnresolvedCommand)
     }
     private var detail: String {
+        guard let status else { return phaseDetail }
+        return "\(phaseDetail) · \(HomeStatusLinePresentation.host(status))"
+    }
+
+    private var phaseDetail: String {
         if isChanging { return "Updating Home…" }
         if hasUnresolvedCommand { return "Home change pending · Tap to check" }
         guard let status else { return isStatusUnavailable ? "Home status unavailable" : "Loading Home status…" }

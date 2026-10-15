@@ -82,6 +82,7 @@ die() { echo "error: $*" >&2; exit 1; }
 # these. Each receives its own fresh fixture and pairing code, because a pairing
 # invitation is one-use.
 ui_owned_journeys=(
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeStatusShowsHostPressureAndWorkers"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testChatSettingsServeEveryKeyAndEditAtChatLayer"
@@ -113,6 +114,7 @@ ui_journey_is_owned() {
 ui_journey_connections() {
   case "$1" in
     *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
+    *testHomeStatusShowsHostPressureAndWorkers) echo "1 no" ;;
     *) echo "0 no" ;;
   esac
 }
