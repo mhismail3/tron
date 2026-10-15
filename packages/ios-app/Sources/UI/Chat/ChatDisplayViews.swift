@@ -777,8 +777,11 @@ private struct DisplayThumbnailSurface: View {
         }
     }
 
+    /// Only a photo needs an opaque backdrop behind its transparent pixels;
+    /// every other face sits directly on the card's glass.
     private var transparencyBackdrop: Color {
-        colorScheme == .dark
+        guard display != nil else { return .clear }
+        return colorScheme == .dark
             ? Color(uiColor: .black)
             : Color(uiColor: .systemBackground)
     }
