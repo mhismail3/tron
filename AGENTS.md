@@ -177,8 +177,9 @@ test suites with an isolated `HOME` and `TMPDIR`.
   simulator), before your final response unless the user asked to keep it
   running.
 - Heavy runs (iOS simulator suites, real-Gateway E2E, full suites, `work verify`/`land`
-  builds and journeys) wait for a host-wide slot in `scripts/tron-heavy`; the owning
-  tools take it themselves. Check `scripts/tron-heavy status` before starting one by
+  builds and journeys) wait in the host-wide heavy queue (`scripts/tron-heavy`), which
+  admits them by expected memory, not just a count; the owning tools take it themselves.
+  Research, thinking and editing never wait, and Home workers have no running cap. Check `scripts/tron-heavy status` before starting one by
   hand, and never bypass it with `TRON_HEAVY_LEASE_HELD`.
 - Prefer commands that exit when they finish. Avoid watch mode and background
   processes unless the task needs them.

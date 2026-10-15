@@ -67,7 +67,7 @@ function toolText(slot: RuntimeSlot, toolCallId: string): string {
   return (item?.content ?? []).map((block) => block.type === "text" ? block.text : "").join("").trim();
 }
 
-describe.sequential("Project root through the patched Pi SDK", () => {
+describe("Project root through the patched Pi SDK", { concurrent: false }, () => {
   const cleanup: Array<() => Promise<void>> = [];
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   afterEach(async () => {
