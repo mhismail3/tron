@@ -29,10 +29,12 @@ RUNNER = ROOT / "scripts/tron-ios-test"
 PROFILER = ROOT / "scripts/tron-profile-ios"
 E2E = ROOT / "scripts/ios-gateway-e2e-test"
 XCTESTRUN_FIXTURE_KEYS = [
+    "TRON_E2E_AGENT_DIR",
     "TRON_E2E_CODE",
     "TRON_E2E_PI_VERSION",
     "TRON_E2E_PORT",
     "TRON_E2E_PROXY_TOKEN",
+    "TRON_E2E_SETTINGS_INVENTORY",
     "TRON_E2E_WORKSPACE",
 ]
 DEVELOPMENT = ROOT / "scripts/tron-ios-simulator"
@@ -125,6 +127,7 @@ CONTAINMENT_VARIABLES = (
     "TRON_IOS_E2E_DERIVED_DATA",
     # The Gateway E2E harness derives its default fixture and DerivedData from it.
     "TMPDIR",
+    "TRON_HEAVY_DIR",
 )
 _VARIABLE_LIST = ",\n        ".join(f'"{name}"' for name in CONTAINMENT_VARIABLES)
 # Prepended to every synthetic tool, so even a script that a fixture launched by
@@ -320,6 +323,10 @@ class ContainedFixture:
             "TRON_IOS_E2E_STATE_DIR": str(root / "e2e-state"),
             "TRON_IOS_E2E_DERIVED_DATA": str(root / "e2e-derived"),
             "TMPDIR": str(temporary),
+            "TRON_HEAVY_DIR": str(root / "heavy"),
+            "TRON_HEAVY_MAX_LOAD": "999999",
+            "TRON_HEAVY_AVAILABLE_MB": "32768",
+            "TRON_HEAVY_MEMORY_BUDGET_MB": "16384",
             "FAKE_CONTAINMENT_ROOT": str(root),
             "FAKE_FIXTURE_OWNER_PID": str(os.getpid()),
             "FAKE_CONTAINMENT_LOG": str(self.containment_log(root)),
@@ -547,7 +554,6 @@ raise SystemExit(2)
             "udid": udid, "name": name, "runtime_identifier": runtime,
             "runtime_version": "26.2", "runtime_build": "23C54",
             "device_type_identifier": TYPE_ID, "device_type_name": "iPhone 17 Pro",
-            "ephemeral": False,
         }
 
     def device(self, udid: str, *, runtime: str = RUNTIME_ID, name: str = "Tron iOS Tests", state: str = "Shutdown") -> tuple[str, dict[str, object]]:
@@ -1167,6 +1173,8 @@ shutil.copytree(source, clone)
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", checkout / "scripts", ignore=ignore)
         shutil.copytree(ROOT / "config", checkout / "config", ignore=ignore)
+        (checkout / "tools/work").mkdir(parents=True)
+        shutil.copy2(ROOT / "tools/work/heavy.py", checkout / "tools/work/heavy.py")
         shutil.copy2(ROOT / ".node-version", checkout / ".node-version")
         shutil.copytree(ROOT / ".github/workflows", checkout / ".github/workflows", ignore=ignore)
         # The project generator runs in this directory; a file keeps it in the commit (Git
@@ -1279,7 +1287,7 @@ shutil.copytree(source, clone)
             "schema": "tron.ios-test-simulator.v1", "owner": "tron-ios-test", "udid": udid,
             "name": name, "runtime_identifier": RUNNER_RUNTIME_ID, "runtime_version": "26.5",
             "runtime_build": "23C54", "device_type_identifier": RUNNER_TYPE_ID,
-            "device_type_name": "iPhone 17 Pro", "ephemeral": False,
+            "device_type_name": "iPhone 17 Pro",
         }
         if worktree is not None:
             marker["worktree"] = worktree
@@ -2219,7 +2227,7 @@ raise SystemExit(2)
             "schema": "tron.ios-test-simulator.v1", "owner": "tron-ios-test", "udid": udid,
             "name": device_name, "runtime_identifier": RUNTIME_ID, "runtime_version": "26.2",
             "runtime_build": "23C54", "device_type_identifier": TYPE_ID,
-            "device_type_name": "iPhone 17 Pro", "ephemeral": False,
+            "device_type_name": "iPhone 17 Pro",
         }
         if worktree is not None:
             marker["worktree"] = worktree
@@ -3669,6 +3677,12 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         self, *arguments: str, timeout: float = 180, harness: Path = E2E,
         environment: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        # This fixture supplies two synthetic UI journeys, not the production
+        # catalog's growing set of real app journeys. Explicit selections still
+        # exercise forwarding and refusal unchanged.
+        if arguments == ("run-ui",):
+            arguments = (*arguments, *(arg for journey in self.owned_ui_journeys()
+                                       for arg in ("--only-testing", journey)))
         return subprocess.run(
             [str(harness), *arguments], env=environment or self.environment,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
@@ -3756,6 +3770,12 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
         node = binary / "node"
         node.write_text(f'''#!/usr/bin/env bash
 set -euo pipefail
+# The synthetic build owns the same version-query contract as its readiness
+# server; it deliberately does not need a production dist tree.
+if [[ "${{1:-}}" == --input-type=module && "${{@: -1}}" == */packages/gateway/dist/version.js ]]; then
+  printf '0.0.0-fixture'
+  exit 0
+fi
 case "${{1:-}}" in
   */packages/gateway/dist/index.js)
     /usr/bin/env >"{record}/gateway.env"
@@ -3818,25 +3838,15 @@ exec "{real_node}" "$@"
         A test process started from a Gateway-spawned shell has that Gateway's
         bundled runtime first on `PATH`: the very runtime #445 keeps out of a
         fixture, and one that cannot load this checkout's node-pty prebuild. So
-        prefer the candidates the harness itself prefers, and use the first PATH
-        entry only on a machine that has neither (hosted CI's setup-node).
+        use the repository's pinned resolver, retaining the host NVM location
+        while every writable fixture path stays inside the isolated environment.
         """
-        candidates = [
-            Path(os.environ.get("NVM_DIR", Path.home() / ".nvm")) / f"versions/node/v{NODE_VERSION}/bin/node",
-            Path("/opt/homebrew/bin/node"),
-            Path("/usr/local/bin/node"),
-        ]
-        for candidate in candidates:
-            if not candidate.is_file():
-                continue
-            if subprocess.run(
-                [str(candidate), "--version"], env=environment,
-                text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            ).stdout.strip() == f"v{NODE_VERSION}":
-                return str(candidate)
-        found = shutil.which("node", path=environment["PATH"])
-        self.assertIsNotNone(found, "the pinned Node runtime is required by the E2E runner")
-        return found
+        resolved = subprocess.run(
+            [str(ROOT / "scripts/tron-node"), "exec", "node", "-p", "process.execPath"],
+            env={**environment, "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))},
+            check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        return resolved.stdout.strip()
 
     def nvm_pinned_environment(self, environment: dict[str, str]) -> dict[str, str]:
         """The fixture toolchain selected the way a machine without TRON_NODE_BIN
@@ -3864,6 +3874,8 @@ exec "{real_node}" "$@"
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", other / "scripts", ignore=ignore)
         shutil.copytree(ROOT / "config", other / "config", ignore=ignore)
+        (other / "tools/work").mkdir(parents=True)
+        shutil.copy2(ROOT / "tools/work/heavy.py", other / "tools/work/heavy.py")
         shutil.copy2(ROOT / ".node-version", other / ".node-version")
         return other
 
@@ -3879,6 +3891,8 @@ exec "{real_node}" "$@"
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", worktree / "scripts", ignore=ignore)
         shutil.copytree(ROOT / "config", worktree / "config", ignore=ignore)
+        (worktree / "tools/work").mkdir(parents=True)
+        shutil.copy2(ROOT / "tools/work/heavy.py", worktree / "tools/work/heavy.py")
         shutil.copytree(ROOT / ".github/workflows", worktree / ".github/workflows")
         shutil.copy2(ROOT / ".node-version", worktree / ".node-version")
         (worktree / "packages/mac-app/scripts").mkdir(parents=True)
@@ -4307,6 +4321,8 @@ exec "{real_node}" "$@"
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", worktree / "scripts", ignore=ignore)
         shutil.copytree(ROOT / "config", worktree / "config", ignore=ignore)
+        (worktree / "tools/work").mkdir(parents=True)
+        shutil.copy2(ROOT / "tools/work/heavy.py", worktree / "tools/work/heavy.py")
         gateway = worktree / "packages/gateway"
         gateway.mkdir(parents=True)
         for name in ("package.json", "package-lock.json"):
@@ -4321,7 +4337,7 @@ exec "{real_node}" "$@"
 
         subprocess.run(["git", "init", "--quiet"], cwd=worktree, env=self.environment, check=True)
         subprocess.run(
-            ["git", "add", ".gitignore", ".node-version", "scripts", "config", "packages/gateway"],
+            ["git", "add", ".gitignore", ".node-version", "scripts", "config", "tools", "packages/gateway"],
             cwd=worktree, env=self.environment, check=True,
         )
         subprocess.run([
@@ -6134,4 +6150,16 @@ print(completed.returncode)
 
 
 if __name__ == "__main__":
+    if not os.environ.get("TRON_HEAVY_LEASE_HELD"):
+        # Hardware-free tools inherit a real, test-owned lease. In particular the
+        # crash fixtures must kill the iOS lane holder, not an intervening heavy
+        # queue supervisor. Never acquire or alter the shared Mac queue here.
+        with tempfile.TemporaryDirectory(prefix="tron-ios-infrastructure-queue-") as queue:
+            result = _subprocess.run(
+                [sys.executable, str(ROOT / "tools/work/heavy.py"), "run", "--owner", "iOS synthetic fixture suite",
+                 "--", sys.executable, "-B", str(Path(__file__).resolve()), *sys.argv[1:]],
+                env={**os.environ, "TRON_HEAVY_DIR": queue, "TRON_HEAVY_MAX_LOAD": "999999",
+                     "TRON_HEAVY_AVAILABLE_MB": "32768", "TRON_HEAVY_MEMORY_BUDGET_MB": "16384"},
+            )
+        raise SystemExit(result.returncode)
     unittest.main(verbosity=2)

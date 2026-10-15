@@ -1,6 +1,7 @@
 {
   "version": 1,
   "about": "The gate step catalog: the one source of truth for every verification step (tools/work/README.md#gate). Plan order is catalog order. Budgets and RSS come from measurements recorded on #1022; `scripts/tron gate report` prints the current ones. `hosted` says whether a step can run on hosted CI (`safe`) or needs this Mac (`local-only: reason`).",
+  "ciSteps": ["repo.policy", "relay.check", "gateway.build", "gateway.integration"],
   "codeExclude": [
     "**/*.md",
     "**/docs/**"
@@ -139,6 +140,27 @@
       "hosted": "safe"
     },
     {
+      "id": "repo.policy",
+      "summary": "Hosted repository policy; common checks are prerequisite catalog steps",
+      "trigger": {},
+      "after": [
+        "repo.privacy",
+        "repo.agent-policy",
+        "protocol.contract"
+      ],
+      "command": "scripts/tron version check && python3 scripts/check-documentation-policy.py",
+      "inputs": [
+        "."
+      ],
+      "budgetSeconds": 30,
+      "timeoutSeconds": 120,
+      "class": "light",
+      "expectedRssMb": 200,
+      "pass": "exit 0",
+      "unlocks": "hosted",
+      "hosted": "safe"
+    },
+    {
       "id": "mac.build",
       "summary": "XcodeGen and Debug build-for-testing of TronMac (stages the Gateway payload, which rewrites packages/gateway/node_modules, so it runs before every Gateway step)",
       "trigger": {
@@ -263,6 +285,52 @@
       "hosted": "safe"
     },
     {
+      "id": "gateway.build",
+      "summary": "Gateway SDK check and emitted build for hosted integration",
+      "trigger": {},
+      "after": [
+        "gateway.deps"
+      ],
+      "command": "cd packages/gateway && npm run check:pi-sdk && npm run build",
+      "inputs": [
+        "packages/gateway",
+        "config",
+        ".node-version"
+      ],
+      "cacheScope": "worktree",
+      "artifacts": [
+        "packages/gateway/dist/index.js"
+      ],
+      "budgetSeconds": 90,
+      "timeoutSeconds": 300,
+      "class": "heavy",
+      "expectedRssMb": 1300,
+      "pass": "exit 0",
+      "unlocks": "gateway.integration",
+      "hosted": "safe"
+    },
+    {
+      "id": "gateway.integration",
+      "summary": "Hosted-safe integration subset; vitest.hosted.config.ts alone owns its file selection (#1026)",
+      "trigger": {},
+      "after": [
+        "gateway.build"
+      ],
+      "command": "cd packages/gateway && npx vitest run --config vitest.hosted.config.ts",
+      "inputs": [
+        "packages/gateway",
+        "config",
+        ".node-version"
+      ],
+      "budgetSeconds": 120,
+      "timeoutSeconds": 240,
+      "class": "heavy",
+      "expectedRssMb": 2500,
+      "pass": "exit 0, no failed test",
+      "unlocks": "hosted",
+      "hosted": "safe"
+    },
+    {
       "id": "gateway.typecheck",
       "summary": "tsc for Gateway sources and test support",
       "trigger": {
@@ -316,7 +384,7 @@
       "unlocks": "gateway.nested",
       "artifacts": [],
       "reports": "test-results/gate/gateway-affected-<shard>-of-<shards>.json (per-file durations for shard balancing)",
-      "hosted": "safe"
+      "hosted": "local-only: Home/runtime timing on hosted runners (#1026); gateway.integration owns hosted coverage"
     },
     {
       "id": "gateway.scripts",
@@ -386,7 +454,7 @@
       "unlocks": "gateway.nested",
       "artifacts": [],
       "reports": "test-results/gate/gateway-full-<shard>-of-<shards>.json (per-file durations for shard balancing)",
-      "hosted": "safe"
+      "hosted": "local-only: Home/runtime timing on hosted runners (#1026); gateway.integration owns hosted coverage"
     },
     {
       "id": "gateway.nested",
@@ -424,7 +492,7 @@
         "subagents-controls": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts src/home/home-task-subagents-controls.e2e.test.ts",
         "rest": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts --exclude 'src/home/home-task-subagents-*.e2e.test.ts'"
       },
-      "hosted": "safe"
+      "hosted": "local-only: Home/runtime timing on hosted runners (#1026); gateway.integration owns hosted coverage"
     },
     {
       "id": "gateway.payload",
@@ -458,14 +526,14 @@
     },
     {
       "id": "relay.check",
-      "summary": "Push relay install, typecheck and dry-run build",
+      "summary": "Push relay install, typecheck, dry-run build and tests",
       "trigger": {
         "paths": [
           "packages/push-relay/**"
         ],
         "code": true
       },
-      "command": "cd packages/push-relay && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run check && npm run build",
+      "command": "cd packages/push-relay && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run check && npm run build && npm test",
       "inputs": [
         "packages/push-relay",
         ".node-version"
@@ -540,6 +608,77 @@
       "unlocks": "journeys",
       "memorySample": "host",
       "hosted": "local-only: simulator lanes on this Mac"
+    },
+    {
+      "id": "gateway.pi-sdk-rollback",
+      "summary": "Networked sequential Pi SDK forward/rollback matrix on an actual Pi dependency-graph delta or matrix-owner change",
+      "trigger": {
+        "piGraph": true,
+        "paths": [
+          "packages/gateway/scripts/check-pi-sdk-rollback.mjs",
+          "packages/gateway/pi-sdk-baseline.json",
+          "packages/gateway/scripts/compare-pi-sdk-graph.mjs"
+        ]
+      },
+      "after": [
+        "gateway.deps"
+      ],
+      "command": "cd packages/gateway && npm run test:pi-sdk-rollback",
+      "inputs": [
+        "packages/gateway",
+        ".node-version"
+      ],
+      "budgetSeconds": 240,
+      "timeoutSeconds": 300,
+      "class": "heavy",
+      "expectedRssMb": 2000,
+      "pass": "exit 0, both rollback sequences and MCP coverage pass",
+      "unlocks": "ios.gateway-boundary",
+      "hosted": "local-only: networked historical SDK installation and real session matrix"
+    },
+    {
+      "id": "ios.gateway-boundary",
+      "summary": "Real Gateway resilience and LAN boundary, built once then run serially in an owned simulator lane; every shard retires its fixture",
+      "trigger": {
+        "piGraph": true,
+        "code": true,
+        "paths": [
+          "packages/gateway/src/transport/server.ts",
+          "packages/gateway/src/transport/connection-policy.ts",
+          "packages/gateway/src/transport/lan-endpoint.ts",
+          "packages/gateway/src/transport/tailscale-peer.ts",
+          "packages/gateway/src/transport/gateway-service.ts",
+          "packages/ios-app/Core/Gateway/**",
+          "packages/ios-app/E2ETests/RealGatewayPiBoundaryTests.swift",
+          "scripts/ios-gateway-*",
+          "scripts/patch-ios-gateway-e2e-xctestrun.py",
+          "config/GatewayProtocol.json"
+        ]
+      },
+      "shardCommands": {
+        "build": "trap 'scripts/ios-gateway-e2e-test stop' EXIT; scripts/ios-gateway-e2e-test build",
+        "resilience": "trap 'scripts/ios-gateway-e2e-test stop' EXIT; scripts/ios-gateway-e2e-test run",
+        "lan": "trap 'scripts/ios-gateway-e2e-test stop' EXIT; scripts/ios-gateway-e2e-test run-lan"
+      },
+      "inputs": [
+        "packages/gateway",
+        "packages/ios-app",
+        "scripts",
+        "config",
+        ".node-version"
+      ],
+      "keyExtra": [
+        "xcode"
+      ],
+      "cacheScope": "worktree",
+      "budgetSeconds": 300,
+      "timeoutSeconds": 900,
+      "class": "heavy",
+      "expectedRssMb": 9000,
+      "pass": "exit 0, XCTest passes and owned fixture stops",
+      "unlocks": "land",
+      "memorySample": "host",
+      "hosted": "local-only: Xcode, owned simulator, private LAN address; cold build has the ios.build 900s hard bound"
     },
     {
       "id": "journey",

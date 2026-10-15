@@ -80,6 +80,28 @@ hand-copying their commands.
 | `gate submit [run args]` / `jobs` / `wait JOB` / `cancel JOB` | Hands a run to the background and returns at once, so the session keeps working; `jobs` shows each job's live state, heavy-queue position and last line; `wait` streams it and returns its result; `cancel` stops it and its running step. |
 | `gate report [--json]` / `gate catalog` | Median and max wall time and peak RSS per shard from every recorded run; the catalog as a table. |
 
+**Hosted CI.** `ciSteps` in the catalog owns the four public `scripts/tron ci`
+step names. Each delegates to `gate run --base HEAD --force <id>`, including its
+transitive prerequisites in catalog order, so it also works in a shallow hosted
+checkout. Failure annotations retain `Reproduce: scripts/tron ci <step>`; there
+are no retries. Dedicated GitHub VMs bypass only the shared Mac heavy queue,
+never the catalog's hosted-safety check. `gateway.integration` invokes
+`vitest.hosted.config.ts`; that config alone owns the hosted test selection.
+`gateway.full`, `gateway.affected` and `gateway.nested` remain local-only because
+of the hosted timing failures documented in #1026. No local tests are removed.
+
+**Pi and connection boundaries.** The graph comparator examines the merge base
+and the candidate Git tree, including dirty edits, without installing packages.
+An actual Pi family dependency-closure delta selects `gateway.pi-sdk-rollback`
+and `ios.gateway-boundary[build,resilience,lan]`; unrelated lock churn does not.
+The catalog also lists the connection/LAN and harness owners that select the
+iOS boundary without rollback. These steps are local-only heavy work. The iOS
+shards build once, run serially, and stop their private Gateway on exit. The
+rollback matrix is networked and installs its historical SDK in a temporary
+fixture; it is not a no-install check. The iOS shard budgets are 300 seconds,
+with a 900-second hard bound for cold Xcode/fixture work; gate metrics expose
+actual durations rather than claiming these new steps have been measured.
+
 **Plans.** Plan order is catalog order, so the same change always gets the same
 plan. Markdown and `docs/` paths never start a build. Representative plans:
 
@@ -101,7 +123,8 @@ plan. Markdown and `docs/` paths never start a build. Representative plans:
 - protocol (`config/GatewayProtocol.json`): `protocol.contract`, `mac.build`, the full
   Gateway suite and `ios.build`;
 - tooling (`tools/work`, `scripts/test-*.py`): `repo.syntax` and one `tooling.tests`
-  shard per affected suite; `--tests` commands become `journey` shards.
+  shard per affected suite (large unittest suites include every direct and indirect
+  TestCase subclass); `--tests` commands become `journey` shards.
 
 **Shards and cache.** Each shard's cache key hashes its expanded command and the
 git tree of its declared inputs (`keyExtra: xcode` adds the Xcode version;
@@ -133,7 +156,10 @@ refuses a dirty worktree or a tree that changed while steps ran. `python3 -B
 scripts/test-gate.py` exercises the real CLI in temporary repositories: the plan for
 each change kind, an injected failure that stops at its shard, a retry that reuses
 passing shards, input invalidation, a hard timeout, background submit/cancel/wait,
-and the dirty-tree refusal; evidence is `test-results/gate.json`.
+and the dirty-tree refusal. It also exercises the real `tron ci` wrapper in a
+shallow fixture checkout (prerequisites, fail-first annotation, local-only refusal),
+Pi versus unrelated lock deltas, transport/LAN plans and complete inherited-suite
+sharding; evidence is `test-results/gate.json`.
 
 ## `land`
 

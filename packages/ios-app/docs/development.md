@@ -1336,7 +1336,21 @@ Run
 to regenerate inspectable process-survival reports at
 `test-results/ios-infrastructure/*-cleanup.json`. The full hardware-free suite is
 a `tooling.tests` gate shard when its scripts change; it does not use real
-devices or simulators.
+devices or simulators. Fixture checkouts include the real heavy-queue owner;
+the suite acquires a real isolated queue lease (or inherits the gate's), so its
+crash cases still target the iOS lane holder, not a new queue supervisor. Its
+synthetic Gateway serves both readiness and built-version queries, resolves its
+real Node through `scripts/tron-node`, and bounds its UI fixture to the two
+journeys it supplies. Assertions and production journey selection stay intact.
+The obsolete hosted-CI ephemeral simulator flag/marker is gone: all callers use
+the same owned-lane lifecycle.
+
+Pi dependency-graph and connection/LAN changes automatically select the local
+`ios.gateway-boundary` build, resilience and LAN shards in the
+[gate catalog](../../../tools/work/gate-catalog.json). The Pi graph also selects
+the networked rollback matrix; unrelated lockfile churn does not. The normal
+boundary and LAN boundary are separate serial shards, not substitutes for one
+another, and each stops its own Gateway fixture on exit.
 
 ### Test runner safety contract
 

@@ -24,6 +24,7 @@ summarizes.
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import fnmatch
 import hashlib
@@ -130,6 +131,10 @@ def load_catalog(path: Path = CATALOG) -> dict:
             raise GateError(f"gate catalog step {step['id']} has class {step['class']}")
         if step["budgetSeconds"] > step["timeoutSeconds"]:
             raise GateError(f"gate catalog step {step['id']} has a budget beyond its hard timeout")
+    steps = {step["id"]: step for step in catalog["steps"]}
+    for name in catalog.get("ciSteps", []):
+        if name not in steps or steps[name].get("hosted") != "safe":
+            raise GateError(f"CI step {name} is not hosted-safe")
     return catalog
 
 
@@ -191,9 +196,17 @@ def _suite_shards(root: Path, suite: str) -> List[str]:
     """One command per suite, or, for a unittest suite with many TestCase classes, one per
     group of consecutive classes balanced by source lines. Groups are computed from the
     file every time, so a new class is always in some shard."""
-    text = (root / suite).read_text(errors="replace").splitlines()
-    starts = [(i, m.group(1)) for i, line in enumerate(text)
-              if (m := re.match(r"^class (\w+)\(.*unittest\.TestCase", line))]
+    source = (root / suite).read_text(errors="replace")
+    text = source.splitlines()
+    # unittest discovers indirect subclasses too (e.g. ReleaseFixture inherits
+    # OwnedLaneFixture). Sharding must preserve that complete discovered suite.
+    classes = [node for node in ast.parse(source).body if isinstance(node, ast.ClassDef)]
+    test_classes: set = set()
+    for node in classes:
+        bases = [ast.unparse(base) for base in node.bases]
+        if "unittest.TestCase" in bases or any(base in test_classes for base in bases):
+            test_classes.add(node.name)
+    starts = [(node.lineno - 1, node.name) for node in classes if node.name in test_classes]
     if len(starts) < SUITE_SPLIT_CLASSES:
         return [f"python3 -B {suite}"]
     spans = [(name, (starts[n + 1][0] if n + 1 < len(starts) else len(text)) - i) for n, (i, name) in enumerate(starts)]
@@ -265,15 +278,38 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
     raise GateError(f"unknown selector {name}")
 
 
+def _pi_graph_changed(change: Change) -> bool:
+    manifests = {"packages/gateway/package.json", "packages/gateway/package-lock.json"}
+    if not manifests.intersection(change.paths):
+        return False
+    comparator = Path(__file__).resolve().parents[2] / "packages/gateway/scripts/compare-pi-sdk-graph.mjs"
+    result = subprocess.run(["node", str(comparator), change.merge_base, change.tree, str(change.root)],
+                            capture_output=True, text=True)
+    if result.returncode:
+        raise GateError("Pi graph classification failed: " + result.stderr.strip())
+    try:
+        changed = json.loads(result.stdout)["changed"]
+        if not isinstance(changed, bool):
+            raise ValueError("changed is not a boolean")
+        return changed
+    except (ValueError, KeyError) as error:
+        raise GateError(f"Pi graph classification returned invalid evidence: {error}") from error
+
+
 def plan(catalog: dict, change: Change) -> List[Shard]:
     """The ordered shards the change needs (catalog order; shards in index order)."""
     exclude = catalog.get("codeExclude", [])
     code = [p for p in change.paths if not _matches(p, exclude)]
     selected: List[Shard] = []
+    pi_changed: Optional[bool] = None
     for step in catalog["steps"]:
         trigger = step["trigger"]
         candidates = code if trigger.get("code") else change.paths
         needed = trigger.get("always") or ("paths" in trigger and any(_matches(p, trigger["paths"]) for p in candidates))
+        if trigger.get("piGraph"):
+            if pi_changed is None:
+                pi_changed = _pi_graph_changed(change)
+            needed = needed or pi_changed
         if "paths" not in trigger and "select" in trigger:
             needed = True
         if not needed:
@@ -431,7 +467,9 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
     stop = stop or threading.Event()
     log.parent.mkdir(parents=True, exist_ok=True)
     lease = None
-    if step["class"] == "heavy":
+    # Dedicated hosted VMs do not share this Mac's memory queue. Membership is
+    # checked before executing any step; local-only steps cannot take this path.
+    if step["class"] == "heavy" and os.environ.get("GITHUB_ACTIONS") != "true":
         try:
             lease = heavy.acquire(f"gate {shard.name} in {root.name}", shard.command, need_mb=int(step["expectedRssMb"]),
                                   cancelled=stop.is_set)
@@ -866,13 +904,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         commands.add_parser(name, help=f"{name} a background gate job").add_argument("job")
     sub = commands.add_parser("report", help="wall time and peak RSS per shard from recorded runs")
     sub.add_argument("--json", action="store_true")
-    commands.add_parser("catalog", help="print the step catalog")
+    sub = commands.add_parser("catalog", help="print the step catalog")
+    sub.add_argument("--ci", action="store_true", help="print the catalog's stable hosted CI step names")
     args = parser.parse_args(argv)
     root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     try:
         if args.action == "report":
             return report(root, args.json)
         if args.action == "catalog":
+            if args.ci:
+                print(" ".join(load_catalog().get("ciSteps", [])))
+                return 0
             return catalog_table()
         if args.action == "submit":
             return submit(root, args.args)
@@ -891,6 +933,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
         if args.action == "run" and args.steps:
             shards = _named(catalog, change, shards, args.steps)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            unsafe = [s.name for s in shards if s.step.get("hosted") != "safe"]
+            if unsafe:
+                raise GateError("local-only steps cannot run on hosted CI: " + ", ".join(unsafe))
         ok = execute(root, config, shards, change, force=getattr(args, "force", False), only_first_pending=args.action == "next")
         return 0 if ok else 1
     except GateError as error:
@@ -899,10 +945,15 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 def _named(catalog: dict, change: Change, planned: List[Shard], names: List[str]) -> List[Shard]:
-    """Named steps (with their planned prerequisites first), even when the change would not select them."""
+    """Named steps and their transitive prerequisites, including in shallow CI checkouts."""
     steps = {step["id"]: step for step in catalog["steps"]}
     wanted: List[Shard] = []
-    for name in names:
+    visiting: set = set()
+
+    def include(name: str) -> None:
+        if name in visiting:
+            raise GateError(f"cyclic gate prerequisite: {name}")
+        visiting.add(name)
         matched = [s for s in planned if s.name == name or s.step["id"] == name]
         if not matched:
             step = steps.get(name.split("#")[0].split("[")[0])
@@ -915,9 +966,14 @@ def _named(catalog: dict, change: Change, planned: List[Shard], names: List[str]
             if not matched:
                 raise GateError(f"no shard named {name}; see scripts/tron gate plan")
         for prerequisite in matched[0].step.get("after", []):
-            wanted.extend(s for s in planned if s.step["id"] == prerequisite and s not in wanted)
+            include(prerequisite)
         wanted.extend(s for s in matched if s not in wanted)
-    return wanted
+        visiting.remove(name)
+
+    for name in names:
+        include(name)
+    order = {step["id"]: i for i, step in enumerate(catalog["steps"])}
+    return sorted(wanted, key=lambda shard: (order[shard.step["id"]], shard.index))
 
 
 def _terminate(_signal, _frame) -> None:
