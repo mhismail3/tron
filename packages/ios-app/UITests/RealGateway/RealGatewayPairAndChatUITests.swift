@@ -1317,10 +1317,16 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         openMacSettings()
         openSettingsSection(app, "setup", linkLabel: "Setup")
-        let outsideRow = topSwitchRow(app, key: "setup.installTelemetry")
+        let outsideSummary = settingRow(app, key: "setup.installTelemetry")
         // The badge's accessible label carries its detail ("Changed outside Tron, Mac: On → Off").
-        XCTAssertTrue(waitUntil(timeout: 30) { self.badgeLabels(outsideRow).contains { $0.hasPrefix("Changed outside Tron") } },
-                      "an outside edit of Tron's value must be shown: \(badgeLabels(outsideRow))")
+        XCTAssertTrue(waitUntil(timeout: 30) { self.badgeLabels(outsideSummary).contains { $0.hasPrefix("Changed outside Tron") } },
+                      "an outside edit of Tron's value must be shown: \(badgeLabels(outsideSummary))")
+        // An actionable outside-change badge promotes this row to a detail link;
+        // its toggle and Apply again belong to that child, not the summary row.
+        let outsideEditor = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-open")
+        XCTAssertNotNil(outsideEditor, "the outside change must open its value and actions")
+        outsideEditor?.tap()
+        let outsideRow = topSwitchRow(app, key: "setup.installTelemetry")
         XCTAssertEqual(switchValue(outsideRow), macEdit.before, "the live value must follow the edited store")
         let applyAgain = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-applyAgain", timeout: 120)
         XCTAssertNotNil(applyAgain, "the outside change of Tron's value must offer Apply again: \(app.debugDescription)")
@@ -1330,6 +1336,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             self.switchValue(outsideRow) == macEdit.after && !self.badgeLabels(outsideRow).contains { $0.hasPrefix("Changed outside Tron") }
         }, "Apply again must restore Tron's value and clear the outside mark: \(badgeLabels(outsideRow))")
 
+        dismissTopSheet(app) // Changed setting detail
         dismissTopSheet(app) // Setup Settings
         // A hand-built screen on the same change path: Extensions' Built-in switch
         // writes `sources.extensions` at the Mac layer (no legacy document read).
@@ -1456,8 +1463,33 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             }
             let elements = descendants(of: snapshot)
             for key in schema.keys where key.group == group {
+                var keyElements = elements
+                var instances: XCUIElement?
+                // Large qualified inventories (Mac permission floors) have their
+                // own progressive sheet. A link is not a value/source row: enter
+                // it and apply the same assertions to its concrete instances.
+                let instancesLinkID = "settings-instances-\(key.id)-open"
+                if elements.contains(where: { $0.identifier == instancesLinkID }) {
+                    let link = hittableElement(app, identifier: instancesLinkID)
+                    XCTAssertNotNil(link, "\(name) cannot reach the instances of \(key.id)")
+                    link?.tap()
+                    let detail = app.descendants(matching: .any)["settings-instances-\(key.id)-detail"]
+                    XCTAssertTrue(detail.waitForExistence(timeout: 30), "the \(key.id) instances did not open")
+                    guard let snapshot = try? detail.snapshot() else {
+                        XCTFail("could not read the \(key.id) instances")
+                        return coverage
+                    }
+                    instances = detail
+                    keyElements = descendants(of: snapshot)
+                }
+                defer {
+                    if let instances {
+                        dismissTopSheet(app)
+                        XCTAssertTrue(waitForNonExistence(instances, timeout: 15), "the \(key.id) instances must dismiss")
+                    }
+                }
                 let token = settingRowToken(key.id)
-                let rows = elements.filter { $0.identifier == token || $0.identifier.hasPrefix(token + "_") }
+                let rows = keyElements.filter { $0.identifier == token || $0.identifier.hasPrefix(token + "_") }
                 let macInstancesOnly = key.qualifier == "key" || key.qualifier == "device"
                 let served = !key.layers.isDisjoint(with: layers) && (!macInstancesOnly || isMacTarget)
                 guard served else {
