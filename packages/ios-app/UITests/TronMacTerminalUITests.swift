@@ -120,6 +120,8 @@ final class TronMacTerminalUITests: XCTestCase {
     private func openMacTerminal(_ app: XCUIApplication) {
         let row = app.buttons["settings-link-Mac Terminal"]
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
+        // Tools & Diagnostics is the last Settings group (#1030).
+        for _ in 0..<12 where !row.isHittable { app.swipeUp() }
         row.tap()
     }
 

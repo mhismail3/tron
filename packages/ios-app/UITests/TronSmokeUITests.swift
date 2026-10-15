@@ -2560,31 +2560,66 @@ final class TronSmokeUITests: XCTestCase {
         assertSettingsTopLevelOrder(app)
     }
 
-    /// Settings top level (#956): Accounts opens with Connections, and the last
-    /// group, This iPhone, holds Push Notifications first, then Appearance,
-    /// Sessions, Logs and Setup. There is no Data & Diagnostics group.
+    /// Settings top level (#956, #1030): Accounts opens with Connections, This
+    /// iPhone holds Push Notifications, Appearance and Sessions, and the last
+    /// group, Tools & Diagnostics, holds Mac Terminal, Experimental, Setup and
+    /// Logs. Each moved row still opens its own sheet from the shared rows.
     @MainActor
     private func assertSettingsTopLevelOrder(_ app: XCUIApplication) {
         let accounts = app.staticTexts["Accounts"].firstMatch
         for _ in 0..<12 where !accounts.isHittable { app.swipeDown() }
         let connections = app.buttons["settings-link-Connections"]
         XCTAssertTrue(connections.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertLessThan(accounts.frame.minY, connections.frame.minY)
-        XCTAssertLessThan(connections.frame.minY, app.buttons["settings-link-Model Providers"].frame.minY,
-                          "Accounts starts with Connections")
+        let accountRows = ["Connections", "Model Providers", "Custom Models", "Connected Services"]
+            .map { app.buttons["settings-link-\($0)"] }
+        let accountTops = [accounts.frame.minY] + accountRows.map(\.frame.minY)
+        XCTAssertEqual(accountTops, accountTops.sorted(), "Accounts lists Connections first: \(accountTops)")
         keepScreenshot(named: "settings-top-level-1")
+
         let iphone = app.staticTexts["This iPhone"].firstMatch
-        let rows = ["Push Notifications", "Appearance", "Sessions", "Logs", "Setup"].map { app.buttons["settings-link-\($0)"] }
-        for _ in 0..<12 where !rows.last!.isHittable { app.swipeUp() }
+        let diagnostics = app.staticTexts["Tools & Diagnostics"].firstMatch
+        let iphoneRows = ["Push Notifications", "Appearance", "Sessions"].map { app.buttons["settings-link-\($0)"] }
+        let movedNames = ["Mac Terminal", "Experimental", "Setup", "Logs"]
+        let movedRows = movedNames.map { app.buttons["settings-link-\($0)"] }
+        for _ in 0..<12 where !movedRows.last!.isHittable { app.swipeUp() }
         keepScreenshot(named: "settings-top-level-2")
-        XCTAssertTrue(iphone.isHittable, app.debugDescription)
-        let tops = [iphone.frame.minY] + rows.map(\.frame.minY)
-        XCTAssertEqual(tops, tops.sorted(), "This iPhone lists Push Notifications, Appearance, Sessions, Logs, Setup: \(tops)")
-        XCTAssertFalse(app.staticTexts["Data & Diagnostics"].exists, "Data & Diagnostics merged into This iPhone")
-        XCTAssertFalse(app.staticTexts["Stored on this iPhone. Never changes what the agent does."].exists,
-                       "Logs and Setup reach the Mac, so the group makes no device-only promise")
+        XCTAssertTrue(iphone.isHittable && diagnostics.isHittable, app.debugDescription)
+        // Card order, then row order inside each card: no moved row is left in
+        // Accounts or This iPhone, and nothing follows Tools & Diagnostics.
+        let tops = [iphone.frame.minY] + iphoneRows.map(\.frame.minY) + [diagnostics.frame.minY] + movedRows.map(\.frame.minY)
+        XCTAssertEqual(tops, tops.sorted(),
+                       "This iPhone (Push Notifications, Appearance, Sessions), then Tools & Diagnostics (Mac Terminal, Experimental, Setup, Logs): \(tops)")
         for group in ["Accounts", "Agent", "Tools & Extensions", "More"] where app.staticTexts[group].firstMatch.exists {
-            XCTAssertLessThan(app.staticTexts[group].firstMatch.frame.minY, iphone.frame.minY, "This iPhone is the last group, after \(group)")
+            XCTAssertLessThan(app.staticTexts[group].firstMatch.frame.minY, iphone.frame.minY, "This iPhone follows \(group)")
+        }
+        // Same shared row inside the same shared group card: every moved row has
+        // the Accounts rows' left edge and width, and keeps its scope summary.
+        let rowGeometry = connections.frame
+        for (row, name) in zip(movedRows, movedNames) {
+            XCTAssertEqual(row.frame.minX, rowGeometry.minX, accuracy: 1, "\(name) is a shared Settings row")
+            XCTAssertEqual(row.frame.width, rowGeometry.width, accuracy: 1, "\(name) is a shared Settings row")
+        }
+        for summary in ["A shell on your Mac, even without the Gateway", "Prototypes to try on this iPhone",
+                        "Import, Mac session folder, and telemetry", "Diagnostics from this iPhone and your Macs"] {
+            XCTAssertTrue(app.staticTexts[summary].exists, "a moved row keeps its scope summary: \(summary)")
+        }
+        XCTAssertFalse(app.staticTexts["Data & Diagnostics"].exists)
+        XCTAssertFalse(app.staticTexts["Stored on this iPhone. Never changes what the agent does."].exists,
+                       "Setup and Logs reach the Mac, so neither group makes a device-only promise")
+
+        // Each moved row still opens its own destination.
+        let destinations: [(String, XCUIElement)] = [
+            ("Mac Terminal", app.descendants(matching: .any)["terminal-sheet-title"].firstMatch),
+            ("Experimental", app.descendants(matching: .any)["settings-experimental-swift-apps"].firstMatch),
+            ("Setup", app.staticTexts["Import"].firstMatch),
+            ("Logs", app.staticTexts["Logs"].firstMatch),
+        ]
+        for (name, marker) in destinations {
+            tapScrolling(app.buttons["settings-link-\(name)"], in: app)
+            XCTAssertTrue(marker.waitForExistence(timeout: 10), "\(name) opens its sheet: \(app.debugDescription)")
+            keepScreenshot(named: "settings-tools-diagnostics-\(name.lowercased().replacingOccurrences(of: " ", with: "-"))")
+            closeTopSheet(app)
+            XCTAssertTrue(diagnostics.waitForExistence(timeout: 5))
         }
     }
 

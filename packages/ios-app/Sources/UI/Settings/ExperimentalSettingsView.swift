@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings › This iPhone › Experimental: prototypes this iPhone can opt into.
+/// Settings › Tools & Diagnostics › Experimental: prototypes this iPhone can opt into.
 /// Each switch is a device-local preference with no Gateway setting behind it.
 struct ExperimentalSettingsView: View {
     @State private var swiftApps = SwiftAppExperiment.shared

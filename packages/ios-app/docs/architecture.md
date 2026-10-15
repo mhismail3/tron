@@ -720,8 +720,7 @@ and one read per actual invalidation rather than feeding its own reload loop.
 construction, and trust inspection/mutation; it keeps no settings projection. Settings are read
 only through `settings.resolve` (the generic renderer's `resolveForRenderer`, or one resolve for a
 single served key, reading `value` or the target's own layer through `ResolvedSetting.value(at:)`)
-and written only through the Gateway's one change path, `settings.change` (gateway
-`docs/settings-model.md`). Hand-built screens send schema keys with `SettingsTarget.keyChange`, so
+and written only through the Gateway's one change path, `settings.change` (`packages/gateway/docs/settings-model.md`). Hand-built screens send schema keys with `SettingsTarget.keyChange`, so
 iOS holds no pi-document path table. A trust decision is the `permissions.projectTrust` key for the
 project target, and its change outcome carries the resulting trust inspection; clearing a saved
 decision is an `unset`, while `true` and `false` remain distinct decisions. It uses the shared
@@ -735,7 +734,7 @@ decisions. `TronProjectTrustUITests` exercises the real controls against the `HO
 `HostedProjectTrustFixture`: an older accepted receipt and older inspection value/error cannot replace
 a later canonical Block, with ordered/single decisions, foreground receipt reconciliation and a
 replacement Mac with the same cwd as controls. The fixture changes no actual trust or resources.
-The settings risk gate's iPhone half (gateway `docs/settings-model.md` 5.4 and 5.5) has the same
+The settings risk gate's iPhone half (`packages/gateway/docs/settings-model.md` 5.4 and 5.5) has the same
 owner. `SettingsApprovalsSection` shows pending changes in Manage Home (Home's and its task
 workers') and Manage Session (this chat's): it re-reads `settings.approvals` on the
 `settings.approvalsChanged` revision and decides with `settings.decide` through the receipt
@@ -791,7 +790,7 @@ Changes separates disposable history errors from action failures. An undo confli
 
 `SettingsValueEditors` supplies the generic numeric-map list editor as well as secret and string-list editors. A numeric map takes every field name, label and numeric range from the served metadata; unknown fields or unsafe numeric representations stay read-only. Save sends a typed object through the ordinary preview/receipt path, and dismissal never submits a draft. The existing secret/list E2E journey also checks offered bounds, untouched-field preservation and numeric-map save/reopen/cancel; the Gateway journey proves an unoffered field cannot erase the stored map. Project settings reuse the scoped package and Hooks owners rather than returning to a Mac/Project picker. Settings › Projects opens the existing workspace browser, so a folder needs no chat to acquire defaults. Its sheet handoff samples current presentation authority at dismissal (not a cached active flag) and retains the exact Mac identity. New Session resolves its model default through the same schema and shows the shared served source badge; choosing an override removes that default-source claim. The dashboard/no-chat journey proves a Project default remains inherited at creation. Manage Session shows automatic-compaction policy once, in the generic Context group; manual Compact Now remains a separate receipt-owning Context action rather than a repeated policy footer in the model card.
 
-The generic settings renderer (gateway `docs/settings-model.md` F1, 7.5, 7.5a) is
+The generic settings renderer (`packages/gateway/docs/settings-model.md` F1, 7.5, 7.5a) is
 `SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
 in `TronPresentation.swift`. It restores the pre-schema Settings design language
 (#876): primary surfaces are titled section cards, each with that section's glyph and
@@ -1747,7 +1746,7 @@ immediate revocation; revoking this iPhone also removes its local profile.
 
 ### Mac Terminal
 
-Settings › Accounts › **Mac Terminal** opens the session terminal's own chrome and
+Settings › Tools & Diagnostics › **Mac Terminal** opens the session terminal's own chrome and
 emulator (`TerminalSheetChrome`, `TerminalSurface`, the control bar and extended
 keys) on a login shell on the paired Mac, reached with SSH through macOS Remote
 Login over Tailscale. Only enrollment and removal use the Gateway (its contract is
@@ -1822,12 +1821,14 @@ Shared Settings conventions (#939):
   `TronTypography.settingsRowSubtext`, the size settings rows and
   `TronSettingsCaption` use.
 - Settings opens with Accounts (Connections, Model Providers, Custom Models,
-  Connected Services), then Agent, Tools & Extensions and, last, This iPhone (Push
-  Notifications, Appearance, Sessions, Logs, Setup; #956). `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst`
+  Connected Services), then Agent, Tools & Extensions, This iPhone (Push
+  Notifications, Appearance, Sessions; #956) and, last, Tools & Diagnostics (Mac
+  Terminal, Experimental, Setup, Logs; #1030). `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst`
   proves the order, pill wording, Done commit and add-value guidance against a real
   Gateway, and keeps one screenshot per sheet; the hosted
   `TronSmokeUITests/testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor` asserts
-  the top-level group membership and order.
+  the top-level group membership and order, that each moved row is the shared
+  row in its card, and that each still opens its own sheet.
 
 `ProjectSettingsContent` is the shared Project card behind Settings' Project row
 (from a chat) and Projects row (from the dashboard), the dashboard workspace
@@ -1847,11 +1848,15 @@ a root or replays audit.
 Settings (the gear) is this Mac and this iPhone. Its toolbar holds Notifications
 and Changes beside each other; the sheet is one row per destination in the shared `SettingsGroupKind` palette: Accounts (indigo:
 Connections, Model Providers, Custom Models, Connected Services), Agent (purple: Model, Context, Run,
-Permissions), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks) and, last, This iPhone
-(emerald: Push Notifications, Appearance, Sessions, Logs, Setup with Import). This iPhone gathers the
-phone's own surfaces; Push Notifications' policy, Logs' Gateway records and export, and Setup's session
-folder and telemetry still live on the Mac, so the group makes no device-only caption. Schema sections the
-app does not place join More, above This iPhone. Every sheet a row opens inherits its card's accent
+Permissions), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks), This iPhone
+(emerald: Push Notifications, Appearance, Sessions) and, last, Tools & Diagnostics (slate: Mac Terminal,
+Experimental, Setup with Import, Logs). This iPhone gathers the phone's own surfaces; Push Notifications'
+policy still lives on the Mac, so the group makes no device-only caption. Tools & Diagnostics holds the
+utilities that span both: Mac Terminal reaches the Mac without the Gateway, Experimental is this iPhone's,
+and Logs' Gateway records and Setup's session folder and telemetry live on the Mac; each row's summary
+names its scope. These groups are the app's (`SettingsGroupKind`), not Gateway-declared: the Gateway serves
+schema sections, which the app places in them. Schema sections the app does not place join More, above
+This iPhone. Every sheet a row opens inherits its card's accent
 through `TronProgressiveSheetLink`, and a sheet's toolbar icons take the same tint as its title: every toolbar
 action uses `tronToolbarAction(accent:role:)` with the accent the sheet gives `TronSheetTitle`,
 and both resolve through `TronSheetTint` (inherited Settings tint, else the sheet's accent, else

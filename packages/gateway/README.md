@@ -309,9 +309,10 @@ not observed fails as stale. The committed `pi-sdk-baseline.json` records the
 prior runtime used for rollback verification and any accepted one-way delta for
 that version range; `package.json` remains current-version authority. Run `node scripts/compare-pi-sdk-graph.mjs BASE HEAD`
 to compare the complete resolved dependency closure reachable from the direct Pi
-family, without treating unrelated lockfile churn as an SDK change. CI runs the
-networked rollback matrix and hosted iOS/Gateway boundary only when that graph
-changes (or when explicitly dispatched).
+family, without treating unrelated lockfile churn as an SDK change. When that graph
+changes, run the networked rollback matrix (`npm run test:pi-sdk-rollback`) and the
+iOS/Gateway boundary (`scripts/ios-gateway-e2e-test`) as `work land --tests`
+journeys; hosted CI runs neither.
 
 A maintainer updates the family only with `npm run update:pi-sdk -- <exact-version>`
 from a clean `package.json`/`package-lock.json`. The helper preflights every
@@ -374,7 +375,7 @@ the patch onto that tag, and running `--write`.
 ships both changes (the declaration's `removeWhen`), remove the patch in one
 change: set `pi-coding-agent` in `package.json` back to the exact release
 version, delete `pi-coding-agent-patch.json`, `third_party/pi-coding-agent/`,
-`scripts/build-pi-coding-agent-patch.mjs` and its `reproduce:pi-coding-agent`
+`packages/gateway/scripts/build-pi-coding-agent-patch.mjs` and its `reproduce:pi-coding-agent`
 script, drop the declaration from `packages/mac-app/scripts/stage-gateway-app.sh`
 and the `BUILD_INPUT_FILES` of `scripts/gateway-install-inputs.mjs`, run
 `npm install` so the lock returns to the registry entry, then
