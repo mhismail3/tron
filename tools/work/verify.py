@@ -255,7 +255,10 @@ def verify(root: Path, config: dict, tests: List[str], base_ref: str) -> bool:
     # tools/work/heavy.py) and their trees hold its descriptor, so a journey that
     # runs another heavy tool inherits the slot instead of waiting on itself.
     is_heavy = any(check.name in build_names or check.name.startswith("test-") for check in checks)
-    lease = heavy.acquire(f"work verify {head[:12]} in {root.name}", "work verify") if is_heavy else None
+    # Xcode work runs outside the process tree and is not measured per run yet: claim more for native builds.
+    native = any(check.name in ("ios", "mac") for check in checks)
+    lease = heavy.acquire(f"work verify {head[:12]} in {root.name}", "work verify",
+                          need_mb=6000 if native else heavy.DEFAULT_NEED_MB) if is_heavy else None
     lease_fds = (lease.fd,) if lease else ()
     if lease:
         environment = {**environment, heavy.HELD_ENV: str(lease.slot + 1)}

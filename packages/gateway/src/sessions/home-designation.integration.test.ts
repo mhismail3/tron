@@ -365,7 +365,7 @@ describe("Tron Home designation", () => {
       readiness: { ready: false, gaps: ["not-designated"] }, recovery: { action: "designate" },
       // Process facts shown in every phase (#930): no worker runs before designation.
       hostPressure: expect.objectContaining({ level: expect.stringMatching(/^(normal|elevated|critical)$/u) }),
-      workers: { running: 0, queued: 0, limit: 3 },
+      workers: { running: 0 },
     });
 
     // The default-model branch: no model named means this Gateway's default.

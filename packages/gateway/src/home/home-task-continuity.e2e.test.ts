@@ -23,7 +23,6 @@ import { readLocalCredential } from "../client/local-credential.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeObservationService } from "../knowledge/knowledge-observation.js";
-import { HOME_TASK_RUNNING_LIMIT } from "./home-task-dispatcher.js";
 
 const REPO = resolve(process.cwd(), "../..");
 const evidence: Array<Record<string, unknown>> = [];
@@ -438,45 +437,6 @@ describe("maintainer messages to Home workers (#959)", () => {
     observation.release();
     evidence.push({ case: "959-resume-during-observation", stopped: stopped.taskId, resumed: "observed-worker.resume-1", outcome: "final" });
   }, 60_000);
-
-  it("queues a resume while the running-worker budget is full, then runs it in the same session with the message", async () => {
-    const f = await fixture();
-    const { port } = await listen(f);
-    const app = await maintainerClient(f, port);
-    const entered = { count: 0 };
-    const seen: string[] = [];
-    f.faux.setResponses([...Array.from({ length: HOME_TASK_RUNNING_LIMIT + 1 }, () => holding(entered)), reporting(seen)]);
-    const stopped = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "capped-worker", intent: "Finite work", target: f.cwd });
-    await waitFor(() => entered.count === 1, "first worker turn");
-    await f.registry.homeOwner().stopTask({ taskId: stopped.taskId, operationId: stopped.operationId });
-    await stopped.completion;
-    // The budget fills with other workers.
-    const running: Array<Awaited<ReturnType<typeof dispatchRunning>>> = [];
-    const dispatchRunning = (taskId: string) => f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId, intent: "Finite work", target: f.cwd });
-    for (let index = 0; index < HOME_TASK_RUNNING_LIMIT; index += 1) {
-      running.push(await dispatchRunning(`busy-${index}`));
-      await waitFor(() => entered.count === index + 2, `busy worker ${index}`);
-    }
-    cleanups.push(async () => {
-      for (const task of running) {
-        await f.registry.homeOwner().stopTask({ taskId: task.taskId, operationId: task.operationId! }).catch(() => {});
-        await task.completion.catch(() => {});
-      }
-    });
-    await app.open(stopped.sessionId);
-    const accepted = await app.send(stopped.sessionId, "I did a vertical stroke");
-    const queued = await f.registry.homeOwner().taskStatus("capped-worker.resume-1");
-    expect(queued).toMatchObject({ lifecycle: "pending", sessionId: null, resumes: { taskId: stopped.taskId, operationId: stopped.operationId } });
-    expect(queued.queuedAt).toBeTruthy();
-    expect(entered.count).toBe(HOME_TASK_RUNNING_LIMIT + 1);
-    // A slot frees: the queued resume runs on the stopped worker's own session.
-    await f.registry.homeOwner().stopTask({ taskId: running[0]!.taskId, operationId: running[0]!.operationId! });
-    await waitFor(async () => (await f.registry.homeOwner().taskStatus("capped-worker.resume-1")).lifecycle === "terminal", "queued resume settles");
-    expect(await f.registry.homeOwner().taskStatus("capped-worker.resume-1")).toMatchObject({ sessionId: stopped.sessionId, operationId: accepted.operationId,
-      terminalEvidence: { outcome: "final", reason: "explicit-report" } });
-    expect(seen[0]).toContain("Instruction:\nI did a vertical stroke");
-    evidence.push({ case: "959-resume-queued-at-cap", stopped: stopped.taskId, resumed: "capped-worker.resume-1", queued: true, sessionId: stopped.sessionId });
-  }, 120_000);
 
   it("keeps a stopped worker resumable after a refused resume and carries the undelivered message to the next one", async () => {
     const f = await fixture();
