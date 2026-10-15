@@ -1633,11 +1633,16 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// The Project card from Manage Session's shared Project settings link.
     @MainActor
     private func openProjectCard(_ app: XCUIApplication) {
-        // The link sits near the top of Manage Session, above the expanded settings.
+        // The link can be below a newly opened medium sheet or above its current
+        // scroll position. Swipe toward it; swiping down blindly dismisses the sheet.
         let link = app.buttons["project-settings-link"]
         XCTAssertTrue(link.waitForExistence(timeout: 30), "Manage Session has no Project settings link: \(app.debugDescription)")
-        for _ in 0..<40 where !link.isHittable { app.swipeDown() }
-        XCTAssertTrue(link.isHittable, "the Project settings link is not reachable: \(app.debugDescription)")
+        func barBottom() -> CGFloat { app.navigationBars.allElementsBoundByIndex.last?.frame.maxY ?? 0 }
+        for _ in 0..<24 where !(link.isHittable && link.frame.minY >= barBottom()) {
+            if link.frame.minY < barBottom() + 40 { app.swipeDown() } else { app.swipeUp() }
+        }
+        XCTAssertTrue(link.isHittable && link.frame.minY >= barBottom(),
+                      "the Project settings link is not reachable: \(app.debugDescription)")
         link.tap()
         XCTAssertTrue(waitUntil(timeout: 30) { !app.buttons["project-settings-link"].isHittable },
                       "the Project card did not cover Manage Session: \(app.debugDescription)")
