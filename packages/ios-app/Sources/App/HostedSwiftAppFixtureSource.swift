@@ -274,6 +274,8 @@ enum HostedSwiftAppFixtureSource {
                     }
                     Text(String(format: "Total $%.2f across %d expenses", store.total, store.expenses.count))
                         .accessibilityIdentifier("budget.total")
+                    Text(store.expenses.last.map { "Latest: \($0.title)" } ?? "No expenses")
+                    Text(store.expenses.first { $0.amount > 1000 }.map { "Big: \($0.title)" } ?? "No big expense")
                     NavigationLink("Biggest expense") {
                         BiggestView()
                     }
