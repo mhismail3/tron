@@ -264,6 +264,8 @@ def journeys():
         check('reinstall' in data['error']['message'] and data['error']['log'].endswith('logs/preflight.log'), 'preflight error is exact with its log path', evidence)
         check(not (platform.store / 'builds').exists(), 'nothing was built after a failed preflight', evidence)
         check(platform.system_info()['sourceRevision'] == fixture.old_revision, 'the old Gateway kept running', evidence)
+        check(platform.endpoint == f'ws://[::1]:{fixture.port}/v1/socket',
+              'the runner reaches the listener the Gateway job holds, not an assumed 127.0.0.1', evidence)
         check(data['notification']['state'] == 'requested', 'the failure was pushed through the running Gateway', evidence)
         (platform.maintenance / 'active.json').unlink()
 

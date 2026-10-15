@@ -723,6 +723,9 @@ scripts/tron mac replace --status --follow   # stream the journal until it settl
   the scripts, so it survives the Gateway and app it replaces. Steps: preflight → build →
   verify signature → stop running workers → stop Gateway → swap app → start → verify → finish
   (quick: preflight → stop workers → rebuild → verify → finish).
+- **Gateway RPC** goes to the listener the `com.tron.server` launchd PID actually holds on 9847
+  (Stable binds its Tailscale address and a TLS-only LAN listener, never loopback), with the
+  `local-auth.json` bearer. An unreachable error names each endpoint tried and why it failed.
 - **Preflight** checks source cleanliness and HEAD, disk space, signing identity, Gateway and
   native-helper registration, protocol compatibility with the requesting iPhone
   (`--allow-protocol-change` overrides from the Mac), and that no manual `mac reinstall`
