@@ -304,7 +304,7 @@ struct ToolRunView: View {
                         )
                     case .displays(let tools):
                         ChatChipStrip {
-                            ForEach(tools, id: \.id) { tool in displayView(tool) }
+                            ForEach(tools, id: \.id) { tool in stripDisplayView(tool) }
                         }
                         .accessibilityIdentifier("tool-run-display-strip")
                     case .wideDisplay(let tool):
@@ -322,6 +322,19 @@ struct ToolRunView: View {
                 ?? DisplayInlineDisclosureState(),
             onOpenTechnicalDetails: { openDetails(displayRun(tool)) }
         )
+    }
+
+    /// A grouped display renders the lone inline display's thumbnail card. A
+    /// completed inline image already is that card with its own collapse
+    /// disclosure, so it keeps the full display view.
+    @ViewBuilder
+    private func stripDisplayView(_ tool: ChatToolDescriptor) -> some View {
+        if let display = tool.display, display.kind == .image, !tool.error, !tool.isRunning,
+           DisplayPresentationPolicy.effectiveSurface(for: display) == .inline {
+            displayView(tool)
+        } else {
+            DisplayStripThumbnail(tool: tool, onOpenTechnicalDetails: { openDetails(displayRun(tool)) })
+        }
     }
 
     /// A display's technical details open as that call alone, never as the
