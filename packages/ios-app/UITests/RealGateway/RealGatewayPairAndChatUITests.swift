@@ -1191,9 +1191,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openSettingsSection(app, "permissions")
         // The project's trust decision is a Mac key qualified by this project: its
         // row offers Edit at Mac, which opens the Mac layer's Settings.
+        // SwiftUI also exposes the containing row with this identifier. Tap the
+        // named action, not the row's centre, which does not invoke the editor.
         let trustEditor = revealedElement(app, where: NSPredicate(
-            format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@",
-            settingRowToken("permissions.projectTrust"), "-edit-layer"))
+            format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND label == %@",
+            settingRowToken("permissions.projectTrust"), "-edit-layer", "Edit at Mac"))
         XCTAssertNotNil(trustEditor, "the project trust row must offer Edit at Mac on the Project card")
         trustEditor?.tap()
         let trustSheetDone = app.buttons["settings-done"]
@@ -1241,6 +1243,38 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertEqual(switchValue(reopenedTelemetry), macEdit.after, "the reopened Mac value is not the accepted value")
         keepScreenshot(app, name: "settings-surface-settings-mac-edit")
         dismissTopSheet(app) // Setup Settings
+        dismissTopSheet(app) // Settings
+        XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
+
+        let attachment = XCTAttachment(string: coverageReport(coverage, schema: schema))
+        attachment.name = "settings-surface-coverage.json"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    // Outside-file reconciliation has its own fresh fixture so the exhaustive
+    // three-surface coverage/edit journey remains a bounded gate shard.
+    @MainActor
+    func testSettingsOutsideChangesAndBuiltinExtensionPersist() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let schema = try SettingsSchemaInventory.fromEnvironment()
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        let macSettingsGear = app.navigationBars.buttons["Settings"]
+        func openMacSettings() {
+            XCTAssertTrue(macSettingsGear.waitForExistence(timeout: 30), app.debugDescription)
+            macSettingsGear.tap()
+            XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 30), app.debugDescription)
+        }
+        openMacSettings()
+        openSettingsSection(app, "setup", linkLabel: "Setup")
+        let macEdit = toggleSetting(app, key: "setup.installTelemetry", expectingBadge: schema.label(for: "mac"))
+        dismissTopSheet(app) // Setup
         dismissTopSheet(app) // Settings
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
 
@@ -1311,10 +1345,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for _ in 0..<3 where app.staticTexts["Settings"].exists || outsideEntry.exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
 
-        let attachment = XCTAttachment(string: coverageReport(coverage, schema: schema))
-        attachment.name = "settings-surface-coverage.json"
-        attachment.lifetime = .keepAlways
-        add(attachment)
     }
 
     // MARK: - Settings surface helpers

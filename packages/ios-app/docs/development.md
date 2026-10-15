@@ -2225,13 +2225,15 @@ as one accessibility snapshot, preserving the per-key row, value and source chec
 without a remote accessibility read for every descendant. Floor and enrolled-device
 instances belong only to the Mac target; saved-project and enrolled-device rows may
 be absent when the isolated fixture has no corresponding trust decision or SSH key.
-It edits one key per layer through the
-shared toggle (Chat, then Project after the untrusted write is refused on its row and
+It edits one key per layer through the shared toggle (Chat, then Project after the untrusted write is refused on its row and
 the project is trusted through Review trust, then Mac) and reads each accepted value
-and badge back after reopening; Mac-only rows open Settings through Edit at Mac. It
-then edits the fixture's Mac `settings.json` by rename-replace (`TRON_E2E_AGENT_DIR`)
-and requires `Changed outside Tron` with Apply again, which restores Tron's value.
-All journeys retain screenshots.
+and badge back after reopening; Mac-only rows open Settings through Edit at Mac.
+`testSettingsOutsideChangesAndBuiltinExtensionPersist` uses a separate fresh fixture
+to edit the Mac `settings.json` by rename-replace (`TRON_E2E_AGENT_DIR`) and requires
+`Changed outside Tron` with Apply again, which restores Tron's value. It also proves
+the Built-in switch's persisted setting and live outside MCP additions in the open
+MCP screen and Changes. Both journeys run independently as bounded gate shards;
+none of the original assertions is omitted. All journeys retain screenshots.
 
 This lane pairs the hosted app for real, and the lane's app container is shared with the
 hosted E2E lane of the same worktree; a pairing left behind made that lane's
