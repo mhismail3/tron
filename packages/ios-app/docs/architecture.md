@@ -2807,7 +2807,10 @@ Prompts, Tools, Commands, Themes order. An empty kind is hidden, a package that 
 and a Gateway that predates `provides` shows no groups and no line at all. Each group reuses the Project Resources icon
 and colour for its kind, and the one bounded `providesDiagnostic` from the same read appears once as the standard
 notice. A typed package-row `conflict` adds the secondary “Ignored” status on the installed row
-and displays its message in the same shared notice on the detail sheet. The optional projection
+and displays its message in the same shared notice on the detail sheet. A `nodeRequirement` the Mac's
+Gateway Node does not meet (or cannot read) adds a “Needs Node <range>” (or “Unreadable Node range”) status
+in the same row detail and header subtitle, and its explanation in the same shared notice. The package still loads
+(#243). The optional projection
 retains unknown codes as strings so their message remains readable. Tron's managed subagent
 provider excludes user `npm:pi-subagents` declarations without altering them; the notice explains
 `pi remove npm:pi-subagents` as optional user cleanup. These names are the projection `packages.list` already carries beside each installed package, so this sheet
