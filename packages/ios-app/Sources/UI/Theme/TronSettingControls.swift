@@ -78,8 +78,8 @@ struct TronChoice<ID: Hashable>: Identifiable {
 }
 
 /// The standard single-choice row: the chosen value in a right-aligned capsule
-/// that opens a picker sheet of option rows. Use it instead of a menu; SwiftUI
-/// menus fail to open in a sheet presented from another sheet (#877).
+/// that opens a picker sheet of option rows. Keep schema choices on this shared
+/// surface; nested native-menu behavior is covered by TronSheetTintUITests (#877).
 struct TronChoiceRow<ID: Hashable>: View {
     let icon: String
     let title: String
