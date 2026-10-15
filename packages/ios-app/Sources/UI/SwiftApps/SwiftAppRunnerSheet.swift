@@ -1,19 +1,41 @@
 import SwiftUI
 
-/// Experimental gate for running displayed `.swift` files (#889). Off by
-/// default, so normal use never shows the control. Launching once with
-/// `-tron.experimental.swiftApps YES` enables it and records that choice, so a
-/// device launched through `devicectl`/`simctl` keeps it across later normal
-/// launches; launching with `NO` turns it off again.
-enum SwiftAppExperiment {
-    static let defaultsKey = "tron.experimental.swiftApps"
+/// Experimental gate for running displayed `.swift` files (#889), an
+/// iPhone-only preference. Off by default, so normal use never shows the
+/// control. Settings › This iPhone › Experimental owns the switch; launching
+/// with `-tron.experimental.swiftApps YES|NO` sets the same stored choice, so
+/// a device launched through `devicectl`/`simctl` keeps it across later normal
+/// launches.
+///
+/// Reads go through this observable owner, never straight to `UserDefaults`:
+/// a launch argument shadows the stored value for the whole process, which
+/// would hide a later Settings change, and observation lets an open document
+/// sheet gain or lose its run control as soon as the switch changes.
+@MainActor
+@Observable
+final class SwiftAppExperiment {
+    static let shared = SwiftAppExperiment(defaults: .standard)
+    nonisolated static let defaultsKey = "tron.experimental.swiftApps"
 
-    static func canRun(fileNamed name: String) -> Bool {
-        let defaults = UserDefaults.standard
-        if let launchValue = defaults.volatileDomain(forName: UserDefaults.argumentDomain)[defaultsKey] {
-            defaults.set((launchValue as? NSString)?.boolValue ?? (launchValue as? Bool ?? false), forKey: defaultsKey)
+    private let defaults: UserDefaults
+
+    var isEnabled: Bool {
+        didSet { defaults.set(isEnabled, forKey: Self.defaultsKey) }
+    }
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+        if let launchValue = defaults.volatileDomain(forName: UserDefaults.argumentDomain)[Self.defaultsKey] {
+            let enabled = (launchValue as? NSString)?.boolValue ?? (launchValue as? Bool ?? false)
+            defaults.set(enabled, forKey: Self.defaultsKey)
+            isEnabled = enabled
+        } else {
+            isEnabled = defaults.bool(forKey: Self.defaultsKey)
         }
-        return defaults.bool(forKey: defaultsKey) && name.lowercased().hasSuffix(".swift")
+    }
+
+    func canRun(fileNamed name: String) -> Bool {
+        isEnabled && name.lowercased().hasSuffix(".swift")
     }
 }
 
