@@ -139,10 +139,10 @@ import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCa
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
-import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection, type InvokedResource } from "./invocation-receipts.js";
 import type { HomeWakeTrigger } from "../home/home-wake-inbox.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
-import { admitPromptText, admitResourceInvocation, canonicalResourceName, parsePiLiteralCommand, userFacingPromptPreview } from "./resource-invocation.js";
+import { admitPromptText, admitResourceInvocations, canonicalResourceName, composeResourcePrompt, parsePiLiteralCommand, userFacingPromptPreview, type ResourceExpansionCatalog } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import { ProcessActivityRecency, isActiveProcessLifecycle, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
 import { redactProcessText } from "./process-activity.js";
@@ -230,7 +230,6 @@ type QueueBehavior = QueuedMessageState["behavior"];
 
 type RuntimeQueuedMessage = QueuedMessageState & {
   runtimeText: string;
-  resourceInvocation?: ResourceInvocation;
   attachmentEnvelope: string;
   images: ImageContent[];
   inputSource: "interactive" | "rpc" | "extension";
@@ -248,7 +247,7 @@ type HeldPrompt = RuntimeQueuedMessage & { admitting: boolean };
  * carry a resource prefix and attachment envelope. */
 type PromptQueueDisplay = {
   text: string;
-  resourceInvocation?: ResourceInvocation;
+  resourceInvocations?: ResourceInvocation[];
   attachmentEnvelope: string;
   attachmentCount: number;
   photoCount?: number;
@@ -7402,7 +7401,7 @@ export class RuntimeSlot {
           behavior,
           text: admission?.text ?? runtimeText,
           attachmentCount: admission?.attachmentCount ?? 0,
-          ...(admission?.resourceInvocation === undefined ? {} : { resourceInvocation: admission.resourceInvocation }),
+          ...(admission?.resourceInvocations === undefined ? {} : { resourceInvocations: admission.resourceInvocations }),
           ...(admission?.photoCount === undefined ? {} : { photoCount: admission.photoCount }),
           ...(admission?.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: admission.fileAttachmentCount }),
           ...(admission?.attachments === undefined ? {} : { attachments: admission.attachments }),
@@ -7504,7 +7503,7 @@ export class RuntimeSlot {
         || item.behavior !== next.behavior
         || item.text !== next.text
         || item.runtimeText !== next.runtimeText
-        || JSON.stringify(item.resourceInvocation) !== JSON.stringify(next.resourceInvocation)
+        || JSON.stringify(item.resourceInvocations) !== JSON.stringify(next.resourceInvocations)
         || item.attachmentCount !== next.attachmentCount
         || item.photoCount !== next.photoCount
         || item.fileAttachmentCount !== next.fileAttachmentCount
@@ -7539,7 +7538,7 @@ export class RuntimeSlot {
       ...this.queuedMessages,
       ...this.heldPrompts.filter((item) => !piQueued.has(item.id)),
     ].map(({
-      id, behavior, text, attachmentCount, photoCount, fileAttachmentCount, attachments, resourceInvocation,
+      id, behavior, text, attachmentCount, photoCount, fileAttachmentCount, attachments, resourceInvocations,
     }) => {
       const semantic = this.internalWakeSemantic(id);
       return {
@@ -7551,7 +7550,7 @@ export class RuntimeSlot {
         ...(photoCount === undefined ? {} : { photoCount }),
         ...(fileAttachmentCount === undefined ? {} : { fileAttachmentCount }),
         ...(attachments === undefined ? {} : { attachments }),
-        ...(resourceInvocation === undefined ? {} : { resourceInvocation }),
+        ...(resourceInvocations === undefined ? {} : { resourceInvocations }),
       };
     });
   }
@@ -7560,24 +7559,19 @@ export class RuntimeSlot {
     return [text.trim(), attachmentEnvelope].filter(Boolean).join("\n\n");
   }
 
-  private static validateQueue(items: Array<Pick<QueuedMessageState, "text" | "attachmentCount"> & { resourceInvocation?: ResourceInvocation | undefined }>): void {
+  private static validateQueue(items: Array<Pick<QueuedMessageState, "text" | "attachmentCount"> & { resourceInvocations?: ResourceInvocation[] | undefined }>): void {
     if (items.length > MAXIMUM_QUEUED_MESSAGES) {
       throw new GatewayError("invalid_request", `At most ${MAXIMUM_QUEUED_MESSAGES} messages may be queued`);
     }
     let totalBytes = 0;
     for (const item of items) {
       admitPromptText(item.text, MAXIMUM_QUEUED_MESSAGE_BYTES);
-      if (item.resourceInvocation !== undefined) {
-        const resource = admitResourceInvocation(item.resourceInvocation);
-        if (resource.arguments !== item.text) {
-          throw new GatewayError("invalid_request", "Queued resource arguments must match queued text");
-        }
-      }
+      if (item.resourceInvocations !== undefined) admitResourceInvocations(item.resourceInvocations, item.text);
       const bytes = Buffer.byteLength(item.text);
       if (bytes > MAXIMUM_QUEUED_MESSAGE_BYTES) {
         throw new GatewayError("invalid_request", "A queued message is too large to manage safely");
       }
-      if (item.text.trim().length === 0 && item.attachmentCount === 0 && item.resourceInvocation === undefined) {
+      if (item.text.trim().length === 0 && item.attachmentCount === 0 && item.resourceInvocations === undefined) {
         throw new GatewayError("invalid_request", "Queued messages cannot be empty");
       }
       totalBytes += bytes;
@@ -8410,7 +8404,9 @@ export class RuntimeSlot {
     if (this.phase !== "compacting" && this.heldPrompts.length === 0) return false;
     this.assertUsable();
     // Extension commands execute rather than wait as a message.
-    if (queueDisplay?.resourceInvocation?.source === "extension") return false;
+    if (queueDisplay?.resourceInvocations?.[0]?.source === "extension") return false;
+    // Skills and prompts make a message whatever its visible text begins with.
+    if (queueDisplay?.resourceInvocations !== undefined) return true;
     const command = parsePiLiteralCommand(text)?.name;
     return command === undefined || this.runtime.session.extensionRunner.getCommand(command) === undefined;
   }
@@ -8445,7 +8441,7 @@ export class RuntimeSlot {
       ...(display.photoCount === undefined ? {} : { photoCount: display.photoCount }),
       ...(display.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: display.fileAttachmentCount }),
       ...(display.attachments === undefined ? {} : { attachments: display.attachments }),
-      ...(display.resourceInvocation === undefined ? {} : { resourceInvocation: display.resourceInvocation }),
+      ...(display.resourceInvocations === undefined ? {} : { resourceInvocations: display.resourceInvocations }),
       runtimeText: text,
       attachmentEnvelope: display.attachmentEnvelope,
       images,
@@ -8498,7 +8494,7 @@ export class RuntimeSlot {
           ...(entry.photoCount === undefined ? {} : { photoCount: entry.photoCount }),
           ...(entry.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: entry.fileAttachmentCount }),
           ...(entry.attachments === undefined ? {} : { attachments: entry.attachments }),
-          ...(entry.resourceInvocation === undefined ? {} : { resourceInvocation: entry.resourceInvocation }),
+          ...(entry.resourceInvocations === undefined ? {} : { resourceInvocations: entry.resourceInvocations }),
         }, undefined, undefined, entry.id, entry);
       } catch (error) {
         if (error instanceof GatewayError && error.code === "busy" && error.retryable
@@ -8618,29 +8614,27 @@ export class RuntimeSlot {
           || queueDisplay.attachments.length !== queueDisplay.attachmentCount)) {
         throw new GatewayError("invalid_request", "Prompt attachment descriptors do not match the bounded attachment count");
       }
-      if (queueDisplay?.resourceInvocation !== undefined) {
-        const resource = admitResourceInvocation(queueDisplay.resourceInvocation);
-        if (resource.arguments !== queueDisplay.text) {
-          throw new GatewayError("invalid_request", "Prompt text must exactly match resource invocation arguments");
-        }
-        if (resource.source === "extension" && (images.length > 0 || (queueDisplay.attachments?.length ?? 0) > 0)) {
+      const resources = queueDisplay?.resourceInvocations;
+      // Skills and prompts the runtime expands itself; an extension command is Pi's literal command text.
+      const composedResources = resources?.[0]?.source === "extension" ? undefined : resources;
+      if (resources !== undefined) {
+        admitResourceInvocations(resources, queueDisplay!.text);
+        if (composedResources === undefined && (images.length > 0 || (queueDisplay!.attachments?.length ?? 0) > 0)) {
           throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
         }
-        const catalogName = canonicalResourceName(resource.source, resource.name);
-        const commands = this.commands();
-        const matches = commands.filter(
-          command => command.source === resource.source && command.name === catalogName,
-        );
-        const shadowed = resource.source !== "extension"
-          && commands.some(command => command.source === "extension" && command.name === catalogName);
-        if (matches.length !== 1 || shadowed) {
-          throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
-        }
+        this.assertInvocableResources(resources);
+      }
+      // Every caller passes the visible prompt; the expansions are composed
+      // here, in the lane, against the catalog just validated.
+      if (composedResources !== undefined) {
+        text = composeResourcePrompt(composedResources, text, this.resourceExpansionCatalog());
       }
       // Pi uses the first literal ASCII space as its command
       // delimiter. Keep admission byte-for-byte identical: tabs/newlines are
       // part of the command name and therefore remain ordinary prompt text.
-      const parsedCommand = ownership?.kind === "subagentWake" || ownership?.kind === "homeWake" ? undefined : parsePiLiteralCommand(text);
+      // A composed message is never a command, whatever its text begins with.
+      const parsedCommand = ownership?.kind === "subagentWake" || ownership?.kind === "homeWake" || composedResources !== undefined
+        ? undefined : parsePiLiteralCommand(text);
       const extensionCommandName = parsedCommand?.name;
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
@@ -8667,18 +8661,23 @@ export class RuntimeSlot {
       const invocationId = existingInvocation?.invocationId ?? randomUUID();
       const invocationSource: InvocationProjection["source"] = existingInvocation?.source ?? (ownership?.kind === "subagentWake" ? "subagentWake" : ownership?.kind === "homeWake" ? "homeWake" : isExactExtensionCommand
         ? "extension"
-        : queueDisplay?.resourceInvocation?.source ?? "plain");
+        : resources?.[0]?.source ?? "plain");
       const invocationName = existingInvocation?.name ?? (isExactExtensionCommand
         ? extensionCommandName
-        : queueDisplay?.resourceInvocation?.name);
+        : resources?.[0]?.name);
+      const invokedResources = RuntimeSlot.invokedResources(composedResources);
+      const extensionArguments = composedResources === undefined ? resources?.[0]?.arguments : undefined;
+      // A composed message's canonical text is its expansions followed by this text.
+      const submittedText = images.length > 0 || composedResources !== undefined ? queueDisplay?.text ?? text : undefined;
       const invocation: LiveInvocation = existingInvocation ?? {
         version: 1,
         invocationId,
         operationId,
         source: invocationSource,
         ...(invocationName ? { name: invocationName } : {}),
-        ...(queueDisplay?.resourceInvocation?.arguments === undefined ? {} : { arguments: queueDisplay.resourceInvocation.arguments }),
-        ...(images.length === 0 ? {} : { submittedText: queueDisplay?.text ?? text }),
+        ...(extensionArguments === undefined ? {} : { arguments: extensionArguments }),
+        ...(submittedText === undefined ? {} : { submittedText }),
+        ...(resources === undefined ? {} : { resourceInvocations: resources }),
         lifecycle: "staged",
         origin: ownership?.origin ?? (invocationSource === "extension" && invocationName
           ? this.extensionCommandOrigin(invocationName)
@@ -8709,9 +8708,9 @@ export class RuntimeSlot {
         RuntimeSlot.validateQueue([...this.queuedMessages.filter((item) => item.id !== redelivery?.id), {
           text: queueAdmissionDisplay.text,
           attachmentCount: queueAdmissionDisplay.attachmentCount,
-          ...(queueAdmissionDisplay.resourceInvocation === undefined
+          ...(queueAdmissionDisplay.resourceInvocations === undefined
             ? {}
-            : { resourceInvocation: queueAdmissionDisplay.resourceInvocation }),
+            : { resourceInvocations: queueAdmissionDisplay.resourceInvocations }),
         }]);
       };
       if (queuesIntoActiveRun) validateQueueAdmission();
@@ -8760,10 +8759,9 @@ export class RuntimeSlot {
           sessionId: this.id,
           source: invocationSource,
           ...(invocationName ? { name: invocationName } : {}),
-          ...(queueDisplay?.resourceInvocation?.arguments
-            ? { arguments: queueDisplay.resourceInvocation.arguments }
-            : {}),
-          ...(images.length === 0 ? {} : { submittedText: queueDisplay?.text ?? text }),
+          ...(extensionArguments ? { arguments: extensionArguments } : {}),
+          ...(invokedResources === undefined ? {} : { resources: invokedResources }),
+          ...(submittedText === undefined ? {} : { submittedText }),
           lifecycle: "staged",
           origin: invocation.origin,
           sequence: this.revision + 1,
@@ -8800,9 +8798,9 @@ export class RuntimeSlot {
             behavior: behavior!,
             text: queueAdmissionDisplay.text,
             attachmentCount: queueAdmissionDisplay.attachmentCount,
-            ...(queueAdmissionDisplay.resourceInvocation === undefined
-              ? {}
-              : { resourceInvocation: queueAdmissionDisplay.resourceInvocation }),
+            ...(queueAdmissionDisplay.resourceInvocations === undefined
+            ? {}
+            : { resourceInvocations: queueAdmissionDisplay.resourceInvocations }),
             ...(queueAdmissionDisplay.photoCount === undefined
               ? {}
               : { photoCount: queueAdmissionDisplay.photoCount }),
@@ -8895,7 +8893,8 @@ export class RuntimeSlot {
           images,
           ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),
           source: ownership?.kind === "subagentWake" ? "extension" : queueDisplay?.inputSource ?? "rpc",
-          ...(ownership?.kind === "subagentWake" ? { expandPromptTemplates: ownership.expandPromptTemplates } : {}),
+          ...(ownership?.kind === "subagentWake" ? { expandPromptTemplates: ownership.expandPromptTemplates }
+            : composedResources !== undefined ? { expandPromptTemplates: false } : {}),
           preflightResult: (disposition) => {
             // Pi calls back only after it has handled, queued, or started the
             // prompt. Rejections do not call this hook; the SDK promise's
@@ -9321,9 +9320,9 @@ export class RuntimeSlot {
         MAXIMUM_PENDING_PROMPT_BYTES
       ),
       attachmentCount: queueDisplay?.attachmentCount ?? images.length,
-      ...(queueDisplay?.resourceInvocation === undefined
+      ...(queueDisplay?.resourceInvocations === undefined
         ? {}
-        : { resourceInvocation: queueDisplay.resourceInvocation }),
+        : { resourceInvocations: queueDisplay.resourceInvocations }),
       ...(queueDisplay?.photoCount === undefined && images.length === 0
         ? {}
         : { photoCount: queueDisplay?.photoCount ?? images.length }),
@@ -9508,7 +9507,7 @@ export class RuntimeSlot {
             ...(item.photoCount === undefined ? {} : { photoCount: item.photoCount }),
             ...(item.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: item.fileAttachmentCount }),
             ...(item.attachments === undefined ? {} : { attachments: item.attachments }),
-            ...(item.resourceInvocation === undefined ? {} : { resourceInvocation: item.resourceInvocation }),
+            ...(item.resourceInvocations === undefined ? {} : { resourceInvocations: item.resourceInvocations }),
             inputSource: item.inputSource,
             ...(item.commandId === undefined ? {} : { commandId: item.commandId }),
           }, undefined, undefined, item.id, heldEntry, hasAcceptedInvocation ? item : undefined, laneOwned);
@@ -9587,9 +9586,12 @@ export class RuntimeSlot {
     });
   }
 
-  private static editedQueueItem<T extends RuntimeQueuedMessage>(
+  /** A held prompt keeps its visible runtime text (admission composes it); a
+   * message in Pi's queue is recomposed with its skills and prompts. */
+  private editedQueueItem<T extends RuntimeQueuedMessage>(
     previous: T,
     item: Pick<QueuedMessageState, "behavior" | "text">,
+    composed: boolean,
   ): T {
     const text = item.text.trim();
     const visibleRuntimeText = RuntimeSlot.queueText(text, previous.attachmentEnvelope);
@@ -9597,15 +9599,42 @@ export class RuntimeSlot {
       ...previous,
       behavior: item.behavior,
       text,
-      ...(previous.resourceInvocation === undefined ? {} : {
-        resourceInvocation: { ...previous.resourceInvocation, arguments: text },
-      }),
       runtimeText: text === previous.text
         ? previous.runtimeText
-        : previous.resourceInvocation === undefined
-          ? visibleRuntimeText
-          : `/${previous.resourceInvocation.source === "skill" ? `skill:${previous.resourceInvocation.name}` : previous.resourceInvocation.name}${visibleRuntimeText ? ` ${visibleRuntimeText}` : ""}`,
+        : composed && previous.resourceInvocations !== undefined
+          ? composeResourcePrompt(previous.resourceInvocations, visibleRuntimeText, this.resourceExpansionCatalog())
+          : visibleRuntimeText,
     };
+  }
+
+  /** The receipt form of a composed message's skills and prompts. */
+  private static invokedResources(resources: readonly ResourceInvocation[] | undefined): InvokedResource[] | undefined {
+    return resources?.map(({ source, name }) => {
+      if (source === "extension") throw new Error("An extension command is not a composed resource");
+      return { source, name };
+    });
+  }
+
+  private resourceExpansionCatalog(): ResourceExpansionCatalog {
+    const session = this.runtime.session;
+    return { skills: session.resourceLoader.getSkills().skills, promptTemplates: session.promptTemplates };
+  }
+
+  private static resourceIsInvocable(commands: readonly CommandInfo[], resource: ResourceInvocation): boolean {
+    const catalogName = canonicalResourceName(resource.source, resource.name);
+    const matches = commands.filter(command => command.source === resource.source && command.name === catalogName);
+    // A skill or prompt sharing an extension command's name is ambiguous to pick.
+    const shadowed = resource.source !== "extension"
+      && commands.some(command => command.source === "extension" && command.name === catalogName);
+    return matches.length === 1 && !shadowed;
+  }
+
+  /** Every resource a message invokes names exactly one loaded, unshadowed command. */
+  assertInvocableResources(resources: readonly ResourceInvocation[]): void {
+    const commands = this.commands();
+    if (!resources.every(resource => RuntimeSlot.resourceIsInvocable(commands, resource))) {
+      throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
+    }
   }
 
   private assertQueueableResources(items: readonly RuntimeQueuedMessage[]): void {
@@ -9614,14 +9643,12 @@ export class RuntimeSlot {
       commands.filter((command) => command.source === "extension").map((command) => command.name),
     );
     for (const item of items) {
-      if (item.resourceInvocation !== undefined) {
-        const resource = item.resourceInvocation;
-        const invocationName = resource.source === "skill" && !resource.name.startsWith("skill:")
-          ? `skill:${resource.name}` : resource.name;
-        const matches = commands.filter(command => command.source === resource.source && command.name === invocationName);
-        if (matches.length !== 1 || (resource.source === "skill" && extensionCommands.has(invocationName))) {
+      if (item.resourceInvocations !== undefined) {
+        if (!item.resourceInvocations.every(resource => RuntimeSlot.resourceIsInvocable(commands, resource))) {
           throw new GatewayError("conflict", "A queued resource is no longer unambiguous for this session", true);
         }
+        // A composed message is never a command, whatever its text begins with.
+        continue;
       }
       if (!item.runtimeText.startsWith("/")) continue;
       const command = parsePiLiteralCommand(item.runtimeText)?.name ?? "";
@@ -9649,7 +9676,7 @@ export class RuntimeSlot {
       if (!previous || !seen.add(item.id)) {
         throw new GatewayError("conflict", "The message queue changed. Review the latest queue and try again.", true);
       }
-      return RuntimeSlot.editedQueueItem(previous, item);
+      return this.editedQueueItem(previous, item, false);
     });
     const admitting = this.heldPrompts.find((item) => item.admitting);
     if (admitting) {
@@ -9705,7 +9732,7 @@ export class RuntimeSlot {
         if (!previous || !seen.add(item.id)) {
           throw new GatewayError("conflict", "The message queue changed. Review the latest queue and try again.", true);
         }
-        return { ...RuntimeSlot.editedQueueItem(previous, item), ordinal: this.nextQueueOrdinal++ };
+        return { ...this.editedQueueItem(previous, item, true), ordinal: this.nextQueueOrdinal++ };
       });
       RuntimeSlot.validateQueue(next);
       this.assertQueueableResources(next);
@@ -9713,11 +9740,10 @@ export class RuntimeSlot {
       const replacementInvocations = new Map<string, InvocationProjection>();
       for (const item of next) {
         const previous = previousByID.get(item.id);
-        if (previous?.resourceInvocation === undefined
-          || previous.resourceInvocation.arguments === item.resourceInvocation?.arguments) continue;
+        if (previous?.resourceInvocations === undefined || previous.text === item.text) continue;
         const invocation = this.invocationForOperation(item.id);
         if (!invocation || invocation.source === "plain" || invocation.name === undefined
-          || item.resourceInvocation === undefined) {
+          || item.resourceInvocations === undefined) {
           throw new GatewayError("conflict", "Queued resource invocation ownership changed", true);
         }
         replacementInvocations.set(item.id, invocation);
@@ -9771,15 +9797,14 @@ export class RuntimeSlot {
       const removed = this.queuedMessages.filter(item => !survivors.some(candidate => candidate.id === item.id));
       const revised = survivors.filter(item => {
         const previous = previousByID.get(item.id);
-        return previous?.resourceInvocation !== undefined
-          && previous.resourceInvocation.arguments !== item.resourceInvocation?.arguments;
+        return previous?.resourceInvocations !== undefined && previous.text !== item.text;
       });
       for (const item of revised) {
         const previousInvocation = replacementInvocations.get(item.id)!;
-        const resourceInvocation = item.resourceInvocation;
+        const resourceInvocations = item.resourceInvocations;
         const invocationName = previousInvocation.name;
-        if (!resourceInvocation || !invocationName) throw new Error("revised resource invocation is unavailable");
-        // Start receipts are immutable. Editing queued arguments terminalizes
+        if (!resourceInvocations || !invocationName) throw new Error("revised resource invocation is unavailable");
+        // Start receipts are immutable. Editing a queued message's text terminalizes
         // the prior intent and starts a replacement invocation while retaining
         // the queue operation ID used by native row identity.
         await this.terminalizeInvocation(item.id, "interrupted", "queue-edited");
@@ -9794,7 +9819,8 @@ export class RuntimeSlot {
           sessionId: this.id,
           source: previousInvocation.source,
           name: invocationName,
-          ...(resourceInvocation.arguments ? { arguments: resourceInvocation.arguments } : {}),
+          resources: RuntimeSlot.invokedResources(resourceInvocations)!,
+          submittedText: item.text,
           lifecycle: "staged",
           origin: previousInvocation.origin,
           sequence: this.revision + 1,
@@ -9818,8 +9844,8 @@ export class RuntimeSlot {
           operationId: item.id,
           source: previousInvocation.source,
           name: invocationName,
-          arguments: resourceInvocation.arguments,
-          resourceInvocation,
+          submittedText: item.text,
+          resourceInvocations,
           lifecycle: "queued",
           origin: previousInvocation.origin,
           sequence: this.revision + 1,

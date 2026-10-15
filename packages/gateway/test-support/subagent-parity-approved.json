@@ -209,7 +209,7 @@
         "contextEffect": "modelInput",
         "confidence": "receipt",
         "lifecycle": null,
-        "resourceInvocation": null,
+        "resourceInvocations": null,
         "submittedText": null,
         "delivery": "stored",
         "visibility": "visible",

@@ -70,7 +70,7 @@ import type { NotificationService } from "../notifications/notification-service.
 import { AsyncMutex } from "../util/async-mutex.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
-import { admitPromptText, admitResourceInvocation, canonicalResourceName } from "../sessions/resource-invocation.js";
+import { admitPromptText, admitResourceInvocations } from "../sessions/resource-invocation.js";
 import type { AutomationService } from "../automations/automation-service.js";
 import { AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY } from "../automations/types.js";
 import { AutomationPaginationStore } from "../automations/automation-pagination.js";
@@ -1785,7 +1785,7 @@ export class GatewayService {
       case "home.prompt": {
         // The logical route accepts the composer's whole prompt contract; the
         // shared admission below validates it against the slot it resolves to.
-        rejectUnknownFields(params, ["commandId", "text", "uploadIds", "behavior", "resourceInvocation"], method);
+        rejectUnknownFields(params, ["commandId", "text", "uploadIds", "behavior", "resourceInvocations"], method);
         let binding: CommandReceiptBinding | undefined;
         return this.mutation(client, method, params, async () => {
           if (!binding) throw new GatewayError("internal", "Home route binding was not persisted before dispatch");
@@ -2628,38 +2628,21 @@ export class GatewayService {
     }
     const text = params.text === undefined ? "" : admitPromptText(params.text);
     const uploadIds = params.uploadIds === undefined ? [] : arrayOfStrings(params.uploadIds, "uploadIds", MAXIMUM_PROMPT_ATTACHMENTS);
-    const resourceInvocation = params.resourceInvocation === undefined || params.resourceInvocation === null
-      ? undefined : admitResourceInvocation(params.resourceInvocation);
-    const resourceSource = resourceInvocation?.source;
-    const resourceName = resourceInvocation?.name;
-    const resourceArguments = resourceInvocation?.arguments;
-    if (resourceInvocation === undefined && !text.trim() && uploadIds.length === 0) {
+    const resourceInvocations = params.resourceInvocations === undefined || params.resourceInvocations === null
+      ? undefined : admitResourceInvocations(params.resourceInvocations, text);
+    const extensionCommand = resourceInvocations?.[0]?.source === "extension" ? resourceInvocations[0] : undefined;
+    if (resourceInvocations === undefined && !text.trim() && uploadIds.length === 0) {
       throw new GatewayError("invalid_request", "Prompt text or attachments are required");
     }
-    if (resourceInvocation !== undefined && resourceArguments !== text) {
-      throw new GatewayError("invalid_request", "Prompt text must exactly match resourceInvocation.arguments");
+    if (extensionCommand !== undefined && uploadIds.length > 0) {
+      throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
     }
-    const catalogResourceName = resourceSource === undefined
-      ? undefined : canonicalResourceName(resourceSource, resourceName!);
-    if (resourceSource !== undefined) {
-      const commands = slot.commands();
-      if (resourceSource === "extension" && uploadIds.length > 0) {
-        throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
-      }
-      const matches = commands.filter(
-        (command) => command.source === resourceSource && command.name === catalogResourceName,
-      );
-      const shadowed = resourceSource !== "extension" && commands.some(
-        (command) => command.source === "extension" && command.name === catalogResourceName,
-      );
-      if (matches.length !== 1 || shadowed) {
-        throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
-      }
-    }
+    // Rejected before any attachment is materialized; the runtime rechecks in its lane.
+    if (resourceInvocations !== undefined) slot.assertInvocableResources(resourceInvocations);
     if (slot.homeTaskWorkerState === "settled") {
       // A message to a Home worker whose task stopped or settled continues that task in place
       // (#929): same session, worktree and claim, with this message as its instruction.
-      if (resourceInvocation !== undefined) {
+      if (resourceInvocations !== undefined) {
         throw new GatewayError("invalid_request", "A stopped Home worker continues from a message, not a command");
       }
       // Attachments (for example the screenshots a stopped worker asked for) go with the
@@ -2672,10 +2655,12 @@ export class GatewayService {
       return { operationId: resumed.operationId };
     }
     const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
-    const visiblePrompt = [resourceArguments ?? text, attachments.envelope].filter(Boolean).join("\n\n");
-    const prompt = resourceSource === undefined
+    const visiblePrompt = [text, attachments.envelope].filter(Boolean).join("\n\n");
+    // An extension command is Pi's literal command text. Skills and prompts are
+    // composed with the visible prompt by the runtime, inside its lane.
+    const prompt = extensionCommand === undefined
       ? visiblePrompt
-      : `/${catalogResourceName!}${visiblePrompt ? ` ${visiblePrompt}` : ""}`;
+      : `/${extensionCommand.name}${visiblePrompt ? ` ${visiblePrompt}` : ""}`;
     const behavior = params.behavior === undefined ? undefined : oneOf(params.behavior, "behavior", ["steer", "followUp"] as const);
     let resolveAdmission!: (result: { operationId: string }) => void;
     let rejectAdmission!: (error: unknown) => void;
@@ -2687,13 +2672,7 @@ export class GatewayService {
       text,
       inputSource: "rpc",
       commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
-      ...(resourceSource === undefined ? {} : {
-        resourceInvocation: {
-          source: resourceSource,
-          name: resourceName!,
-          arguments: resourceArguments!,
-        },
-      }),
+      ...(resourceInvocations === undefined ? {} : { resourceInvocations }),
       attachmentEnvelope: attachments.envelope,
       attachmentCount: uploadIds.length,
       ...(attachments.photoCount > 0 ? { photoCount: attachments.photoCount } : {}),

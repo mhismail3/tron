@@ -288,7 +288,8 @@ export interface ChatSemanticMetadata {
   operationId?: string;
   sequence: number;
   lifecycle?: InvocationLifecycle;
-  resourceInvocation?: ResourceInvocation;
+  /** Ordered resources this message invoked: skills and prompts in chip order, or one exclusive extension command. */
+  resourceInvocations?: ResourceInvocation[];
   /** Authored text retained for image prompts whose SDK history includes generated resize notes. */
   submittedText?: string;
   /** Set only on a command row a fork inherited from its origin, whose lifecycle settled there. */
@@ -841,7 +842,9 @@ export interface ResourceInvocation {
   source: "skill" | "prompt" | "extension";
   /** Canonical resource name; skills omit the `skill:` transport prefix. */
   name: string;
-  /** Exact visible arguments, bounded to 5,000 UTF-8 bytes for receipt safety. Empty is valid. */
+  /** Exact visible arguments, bounded to 5,000 UTF-8 bytes for receipt safety. Empty is valid.
+   * An extension command's arguments are the message text; a chat skill or prompt
+   * carries none (the message text follows every expansion once). */
   arguments: string;
 }
 
@@ -857,7 +860,7 @@ export interface QueuedMessageState {
   fileAttachmentCount?: number;
   /** Bounded exact descriptors; payload bytes remain outside snapshots. */
   attachments?: PromptAttachmentState[];
-  resourceInvocation?: ResourceInvocation;
+  resourceInvocations?: ResourceInvocation[];
 }
 
 /** A prompt admitted before its canonical user entry exists, usually while
@@ -875,7 +878,7 @@ export interface PendingPromptState {
   fileAttachmentCount?: number;
   /** Bounded exact descriptors; payload bytes remain outside snapshots. */
   attachments?: PromptAttachmentState[];
-  resourceInvocation?: ResourceInvocation;
+  resourceInvocations?: ResourceInvocation[];
 }
 
 export interface ContextWindowLimits {

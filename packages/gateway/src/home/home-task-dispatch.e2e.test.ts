@@ -1292,7 +1292,7 @@ describe("Home task production dispatch", () => {
       .rejects.toMatchObject({ code: "conflict", details: { reason: "sealed-chapter" } });
     const upload = await uploads.save("notes.txt", "text/plain", Buffer.from("attached notes"));
     // Extension commands never carry attachments, on the logical route as well.
-    await expect(service.invoke(client, "home.prompt", { commandId: "extension-attachment-command", text: "", uploadIds: [upload.id], resourceInvocation: { source: "extension", name: "goal", arguments: "" } }))
+    await expect(service.invoke(client, "home.prompt", { commandId: "extension-attachment-command", text: "", uploadIds: [upload.id], resourceInvocations: [{ source: "extension", name: "goal", arguments: "" }] }))
       .rejects.toMatchObject({ code: "invalid_request" });
     f.faux.setResponses([fauxAssistantMessage("attachment received")]);
     const accepted = await service.invoke(client, "home.prompt", { commandId: "attachment-command-one", text: "Review the attachment", uploadIds: [upload.id] }) as unknown as { sessionId: string; operationId: string; logicalSessionId: string };
