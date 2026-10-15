@@ -4,6 +4,20 @@ import SwiftUI
 
 /// Evaluates a builder closure or view value only when SwiftUI asks for it
 /// (navigation destinations, sheets, toolbar and tab content).
+/// Content of a presentation the program created (a `sheet` or a
+/// `NavigationLink` destination). Its views' `@Environment(\.dismiss)` closes
+/// this presentation, the way SwiftUI's does, and never the runner sheet.
+struct SwiftAppPresentedContent: View {
+    let runtime: SwiftAppRuntime
+    let value: SwiftAppValue?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        SwiftAppLazyContent(runtime: runtime, value: value)
+            .environment(\.swiftAppDismiss, dismiss)
+    }
+}
+
 struct SwiftAppLazyContent: View {
     let runtime: SwiftAppRuntime
     let value: SwiftAppValue?
@@ -238,7 +252,7 @@ struct SwiftAppModifiedView: View {
             }
             let title = title ?? ""
             return AnyView(NavigationLink {
-                SwiftAppLazyContent(runtime: runtime, value: destination)
+                SwiftAppPresentedContent(runtime: runtime, value: destination)
             } label: {
                 if let label { SwiftAppLazyContent(runtime: runtime, value: label) } else { Text(verbatim: title) }
             })
@@ -448,7 +462,7 @@ struct SwiftAppModifiedView: View {
         case "sheet":
             guard case .binding(let binding)? = argument(arguments, "isPresented") else { return view }
             let content = arguments.last?.value
-            return AnyView(view.sheet(isPresented: boolBinding(binding)) { SwiftAppLazyContent(runtime: runtime, value: content) })
+            return AnyView(view.sheet(isPresented: boolBinding(binding)) { SwiftAppPresentedContent(runtime: runtime, value: content) })
         case "alert":
             guard case .binding(let binding)? = argument(arguments, "isPresented") else { return view }
             let actions = arguments.first(where: { $0.label == nil && { if case .closure = $0.value { true } else { false } }($0) })?.value
