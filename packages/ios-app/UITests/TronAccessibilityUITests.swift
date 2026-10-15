@@ -77,6 +77,37 @@ final class TronAccessibilityUITests: XCTestCase {
         }
     }
 
+    /// The Mac replacement journal (#984) in the shared Settings rows: path and
+    /// reason, every step with its timing, the exact error and log, the
+    /// rollback, and the stopped workers with in-place Resume.
+    func testMacReplacementJournalRows() {
+        for arguments in [[], ["-fixture-large-type"]] {
+            let app = launch(arguments)
+            defer { app.terminate() }
+            app.buttons["Mac Replacement"].tap()
+            let resume = app.buttons["Resume iPhone SSH terminal"]
+            for label in ["Full signed build", "Rolled back", "Preflight", "Build signed app", "Verify signature",
+                          "Stop running workers", "Stop Gateway", "Swap app", "Start new app", "Verify Gateway", "Finish"] {
+                XCTAssertTrue(app.staticTexts[label].firstMatch.waitForExistence(timeout: 3), "missing \(label)")
+            }
+            let top = XCTAttachment(screenshot: app.screenshot())
+            top.name = "mac-replacement-top\(arguments.joined(separator: "-"))"
+            top.lifetime = .keepAlways
+            add(top)
+            for _ in 0..<6 where !resume.isHittable { app.swipeUp() }
+            XCTAssertTrue(app.staticTexts["Failed at Start new app"].exists)
+            XCTAssertTrue(app.staticTexts["Previous app restored"].exists)
+            XCTAssertTrue(resume.isHittable, "a stopped worker offers Resume")
+            XCTAssertFalse(app.buttons["Resume Settings polish"].exists, "a resumed worker offers no second Resume")
+            XCTAssertTrue(app.staticTexts["Resumed in place"].exists)
+            let bottom = XCTAttachment(screenshot: app.screenshot())
+            bottom.name = "mac-replacement-bottom\(arguments.joined(separator: "-"))"
+            bottom.lifetime = .keepAlways
+            add(bottom)
+            app.terminate()
+        }
+    }
+
     func testJSONTypedButtonsOpenTheirCompleteValues() {
         let app = launch()
         defer { app.terminate() }
