@@ -36,8 +36,6 @@ struct SettingsView: View {
                             ConnectionsSettingsView()
                         }
                         TronSettingsDivider()
-                        MacTerminalSettingsRow()
-                        TronSettingsDivider()
                         settingsLink("Model Providers", summary: "Provider accounts and sign-in", icon: "key") {
                             ProvidersSettingsView(sessionID: nil)
                         }
@@ -78,10 +76,7 @@ struct SettingsView: View {
                                                  target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
                         }
                     }
-                    // Everything about this iPhone in one place. Logs and Setup
-                    // also read or write the Mac (Gateway logs, the session
-                    // folder, telemetry), so this group has no "never changes
-                    // the agent" caption (#956).
+                    // How this iPhone alerts, looks and lists sessions.
                     SettingsGroupCard(.iphone) {
                         settingsLink("Push Notifications", summary: "Agent alerts on this iPhone", icon: "bell.badge") {
                             PushNotificationsSettingsView()
@@ -92,17 +87,24 @@ struct SettingsView: View {
                         TronSettingsDivider()
                         settingsLink("Sessions", summary: "Dashboard list and subagent activity",
                                      icon: "slider.horizontal.2.square") { AppLocalBehaviorSettingsView() }
+                    }
+                    // Utilities and diagnostics that span this iPhone and the
+                    // Mac: a shell on the Mac, prototypes, logs and setup. Each
+                    // row's summary names its own scope, so the group has no
+                    // caption (#1030).
+                    SettingsGroupCard(.diagnostics) {
+                        MacTerminalSettingsRow()
                         TronSettingsDivider()
                         settingsLink("Experimental", summary: "Prototypes to try on this iPhone", icon: "flask") {
                             ExperimentalSettingsView()
                         }
                         TronSettingsDivider()
-                        settingsLink("Logs", summary: "Diagnostics from this iPhone and your Macs", icon: "text.alignleft") {
-                            GatewayLogsSettingsView()
-                        }
-                        TronSettingsDivider()
                         settingsLink("Setup", summary: "Import, Mac session folder, and telemetry", icon: "gearshape.2") {
                             SetupSettingsView(onImported: onImported)
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Logs", summary: "Diagnostics from this iPhone and your Macs", icon: "text.alignleft") {
+                            GatewayLogsSettingsView()
                         }
                     }
                 }
@@ -184,9 +186,10 @@ struct SettingsView: View {
 /// The settings palette: each group is one titled card with one accent, and every
 /// sheet a row opens keeps that accent. Groups follow what is being configured:
 /// the Macs and accounts Tron reaches, the agent's behaviour, what it can use,
-/// then this iPhone (its alerts, look, prototypes, logs and setup).
+/// then this iPhone (its alerts, look and session list), and last Tools &
+/// Diagnostics (Mac Terminal, prototypes, setup and logs).
 enum SettingsGroupKind {
-    case agent, tools, accounts, more, iphone
+    case agent, tools, accounts, more, iphone, diagnostics
 
     var title: String {
         switch self {
@@ -195,6 +198,7 @@ enum SettingsGroupKind {
         case .accounts: "Accounts"
         case .more: "More"
         case .iphone: "This iPhone"
+        case .diagnostics: "Tools & Diagnostics"
         }
     }
 
@@ -203,7 +207,7 @@ enum SettingsGroupKind {
         case .agent: .tronPurple
         case .tools: .tronCyan
         case .accounts: .tronIndigo
-        case .more, .iphone: .tronEmerald
+        case .more, .iphone, .diagnostics: .tronEmerald
         }
     }
 
