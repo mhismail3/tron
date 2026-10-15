@@ -2217,7 +2217,15 @@ the fixture Gateway's own built schema (`TRON_E2E_SETTINGS_INVENTORY`, written b
 harness), never a Swift key list. On Manage Session, the shared Project card and
 Settings it requires every key served on that target to have a row with a value and
 a layer source badge, and every unserved key to have none, and attaches the per-surface
-counts (`settings-surface-coverage.json`). It edits one key per layer through the
+counts (`settings-surface-coverage.json`). Sources is reached through Extensions on
+both Project and Mac Settings; Mac Setup is reached through its named Setup row.
+The journey checks the embedded schema section, not the surrounding hand-built
+controls, and retains screenshots of those destinations. It reads each destination
+as one accessibility snapshot, preserving the per-key row, value and source checks
+without a remote accessibility read for every descendant. Floor and enrolled-device
+instances belong only to the Mac target; saved-project and enrolled-device rows may
+be absent when the isolated fixture has no corresponding trust decision or SSH key.
+It edits one key per layer through the
 shared toggle (Chat, then Project after the untrusted write is refused on its row and
 the project is trusted through Review trust, then Mac) and reads each accepted value
 and badge back after reopening; Mac-only rows open Settings through Edit at Mac. It
