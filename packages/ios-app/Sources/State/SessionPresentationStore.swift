@@ -324,7 +324,10 @@ final class SessionPresentationStore {
         self.performanceSignposts = performanceSignposts
         self.clock = clock
     }
+}
 
+// Behavior stays out of the @Observable class body; see AppModel (#1066).
+extension SessionPresentationStore {
     var mountedTarget: SessionPresentationIdentity? {
         guard let target, owns(target) else { return nil }
         return target

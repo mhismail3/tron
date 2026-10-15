@@ -525,6 +525,41 @@ Adding API to `Core`:
    A file that carries the Gateway protocol constants must keep its path in
    `scripts/gateway_protocol_contract.py` current.
 
+### Type-checking cost
+
+The app module's emit-module job type-checks every opaque `some View` body
+and runs on every edit, so one slow body slows every incremental build, not
+just edits to its own file (#1066). Two patterns account for most of the cost:
+
+- **Large `@Observable` classes.** The macro expands once per class member
+  and each expansion carries the whole class body, so the cost grows with
+  members times body length and is paid by every compile job that references
+  the class. Keep only stored properties and the designated initializer in the
+  class; put behavior in a same-file `extension` (see `AppModel`).
+- **Long modifier chains and literal arithmetic.** A view's modifier chain is
+  one expression. Split a long chain into staged opaque properties that apply
+  the same modifiers in the same order (see `ChatView.contentSurface`), move
+  multi-statement closures into named methods, and give literal-heavy layout
+  math explicit `CGFloat`/`Double` types.
+
+To find hotspots, build once with the compiler's timing warnings into a
+throwaway DerivedData directory and read the `took …ms to type-check`
+warnings (each body appears once for its compile job and once for
+emit-module):
+
+```bash
+cd packages/ios-app && ../../scripts/tron-heavy run --owner typecheck --need-mb 7000 -- \
+  xcodebuild build -project TronMobile.xcodeproj -scheme "Tron UI Validation" \
+  -configuration Test -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath "$TMPDIR/tron-typecheck" \
+  'OTHER_SWIFT_FLAGS=$(inherited) -Xfrontend -warn-long-function-bodies=100 -Xfrontend -warn-long-expression-type-checking=100'
+```
+
+Compare implementations by `Frontend.NumInstructionsExecuted` from
+`-Xfrontend -stats-output-dir -Xfrontend <dir>` rather than wall time, which
+varies with the other work on this Mac. Remove the DerivedData directory
+afterwards.
+
 ### Build matrix
 
 | Configuration | Intended workflow | Bundle identity | Push environment |

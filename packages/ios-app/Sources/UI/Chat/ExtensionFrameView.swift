@@ -118,9 +118,15 @@ enum ExtensionFrameColorPolicy {
     private static func luminance(_ value: String) -> Double {
         let cleaned = value.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         guard cleaned.count == 6, let rgb = Int(cleaned, radix: 16) else { return 0.5 }
-        let channels = [Double((rgb >> 16) & 0xff), Double((rgb >> 8) & 0xff), Double(rgb & 0xff)].map { $0 / 255 }
-        let linear = channels.map { $0 <= 0.03928 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
-        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+        // Explicit Double types keep this off the literal-overload search (#1066).
+        let channels: [Double] = [Double((rgb >> 16) & 0xff), Double((rgb >> 8) & 0xff), Double(rgb & 0xff)].map { $0 / 255 }
+        let linear: [Double] = channels.map { (channel: Double) -> Double in
+            channel <= 0.03928 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+        }
+        let red: Double = 0.2126 * linear[0]
+        let green: Double = 0.7152 * linear[1]
+        let blue: Double = 0.0722 * linear[2]
+        return red + green + blue
     }
 }
 

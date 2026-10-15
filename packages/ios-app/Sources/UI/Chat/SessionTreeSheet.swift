@@ -167,20 +167,7 @@ struct SessionTreeSheet: View {
                                 }
                                 pagingControls(page, location: "top")
                                 ForEach(page.nodes) { node in
-                                    let row = SessionHistoryRowPresentation(node: node)
-                                    SessionHistoryRow(row: row, current: node.id == model.sessionHistoryPresentation(for: sessionID)?.leafEntryId,
-                                        canAct: active && !store.loading && identity != nil && store.identity == identity,
-                                        select: { select(node, .details) }, navigate: { select(node, .navigate) },
-                                        fork: { select(node, .fork) }, bookmark: {
-                                            label = node.label ?? ""; labelIdentity = identity; labelNode = node
-                                        })
-                                    #if HOSTED_TEST
-                                    .background {
-                                        if node.id == page.nodes.first?.id {
-                                            HistoryFirstRowMarker(entryID: node.id)
-                                        }
-                                    }
-                                    #endif
+                                    historyRow(node, in: page)
                                 }
                                 if !page.nodes.isEmpty { pagingControls(page, location: "bottom") }
                             }
@@ -281,6 +268,27 @@ struct SessionTreeSheet: View {
               self.identity == identity, !initialEntryResolved else { return }
         initialEntryResolved = true
         select(SessionHistoryEntryStore.node(for: exact), .details, initialPage: exact)
+    }
+
+    // One row outside the body's result builder: inline, its closures and
+    // comparisons were solved with the whole sheet body (~1.3 s, #1066).
+    private func historyRow(_ node: SessionTreeNode, in page: SessionHistoryPage) -> some View {
+        let row = SessionHistoryRowPresentation(node: node)
+        let current: Bool = node.id == model.sessionHistoryPresentation(for: sessionID)?.leafEntryId
+        let canAct: Bool = active && !store.loading && identity != nil && store.identity == identity
+        return SessionHistoryRow(row: row, current: current,
+            canAct: canAct,
+            select: { select(node, .details) }, navigate: { select(node, .navigate) },
+            fork: { select(node, .fork) }, bookmark: {
+                label = node.label ?? ""; labelIdentity = identity; labelNode = node
+            })
+            #if HOSTED_TEST
+            .background {
+                if node.id == page.nodes.first?.id {
+                    HistoryFirstRowMarker(entryID: node.id)
+                }
+            }
+            #endif
     }
 
     private func pagingControls(_ page: SessionHistoryPage, location: String) -> some View {

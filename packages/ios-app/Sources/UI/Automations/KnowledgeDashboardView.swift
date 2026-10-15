@@ -266,7 +266,63 @@ struct KnowledgeDashboardView: View {
     }
     private var presentsLibraryRows: Bool { section == .sources && supportsLibraryRows }
 
+    // Built in stages (each a separate opaque property) because one modifier chain
+    // is solved as a single expression and took ~5 s to type-check (#1066). The
+    // stages apply the same modifiers in the same order.
     var body: some View {
+        dashboardObservers
+        .tronManagedSheet(isPresented: $coverageSheet, identity: "knowledge.coverage", onDismiss: finishDetailDismissal) {
+            coverageDetailSheet
+        }
+        .tronManagedSheet(isPresented: $chronicleInfoSheet, identity: "knowledge.chronicle-info") {
+            chronicleInfoSheetView
+        }
+        .tronManagedSheet(isPresented: $showingFilters, identity: "knowledge.filters") {
+            knowledgeFilterSheet
+        }
+        .tronManagedSheet(isPresented: $configSheet, identity: "knowledge.configuration") {
+            KnowledgeConfigurationView().environment(model)
+        }
+        .tronManagedSheet(isPresented: $captureSheet, identity: "knowledge.capture") {
+            KnowledgeCaptureView(origin: model.knowledgeDestinationIdentity) { captureSheet = false; await reload() }.environment(model)
+        }
+        .tronManagedSheet(isPresented: $noteSheet, identity: "knowledge.note") {
+            KnowledgeNoteCreateView(origin: model.knowledgeDestinationIdentity) { noteSheet = false; await reload() }.environment(model)
+        }
+        .task(id: catalogueTaskID) {
+            guard activity.allowsPresentationPublication else { return }
+            await reload()
+        }
+        .onChange(of: activity.allowsPresentationPublication) { _, active in
+            if !active {
+                // Covered reads are disposable, but their accepted page remains
+                // the dashboard projection until a matching refresh arrives.
+                loadGeneration &+= 1
+                loadingMore = false
+                coverageStore.suspend()
+            }
+        }
+        .onDisappear { coverageStore.suspend(); searchDebouncer.cancel() }
+    }
+
+    /// The catalogue read restarts whenever any part of its request or the
+    /// Gateway identity it reads from changes.
+    private var catalogueTaskID: String {
+        let identity: KnowledgePresentationIdentity = model.knowledgePresentationIdentity
+        let parts: [String] = [
+            section.rawValue,
+            activeSourceVisibility.rawValue,
+            scope?.rawValue ?? "all",
+            effectiveSearch,
+            String(activity.allowsPresentationPublication),
+            identity.profileID ?? "none",
+            String(identity.lifecycleGeneration ?? -1),
+            String(identity.connectionID ?? -1),
+        ]
+        return parts.joined(separator: "/")
+    }
+
+    private var dashboardSurface: some View {
         DashboardChrome(
             mode: .knowledge,
             header: dashboardHeader,
@@ -298,6 +354,10 @@ struct KnowledgeDashboardView: View {
         .font(TronTypography.body)
         .foregroundStyle(Color.tronTextPrimary)
         .tronSettingsVisualTheme(accent: .tronKnowledge)
+    }
+
+    private var dashboardObservers: some View {
+        dashboardSurface
         .tronManagedSheet(item: $selectedSubject, identity: { "knowledge.detail.\($0.id)" }, onDismiss: finishDetailDismissal) { subject in
             KnowledgeDetailSheet(subject: subject, origin: selectedIdentity ?? model.knowledgePresentationIdentity,
                                  onChanged: { await reload() },
@@ -339,38 +399,6 @@ struct KnowledgeDashboardView: View {
         .onChange(of: model.connectionState) { _, state in
             if state == .connected { model.knowledgePreviews.retryUnavailable() }
         }
-        .tronManagedSheet(isPresented: $coverageSheet, identity: "knowledge.coverage", onDismiss: finishDetailDismissal) {
-            coverageDetailSheet
-        }
-        .tronManagedSheet(isPresented: $chronicleInfoSheet, identity: "knowledge.chronicle-info") {
-            chronicleInfoSheetView
-        }
-        .tronManagedSheet(isPresented: $showingFilters, identity: "knowledge.filters") {
-            knowledgeFilterSheet
-        }
-        .tronManagedSheet(isPresented: $configSheet, identity: "knowledge.configuration") {
-            KnowledgeConfigurationView().environment(model)
-        }
-        .tronManagedSheet(isPresented: $captureSheet, identity: "knowledge.capture") {
-            KnowledgeCaptureView(origin: model.knowledgeDestinationIdentity) { captureSheet = false; await reload() }.environment(model)
-        }
-        .tronManagedSheet(isPresented: $noteSheet, identity: "knowledge.note") {
-            KnowledgeNoteCreateView(origin: model.knowledgeDestinationIdentity) { noteSheet = false; await reload() }.environment(model)
-        }
-        .task(id: "\(section.rawValue)/\(activeSourceVisibility.rawValue)/\(scope?.rawValue ?? "all")/\(effectiveSearch)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)") {
-            guard activity.allowsPresentationPublication else { return }
-            await reload()
-        }
-        .onChange(of: activity.allowsPresentationPublication) { _, active in
-            if !active {
-                // Covered reads are disposable, but their accepted page remains
-                // the dashboard projection until a matching refresh arrives.
-                loadGeneration &+= 1
-                loadingMore = false
-                coverageStore.suspend()
-            }
-        }
-        .onDisappear { coverageStore.suspend(); searchDebouncer.cancel() }
     }
 
     private var dashboardMenuActions: DashboardMenuActions {
@@ -1096,7 +1124,7 @@ struct KnowledgeSourceRowView: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(2)
-                Text(KnowledgeSourceRowPresentationPolicy.subtitle(row) + " · " + row.freshness.rawValue.capitalized + (row.verdict.map { " · \($0.label)" } ?? ""))
+                Text(subtitle)
                     .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(1)
@@ -1109,6 +1137,14 @@ struct KnowledgeSourceRowView: View {
             guard let request = row.previewRequest else { return }
             _ = await previews.load(request, includeArchived: row.admission == .archived)
         }
+    }
+
+    // A typed join; the inline `+` chain with an optional map took ~1 s to
+    // type-check (#1066).
+    private var subtitle: String {
+        var parts: [String] = [KnowledgeSourceRowPresentationPolicy.subtitle(row), row.freshness.rawValue.capitalized]
+        if let verdict = row.verdict { parts.append(verdict.label) }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -1372,7 +1408,51 @@ struct KnowledgeDetailView: View {
     }
     private var observationPresentation: KnowledgeObservationPresentation? { KnowledgeObservationPresentation(record: currentRecord) }
 
+    // Built in stages (separate opaque properties) because the single modifier
+    // chain took ~4 s to type-check (#1066); modifiers and order are unchanged.
     var body: some View {
+        detailObservers
+        .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) {
+            Button("Forget", role: .destructive) { forget() }
+        }
+        .tronManagedSheet(isPresented: $technicalDetailsSheet, identity: "knowledge.technical.\(currentRecord.id)") {
+            if let observation = observationPresentation {
+                KnowledgeObservationTechnicalDetailsSheet(presentation: observation)
+            }
+        }
+        .tronManagedSheet(isPresented: Binding(get: { externalPageURL != nil }, set: { if !$0 { externalPageURL = nil } }), identity: "knowledge.external.\(currentRecord.id)") {
+            if let externalPageURL {
+                TronSafariView(url: externalPageURL)
+                    .ignoresSafeArea(.container, edges: .all)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.hidden)
+            }
+        }
+        .tronManagedSheet(isPresented: $correctionSheet, identity: "knowledge.correction.\(currentRecord.id)") {
+            KnowledgeCorrectionView(record: currentRecord, origin: origin) { updated in
+                // A managed child temporarily owns presentation publication while
+                // its covered detail keeps data ownership. Identity, rather than
+                // the parent's publication flag, admits this legitimate callback.
+                guard admitsDestination else { return }
+                currentRecord = updated
+                await onChanged()
+                correctionSheet = false
+            }
+        }
+        .navigationDestination(item: Binding(get: { linkedReader.record }, set: { _ in linkedReader.clear() })) { linked in
+            KnowledgeDetailView(record: linked, origin: origin, onChanged: onChanged,
+                                onOpenDraft: onOpenDraft, onOpenSession: onOpenSession, navigationAncestors: navigationAncestors)
+        }
+        .onDisappear {
+            linkedReader.suspend()
+            if case .source(let source) = currentRecord.content, takeDraft != (source.take?.text ?? "") {
+                Task { @MainActor in await saveTakeDraft() }
+            }
+        }
+    }
+
+    private var detailContent: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
                 if let observation = observationPresentation {
@@ -1444,6 +1524,10 @@ struct KnowledgeDetailView: View {
             .padding(.vertical, TronSpacing.large)
         }
         .tronScrollEdgeChrome()
+    }
+
+    private var detailChrome: some View {
+        detailContent
         .task(id: "detail-preview-\(model.knowledgePresentationIdentity):\(activity.allowsPresentationPublication):\(currentRecord.id):\(currentRecord.revisionId):\(currentRecord.content.sourcePreviewHash ?? "none")") {
             guard case .source(let source) = currentRecord.content, let preview = source.preview,
                   admitsOrigin else { return }
@@ -1478,6 +1562,10 @@ struct KnowledgeDetailView: View {
                 .accessibilityLabel("Knowledge record actions")
             }
         }
+    }
+
+    private var detailMutations: some View {
+        detailChrome
         .modifier(KnowledgeMutationObserver(mutation: $recordMutation, error: $message) {
             if dismissAfterRecordMutation { dismiss() }
             else { Task { @MainActor in await onChanged() } }
@@ -1492,6 +1580,10 @@ struct KnowledgeDetailView: View {
         }
         .foregroundStyle(Color.tronTextPrimary)
         .tronSettingsLayout()
+    }
+
+    private var detailObservers: some View {
+        detailMutations
         .task(id: "citations-\(currentRecord.id):\(currentRecord.revisionId)") { await loadCitationTitles() }
         .task(id: "curation-jobs-\(model.knowledgePresentationIdentity)-\(activity.allowsPresentationPublication)-\(currentRecord.id)-\(String(describing: model.connectionState))-\(jobsRequestGeneration)") { await observeCurationJobs() }
         .task(id: "take-\(takeDraft)/\(model.knowledgePresentationIdentity)/\(activity.allowsPresentationPublication)") {
@@ -1531,44 +1623,6 @@ struct KnowledgeDetailView: View {
                 return
             }
             KnowledgeTakeDraftRegistry.shared.set(.init(text: value, commandID: command, expectedRevision: currentRecord.revisionId, error: nil, currentText: nil), profileID: origin.profileID, recordID: currentRecord.id)
-        }
-        .tronSettingsVisualTheme(accent: .tronKnowledge)
-        .confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) {
-            Button("Forget", role: .destructive) { forget() }
-        }
-        .tronManagedSheet(isPresented: $technicalDetailsSheet, identity: "knowledge.technical.\(currentRecord.id)") {
-            if let observation = observationPresentation {
-                KnowledgeObservationTechnicalDetailsSheet(presentation: observation)
-            }
-        }
-        .tronManagedSheet(isPresented: Binding(get: { externalPageURL != nil }, set: { if !$0 { externalPageURL = nil } }), identity: "knowledge.external.\(currentRecord.id)") {
-            if let externalPageURL {
-                TronSafariView(url: externalPageURL)
-                    .ignoresSafeArea(.container, edges: .all)
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.hidden)
-            }
-        }
-        .tronManagedSheet(isPresented: $correctionSheet, identity: "knowledge.correction.\(currentRecord.id)") {
-            KnowledgeCorrectionView(record: currentRecord, origin: origin) { updated in
-                // A managed child temporarily owns presentation publication while
-                // its covered detail keeps data ownership. Identity, rather than
-                // the parent's publication flag, admits this legitimate callback.
-                guard admitsDestination else { return }
-                currentRecord = updated
-                await onChanged()
-                correctionSheet = false
-            }
-        }
-        .navigationDestination(item: Binding(get: { linkedReader.record }, set: { _ in linkedReader.clear() })) { linked in
-            KnowledgeDetailView(record: linked, origin: origin, onChanged: onChanged,
-                                onOpenDraft: onOpenDraft, onOpenSession: onOpenSession, navigationAncestors: navigationAncestors)
-        }
-        .onDisappear {
-            linkedReader.suspend()
-            if case .source(let source) = currentRecord.content, takeDraft != (source.take?.text ?? "") {
-                Task { @MainActor in await saveTakeDraft() }
-            }
         }
     }
     @ViewBuilder private var recordMetadata: some View {
