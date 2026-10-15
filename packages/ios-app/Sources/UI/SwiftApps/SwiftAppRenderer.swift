@@ -209,6 +209,18 @@ private struct SwiftAppViewDepthKey: EnvironmentKey {
     static let defaultValue = 0
 }
 
+private struct SwiftAppHostChromeKey: EnvironmentKey {
+    static let defaultValue: SwiftAppHostChrome? = nil
+}
+
+private struct SwiftAppHostedRootKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private struct SwiftAppHostsNavigationKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 private struct SwiftAppDismissKey: EnvironmentKey {
     static let defaultValue: DismissAction? = nil
 }
@@ -225,6 +237,24 @@ extension EnvironmentValues {
     }
     /// The dismiss action of the innermost presentation the program created
     /// (`SwiftAppPresentedContent`); nil in the program's root.
+    /// Set from the runner's root until the program's first real view, which
+    /// `SwiftAppModifiedView` wraps in a `SwiftAppHostStack` (#909).
+    var swiftAppHostChrome: SwiftAppHostChrome? {
+        get { self[SwiftAppHostChromeKey.self] }
+        set { self[SwiftAppHostChromeKey.self] = newValue }
+    }
+    /// True inside the program's root as the runner hosts it, until a
+    /// presentation the program creates (#909).
+    var swiftAppHostedRoot: Bool {
+        get { self[SwiftAppHostedRootKey.self] }
+        set { self[SwiftAppHostedRootKey.self] = newValue }
+    }
+    /// True until the program's outermost NavigationStack, which merges into
+    /// the runner sheet's own stack (`SwiftAppNavigationStack`).
+    var swiftAppHostsNavigation: Bool {
+        get { self[SwiftAppHostsNavigationKey.self] }
+        set { self[SwiftAppHostsNavigationKey.self] = newValue }
+    }
     var swiftAppDismiss: DismissAction? {
         get { self[SwiftAppDismissKey.self] }
         set { self[SwiftAppDismissKey.self] = newValue }
@@ -240,6 +270,7 @@ struct SwiftAppCustomView: View {
     @Environment(\.swiftAppEnvironmentObjects) private var environmentObjects
     @Environment(\.swiftAppViewDepth) private var depth
     @Environment(\.swiftAppDismiss) private var dismiss
+    @Environment(\.swiftAppHostChrome) private var hostChrome
     /// A view that contains itself (`struct A { var body { A() } }`) is
     /// unbounded SwiftUI recursion; it stops here with a diagnostic.
     static let maximumDepth = 48
@@ -258,7 +289,14 @@ struct SwiftAppCustomView: View {
             case .success(let node):
                 SwiftAppNodeView(runtime: runtime, node: node)
                     .environment(\.swiftAppViewDepth, depth + 1)
-            case .failure(let error): SwiftAppErrorView(message: String(describing: error))
+            case .failure(let error):
+                if let hostChrome {
+                    // A root that fails before its first view still gets the
+                    // runner's chrome, so Done can close it.
+                    SwiftAppHostStack(chrome: hostChrome) { SwiftAppErrorView(message: String(describing: error)) }
+                } else {
+                    SwiftAppErrorView(message: String(describing: error))
+                }
             }
         }
     }
@@ -307,9 +345,13 @@ struct SwiftAppNodesView: View {
 struct SwiftAppNodeView: View {
     let runtime: SwiftAppRuntime
     let node: SwiftAppViewNode
+    @Environment(\.swiftAppHostChrome) private var hostChrome
 
     var body: some View {
-        if node.name == SwiftAppRenderer.builderGroup {
+        if let hostChrome, node.name == SwiftAppRenderer.builderGroup || node.name == "ForEach" {
+            // Several root views, or a root ForEach, share one runner stack.
+            SwiftAppHostStack(chrome: hostChrome) { SwiftAppNodeView(runtime: runtime, node: node) }
+        } else if node.name == SwiftAppRenderer.builderGroup {
             SwiftAppNodesView(runtime: runtime, nodes: node.children ?? [])
         } else if node.name == "ForEach" {
             forEach

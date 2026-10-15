@@ -47,6 +47,13 @@ struct SwiftAppLaunch: Identifiable {
 
 /// Runs one interpreted single-file SwiftUI app in a large sheet. Dismissing
 /// the sheet discards the program and all of its state.
+///
+/// The program is hosted in Tron's shared `TronDocumentSheet` (#909): detents,
+/// sheet material, tint and typography. Its first real view sits in a
+/// `SwiftAppHostStack` with the shared sheet chrome (title, Done); a root
+/// TabView gets one per tab. Tron's theme is the environment default, so plain
+/// SwiftUI looks like Tron, and anything the program sets explicitly is applied
+/// closer to its views and wins.
 struct SwiftAppRunnerSheet: View {
     let launch: SwiftAppLaunch
     @State private var runtime: Result<SwiftAppRuntime, Error>
@@ -56,22 +63,26 @@ struct SwiftAppRunnerSheet: View {
         _runtime = State(initialValue: Result { try SwiftAppRuntime(source: launch.source) })
     }
 
+    private var fileTitle: String {
+        launch.name.lowercased().hasSuffix(".swift") ? String(launch.name.dropLast(6)) : launch.name
+    }
+
     var body: some View {
-        Group {
-            switch runtime {
-            case .success(let runtime):
+        switch runtime {
+        case .success(let runtime):
+            TronDocumentSheet(title: fileTitle, hostsNavigation: false) {
                 running(runtime)
-            case .failure(let error):
-                TronDocumentSheet(title: launch.name) {
-                    ScrollView {
-                        TronInfoCard(
-                            icon: "exclamationmark.triangle",
-                            text: "This file uses Swift outside the supported SwiftUI subset.\n\n\(error)",
-                            accent: .tronBlue
-                        )
-                        .padding(TronSpacing.xlarge)
-                        .accessibilityIdentifier("swiftApp.unsupported")
-                    }
+            }
+        case .failure(let error):
+            TronDocumentSheet(title: launch.name) {
+                ScrollView {
+                    TronInfoCard(
+                        icon: "exclamationmark.triangle",
+                        text: "This file uses Swift outside the supported SwiftUI subset.\n\n\(error)",
+                        accent: .tronBlue
+                    )
+                    .padding(TronSpacing.xlarge)
+                    .accessibilityIdentifier("swiftApp.unsupported")
                 }
             }
         }
@@ -82,9 +93,10 @@ struct SwiftAppRunnerSheet: View {
         if let root = runtime.rootDeclaration {
             SwiftAppCustomView(runtime: runtime, node: SwiftAppViewNode(name: root.name, arguments: [], declaration: root))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // The interpreted app looks like a standard iOS app, not Tron:
-                // controls and text use their system default fonts.
-                .environment(\.font, nil)
+                .environment(\.swiftAppHostChrome, SwiftAppHostChrome(title: fileTitle))
+                // Lists and Forms show the shared sheet material, like Tron's
+                // own sheets; a program's own scrollContentBackground wins.
+                .scrollContentBackground(.hidden)
                 .overlay(alignment: .bottom) {
                     if let message = runtime.actionError {
                         SwiftAppErrorView(message: message)
@@ -93,8 +105,6 @@ struct SwiftAppRunnerSheet: View {
                 }
                 // No identifier here: on a container SwiftUI pushes it onto
                 // every child, replacing the program's own identifiers.
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
         }
     }
 }

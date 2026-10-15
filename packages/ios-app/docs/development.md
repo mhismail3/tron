@@ -2277,6 +2277,20 @@ full-affordance layout must preserve monotonic mounted rows through the same bou
 The Processes route still requires a real composer interaction in manual UI validation;
 directly calling a hosted probe recorder is not route-wiring coverage. Presentation-reset
 
+The nested-menu regressions (#877) run with
+`scripts/tron-ios-test run --only-testing TronMobileUITests/TronSheetTintUITests/testNestedSessionsRetentionOpensAndPersistsInLightAndDark --only-testing TronMobileUITests/TronSheetTintUITests/testNestedHistoryMenuOpensEveryDestinationInLightAndDark`.
+They use the production Settings → Sessions and Manage Session → Session History
+sheets at depth two, not isolated menu mocks. The Sessions journey changes a
+value, closes/reopens the sheet, verifies it and restores the previous value.
+The history journey opens each menu destination and returns without sending
+navigation, fork or bookmark mutations. Both check toolbar/title tint and retain
+`877-retention-light/dark` and `877-history-light/dark` screenshots in the reported
+`.xcresult`; export with `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-directory>`.
+The one-step diagnostic signal is failure to find the tapped menu's actual option
+at depth two, with the native accessibility tree and screenshot in the result.
+These passed on iOS 26.5 before any production behavior change; they do not prove
+an Apple root cause, other OS versions or physical-device behavior.
+
 Simulator screenshots are deterministic regression artifacts, not the final
 system-chrome authority. A physical install is protocol-gated before
 `devicectl`: the default Stable target requires a matching verified installed

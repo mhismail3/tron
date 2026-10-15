@@ -22,6 +22,30 @@ runs that file as a native SwiftUI app in a large sheet.
    root view through `SwiftAppRenderer`. Dismissing the sheet discards the
    program and its state.
 
+## Tron styling (#909)
+
+A plain file looks like Tron with no styling code. The runner is a
+`TronDocumentSheet` (shared detents, sheet material, `tronPresentation`
+typography and the sheet's tint). The program's first real view, after its
+`App`, `WindowGroup`, custom view structs and a root `TabView`, sits in a
+`SwiftAppHostStack`. That is one NavigationStack with the shared
+`tronDocumentSheetChrome`: a `TronSheetTitle` and a Done control that closes the
+runner. The title is the program's root `navigationTitle`, else the file name.
+
+- The program's own outermost `NavigationStack` merges into that stack
+  (`SwiftAppNavigationStack`), so its title, toolbar items and pushes use the
+  sheet's bar.
+- A root `TabView` gets one host stack per tab, with the tab's
+  `tabItem`/`badge`/`tag` kept outside it. A stack around the TabView would hide
+  each tab's toolbar.
+- Lists and Forms hide their scroll background so the sheet material shows,
+  and Lists, Forms and ScrollViews carry `tronScrollEdgeChrome`.
+- Sheets and destinations the program presents keep their own NavigationStacks.
+
+Theme values are environment defaults set above the program. A program's own
+`font`, `tint`, `foregroundStyle`, `scrollContentBackground` or
+`navigationBarTitleDisplayMode` is applied closer to its views and wins.
+
 ## Flag
 
 Off by default; without it `.swift` artifacts are unchanged. Turn it on from
@@ -125,7 +149,10 @@ Remaining limits, by design of this prototype:
   `reduce(0, +)`.
 - **Library:** common `Array`, `String`, `Int`, and `Double` members
   (`filter`, `map`, `reduce`, `sorted`, `contains`, `append`, `remove`,
-  `firstIndex`, `enumerated`, `joined`, `uppercased`, `formatted`, …),
+  `firstIndex`, `first(where:)`/`first { … }`, `enumerated`, `joined`,
+  `uppercased`, `formatted`, …), `Optional.map`/`flatMap` (nil stays nil; a
+  non-collection value is passed to the closure, while arrays, ranges and strings
+  keep their own `map`),
   `min`, `max`, `abs`, `random(in:)`, `String(format:)`, `UUID()`, and
   `withAnimation`.
 - **Views:** Text, Label, Image(systemName:), Button, Toggle, TextField,
@@ -159,9 +186,16 @@ fixture (`-readonly-preview-scenario display-swift…`):
   off the `.swift` sheet is the ordinary document sheet (no run control, large
   detent, Done dismisses), and that a preview truncated at the text limit never
   offers to run.
+- The `habits`, `budget` and `limits` journeys also check the hosted chrome
+  with `assertToolbarTint`. The shared title (the program's root
+  `navigationTitle`, or the file name for `limits`) carries a Done inked in the
+  title's tint, so a runner that draws its own chrome fails. Done closes the
+  runner back to the document. Each tab of `budget`'s root TabView has the
+  chrome and keeps its own toolbar.
 - `testDisplayedSwiftStoreAppSharesStateAcrossTabs` runs `budget`: an
   `ObservableObject` store shared through `environmentObject`, `TabView`,
-  `List`, an enum `switch`, and `String(format:)`, then `dismiss()` popping a
+  `List`, an enum `switch`, `String(format:)`, `Optional.map` on a value and on
+  `first { … }`'s nil, then `dismiss()` popping a
   `NavigationLink` destination, closing the program's own sheet after its
   save action, and doing nothing in the root view (#1027).
 - `testSettingsSwitchAddsAndRemovesSwiftRunControlLive` starts with the

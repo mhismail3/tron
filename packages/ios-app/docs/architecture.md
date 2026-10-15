@@ -1796,7 +1796,16 @@ also checks Project/catalog sheet ownership while proving inheritance. Layout
 assertions use bounded tolerances only for the identified width/chrome risks;
 screenshots are diagnostic evidence, not substitutes for successful interaction.
 State-boundary integration tests supplement these journeys where the native
-fixture cannot establish store/runtime behavior.
+fixture cannot establish store/runtime behavior. Nested native menus are covered
+by `TronSheetTintUITests`: Settings → Sessions changes and restores retention,
+and Manage Session → Session History opens navigation, fork and bookmark
+presentations at sheet depth two in light and dark. These controls work on the
+iOS 26.5 simulator without changing production presentation ownership (#877).
+The earlier Manage Session → Settings → Sessions route is no longer current:
+the chat gear opens Mac/iPhone Settings directly, while Manage Session owns
+Chat Settings. Do not infer a platform-wide menu failure or rewrite working
+controls from the historical report; physical-device behavior remains a separate
+qualification. Schema choices continue to use the shared picker-sheet design.
 
 Shared Settings conventions (#939):
 
@@ -2107,6 +2116,10 @@ Document-style sheets use the shared `TronDocumentSheet` for the standard
 the concrete content surface owns any custom blur overlay. Default detents remain
 unchanged; a caller may explicitly provide an initial detent, in which case the
 shared owner keeps the other configured detents available for native dragging.
+Its navigation chrome is the shared `tronDocumentSheetChrome` modifier. Content
+that owns its own stacks (an interpreted Swift app whose root is a TabView) uses
+`hostsNavigation: false` and applies that modifier at each stack root, so the
+chrome is never nested inside a second NavigationStack.
 Video display sheets open at medium with large available and use native safe-area
 placement without a content-level custom blur surface. Playback at medium and
 expansion to large are covered by hosted UI tests. Paused-control icon rendering
