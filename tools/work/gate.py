@@ -15,7 +15,8 @@ worktree` keys also bind the worktree because their products live there.
 
 Running prints one line per shard as it starts and a heartbeat with elapsed
 time, budget and live tree RSS while it runs, stops at the first failure with
-the log tail, and kills a shard that exceeds its hard timeout, naming it. Heavy
+the log tail, and stops a shard that exceeds its hard timeout with its whole
+process tree, naming it. Heavy
 shards wait for the host-wide heavy queue (heavy.py) with their expected RSS;
 light shards never wait. Every finished shard appends its wall time, peak tree
 RSS and CPU to `<git common dir>/work/gate/metrics.jsonl`, which `report`
@@ -52,6 +53,10 @@ import heavy  # noqa: E402
 CATALOG = Path(os.environ.get("TRON_GATE_CATALOG") or Path(__file__).resolve().parent / "gate-catalog.json")
 HEARTBEAT_SECONDS = float(os.environ.get("TRON_GATE_HEARTBEAT_SECONDS") or 15)
 SAMPLE_SECONDS = 0.5
+# How long a stopped step's processes get to finish their own cleanup after SIGTERM before
+# SIGKILL: the iOS lease holder waits up to 30 s for its command tree, then releases its
+# simulator. scripts/test-gate.py shortens it for its fixtures.
+STOP_GRACE_SECONDS = float(os.environ.get("TRON_GATE_STOP_GRACE_SECONDS") or 45)
 EXCERPT_LINES = 40
 _TEST_FILE = re.compile(r"\.(test|spec)\.(ts|tsx|mts|mjs|js)$")
 _TS_FILE = re.compile(r"\.(ts|tsx|mts|mjs|js|json)$")
@@ -211,6 +216,91 @@ def _suite_shards(root: Path, suite: str) -> List[str]:
     return [f"python3 -B {suite} {node.name}" for node in classes if node.name in test_classes]
 
 
+# Swift comments and string literals, blanked before scanning so braces and `func test` inside
+# them are not read as declarations.
+_SWIFT_NOISE = re.compile(r'//[^\n]*|/\*.*?\*/|#*""".*?"""#*|#*"(?:\\.|[^"\\\n])*"#*', re.S)
+_SWIFT_ATTRS = r"(?:@\w+(?:\([^()]*\))?\s*)"
+_SWIFT_MODIFIERS = r"(?:public|internal|open|final|override|nonisolated|private|fileprivate|static|class|mutating)"
+# The head of a top-level type body: `@MainActor final class X: XCTestCase {`, `extension X {`.
+_SWIFT_TYPE_HEAD = re.compile(rf"(?:^|\s)(?:{_SWIFT_ATTRS}|{_SWIFT_MODIFIERS}\s+)*(class|struct|enum|actor|extension|protocol)\s+"
+                              r"([A-Za-z_]\w*)\s*(?::\s*([^{]*?))?\s*(?:where\b[^{]*)?$")
+# The head of a method body XCTest runs: an instance `func testX()` with no parameters, after
+# any attributes and modifiers (`@MainActor`, `@available(...)`, `override`, on the same line or not).
+_SWIFT_TEST_HEAD = re.compile(rf"(?:^|\s)((?:{_SWIFT_ATTRS}|{_SWIFT_MODIFIERS}\s+)*)func\s+(test\w*)\s*\(\s*\)\s*"
+                              r"(?:async\s*)?(?:throws\s*)?(?:->\s*(?:Void|\(\s*\))\s*)?$")
+
+
+def _swift_declarations(source: str) -> tuple:
+    """Top-level types of one Swift file and the XCTest methods each declares.
+
+    Returns ({type: [inherited names]} for classes, [(type, method)] in source order). A method
+    counts only as a direct member of a top-level class or extension body; methods of nested
+    types, local functions and static/private functions are not XCTest test methods.
+    """
+    text = _SWIFT_NOISE.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), source)
+    classes: Dict[str, List[str]] = {}
+    methods: list = []
+    stack: List[Optional[str]] = []  # the enclosing top-level type name, or None for any other body
+    head_start = 0
+    for match in re.finditer(r"[{};]", text):
+        head, head_start = text[head_start:match.start()], match.end()
+        if match.group() == ";":
+            continue
+        if match.group() == "}":
+            if stack:
+                stack.pop()
+            continue
+        owner = None
+        if not stack:
+            declared = _SWIFT_TYPE_HEAD.search(head)
+            if declared:
+                owner = declared.group(2)
+                if declared.group(1) == "class":
+                    classes[owner] = [base.strip() for base in (declared.group(3) or "").split(",") if base.strip()]
+        elif len(stack) == 1 and stack[0]:
+            test = _SWIFT_TEST_HEAD.search(head)
+            if test and not re.search(r"\b(static|class|private|fileprivate)\s", test.group(1)):
+                methods.append((stack[0], test.group(2)))
+        stack.append(owner)
+    return classes, methods
+
+
+def _ios_journey_shards(root: Path, paths: List[str]) -> List[str]:
+    """One shard per IOS_METHODS_PER_SHARD test methods of each changed UI test class, all
+    from the same stamped build products; methods are read from the files every time.
+
+    Test classes are the UI test target's classes that inherit XCTestCase, directly or through
+    another test class; a changed file contributes the test methods it declares in them,
+    including through an extension in a file of another name.
+    """
+    folder, excluded = "packages/ios-app/UITests/", "packages/ios-app/UITests/RealGateway/"
+    files = {}
+    for path in sorted((root / folder).rglob("*.swift")):
+        relative = path.relative_to(root).as_posix()
+        if not relative.startswith(excluded):
+            files[relative] = _swift_declarations(path.read_text(errors="replace"))
+    bases = {name: inherited for classes, _ in files.values() for name, inherited in classes.items()}
+    tests = {"XCTestCase"}
+    while True:
+        found = {name for name, inherited in bases.items() if inherited and inherited[0] in tests} - tests
+        if not found:
+            break
+        tests |= found
+    tests.discard("XCTestCase")
+    by_class: Dict[str, List[str]] = {}
+    for path in paths:
+        for owner, method in files.get(path, ({}, []))[1]:
+            if owner in tests:
+                by_class.setdefault(owner, []).append(method)
+    shards = []
+    for owner, methods in by_class.items():
+        methods = list(dict.fromkeys(methods))
+        for start in range(0, len(methods), IOS_METHODS_PER_SHARD):
+            shards.append(" ".join(f"--only-testing TronMobileUITests/{owner}/{m}"
+                                   for m in methods[start:start + IOS_METHODS_PER_SHARD]))
+    return shards
+
+
 def _select(name: str, change: Change, code: List[str]) -> List[str]:
     """Arguments a selecting step needs from the change; empty means the step is not needed."""
     root = change.root
@@ -252,16 +342,7 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
                         suites.append(candidate)
         return [command for suite in dict.fromkeys(suites) for command in _suite_shards(root, suite)]
     if name == "ios-journeys":
-        # One shard per IOS_METHODS_PER_SHARD test methods of each changed UI test class, all
-        # from the same stamped build products; methods are read from the file every time.
-        shards = []
-        for path in change.existing():
-            if path.startswith("packages/ios-app/UITests/") and path.endswith("UITests.swift") and "/RealGateway/" not in path:
-                owner = f"TronMobileUITests/{Path(path).stem}"
-                methods = re.findall(r"^\s*func (test\w+)\(", (root / path).read_text(errors="replace"), re.M)
-                for start in range(0, len(methods), IOS_METHODS_PER_SHARD):
-                    shards.append(" ".join(f"--only-testing {owner}/{m}" for m in methods[start:start + IOS_METHODS_PER_SHARD]))
-        return list(dict.fromkeys(shards)) or [""]
+        return list(dict.fromkeys(_ios_journey_shards(root, change.existing()))) or [""]
     if name == "named-journeys":
         return list(change.tests)
     raise GateError(f"unknown selector {name}")
@@ -402,14 +483,73 @@ def cached(root: Path, shard: Shard, key: str) -> Optional[dict]:
 
 # ---------------------------------------------------------------- running
 
-def _tree_rss_kb(pgid: int) -> int:
-    done = subprocess.run(["ps", "-axo", "pgid=,rss="], capture_output=True, text=True)
-    total = 0
-    for line in done.stdout.splitlines():
-        parts = line.split()
-        if len(parts) == 2 and parts[0] == str(pgid):
-            total += int(parts[1])
-    return total
+class _Tree:
+    """A step's process tree: every process ever seen descending from its shell.
+
+    Members are keyed by pid and start time, so a reused pid is never taken for one. A
+    process that starts its own session or process group (the iOS lease holder's command,
+    xcodebuild under ios-test-process.py) leaves the step's group but not this tree, and
+    stays in it after its parent dies and launchd adopts it (#1071). A process that detaches
+    and loses its parent between two samples (SAMPLE_SECONDS) is not seen.
+    """
+
+    def __init__(self, root: int):
+        self.root = root
+        self.members: Dict[int, str] = {}
+        self.seeded = False
+
+    def sample(self) -> Dict[int, int]:
+        """Refresh the members; returns the live ones (zombies excluded) with their RSS in KB."""
+        done = subprocess.run(["ps", "-axo", "pid=,ppid=,stat=,rss=,lstart="], capture_output=True, text=True)
+        rows: Dict[int, tuple] = {}
+        for line in done.stdout.splitlines():
+            parts = line.split(None, 4)
+            if len(parts) == 5 and parts[0].isdigit() and parts[1].isdigit() and parts[3].isdigit():
+                rows[int(parts[0])] = (int(parts[1]), parts[2], int(parts[3]), parts[4].strip())
+        self.members = {pid: start for pid, start in self.members.items() if pid in rows and rows[pid][3] == start}
+        if not self.seeded and self.root in rows:
+            self.members[self.root], self.seeded = rows[self.root][3], True
+        grown = True
+        while grown:
+            grown = False
+            for pid, (ppid, _, _, start) in rows.items():
+                if ppid in self.members and pid not in self.members:
+                    self.members[pid], grown = start, True
+        return {pid: rows[pid][2] for pid in self.members if not rows[pid][1].startswith("Z")}
+
+    @staticmethod
+    def _signal(pids, signum: int) -> None:
+        # Members by pid, never the root's group id: once the root is reaped that id can be reused.
+        for pid in pids:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signum)
+
+    def stop(self, grace: float) -> str:
+        """End the whole tree: TERM every member, give their handlers `grace` seconds to
+        finish (the iOS lease holder joins its command and releases its simulator lane;
+        anything that starts meanwhile is joined too), then KILL whatever is left.
+        Returns a line for the step log, empty when nothing was running."""
+        live = self.sample()
+        if not live:
+            return ""
+        started, count = time.monotonic(), len(live)
+        self._signal(live, signal.SIGTERM)
+        while live and time.monotonic() - started < grace:
+            time.sleep(0.2)
+            live = self.sample()
+        if not live:
+            return f"gate: stopped the step's {count} processes in {time.monotonic() - started:.1f}s"
+        stubborn = sorted(live)
+        self._signal(live, signal.SIGKILL)
+        deadline = time.monotonic() + 5
+        while live and time.monotonic() < deadline:
+            time.sleep(0.1)
+            live = self.sample()
+        line = (f"gate: stopped the step's processes; {len(stubborn)} still running {grace:g}s after SIGTERM "
+                f"were killed: {' '.join(map(str, stubborn))}")
+        if live:
+            line += f"\ngate: WARNING {len(live)} processes survived SIGKILL: {' '.join(map(str, sorted(live)))}"
+        return line
 
 
 def _host_used_mb() -> int:
@@ -484,6 +624,8 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
             process = subprocess.Popen(["bash", "-c", f"set -eo pipefail\n{prelude}\n{shard.command}"], cwd=root, env=env,
                                        stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
                                        start_new_session=True, pass_fds=(lease.fd,) if lease else ())
+            tree = _Tree(process.pid)
+            tree.sample()
             done = threading.Event()
             result: dict = {}
 
@@ -498,30 +640,27 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
             try:
                 while not done.wait(SAMPLE_SECONDS):
                     now = time.monotonic()
-                    peak = max(peak, _tree_rss_kb(process.pid))
+                    peak = max(peak, sum(tree.sample().values()))
                     if host_sampling:
                         host_peak = max(host_peak, _host_used_mb() - host_base)
                     if stop.is_set():
                         cancelled = True
-                        _kill_group(process.pid)
-                        done.wait(10)
                         break
                     if now - started > step["timeoutSeconds"]:
                         timed_out = True
-                        _kill_group(process.pid)
-                        done.wait(10)
                         break
                     if now >= next_beat:
                         next_beat = now + HEARTBEAT_SECONDS
                         over = " OVER BUDGET" if now - started > step["budgetSeconds"] else ""
                         print_line(f"gate: {position} {shard.name} running {now - started:.0f}s (budget {step['budgetSeconds']}s, "
                                    f"limit {step['timeoutSeconds']}s, rss {peak // 1024} MB){over} | {_last_line(log)}", flush=True)
-            except BaseException:
-                _kill_group(process.pid)
-                raise
             finally:
-                # A step owns its process group: anything it left running goes with it.
-                _kill_group(process.pid)
+                # A step owns its whole process tree, whether it timed out, was cancelled or
+                # passed: anything it left running goes with it, after its own cleanup ran.
+                stopped = tree.stop(STOP_GRACE_SECONDS)
+                if stopped:
+                    stream.write(f"\n{stopped}\n")
+                done.wait(10)
     finally:
         if lease:
             lease.release()
@@ -539,11 +678,6 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
             stream.write(f"\ngate: TIMEOUT {shard.name} exceeded its hard limit of {step['timeoutSeconds']}s\n")
         return Outcome(shard, "timeout", 124, seconds, peak // 1024, cpu, log)
     return Outcome(shard, "pass" if code == 0 else "fail", code, seconds, peak // 1024, cpu, log)
-
-
-def _kill_group(pgid: int) -> None:
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(pgid, signal.SIGKILL)
 
 
 def _excerpt(log: Path) -> str:
@@ -865,7 +999,7 @@ def cancel(root: Path, job_id: str) -> int:
         print(f"gate: job {job['id']} already {job['state']}")
         return 0
     (Path(job["dir"]) / "cancelled").touch()
-    # The job owns its process group; the runner's own step groups are killed by its TERM handler.
+    # The job owns its process group; the runner's TERM handler stops its running step's tree.
     with contextlib.suppress(ProcessLookupError):
         os.killpg(job["pid"], signal.SIGTERM)
     print(f"gate: cancelled job {job['id']}")
@@ -966,7 +1100,7 @@ def _named(catalog: dict, change: Change, planned: List[Shard], names: List[str]
 
 
 def _terminate(_signal, _frame) -> None:
-    # Cancellation (gate cancel, a closed terminal): unwind so the running step's group is killed.
+    # Cancellation (gate cancel, a closed terminal): unwind so the running step's tree is stopped.
     raise KeyboardInterrupt
 
 

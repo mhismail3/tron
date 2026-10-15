@@ -123,7 +123,7 @@ shared generic state store. Ordinary retained documents belong in `files/`;
 runtime stores remain under the separate Pi `agentDir`.
 
 The wrapper does not scan, index, synchronize or recreate this workspace.
-Application replacement and `TronUninstaller.cleanLocalState`, including local
+Application replacement and `TronUninstaller.removeLocalState`, including local
 settings/credential resets, preserve both workspace content and the Gateway's
 `gateway/workspace-state` lifecycle evidence. Missing/unsafe workspace recovery is
 manual; never remove it as an application or signing repair. The Gateway owns the
@@ -153,7 +153,10 @@ activation and singleton lifetime across menu closure and login. Probes may wake
 an already registered service but never register it, request TCC, or restart the
 Gateway. Explicit uninstall first joins native retirement and unregisters that
 helper, then removes the Gateway service and local runtime files. Native retirement
-failure preserves Gateway registration and local state. The helper queries Accessibility
+failure preserves Gateway registration and local state. Only an already absent
+file counts as removed: any other failure to remove a run marker or a requested
+settings/credential reset is logged, and the menu-bar Uninstall reports it as
+"Uninstall incomplete" before quitting. The helper queries Accessibility
 and Screen Recording from its own signed process, so a wrapper Boolean or the
 Node Gateway cannot become permission authority. FDA remains the wrapper's
 existing filesystem probe.
