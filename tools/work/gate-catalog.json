@@ -407,7 +407,7 @@
         "config/GatewayProtocol.json",
         ".node-version"
       ],
-      "budgetSeconds": 180,
+      "budgetSeconds": 240,
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 2000,
