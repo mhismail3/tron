@@ -79,8 +79,10 @@ def plans(base: Path, env: dict) -> None:
                       "gateway.full#1/6", "gateway.full#2/6", "gateway.full#3/6", "gateway.full#4/6", "gateway.full#5/6", "gateway.full#6/6",
                       "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]"]),
         "ios-only": ({"packages/ios-app/Sources/UI/View.swift": "// view\n",
-                      "packages/ios-app/UITests/TronHomeSheetsUITests.swift": "// journey\n"},
-                     ["repo.privacy", "repo.whitespace", "ios.build", "ios.journeys[TronHomeSheetsUITests]"]),
+                      "packages/ios-app/UITests/TronHomeSheetsUITests.swift":
+                          "final class TronHomeSheetsUITests {\n    func testA() {}\n    func testB() {}\n    func testC() {}\n}\n"},
+                     ["repo.privacy", "repo.whitespace", "ios.build", "ios.journeys[TronHomeSheetsUITests.testA+1]",
+                      "ios.journeys[TronHomeSheetsUITests.testC]"]),
         "mac-only": ({"packages/mac-app/Sources/App.swift": "// app\n"},
                      ["repo.privacy", "repo.whitespace", "mac.build", "mac.test"]),
         "gateway-and-config": ({"packages/gateway/src/home/x.ts": "export const x = 1;\n", "packages/gateway/vitest.config.ts": "export {};\n"},

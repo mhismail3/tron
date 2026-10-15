@@ -19,7 +19,7 @@
       "budgetSeconds": 20,
       "timeoutSeconds": 120,
       "class": "light",
-      "expectedRssMb": 100,
+      "expectedRssMb": 1400,
       "pass": "exit 0",
       "unlocks": "builds",
       "hosted": "safe"
@@ -194,7 +194,7 @@
         "xcode"
       ],
       "cacheScope": "worktree",
-      "budgetSeconds": 120,
+      "budgetSeconds": 180,
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 2000,
@@ -511,7 +511,7 @@
     },
     {
       "id": "ios.journeys",
-      "summary": "Simulator journeys for the changed UI test classes (or the smoke set) with test-without-building, one shard per class",
+      "summary": "Simulator journeys for the changed UI test classes, two test methods per shard (or the smoke set), with test-without-building from the one ios.build",
       "trigger": {
         "paths": [
           "packages/ios-app/**"

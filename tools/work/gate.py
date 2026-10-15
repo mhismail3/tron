@@ -182,6 +182,7 @@ def _script_kind(root: Path, relative: str) -> Optional[str]:
     return kind
 
 
+IOS_METHODS_PER_SHARD = 2
 SUITE_GROUPS = 3
 SUITE_SPLIT_CLASSES = 6
 
@@ -249,11 +250,16 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
                         suites.append(candidate)
         return [command for suite in dict.fromkeys(suites) for command in _suite_shards(root, suite)]
     if name == "ios-journeys":
-        classes = []
+        # One shard per IOS_METHODS_PER_SHARD test methods of each changed UI test class, all
+        # from the same stamped build products; methods are read from the file every time.
+        shards = []
         for path in change.existing():
             if path.startswith("packages/ios-app/UITests/") and path.endswith("UITests.swift") and "/RealGateway/" not in path:
-                classes.append(f"--only-testing TronMobileUITests/{Path(path).stem}")
-        return list(dict.fromkeys(classes)) or [""]
+                owner = f"TronMobileUITests/{Path(path).stem}"
+                methods = re.findall(r"^\s*func (test\w+)\(", (root / path).read_text(errors="replace"), re.M)
+                for start in range(0, len(methods), IOS_METHODS_PER_SHARD):
+                    shards.append(" ".join(f"--only-testing {owner}/{m}" for m in methods[start:start + IOS_METHODS_PER_SHARD]))
+        return list(dict.fromkeys(shards)) or [""]
     if name == "named-journeys":
         return list(change.tests)
     raise GateError(f"unknown selector {name}")
@@ -306,7 +312,10 @@ def expand(step: dict, change: Change, selections: List[str]) -> List[Shard]:
 
 def _label(select: Optional[str], selection: str, index: int) -> str:
     if select == "ios-journeys":
-        return selection.rsplit("/", 1)[-1] if selection else "smoke"
+        if not selection:
+            return "smoke"
+        tests = [part.split("/")[-2:] for part in selection.split() if "/" in part]
+        return f"{tests[0][0]}.{tests[0][1]}" + (f"+{len(tests) - 1}" if len(tests) > 1 else "")
     if select == "tooling-tests":
         parts = selection.split()
         stem = Path(parts[2]).stem
