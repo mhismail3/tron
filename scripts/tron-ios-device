@@ -380,10 +380,10 @@ prepare_xcodebuild_args() {
     fi
 }
 
-# Generates the project and runs xcodebuild for DERIVED_DATA, DEVICE_ID, BUILD_MODE
-# and signing ("signed" or "unsigned"). On failure it
-# prints the compiler errors and failed commands and exits with xcodebuild's
-# status; the Gateway's install sheet surfaces that summary. Sets BUILD_LOG and
+# Generates the project and builds into DERIVED_DATA for DEVICE_ID (empty: any
+# device), BUILD_MODE and signing ("signed" or "unsigned"). On failure it prints
+# the compiler errors and failed commands and exits with xcodebuild's status;
+# the Gateway's install sheet surfaces that summary. Sets BUILD_LOG and
 # BUILD_XCRESULT. Leaves cwd at IOS_DIR.
 BUILD_LOG=""
 BUILD_XCRESULT=""

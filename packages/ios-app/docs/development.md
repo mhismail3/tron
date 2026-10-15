@@ -568,6 +568,15 @@ unoptimized Swift/Clang compilation, in-object debug symbols, and a separate
 `Tron Device`'s Run action is only a scheme convenience; the device helper's
 launch and a launch from the device itself are not debugger sessions.
 
+`scripts/tron-ios-device compile [--fast-debug]` runs the optimized install's
+exact build for `generic/platform=iOS` with `CODE_SIGNING_ALLOWED=NO`, so it
+needs no device, lease, account or profile, and keeps its own
+`build/DerivedData-compile` cache. The gate runs it as `ios.device-compile`
+because the UI-validation build defines `HOSTED_TEST`: code that compiles only
+in the shipped configuration (for example a hosted fixture left outside its
+`#if HOSTED_TEST`, #1061) passes every simulator journey yet breaks Rebuild and
+Install.
+
 ### Over-the-air development install
 
 `devicectl` installs only reach a phone the Mac can see. When the phone is
