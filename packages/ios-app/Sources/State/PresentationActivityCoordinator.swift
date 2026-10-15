@@ -329,6 +329,9 @@ struct PresentationDismissalLease: Equatable {
 private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @Binding var isPresented: Bool
     let identity: String
+    /// The presenting call site: two presenters that share an identity string
+    /// still keep separate presentation state.
+    let site: String
     let onDismiss: (() -> Void)?
     @ViewBuilder let sheetContent: () -> SheetContent
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
@@ -339,7 +342,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @State private var localStateStore = PresentationStateStore()
 
     private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
-    private var statePath: String { PresentationStateStore.path(parent: parentStateScope, identity: identity) }
+    private var statePath: String { PresentationStateStore.path(parent: parentStateScope, identity: "\(identity)@\(site)") }
 
     func body(content: Content) -> some View {
         content
@@ -393,6 +396,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
 private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: View>: ViewModifier {
     @Binding var item: Item?
     let identity: (Item) -> String
+    let site: String
     let onDismiss: (() -> Void)?
     @ViewBuilder let sheetContent: (Item) -> SheetContent
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
@@ -410,7 +414,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     /// The item's own identity is part of the path: a presenter whose identity
     /// string is constant still gives a different item a fresh state.
     private func statePath(_ value: Item) -> String {
-        PresentationStateStore.path(parent: parentStateScope, identity: "\(identity(value))#\(value.id)")
+        PresentationStateStore.path(parent: parentStateScope, identity: "\(identity(value))#\(value.id)@\(site)")
     }
 
     func body(content: Content) -> some View {
@@ -507,11 +511,14 @@ extension View {
         isPresented: Binding<Bool>,
         identity: String,
         onDismiss: (() -> Void)? = nil,
+        fileID: String = #fileID,
+        line: Int = #line,
         @ViewBuilder content: @escaping () -> SheetContent
     ) -> some View {
         modifier(TronManagedSheetModifier(
             isPresented: isPresented,
             identity: identity,
+            site: "\(fileID):\(line)",
             onDismiss: onDismiss,
             sheetContent: content
         ))
@@ -521,11 +528,14 @@ extension View {
         item: Binding<Item?>,
         identity: @escaping (Item) -> String,
         onDismiss: (() -> Void)? = nil,
+        fileID: String = #fileID,
+        line: Int = #line,
         @ViewBuilder content: @escaping (Item) -> SheetContent
     ) -> some View {
         modifier(TronManagedItemSheetModifier(
             item: item,
             identity: identity,
+            site: "\(fileID):\(line)",
             onDismiss: onDismiss,
             sheetContent: content
         ))
@@ -549,4 +559,3 @@ extension View {
         TronPresentationSurface(id: id, onMount: onMount, onRetire: onRetire) { self }
     }
 }
-

@@ -369,6 +369,9 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let detents: TronSheetDetentPolicy
     /// Runs once the destination sheet has actually been dismissed.
     let onDismiss: (() -> Void)?
+    /// The link's call site, so two links sharing a label keep separate state.
+    private let fileID: String
+    private let line: Int
     /// Kept in the enclosing presentation's scope by identity, so a link inside
     /// a sheet whose content SwiftUI rebuilds keeps its sheet open (#1073).
     @PresentationState private var isPresented: Bool
@@ -380,12 +383,16 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         accent: Color? = nil,
         detents: TronSheetDetentPolicy = .fixed([.medium, .large]),
         onDismiss: (() -> Void)? = nil,
+        fileID: String = #fileID,
+        line: Int = #line,
         @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder label: () -> Label
     ) {
+        self.fileID = fileID
+        self.line = line
         self.accessibilityLabel = accessibilityLabel
         self.identity = identity ?? "settings.\(accessibilityLabel)"
-        _isPresented = PresentationState(wrappedValue: false, key: self.identity)
+        _isPresented = PresentationState(wrappedValue: false, key: "\(self.identity)@\(fileID):\(line)")
         self.accent = accent
         self.detents = detents
         self.onDismiss = onDismiss
@@ -400,7 +407,9 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
             .tronManagedSheet(
                 isPresented: $isPresented,
                 identity: identity,
-                onDismiss: onDismiss
+                onDismiss: onDismiss,
+                fileID: fileID,
+                line: line
             ) {
                 NavigationStack {
                     themed(destination().toolbar {
