@@ -209,8 +209,27 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["budget.fun"].label, "0.00")
         keepScreenshot(app, "889-7-budget-summary")
 
+        // #1027: dismiss() closes the presentation the program created, and
+        // only that: a pushed destination pops, a sheet closes after its save,
+        // and in the program's root it never closes the runner itself.
+        app.buttons["Biggest expense"].tap()
+        let back = app.buttons["Back to summary"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
+        XCTAssertTrue(wait(back, predicate: "exists == false"), "dismiss() pops the program's navigation destination")
+        XCTAssertTrue(total.waitForExistence(timeout: 5))
+
         app.buttons["Expenses"].tap()
         XCTAssertTrue(app.staticTexts["New food"].waitForExistence(timeout: 5), "Switching tabs keeps the shared store")
+        app.buttons["Plan trip"].tap()
+        let save = app.buttons["Save trip"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5)); save.tap()
+        XCTAssertTrue(wait(save, predicate: "exists == false"), "dismiss() closes the program's own sheet")
+        XCTAssertTrue(app.staticTexts["New travel"].waitForExistence(timeout: 5), "The sheet's action ran before it closed")
+        keepScreenshot(app, "1027-sheet-dismissed")
+
+        app.buttons["Leave app"].tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertTrue(app.staticTexts["New travel"].exists, "dismiss() in the program's root never closes the runner sheet")
     }
 
     /// #889: unsupported Swift shows a line-numbered diagnostic; runaway loops,

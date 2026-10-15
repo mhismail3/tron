@@ -56,8 +56,10 @@ program can only build views and change its own interpreted state: names
 resolve to the program's own declarations or to a fixed list of builtins
 (`SwiftAppRuntimeMembers.swift`), and there is no reflection, selector, URL,
 `Link`, `AsyncImage`, timer, or task. Text renders verbatim, so Markdown
-links never open URLs. `print` is a no-op and `dismiss` closes
-nothing outside the program. Unsupported syntax shows a readable message with
+links never open URLs. `print` is a no-op. `@Environment(\.dismiss)` closes
+the presentation the program created around that view (its `sheet` or a
+`NavigationLink` destination, through `SwiftAppPresentedContent`); in the
+program's root view it does nothing, so a program never closes the runner. Unsupported syntax shows a readable message with
 its line number instead of running; an unsupported view or a failing body
 renders an inline diagnostic beside the working views; a failing action shows
 its message over the app, and the next successful action clears it.
@@ -159,7 +161,9 @@ fixture (`-readonly-preview-scenario display-swift…`):
   offers to run.
 - `testDisplayedSwiftStoreAppSharesStateAcrossTabs` runs `budget`: an
   `ObservableObject` store shared through `environmentObject`, `TabView`,
-  `List`, an enum `switch`, and `String(format:)`.
+  `List`, an enum `switch`, and `String(format:)`, then `dismiss()` popping a
+  `NavigationLink` destination, closing the program's own sheet after its
+  save action, and doing nothing in the root view (#1027).
 - `testSettingsSwitchAddsAndRemovesSwiftRunControlLive` starts with the
   runner off, turns it on in Settings › This iPhone › Experimental and runs
   the displayed file, then turns it off and sees the run control gone, all in

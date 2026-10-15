@@ -33,7 +33,7 @@ extension SwiftAppRuntime {
                     }
                     return object
                 case "Environment":
-                    return .builtin("dismiss", nil)
+                    return .dismiss(instance.dismiss)
                 default:
                     return instance.properties[name] ?? .nilValue
                 }
@@ -346,6 +346,9 @@ extension SwiftAppRuntime {
             return try call(function, receiver: receiver, arguments)
         case .builtin(let name, let receiver):
             return try SwiftAppBuiltins.call(name, receiver: receiver, arguments, runtime: self)
+        case .dismiss(let action):
+            action?()
+            return .void
         case .member(let name, nil):
             return .member(name, arguments)
         case .binding(let binding):

@@ -209,6 +209,10 @@ private struct SwiftAppViewDepthKey: EnvironmentKey {
     static let defaultValue = 0
 }
 
+private struct SwiftAppDismissKey: EnvironmentKey {
+    static let defaultValue: DismissAction? = nil
+}
+
 extension EnvironmentValues {
     var swiftAppEnvironmentObjects: [String: SwiftAppValue] {
         get { self[SwiftAppEnvironmentObjectsKey.self] }
@@ -218,6 +222,12 @@ extension EnvironmentValues {
     var swiftAppViewDepth: Int {
         get { self[SwiftAppViewDepthKey.self] }
         set { self[SwiftAppViewDepthKey.self] = newValue }
+    }
+    /// The dismiss action of the innermost presentation the program created
+    /// (`SwiftAppPresentedContent`); nil in the program's root.
+    var swiftAppDismiss: DismissAction? {
+        get { self[SwiftAppDismissKey.self] }
+        set { self[SwiftAppDismissKey.self] = newValue }
     }
 }
 
@@ -229,6 +239,7 @@ struct SwiftAppCustomView: View {
     @State private var state: SwiftAppStateStore
     @Environment(\.swiftAppEnvironmentObjects) private var environmentObjects
     @Environment(\.swiftAppViewDepth) private var depth
+    @Environment(\.swiftAppDismiss) private var dismiss
     /// A view that contains itself (`struct A { var body { A() } }`) is
     /// unbounded SwiftUI recursion; it stops here with a diagnostic.
     static let maximumDepth = 48
@@ -258,7 +269,8 @@ struct SwiftAppCustomView: View {
                 declaration: node.declaration!,
                 properties: try runtime.properties(for: node),
                 state: state,
-                environmentObjects: environmentObjects
+                environmentObjects: environmentObjects,
+                dismiss: dismiss
             )
             let value = try runtime.body(of: instance)
             return SwiftAppRuntime.viewNode(from: value) ?? SwiftAppViewNode(name: "EmptyView", arguments: [])
