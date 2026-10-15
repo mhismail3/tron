@@ -94,6 +94,10 @@ indirect enum SwiftAppValue {
     case closure(SwiftAppClosure)
     case function(SwiftAppFunction, SwiftAppSelf?)
     case builtin(String, SwiftAppValue?)
+    /// `@Environment(\.dismiss)`: closes the presentation the program
+    /// created around this view, or nothing (nil) in the program's root,
+    /// so a program can never close the runner sheet itself.
+    case dismiss(DismissAction?)
     case binding(SwiftAppBinding)
     case keyPath([String])
     case typeReference(String)
@@ -159,7 +163,7 @@ indirect enum SwiftAppValue {
         case .object(let object): append(object.typeName)
         case .member(let name, _): append(name)
         case .view(let node): append(node.name)
-        case .closure, .function, .builtin: append("(function)")
+        case .closure, .function, .builtin, .dismiss: append("(function)")
         case .binding(let binding): binding.get().write(into: &text, budget: &budget, quoted: quoted)
         case .keyPath(let path): append("\\." + path.joined(separator: "."))
         case .typeReference(let name): append(name)
@@ -289,16 +293,19 @@ final class SwiftAppViewInstance {
     var properties: [String: SwiftAppValue]
     let state: SwiftAppStateStore
     let environmentObjects: [String: SwiftAppValue]
+    let dismiss: DismissAction?
     init(
         declaration: SwiftAppTypeDeclaration,
         properties: [String: SwiftAppValue],
         state: SwiftAppStateStore,
-        environmentObjects: [String: SwiftAppValue]
+        environmentObjects: [String: SwiftAppValue],
+        dismiss: DismissAction? = nil
     ) {
         self.declaration = declaration
         self.properties = properties
         self.state = state
         self.environmentObjects = environmentObjects
+        self.dismiss = dismiss
     }
 }
 
