@@ -507,7 +507,7 @@ def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, fo
             only_first_pending: bool = False, require_clean: bool = False) -> bool:
     """Run shards in catalog order, reusing valid passes; stop at the first failure. True when all pass.
 
-    Steps run one after another. The pending shards of a step marked `parallelShards`
+    Steps run one after another. Up to `parallelShards` pending shards of one step
     run together, each admitted by the heavy queue on its own memory; the first failing
     shard stops its siblings.
     """
@@ -541,10 +541,10 @@ def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, fo
             print(f"gate: next pending is {pending[0][1].name}; stopping after one step (gate next)", flush=True)
             return False
         step = pending[0][1].step
-        if only_first_pending or not step.get("parallelShards"):
-            pending_runs = [[item] for item in pending]
-        else:
-            pending_runs = [pending]
+        # At most `parallelShards` shards of one step run together (each still admitted by
+        # memory); serial suites leave it unset, so timing-sensitive tests never share the host.
+        width = 1 if only_first_pending else max(1, int(step.get("parallelShards") or 1))
+        pending_runs = [pending[i:i + width] for i in range(0, len(pending), width)]
         for batch in pending_runs:
             failed = _run_batch(root, prelude, batch, logs, environment, total, change, counts)
             if failed:

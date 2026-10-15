@@ -302,7 +302,7 @@
       ],
       "command": "cd packages/gateway && npx vitest related --run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-affected-{shard}-of-{shards}.json --shard={shard}/{shards} {select}",
       "shards": 3,
-      "parallelShards": true,
+      "parallelShards": 2,
       "supersededBy": "gateway.full",
       "inputs": [
         "packages/gateway",
@@ -372,7 +372,7 @@
       ],
       "command": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-full-{shard}-of-{shards}.json --shard={shard}/{shards}",
       "shards": 6,
-      "parallelShards": true,
+      "parallelShards": 2,
       "inputs": [
         "packages/gateway",
         "config/GatewayProtocol.json",
@@ -424,7 +424,6 @@
         "subagents-controls": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts src/home/home-task-subagents-controls.e2e.test.ts",
         "rest": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts --exclude 'src/home/home-task-subagents-*.e2e.test.ts'"
       },
-      "parallelShards": true,
       "hosted": "safe"
     },
     {

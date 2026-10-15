@@ -86,11 +86,11 @@ plan. Markdown and `docs/` paths never start a build. Representative plans:
 - docs only: `repo.privacy`, `repo.whitespace`;
 - Gateway TypeScript: `gateway.deps` (verifies the install against the lock and
   repairs drift with `npm ci`, the #1011 guard) → `gateway.typecheck` → the related
-  vitest files in 3 parallel shards (`gateway.affected`) → the nested-SDK pass in
-  four named shards balanced by measured file time (`gateway.nested`; it has no
+  vitest files in 3 shards, two at a time (`gateway.affected`) → the nested-SDK pass in
+  four named shards run one at a time, balanced by measured file time (`gateway.nested`; it has no
   affected-only form, and new nested files land in its `[rest]` shard);
 - Gateway lockfile, package, vitest config, test support or `.node-version`: the
-  whole default suite in 6 parallel shards (`gateway.full`, which supersedes
+  whole default suite in 6 shards, two at a time (`gateway.full`, which supersedes
   `gateway.affected`) plus `gateway.scripts` (three named shards);
 - iOS Swift: one `ios.build` (build-for-testing), then `ios.journeys`, which runs the
   changed UI test classes (or the smoke set) with test-without-building, one shard

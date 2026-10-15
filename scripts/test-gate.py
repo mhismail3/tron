@@ -122,7 +122,7 @@ FIXTURE_CATALOG = {
         {"id": "long", "trigger": {"paths": ["long/**"]}, "command": "echo $$ > \"$GATE_TRACE.pid\"; sleep 30",
          "inputs": ["long"], "budgetSeconds": 40, "timeoutSeconds": 60, "class": "heavy", "expectedRssMb": 10,
          "pass": "exit 0", "unlocks": "par"},
-        {"id": "par", "trigger": {"paths": ["par/**"]}, "shards": 2, "parallelShards": True,
+        {"id": "par", "trigger": {"paths": ["par/**"]}, "shards": 2, "parallelShards": 2,
          "command": "if [ {shard} = 1 ]; then sleep 1; echo 'shard one fails' >&2; exit 4; fi; sleep 30",
          "inputs": ["par"], "budgetSeconds": 20, "timeoutSeconds": 60, "class": "heavy", "expectedRssMb": 10,
          "pass": "exit 0", "unlocks": "land"},
