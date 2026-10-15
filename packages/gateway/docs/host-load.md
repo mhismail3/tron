@@ -90,7 +90,9 @@ adds the load average (`os.loadavg()`, per CPU) and derives one level:
   reading tick itself and reads about 0.95 on an idle process, so until the first
   full window after a start the level rests on load alone (#1000).
 - `home.status.hostPressure: { level, load1PerCpu, eventLoopUtilization, swapUsedBytes, sampledAt }`,
-  shown in Home's status row with the standard status treatment.
+  shown in iOS's pinned Home row and Manage Home's shared status row alongside
+  `workers.running` (#931). There is no queued-worker count: the heavy-step
+  queue above has a separate tooling owner.
 - `host.pressure` is logged on each level transition. The level informs; it does
   not hold workers back.
 

@@ -1174,8 +1174,19 @@ private actor HostedHomeShellGateway {
     /// The Gateway's rollover shape: the reserved successor is named but absent.
     /// The sealed predecessor is the openable route until a logical prompt
     /// materializes the successor.
+    private var hostPressure: JSONValue {
+        let args = ProcessInfo.processInfo.arguments
+        let level = args.contains("-host-critical") ? "critical" : args.contains("-host-elevated") ? "elevated" : "normal"
+        return .object(["level": .string(level)])
+    }
+
+    private var workers: JSONValue {
+        let args = ProcessInfo.processInfo.arguments
+        return .object(["running": .number(args.contains("-host-critical") ? 7 : args.contains("-host-elevated") ? 1 : 0)])
+    }
+
     private func rolloverStatus() -> JSONValue {
-        .object(["taskRecovery": .object(["available": .bool(true)]), "routeGeneration": .number(2),
+        .object(["hostPressure": hostPressure, "workers": workers, "taskRecovery": .object(["available": .bool(true)]), "routeGeneration": .number(2),
             "phase": .string(materialized ? "ready" : "rollover-pending"),
             "activation": .object(["available": .bool(true), "activationOpen": .bool(false), "effectiveTokens": .number(30_800),
                 "contextWindow": .number(1_000_000), "viewLines": .number(412), "viewBytes": .number(18_400)]),
@@ -1194,7 +1205,8 @@ private actor HostedHomeShellGateway {
             : initialState == "missing-session" ? "missing-session" : "undesignated"
         let sessionPresent = designated || initialState == "disabled" || phase == "disabled"
         let enabled = designated || initialState == "missing-session"
-        return .object(["taskRecovery": .object(["available": .bool(sheetState != "task-fenced"), "reason": .string("unsafe-state")]),
+        return .object(["hostPressure": hostPressure, "workers": workers,
+            "taskRecovery": .object(["available": .bool(sheetState != "task-fenced"), "reason": .string("unsafe-state")]),
             "routeGeneration": .number(2), "phase": .string(phase),
             "activation": emptyContext ? .object(["available": .bool(false)]) : .object(["available": .bool(true), "activationOpen": .bool(phase == "active"),
                 "effectiveTokens": .number(30_800), "contextWindow": .number(1_000_000), "viewLines": .number(12), "viewBytes": .number(480)]),

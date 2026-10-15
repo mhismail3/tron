@@ -50,6 +50,27 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         super.tearDown()
     }
 
+    /// #931: real home.status bytes cross the socket and the production DTO into
+    /// the pinned row, even before Home is designated. This fixture starts no
+    /// workers; the actual Mac's pressure is intentionally not forced or loaded.
+    /// Hosted Home journeys separately distinguish all three pressure levels.
+    @MainActor
+    func testHomeStatusShowsHostPressureAndWorkers() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        let home = app.buttons["home-pinned-row"]
+        XCTAssertTrue(home.waitForExistence(timeout: 60), app.debugDescription)
+        let published = NSPredicate(format: "label CONTAINS '0 workers running'")
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: published, object: home)], timeout: 30), .completed)
+        XCTAssertTrue(["normal", "elevated", "critical"].contains { home.label.contains("Host \($0)") }, home.label)
+        XCTAssertFalse(home.label.lowercased().contains("queued"), home.label)
+        keepScreenshot(app, name: "931-real-gateway-home-host-status")
+    }
+
     @MainActor
     func testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground() throws {
         continueAfterFailure = false

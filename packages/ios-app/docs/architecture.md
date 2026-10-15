@@ -208,7 +208,17 @@ model and context window, Home context, memory (settings, browser, pause/resume)
 bounded chapter metadata, tasks and permissions, and disable/check-completion —
 and opens each existing Home destination as a managed child sheet with its own
 read owner. `HomeStatusLinePresentation` is the one source of the sheet's state
-and memory lines. Mutations go through the `HomeMutationCoordinator` authority.
+and memory lines, and the host/worker summary. The pinned Home row shows the
+Gateway's `home.status.hostPressure.level` and `workers.running`; Manage Home's
+rows card shows the same facts in a read-only `TronSettingsRow` with a
+`TronStatusPill` (normal/emerald, elevated/warning, critical/error). These fields
+are required process facts in the typed status projection, including before Home
+is designated; they use the existing managed read and retirement fences. iOS
+never samples the Mac or counts session rows to derive them. Home workers have
+no queue or cap (#1033); the tooling's memory-aware heavy-step queue is separate
+and is not presented as queued Home workers. The Home dashboard's floating
+button and existing sections remain unchanged; its context ring opens Manage
+Home. Mutations go through the `HomeMutationCoordinator` authority.
 The sheet subsumed the former Home header bar and its overflow menu (#740); the
 composer's Stop is the only Stop (#811), and Manage Home has no Stop row. The
 Chapters child sheet reads `home.chapterList` (gated on `home-chapter-list.v1`),
