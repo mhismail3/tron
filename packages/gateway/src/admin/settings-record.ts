@@ -81,6 +81,9 @@ export interface ChangeEntry {
   /** The approval request a pending entry belongs to, and on a decision fact who decided. */
   requestId?: string;
   decidedBy?: Actor;
+  /** Entries one change wrote together and undo reverts together: both notes of a
+   * profile supersede, or every item of a Confirm all (doc 6.4). */
+  group?: { id: string; size: number };
 }
 
 export const SEGMENT_ENTRIES = 500;
@@ -182,6 +185,20 @@ export class SettingsChangeRecord {
       }
     }
     return undefined;
+  }
+
+  /** The entries of one group, oldest first. A group is appended in one write, so the
+   * scan stops at the segment that holds its first entry. */
+  async group(groupId: string, size: number): Promise<ChangeEntry[]> {
+    const index = await this.index();
+    const found: ChangeEntry[] = [];
+    for (let segmentIndex = index.segments.length - 1; segmentIndex >= 0 && found.length < size; segmentIndex -= 1) {
+      const lines = await this.segmentLines(index.segments[segmentIndex]!.name);
+      for (let line = lines.length - 1; line >= 0 && found.length < size; line -= 1) {
+        if (lines[line]!.group?.id === groupId) found.unshift(lines[line]!);
+      }
+    }
+    return found;
   }
 
   /** Any entry by its own id, a later fact included (an outside change refers to the value it replaced). */

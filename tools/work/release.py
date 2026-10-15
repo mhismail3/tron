@@ -5,8 +5,10 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -21,6 +23,13 @@ from gh import Gh
 # release-only: nothing in the Gateway carries the owner id, and the work is
 # preserved before the claim goes. Handoff and recover still need `settled`.
 RELEASABLE = {"settled", "absent"}
+# `release --stale` sweeps only claims with no claim-branch commit and no issue comment for this long.
+STALE_HOURS = 72
+# The Gateway's session id shape (packages/gateway/src/client/work-owner-status.ts). Among indeterminate
+# owners a maintainer may force-release only one outside it (a legacy owner no Gateway knows); a
+# Gateway-shaped indeterminate owner (a delegated session, an unsettled Home task, an unreadable Gateway)
+# is never forced. A listed `idle` session with no Home task is the maintainer's to release (#1001).
+_GATEWAY_SESSION = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 class ReleaseError(RuntimeError):
@@ -84,18 +93,41 @@ def _snapshot_tree(path: Path, settings: cleanup.Settings) -> str:
         return _git(path, "write-tree", env=env)
 
 
-def _owner(repo: Path, number: int, head: str) -> str:
+def _owner(repo: Path, number: int, head: str, force: bool) -> str:
     _, owner = handoff._claim_at(repo, head, number)
     if not owner:
-        raise ReleaseError(f"#{number}'s claim records no owner session; the owner is unknown, so the claim stays")
+        if force:
+            return "unknown"
+        raise ReleaseError(f"#{number}'s claim records no owner session; the owner is unknown, so the claim stays "
+                           "(a maintainer may use --force-maintainer from a real terminal)")
     return owner
 
 
-def _admit_owner(owner: str) -> Tuple[str, str]:
+def _admit_owner(owner: str, force: bool = False) -> Tuple[str, str]:
+    """Admit a settled or absent owner; with force, also an idle Gateway session or a legacy owner no Gateway knows.
+
+    An idle session could be resumed at any moment, so its release needs the maintainer's typed
+    confirmation; `run` re-reads this verdict right before the remote write, and a session that
+    became live in between keeps its claim. Live owners are never released.
+    """
+    if force and owner == "unknown":
+        return "unknown", "legacy claim without an owner session; maintainer confirmed"
     state, why = handoff.owner_status(owner)
-    if state not in RELEASABLE:
-        raise ReleaseError(f"owner session {owner} is {state} ({why}); refusing release, claim left unchanged")
-    return state, why
+    if state in RELEASABLE:
+        return state, why
+    if force and (state == "idle" or state == "indeterminate" and not _GATEWAY_SESSION.fullmatch(owner.lower())):
+        return state, f"{why}; maintainer confirmed"
+    hint = " (a maintainer may use --force-maintainer from a real terminal)" if state == "idle" and not force else ""
+    raise ReleaseError(f"owner session {owner} is {state} ({why}); refusing release, claim left unchanged{hint}")
+
+
+def _confirm(number: int, owner: str) -> None:
+    if not sys.stdin.isatty():
+        raise ReleaseError("--force-maintainer requires an interactive terminal; claim left unchanged")
+    expected = f"RELEASE #{number} FROM {owner}"
+    print(f"Type exactly: {expected}", flush=True)
+    if input("> ").strip() != expected:
+        raise ReleaseError("confirmation did not match; claim left unchanged")
 
 
 def _write_json(path: Path, value: dict) -> None:
@@ -169,7 +201,8 @@ def _finish(gh: Gh, number: int, manifest: dict, manifest_path: Path, settings: 
     return 0
 
 
-def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str) -> int:
+def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str, force: bool = False,
+        absent_only: bool = False) -> int:
     if number < 1:
         raise ReleaseError("issue number must be positive")
     reason = reason.strip()
@@ -210,8 +243,10 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str) -> int:
     why = _claim_only(primary, base_ref, remote_head)
     if why:
         raise ReleaseError(f"{branch} on {remote} is not claim-only: {why}")
-    owner = _owner(primary, number, remote_head)
-    owner_state, owner_reason = _admit_owner(owner)
+    owner = _owner(primary, number, remote_head, force)
+    owner_state, owner_reason = _admit_owner(owner, force)
+    if absent_only and owner_state != "absent":
+        raise ReleaseError(f"owner session {owner} is now {owner_state}; the stale sweep releases only absent owners")
 
     # The local side: a registered claim worktree, or only a local branch, or nothing.
     path = (settings.root / branch.split("/", 1)[1]).resolve()
@@ -229,6 +264,8 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str) -> int:
         if busy:
             raise ReleaseError(f"{path}: " + "; ".join(busy))
     local_head = _git(primary, "rev-parse", "-q", "--verify", f"refs/heads/{branch}", check=False) or remote_head
+    if force:
+        _confirm(number, owner)
 
     # Preserve before any release step: local head, remote head and the worktree's exact state.
     snapshot, changed = "", 0
@@ -270,7 +307,8 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str) -> int:
             if failure:
                 raise ReleaseError(f"release command {failure}; claim left unchanged, work preserved")
     # Everything slow is done: prove nothing changed since the snapshot, right before the remote write.
-    _admit_owner(owner)
+    if _admit_owner(owner, force)[0] != owner_state:
+        raise ReleaseError("the owner's state changed while preserving; claim left unchanged, work preserved")
     if tree:
         if _git(path, "rev-parse", "HEAD") != local_head or _snapshot_tree(path, settings) != _git(path, "rev-parse", f"{snapshot}^{{tree}}"):
             raise ReleaseError("the worktree changed after it was preserved; claim left unchanged, retry to preserve again")
@@ -284,3 +322,61 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str) -> int:
     manifest["phase"] = "remote-released"
     _write_json(manifest_path, manifest)
     return _finish(gh, number, manifest, manifest_path, settings, config, log)
+
+
+def _idle_hours(primary: Path, gh: Gh, number: int, branch: str, remote: str, now: datetime) -> Tuple[Optional[str], float]:
+    """(issue state, hours since the newest claim-branch commit or issue comment)."""
+    committed = int(_git(primary, "log", "-1", "--format=%ct", f"refs/remotes/{remote}/{branch}"))
+    issue = json.loads(gh.run("issue", "view", str(number), "--json", "state,comments"))
+    moments = [datetime.fromtimestamp(committed, timezone.utc)]
+    moments += [datetime.fromisoformat(c["createdAt"].replace("Z", "+00:00")) for c in issue.get("comments") or []]
+    return issue.get("state"), (now - max(moments)).total_seconds() / 3600
+
+
+def sweep(gh: Gh, cwd: Path, config: dict, dry_run: bool) -> int:
+    """Release every open-issue claim idle for more than STALE_HOURS whose owner is absent.
+
+    Only `absent` qualifies: a settled Home task's claim passes to its successor through `start`
+    (#929) and may be a maintainer's paused continuation, so the sweep leaves it. Each release is
+    the ordinary audited `run` above (preservation, owner re-proof, exact lease); a refusal leaves
+    that claim untouched and the sweep continues.
+    """
+    rules = config["claim"]
+    remote = rules["remote"]
+    primary = start.primary_checkout(cwd).resolve()
+    heads = sorted((claims.claimed_issue(name), name) for name in claims._remote_heads(primary, remote)
+                   if claims.claimed_issue(name) is not None)
+    if heads:
+        _git(primary, "fetch", "-q", remote, *(f"refs/heads/{b}:refs/remotes/{remote}/{b}" for _, b in heads))
+    now = datetime.now(timezone.utc)
+    released, kept = [], []
+    for number, branch in heads:
+        state, idle = _idle_hours(primary, gh, number, branch, remote, now)
+        if state != "OPEN":
+            continue  # a closed issue's claim is `work cleanup`'s
+        if idle <= STALE_HOURS:
+            continue
+        label = f"#{number} {branch} idle {idle / 24:.1f}d"
+        owner = handoff._claim_at(primary, f"refs/remotes/{remote}/{branch}", number)[1]
+        state, why = handoff.owner_status(owner) if owner else ("unknown", "claim records no owner")
+        if state != "absent":
+            print(f"kept {label}: owner {owner} is {state} ({why})", flush=True)
+            kept.append(number)
+            continue
+        if dry_run:
+            print(f"would release {label}: owner {owner} is absent ({why})")
+            continue
+        print(f"releasing {label}", flush=True)
+        try:
+            run(gh, primary, config, number, f"stale claim: idle {idle / 24:.1f} days and its owner session is gone",
+                absent_only=True)
+            released.append(number)
+        except ReleaseError as error:
+            print(f"kept {label}: {error}", flush=True)
+            kept.append(number)
+    if dry_run:
+        print(f"stale sweep (dry run): kept {len(kept)}")
+    else:
+        print(f"stale sweep: released {len(released)}" + (f" ({', '.join(f'#{n}' for n in released)})" if released else "")
+              + f", kept {len(kept)}" + (f" ({', '.join(f'#{n}' for n in kept)})" if kept else ""))
+    return 0

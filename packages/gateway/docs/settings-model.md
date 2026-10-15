@@ -531,6 +531,7 @@ Gateway serves it to clients; iOS holds no per-key code.
 | `control` | One of the fixed control primitives, with an optional `fallback` control for older clients. |
 | `unit`, `format` | How the Gateway formats `display` ("200K tokens", "3 retries"). |
 | `confirm` | Optional confirmation text when the maintainer's own tap changes a key whose tier would be `approve` for anyone else. |
+| `entry` | What to type: `{ hint, example }`. The hint names the format in one sentence; the example is a realistic value the client shows as the field's placeholder. Every editable `text` key and string-list key has one, so the client's shared text and add-value rows never invent their own guidance. |
 
 Provenance is not a field. It is part of every resolved value
 ([3.1](#31-precedence-and-the-resolver)).
@@ -550,6 +551,7 @@ Provenance is not a field. It is part of every resolved value
 | `tools.active` | tools | | chat → active tool set; profile; project/mac → `defaultTools` | fixed / next-turn | notify / quiet | ui, home, agent |
 | `tools.codemode.mode` | tools | | project/mac → `codemode.mode` | fixed / new-chat | notify / quiet | ui, home |
 | `permissions.projectTrust` | permissions | `project` | mac → `trust.json` | narrow live, widen live once approved | approve / notify | ui, home |
+| `permissions.macTerminalKey` | permissions | `device` | mac → `~/.ssh/authorized_keys` (the `tron-mac-terminal:<device>` line; [Mac Terminal](../README.md#mac-terminal)) | live | approve / notify | ui, home, agent, worker (an iPhone sets only its own device) |
 | `permissions.defaultProjectTrust` | permissions | | mac → `defaultProjectTrust` | live | approve / notify | ui |
 | `permissions.connectionWrite` | permissions | `connection` | mac → connections policy | narrow live | approve / quiet | ui |
 | `permissions.budget.task` | permissions | | profile | narrow live | approve / quiet | ui, home |
@@ -651,6 +653,11 @@ editing settings files. Direct edits are still found (F2).
 the actor read, so a stale change is refused instead of overwriting. With
 `dryRun: true` it validates and returns the tier without applying, so a row can
 say "Needs approval" before anyone commits to it.
+
+Each change's outcome names its key, layer, status and tier, and the value at that
+layer `before` and `after` the change (`null` when unset there); a redacted key
+reports only `redacted: true`, as its record does. The `settings` tool's result
+carries the outcome, so its transcript detail shows old → new without a second read.
 
 The steps:
 
@@ -1076,7 +1083,7 @@ no change to the resolver (F4). The Home profile has two parts.
 
 - **Typed values.** Schema keys whose allowed layers include `profile`: the
   worker model and thinking, the memory model, task budgets and scopes. They
-  resolve like any layer value, show a **"Profile: Home"** badge, and go through
+  resolve like any layer value, show a **"Set in Home profile"** badge, and go through
   the change path.
 - **Instructions and learned notes.** The Knowledge-backed learned profile owned
   by #734 (`packages/gateway/src/home/home-profile.ts`). Notes may explain *why*
@@ -1182,6 +1189,44 @@ Changing Home's model later does not change running workers: the worker's
 values are fixed at start. Changing the profile key from `sameAs: home` to an
 explicit model is a profile change with a `notify` floor.
 
+### 6.4 Learned-profile changes
+
+The learned profile (6.1, second part) is not a key: its store is Knowledge, and an
+item never resolves as a setting. Its changes still take this document's one path,
+so they are logged, shown and undone like any other change.
+
+- **One implementation.** Home's `profile` tool and the maintainer's
+  `home.profileChange` both call `SettingsChangePath.changeProfile`, which applies
+  ops with `HomeProfileItems` (`home-profile.ts`) under the Home target's lock. The
+  actor decides only confirmation: Home writes inferred items, and the maintainer's
+  tap writes confirmed ones (`confirmedByUser`).
+- **The record.** Each note a change touches is one entry: key `home.profile.item`,
+  qualifier `note`, target `home`, layer `profile`. Its `before` and `after` are the
+  item's value `{ kind, text, confirmed, state, revisionId, supersedes?,
+  supersededBy? }`; a note that did not exist has none. The entries of one change share
+  `group: { id, size }`, for example both notes of a supersede or every item of a
+  Confirm all. The subject's floor is quiet. Home's run web mark raises it one step,
+  so a profile change after open-world content pushes "Undo it in Tron". The risk
+  model is not consulted, because an item stays inferred until the maintainer
+  confirms it.
+- **Undo.** `settings.undo` of a profile entry reverts its whole group, restoring
+  each note to its `before`: text, kind, confirmation, retirement and its
+  `supersedes` relation. A note that did not exist is retired. Undo is refused with
+  `conflict` and `{ current, after, display }` unless every note still equals its
+  recorded `after`. Clearing retirement uses Knowledge's `retired: false` draft
+  (knowledge.md), which is never stored.
+- **Concurrency.** Every maintainer op names the revision he read. A note Home changed
+  since is refused with the item as it now stands, never overwritten. Knowledge's
+  revision fence also covers the race between Home's read and its write.
+- **Not recorded.** A native Knowledge note edit stays the Knowledge owner's. It is
+  not a profile change, and no outside-change comparison runs for notes (F2's
+  outside detection covers settings files only).
+
+The real-Gateway journey is `src/sessions/home-profile.integration.test.ts`
+(F11–F13): maintainer confirm, refine with a kind change, supersede, retire and
+their undos over RPC, Changes entries, the stale-edit and stale-undo conflicts, and
+the next activation's profile section.
+
 ## 7. Presentation and the rendering contract
 
 ### 7.1 Posture: calm by default, everything on demand
@@ -1206,10 +1251,13 @@ has a key for the target as `{ id, title, description, order, note? }`; the
 `description` is the one line a client shows beside the title.
 
 On iOS (#876) the gear's **Settings** is this Mac and this iPhone, one row per
-destination in five titled cards that share an accent: **Agent** (Model, Context,
-Run, Permissions), **Tools & Extensions** (Tools, MCP Servers, Extensions, Hooks),
-**Accounts** (Model Providers, Custom Models, Connected Services), **Data &
-Diagnostics** (Connections, Logs, Setup) and **This iPhone**. Sources' keys show
+destination in titled cards that share an accent: **Accounts** (Connections, Model
+Providers, Custom Models, Connected Services), **Agent** (Model, Context, Run,
+Permissions), **Tools & Extensions** (Tools, MCP Servers, Extensions, Hooks) and,
+last, **This iPhone** (Push Notifications, Appearance, Sessions, Logs, Setup; #956).
+The iOS This iPhone card gathers the phone's own surfaces by the maintainer's
+choice; Push Notifications' policy and Setup's keys stay Gateway-stored as above,
+so the card carries no device-only caption. Sources' keys show
 in Extensions and Setup's beside Import; a section the app does not place joins
 **More**. A chat's own settings are one row in **Manage Session** (Home's in Manage
 Home), beside its Project Settings row: Chat Settings opens the chat's Changes,
@@ -1233,9 +1281,9 @@ kind renders as a neutral badge with its label.
 
 | Kind | Labels |
 |---|---|
-| Layer | Chat, Profile: Home, Project, Mac, Built-in |
-| Source | From default at start, From Home at start, Follows default |
-| Scope | The qualifier: a provider, model, tool or project |
+| Layer | Where the value comes from: Set in this chat, Set in Home profile, Set in project, Set on Mac, Tron default (`LAYER_SOURCE_LABELS`; `LAYER_LABELS` names the layer itself in sentences and the Changes feed) |
+| Source | Chosen for this chat; From Mac default / project default / Home profile / Tron default at start; From Home at start |
+| Scope | The qualifier: a provider, tool or project; a per-model value reads "For <model display name>" with the `provider/id` as its detail |
 | Authority | Who last changed it: You, Home, a named chat or worker, Outside Tron |
 | State | Staged, Uncommitted, Local only, Changed outside Tron, Pending approval, Not undoable, Not applied (untrusted), Clamped, Applies after restart |
 
@@ -1473,7 +1521,7 @@ planned for it.
 
 ## 9. Slices
 
-Each slice is a Proposed issue under epic #758; the maintainer moves a slice to Ready.
+Each slice is an issue under epic #758.
 The maintainer-approved #758 integration branch collects these dependent slices;
 individual acceptance remains explicit and every required dependency must be
 satisfied before its draft integration PR can land. Size is S, M or L. Slice 14

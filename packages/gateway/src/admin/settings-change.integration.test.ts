@@ -1,3 +1,5 @@
+import { generateKeyPairSync } from "node:crypto";
+import { MacTerminalKeys } from "../security/mac-terminal.js";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -48,6 +50,16 @@ afterEach(async () => {
 const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe", env: GIT_ENV }).toString();
 
+/** The paired iPhone whose Mac Terminal key the every-key case changes. */
+const ENROLLED_IPHONE = "00000000-0000-4000-8000-000000000001";
+
+/** A fresh OpenSSH ecdsa-sha2-nistp256 public key, as the iPhone's Secure Enclave key enrolls. */
+function macTerminalSampleKey(): string {
+  const point = generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey.export({ format: "der", type: "spki" }).subarray(-65);
+  const field = (value: Buffer) => { const length = Buffer.alloc(4); length.writeUInt32BE(value.length); return Buffer.concat([length, value]); };
+  return `ecdsa-sha2-nistp256 ${Buffer.concat([field(Buffer.from("ecdsa-sha2-nistp256")), field(Buffer.from("nistp256")), field(point)]).toString("base64")}`;
+}
+
 function client(sessionIds: string[] = []): ClientContext {
   return { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: (id: string) => sessionIds.includes(id), isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
 }
@@ -77,7 +89,8 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
   });
   registries.push(registry);
   await registry.initialize();
-  const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime });
+  const macTerminalKeys = new MacTerminalKeys(join(root, "home", ".ssh"));
+  const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime, macTerminalKeys });
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
   // Production wiring: every read reconciles outside changes (doc 5.6).
   const outside = new OutsideChanges(tronHome, agentDir, record, settingsModel.observedReaders);
@@ -118,7 +131,7 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
     return entries;
   };
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
-  return { root, tronHome, agentDir, trust, registry, service, record, settingsChanges, broadcasts, pushes, outside, change, history, macDocument, faux };
+  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsChanges, broadcasts, pushes, outside, change, history, macDocument, faux };
 }
 
 async function gitProject(root: string, name: string) {
@@ -156,6 +169,8 @@ describe("settings.change", () => {
       { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6 },
     ], { actor: { kind: "home", id: "home-fixture" }, reason: "Retry a bounded failure" });
     expect(result.status).toBe("pending");
+    // A held change still names its values, so the agent's settings tool detail shows old → new (#957).
+    expect(result.changes[0]).toMatchObject({ key: "run.retry.maxRetries", status: "pending", before: 4, after: 6 });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     expect((await f.history())[0]).toMatchObject({ tier: "approve", tierBasis: { floor: "quiet", risk: "approve" } });
     transcript.push({ case: "risk-raise-held", detail: { result, history: await f.history() } });
@@ -223,6 +238,7 @@ describe("settings.change", () => {
     const f = await fixture();
     const applied = await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6, expected: 4 }]);
     expect(applied.status).toBe("applied");
+    expect(applied.changes[0]).toMatchObject({ before: 4, after: 6 });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
     expect(f.broadcasts).toContainEqual({ topic: "settings.changed", payload: expect.objectContaining({ keys: ["run.retry.maxRetries"], layer: "mac" }) });
     const [entry] = await f.history({ key: "run.retry.maxRetries" });
@@ -250,6 +266,10 @@ describe("settings.change", () => {
 
     // A redacted key records only "changed", and its change is not undoable.
     const proxy = await f.change({ kind: "mac" }, [{ key: "run.httpProxy", layer: "mac", op: "set", value: "http://proxy.invalid:3128" }]);
+    // A redacted key's outcome withholds both values, as its record does.
+    expect(proxy.changes[0]).toMatchObject({ redacted: true });
+    expect(proxy.changes[0]).not.toHaveProperty("after");
+    expect(JSON.stringify(proxy)).not.toContain("proxy.invalid");
     const proxyEntry = (await f.history({ key: "run.httpProxy" }))[0]!;
     expect(proxyEntry).toMatchObject({ changed: true, redacted: true, tier: "notify",
       presentation: { label: "HTTP proxy", display: { before: "Hidden", after: "Changed" } } });
@@ -595,7 +615,7 @@ describe("outside changes", () => {
     expect(label(await transport(), "Staged")).toBeDefined();
     git(project, "commit", "-q", "-m", "transport");
     const committedRow = await transport();
-    expect(committedRow.badges.map(badge => badge.label)).toEqual(["Project"]);
+    expect(committedRow.badges.map(badge => badge.label)).toEqual(["Set in project"]);
     const committed = (await f.history()).find(entry => entry.status === "committed")!;
     expect(committed).toMatchObject({ refersTo: written.changes[0]!.changeId, git: { head: git(project, "rev-parse", "HEAD").trim() } });
 
@@ -812,6 +832,8 @@ describe("every key at every allowed layer", () => {
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), defaultProvider: first.provider, defaultModel: first.id }));
     const project = await gitProject(f.root, "every");
     await f.trust.set(project, true);
+    // An enrolled iPhone gives the Mac Terminal key its one Mac instance.
+    await f.macTerminalKeys.set(ENROLLED_IPHONE, macTerminalSampleKey());
     const slot = await f.registry.create(project);
     await slot.setModel(first.provider, first.id);
     const controls = [...CONTROLS];
@@ -838,6 +860,7 @@ describe("every key at every allowed layer", () => {
         const served = await f.service.invoke(client([slot.id]), "settings.options", { target: targets[layer], key: row.key, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }) as unknown as { range: { min: number; max: number } };
         return Math.floor((served.range.min + served.range.max) / 2);
       }
+      if (row.key === "permissions.macTerminalKey") return macTerminalSampleKey();
       if (valueKind === "boolean") return row.value !== true;
       if (valueKind === "numberMap") return { [String(options![0]!.value)]: range!.min + 1 };
       if (options?.length) return options.map(option => option.value).find(value => differs(value, row.value));
@@ -857,6 +880,7 @@ describe("every key at every allowed layer", () => {
         project: { root: project, document: await json(join(project, ".pi", "settings.json")), applied: true },
         profile: await json(join(f.tronHome, "gateway", "home", "profile.json")),
         trust: await json(join(f.agentDir, "trust.json")) as Record<string, boolean>,
+        macTerminal: await f.macTerminalKeys.read(),
         floors: await json(join(f.tronHome, "gateway", "settings", "floors.json")),
         chat: slot.settingsChatLayer(),
       } as unknown as SettingsStores;
@@ -888,7 +912,10 @@ describe("every key at every allowed layer", () => {
         }
         let applied: Awaited<ReturnType<typeof f.change>>;
         try {
-          applied = await f.change(targets[layer]!, request, extra, client([slot.id]));
+          // An iPhone enrolls only its own Mac Terminal key, so that key is changed as its device.
+          const actor = key.id === "permissions.macTerminalKey"
+            ? { ...client([slot.id]), identity: ENROLLED_IPHONE } as ClientContext : client([slot.id]);
+          applied = await f.change(targets[layer]!, request, extra, actor);
         } catch (error) {
           report.push({ ...instance, result: `refused: ${(error as Error).message}` });
           continue;

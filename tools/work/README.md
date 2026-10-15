@@ -15,15 +15,37 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | `start <issue> [--integration] [--base REMOTE-BRANCH]` | Claims an open, unclaimed issue: pushes a canonical claim commit to `claim.remote`, sets Status In progress, comments the claim, and creates its worktree under `../tron-worktrees/`. Ordinary start excludes epics; maintainer-approved epic integration uses `--integration`. `--base` selects a branch on the configured remote; its name is recorded as `Work-Claim-Base` and the claim commit's parent pins the exact starting commit. Without it the configured base is used. A session resumes its own claim from that immutable creation receipt, including after handoff or a base advance. Closed issues and open blockers remain refused. Never create manual ownerless epic/custom-base branches. This is not adoption: unknown/live claims must go through supported handoff. |
 | `handoff <issue> --reason TEXT [--session ID] [--force-maintainer]` | Transfers an existing claim in place; preserves the registered worktree and dirty files. Automatic transfer requires authoritative terminal settlement evidence from `packages/gateway/dist/client/work-owner-status.js`; unknown `no-report` work is eligible only when the Gateway's `ownerSettlement` proof validates its canonical task marker, invocation start/terminal receipts, and successful subagent settlement for the same task, session, and operation (including a successful join with zero stops). The helper rechecks task identity, lifecycle, operation and proof before accepting. A terminal task with zero projected live runs is not independent settlement proof. This requires both a rebuilt helper and a Gateway running the updated Home status projection; an older Gateway omits the proof and therefore fails closed. Prepare the helper with `PATH="$HOME/.nvm/versions/node/v$(cat .node-version)/bin:$PATH" npm --prefix packages/gateway run build`. The helper defaults `TRON_GATEWAY_HOST` to the local Tailscale address, matching terminal chat. Set `TRON_GATEWAY_HOST=127.0.0.1` when querying a loopback-bound development Gateway, or set it to a literal IP assigned to this Mac; it refuses other hosts before reading the local credential or opening a socket. Maintainer override requires a real TTY and exact typed confirmation. A legacy claim with no owner is `unknown`, never automatically transferable; this includes both a claim commit with no owner trailer and an established claim-style remote branch with no claim commit or claim trailers at all. The branch name plus the matching registered worktree and exact local/remote head identify the existing claim; they do not invent an old session identity. A maintainer can recover it only with `--force-maintainer` and the exact prompt `HANDOFF #<issue> FROM unknown`. This records `unknown` as the prior owner; it does not invent an identity or liveness result. The public audit includes old/new owner, reason, and exact transition commit SHA. Local and remote claim heads must match exactly (except a verified partial handoff retry); an unpushed or divergent local head is refused even with force. Only a clean descendant candidate with a settled owner can use `recover` below before ordinary handoff. |
 | `recover <issue> --expected-local SHA --expected-remote SHA --reason TEXT` | Publishes an exact clean descendant candidate as **unverified work**, without transferring ownership or changing local history. Requires the same known claim at both full commit IDs and canonical owner/children settlement; there is no force override. See [candidate recovery](#candidate-recovery). |
-| `release <issue> --reason TEXT` | Gives up a stale claim on an **open** issue: preserves the claim's work, deletes the remote claim branch with an exact lease, posts an audited comment, sets Status back to Ready and removes the worktree and local branch. The issue stays open and unclaimed. Refuses a live or indeterminate owner. See [`release`](#release). |
+| `release <issue> --reason TEXT [--force-maintainer]` | Gives up a stale claim on an **open** issue: preserves the claim's work, deletes the remote claim branch with an exact lease, posts an audited comment, sets Status back to Ready and removes the worktree and local branch. The issue stays open and unclaimed. Refuses a live or indeterminate owner; an idle Gateway session or a legacy owner needs the maintainer's `--force-maintainer`. See [`release`](#release). |
+| `release --stale [--dry-run]` | Sweeps every open-issue claim idle for more than 72 h and releases, through the same path, each one whose owner is `absent`. See [stale sweep](#stale-sweep). |
 | `verify [--tests CMD]...` | Runs the checks the branch's paths require, then each `--tests` command, on the current commit. Exit 0 when all pass. |
 | `land --summary-file <md> [--title T] [--tests CMD]... [--ready] [--dry-run]` | Merges `origin/main` in, verifies the merged tree, pushes the branch, opens or updates its pull request (title = `--title` or the issue title; body = the summary file, verbatim), squash-merges at the verified commit, deletes the remote branch, and closes the issue as completed with Status Done. A draft pull request refuses before the merge unless `--ready`, which marks it ready for review only after verify and the exact-head publication, re-reads it, and merges nothing if it is still a draft. An issue with open sub-issues (an epic) is left open and `land` lists them: close each fulfilled child with `work issue close`, then the epic. Prints `merged: <commit>`. |
 | `cleanup [--all] [--dry-run]` | Removes a task worktree and its branches once its pull request merged at its head (or its issue is closed and it holds only its claim commit). Names what it keeps and why. |
-| `dashboard [--html P] [--json P]` | Read-only view of claims, Status, epics, stale work, orphans and main CI. |
+| `dashboard [--html P] [--json P]` | Read-only view of claims, Status, epics, stale claims, paused epics, past exit dates, orphans, classification gaps and main CI. |
 | `comment <issue> --body-file F` | Privacy-checks, then posts a public issue comment. |
-| `issue create\|labels\|close\|reopen\|parent\|block` | Files issues and changes labels and links. Labels are optional; only declared labels are accepted. `close` posts a comment, closes, and sets Status Done. Epics may close only when all linked children are closed (every page is checked before any write, for either close reason). `reopen <issue> --comment-file F` requires the reason as a non-empty, privacy-checked comment, posts it with an audit marker, reopens, and sets Status In progress when the issue is claimed (claims are left as they are) or Ready otherwise; it refuses an open issue it did not reopen, and a re-run finishes a partial reopen without a second comment. `parent --replace-parent` moves a task from its current epic to another. |
-| `project add\|set` | Adds an issue to the Project, or sets Status (Proposed, Ready, Blocked) and Priority. |
-| `bootstrap [--apply]` | Plans or converges labels and the Project fields to `.github/work.json`. Adds and updates only. |
+| `issue create\|edit\|labels\|close\|reopen\|parent\|block` | Files issues and changes labels and links; see [filing](#filing). `edit <issue> [--title T] [--body-file F]` replaces a title or body (privacy-checked). `close` posts a comment, closes, and sets Status Done. Epics may close only when all linked children are closed (every page is checked before any write, for either close reason). `reopen <issue> --comment-file F` requires the reason as a non-empty, privacy-checked comment, posts it with an audit marker, reopens, and sets Status In progress when the issue is claimed (claims are left as they are) or Ready otherwise; it refuses an open issue it did not reopen, and a re-run finishes a partial reopen without a second comment. `parent --replace-parent` moves a task from its current epic to another. |
+| `project add\|set` | Adds an issue to the Project, or sets Status (Ready, Blocked) and Priority. |
+| `bootstrap [--apply [--prune]]` | Plans or converges labels and the Project fields to `.github/work.json`. Labels, custom Project fields and Status/Priority options on GitHub that the file does not declare are reported as `drift:` lines (exit 2). `--apply` adds and updates; `--apply --prune` also deletes drifted labels that no open issue carries, options no Project item uses, and undeclared custom fields with their values. Labels and options still in use stay reported until migrated. |
+
+## Filing
+
+Every issue is filed with `issue create`; the repository has no GitHub issue templates.
+
+- A task needs exactly one declared `kind:` label (`--kind`) and at least one declared
+  `area:` label (`--area`, repeatable). An epic (`--type epic`) gets only the `epic`
+  label. The type, kind and area are labels, so titles carry no `[Task]:`-style prefix;
+  such a prefix is refused.
+- The command adds the issue to the Project with Status Ready (or `--status Blocked`)
+  and an optional `--priority`. All checks run before the first write; if the Project
+  write fails after the issue exists, the error names the `project add`/`set` to finish.
+- An issue that waits for the next failure or a recurrence needs an exit:
+  `--exit-by YYYY-MM-DD` appends `Exit by: <date>. Close as not planned if it has not
+  recurred by then.` A body that says it waits for a recurrence without one is refused.
+  The dashboard lists open issues past their exit date.
+- Status is Ready (open, claimable), In progress (claimed), Blocked (reason in the latest
+  comment) or Done. Priority is optional.
+- When partial progress lands or an audit finds some of the scope done, replace the body's
+  remaining scope with `issue edit` instead of appending a comment, so the next reader
+  does not re-derive it.
 
 Every GitHub write goes through `scripts/tron work`, which appends it to a private,
 bounded audit log at `<git common dir>/work/github-writes.jsonl` without its body.
@@ -141,9 +163,11 @@ leaves the claim, refs, worktree and GitHub unchanged:
    is refused: land, hand off or recover it instead.
 2. **Owner.** The newest `Work-Claim-Session` on the branch, checked with the owner helper
    ([owner status](#owner-status)). Only `settled` or `absent` admits a release; `live`
-   and `indeterminate` refuse with the helper's reason. A claim without an owner refuses.
+   and `indeterminate` refuse with the helper's reason, and `idle` refuses unless the
+   maintainer forces it ([maintainer release](#maintainer-release)). A claim without an
+   owner refuses.
 3. **Local.** The registered claim worktree (if any) must not be locked, mid merge/rebase,
-   or the working directory of another process.
+   the working directory of another process or hold a file another process has open.
 4. **Preserve first.** The worktree's whole state (tracked edits, staged files, untracked
    files and non-regenerable ignored files such as `progress.md`) is captured as a
    snapshot commit through a private temporary index, so the worktree and its index are
@@ -154,12 +178,46 @@ leaves the claim, refs, worktree and GitHub unchanged:
    ignored output (`cleanup.regenerableIgnored`) is not preserved. A nested checkout with
    local data refuses.
 5. **Release.** `cleanup.releaseCommands` run, then the owner, head, snapshot tree and
-   processes are re-proven. Any change refuses with the work still preserved. The remote
+   processes are re-proven (a forced `idle` owner must still be `idle`). Any change refuses
+   with the work still preserved. The remote
    branch is deleted with a lease on its exact head, the audit comment (marker keyed by
    branch and head; privacy-checked) names the old owner and its evidence, the releasing
    session, the reason and the released head. Status returns to Ready, the worktree is
    force-removed (its exact state is in the bundle) and the local branch is deleted at
    its preserved head. A record is appended to `work/releases/log.jsonl`.
+
+### Stale sweep
+
+`release --stale` lists every remote claim branch, skips closed issues (`cleanup` owns those)
+and any claim with a claim-branch commit or issue comment in the last 72 hours, and asks the
+owner helper about the rest. Only an `absent` owner is released, through the ordinary steps
+above with a reason naming the idle time; every other state, including `settled`, is kept and
+printed with its verdict. A settled Home task's claim passes to its successor through `start`
+(#929) and can be a maintainer's paused continuation, so the sweep never takes it. A refusal
+inside one release (published work, a busy worktree, an owner that changed) keeps that claim
+and the sweep continues. `--dry-run` prints the same decisions without any write. The
+dashboard's Stale claims section (48 h without activity) names this command.
+
+### Maintainer release
+
+Two owners can never become `settled` or `absent` on their own, so only the maintainer
+releases them, with `release <issue> --reason TEXT --force-maintainer` from a real terminal,
+typing exactly `RELEASE #<issue> FROM <owner>`:
+
+- **An idle Gateway session** (#1001): an ordinary chat that claimed the issue and went idle.
+  The helper answers `idle` only when the Gateway lists the session with no turn, subagent or
+  user wait and no Home task is bound to it. It could still be resumed, so the maintainer
+  confirms it is abandoned. The verdict is re-read right before the remote delete; a session
+  that became live keeps its claim.
+- **A legacy owner**: a missing owner trailer (type `unknown`), or an id that is not a Gateway
+  session id (for example `reliability-364`), which no Gateway can report live or settled.
+
+Everything else is unchanged: work is preserved first, the worktree must have no process
+inside or holding a file open, and `live` refuses before any prompt. A Gateway-shaped
+`indeterminate` owner (a delegated session or Home chapter, a Home task that ended without
+settlement proof, an unreadable Gateway) is never forced. An interrupted `warm` clone's
+`packages/*/.tron-warm-*/` staging directory holds only `node_modules`, so it is regenerable
+output that neither blocks the release nor enters the bundle.
 
 If a step after the remote delete fails (for example the comment), rerun the same command:
 it finds the manifest in phase `remote-released` and finishes the comment, Status and
@@ -179,12 +237,34 @@ within a 20-second overall budget; every request gets only what remains of it:
   root carries it. The root is trusted only if it holds every idle listed session. This
   covers delegated sessions and Home chapters, which the listing omits. A session that
   could have made a claim commit has run tools, so it was persisted.
-- `indeterminate`: everything else, including an idle existing session that could be
-  resumed, an id that is not a Gateway session id, a mismatched root and a deadline. The
+- `idle`: `session.list` lists the session with no active turn, subagent or user wait, and
+  the whole Home task list binds no task to it. It can still be resumed.
+- `indeterminate`: everything else, including a session whose Home task ended without
+  settlement proof, an unlisted session with a file (a delegated session or Home chapter),
+  an id that is not a Gateway session id, a mismatched root and a deadline. The
   reason names the cause, for example `home.taskList did not answer within the 20s
   owner-status deadline`.
 
-Only `release` accepts `absent`; `handoff` and `recover` still require `settled`.
+Only `release` accepts `absent` (and `release --stale` accepts only `absent`), and only a
+maintainer-forced `release` accepts `idle`; `handoff` and `recover` still require `settled`.
+
+The tooling builds the helper it runs: the build is stamped with the Git tree of
+`packages/gateway/src` it came from, and a missing, stale or uncommitted-source build is
+rebuilt under a lock before use (#924), so a stale helper is never read as an
+indeterminate owner. `work-owner-status.js --home-task <session>` prints `{state: "live",
+reason, taskId}` when a non-terminal Home task is bound to the session, else
+`{state: "none", reason}`.
+
+**Settled-owner successors (#929).** `start` on an issue claimed by another session hands
+the claim over automatically, with the ordinary audited `handoff` (claim trailer and issue
+comment), when the owner is `settled` and the caller runs a live Home task. Any other owner
+state refuses with its verdict; a settled owner and a caller that runs no Home task refuse
+with the `handoff` command to use. A task resumed in place keeps its session, so it keeps
+its claim with no transfer. Claim identity comes from `--session`, `WORK_SESSION_ID` or
+`PI_SESSION_ID`; a terminal opened from a chat inherits that chat's `PI_SESSION_ID`, so a
+maintainer running `handoff` from Home's terminal once claimed for Home's own chapter
+session. `handoff --force-maintainer` therefore requires `--session` (or `WORK_SESSION_ID`)
+and refuses an identity inherited only from `PI_SESSION_ID`.
 `home.taskList` used to cost O(catalog) per row (#905): live rows built a whole session
 snapshot to read the worker name, and settled rows rebuilt the catalog acquisition. On
 the Stable Gateway a 50-row page took 6.3 s against the helper's old 4 s per-request cap,
@@ -196,7 +276,7 @@ and the session root, but a Home-task lookup may end `indeterminate` at the dead
 
 A worktree is removed only when its head is proven done and nothing local would be
 lost: no uncommitted or untracked files, no non-regenerable ignored files, no operation in
-progress, no process working inside it. Release commands from `cleanup.releaseCommands`
+progress, no process working inside it or holding a file there open. Release commands from `cleanup.releaseCommands`
 run first (`scripts/ios-gateway-e2e-test clean`, `scripts/tron-ios-test clean`). Removal
 deletes the local branch and the remote branch with a lease on the proven head.
 `--dry-run` changes nothing.
@@ -258,9 +338,21 @@ Git repositories and linked worktrees, checking exact-head evidence retention, 3
 pruning, and remote-branch/worktree removal. Evidence is written to
 `test-results/work-cleanup.json`; the temporary repositories are removed on exit.
 
-`python3 scripts/test-work-close.py` exercises epic/task close and reopen through the
+`python3 scripts/test-work-bootstrap.py` runs `bootstrap` through the real CLI against a
+process-level gh fixture holding undeclared labels, a Status option still in use, an unused
+one, an undeclared custom field and a built-in field. It proves the plan reports each as
+drift with exit 2 and writes nothing, that `--apply` alone deletes nothing, that
+`--apply --prune` deletes only the unused label, unused option and undeclared field while
+in-use items stay reported, and that it converges once they are migrated. Evidence:
+`test-results/work-bootstrap.json`.
+
+`python3 scripts/test-work-close.py` exercises filing, epic/task close and reopen through the
 real CLI and Git with a process-level GitHub fixture in an isolated temporary home. It
-covers completed epics, unfinished children on later pages, failed reads, foreign claims,
+covers filing first: a task without a kind or area, an undeclared label, a `[Task]:` title
+prefix and a wait-for-recurrence body without `--exit-by` are refused before any write; a
+classified task is created with exactly its kind and area labels and its exit line, then
+added to the Project with Status Ready; an epic gets only `epic`; `issue edit` replaces a
+body. It then covers completed epics, unfinished children on later pages, failed reads, foreign claims,
 and idempotent recovery after a partial close; and for reopen, refusal without a reason
 or of an open issue, the Ready/In progress Status choice, the audited write, and
 idempotent recovery after a partial reopen. Regenerable evidence is written to
@@ -276,9 +368,11 @@ access, acceptance of a locally assigned interface IP when one is available, act
 refusal without status reads, pagination to a finished matching owner, malformed
 evidence, settled no-report proof with stopped or naturally completed children, task/session/operation mismatches, missing or failed settlement, excluded unknown reasons, status races, natural completion with zero stopped subagents, refusal preservation of
 refs/index/dirty bytes, ordinary and TTY-confirmed takeover, idempotent audit, and
-missing-worktree refusal without recreation. Evidence is written to
-`test-results/work-handoff.json`; build the Gateway first with the pinned Node runtime
-using `npm --prefix packages/gateway run build`. The fixture sets
+missing-worktree refusal without recreation, and a legacy bare-verdict helper with a stale
+source stamp is rebuilt before a settled-owner handoff succeeds; only that call allows
+the helper's 300-second build bound plus 30 seconds for the CLI/Gateway exchange.
+Evidence is written to `test-results/work-handoff.json`; build the Gateway first with the
+pinned Node runtime using `npm --prefix packages/gateway run build`. The fixture sets
 `TRON_GATEWAY_HOST=127.0.0.1` by default so it remains independent of host Tailscale.
 
 `python3 scripts/test-tron-heavy.py` runs the heavy-run queue with real concurrent
@@ -289,14 +383,22 @@ an inherited slot. Evidence: `test-results/tron-heavy.json`.
 `python3 scripts/test-work-release.py` exercises `release` through the real CLI, Git, the
 built owner helper, a Gateway WebSocket fixture (with a seeded session root) and a gh
 fixture. It proves refusal without any change for a live session, a live Home task, an
-idle existing session, an unlisted session that has a file, a non-Gateway owner id, an
+idle listed session without force (naming the maintainer route), an idle session whose Home
+task ended without settlement proof, an unlisted session that has a file, a non-Gateway owner id, an
 unverifiable session root, a stalled `home.taskList` (bounded at the 20 s deadline), and a
 claim branch carrying published work. Dirty work (staged, unstaged, untracked,
 non-regenerable ignored and an unpublished local commit) is restored byte for byte from
 the bundle into a fresh clone after release. A failed audit comment after the remote
 delete resumes once on retry, and the result is Status Ready, one comment and the log
 record. A settled Home task owner is also released through 5 s Home task pages, which the
-former 4 s cap refused. Evidence: `test-results/work-release.json`.
+former 4 s cap refused. The stale sweep keeps a recent absent-owner claim, one with a recent
+issue comment, and idle live, resumable and settled owners, each with refs, worktree (including
+an uncommitted file) and GitHub unchanged; it releases an absent owner idle for 100 hours and
+its uncommitted files are restored byte for byte from the bundle. Maintainer release refuses a
+live owner even with force, refuses an idle owner without a terminal, while another process
+holds a worktree file open, and on a confirmation naming another owner; through a real
+pseudo-terminal it releases an idle Gateway session (whose worktree holds an interrupted
+`.tron-warm-*` clone, kept out of the bundle) and a legacy owner after the exact confirmation. Evidence: `test-results/work-release.json`.
 
 `python3 scripts/test-work-handoff.py --recovery-only` runs the focused recovery
 journeys through the same CLI/Git/WebSocket boundaries; the default command also

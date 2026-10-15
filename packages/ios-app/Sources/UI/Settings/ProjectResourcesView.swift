@@ -362,11 +362,7 @@ struct ProjectResourcesView: View {
                             .environment(\.tronSettingsVisualTheme, nil)
                         }
                     } else if loading {
-                        TronGlassCard(accent: .tronSessionTeal) {
-                            TronLoadingState(label: "Loading project resources…", accent: .tronSessionTeal)
-                                .padding(18)
-                                .frame(maxWidth: .infinity)
-                        }
+                        TronSheetLoadingState(label: "Loading project resources…", accent: .tronSessionTeal)
                     } else {
                         TronPlaceholderState(
                             title: "Resources Unavailable",
@@ -401,7 +397,7 @@ struct ProjectResourcesView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronSessionTeal)
+                            .tronToolbarAction(accent: .tronSessionTeal)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -579,7 +575,7 @@ struct ProjectResourceDetailSheet: View {
                     Button(action: onDone) {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }

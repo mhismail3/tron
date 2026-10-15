@@ -72,7 +72,7 @@ struct ExtensionFormSheet: View {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Cancel", action: cancel)
                             .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronError)
+                            .tronToolbarAction(role: .destructive)
                             .disabled(submitting)
                             .accessibilityLabel("Cancel form")
                     }
@@ -85,7 +85,7 @@ struct ExtensionFormSheet: View {
                         Image(systemName: "xmark")
                             .font(TronTypography.buttonSM)
                     }
-                    .tronToolbarAction(accent: .tronTextMuted)
+                    .tronToolbarAction(role: .neutral)
                     .disabled(submitting)
                     .accessibilityLabel("Close form and keep answers")
                 }
@@ -96,9 +96,7 @@ struct ExtensionFormSheet: View {
                     if form != nil {
                         Button(action: submit) {
                             if submitting {
-                                ProgressView()
-                                    .scaleEffect(0.72)
-                                    .tint(Color.tronAmber)
+                                TronPulseLoadingIndicator(accent: .tronAmber, size: 14)
                             } else {
                                 Image(systemName: "paperplane.fill")
                                     .font(TronTypography.buttonSM)
@@ -216,17 +214,30 @@ struct ExtensionFormSheet: View {
     private func questionPage(_ question: ExtensionFormQuestion, index: Int) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
+                // Agent-authored text may carry URLs, commands and IDs the user
+                // must act on: shared Markdown with native selection and Copy.
                 if let context = question.context, !context.isEmpty {
-                    Text(context)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM + 0.3))
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    TronMarkdownView(
+                        text: context,
+                        streaming: false,
+                        textStyle: ChatSelectableTextStyle(
+                            size: TronTypography.sizeBodySM + 0.3,
+                            color: .tronTextSecondary
+                        ),
+                        selectableText: true
+                    )
                 }
 
-                Text(question.question)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
+                TronMarkdownView(
+                    text: question.question,
+                    streaming: false,
+                    textStyle: ChatSelectableTextStyle(
+                        size: TronTypography.sizeBodyLG,
+                        weight: .semibold,
+                        color: .tronTextPrimary
+                    ),
+                    selectableText: true
+                )
 
                 VStack(spacing: 10) {
                     ForEach(question.options) { option in

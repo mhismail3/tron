@@ -1,3 +1,4 @@
+import { MacTerminalHost, MacTerminalKeys } from "./security/mac-terminal.js";
 import { ManagedSubagents } from "./sessions/managed-subagents.js";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -55,6 +56,7 @@ import { GatewayAutomationExecutor } from "./automations/automation-executor.js"
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
+import { HomeProfileItems } from "./home/home-profile.js";
 import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
@@ -184,7 +186,10 @@ const trust = new TrustService(config.agentDir, { standaloneDirectories: [homeWo
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
+// Mac Terminal's store is the Gateway user's own ~/.ssh/authorized_keys.
+const macTerminalKeys = new MacTerminalKeys(join(homedir(), ".ssh"));
 const settingsModel = new SettingsModel({
+  macTerminalKeys,
   agentDir: config.agentDir,
   tronHome: config.tronHome,
   trust,
@@ -830,6 +835,7 @@ const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, ne
     if (!home) throw new GatewayError("unsupported", "Tron Home is not available");
     await home.configureMemory({ model });
   },
+  profile: new HomeProfileItems(() => knowledge),
 }, config.agentDir);
 sessions.setSettings(settingsModel, settingsChanges);
 
@@ -844,6 +850,7 @@ const service = new GatewayService({
   trust,
   settingsModel,
   settingsChanges,
+  macTerminal: new MacTerminalHost(macTerminalKeys),
   modelConfig,
   packages,
   hookResources,

@@ -753,7 +753,7 @@ struct ComposerResourceDetailSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -899,7 +899,7 @@ struct ComposerResourceDetailSheet: View {
                         .font(TronTypography.bodySM)
                         .foregroundStyle(Color.tronTextSecondary)
                 } else {
-                    TronLoadingState(label: "Loading resource content…")
+                    TronLoadingState(label: "Loading resource content…", accent: accent)
                 }
             }
             .padding(14)

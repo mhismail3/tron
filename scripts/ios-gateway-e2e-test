@@ -122,8 +122,11 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSurfacesServeEveryKeyAndEditAtItsLayer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered"
 )
 
 ui_journey_is_owned() {
@@ -523,6 +526,23 @@ const faux = fauxProvider({
   models: [{ id: "e2e-model", name: "Tron E2E Model", reasoning: true, input: ["text", "image"], contextWindow: 32768, maxTokens: 4096 }],
   tokensPerSecond: 8,
 });
+// A prompt carrying the codemode journey marker asks its question from inside codemode
+// (#929); its turns are decided by what the model sees, not by a script position.
+const CODEMODE_MARKER = "CODEMODE-ASK-USER-JOURNEY";
+const textOf = (message) => typeof message?.content === "string" ? message.content
+  : (message?.content ?? []).map((part) => part.type === "text" ? part.text : "").join("");
+const codemodeTurn = (context) => {
+  const last = context.messages.at(-1);
+  if (last?.role === "toolResult" && last.toolName === "codemode") {
+    const output = textOf(last);
+    const choice = ["Approve it", "Hold it"].find((label) => output.includes('"' + label + '"'));
+    return fauxAssistantMessage("Codemode question answered: " + (choice ?? "no answer in: " + output.replace(/[ \n\t]+/g, " ").slice(-200)));
+  }
+  if (last?.role === "user" && textOf(last).includes(CODEMODE_MARKER)) {
+    return fauxAssistantMessage([fauxToolCall("codemode", { code: 'text(await tools.ask_user({ title: "Codemode approval", questions: [{ header: "Approve", question: "Approve the codemode step?", options: [{ label: "Approve it" }, { label: "Hold it" }] }] }));' }, { id: "e2e-codemode-ask" })], { stopReason: "toolUse" });
+  }
+  return undefined;
+};
 // Ordinary prompts consume this script in order. A prompt carrying the ask
 // journey marker consumes its own script instead, so the real-UI ask journey
 // (#935) cannot shift the responses every other journey and boundary case expects.
@@ -555,6 +575,24 @@ const askJourney = [
   ], { stopReason: "toolUse" }),
   fauxAssistantMessage("Ask journey answered: the fixture received the form answer."),
 ];
+// A prompt carrying the steer journey marker holds its turn until the phone
+// has queued a message, then ends it, so Pi delivers the queued steer (#974).
+// The steered photo has no text; its turn is recognised by its image.
+const steerJourneyMarker = "Fixture steer journey";
+let steerContext;
+const holdUntilSteerQueued = async () => {
+  const deadline = Date.now() + 180000;
+  while (!steerContext?.hasPendingMessages() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  // Keep the run going briefly so the phone presents the queued steer.
+  await new Promise((resolve) => setTimeout(resolve, 4000));
+  return fauxAssistantMessage("Steer journey turn finished.");
+};
+const lastUserHasImage = (context) => {
+  const last = context.messages.at(-1);
+  return last?.role === "user" && Array.isArray(last.content) && last.content.some((part) => part.type === "image");
+};
 const latestUserText = (context) => {
   for (let index = context.messages.length - 1; index >= 0; index -= 1) {
     const message = context.messages[index];
@@ -565,6 +603,9 @@ const latestUserText = (context) => {
   return "";
 };
 const scripted = (context, options, state, model) => {
+  if (latestUserText(context).includes(CODEMODE_MARKER)) return codemodeTurn(context) ?? fauxAssistantMessage("", { stopReason: "error", errorMessage: "Unexpected codemode journey turn" });
+  if (lastUserHasImage(context)) return fauxAssistantMessage("Steer journey saw the photo.");
+  if (latestUserText(context).includes(steerJourneyMarker)) return holdUntilSteerQueued();
   const step = (latestUserText(context).includes(askJourneyMarker) ? askJourney : ordinary).shift();
   if (step === undefined) {
     return fauxAssistantMessage("", { stopReason: "error", errorMessage: "No more faux responses queued" });
@@ -574,6 +615,7 @@ const scripted = (context, options, state, model) => {
 faux.setResponses(Array.from({ length: 64 }, () => scripted));
 export default function (pi) {
   pi.registerProvider(faux.provider);
+  pi.on("agent_start", (_event, ctx) => { steerContext = ctx; });
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
     const choice = await ctx.ui.select("Allow this test command?", ["Yes", "No"]);
@@ -586,6 +628,7 @@ EOF
   "defaultProvider": "tron-e2e",
   "defaultModel": "e2e-model",
   "defaultThinkingLevel": "low",
+  "defaultTools": ["+codemode"],
   "defaultProjectTrust": "never",
   "enableAnalytics": false,
   "enableInstallTelemetry": false
@@ -750,7 +793,8 @@ PY
 }
 
 # The fixture Gateway's own settings schema (its built settings-schema.ts), one row
-# per key with its section, layers, label and qualifier, plus the Gateway's layer labels.
+# per key with its section, layers, label and qualifier, plus the provenance pill wording
+# (LAYER_SOURCE_LABELS) each row's layer badge carries.
 settings_inventory_json() {
   "$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
@@ -759,7 +803,7 @@ settings_inventory_json() {
     const types = await import(pathToFileURL(`${dir}/settings-types.js`).href);
     const keys = schema.KEYS.map(key => ({ id: key.id, label: key.label, group: key.group, layers: Object.keys(key.layers),
       qualifier: key.qualifier ?? null }));
-    process.stdout.write(JSON.stringify({ layerLabels: types.LAYER_LABELS, keys }));
+    process.stdout.write(JSON.stringify({ layerLabels: types.LAYER_SOURCE_LABELS, keys }));
   ' "$gateway_dir/dist/admin"
 }
 

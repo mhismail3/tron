@@ -14,6 +14,9 @@ struct SettingsView: View {
     @Environment(\.hostedIntegrationPresentationTrace) private var hostedTrace
     #endif
     @State private var showsNotifications = false
+    /// Connected Services sheet routes live here, above its presented content,
+    /// which SwiftUI can rebuild while the sheet stays up (#932).
+    @State private var integrationRoutes = IntegrationSheetRoutes()
     @State private var hasRefreshedNotificationBadge = false
 
     init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
@@ -28,6 +31,26 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
+                    SettingsGroupCard(.accounts) {
+                        settingsLink("Connections", summary: "Paired Macs and authorized devices", icon: "desktopcomputer") {
+                            ConnectionsSettingsView()
+                        }
+                        TronSettingsDivider()
+                        MacTerminalSettingsRow()
+                        TronSettingsDivider()
+                        settingsLink("Model Providers", summary: "Provider accounts and sign-in", icon: "key") {
+                            ProvidersSettingsView(sessionID: nil)
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Custom Models", summary: "Your own model definitions", icon: "slider.horizontal.3") {
+                            CustomModelsSettingsView()
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Connected Services", summary: "Service accounts and what they offer", icon: "link",
+                                     onDismiss: { integrationRoutes.reset() }) {
+                            IntegrationsSettingsView(routes: integrationRoutes)
+                        }
+                    }
                     SettingsGroupCard(.agent) {
                         SettingsSectionLinks(ids: ["model", "context", "run", "permissions"], sections: sections,
                                              target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
@@ -47,32 +70,6 @@ struct SettingsView: View {
                             HooksSettingsView(projectCWD: nil)
                         }
                     }
-                    SettingsGroupCard(.accounts) {
-                        settingsLink("Model Providers", summary: "Provider accounts and sign-in", icon: "key") {
-                            ProvidersSettingsView(sessionID: nil)
-                        }
-                        TronSettingsDivider()
-                        settingsLink("Custom Models", summary: "Your own model definitions", icon: "slider.horizontal.3") {
-                            CustomModelsSettingsView()
-                        }
-                        TronSettingsDivider()
-                        settingsLink("Connected Services", summary: "Service accounts and what they offer", icon: "link") {
-                            IntegrationsSettingsView()
-                        }
-                    }
-                    SettingsGroupCard(.data) {
-                        settingsLink("Connections", summary: "Paired Macs, devices, and push", icon: "desktopcomputer") {
-                            ConnectionsSettingsView()
-                        }
-                        TronSettingsDivider()
-                        settingsLink("Logs", summary: "Recent diagnostics from your Macs", icon: "text.alignleft") {
-                            GatewayLogsSettingsView()
-                        }
-                        TronSettingsDivider()
-                        settingsLink("Setup", summary: "Import, session storage, and telemetry", icon: "gearshape.2") {
-                            SetupSettingsView(onImported: onImported)
-                        }
-                    }
                     let placed = SettingsGroupKind.placedSections
                     let unplaced = sections.filter { !placed.contains($0.id) }
                     if !unplaced.isEmpty {
@@ -81,12 +78,32 @@ struct SettingsView: View {
                                                  target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
                         }
                     }
-                    SettingsGroupCard(.iphone, detail: "Stored on this iPhone. Never changes what the agent does.") {
+                    // Everything about this iPhone in one place. Logs and Setup
+                    // also read or write the Mac (Gateway logs, the session
+                    // folder, telemetry), so this group has no "never changes
+                    // the agent" caption (#956).
+                    SettingsGroupCard(.iphone) {
+                        settingsLink("Push Notifications", summary: "Agent alerts on this iPhone", icon: "bell.badge") {
+                            PushNotificationsSettingsView()
+                        }
+                        TronSettingsDivider()
                         settingsLink("Appearance", summary: "Theme, type scale, and visual preferences",
                                      icon: "circle.lefthalf.filled") { AppearanceSettingsView() }
                         TronSettingsDivider()
                         settingsLink("Sessions", summary: "Dashboard list and subagent activity",
                                      icon: "slider.horizontal.2.square") { AppLocalBehaviorSettingsView() }
+                        TronSettingsDivider()
+                        settingsLink("Experimental", summary: "Prototypes to try on this iPhone", icon: "flask") {
+                            ExperimentalSettingsView()
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Logs", summary: "Diagnostics from this iPhone and your Macs", icon: "text.alignleft") {
+                            GatewayLogsSettingsView()
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Setup", summary: "Import, Mac session folder, and telemetry", icon: "gearshape.2") {
+                            SetupSettingsView(onImported: onImported)
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -110,7 +127,7 @@ struct SettingsView: View {
                     Button { dismiss() } label: {
                         Image(systemName: dynamicTypeSize.isAccessibilitySize ? "xmark" : "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                             .accessibilityLabel("Done")
                     }
                     .accessibilityIdentifier("settings-done")
@@ -153,9 +170,10 @@ struct SettingsView: View {
         _ title: String,
         summary: String,
         icon: String,
+        onDismiss: (() -> Void)? = nil,
         @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
-        TronProgressiveSheetLink(accessibilityLabel: title, destination: destination) {
+        TronProgressiveSheetLink(accessibilityLabel: title, onDismiss: onDismiss, destination: destination) {
             TronSettingsRow(icon: icon, title: title, subtitle: summary, subtitleColor: .tronTextSecondary)
                 .contentShape(Rectangle())
         }
@@ -165,17 +183,16 @@ struct SettingsView: View {
 
 /// The settings palette: each group is one titled card with one accent, and every
 /// sheet a row opens keeps that accent. Groups follow what is being configured:
-/// the agent's behaviour, what it can use, the accounts it reaches, this Mac's
-/// maintenance, then this iPhone.
+/// the Macs and accounts Tron reaches, the agent's behaviour, what it can use,
+/// then this iPhone (its alerts, look, prototypes, logs and setup).
 enum SettingsGroupKind {
-    case agent, tools, accounts, data, more, iphone
+    case agent, tools, accounts, more, iphone
 
     var title: String {
         switch self {
         case .agent: "Agent"
         case .tools: "Tools & Extensions"
         case .accounts: "Accounts"
-        case .data: "Data & Diagnostics"
         case .more: "More"
         case .iphone: "This iPhone"
         }
@@ -186,7 +203,6 @@ enum SettingsGroupKind {
         case .agent: .tronPurple
         case .tools: .tronCyan
         case .accounts: .tronIndigo
-        case .data: .tronBlue
         case .more, .iphone: .tronEmerald
         }
     }
@@ -212,15 +228,14 @@ enum SettingsGroupKind {
 /// One group's titled card, its rows and every sheet they open in its accent.
 struct SettingsGroupCard<Content: View>: View {
     let kind: SettingsGroupKind
-    var detail: String?
     @ViewBuilder let content: () -> Content
 
-    init(_ kind: SettingsGroupKind, detail: String? = nil, @ViewBuilder content: @escaping () -> Content) {
-        self.kind = kind; self.detail = detail; self.content = content
+    init(_ kind: SettingsGroupKind, @ViewBuilder content: @escaping () -> Content) {
+        self.kind = kind; self.content = content
     }
 
     var body: some View {
-        TronSettingsGroup(kind.title, detail: detail, accent: kind.accent) { content() }
+        TronSettingsGroup(kind.title, accent: kind.accent) { content() }
             .tronSettingsVisualTheme(accent: kind.accent)
     }
 }
@@ -280,10 +295,10 @@ struct ChatSettingsView: View {
                     SettingsChangesLink(scope: changesScope, subtitle: "What agents changed, and approvals waiting for you",
                                         onOpenSession: onOpenSession)
                 }
-                TronSettingsGroup("Settings", detail: "Each value shows where it comes from: this chat, its project, this Mac, or built in.") {
-                    if sections.isEmpty {
-                        TronLoadingState(label: "Loading settings…").padding(16)
-                    } else {
+                if sections.isEmpty {
+                    TronSheetLoadingState(label: "Loading settings…")
+                } else {
+                    TronSettingsGroup("Settings", detail: "Each value shows where it comes from: this chat, its project, this Mac, or built in.") {
                         SettingsSectionLinks(ids: Self.chatSections + unplaced, sections: sections, target: target,
                                              writeLayer: nil, ownedLayers: ownedLayers, projectCWD: projectCWD)
                     }
@@ -347,6 +362,8 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     /// Settings destinations open at medium and expand to large; a destination
     /// that publishes `TronSheetFitHeightKey` (the model picker) passes `.contentFit`.
     let detents: TronSheetDetentPolicy
+    /// Runs once the destination sheet has actually been dismissed.
+    let onDismiss: (() -> Void)?
     @State private var isPresented = false
     @Environment(\.tronSettingsVisualTheme) private var inheritedTheme
 
@@ -355,6 +372,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         identity: String? = nil,
         accent: Color? = nil,
         detents: TronSheetDetentPolicy = .fixed([.medium, .large]),
+        onDismiss: (() -> Void)? = nil,
         @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder label: () -> Label
     ) {
@@ -362,36 +380,32 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         self.identity = identity ?? "settings.\(accessibilityLabel)"
         self.accent = accent
         self.detents = detents
+        self.onDismiss = onDismiss
         self.destination = destination
         self.label = label()
     }
 
     var body: some View {
-        let _ = identity == "settings.Connected Services" ? NSLog("TRON366 link body theme=%@", inheritedTheme == nil ? "nil" : "set") : ()
         Button { isPresented = true } label: { label }
             .buttonStyle(.plain)
             .accessibilityLabel(accessibilityLabel)
             .tronManagedSheet(
                 isPresented: $isPresented,
-                identity: identity
+                identity: identity,
+                onDismiss: onDismiss
             ) {
                 NavigationStack {
-                    destinationContent
-                        .onAppear { NSLog("TRON366 link %@ destination appear theme=%@", identity, inheritedTheme == nil ? "nil" : "set") }
-                        .onDisappear { NSLog("TRON366 link %@ destination disappear theme=%@", identity, inheritedTheme == nil ? "nil" : "set") }
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button { isPresented = false } label: {
-                                    Image(systemName: "checkmark")
-                                        .font(TronTypography.buttonSM)
-                                        .foregroundStyle(accent ?? inheritedTheme?.accent ?? .tronEmerald)
-                                }
-                                .accessibilityLabel("Done")
+                    themed(destination().toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button { isPresented = false } label: {
+                                Image(systemName: "checkmark")
+                                    .font(TronTypography.buttonSM)
+                                    .tronToolbarAction()
                             }
+                            .accessibilityLabel("Done")
                         }
+                    })
                 }
-                .onAppear { NSLog("TRON366 link %@ stack appear", identity) }
-                .onDisappear { NSLog("TRON366 link %@ stack disappear %@", identity, Thread.callStackSymbols.prefix(70).map { $0.split(separator: " ", omittingEmptySubsequences: true).dropFirst(3).prefix(1).joined() }.joined(separator: " < ")) }
                 .tronTopBlur(.sheet)
                 .tronPresentation()
                 .tronSettingsLayout()
@@ -401,12 +415,13 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     }
 
     /// A destination keeps its presenter's family accent unless the link names one.
+    /// The theme wraps the Done too, so it takes the same tint as the title (#963).
     @ViewBuilder
-    private var destinationContent: some View {
+    private func themed(_ content: some View) -> some View {
         if let resolved = accent ?? inheritedTheme?.accent {
-            destination().tronSettingsVisualTheme(accent: resolved)
+            content.tronSettingsVisualTheme(accent: resolved)
         } else {
-            destination()
+            content
         }
     }
 }

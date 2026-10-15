@@ -1,5 +1,6 @@
 import { GatewayError } from "../errors.js";
 import { COMPACTION_POLICY_INSTRUCTION_LIMIT } from "../runtime/compaction-policy.js";
+import { validateMacTerminalKey } from "../security/mac-terminal.js";
 import { boolean, integer, object, string, arrayOfStrings } from "../util/validation.js";
 import {
   type Control, type Direction, type Effect, type LayerId, type QualifierName, type Tier, type Timing, type ValueType, type Writer,
@@ -43,6 +44,9 @@ export type Binding =
   | { store: "profile"; path: readonly string[] }
   | { store: "home-memory" }
   | { store: "trust" }
+  /** `~/.ssh/authorized_keys`, the Tron lines only (security/mac-terminal.ts):
+   * one Mac Terminal key per paired iPhone, qualified by `device`. */
+  | { store: "mac-terminal" }
   /** `<tronHome>/gateway/settings/floors.json`: the maintainer's floor
    * overrides, `{ [keyId]: { widen?, narrow? } }` (doc 5.4). */
   | { store: "floors" };
@@ -83,7 +87,21 @@ export interface KeyDeclaration {
   control: Control;
   fallback?: Control;
   confirm?: string;
+  /** What to type into a text field or a list's new value (#939): the format in
+   * a short sentence, and a realistic example shown as the field's placeholder.
+   * Every editable text and string-list key has one. */
+  entry?: EntryGuidance;
 }
+
+export interface EntryGuidance { hint: string; example: string }
+
+/** Search-path entries, as pi resolves them (pi docs/settings.md "Resources"). */
+const SEARCH_PATH_ENTRY: Record<"extensions" | "skills" | "prompts" | "themes", EntryGuidance> = {
+  extensions: { hint: "An extension file or folder on the Mac. Start with ~ or /.", example: "~/Code/pi-extensions" },
+  skills: { hint: "A skill file or folder on the Mac. Start with ~ or /.", example: "~/Code/skills" },
+  prompts: { hint: "A prompt-template file or folder on the Mac. Start with ~ or /.", example: "~/Code/prompts" },
+  themes: { hint: "A theme file or folder on the Mac. Start with ~ or /.", example: "~/Code/themes/dusk.json" },
+};
 
 /** The maintainer, Home, an ordinary chat's agent and a task worker. A key an
  * agent may change, a task worker may change too (decision 34). */
@@ -239,6 +257,8 @@ export const KEYS: readonly KeyDeclaration[] = [
     layers: both(pi("enabledModels")), timing: "live", effect: "next-turn", floor: "quiet", writers: ["ui", "home"],
     label: "Offered models", help: "Models offered in the picker. Empty offers every model.", order: 70,
     importance: "advanced", control: "list",
+    // pi matches each pattern against `provider/id` and the bare id (pi model-resolver).
+    entry: { hint: "A provider/model ID, or a pattern where * matches any text.", example: "anthropic/claude-sonnet-*" },
   },
   {
     id: "model.thinking[role=summarizer]", group: "model", fixed: { role: "summarizer" }, subgroup: "Compaction",
@@ -294,6 +314,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "context.compaction.instructions", group: "context", subgroup: "Compaction", type: types.text(COMPACTION_POLICY_INSTRUCTION_LIMIT, { raw: true }),
     layers: chatPi("compaction", "instructions"), timing: "live", effect: "next-compaction", floor: "notify", writers: ["ui", "home"],
     label: "Summary instructions", help: "Extra instructions for compaction summaries.", order: 40, importance: "advanced", control: "text",
+    entry: { hint: "Plain sentences added to the summary prompt.", example: "Keep file paths and open decisions." },
   },
   {
     id: "context.branchSummary.reserveTokens", group: "context", subgroup: "Compaction", type: types.integer(1_024, 1_000_000, "tokens"),
@@ -339,11 +360,13 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "tools.shell.path", group: "tools", subgroup: "Shell", type: types.text(4_096),
     layers: both(pi("shellPath")), timing: "fixed", effect: "new-chat", floor: "notify", writers: ["ui", "home"],
     label: "Shell", help: "The shell the bash tool runs.", order: 40, importance: "advanced", control: "text",
+    entry: { hint: "The path to a Bash executable on the Mac. ~ is allowed.", example: "/opt/homebrew/bin/bash" },
   },
   {
     id: "tools.shell.commandPrefix", group: "tools", subgroup: "Shell", type: types.text(4_096),
     layers: both(pi("shellCommandPrefix")), timing: "fixed", effect: "new-chat", floor: "notify", writers: ["ui", "home"],
     label: "Command prefix", help: "Text run before every shell command.", order: 50, importance: "advanced", control: "text",
+    entry: { hint: "Shell code run before each command, on one line.", example: "shopt -s expand_aliases" },
   },
   // Permissions ---------------------------------------------------------
   {
@@ -351,6 +374,26 @@ export const KEYS: readonly KeyDeclaration[] = [
     layers: { mac: { store: "trust" } }, timing: "live", effect: "reload", floor: { widen: "approve", narrow: "notify" }, direction: grants,
     writers: ["ui", "home"], label: "Trust for this project", help: "Lets this project's extensions, hooks and settings load.",
     order: 10, importance: "essential", control: "toggle", confirm: "Trusting a project runs its extensions and hooks.",
+  },
+  {
+    // A paired iPhone's Mac Terminal key: its line in ~/.ssh/authorized_keys.
+    // Adding one lets that iPhone's Secure Enclave key log in over Tailscale,
+    // so it is a credential addition (approve); removing it is a revocation.
+    id: "permissions.macTerminalKey", group: "permissions", subgroup: "Mac Terminal", qualifier: "device",
+    type: {
+      kind: "text",
+      validate: (value: unknown, label: string) => validateMacTerminalKey(value, label),
+      format: (value: unknown) => {
+        const blob = String(value).split(" ")[1] ?? "";
+        return `ECDSA P-256 key …${blob.slice(-12)}`;
+      },
+    },
+    layers: { mac: { store: "mac-terminal" } }, timing: "live", effect: "next-change",
+    floor: { widen: "approve", narrow: "notify" }, direction: (_before, after) => after === undefined ? "narrow" : "widen",
+    writers: ANY_ACTOR, label: "Mac Terminal key",
+    help: "Lets this paired iPhone open a shell on the Mac over Tailscale through Remote Login, even when the Gateway is not running.",
+    order: 15, importance: "advanced", control: "readOnly",
+    confirm: "This iPhone's key will be added to ~/.ssh/authorized_keys and can log in to your Mac account over Tailscale.",
   },
   {
     id: "permissions.defaultProjectTrust", group: "permissions",
@@ -469,7 +512,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: `sources.${name}`, group: "sources", subgroup: "Search paths", type: types.stringList(500),
     layers: both(pi(name)), timing: "fixed", effect: "reload", floor: { widen: "notify", narrow: "quiet" }, direction: toolsDirection,
     writers: ["ui", "home"], label: name[0]!.toUpperCase() + name.slice(1), help: `Paths searched for ${name}.`,
-    order: 10 + index * 10, importance: "advanced", control: "list",
+    order: 10 + index * 10, importance: "advanced", control: "list", entry: SEARCH_PATH_ENTRY[name],
   })),
   {
     id: "sources.packages", group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
@@ -479,6 +522,8 @@ export const KEYS: readonly KeyDeclaration[] = [
   {
     id: "sources.npmCommand", group: "sources", type: types.stringList(20), layers: { mac: pi("npmCommand") }, timing: "live", effect: "next-change",
     floor: "notify", writers: ["ui"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
+    // pi runs the first value as the program and passes the rest before its own npm arguments.
+    entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
   },
   // Setup ---------------------------------------------------------------
   {
@@ -487,6 +532,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "setup.sessionDir", group: "setup", type: types.text(4_096), layers: { mac: pi("sessionDir") }, timing: "live", effect: "restart",
     floor: "notify", writers: [], label: "Session folder", help: "Where chats are stored. Applies after a restart.",
     order: 10, importance: "advanced", control: "text",
+    entry: { hint: "A folder path on the Mac. Start with ~ or /.", example: "~/Documents/Tron Sessions" },
   },
   {
     id: "setup.installTelemetry", group: "setup", type: types.boolean(), layers: { mac: pi("enableInstallTelemetry") }, builtin: true,
@@ -578,6 +624,21 @@ export const RECORD_SUBJECTS: readonly RecordSubject[] = [
 
 export function recordSubject(id: string): RecordSubject | undefined {
   return RECORD_SUBJECTS.find(subject => subject.id === id);
+}
+
+/**
+ * Home's learned profile items (doc 6.4): Knowledge notes, changed by Home's `profile`
+ * tool and the maintainer's `home.profileChange` through the change path, which records
+ * one instance per note (qualifier `note`). Not a key: an item never resolves as a
+ * setting, and Knowledge stays its store.
+ */
+export const HOME_PROFILE_SUBJECT = { id: "home.profile.item", label: "Profile item", group: "context", qualifier: "note" as const, floor: "quiet" as Tier };
+
+/** The section group and label of a recorded key or subject, or undefined for one this
+ * Gateway no longer declares. */
+export function auditSubject(id: string): { label: string; group: string } | undefined {
+  if (id === HOME_PROFILE_SUBJECT.id) return HOME_PROFILE_SUBJECT;
+  return KEYS.find(key => key.id === id) ?? recordSubject(id);
 }
 
 export function timingFor(key: KeyDeclaration, direction: Direction): Timing {

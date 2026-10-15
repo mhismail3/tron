@@ -940,6 +940,9 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let outputTruncated: Bool
     let nestedCallCount: Int
     let nestedFailureCount: Int
+    /// A nested `ask_user` call (for example from codemode) is still running inside this
+    /// call, so its pending question opens from this row (#929).
+    let hostsRunningNestedAskUser: Bool
     let display: DisplayProjection?
     let requestedDisplaySurface: DisplaySurface?
     let extensionOrigin: ExtensionToolOrigin?
@@ -966,6 +969,9 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         // The Gateway bounds the list; the chip counts the calls the sheet lists.
         nestedCallCount = nested.count
         nestedFailureCount = nested.filter { $0.objectValue?["status"]?.stringValue == "failed" }.count
+        hostsRunningNestedAskUser = nested.contains {
+            $0.objectValue?["toolName"]?.stringValue == "ask_user" && $0.objectValue?["status"]?.stringValue == "running"
+        }
         display = tool.display
         requestedDisplaySurface = tool.display.map(DisplayPresentationPolicy.effectiveSurface)
             ?? DisplayPresentationPolicy.invocationSurface(toolName: tool.toolName, request: tool.request)
@@ -1574,9 +1580,13 @@ enum ChatToolInvocationOrdering {
 struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     let tools: [ChatToolDescriptor]
     let anchorID: String
+    /// Set for a stretch split out of a row (`ToolRunSegment`): it presents
+    /// exactly its own calls, not the finalized group's declared cardinality.
+    let visibleCallsOnly: Bool
 
-    init(tools: [ChatToolDescriptor], anchorID: String? = nil) {
+    init(tools: [ChatToolDescriptor], anchorID: String? = nil, visibleCallsOnly: Bool = false) {
         self.tools = tools
+        self.visibleCallsOnly = visibleCallsOnly
         // Finalized Gateway group identity is stable before execution starts
         // and survives live-to-canonical settlement. Legacy rows retain their
         // first call only when no finalized group metadata exists.
@@ -1598,6 +1608,7 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
         return tools.compactMap(\.groupId).filter { seen.insert($0).inserted }
     }
     var displayCount: Int {
+        if visibleCallsOnly { return tools.count }
         var countByGroup: [String: Int] = [:]
         var ungrouped = 0
         for tool in tools {

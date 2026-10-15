@@ -67,7 +67,7 @@ struct ExtensionInteractionSheet: View {
                     Button(action: close) {
                         Image(systemName: "xmark")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronTextMuted)
+                            .tronToolbarAction(role: .neutral)
                     }
                     .accessibilityLabel("Close question and keep answer")
                     .disabled(submitting)
@@ -84,7 +84,7 @@ struct ExtensionInteractionSheet: View {
                             systemImage: "paperplane.fill",
                             isWorking: submitting
                         )
-                        .tronToolbarAction(accent: canSubmit ? .tronAmber : .tronTextMuted)
+                        .tronToolbarAction(accent: .tronAmber)
                     }
                     .accessibilityLabel("Submit answer")
                     .disabled(!canSubmit || submitting || isExpired)

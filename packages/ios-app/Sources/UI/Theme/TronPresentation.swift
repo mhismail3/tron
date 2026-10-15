@@ -44,6 +44,9 @@ enum TronTypography {
     /// A settings row's subtitle, and every sheet intro and caption: one size so
     /// explanatory copy never reads smaller than the rows around it.
     static func settingsSubtext(adjustment: CGFloat) -> Font { sans(size: sizeSecondary + adjustment) }
+    /// The subtext size settings rows show inside a settings layout. Captions and
+    /// New Session's setup cards use it directly so neither drifts from Settings (#939).
+    static var settingsRowSubtext: Font { settingsSubtext(adjustment: TronSettingsLayoutPolicy.metadataSizeAdjustment) }
     /// Right-aligned values use the selected code family.
     static var secondaryCodeDescription: Font { code(size: sizeSecondary) }
     /// Shared section-label treatment used by every sheet and settings group.
@@ -117,6 +120,15 @@ private struct TronSettingsVisualThemeModifier: ViewModifier {
         content
             .environment(\.tronSettingsVisualTheme, TronSettingsVisualTheme(accent: accent))
             .tint(accent)
+    }
+}
+
+private struct TronInheritedSettingsVisualThemeModifier: ViewModifier {
+    let fallback: Color
+    @Environment(\.tronSettingsVisualTheme) private var inherited
+
+    func body(content: Content) -> some View {
+        content.tronSettingsVisualTheme(accent: inherited?.accent ?? fallback)
     }
 }
 
@@ -218,21 +230,6 @@ private struct TronScrollSurfaceModifier: ViewModifier {
     }
 }
 
-private struct TronListRowHighlightModifier: ViewModifier {
-    let isHighlighted: Bool
-    let accent: Color
-    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
-
-    func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
-        content
-            .contentShape(shape)
-            .background {
-                shape.fill((settingsTheme?.accent ?? accent).opacity(isHighlighted ? 0.10 : 0))
-            }
-    }
-}
-
 extension View {
     /// Required at the app root so controls created by system containers inherit
     /// Tron's selected family and emerald interaction color.
@@ -250,6 +247,13 @@ extension View {
     /// every nested sheet it presents.
     func tronSettingsVisualTheme(accent: Color) -> some View {
         modifier(TronSettingsVisualThemeModifier(accent: accent))
+    }
+
+    /// A settings destination's own accent, used only when nothing opened it with
+    /// one (#939): opened from a Settings group, the group's accent carries through
+    /// it and every sheet it presents, so no screen paints its own colour.
+    func tronSettingsVisualTheme(inheriting fallback: Color) -> some View {
+        modifier(TronInheritedSettingsVisualThemeModifier(fallback: fallback))
     }
 
     /// Resolves direct icon/action paint through the active settings theme while
@@ -306,17 +310,12 @@ extension View {
         ))
     }
 
-    /// A row in a plain list on the sheet surface (no card): clear at rest and
-    /// lightly tinted with the accent while it needs attention, such as an
-    /// unread notification.
-    func tronListRowHighlight(_ isHighlighted: Bool, accent: Color = .tronEmerald) -> some View {
-        modifier(TronListRowHighlightModifier(isHighlighted: isHighlighted, accent: accent))
-    }
-
-    /// A toolbar action takes `accent` when given, else its sheet's inherited
-    /// settings accent (the colour of its title), else emerald.
-    func tronToolbarAction(accent: Color? = nil) -> some View {
-        modifier(TronToolbarActionAccent(accent: accent))
+    /// Paints a sheet's toolbar action in its title's tint (#963): pass the same
+    /// `accent` the sheet gives `TronSheetTitle`, and `TronSheetTint` resolves both
+    /// identically. Destructive actions stay red and neutral Close/Cancel grey; a
+    /// disabled action greys itself. Never paint toolbar icons directly.
+    func tronToolbarAction(accent: Color? = nil, role: TronToolbarActionRole = .standard) -> some View {
+        modifier(TronToolbarActionAccent(accent: accent, role: role))
     }
 
     func tronNavigationTitle(_ title: String, accent: Color = .tronEmerald) -> some View {
@@ -585,6 +584,52 @@ extension View {
     func tronTextEditor(monospaced: Bool = false) -> some View {
         modifier(TronTextEditorSurfaceModifier(monospaced: monospaced))
     }
+
+    /// The one way a settings text entry ends (#939). A single-line field's return
+    /// key reads Done and commits. A multi-line field, which keeps return for
+    /// newlines, and a keyboard with no return key (number pad) show Done above
+    /// the keyboard instead. Either way Done runs `onDone`, then the keyboard goes
+    /// away. A caller that commits on focus loss passes its focus.
+    func tronTextEntryDone(
+        keyboardToolbar: Bool = false,
+        focus: FocusState<Bool>.Binding? = nil,
+        onDone: @escaping () -> Void = {}
+    ) -> some View {
+        modifier(TronTextEntryDoneModifier(keyboardToolbar: keyboardToolbar, external: focus, onDone: onDone))
+    }
+}
+
+private struct TronTextEntryDoneModifier: ViewModifier {
+    let keyboardToolbar: Bool
+    let external: FocusState<Bool>.Binding?
+    let onDone: () -> Void
+    @FocusState private var owned: Bool
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    func body(content: Content) -> some View {
+        let focus = external ?? $owned
+        if keyboardToolbar {
+            content
+                .focused(focus)
+                .toolbar {
+                    // Only the focused entry contributes, so sibling fields never stack Done buttons.
+                    if focus.wrappedValue {
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            Button("Done") { onDone(); focus.wrappedValue = false }
+                                .font(TronTypography.buttonSM)
+                                .tronToolbarAction()
+                                .accessibilityIdentifier("text-entry-done")
+                        }
+                    }
+                }
+        } else {
+            content
+                .focused(focus)
+                .submitLabel(.done)
+                .onSubmit { onDone(); focus.wrappedValue = false }
+        }
+    }
 }
 
 // MARK: - Read-only documents
@@ -705,7 +750,7 @@ private struct TronSaveToolbarModifier: ViewModifier {
                 Button(action: action) {
                     Text("Save")
                         .font(TronTypography.buttonSM)
-                        .foregroundStyle(enabled ? theme?.accent ?? .tronEmerald : .tronTextMuted)
+                        .tronToolbarAction()
                 }
                 .disabled(!enabled)
                 .accessibilityIdentifier("tron-sheet-save")
@@ -859,7 +904,7 @@ struct TronSheetTitle: View {
     var truncationMode: Text.TruncationMode = .tail
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
-    private var resolvedAccent: Color { settingsTheme?.accent ?? accent }
+    private var resolvedAccent: Color { TronSheetTint.resolve(accent, theme: settingsTheme) }
 
     var body: some View {
         HStack(spacing: 7) {
@@ -914,7 +959,7 @@ struct TronDashboardFilterSheet<Content: View>: View {
                     Button(action: onDone) {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -1138,13 +1183,13 @@ struct TronConfirmationSheet: View {
                         } label: {
                             TronToolbarTextLabel(secondaryTitle ?? "Cancel", systemImage: "xmark")
                         }
-                        .tronToolbarAction(accent: .tronTextSecondary)
+                        .tronToolbarAction(role: .neutral)
                         .accessibilityIdentifier("confirmation-cancel")
                     }
                     if placement == .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
                             confirmButton
-                                .tronToolbarAction(accent: accent)
+                                .tronToolbarAction(accent: .tronEmerald, role: destructive ? .destructive : .standard)
                                 .accessibilityIdentifier("confirmation-primary-toolbar")
                         }
                     }
@@ -1171,12 +1216,42 @@ struct TronConfirmationSheet: View {
     private var accent: Color { destructive ? .tronError : .tronEmerald }
 }
 
+/// The one tint rule a sheet's title and its toolbar actions share (#963): the
+/// inherited Settings tint wins, else the sheet's own accent, else emerald. Both
+/// `TronSheetTitle` and `tronToolbarAction` resolve through it, so a sheet's
+/// icons cannot drift from its title.
+enum TronSheetTint {
+    static func resolve(_ accent: Color?, theme: TronSettingsVisualTheme?) -> Color {
+        theme?.accent ?? accent ?? .tronEmerald
+    }
+}
+
+enum TronToolbarActionRole {
+    /// Takes the sheet's tint.
+    case standard
+    /// Removes, stops or cancels a request: always the error red.
+    case destructive
+    /// Closes without acting (Cancel, Close keeping a draft): grey.
+    case neutral
+}
+
 private struct TronToolbarActionAccent: ViewModifier {
     let accent: Color?
+    let role: TronToolbarActionRole
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.isEnabled) private var isEnabled
 
     func body(content: Content) -> some View {
-        content.foregroundStyle(accent ?? settingsTheme?.accent ?? .tronEmerald)
+        content.foregroundStyle(color)
+    }
+
+    private var color: Color {
+        guard isEnabled else { return .tronTextMuted }
+        return switch role {
+        case .standard: TronSheetTint.resolve(accent, theme: settingsTheme)
+        case .destructive: .tronError
+        case .neutral: .tronTextSecondary
+        }
     }
 }
 
@@ -1219,7 +1294,7 @@ struct TronReloadToolbarButton: View {
             } else {
                 Image(systemName: "arrow.clockwise")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                    .tronToolbarAction()
             }
         }
         .disabled(isReloading)
@@ -1417,6 +1492,9 @@ struct TronSettingsRow<Trailing: View>: View {
     let title: String
     let subtitle: String?
     let subtitleLineLimit: Int?
+    /// Renders the subtitle's inline markdown (emphasis, code, links) with the
+    /// chat renderer's inline parser, for rows that preview canonical text.
+    let subtitleIsMarkdown: Bool
     let titleIsIdentifier: Bool
     let accent: Color
     let titleFont: Font
@@ -1438,6 +1516,7 @@ struct TronSettingsRow<Trailing: View>: View {
         title: String,
         subtitle: String? = nil,
         subtitleLineLimit: Int? = 2,
+        subtitleIsMarkdown: Bool = false,
         titleIsIdentifier: Bool = false,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
@@ -1450,6 +1529,7 @@ struct TronSettingsRow<Trailing: View>: View {
         self.title = title
         self.subtitle = subtitle
         self.subtitleLineLimit = subtitleLineLimit
+        self.subtitleIsMarkdown = subtitleIsMarkdown
         self.titleIsIdentifier = titleIsIdentifier
         self.accent = accent
         self.titleFont = titleFont
@@ -1508,7 +1588,9 @@ struct TronSettingsRow<Trailing: View>: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if let subtitle {
-                        Text(subtitle)
+                        Text(subtitleIsMarkdown
+                             ? MarkdownPresentation.Inline(source: subtitle).attributedString ?? AttributedString(subtitle)
+                             : AttributedString(subtitle))
                             .font(feedTrailing == nil
                                 ? TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment)
                                 : TronTypography.body)
@@ -1602,11 +1684,66 @@ private struct TronSettingsRowLayout: Layout {
 }
 
 private extension TronSettingsRow {
-    var tagList: some View {
+    var tagList: some View { TronTagList(tags: tags) }
+}
+
+/// A row's source and state tags, left-aligned as its last content: one line when
+/// they fit, else one per line. Settings rows and setup cards place them the same way.
+struct TronTagList: View {
+    let tags: [TronTagModel]
+
+    var body: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 4) { ForEach(tags) { TronTag($0) } }
             VStack(alignment: .leading, spacing: 4) { ForEach(tags) { TronTag($0) } }
         }
+    }
+}
+
+/// One setup choice on New Session (#939): a tinted icon and title on the left,
+/// the chosen value large and trailing, the subtext beneath in the settings row
+/// subtext size, and any source tags after it as on a settings row. Every card,
+/// whether it opens a picker or a settings sheet, is this one label.
+struct TronSetupCardLabel: View {
+    let icon: String
+    let title: String
+    let value: String
+    let caption: String
+    let accent: Color
+    var tags: [TronTagModel] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .frame(width: 16)
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
+                Spacer(minLength: 10)
+                Text(value)
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+                    .truncationMode(.middle)
+            }
+            .foregroundStyle(accent)
+            HStack(alignment: .top, spacing: 8) {
+                Color.clear.frame(width: 16, height: 1)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(caption)
+                        .font(TronTypography.settingsRowSubtext)
+                        .foregroundStyle(Color.tronTextMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !tags.isEmpty { TronTagList(tags: tags) }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .tronGlassSurface(accent: accent, cornerRadius: 12, tintOpacity: 0.15, interactive: true)
     }
 }
 
@@ -1616,6 +1753,7 @@ extension TronSettingsRow where Trailing == EmptyView {
         title: String,
         subtitle: String? = nil,
         subtitleLineLimit: Int? = 2,
+        subtitleIsMarkdown: Bool = false,
         titleIsIdentifier: Bool = false,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
@@ -1628,6 +1766,7 @@ extension TronSettingsRow where Trailing == EmptyView {
             title: title,
             subtitle: subtitle,
             subtitleLineLimit: subtitleLineLimit,
+            subtitleIsMarkdown: subtitleIsMarkdown,
             titleIsIdentifier: titleIsIdentifier,
             accent: accent,
             titleFont: titleFont,
@@ -1997,12 +2136,92 @@ struct TronCaption: View {
 }
 
 enum TronDashboardContentMotion {
+    static let duration: TimeInterval = 0.28
+
     static func animation(reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: 0.28)
+        reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: duration)
     }
 
     static func transition(reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.985))
+    }
+
+    /// The pause between consecutive sections of a dashboard view's first
+    /// appearance. Reduce Motion drops the stagger and keeps only the fade.
+    static let sectionStaggerStep: TimeInterval = 0.08
+
+    /// When a section's reveal has finished, measured from the view's reveal
+    /// start; a row created after it renders without fading.
+    static func sectionRevealEnd(order: Int) -> TimeInterval {
+        Double(max(order, 0)) * sectionStaggerStep + duration
+    }
+}
+
+/// Fades one dashboard section in at its place in the view's stagger, with the
+/// same opacity and scale as `TronDashboardContentMotion.transition`.
+///
+/// The dashboard owns one reveal start per entry into its view (nil while the
+/// view is not on screen). A list mounts its rows lazily, often after that start
+/// is published, so each row decides once, when it is created: a row created
+/// before its section's reveal has finished fades in on the shared schedule; a
+/// row created later (scrolled into view, recycled, or a live catalog insert,
+/// which the list's own insertion animates) renders as is. Refreshes therefore
+/// never re-fade content.
+struct TronDashboardSectionReveal: ViewModifier {
+    let order: Int
+    let revealStart: Date?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown: Bool
+
+    init(order: Int, revealStart: Date?) {
+        self.order = order
+        self.revealStart = revealStart
+        _shown = State(initialValue: revealStart.map {
+            Date().timeIntervalSince($0) > TronDashboardContentMotion.sectionRevealEnd(order: order)
+        } ?? false)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .scaleEffect(shown || reduceMotion ? 1 : 0.985)
+            .onAppear { reveal() }
+            .onChange(of: revealStart) { _, _ in reveal() }
+    }
+
+    private func reveal() {
+        guard !shown, let revealStart else { return }
+        // Keep the section's place in the schedule however late the row mounts.
+        let elapsed = max(0, Date().timeIntervalSince(revealStart))
+        let animation = reduceMotion
+            ? TronDashboardContentMotion.animation(reduceMotion: true)
+            : TronDashboardContentMotion.animation(reduceMotion: false)
+                .delay(max(0, Double(order) * TronDashboardContentMotion.sectionStaggerStep - elapsed))
+        withAnimation(animation) { shown = true }
+        #if HOSTED_TEST
+        TronDashboardRevealProbe.shared.reveals.append(order)
+        #endif
+    }
+}
+
+#if HOSTED_TEST
+/// Every reveal animation a mounted section view started, by stagger order, so
+/// UI journeys prove the order and that live refreshes start none.
+@MainActor @Observable
+final class TronDashboardRevealProbe {
+    static let shared = TronDashboardRevealProbe()
+    var reveals: [Int] = []
+
+    /// The distinct stagger orders revealed and the total reveal count.
+    var summary: String {
+        "orders:\(Set(reveals).sorted().map(String.init).joined(separator: ",")) reveals:\(reveals.count)"
+    }
+}
+#endif
+
+extension View {
+    func tronDashboardSectionReveal(order: Int, revealStart: Date?) -> some View {
+        modifier(TronDashboardSectionReveal(order: order, revealStart: revealStart))
     }
 }
 
@@ -2150,20 +2369,98 @@ struct TronPlaceholderState: View {
     }
 }
 
+/// Whole-content loading for a sheet or sub-sheet. The placeholder takes no
+/// layout space; it asks the enclosing presentation surface to draw the
+/// chat-opening pulse centered over the whole visible sheet. Centering at the
+/// surface, not inside the sheet's scroll/stack, keeps it still across medium,
+/// large and in-flight detents and means arriving content never shifts layout.
+/// The accent resolves exactly like `TronSheetTitle`, so pass the title's accent.
+/// Partial, in-section loads use `TronLoadingState` instead.
+struct TronSheetLoadingState: View {
+    let label: String
+    var accent: Color = .tronEmerald
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .preference(
+                key: TronSheetLoadingPreferenceKey.self,
+                value: TronSheetLoadingRequest(label: label, accent: settingsTheme?.accent ?? accent)
+            )
+    }
+}
+
+struct TronSheetLoadingRequest: Equatable {
+    let label: String
+    let accent: Color
+}
+
+struct TronSheetLoadingPreferenceKey: PreferenceKey {
+    static let defaultValue: TronSheetLoadingRequest? = nil
+    // One pulse per sheet: the first (outermost/earliest) request wins.
+    static func reduce(value: inout TronSheetLoadingRequest?, nextValue: () -> TronSheetLoadingRequest?) {
+        if value == nil { value = nextValue() }
+    }
+}
+
+/// Owned by `TronPresentationSurface` (every managed sheet and the app shell):
+/// draws the one centered pulse a surface's content requests and consumes the
+/// request so an outer surface cannot repeat it.
+struct TronSheetLoadingHostModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .overlayPreferenceValue(TronSheetLoadingPreferenceKey.self) { request in
+                ZStack {
+                    if let request {
+                        // The same indicator and size the chat opening surface uses.
+                        TronPulseLoadingIndicator(accent: request.accent, size: 44)
+                            .padding(18)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(request.label)
+                            .accessibilityIdentifier("sheet-loading")
+                            .transition(.opacity)
+                    }
+                }
+                // No background: the native sheet material stays the only surface (#843).
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .animation(TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+                           value: request != nil)
+            }
+            #if HOSTED_TEST
+            // Exposes the exact area the pulse is centered in so UI journeys measure
+            // centering. Behind the content, so toolbar controls stay on top.
+            .backgroundPreferenceValue(TronSheetLoadingPreferenceKey.self) { request in
+                if request != nil {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .ignoresSafeArea()
+                        .accessibilityElement()
+                        .accessibilityIdentifier("sheet-loading-surface")
+                }
+            }
+            #endif
+            .transformPreference(TronSheetLoadingPreferenceKey.self) { $0 = nil }
+    }
+}
+
+/// A partial load inside an already-visible sheet section: the pulse alone, with
+/// its label kept for VoiceOver so it can never wrap or crowd the row.
 struct TronLoadingState: View {
     let label: String
     var accent: Color = .tronEmerald
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {
-        HStack(spacing: TronSpacing.md) {
-            TronPulseLoadingIndicator(accent: settingsTheme?.accent ?? accent)
-            Text(label)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(Color.tronTextSecondary)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(label)
+        TronPulseLoadingIndicator(accent: settingsTheme?.accent ?? accent)
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
     }
 }
 

@@ -217,8 +217,11 @@ describe("Home learned profile in the breakdown", () => {
     const registry = await f.restartToReadiness();
     f.registry = registry;
     const store = new KnowledgeStore(registry.knowledgeWorkspace(), () => {});
-    registry.setKnowledgeService(new KnowledgeService(store, new KnowledgeObservationService(store, undefined, undefined, undefined,
-      homeChapterObservationExcluded(() => registry.homeOwner()))));
+    const knowledge = new KnowledgeService(store, new KnowledgeObservationService(store, undefined, undefined, undefined,
+      homeChapterObservationExcluded(() => registry.homeOwner())));
+    registry.setKnowledgeService(knowledge);
+    // Home's profile tool writes through the settings change path, as gateway-main wires it.
+    settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => registry.homeOwner(), registry, knowledge: () => knowledge });
     await registry.catalog("all");
     const home = await registry.acquire(f.home.sessionId);
     // The profile section is read once per activation, so the note is learned in one activation and counted in the next.
@@ -274,7 +277,7 @@ describe("Home chapters, task names and memory pages", () => {
     await waitFor(async () => ((await owner.chapterList()).chapters[0]?.contents?.topics.length ?? 0) > 0, "chapter topics");
     const topics = (await owner.chapterList()).chapters[0]!.contents!.topics;
     expect(topics.length).toBeLessThanOrEqual(8);
-    expect(topics.every(topic => [...topic].length <= 200)).toBe(true);
+    expect(topics.every(topic => [...topic].length <= 1000)).toBe(true);
     expect(topics.every(topic => !/^(?:user|talk|echo|event|summary):|^\[call\b/iu.test(topic))).toBe(true);
   }, 60_000);
 

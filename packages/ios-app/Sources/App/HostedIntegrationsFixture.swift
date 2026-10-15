@@ -43,6 +43,7 @@ struct HostedIntegrationsFixtureView: View {
     @State private var presentationTrace = HostedIntegrationPresentationTrace()
     @State private var productionXLogs = ""
     @State private var showingOllamaDetails = false
+    @State private var integrationRoutes = IntegrationSheetRoutes()
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
@@ -134,7 +135,7 @@ struct HostedIntegrationsFixtureView: View {
                                 Text(mcpOriginalCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-original")
                                 Text(mcpReplacementCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-replacement")
                                 Text(model.knowledgeDestinationIdentity.profileID ?? "none").font(.caption2).accessibilityIdentifier("fixture.destination")
-                            } else { IntegrationsSettingsView() }
+                            } else { IntegrationsSettingsView(routes: integrationRoutes) }
                             Text(oauthCounters).font(.caption2).lineLimit(2).frame(height: 32)
                                 .accessibilityIdentifier("fixture.oauth-counters")
                         }
@@ -173,12 +174,18 @@ struct HostedIntegrationsFixtureView: View {
             @unknown default: break
             }
         }
-        .task(id: "\(oauthCounters)|\(model.knowledgeDestinationIdentity)|\(model.knowledgePresentationIdentity.connectionID ?? -1)|\(presentationTrace.summary)") {
-            await Task.yield()
-            let records = await model.appLog.snapshot().filter { $0.event.hasPrefix("xsetup.") }
-            productionXLogs = records.map { record in
-                "\(record.event) outcome=\(record.outcome ?? "-") generation=\(record.lifecycleGeneration.map(String.init) ?? "-") connection=\(record.connectionID.map(String.init) ?? "-") \(record.message)"
-            }.joined(separator: "|")
+        .task {
+            // Diagnostics reach the AppLog actor asynchronously and the last one (for
+            // example xsetup.observer.published) can land after every visible state
+            // change, so follow the log itself rather than re-reading on UI changes.
+            while !Task.isCancelled {
+                let records = await model.appLog.snapshot().filter { $0.event.hasPrefix("xsetup.") }
+                let projected = records.map { record in
+                    "\(record.event) outcome=\(record.outcome ?? "-") generation=\(record.lifecycleGeneration.map(String.init) ?? "-") connection=\(record.connectionID.map(String.init) ?? "-") \(record.message)"
+                }.joined(separator: "|")
+                if projected != productionXLogs { productionXLogs = projected }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
         }
         .task {
             guard recoveryScenario == nil else { return }

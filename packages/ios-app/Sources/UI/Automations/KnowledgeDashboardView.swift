@@ -813,7 +813,7 @@ private struct KnowledgeChronicleInfoSheet: View {
                         TronPlaceholderState(title: "Chronicle info unavailable", detail: error, icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
                                              actionTitle: "Retry", action: { requestGeneration &+= 1 })
                     } else {
-                        TronLoadingState(label: "Loading Chronicle info…", accent: .tronKnowledge)
+                        TronSheetLoadingState(label: "Loading Chronicle info…", accent: .tronKnowledge)
                     }
                 }
                 .padding(TronSpacing.section)
@@ -823,7 +823,7 @@ private struct KnowledgeChronicleInfoSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronKnowledge)
+                            .tronToolbarAction(accent: .tronKnowledge)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -906,7 +906,7 @@ private struct KnowledgeCoverageSheetHost: View {
                                          icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
                                          actionTitle: "Retry", action: { requestGeneration &+= 1 })
                 } else {
-                    TronLoadingState(label: "Loading attention…", accent: .tronKnowledge)
+                    TronSheetLoadingState(label: "Loading attention…", accent: .tronKnowledge)
                 }
             }
             .tronNavigationTitle("Observation coverage", accent: .tronKnowledge)
@@ -914,7 +914,7 @@ private struct KnowledgeCoverageSheetHost: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronKnowledge)
+                            .tronToolbarAction(accent: .tronKnowledge)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -1047,10 +1047,6 @@ struct KnowledgeRecordRow: View {
             }
             .layoutPriority(1)
             Spacer(minLength: TronSpacing.md)
-            Image(systemName: "chevron.right")
-                .font(TronTypography.caption)
-                .foregroundStyle(Color.tronKnowledge)
-                .accessibilityHidden(true)
         }
     }
 }
@@ -1478,7 +1474,7 @@ struct KnowledgeDetailView: View {
                     Button("Correct record", systemImage: "arrow.triangle.2.circlepath") { correctionSheet = true }
                     Button("Exclude from Knowledge", systemImage: "eye.slash") { exclude() }
                     Button("Forget permanently", systemImage: "trash", role: .destructive) { forgetConfirmation = true }
-                } label: { Image(systemName: "ellipsis.circle").foregroundStyle(Color.tronKnowledge) }
+                } label: { Image(systemName: "ellipsis.circle").tronToolbarAction(accent: .tronKnowledge) }
                 .accessibilityLabel("Knowledge record actions")
             }
         }
@@ -1746,9 +1742,7 @@ struct KnowledgeDetailView: View {
                     Button { openLinkedRecord(id: replacement.id, revisionID: replacement.revisionId,
                                                  includeArchived: replacement.admission == .archived,
                                                  includePending: replacement.admission == .pending) } label: {
-                        TronSettingsRow(icon: "arrow.turn.down.right", title: "Replaced by: \(replacement.title)", accent: .tronKnowledge) {
-                            Image(systemName: "chevron.right").font(TronTypography.caption).foregroundStyle(Color.tronKnowledge)
-                        }
+                        TronSettingsRow(icon: "arrow.turn.down.right", title: "Replaced by: \(replacement.title)", accent: .tronKnowledge)
                     }.buttonStyle(.plain)
                 }
                 if choosingReplacement || source.verdict?.verdict == .superseded {
@@ -1843,9 +1837,7 @@ struct KnowledgeDetailView: View {
                     ForEach(Array(related.enumerated()), id: \.element) { index, id in
                         if index > 0 { TronSettingsDivider(accent: .tronKnowledge) }
                         Button { openLinkedRecord(id: id, revisionID: nil) } label: {
-                            TronSettingsRow(icon: "doc.text", title: citationTitles[id] ?? citationTitles.first(where: { $0.key.hasPrefix("\(id)|") })?.value ?? "Related entry", accent: .tronKnowledge) {
-                                Image(systemName: "chevron.right").font(TronTypography.caption).foregroundStyle(Color.tronKnowledge)
-                            }
+                            TronSettingsRow(icon: "doc.text", title: citationTitles[id] ?? citationTitles.first(where: { $0.key.hasPrefix("\(id)|") })?.value ?? "Related entry", accent: .tronKnowledge)
                         }
                         .buttonStyle(.plain)
                     }
@@ -2375,55 +2367,58 @@ struct KnowledgeConfigurationView: View {
 
     var body: some View {
         KnowledgeFormSheet(title: "Observation", isWorking: saving, actionDisabled: config == nil, onAction: save) {
-            if config == nil && error == nil { TronLoadingState(label: "Loading configuration…") }
-            TronSettingsGroup("Observer", accent: .tronKnowledge) {
-                TronSelectionSheetRow(icon: "cpu", title: "Model", value: SessionModelSelectionPresentation.modelName(chosenModel, catalog: catalogModels), accent: .tronKnowledge) {
-                    ModelPicker(selection: $chosenModel, models: catalogModels.filter(\.available))
-                        .tronNavigationTitle("Observation model", accent: .tronKnowledge)
-                        .presentationDetents([.large])
-                }
-            }
-            .disabled(config == nil)
-            .tronSettingsCaption("The model is used for future eligible turns; earlier turns are not backfilled.")
-            TronSettingsGroup("Knowledge model", accent: .tronKnowledge) {
-                VStack(spacing: 0) {
-                    TronSelectionSheetRow(icon: "sparkles", title: "Knowledge model", value: SessionModelSelectionPresentation.modelName(chosenKnowledgeModel, catalog: catalogModels), accent: .tronKnowledge) {
-                        ModelPicker(selection: Binding(get: { chosenKnowledgeModel }, set: { chosenKnowledgeModel = $0; knowledgeModelChanged = true }), models: catalogModels.filter(\.available))
-                            .tronNavigationTitle("Knowledge model", accent: .tronKnowledge)
+            if config == nil && error == nil {
+                TronSheetLoadingState(label: "Loading configuration…", accent: .tronKnowledge)
+            } else {
+                TronSettingsGroup("Observer", accent: .tronKnowledge) {
+                    TronSelectionSheetRow(icon: "cpu", title: "Model", value: SessionModelSelectionPresentation.modelName(chosenModel, catalog: catalogModels), accent: .tronKnowledge) {
+                        ModelPicker(selection: $chosenModel, models: catalogModels.filter(\.available))
+                            .tronNavigationTitle("Observation model", accent: .tronKnowledge)
                             .presentationDetents([.large])
                     }
-                    if chosenKnowledgeModel != nil {
-                        TronSettingsDivider(accent: .tronKnowledge)
-                        TronSettingsRow(icon: "xmark.circle", title: "Clear Knowledge model",
-                                        subtitle: "Knowledge generation stays off until you choose a model again", accent: .tronKnowledge) {
-                            Button { chosenKnowledgeModel = nil; knowledgeModelChanged = true } label: {
-                                TronInlineActionLabel("Clear", accent: .tronKnowledge)
+                }
+                .disabled(config == nil)
+                .tronSettingsCaption("The model is used for future eligible turns; earlier turns are not backfilled.")
+                TronSettingsGroup("Knowledge model", accent: .tronKnowledge) {
+                    VStack(spacing: 0) {
+                        TronSelectionSheetRow(icon: "sparkles", title: "Knowledge model", value: SessionModelSelectionPresentation.modelName(chosenKnowledgeModel, catalog: catalogModels), accent: .tronKnowledge) {
+                            ModelPicker(selection: Binding(get: { chosenKnowledgeModel }, set: { chosenKnowledgeModel = $0; knowledgeModelChanged = true }), models: catalogModels.filter(\.available))
+                                .tronNavigationTitle("Knowledge model", accent: .tronKnowledge)
+                                .presentationDetents([.large])
+                        }
+                        if chosenKnowledgeModel != nil {
+                            TronSettingsDivider(accent: .tronKnowledge)
+                            TronSettingsRow(icon: "xmark.circle", title: "Clear Knowledge model",
+                                            subtitle: "Knowledge generation stays off until you choose a model again", accent: .tronKnowledge) {
+                                Button { chosenKnowledgeModel = nil; knowledgeModelChanged = true } label: {
+                                    TronInlineActionLabel("Clear", accent: .tronKnowledge)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Clear Knowledge model")
+                                .accessibilityIdentifier("knowledge.clearKnowledgeModel")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Clear Knowledge model")
-                            .accessibilityIdentifier("knowledge.clearKnowledgeModel")
                         }
                     }
                 }
+                .disabled(config == nil)
+                .tronSettingsCaption("Summaries, source assessment, synthesis, reflection, and manual-capture assessment use this model and its own input/output limits. It never falls back to the observer model.")
+                TronSettingsGroup("Observation", accent: .tronKnowledge) {
+                    TronToggleRow(icon: "globe", title: "Observe all Tron sessions",
+                                  detail: "When enabled, save future observations from every Tron conversation. Excluded conversations and projects stay excluded.", accent: .tronKnowledge,
+                                  isOn: Binding(get: { config?.observation.enabled ?? false }, set: { config?.observation.enabled = $0 }))
+                        .disabled(config == nil || (!supportsGlobalObservation && config?.observation.enabled != true))
+                }
+                .tronSettingsCaption("This covers Tron conversations only, not other apps, files, or delegated-agent transcripts.")
+                if !supportsGlobalObservation {
+                    TronSettingsNotice(message: "Update this Gateway to enable all-session observation.", accent: .tronAmber)
+                }
+                TronSettingsGroup("Current interests", accent: .tronKnowledge, surfaceStyle: .uncontained) {
+                    TextEditor(text: $interestsText).frame(minHeight: 120).tronTextEditor()
+                        .accessibilityLabel("Current interests")
+                }
+                .tronSettingsCaption("One interest per line, up to 50. Interests guide source assessment and do not enable observation.")
+                if let error { TronSettingsNotice(message: error, accent: .tronError) }
             }
-            .disabled(config == nil)
-            .tronSettingsCaption("Summaries, source assessment, synthesis, reflection, and manual-capture assessment use this model and its own input/output limits. It never falls back to the observer model.")
-            TronSettingsGroup("Observation", accent: .tronKnowledge) {
-                TronToggleRow(icon: "globe", title: "Observe all Tron sessions",
-                              detail: "When enabled, save future observations from every Tron conversation. Excluded conversations and projects stay excluded.", accent: .tronKnowledge,
-                              isOn: Binding(get: { config?.observation.enabled ?? false }, set: { config?.observation.enabled = $0 }))
-                    .disabled(config == nil || (!supportsGlobalObservation && config?.observation.enabled != true))
-            }
-            .tronSettingsCaption("This covers Tron conversations only, not other apps, files, or delegated-agent transcripts.")
-            if !supportsGlobalObservation {
-                TronSettingsNotice(message: "Update this Gateway to enable all-session observation.", accent: .tronAmber)
-            }
-            TronSettingsGroup("Current interests", accent: .tronKnowledge, surfaceStyle: .uncontained) {
-                TextEditor(text: $interestsText).frame(minHeight: 120).tronTextEditor()
-                    .accessibilityLabel("Current interests")
-            }
-            .tronSettingsCaption("One interest per line, up to 50. Interests guide source assessment and do not enable observation.")
-            if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
         .modifier(KnowledgeMutationObserver(mutation: $mutation, error: $error) { dismiss() })
         .task(id: PresentationActivityTaskID(source: model.knowledgePresentationIdentity,

@@ -54,6 +54,17 @@ run settlement and canonical receipt persistence, with the repeatable artifact
 `test-results/failed-stop-natural-completion.json`, alongside actual fast-abort
 and already-completed controls.
 
+Every tool call's life after cancellation is bounded (#961,
+`sessions/bounded-tool-cancellation.ts`). Pi's loop awaits a tool's `execute`
+and its abort waits for the loop to go idle, so one tool that ignored its abort
+signal made Stop hang and left a worker running. Two seconds after cancellation
+the call resolves as an error result naming the abandoned tool; the run ends and
+Stop settles within its grace. Built-in bash kills its process group on abort
+and settles first. The abandoned call's late result is discarded.
+`src/home/home-task-tool.e2e.test.ts` stops a Home worker blocked in such a tool
+and resumes it in place, and stops one in a SIGTERM-ignoring 10-minute command,
+with the repeatable artifact `test-results/home-task-tool.json`.
+
 An invocation's receipts all belong to the session it started in. An extension
 command that replaces its own session (`ctx.switchSession`, `ctx.newSession`,
 `ctx.fork`) is settled there when Pi commits the replacement: at
@@ -322,8 +333,11 @@ commands, or promote/restart a Gateway as part of this process.
 ### Tron-patched `pi-coding-agent`
 
 The Gateway needs the SDK's `projectDir` option (the Project layer is the
-worktree root's `.pi/`, see [Project root](#project-root)), which no published
-release has. Until one does, `pi-coding-agent` comes from a Tron-built tarball
+worktree root's `.pi/`, see [Project root](#project-root)) and an `AgentSession`
+that dequeues a delivered image-only steer or follow-up (upstream removes a
+delivered queue entry only when its text is non-empty, so a photo-only queued
+message stayed in Pi's queue and in every snapshot's `queuedItems`, #974). No
+published release has either. Until one does, `pi-coding-agent` comes from a Tron-built tarball
 instead of the registry, at the same version as the rest of the family.
 `pi-coding-agent-patch.json` is its only owner. It records the upstream tag and
 commit, the published tarball's integrity, the upstream proposal commit the patch
@@ -357,7 +371,7 @@ the declaration's `version`, `upstream`, `modelData` and artifact path, rebasing
 the patch onto that tag, and running `--write`.
 
 `npm run update:pi-sdk` refuses while the declaration exists. When a release
-ships `projectDir` (the declaration's `removeWhen`), remove the patch in one
+ships both changes (the declaration's `removeWhen`), remove the patch in one
 change: set `pi-coding-agent` in `package.json` back to the exact release
 version, delete `pi-coding-agent-patch.json`, `third_party/pi-coding-agent/`,
 `scripts/build-pi-coding-agent-patch.mjs` and its `reproduce:pi-coding-agent`
@@ -888,6 +902,9 @@ changes are labeled Outside Tron, not You. Native clients need no key-formatting
 `settings.undo { commandId, changeId, fence? }` writes `before` back as an
 ordinary change, refused with the current value when the store no longer holds
 `after`, and refused for a redacted change, which has no `before`.
+A learned-profile entry (`home.profile.item`, written by Home's `profile` tool or
+`home.profileChange`) is undone with its whole group back to each note's `before`,
+and refused unless every note still holds its `after` (docs/settings-model.md 6.4).
 `settings.applyAgain { commandId, changeId }` names an `outside` entry that
 replaced or removed a value Tron wrote and writes that value back through the same
 path and gate (with `applyAgainOf`), refused when the store moved on since.
@@ -1356,7 +1373,24 @@ the host-wide heavy-run queue and the host-pressure signal (#915).
 - **Task control.** `home.taskList`, `home.taskStatus`, `home.steerTask` and `home.stopTask` expose durable spend
   and shared control. A list row reads its worker's name without building a session snapshot or a catalog
   acquisition, so a page stays cheap however large the catalog or the live transcripts are. Terminal `/home task`, `/home steer` and `/home stop` target one task. Steering shares the
-  session lane; Stop persists exact intent and cancels outside blocked admission. Canonical usage identities dedupe
+  session lane; Stop persists exact intent and cancels outside blocked admission. The maintainer's chat messages to a
+  running worker join that same ordered steering lane (a follow-up becomes steering), and Home's steering or the
+  maintainer's message also starts the held task's next turn while it waits between turns for its subagent runs.
+- **Resume in place (#929).** A settled task (stopped, interrupted, limited or reported) continues as its one
+  successor task `<id>.resume-<n>`, bound to the same worker session, so its worktree and work claim (claims name
+  the session) stay with it. Home's `task` tool action `resume` (only `taskId`; naming any task of the lineage reaches its current one, #961) and a maintainer message sent in the stopped
+  worker's chat both resume it; the message becomes the resume instruction. The stopped record stays immutable and
+  each task has at most one started successor. A resume admits like any task: beyond the running-worker budget it
+  queues, its worker operation already fixed so the maintainer's message names it (#959). A successor refused or
+  settled before it started is not one: the stopped task stays resumable, the refusal's message is kept as
+  `terminalEvidence.detail` (and in Home's wake), and its instruction (`resumes.instruction`) is re-delivered,
+  oldest first, by the next resume. The rebind refuses while other work runs in the session, but not for Knowledge
+  observation, which only reads the settled turn. The worker slot is rebound to the new operation's report owner in place,
+  so viewers keep their subscription. Each operation owns the canonical span from its marker to the next marker,
+  so reports, spend, subagent counts and settlement proof never mix operations. A question `ask_user` was asking
+  when its run stopped (also inside codemode) is recorded as a `tron.ask-user.interrupted.v1` custom entry, and
+  the resume brief restates it so the worker asks it again. Journeys: `src/home/home-task-continuity.e2e.test.ts`.
+  Canonical usage identities dedupe
   tokens before display. Task results never trigger an automatic Home call: terminal tasks co-commit a durable inbox
   event, delivered on the next maintainer Home message, and make one advisory push decision at most.
 - **Protocol.** `home.v1` is advertised in `hello` and `system.info`. `home-memory-view.v1` additionally gates the
@@ -2166,7 +2200,9 @@ Pi's prompt path. Tron registers its release-owned `ask_user` capability as one 
 semantic form tool (`tron:ask-user.v1`). Its title, descriptions, multi-select/Other policy,
 question and option order, and bounded answer details are retained in one canonical result
 shape; native Cancel is admitted only when `allowCancel` is true, while closing the native
-sheet preserves the draft and leaves the interaction pending. A same-name foreign registration
+sheet preserves the draft and leaves the interaction pending. Its prompt guideline tells agents to
+put commands, URLs, paths and IDs the user may need to copy in normal assistant text before asking
+(or in `context` as a fenced code block), not only in the question sentence. A same-name foreign registration
 fails closed with an actionable destination-only settings migration message. Historical
 `@zhushanwen/pi-ask-user` results remain readable through the audited adapter below.
 The explicit extension adapter registry identifies only the pinned
@@ -2910,7 +2946,21 @@ Mark-read carries the exact rendered completion revision so a racing newer
 completion stays unread. A live completion whose shared disposition observes an
 active mobile presentation advances completion and read-through together in one
 durable attention replacement, clears manual unread, and publishes no transient
-unread summary. Successful `session.open` returns its current completion revision,
+unread summary. A Home task worker ends through its `report` tool call, never a
+successful final reply, so a settled task records one completion (`task:<taskId>`)
+for its worker session, admitted read: its result reports back to Home, so only
+sessions the maintainer starts himself join the Unread queue on completion (#1003).
+Every completion of a recorded worker (a resumed task reuses its session, and any
+later assistant reply in it) is admitted read the same way, while an explicit
+mark-unread still holds. Recording a worker in the index also acknowledges its
+earlier completions, so the startup seeding pass clears unread left by builds
+before this rule and completions recovered at startup before the index existed;
+a failed acknowledgement logs `home-worker-attention-failed` and is retried by
+the next startup. Catalog rows of a Home task's worker carry `homeTaskId`: RuntimeRegistry
+holds a worker-session index the task dispatcher seeds from its startup recovery
+pass over the ledger and extends on each bind, each change invalidating catalogs
+once, so clients learn which sessions are Home workers from the list they already
+sync rather than by reading `home.taskList`. Successful `session.open` returns its current completion revision,
 and first-party clients acknowledge it only after installing the snapshot and
 retry transient acknowledgement failure against that same absolute revision.
 Protocol-v7 clients require the complete attention and presentation contract;
@@ -3530,6 +3580,46 @@ the current ordered set after unregistering old extension layers, so removing or
 reordering a contributor does not leave stale fields behind or disturb built-in
 providers. Project-scoped package and settings changes do not reload or mutate the
 global provider runtime.
+
+### Mac Terminal
+
+Mac Terminal gives the iPhone a login shell on this Mac that does not depend on
+the Gateway: it connects with SSH to macOS Remote Login (the built-in sshd) over
+Tailscale, so it keeps working while Tron.app or the Gateway is quit, crashed or
+being replaced. The Gateway's only part is enrollment and revocation
+(`src/security/mac-terminal.ts`):
+
+- **`macTerminal.status`** (paired iPhones only, no parameters) returns the login
+  `username`, `port` (22), `hosts` (MagicDNS name, then Tailscale addresses, from
+  `tailscale status`), `hostKeys` (`/etc/ssh/ssh_host_{ed25519,ecdsa}_key.pub`),
+  `remoteLogin` (`on`/`off`/`unknown` from one bounded loopback connect to the
+  port; Tron never changes Remote Login) and whether this device is `enrolled`.
+- **The key** is the Mac-layer setting `permissions.macTerminalKey`, qualified
+  by `device`, stored as one line of `~/.ssh/authorized_keys`:
+  `from="100.64.0.0/10,fd7a:115c:a1e0::/48",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc ecdsa-sha2-nistp256 … tron-mac-terminal:<device> …`.
+  Only an `ecdsa-sha2-nistp256` key (the iPhone's Secure Enclave key) is
+  admitted. Adding one is a widening with an `approve` floor: the maintainer's
+  own tap applies it, any agent's request waits for his approval. Removing one
+  is `notify`. An iPhone may enroll only its own device id. Every change goes
+  through `settings.change` and the record, like any other setting.
+- **The file** is the store: Tron rewrites it atomically under its own lock,
+  keeps every other line byte for byte, writes mode 0600, and refuses a symlinked,
+  non-regular or oversized file. A line deleted by hand on the Mac is simply a
+  revoked key, with or without the Gateway.
+- **Revocation** is the key unset from the iPhone's Mac Terminal menu or by any
+  chat's `settings` tool on the Mac, deleting the line by hand, or revoking the
+  paired device: `device.revoke` removes the device's key first and refuses the
+  revoke if that fails, so a revoked iPhone never keeps a working key.
+
+The iPhone pins the reported host keys at enrollment and refuses any other key
+with its fingerprint; see the iOS architecture's
+[Mac Terminal](../ios-app/docs/architecture.md#mac-terminal). The journey
+`npm run test:mac-terminal` (it needs this Mac on its tailnet and Swift 6.2)
+enrolls through a real Gateway into a real sshd's `authorized_keys` and logs in
+with the app's own SSH client: success with PTY resize, login with the Gateway
+gone, host-key mismatch, the `from=` restriction, revocation from the iPhone and
+by device revoke, and Remote Login off. Its transcript is
+`test-results/mac-terminal.json`.
 
 ### Project root
 

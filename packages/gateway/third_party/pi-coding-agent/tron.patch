@@ -1,12 +1,16 @@
-pi-coding-agent 1.0.4 + projectDir (Tron-owned backport declared by packages/gateway/pi-coding-agent-patch.json)
+pi-coding-agent 1.0.4 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
 
-Upstream proposal commit 7a795da1c69cbc2df30485c173d14d2266ead2ba (parent a447ba1), backported
-onto tag v1.0.4 (7c10bd4337495ee613f2224843ecdf349b80d1df). Apply with git apply at the tag.
+Apply with git apply at tag v1.0.4 (7c10bd4337495ee613f2224843ecdf349b80d1df).
 
-A session can run in a subdirectory (cwd) while its project .pi comes from projectDir:
-settings, resources, packages, SYSTEM.md, and built-in MCP config, whose stdio servers
-start in projectDir. Tools, context files, .agents/skills discovery and session grouping
-keep cwd. Extensions read ctx.projectDir. projectDir defaults to cwd.
+1. projectDir. Upstream proposal commit 7a795da1c69cbc2df30485c173d14d2266ead2ba (parent a447ba1).
+   A session can run in a subdirectory (cwd) while its project .pi comes from projectDir:
+   settings, resources, packages, SYSTEM.md, and built-in MCP config, whose stdio servers
+   start in projectDir. Tools, context files, .agents/skills discovery and session grouping
+   keep cwd. Extensions read ctx.projectDir. projectDir defaults to cwd.
+
+2. Image-only queue delivery (Tron #974). AgentSession dequeued a delivered steer or follow-up
+   only when its text was non-empty, so an image-only queued message stayed in
+   getSteeringMessages()/getFollowUpMessages() after delivery. Empty text now dequeues too.
 
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
 index c6e160444644530af9831f3135f593bd89ebf798..28f46728894ab5ccc4add4e41f89206a3d9c9614 100644
@@ -100,7 +104,7 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index 95b96350df4b818ea408f4f6ebfb117858d02bc3..34bcab3ce1fefcd79e8a633b4ec4ba7fca06d345 100644
+index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f8b93acf9d562c0262d580d4098acc47fd91c8e1 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
 @@ -249,6 +249,8 @@ export interface AgentSessionConfig {
@@ -128,6 +132,39 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..34bcab3ce1fefcd79e8a633b4ec4ba7f
  		this._modelRuntime = config.modelRuntime;
  		this._cacheWarmer = config.cacheWarmer;
  		if (this._cacheWarmer) {
+@@ -1105,20 +1109,20 @@ export class AgentSession {
+ 		// This ensures the UI sees the updated queue state
+ 		if (event.type === "message_start" && event.message.role === "user") {
+ 			this._overflowRecoveryAttempted = false;
++			// An image-only message queues an empty text entry, so empty text must
++			// dequeue too; otherwise its delivered entry stays queued forever.
+ 			const messageText = contentText(event.message.content, "");
+-			if (messageText) {
+-				// Check steering queue first
+-				const steeringIndex = this._steeringMessages.indexOf(messageText);
+-				if (steeringIndex !== -1) {
+-					this._steeringMessages.splice(steeringIndex, 1);
++			// Check steering queue first
++			const steeringIndex = this._steeringMessages.indexOf(messageText);
++			if (steeringIndex !== -1) {
++				this._steeringMessages.splice(steeringIndex, 1);
++				this._emitQueueUpdate();
++			} else {
++				// Check follow-up queue
++				const followUpIndex = this._followUpMessages.indexOf(messageText);
++				if (followUpIndex !== -1) {
++					this._followUpMessages.splice(followUpIndex, 1);
+ 					this._emitQueueUpdate();
+-				} else {
+-					// Check follow-up queue
+-					const followUpIndex = this._followUpMessages.indexOf(messageText);
+-					if (followUpIndex !== -1) {
+-						this._followUpMessages.splice(followUpIndex, 1);
+-						this._emitQueueUpdate();
+-					}
+ 				}
+ 			}
+ 		}
 @@ -2410,6 +2414,11 @@ export class AgentSession {
  		return this._followUpMessages;
  	}
@@ -538,340 +575,6 @@ index 18d6d95dd12d3a12fbc77d399cffa73aea2483f2..97e58691312f638623b79b9d8807ecee
  			sessionManager: this.sessionManager,
  			modelRegistry: extensionRunner.getModelRegistry(),
  			model: this.session.model,
-diff --git a/packages/coding-agent/test/sdk-project-dir.test.ts b/packages/coding-agent/test/sdk-project-dir.test.ts
-new file mode 100644
-index 0000000000000000000000000000000000000000..7e39ade3c098ff2fe91e06cc4a1f2172b99a78de
---- /dev/null
-+++ b/packages/coding-agent/test/sdk-project-dir.test.ts
-@@ -0,0 +1,328 @@
-+import { execFileSync } from "node:child_process";
-+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-+import { tmpdir } from "node:os";
-+import { join } from "node:path";
-+import type { TUI } from "@earendil-works/pi-tui";
-+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-+import { KeybindingsManager } from "../src/core/keybindings.ts";
-+import { McpManagerView, type McpMenu } from "../src/extensions/mcp/ui.ts";
-+import {
-+	type AgentSessionRuntime,
-+	createAgentSessionFromServices,
-+	createAgentSessionRuntime,
-+	createAgentSessionServices,
-+	createMcpExtension,
-+	type ExtensionContext,
-+	hasTrustRequiringProjectResources,
-+	SessionManager,
-+	SettingsManager,
-+} from "../src/index.ts";
-+import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
-+import { createTestUiContext } from "./suite/harness.ts";
-+
-+/**
-+ * A stdio MCP server with one direct tool, `where`. It records the directory it started in and the
-+ * name it was configured under, so the test can see which `mcp.json` started it and from where.
-+ */
-+const SERVER = `import { appendFileSync } from "node:fs";
-+import { createInterface } from "node:readline";
-+const [name, log] = process.argv.slice(2);
-+appendFileSync(log, JSON.stringify({ name, cwd: process.cwd() }) + "\\n");
-+createInterface({ input: process.stdin }).on("line", (line) => {
-+	const message = JSON.parse(line);
-+	if (message.id === undefined) return;
-+	const result =
-+		message.method === "initialize"
-+			? { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name, version: "1" } }
-+			: message.method === "tools/list"
-+				? { tools: [{ name: "where", description: "Where the server runs", inputSchema: { type: "object", properties: {} } }] }
-+				: {};
-+	process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }) + "\\n");
-+});
-+`;
-+
-+function git(cwd: string, ...args: string[]): void {
-+	execFileSync("git", args, { cwd, stdio: "ignore" });
-+}
-+
-+function writeJson(path: string, value: unknown): void {
-+	writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
-+}
-+
-+describe("SDK projectDir", () => {
-+	let root: string;
-+	let agentDir: string;
-+	let serverLog: string;
-+	let serverScript: string;
-+	const runtimes: AgentSessionRuntime[] = [];
-+
-+	/** Write a project `.pi` with a retry setting and one stdio MCP server named `server`. */
-+	function writeProject(dir: string, maxRetries: number, server: string): void {
-+		mkdirSync(join(dir, ".pi"), { recursive: true });
-+		writeJson(join(dir, ".pi", "settings.json"), { retry: { maxRetries } });
-+		writeJson(join(dir, ".pi", "mcp.json"), {
-+			mcpServers: {
-+				[server]: { command: process.execPath, args: [serverScript, server, serverLog], exposure: "direct" },
-+			},
-+		});
-+	}
-+
-+	function serverStarts(): Array<{ name: string; cwd: string }> {
-+		return readFileSync(serverLog, "utf8")
-+			.trim()
-+			.split("\n")
-+			.filter(Boolean)
-+			.map((line) => JSON.parse(line));
-+	}
-+
-+	/**
-+	 * Start a session in `cwd` the way an SDK host does, through the runtime factory. `projectDir` and
-+	 * `projectTrusted` are the host's decisions. Returns the runtime and the context extensions get.
-+	 */
-+	async function start(
-+		cwd: string,
-+		options: { projectDir?: string; projectTrusted?: boolean; mcpChoices?: Array<string | undefined> } = {},
-+	) {
-+		let context: ExtensionContext | undefined;
-+		const runtime = await createAgentSessionRuntime(
-+			async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
-+				const services = await createAgentSessionServices({
-+					cwd,
-+					agentDir,
-+					...(options.projectDir ? { projectDir: options.projectDir } : {}),
-+					...(options.projectTrusted === undefined
-+						? {}
-+						: {
-+								settingsManager: SettingsManager.create(options.projectDir ?? cwd, agentDir, {
-+									projectTrusted: options.projectTrusted,
-+								}),
-+							}),
-+					resourceLoaderOptions: {
-+						extensionFactories: [
-+							createMcpExtension({ startupWaitMs: 0 }),
-+							(pi) => {
-+								pi.on("session_start", (_event, ctx) => {
-+									context = ctx;
-+								});
-+							},
-+						],
-+					},
-+				});
-+				return {
-+					...(await createAgentSessionFromServices({ services, sessionManager, sessionStartEvent })),
-+					services,
-+					diagnostics: services.diagnostics,
-+				};
-+			},
-+			{ cwd, agentDir, sessionManager: SessionManager.inMemory(cwd) },
-+		);
-+		runtimes.push(runtime);
-+		// A shutdown handler makes reload() start the session again, like the CLI.
-+		await runtime.session.bindExtensions({
-+			shutdownHandler: () => {},
-+			...(options.mcpChoices ? { mode: "tui" as const, uiContext: scriptedMcpManager(options.mcpChoices) } : {}),
-+		});
-+		return { runtime, context: () => context! };
-+	}
-+
-+	/**
-+	 * A UI whose `/mcp` manager picks `choices` in order, one per menu it shows, instead of reading keys.
-+	 * Each choice must be offered by its menu.
-+	 */
-+	function scriptedMcpManager(choices: Array<string | undefined>) {
-+		vi.spyOn(McpManagerView.prototype, "menu").mockImplementation(async (build: () => McpMenu) => {
-+			const choice = choices.shift();
-+			if (choice !== undefined) expect(build().items.map((item) => item.value)).toContain(choice);
-+			return choice;
-+		});
-+		const tui = { requestRender: () => {} } as unknown as TUI;
-+		return createTestUiContext({
-+			custom: <T>(factory: Parameters<ReturnType<typeof createTestUiContext>["custom"]>[0]) =>
-+				new Promise<T>((done) => {
-+					factory(tui, theme, new KeybindingsManager(), done as (result: unknown) => void);
-+				}),
-+		});
-+	}
-+
-+	async function waitForTool(runtime: AgentSessionRuntime, name: string): Promise<void> {
-+		await vi.waitFor(() => expect(runtime.session.getAllTools().map((tool) => tool.name)).toContain(name), {
-+			timeout: 10_000,
-+		});
-+	}
-+
-+	function mcpTools(runtime: AgentSessionRuntime): string[] {
-+		return runtime.session
-+			.getAllTools()
-+			.map((tool) => tool.name)
-+			.filter((name) => name.startsWith("mcp__"))
-+			.sort();
-+	}
-+
-+	beforeAll(() => {
-+		initTheme("dark");
-+	});
-+
-+	beforeEach(() => {
-+		root = realpathSync(mkdtempSync(join(tmpdir(), "pi-project-dir-")));
-+		agentDir = join(root, "agent");
-+		mkdirSync(agentDir);
-+		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-+		serverLog = join(root, "servers.log");
-+		writeFileSync(serverLog, "");
-+		serverScript = join(root, "server.mjs");
-+		writeFileSync(serverScript, SERVER);
-+	});
-+
-+	afterEach(async () => {
-+		vi.restoreAllMocks();
-+		while (runtimes.length > 0) await runtimes.pop()?.dispose();
-+		rmSync(root, { recursive: true, force: true });
-+	});
-+
-+	it("loads settings, resources, and MCP servers from projectDir while the session runs in a subdirectory", async () => {
-+		// One repository with two worktrees. Each worktree root has its own project configuration; a
-+		// subdirectory of the second worktree has a nested `.pi` and its own instructions.
-+		const main = join(root, "repo");
-+		const worktree = join(root, "repo-feature");
-+		mkdirSync(main);
-+		git(main, "init", "-q");
-+		writeFileSync(join(main, "AGENTS.md"), "Root instructions.");
-+		git(main, "add", ".");
-+		git(main, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-qm", "init");
-+		git(main, "worktree", "add", "-q", worktree);
-+		writeProject(main, 5, "main-root");
-+		writeProject(worktree, 7, "feature-root");
-+		const cwd = join(worktree, "packages", "app");
-+		mkdirSync(cwd, { recursive: true });
-+		writeProject(cwd, 99, "nested");
-+		writeFileSync(join(cwd, "AGENTS.md"), "Nested instructions.");
-+		mkdirSync(join(worktree, ".pi", "prompts"));
-+		writeFileSync(join(worktree, ".pi", "prompts", "root-prompt.md"), "Root prompt");
-+		mkdirSync(join(cwd, ".pi", "prompts"));
-+		writeFileSync(join(cwd, ".pi", "prompts", "nested-prompt.md"), "Nested prompt");
-+
-+		const { runtime, context } = await start(cwd, { projectDir: worktree });
-+		const session = runtime.session;
-+		expect(context().projectDir).toBe(worktree);
-+		expect(session.settingsManager.getRetrySettings().maxRetries).toBe(7);
-+		await waitForTool(runtime, "mcp__feature_root__where");
-+
-+		// The session, its tools, and its context files stay in the subdirectory.
-+		expect(context().cwd).toBe(cwd);
-+		expect(session.sessionManager.getCwd()).toBe(cwd);
-+		expect(session.resourceLoader.getAgentsFiles().agentsFiles.map((file) => file.path)).toEqual([
-+			join(worktree, "AGENTS.md"),
-+			join(cwd, "AGENTS.md"),
-+		]);
-+		// Configuration comes from the worktree root only, not from the nested `.pi` or the other worktree.
-+		expect(session.projectDir).toBe(worktree);
-+		expect(runtime.services.projectDir).toBe(worktree);
-+		const prompts = session.promptTemplates.map((template) => template.name);
-+		expect(prompts).toContain("root-prompt");
-+		expect(prompts).not.toContain("nested-prompt");
-+		expect(mcpTools(runtime)).toEqual(["mcp__feature_root__where"]);
-+		// The stdio server starts in the project directory.
-+		expect(serverStarts()).toEqual([{ name: "feature-root", cwd: worktree }]);
-+
-+		// Outside edits to the root configuration apply on reload; edits to the nested `.pi` do not.
-+		writeProject(worktree, 8, "edited-root");
-+		writeProject(cwd, 100, "nested-edited");
-+		await session.reload();
-+		await waitForTool(runtime, "mcp__edited_root__where");
-+		expect(session.settingsManager.getRetrySettings().maxRetries).toBe(8);
-+		expect(mcpTools(runtime)).toEqual(["mcp__edited_root__where"]);
-+		expect(serverStarts().at(-1)).toEqual({ name: "edited-root", cwd: worktree });
-+		expect(context().cwd).toBe(cwd);
-+
-+		// A session in the main worktree uses that worktree's configuration.
-+		const other = await start(main, { projectDir: main });
-+		await waitForTool(other.runtime, "mcp__main_root__where");
-+		expect(other.runtime.session.settingsManager.getRetrySettings().maxRetries).toBe(5);
-+		expect(mcpTools(other.runtime)).toEqual(["mcp__main_root__where"]);
-+		expect(session.settingsManager.getRetrySettings().maxRetries).toBe(8);
-+	});
-+
-+	it("saves /mcp changes to the projectDir mcp.json", async () => {
-+		const project = join(root, "project");
-+		const cwd = join(project, "sub");
-+		mkdirSync(cwd, { recursive: true });
-+		writeProject(project, 7, "root");
-+		writeProject(cwd, 99, "nested");
-+		const nestedConfig = readFileSync(join(cwd, ".pi", "mcp.json"), "utf8");
-+		// A relative stdio cwd resolves against the project directory.
-+		mkdirSync(join(project, "tools"));
-+		const rootConfig = JSON.parse(readFileSync(join(project, ".pi", "mcp.json"), "utf8"));
-+		rootConfig.mcpServers.relative = {
-+			command: process.execPath,
-+			args: [serverScript, "relative", serverLog],
-+			cwd: "tools",
-+			exposure: "direct",
-+		};
-+		writeJson(join(project, ".pi", "mcp.json"), rootConfig);
-+		writeJson(join(agentDir, "mcp.json"), {
-+			mcpServers: { global: { command: process.execPath, args: [serverScript, "global", serverLog] } },
-+		});
-+
-+		const { runtime, context } = await start(cwd, {
-+			projectDir: project,
-+			// Disable `root` in its file, then turn off the user-level `global` for this project only.
-+			mcpChoices: ["root", "disable", undefined, "global", "disable-project", undefined, undefined],
-+		});
-+		await waitForTool(runtime, "mcp__root__where");
-+		await waitForTool(runtime, "mcp__relative__where");
-+		expect(serverStarts()).toContainEqual({ name: "relative", cwd: join(project, "tools") });
-+		await runtime.session.prompt("/mcp");
-+
-+		await vi.waitFor(() =>
-+			expect(JSON.parse(readFileSync(join(project, ".pi", "mcp.json"), "utf8")).mcpServers).toMatchObject({
-+				root: { enabled: false },
-+				global: { enabled: false },
-+			}),
-+		);
-+		expect(readFileSync(join(cwd, ".pi", "mcp.json"), "utf8")).toBe(nestedConfig);
-+		expect(JSON.parse(readFileSync(join(agentDir, "mcp.json"), "utf8")).mcpServers.global.enabled).toBeUndefined();
-+		expect(context().cwd).toBe(cwd);
-+	});
-+
-+	it("keeps an untrusted projectDir's configuration out", async () => {
-+		const project = join(root, "project");
-+		const cwd = join(project, "sub");
-+		mkdirSync(cwd, { recursive: true });
-+		writeProject(project, 7, "root");
-+		// The project directory's configuration needs a trust decision, though cwd has none.
-+		expect(hasTrustRequiringProjectResources(cwd)).toBe(false);
-+		expect(hasTrustRequiringProjectResources(cwd, project)).toBe(true);
-+		writeProject(cwd, 99, "nested");
-+		// A user-level server still connects, which shows the MCP extension finished loading its config.
-+		writeJson(join(agentDir, "mcp.json"), {
-+			mcpServers: {
-+				global: { command: process.execPath, args: [serverScript, "global", serverLog], exposure: "direct" },
-+			},
-+		});
-+
-+		const { runtime, context } = await start(cwd, { projectDir: project, projectTrusted: false });
-+		expect(context().projectDir).toBe(project);
-+		await waitForTool(runtime, "mcp__global__where");
-+		expect(runtime.session.settingsManager.getRetrySettings().maxRetries).toBe(
-+			SettingsManager.inMemory().getRetrySettings().maxRetries,
-+		);
-+		expect(mcpTools(runtime)).toEqual(["mcp__global__where"]);
-+		expect(serverStarts()).toEqual([{ name: "global", cwd: project }]);
-+	});
-+
-+	it("uses cwd as the project directory by default", async () => {
-+		const project = join(root, "project");
-+		const cwd = join(project, "sub");
-+		mkdirSync(cwd, { recursive: true });
-+		writeProject(project, 7, "root");
-+		writeProject(cwd, 99, "nested");
-+
-+		const { runtime, context } = await start(cwd);
-+		expect(context().projectDir).toBe(cwd);
-+		expect(runtime.services.projectDir).toBe(cwd);
-+		expect(runtime.session.settingsManager.getRetrySettings().maxRetries).toBe(99);
-+		await waitForTool(runtime, "mcp__nested__where");
-+		expect(mcpTools(runtime)).toEqual(["mcp__nested__where"]);
-+		expect(serverStarts()).toEqual([{ name: "nested", cwd }]);
-+	});
-+});
 diff --git a/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts b/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts
 index 9991520690bee8593e48b3f49c2eaff4c3748aa4..238f32d0c2d08c802b76282343993fa8e255b28f 100644
 --- a/packages/coding-agent/test/suite/regressions/8724-in-memory-fork-active-tool.test.ts

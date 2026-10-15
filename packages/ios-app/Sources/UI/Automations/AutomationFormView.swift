@@ -95,7 +95,7 @@ struct AutomationSessionPickerSheet: View {
             .tronNavigationTitle("Choose Session", accent: .tronAutomation)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")
+                    Button { dismiss() } label: { Image(systemName: "xmark").tronToolbarAction(accent: .tronAutomation) }.accessibilityLabel("Cancel")
                 }
             }
         }
@@ -304,7 +304,7 @@ struct AutomationFormView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronAutomation)
+                            .tronToolbarAction(accent: .tronAutomation)
                     }
                     .accessibilityLabel("Cancel")
                 }
@@ -317,8 +317,7 @@ struct AutomationFormView: View {
                                 .font(TronTypography.buttonSM)
                         }
                     }
-                    .foregroundStyle(Color.tronBlue)
-                    .tronToolbarAction(accent: .tronBlue)
+                    .tronToolbarAction(accent: .tronAutomation)
                     .disabled(isSaving || !canSave || !ownsMutationGateway)
                     .accessibilityLabel(saveTitle)
                 }

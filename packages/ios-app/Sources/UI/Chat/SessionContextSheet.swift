@@ -240,9 +240,7 @@ struct SessionContextSheet: View {
                         settingsSection(snapshot)
                         exportSection
                     } else {
-                        TronLoadingState(label: "Loading session…")
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 40)
+                        TronSheetLoadingState(label: "Loading session…", accent: .tronEmerald)
                     }
                 }
                 .padding(18)
@@ -262,7 +260,7 @@ struct SessionContextSheet: View {
                     } label: {
                         Image(systemName: "pencil")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .disabled(displayedPresentation == nil)
                     .accessibilityLabel("Rename Session")
@@ -279,7 +277,7 @@ struct SessionContextSheet: View {
                     } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }

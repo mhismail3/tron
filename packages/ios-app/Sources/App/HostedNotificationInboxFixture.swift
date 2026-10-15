@@ -70,8 +70,9 @@ struct HostedNotificationInboxFixture: View {
 }
 
 /// A process-wide Darwin notification is the only channel the UI test runner
-/// shares with the app; each observer lives for the fixture process.
-private enum DarwinTrigger {
+/// shares with the app; each observer lives for the fixture process. Shared by
+/// the hosted fixtures whose controls a presented sheet would cover.
+enum DarwinTrigger {
     private final class Box { let action: () -> Void; init(_ action: @escaping () -> Void) { self.action = action } }
 
     static func observe(_ name: String, action: @escaping @MainActor () -> Void) {

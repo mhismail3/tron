@@ -44,6 +44,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
+import { boundToolCancellation } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { HomeRequestPolicy } from "../home/home-request-policy.js";
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
@@ -58,6 +59,7 @@ import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProject
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import type { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import type { HomeProfileChangeAccess } from "../home/home-profile.js";
 import type { Actor } from "../admin/settings-record.js";
 import type { SettingsToolAccess } from "../admin/tron-settings-extension.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -521,7 +523,7 @@ type PromptOwnership = AutomationPromptOwnership | HomeWakeOwnership | {
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
-  homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => Promise<unknown>;
+  homeTask: (sessionId: string, request: unknown) => Promise<unknown>;
   homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
@@ -1011,7 +1013,8 @@ export class RuntimeSlot {
     interrupted: boolean,
     creationProfile: RuntimeProfile = "ordinary",
     homeMaterializationAuthority?: HomeMaterializationAuthority,
-    private readonly taskWorker?: HomeTaskReportOwner,
+    // Rebound only by `bindTaskWorker` when a settled task resumes in place (#929).
+    private taskWorker?: HomeTaskReportOwner,
   ) {
     this.explicitHomeSessionId = creationProfile === "home" ? sessionManager.getSessionId() : undefined;
     this.homeMaterializationAuthority = homeMaterializationAuthority
@@ -1239,6 +1242,15 @@ export class RuntimeSlot {
     return isBuiltinMcpCommand(this.runtime.session.extensionRunner.getCommand("mcp"));
   }
 
+  /** Whether this is a Home task worker and whether its task operation still runs here.
+   * `settled`: a worker session whose last task stopped or ended; a maintainer message
+   * resumes it in place rather than being refused (#929). */
+  get homeTaskWorkerState(): "none" | "active" | "settled" {
+    if (this.taskWorker?.controlsActive) return "active";
+    return this.taskWorker || this.canonicalTaskEvidence().some(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER)
+      ? "settled" : "none";
+  }
+
   /** Immutable task addresses are file-wide evidence, not the selected model
    * branch. Harmless tree viewing must never lose an already sealed result. */
   canonicalTaskEvidence(): FileEntry[] {
@@ -1357,6 +1369,18 @@ export class RuntimeSlot {
         ...(input.dryRun ? { dryRun: true } : {}),
       }),
       takeOutcomes: () => owners.changes.takeOutcomes(this.id),
+    };
+  }
+
+  /** Home's `profile` tool reaches the change path as Home (docs/settings-model.md 6.4). */
+  private homeProfileChangeAccess(): HomeProfileChangeAccess | undefined {
+    const owners = this.dependencies.settings();
+    if (!owners || this.liveProfile() !== "home") return undefined;
+    return {
+      change: (ops, input) => owners.changes.changeProfile(ops, {
+        actor: { kind: "home", id: this.id, sessionId: this.id, toolCallId: input.toolCallId },
+        author: input.author, commandId: input.commandId, web: input.web, ...(input.reason ? { reason: input.reason } : {}),
+      }),
     };
   }
 
@@ -2184,6 +2208,7 @@ export class RuntimeSlot {
         },
         ...(this.dependencies.homeWebTransport ? { homeWebTransport: this.dependencies.homeWebTransport } : {}),
         settings: () => this.settingsToolAccess(),
+        homeProfileChanges: () => this.homeProfileChangeAccess(),
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
@@ -2423,11 +2448,13 @@ export class RuntimeSlot {
   }
 
   private async initialize(): Promise<void> {
+    // A task resumed in place appends its own marker after its predecessor's (#929): every
+    // marker must name a distinct operation of a task bound to this session.
     const markers = this.canonicalTaskEvidence().filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
-    if (markers.length > 1) throw new GatewayError("conflict", "Conflicting canonical task markers");
-    if (markers.length) {
-      const marker = markers[0];
-      if (marker?.type !== "custom") throw new GatewayError("conflict", "Task authority is unavailable");
+    const operations = new Set(markers.map(marker => marker.type === "custom" ? (marker.data as { operationId?: unknown } | null)?.operationId : undefined));
+    if (operations.size !== markers.length) throw new GatewayError("conflict", "Conflicting canonical task markers");
+    for (const marker of markers) {
+      if (marker.type !== "custom") throw new GatewayError("conflict", "Task authority is unavailable");
       await this.dependencies.validateTaskMarker(this.id, marker.data);
     }
     this.runtime = await createAgentSessionRuntime(this.runtimeFactory(), {
@@ -2642,6 +2669,8 @@ export class RuntimeSlot {
     const session = this.runtime.session;
     const nextManager = session.sessionManager;
     const nextId = nextManager.getSessionId();
+    // Stop must settle even when a tool ignores cancellation (#961).
+    boundToolCancellation(session);
     await session.bindExtensions({
       uiContext: this.extensionHost.context(),
       mode: "rpc",
@@ -2755,6 +2784,49 @@ export class RuntimeSlot {
    * the idle check, the durable commit and the rebuild: the next prompt always
    * sees the new profile. A busy slot refuses retryably and changes nothing.
    */
+  /** A settled task resumes in place (#929): this session's next task operation is owned by
+   * `report`. Refused while any run, admission, subagent or previous task operation is live,
+   * so the predecessor's operation is never shared. The runtime is rebuilt over the same
+   * session manager, keeping identity, subscribers and presentation, so the task worker's
+   * tools and producer gates belong to the new operation. */
+  async bindTaskWorker(report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<void> {
+    await this.lane.run(async () => {
+      this.assertUsable();
+      this.assertChapterWritable();
+      // Knowledge observation of the stopped turn only reads its already-settled cut, so it
+      // never blocks the rebind (#959). Any other live work refuses it, named.
+      const blocking = this.dependencies.workRegistry.sessionWorkKinds(this.id, exceptWorkToken)
+        .filter(kind => kind !== "knowledge-observation");
+      const drain = this.administrativeDrainBlockers().map(fact => fact.category);
+      if (this.runtime.session.isStreaming || blocking.length || drain.length) {
+        throw new GatewayError("busy", `The worker session is busy (${[...new Set([...blocking, ...drain])].join(", ") || "streaming"}); resume it when that finishes`, true);
+      }
+      if (this.liveProfile() === "home" || this.dependencies.homeChapterState(this.id).homeId) {
+        throw new GatewayError("conflict", "A Home chapter cannot run a task");
+      }
+      if (this.taskWorker?.controlsActive || this.taskWait || this.activeOperationId !== undefined || this.operation !== undefined
+        || this.catalogHasActiveSubagents || this.isAgentAdmissionSettling) {
+        throw new GatewayError("conflict", "The worker session is still running; stop it before resuming");
+      }
+      const markers = this.canonicalTaskEvidence().filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER);
+      if (!markers.length) throw new GatewayError("conflict", "Only a Home task worker session can resume a task");
+      const work = this.dependencies.workRegistry.begin({
+        kind: "administrative-provider-package-operation",
+        sessionId: this.id,
+        hostEpoch: this.ui.hostEpoch,
+      });
+      try {
+        this.taskWorker = report;
+        await this.replaceRuntime();
+        this.revision += 1;
+        this.emit("session.resourcesChanged", {});
+        this.publishSnapshot();
+      } finally {
+        work.settle();
+      }
+    });
+  }
+
   async replaceRuntimeForProfile(commit: () => Promise<void>): Promise<void> {
     await this.lane.run(async () => {
       this.assertUsable();
@@ -4049,10 +4121,14 @@ export class RuntimeSlot {
   }
 
   private async notifyOwnedTerminal(terminal: OwnedOperationTerminal): Promise<void> {
-    const observer = this.ownedTerminalObservers.get(terminal.operationId)
-      ?? (this.taskWait?.wakeOperationId === terminal.operationId ? this.taskWait.observer : undefined);
+    // A held task's next turn reports to the task, even when Home's steering started that turn;
+    // the steering's own observer still learns its terminal.
+    const own = this.ownedTerminalObservers.get(terminal.operationId);
+    const wake = this.taskWait?.wakeOperationId === terminal.operationId ? this.taskWait.observer : undefined;
+    const observer = wake ?? own;
     if (!observer) return;
     this.ownedTerminalObservers.delete(terminal.operationId);
+    if (wake && own) await own(terminal);
     // Only the task's own turns (its first operation, then each wake) hold or settle it; a steer
     // or other owned operation reports to its own observer and never touches the wait.
     if (this.taskWorker && (terminal.operationId === this.taskWorker.identity.operationId || this.taskWait?.wakeOperationId === terminal.operationId)) {
@@ -4063,6 +4139,14 @@ export class RuntimeSlot {
       this.taskWait = undefined;
     }
     await observer(terminal);
+  }
+
+  /** A message the maintainer sent, or Home's exact-operation steering, to this worker's task. */
+  private sharedTaskSteering(ownership: PromptOwnership | undefined): boolean {
+    if (!this.taskWorker) return false;
+    if (!ownership) return true;
+    const fence = ownership.taskFence;
+    return !!fence && fence.taskId === this.taskWorker.identity.taskId && fence.operationId === this.taskWorker.identity.operationId;
   }
 
   /** The task operation a turn reports under. A wake that continues the held task is the task's
@@ -8509,11 +8593,15 @@ export class RuntimeSlot {
         if (ownership?.operationId === this.taskWorker.identity.operationId) {
           await this.persistCanonicalCustomEntry(HOME_TASK_MARKER,
             JSON.parse(JSON.stringify({ version: 1, receiptId: `task:${operationId}`, ...this.taskWorker.identity, sessionId: this.id })), `task:${operationId}`);
-        } else if (ownership?.kind === "subagentWake" && this.taskWait && this.taskWait.wakeOperationId === undefined
+        } else if ((ownership?.kind === "subagentWake" || this.sharedTaskSteering(ownership)) && this.taskWait && this.taskWait.wakeOperationId === undefined
           && this.taskWorker.acceptsSteering && this.activeOperationId === undefined && this.operation === undefined && !session.isStreaming) {
-          // The provider's wake continues the task this operation holds open; its marker stays the first one.
+          // The provider's wake, or the maintainer's or Home's message (#929), continues the task this
+          // operation holds open between turns; its marker stays the first one.
         } else {
           const fence = ownership?.taskFence;
+          // The maintainer and Home share one ordered steering lane per worker (#929): a maintainer
+          // message to a running task joins that lane whatever behavior the composer chose.
+          if (!ownership && this.taskWorker.acceptsSteering) behavior = "steer";
           if (behavior !== "steer" || this.activeOperationId !== this.taskWorker.identity.operationId
             || !session.isStreaming || !this.taskWorker.acceptsSteering
             || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.activeOperationId))) {
@@ -8743,7 +8831,7 @@ export class RuntimeSlot {
           this.publishSnapshot();
         } else if (!queuesIntoActiveRun) {
           this.activeOperationId = operationId;
-          if (ownership?.kind === "subagentWake" && this.taskWait && this.taskWait.wakeOperationId === undefined) {
+          if ((ownership?.kind === "subagentWake" || this.sharedTaskSteering(ownership)) && this.taskWait && this.taskWait.wakeOperationId === undefined) {
             this.taskWait.wakeOperationId = operationId;
           }
           // The canonical leaf immediately before Pi sees the input is the exact

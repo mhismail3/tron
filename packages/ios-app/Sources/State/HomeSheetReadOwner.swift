@@ -167,11 +167,12 @@ struct HomeChapterListDTO: Decodable, Equatable, Sendable {
         let userMessages: Int?
         let homeReplies: Int?
         let tasksDelegated: Int?
-        /// At most eight of the chapter's newest memory summaries, each at most 200 characters.
+        /// At most eight of the chapter's newest memory summaries, each at most 1000
+        /// characters with its markdown lines kept; a row previews one, a sheet shows it whole.
         let topics: [String]?
         var valid: Bool {
             [userMessages, homeReplies, tasksDelegated].allSatisfy { ($0 ?? 0) >= 0 }
-                && (topics?.count ?? 0) <= 8 && (topics ?? []).allSatisfy { $0.count <= 200 }
+                && (topics?.count ?? 0) <= 8 && (topics ?? []).allSatisfy { $0.count <= 1000 }
         }
     }
     struct Limits: Decodable, Equatable, Sendable {
@@ -251,6 +252,63 @@ struct HomeManageDTO: Equatable, Sendable {
     let chapters: HomeChapterListDTO?
     let tasks: HomeTaskPageDTO?
     let permissions: HomeTaskPermissionsDTO?
+    /// Absent on a Gateway without `home-profile-list.v1` or when its read was refused.
+    var profile: HomeProfileListDTO? = nil
+}
+
+/// Typed projection of `home.profileList`: every learned-profile Knowledge note,
+/// classified by the Gateway the way Home's instructions apply them. Only an
+/// `active` item applies; decode fails closed on protocol drift.
+/// One maintainer change to a learned-profile item, as `home.profileChange` takes it.
+/// `expectedRevision` is the revision he read: a note Home changed since is refused.
+struct HomeProfileChange: Encodable, Equatable, Sendable {
+    enum Action: String, Encodable, Sendable { case confirm, refine, supersede, retire }
+    let action: Action
+    let id: String
+    let expectedRevision: String
+    var text: String? = nil
+    var kind: HomeProfileListDTO.Item.Kind? = nil
+    var reason: String? = nil
+}
+
+/// `home.profileChange`'s answer: the record entries it wrote (each undoable through
+/// `settings.undo`) and the changed items as `home.profileList` lists them now.
+struct HomeProfileChangeResultDTO: Decodable, Sendable {
+    struct Change: Decodable, Sendable { let changeId: String }
+    let changes: [Change]
+    let items: [HomeProfileListDTO.Item]
+}
+
+struct HomeProfileListDTO: Decodable, Equatable, Sendable {
+    struct Item: Decodable, Equatable, Hashable, Sendable, Identifiable {
+        enum Kind: String, Codable, Sendable, CaseIterable {
+            case preference, standingDecision = "standing-decision", delegationDefault = "delegation-default", fact
+        }
+        enum Status: String, Decodable, Sendable { case active, superseded, retired }
+        let id: String
+        let revisionId: String
+        let kind: Kind
+        let text: String
+        let confirmed: Bool
+        let status: Status
+        let createdAt: String
+        let updatedAt: String
+        var valid: Bool {
+            !id.isEmpty && id.utf8.count <= 200 && !revisionId.isEmpty && revisionId.utf8.count <= 200
+                && text.utf16.count <= 4096 && [createdAt, updatedAt].allSatisfy { $0.utf8.count <= 64 }
+        }
+    }
+    let items: [Item]
+    let unclassified: Int
+
+    var active: [Item] { items.filter { $0.status == .active } }
+
+    static func decode(_ value: JSONValue) throws -> Self {
+        let list = try value.decode(Self.self)
+        guard list.unclassified >= 0, list.items.count <= 10_000, list.items.allSatisfy(\.valid),
+              Set(list.items.map(\.id)).count == list.items.count else { throw invalidHomeRead() }
+        return list
+    }
 }
 
 /// The Home context and memory text the sheets show, derived in one owner so the
@@ -291,6 +349,19 @@ enum HomeContextPresentation {
 /// One owner of the chapter rows' derived text, so the sheet and its tests
 /// describe the same ledger identically.
 enum HomeChapterPresentation {
+    /// A topic's row preview: one line of plain text (markdown marks dropped),
+    /// ended at a word boundary. Tapping the row opens the topic whole.
+    static func topicPreview(_ topic: String, limit: Int = 140) -> String {
+        let line = topic.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: #"^(?:[-*+]|\d+[.)]|#{1,6})\s+"#, with: "", options: .regularExpression) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        let plain = MarkdownPresentation.Inline(source: line).attributedString.map { String($0.characters) } ?? line
+        guard plain.count > limit else { return plain }
+        let prefix = String(plain.prefix(limit))
+        let cut = prefix.lastIndex(of: " ").map { String(prefix[..<$0]) } ?? prefix
+        return cut.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces)) + "…"
+    }
+
     static func manageSubtitle(_ chapter: HomeStatusDTO.Chapter) -> String {
         let count = chapter.count == 1 ? "1 chapter" : "\(chapter.count.formatted()) chapters"
         switch chapter.recoveryDecision {
@@ -383,9 +454,9 @@ struct HomeSheetReadIdentity: Hashable {
 
 enum HomeSheetReadQuery: Hashable, Sendable {
     case manage
-    case context
     case tasks(String?), task(String), permissions
     case chapters
+    case profile
     /// One chapter's memory when `sessionID` is set; otherwise the whole memory view.
     case memory(sessionID: String?, continuation: HomeMemoryViewDTO.Continuation?)
     /// The two lines one summary line covers.
@@ -395,9 +466,9 @@ enum HomeSheetReadQuery: Hashable, Sendable {
 
 enum HomeSheetContent {
     case manage(HomeManageDTO)
-    case context(HomeContextDTO)
     case tasks(HomeTaskPageDTO?, HomeStatusDTO), task(HomeTaskDTO?, HomeStatusDTO), permissions(HomeTaskPermissionsDTO?, HomeStatusDTO)
     case chapters(HomeChapterListDTO)
+    case profile(HomeProfileListDTO)
     case memory(HomeMemoryViewDTO)
     case evidence(HomeMemoryEvidencePageDTO)
 }

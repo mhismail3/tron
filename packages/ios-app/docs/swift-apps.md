@@ -1,6 +1,6 @@
 # Experimental: running single-file SwiftUI apps (#889)
 
-Status: experimental prototype, off by default behind a flag.
+Status: experimental prototype, off by default behind a flag that Settings › This iPhone can turn on.
 
 The idea comes from an X post by @ronithhh: a Swift interpreter that runs native,
 fully interactive iOS apps directly from a `.swift` file
@@ -24,10 +24,17 @@ runs that file as a native SwiftUI app in a large sheet.
 
 ## Flag
 
-Off by default; without it `.swift` artifacts are unchanged. Launch the app once
-with the argument `-tron.experimental.swiftApps YES` to enable it. The choice is
-recorded under the UserDefaults key `tron.experimental.swiftApps`, so later
-normal launches keep it; launching with `NO` turns it off.
+Off by default; without it `.swift` artifacts are unchanged. Turn it on from
+the iPhone in **Settings › This iPhone › Experimental › Run Swift files**
+(`ExperimentalSettingsView`). It is an iPhone-only preference with no Gateway
+setting behind it, stored under the UserDefaults key
+`tron.experimental.swiftApps`. The change applies at once: an open `.swift`
+sheet gains or loses its run control without a relaunch, because the sheet
+reads the observable `SwiftAppExperiment.shared` rather than UserDefaults.
+
+The launch argument `-tron.experimental.swiftApps YES` (or `NO`) still sets the
+same stored choice, so later normal launches keep it and the Settings switch
+shows and can change it.
 
 ```bash
 # Simulator (Development build)
@@ -153,6 +160,10 @@ fixture (`-readonly-preview-scenario display-swift…`):
 - `testDisplayedSwiftStoreAppSharesStateAcrossTabs` runs `budget`: an
   `ObservableObject` store shared through `environmentObject`, `TabView`,
   `List`, an enum `switch`, and `String(format:)`.
+- `testSettingsSwitchAddsAndRemovesSwiftRunControlLive` starts with the
+  runner off, turns it on in Settings › This iPhone › Experimental and runs
+  the displayed file, then turns it off and sees the run control gone, all in
+  one launch.
 - `testSwiftAppFailuresStayContainedInTheRunner` runs `broken` (line-numbered
   unsupported syntax), a file nested past the parser limit, and `limits`: an
   unsupported view, an infinite loop, unbounded recursion, unbounded string
@@ -167,5 +178,6 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag \
   --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftRunControlRequiresFlagAndCompletePreview \
   --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testDisplayedSwiftStoreAppSharesStateAcrossTabs \
-  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftAppFailuresStayContainedInTheRunner
+  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftAppFailuresStayContainedInTheRunner \
+  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSettingsSwitchAddsAndRemovesSwiftRunControlLive
 ```

@@ -78,7 +78,8 @@ extension HomeSheet {
             else { present(.memorySummary(line, sessionID: memoryFilter)) }
         } label: {
             TronSettingsRow(icon: HomeMemoryPresentation.icon(line), title: HomeMemoryPresentation.title(line),
-                            subtitle: HomeMemoryPresentation.text(line), subtitleLineLimit: 3, accent: .tronSessionTeal) {
+                            subtitle: HomeMemoryPresentation.text(line), subtitleLineLimit: 3,
+                            subtitleIsMarkdown: true, accent: .tronSessionTeal) {
                 Text(HomeMemoryPresentation.when(line) ?? "")
                     .font(TronTypography.caption)
                     .foregroundStyle(Color.tronTextMuted)
@@ -97,7 +98,7 @@ extension HomeSheet {
                     TronSettingsRow(icon: HomeMemoryPresentation.icon(line), title: HomeMemoryPresentation.title(line),
                                     subtitle: HomeSheetTime.range(line.firstAt, line.lastAt), accent: .tronSessionTeal)
                     divider()
-                    readingText(HomeMemoryPresentation.text(line))
+                    markdownText(HomeMemoryPresentation.text(line))
                 }
             }
             TronSettingsGroup("Covers", detail: "The two halves this summary was made from.", accent: .tronSessionTeal) {
@@ -121,7 +122,7 @@ extension HomeSheet {
                     TronSettingsRow(icon: Self.attributionIcon(item.attribution), title: Self.attributionLabel(item.attribution),
                                     subtitle: HomeSheetTime.relative(item.timestamp), accent: .tronSessionTeal)
                     divider()
-                    readingText(message)
+                    markdownText(message)
                     if item.projection.omitted || !item.projection.omissions.isEmpty {
                         TronCaption("Part of this message is left out of memory.")
                             .padding(.horizontal, 16).padding(.bottom, 14)
@@ -129,7 +130,7 @@ extension HomeSheet {
                 }
             }
             if let remembered {
-                TronSettingsGroup("Home remembers", accent: .tronSessionTeal) { readingText(remembered) }
+                TronSettingsGroup("Home remembers", accent: .tronSessionTeal) { markdownText(remembered) }
                     .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home-memory-remembered")
             }
@@ -183,6 +184,14 @@ extension HomeSheet {
         }
     }
 
+    /// Memory text is Home's own words, often markdown: the chat renderer shows it.
+    func markdownText(_ text: String) -> some View {
+        TronMarkdownView(text: text, streaming: false)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+    }
+
     func readingText(_ text: String) -> some View {
         Text(text)
             .font(TronTypography.body)
@@ -205,7 +214,7 @@ extension HomeSheet {
         }
     }
 
-    static func attributionIcon(_ attribution: HomeMemoryItemDTO.Attribution) -> String {
+    nonisolated static func attributionIcon(_ attribution: HomeMemoryItemDTO.Attribution) -> String {
         switch attribution {
         case .user: "person.fill"
         case .assistant: "house.fill"
@@ -214,7 +223,7 @@ extension HomeSheet {
         }
     }
 
-    static func attributionLabel(_ attribution: HomeMemoryItemDTO.Attribution) -> String {
+    nonisolated static func attributionLabel(_ attribution: HomeMemoryItemDTO.Attribution) -> String {
         switch attribution {
         case .user: "You"
         case .assistant: "Home"
@@ -268,6 +277,13 @@ enum HomeSheetTime {
     static func relative(_ timestamp: String?, now: Date = .now) -> String? {
         guard let timestamp, let date = HomeChapterPresentation.parse(timestamp) else { return nil }
         return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: now)
+    }
+
+    /// "Oct 13, 2026 at 10:30 PM · 2 days ago", for a detail row that names one instant.
+    static func absolute(_ timestamp: String, now: Date = .now) -> String {
+        guard let date = HomeChapterPresentation.parse(timestamp) else { return timestamp }
+        let when = date.formatted(date: .abbreviated, time: .shortened)
+        return "\(when) · \(RelativeDateTimeFormatter().localizedString(for: date, relativeTo: now))"
     }
 
     /// "Mar 3 – Mar 9", or one date when the range is a single day.

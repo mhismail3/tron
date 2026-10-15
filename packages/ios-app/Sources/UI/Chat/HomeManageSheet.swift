@@ -1,9 +1,10 @@
 import SwiftUI
 import TronMobileCore
 
-/// The Manage Home main sheet: the Home chat's stats card with the state pill,
-/// its model card with the memory model row, the rows container of Home
-/// sub-sheets, and the pause and disable controls.
+/// The Manage Home main sheet: the Home chat's context card (state pill, the
+/// last activation, and the context window split by section), its model card
+/// with the memory model row, the rows container of Home sub-sheets, and the
+/// pause and disable controls.
 extension HomeSheet {
     /// The state pill's accent: a working or ready Home reads as success, a blocked
     /// or recovering one as an error, and a paused or disabled one as idle.
@@ -19,21 +20,22 @@ extension HomeSheet {
         let unresolved = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
         let mutating = model.homeMutations.isRunning(profileID: profileID)
         return VStack(alignment: .leading, spacing: 18) {
-            statsAndModel(read.status)
+            statsAndModel(read)
             manageRows(read, unresolved: unresolved)
             settingsRow
             manageControls(read.status, unresolved: unresolved, mutating: mutating)
         }
     }
 
-    @ViewBuilder func statsAndModel(_ status: HomeStatusDTO) -> some View {
+    @ViewBuilder func statsAndModel(_ read: HomeManageDTO) -> some View {
+        let status = read.status
         if let sessionID, let snapshot = model.sessionContextPresentation(for: sessionID) {
             SessionContextUsageCard(
                 snapshot: snapshot,
-                accessory: TronStatusPill(text: HomeStatusLinePresentation.state(status),
-                                          accent: Self.statusAccent(status))
-                    .accessibilityIdentifier("home-manage-state")
+                accessory: contextHeader(status, breakdown: read.context.breakdown),
+                segments: read.context.breakdown.map(Self.contextSegments)
             )
+            .accessibilityIdentifier("home-context-breakdown")
             // Home-originated and Home-task settings requests belong to Manage Home.
             .settingsApprovals(.home)
             SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot,
@@ -55,31 +57,74 @@ extension HomeSheet {
         }
     }
 
-    /// The Home sub-sheets, each a standard chevron row in the rows container. A row's
+    /// Home's state pill, then what started the last activation and when.
+    private func contextHeader(_ status: HomeStatusDTO, breakdown: HomeContextDTO.Breakdown?) -> some View {
+        HStack(spacing: 8) {
+            TronStatusPill(text: HomeStatusLinePresentation.state(status), accent: Self.statusAccent(status))
+                .accessibilityIdentifier("home-manage-state")
+            if let breakdown {
+                Text(HomeContextPresentation.activationLine(breakdown.activation))
+                    .font(SessionSummaryTypography.detail)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("home-context-activation")
+            }
+        }
+    }
+
+    /// The context window split by where the last activation's request went.
+    static func contextSegments(_ breakdown: HomeContextDTO.Breakdown) -> SessionContextSegments {
+        SessionContextSegments(
+            used: breakdown.effectiveTokens, window: breakdown.contextWindow,
+            segments: breakdown.sections.map { section in
+                .init(id: section.id.rawValue,
+                      label: HomeContextPresentation.sectionLabel(section.id, input: breakdown.activation.kind),
+                      tokens: section.tokens, color: sectionColor(section.id),
+                      detail: HomeContextPresentation.countLine(section))
+            })
+    }
+
+    static func sectionColor(_ id: HomeContextDTO.Breakdown.Section.ID) -> Color {
+        switch id {
+        case .instructions: .tronSlate
+        case .profile: .tronPurple
+        case .memory: .tronKnowledge
+        case .chapter: .tronSessionTeal
+        case .results: .tronSuccess
+        case .input: .tronBlue
+        }
+    }
+
+    /// The Home sub-sheets, each a standard row in the rows container. A row's
     /// secondary line is read from this sheet's load, never from a sub-sheet.
     func manageRows(_ read: HomeManageDTO, unresolved: Bool) -> some View {
         let status = read.status
         let summaries = read.context.breakdown?.sections.first { $0.id == .memory }?.count
         let memoryBrowser = model.gatewayInfo?.capabilities.contains("home-memory-view.v1") == true
         let chapterList = model.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
+        let profileList = model.gatewayInfo?.capabilities.contains("home-profile-list.v1") == true
         return TronGlassCard(accent: .tronSessionTeal) {
             VStack(spacing: 0) {
-                navigationRow(icon: "doc.text.magnifyingglass", title: "Home Context",
-                              subtitle: "Next request and delivered context", destination: .context, id: "home-manage-context")
+                // What Home has learned about you sits above what it remembers.
+                if profileList {
+                    navigationRow(icon: "person.text.rectangle", title: "Profile",
+                                  subtitle: HomeManageRowPresentation.profile(read.profile),
+                                  destination: .profile, id: "home-manage-profile")
+                    if memoryBrowser || (status.chapter != nil && chapterList) || status.taskRecovery != nil { divider() }
+                }
                 if memoryBrowser {
-                    divider()
                     navigationRow(icon: "brain", title: "Memory",
                                   subtitle: HomeStatusLinePresentation.memory(status, summaries: summaries, unresolvedCommand: unresolved),
                                   destination: .memory(sessionID: nil, chapterOrdinal: nil), id: "home-manage-memory-browser")
                 }
                 if let chapter = status.chapter, chapterList {
-                    divider()
+                    if memoryBrowser { divider() }
                     navigationRow(icon: "book", title: "Chapters",
                                   subtitle: HomeManageRowPresentation.chapters(read.chapters, fallback: chapter),
                                   destination: .chapters, id: "home-manage-chapters")
                 }
                 if status.taskRecovery != nil {
-                    divider()
+                    if memoryBrowser || (status.chapter != nil && chapterList) { divider() }
                     navigationRow(icon: "checklist", title: "Tasks",
                                   subtitle: HomeManageRowPresentation.tasks(read.tasks, admitted: status.admitsTaskReads),
                                   destination: .tasks, id: "home-manage-tasks")
@@ -102,11 +147,7 @@ extension HomeSheet {
                         .tronNavigationTitle("Home Settings")
                 } label: {
                     TronSettingsRow(icon: "slider.horizontal.3", title: "Home Settings",
-                                    subtitle: "Every setting Home uses", accent: .tronSessionTeal) {
-                        Image(systemName: "chevron.right")
-                            .font(TronTypography.caption)
-                            .foregroundStyle(Color.tronSessionTeal)
-                    }
+                                    subtitle: "Every setting Home uses", accent: .tronSessionTeal)
                 }
                 .accessibilityIdentifier("home-manage-settings")
             }
@@ -176,15 +217,11 @@ extension HomeSheet {
         }
     }
 
-    /// A chevron row that presents a managed child sheet.
+    /// A row that presents a managed child sheet.
     func navigationRow(icon: String, title: String, subtitle: String? = nil,
                        destination: HomeSheetDestination, id: String) -> some View {
-        Button { present(destination) } label: {
-            TronSettingsRow(icon: icon, title: title, subtitle: subtitle, accent: .tronSessionTeal) {
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.caption)
-                    .foregroundStyle(Color.tronSessionTeal)
-            }
+        Button { present(destination, rowAccent: .tronSessionTeal) } label: {
+            TronSettingsRow(icon: icon, title: title, subtitle: subtitle, accent: .tronSessionTeal)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)

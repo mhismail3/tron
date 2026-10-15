@@ -474,6 +474,7 @@ interface CatalogPageSeed {
   readonly kind: SessionSummary["kind"];
   readonly parentSessionId?: string;
   readonly creationOrigin?: SessionCreationOrigin;
+  readonly homeTaskId?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly activeSince?: string;
@@ -649,6 +650,11 @@ export class RuntimeRegistry {
    * generation keys immutable compact page seeds without making them catalog
    * authority. */
   private catalogProjectionGeneration = 0;
+  /** Worker session id → the Home task that created it. The task ledger is the
+   * authority; the dispatcher seeds this from its recovery pass and adds each
+   * bind, so the dashboard learns which rows are Home workers from the catalog
+   * it already syncs instead of querying the ledger. */
+  private readonly homeTaskWorkers = new Map<string, string>();
   private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
   private readonly pendingSlotStarts = new Map<string, PendingColdLoad>();
   private reservedSlotStarts = 0;
@@ -851,6 +857,7 @@ export class RuntimeRegistry {
         },
         sessionFile: (sessionId) => this.homeSessionFile(sessionId),
         hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
+        waitingForUser: (sessionId) => this.slots.get(sessionId)?.catalogWaitingForUser ?? false,
         chapterMetrics: async (sessionId) => {
           const slot = this.slots.get(sessionId);
           if (!slot) return this.coldHomeChapterMetrics(sessionId);
@@ -1441,7 +1448,10 @@ export class RuntimeRegistry {
         recovery: boolean,
         observed: boolean,
       ) => this.attentionLane.run(async () => {
-        const result = await this.attention.complete(sessionId, completion.id, !recovery && observed);
+        // A Home worker's completions are read by construction (#1003). Startup
+        // recovery runs before the worker index is seeded; seeding acknowledges those.
+        const read = (!recovery && observed) || this.homeTaskWorkers.has(sessionId);
+        const result = await this.attention.complete(sessionId, completion.id, read);
         if (result.changed) await this.publishAttentionSummary(sessionId, result.projection);
       }),
       closed: (sessionId: string, slot: RuntimeSlot) => {
@@ -2002,7 +2012,7 @@ export class RuntimeRegistry {
       homeChapterAdmission: (sessionId: string, metrics: { bytes: number; entries: number }) => this.home.assertChapterAdmission(sessionId, metrics),
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
-      homeTask: (sessionId: string, request: import("../home/tron-home-extension.js").HomeTaskToolRequest) => this.home.taskTool(sessionId, request),
+      homeTask: (sessionId: string, request: unknown) => this.home.taskTool(sessionId, request),
       homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => this.dispatchHomeTask(sessionId, request, signal),
       validateTaskMarker: (sessionId: string, marker: unknown) => this.home.validateTaskMarker(sessionId, marker),
       ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),
@@ -2232,6 +2242,16 @@ export class RuntimeRegistry {
     if (!await this.attentionEntryStillAdmitted(entry)) {
       throw new GatewayError("busy", "Automation target changed during validation", true);
     }
+  }
+
+  /** The leased worker of a task resumed in place (#929). Viewing the session never blocks
+   * this: an open slot keeps its subscribers and is rebound, not replaced. */
+  async resumeTaskWorker(sessionId: string, report: import("../home/home-task-report.js").HomeTaskReportOwner, exceptWorkToken?: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
+    const lease = await this.acquireOwnedSessionLease(sessionId);
+    try {
+      await lease.slot.bindTaskWorker(report, exceptWorkToken);
+      return lease;
+    } catch (error) { lease.release(); throw error; }
   }
 
   async acquireOwnedSessionLease(sessionId: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
@@ -2827,6 +2847,7 @@ export class RuntimeRegistry {
         kind,
         ...(parentSessionId ? { parentSessionId } : {}),
         ...(session.creationOrigin ? { creationOrigin: session.creationOrigin } : {}),
+        ...(this.homeTaskWorkers.has(session.id) ? { homeTaskId: this.homeTaskWorkers.get(session.id)! } : {}),
         createdAt: session.created.toISOString(),
         updatedAt: latest?.updatedAt ?? session.modified.toISOString(),
         ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
@@ -2861,6 +2882,7 @@ export class RuntimeRegistry {
           ...(automationOwner ? {
             creationOrigin: { kind: "automation", automationId: automationOwner.automationId },
           } as const : {}),
+          ...(this.homeTaskWorkers.has(id) ? { homeTaskId: this.homeTaskWorkers.get(id)! } : {}),
           createdAt: slot.catalogCreatedAt,
           updatedAt: latest?.updatedAt ?? slot.catalogCreatedAt,
           ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
@@ -2900,6 +2922,7 @@ export class RuntimeRegistry {
       + (seed.parentSessionId ? Buffer.byteLength(seed.parentSessionId) : 0)
       + (seed.creationOrigin ? Buffer.byteLength(seed.creationOrigin.kind)
         + Buffer.byteLength(seed.creationOrigin.automationId) : 0)
+      + (seed.homeTaskId ? Buffer.byteLength(seed.homeTaskId) : 0)
       // Object/reference, number, and boolean storage for the seed and captured
       // summary/attention revision fields. String payloads are counted above.
       + 160, 0);
@@ -2915,6 +2938,7 @@ export class RuntimeRegistry {
         kind: seed.kind,
         ...(seed.parentSessionId ? { parentSessionId: seed.parentSessionId } : {}),
         ...(seed.creationOrigin ? { creationOrigin: seed.creationOrigin } : {}),
+        ...(seed.homeTaskId ? { homeTaskId: seed.homeTaskId } : {}),
         createdAt: seed.createdAt,
         updatedAt: seed.updatedAt,
         ...(seed.activeSince ? { activeSince: seed.activeSince } : {}),
@@ -3103,11 +3127,13 @@ export class RuntimeRegistry {
     const choiceNotes = [clampNote].filter(Boolean).join("; ");
     const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.`;
     const { model: _model, thinking: _thinking, ...input } = request;
-    return this.home.dispatchTask(sessionId, { ...input, ...choice, intent: brief,
+    const worker = { model: modelText, thinking: thinkingText, modelSource, thinkingSource, ...(choiceNotes ? { note: choiceNotes } : {}) };
+    const handle = await this.home.dispatchTask(sessionId, { ...input, ...choice, intent: brief,
       provenance: {
         model: { via: fallback ? "home-fallback" : !fromProfileModel ? "home-explicit" : profileModel && "provider" in profileModel ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
         thinking: { via: !fromProfileThinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
       } }, signal);
+    return { ...handle, worker };
   }
 
   /** Admits a delegation's model and thinking level against the Gateway's own model
@@ -4848,6 +4874,74 @@ export class RuntimeRegistry {
   async taskWorkerModel(sessionId: string): Promise<{ provider: string; id: string } | undefined> {
     const change = (await this.taskWorkerEntries(sessionId)).findLast(entry => entry.type === "model_change");
     return change?.type === "model_change" ? { provider: change.provider, id: change.modelId } : undefined;
+  }
+
+  /** Record which Home task created each worker session. The first task to
+   * name a session owns it (a resumed task rebinds the same worker). A change
+   * invalidates catalogs once per call, so recovery publishes one batch.
+   *
+   * Home workers never read as unread (#1003): their result reports back to
+   * Home, so only sessions the maintainer started himself join the Unread
+   * queue. Every completion of a recorded worker is admitted read. A worker
+   * newly recorded here, which recovery does for every worker in the ledger at
+   * startup, also has any earlier completion acknowledged: that clears unread
+   * left by builds before this rule and completions recovered at startup
+   * before this index was seeded. An explicit mark-unread is kept. */
+  recordTaskWorkers(workers: Iterable<readonly [sessionId: string, taskId: string]>): void {
+    let changed = false;
+    const acknowledge: string[] = [];
+    for (const [sessionId, taskId] of workers) {
+      if (this.homeTaskWorkers.has(sessionId)) continue;
+      this.homeTaskWorkers.set(sessionId, taskId);
+      changed = true;
+      if (this.attention.hasUnacknowledgedCompletion(sessionId)) acknowledge.push(sessionId);
+    }
+    if (acknowledge.length > 0) void this.acknowledgeTaskWorkers(acknowledge);
+    if (!changed) return;
+    this.catalogProjectionGeneration += 1;
+    this.options.sessionListChanged();
+  }
+
+  private async acknowledgeTaskWorkers(sessionIds: readonly string[]): Promise<void> {
+    await this.attentionLane.run(async () => {
+      let cold = false;
+      for (const sessionId of sessionIds) {
+        try {
+          const result = await this.attention.acknowledgeCompletions(sessionId);
+          if (!result.changed) continue;
+          const latest = this.latestSummaries.get(sessionId);
+          if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
+          else cold = true;
+        } catch {
+          // The worker stays unread until the next startup's seeding retries it.
+          this.options.persistenceDiagnostic?.(sessionId, "home-worker-attention-failed");
+        }
+      }
+      if (cold) {
+        this.catalogProjectionGeneration += 1;
+        this.options.sessionListChanged();
+      }
+    });
+  }
+
+  /** A Home task settled: its worker session gains one attention completion,
+   * keyed by the task, admitted read (#1003) so the worker never joins the
+   * Unread queue; the completion still advances the row's attention revision.
+   * A worker ends through its `report` tool call, which is never a successful
+   * final assistant reply, so the ordinary completion path cannot see it. */
+  taskWorkerSettled(sessionId: string, taskId: string): Promise<void> {
+    return this.attentionLane.run(async () => {
+      const result = await this.attention.complete(sessionId, `task:${taskId}`, true);
+      if (!result.changed) return;
+      const latest = this.latestSummaries.get(sessionId);
+      if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
+      else {
+        // A cold worker has no retained summary: invalidate catalogs, as
+        // `session.attention.set` does, rather than fabricating one.
+        this.catalogProjectionGeneration += 1;
+        this.options.sessionListChanged();
+      }
+    });
   }
 
   /** A worker's display name: the live session's own name, else its catalog row.

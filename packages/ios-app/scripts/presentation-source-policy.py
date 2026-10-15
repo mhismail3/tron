@@ -10,6 +10,9 @@ import sys
 import unittest
 
 OWNER = pathlib.PurePosixPath("State/PresentationActivityCoordinator.swift")
+# The Swift app interpreter replays a displayed app's own `.sheet` modifier inside
+# its managed runner sheet; that is the app's presentation, not a Tron surface.
+INTERPRETED = pathlib.PurePosixPath("UI/SwiftApps/SwiftAppViews.swift")
 # Mask comments/strings so documentation and string literals aren't controls.
 NON_CODE = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"""[\s\S]*?"""|"(?:\\.|[^"\\])*"')
 PRESENTATION = re.compile(r"\.\s*(sheet|fullScreenCover)\s*\(")
@@ -21,7 +24,7 @@ def violations(relative_path, text):
         f"{relative_path}:{code.count(chr(10), 0, match.start()) + 1}: "
         f"raw {match.group(1)} must use the managed presentation owner"
         for match in PRESENTATION.finditer(code)
-        if pathlib.PurePosixPath(relative_path) != OWNER
+        if pathlib.PurePosixPath(relative_path) not in (OWNER, INTERPRETED)
     ]
 
 

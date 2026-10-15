@@ -658,6 +658,11 @@ runtime neither calls nor has registered a tool outside it.
   `unavailable`: `not-home-session`, `memory-not-configured`, `memory-unavailable`,
   `memory-blocked` or `timestamp-unavailable`. A call never opens, configures or
   resumes a memory.
+- **Typed details.** Each result's details carry `status` (`ok`, `invalid-arguments`,
+  `unavailable` with its `reason`). An answered `date` adds `date: { id, at }` (the
+  canonical instant, ISO 8601) and an answered `memory_search` adds `search: { query,
+  from, to, matches, shown, omitted, capped }`, so a transcript reader never parses the
+  text the model reads.
 - **Dates.** A `date` answers the instant its catalog record holds; the store
   refuses records without one, and a catalog without instants is refused on open
   (`memory-unavailable`). An unreadable instant answers
@@ -733,20 +738,27 @@ run from the task result alone, so it carries none).
 
 Home keeps what the maintainer taught it as Knowledge notes (#731, epic #734). The
 Knowledge owner is the only store: there is no Home-side profile file, cache or
-timer. The `profile` tool is the only writer, and every change is one Knowledge note
-mutation.
+timer. Home's `profile` tool and the maintainer's `home.profileChange` are the two
+writers, and they share one implementation, `HomeProfileItems`
+(`home-profile.ts`). Both run through the settings change path, which records each
+change and makes it undoable ([settings-model.md 6.4](settings-model.md#64-learned-profile-changes)).
 
 - **Membership.** A personal-scope note is a profile item when it carries the
   `home-profile` label and exactly one `kind-<kind>` label, where kind is
   `preference`, `standing-decision`, `delegation-default` or `fact`. Provenance never
   decides membership: it changes when the maintainer edits a note natively.
-- **Writes.** `profile` takes `learn(kind, text)`, `refine(id, text)`,
-  `supersede(id, kind, text)` and `retire(id, reason)`, plus an optional `reason` on
-  refine and supersede. Every write carries provenance `actor: agent`, `source: home`,
-  the Home chapter session, and a `sessionEntry` citation of the last maintainer
-  message on the chat's branch, the message the turn answers. Items are always written
-  unconfirmed. Only Knowledge's native confirmation owner sets `confirmed`. The tool
-  result states what was saved, and the call is a visible transcript entry.
+- **Writes.** `profile` takes `learn(kind, text)`, `refine(id, text?, kind?)` (at
+  least one of the two; a kind change keeps the note), `supersede(id, kind, text)` and
+  `retire(id, reason)`, plus an optional `reason` on refine and supersede. Every write
+  carries provenance `actor: agent`, `source: home`, the Home chapter session, and a
+  `sessionEntry` citation of the last maintainer message on the chat's branch, the
+  message the turn answers. Home's items are always written unconfirmed. The
+  maintainer's own changes (`confirm`, `refine`, `supersede`, `retire` from Manage
+  Home) are written confirmed, with provenance `actor: user`, `source: home-profile`. The tool
+  result states what was saved, and the call is a visible transcript entry. Its details
+  are `saved` (with the note `id`, `revisionId`, `kind`, `supersededId` and, for refine,
+  supersede and retire, the replaced item's `previousText`), `refused` with its `reason`,
+  or `unavailable`.
 - **Ledger.** Each action is a note revision carrying its reason
   (`provenance.reason`). Refine keeps every earlier revision, readable by revision ID
   through `knowledge read`. Supersede creates a new item whose `supersedes` relation
@@ -773,6 +785,15 @@ mutation.
   them with refine, supersede or retire.
 - **Unavailable.** When Knowledge is absent or the read fails, the section says so.
   It never reads as an empty profile.
+- **Read.** `home.profileList` answers every profile note through the same classifier
+  (id, revision, kind, text, confirmed, status, timestamps, plus the `unclassified`
+  count) for Manage Home's Profile row. It is read-only and needs a Knowledge owner.
+- **Maintainer changes.** `home.profileChange` takes typed ops, each with the
+  `expectedRevision` the maintainer read. A note Home changed since is refused with
+  `conflict`, and `details.current` holds the item as it now stands; nothing is
+  overwritten. Each change, Home's included, is a `home.profile.item` record entry in
+  Changes, and `settings.undo` reverts it. Changes apply from Home's next activation,
+  because the section is read from Knowledge then.
 - **Native edits.** iOS and the Mac dashboard save notes from typed drafts that do not
   model labels or retirement. The Knowledge owner keeps `tags` and `retired` when an
   update or correction omits them, so a native confirmation, edit or correction keeps
@@ -962,6 +983,9 @@ field is same-as-Home, read from Home's live session at that boundary. An explic
 field still resolves from the profile. Choices are copied into the task brief and are never
 re-resolved for that worker. A later Home model/profile change therefore affects only a later
 delegation. Ordinary sessions never read this profile and keep their repo/Mac defaults.
+The `delegate` result's details carry the same resolution as `worker: { model, thinking,
+modelSource, thinkingSource, note? }` (the brief's text values), so a transcript reader shows
+the worker choice without parsing the brief.
 
 The resolved model must be registered, usable (its provider has credentials) and not virtual.
 An unavailable profile-derived model falls through to the worker's normal Gateway/project
@@ -1305,13 +1329,29 @@ work. One per-process result is shared by every task surface.
   state, startedAt, lastActivityAt }`; `total` counts every live run. A settled task lists none,
   and nothing is persisted: the task record stays strict v1. The field is additive, so released
   iOS decodes the status without it. A run's `state` is its own lifecycle, or a live workflow
-  child's when the run's own work has ended. Viewing never changes control. Home's
-  `task` tool exposes `status`, `steer` and `stop`, only for tasks bound to the
-  enabled Home's identity and generation; it can never reconfirm, revoke or decide.
-  Status follows Home across disable and re-enable but never transfers control.
-- **Steer and Stop** read status, then send the exact fenced command; an intervening
-  change refuses rather than targeting a successor. Stop receipts can be repeated
-  after settlement without repeating cancellation.
+  child's when the run's own work has ended. Viewing never changes control.
+- **Home's `task` tool (#961)** is one flat object schema, `action` (`list`, `status`,
+  `report`, `steer`, `stop`, `resume`) plus optional `taskId`, `text`, `operationId`,
+  `offset` and `limit`, each described. Providers keep only a tool's top-level
+  `properties`, so a top-level union reached the model as an empty schema; per-action
+  requirements are checked by `admitHomeTaskToolRequest`, whose refusals name the field,
+  what the action takes and, for an unknown task, up to five close task IDs. `list` (or
+  `status` without `taskId`) returns control rows: `taskId`, title, `state` (`starting`,
+  `queued`, `running`, `settled`), outcome and refusal reason/detail, worker `sessionId`,
+  the `operationId` a control would act on, and the `actions` that apply now. The tool acts
+  only on tasks bound to the enabled Home's identity and generation; it can never
+  reconfirm, revoke or decide. Status follows Home across disable and re-enable but never
+  transfers control.
+- **Steer, Stop and Resume** need only `taskId` (and `text` to steer). The Gateway acts on
+  the worker's current task: the last resume successor of the named task that is pending,
+  running or bound a worker (refused-before-start successors are skipped, as resume skips
+  them), with that task's current operation (`queued` for a queued task). The reply names
+  the task acted on and `resolvedFrom` when it differs. An explicit `operationId` is a race
+  guard: a mismatch is refused with the current task, state and operation. An action that
+  does not apply (steer a settled task, resume a running one) is refused with the state and
+  the action to use instead; a refusal from the owner carries its code and reason and the
+  task's state after it. Stop receipts can be repeated after settlement without repeating
+  cancellation.
 - Home and maintainer steering share RuntimeSlot's session lane; accepted lane order
   is authoritative. Steering cannot start a successor, and a report that races a
   delayed steer prevents it. There is no takeover state and no transfer command.
@@ -1501,7 +1541,10 @@ vocabulary.
 `home.v1` is advertised in `hello` and `system.info` when the Gateway has a Home
 owner. `home-memory-view.v1`
 additionally gates the memory-browser reads below, and `home-chapter-list.v1`
-gates `home.chapterList`; `home.v1` alone promises neither. Parameter objects are
+gates `home.chapterList`; `home.v1` alone promises neither. `home-profile-list.v1`
+gates `home.profileList`, and `home-profile-edit.v1` gates `home.profileChange` and the
+undo of profile entries; both are advertised only with a Knowledge owner. Without the
+edit capability, iOS keeps the Profile sheet read-only. Parameter objects are
 strict: unknown fields are `invalid_request`. **Receipted** mutations carry a
 `commandId` and use the bounded receipt
 described in [Logical route and receipts](#logical-route-and-receipts).
@@ -1512,6 +1555,8 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.context` | none | read | Bounded request context of the current or last activation, with its `breakdown` by section ([Request breakdown](#request-breakdown)). Never a message body. |
 | `home.open` | none | read | Logical route and binding. Creates no runtime and materializes no successor. |
 | `home.chapterList` | none | read | The whole chapter ledger in ledger order, each chapter with state, `createdAt`, `sealedAt?`, `activationStarted`, `sessionPresent` and metrics, plus the shared soft and hard rollover limits (`home-chapter-list.v1`, #740). Each chapter also carries `contents` ([Chapter contents](#chapter-contents)). Sealed chapters answer exactly their recorded seal metrics (a disable-sealed chapter has none); only the active chapter is measured live, and only while its session is present, so absent sizes mean unmeasured, never zero. Undesignated refuses `not_found`; an unavailable record refuses `conflict`, never a partial list. A disabled Home still lists its chapters. |
+| `home.profileList` | none | read | The learned profile ([The learned profile](#the-learned-profile)): every profile note with `id`, `revisionId`, `kind`, `text`, `confirmed`, `status` (`active`, `superseded`, `retired`), `createdAt` and `updatedAt` in Home's order, plus `unclassified` (`home-profile-list.v1`). A Gateway without Knowledge refuses `unsupported`. |
+| `home.profileChange` | `commandId`, `changes` (1–50 of `{ action: confirm\|refine\|supersede\|retire, id, expectedRevision, text?, kind?, reason? }`) | receipted | The maintainer's learned-profile changes ([The learned profile](#the-learned-profile)), applied in order through the settings change path as one undoable group. Refine needs `text` or `kind`; supersede needs both. Returns `{ status, tier, changes, saved, items }`: `changes` are the record entries (one per touched note, key `home.profile.item`, qualifier `note`), and `items` are the changed items as `home.profileList` lists them. A stale `expectedRevision`, or an item that is no longer active, refuses `conflict` with `details.current`; a failure part-way rolls back the ops already applied (`home-profile-edit.v1`). |
 | `home.prompt` | `commandId`, `text`, `uploadIds` (at most 10, into the resolved chapter), `behavior` (`steer` or `followUp` while a turn runs), `resourceInvocation` | receipted | The composer's whole prompt contract, admitted by the same code as `session.prompt`. Returns the physical session and operation. |
 | `home.designate` | `commandId`, `model?` | receipted | With no record: creates the working directory and its trust decision, a **new** session whose first runtime has the Home profile, applies the model, writes the record, and returns `{ homeId, sessionId, generation }`. An enabled record whose session still exists is idempotent when the model is absent or matches; a different model refuses with a conflict directing to `settings.change`. A disabled record re-enables the same session at `generation + 1`, preserving any `reserved` or `materializing` successor for the next `home.prompt`. A record whose session is **gone** is given a fresh session at `generation + 1`, enabled or not: the record is the only evidence of the designation, and the dangling ID is never re-enabled. |
 | `home.disable` | `commandId` | receipted | `enabled: false` at `generation + 1`. The session stays ordinary. A record whose session is gone is only marked disabled. |
@@ -1547,7 +1592,7 @@ HomeStatus {
   available, reason?, enabled,
   homeId?, sessionId?, openSessionId?, generation?, routeGeneration?, bindingRevision?, model?,
   chapter?: { count, currentBytes?, currentEntries?, recoveryDecision: "none" | "reserved" | "materializing" },
-  live, sessionPresent,
+  live, sessionPresent, waitingForUser?,
   memory: HomeMemoryStatus
 }
 HomeMemoryStatus {
@@ -1575,6 +1620,10 @@ HomeMemoryStatus {
   whether it exists, live or on disk. Before the
   first catalog cut completes, `sessionPresent` is `true`, because an unread catalog
   cannot prove absence.
+- `waitingForUser` is true while the live `openSessionId` runtime is blocked on a
+  semantic user interaction (a pending `ask_user` question); it is the same
+  interaction state a session row's `waitingForUser` projects. A designated Home
+  always reports it, `false` when nothing is openable or no runtime is live.
 - `taskRecovery` fences only task surfaces until the next Gateway start. It does not
   gate ordinary readiness or `ok`.
 - The memory projection carries counters and state only, never messages or view
@@ -1617,10 +1666,11 @@ refuses with retryable `busy`.
     identity strings bounded to 200 UTF-8 bytes; references must match the current catalog.
   - **Continuations** are canonical base64url `{ revision, offset, limit, sessionId? }` (at
     most 1,024 characters). Repeat the same `limit` and filter. The content-derived revision
-    covers the Home identity, generation, committed catalog and node revision, and
-    per-chapter source cuts; any append, invalidation, summary settlement or changed cut
-    returns a retryable `conflict` with `home-memory-revision-changed`, and the client
-    reloads the first page. Offsets beyond the lines refuse rather than clamp.
+    covers the Home identity, generation, committed catalog and node revision, per-chapter
+    source cuts, and the exact ordered part decomposition rendered by the current view. A
+    change to any of these—including a different decomposition rebuilt after Gateway restart—
+    returns a retryable `conflict` with `home-memory-revision-changed`, and the client reloads
+    the first page. Offsets beyond the lines refuse rather than clamp.
   - **`sessionId`** filters to one chapter: a line crossing the chapter's boundary is split
     into its halves recursively until each piece is inside or outside, so no line covers
     another chapter's messages. A session that is not a chapter of this Home refuses with
@@ -1641,16 +1691,29 @@ refuses with retryable `busy`.
 
 Every read proves the complete frozen Home cut through the per-chapter index before
 it returns anything, then fences the exact ledger, binding and
-memory revision after its awaits. The evidence reader keeps only the selected
-bounded line and re-proves its chapter prefix at use. It never opens a
+memory revision after its awaits. The evidence reader proves its chapter, then
+reads only the selected bounded line at its proven position and checks that
+line's own digest at use. It never opens a
 writer-capable `SessionManager`. Missing, changed or malformed sources yield no
 partial page or evidence, even when an earlier chapter was readable
 (`busy`, `home-memory-source-unavailable`). Unknown fields and malformed bounds are
 `invalid_request`. Source details, references and content are never
 logged. Both endpoints use the shared disposable read deadline. Cancellation never
-cancels a prompt or an accepted mutation. Proof streams raw lines but
-traverses the compact index, so its cost scales with the Home history, not only with
-the page size. No persisted format and no client cache is introduced.
+cancels a prompt or an accepted mutation.
+
+Proof cost does not grow with Home's history per read (#940). The memory owner
+keeps one in-memory proof per chapter (`HomeSourceProofs` in
+`episodic/home-source.ts`): the prefix digest and leaf re-derived from bytes, the
+file stat it was read under, and each entry's line position. A proof is reused
+while its file's stat is identical (the test sealed chapters are held to). An
+appended active chapter is extended over its new bytes only, after the line
+ending at the proven boundary still hashes to the proven leaf (ingestion's own
+append test); navigation or any other change re-proves the whole chapter. A
+proof runs once per chapter at a time and a cancelled read abandons only its
+wait, so a cold proof slower than the read deadline still completes for the
+retry. Activation's cut lookup shares the same proofs. Only the first read after
+a Gateway start proves all history from its first byte. No persisted format and
+no client cache is introduced.
 
 ## The terminal client
 
@@ -1739,6 +1802,7 @@ without a retained artifact.
 | `src/sessions/home-profile.integration.test.ts` | learn through a real activation with its evidence and unconfirmed state; verbatim injection with a byte-stable prompt; refine, supersede and retire lifecycles; refusals of retired and superseded items; a native confirmation and correction keep the item; the over-bound refusal; a worker receives the brief; Home chapters unobserved; ordinary sessions without the profile tool | `test-results/home-profile/report.json` | `npx vitest run src/sessions/home-profile.integration.test.ts` |
 | `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; a Chat-layer `tools.active` change restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |
+| `src/sessions/home-memory-browser-scale.e2e.test.ts` | memory browser at a large Home's scale (3 chapters, 1,200+ messages, ~68 MB canonical JSONL): first page, paging, chapter scope, part and evidence answer within a fifth of the read deadline and at least ten times faster than proving all history per read, with identical answers; a cancelled cold proof completes for the retry; a live append extends the proof and navigation re-proves it | `test-results/home-memory-browser-scale/report.json` | `npx vitest run src/sessions/home-memory-browser-scale.e2e.test.ts` |
 | `src/episodic/home-source.e2e.test.ts` | cross-chapter replay, restart, navigation and frozen-cut proof | `test-results/home-memory/continuity.json` | `npx vitest run src/episodic/home-source.e2e.test.ts` |
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on explicit/profile/Home values; profile model and thinking resolve independently, unsupported thinking is clamped, provenance is captured in the brief and worker Chat, direct Home dispatch inherits the live Home choice, Home’s context names its identity, unknown tasks return not_found, and ordinary chats retain their own defaults; unavailable profile models fall through; invalid explicit choices are refused before any task or session; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries plus a deterministically held empty-PID publication interval (positive identity before cancellation, unchanged reaping and no-further-effects assertions); frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |

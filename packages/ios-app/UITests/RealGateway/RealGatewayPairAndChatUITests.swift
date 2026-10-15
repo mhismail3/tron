@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import XCTest
 
 /// Real-UI journeys against the real Gateway fixture.
@@ -523,6 +524,97 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["Opening conversation"].exists)
     }
 
+    /// A photo-only message sent while a turn runs is queued as a steer, and
+    /// once Pi delivers it the "Steer next" card leaves the composer, also
+    /// after the session is reopened (#974). Failure mode: Pi dequeued a
+    /// delivered message only when it had text, so the Gateway kept projecting
+    /// the delivered photo as queued forever.
+    @MainActor
+    func testImageOnlySteerLeavesTheQueueOnceDelivered() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let firstRun = launchApp()
+        open(fixture.invitationLink())
+        completeFirstRunSetup(firstRun, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(firstRun.buttons["dashboard.menu"], timeout: 90), firstRun.debugDescription)
+        createSession(firstRun, inWorkspace: fixture.workspace)
+
+        // One completed turn persists the session, so the relaunched dashboard
+        // lists it (a session created by a held first turn can be missing: #944).
+        let composer = firstRun.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60), firstRun.debugDescription)
+        composer.tap()
+        composer.typeText("Start the conversation.")
+        let send = firstRun.buttons["Send message"]
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), firstRun.debugDescription)
+        send.tap()
+        XCTAssertTrue(
+            firstRun.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion)).firstMatch
+                .waitForExistence(timeout: 120),
+            "the first turn never completed: \(firstRun.debugDescription)"
+        )
+
+        // The fixture model holds this turn until the phone queues a message.
+        composer.tap()
+        composer.typeText("Fixture steer journey: wait for my photo.")
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), firstRun.debugDescription)
+        send.tap()
+        XCTAssertTrue(firstRun.buttons["Stop Tron"].waitForExistence(timeout: 60),
+                      "the held turn never started: \(firstRun.debugDescription)")
+
+        // A photo with no text, pasted into the composer and sent as the default steer.
+        UIPasteboard.general.image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64)).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+        }
+        composer.tap()
+        let paste = firstRun.menuItems["Paste"]
+        for _ in 0..<3 where !paste.exists {
+            composer.press(forDuration: 1.0)
+            if paste.waitForExistence(timeout: 3) { break }
+        }
+        XCTAssertTrue(paste.exists, "the composer edit menu offers Paste: \(firstRun.debugDescription)")
+        paste.tap()
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), "the pasted photo never became sendable: \(firstRun.debugDescription)")
+        send.tap()
+
+        // The queued card's delivery detail, "After the current turn · 1 of 1".
+        let queuedSteer = firstRun.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS %@", "After the current turn")
+        ).firstMatch
+        XCTAssertTrue(queuedSteer.waitForExistence(timeout: 30),
+                      "the photo was not queued as a steer: \(firstRun.debugDescription)")
+        keepScreenshot(firstRun, name: "974-image-only-steer-queued")
+        let delivered = firstRun.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Steer journey saw the photo")
+        ).firstMatch
+        XCTAssertTrue(delivered.waitForExistence(timeout: 120),
+                      "the model never received the steered photo: \(firstRun.debugDescription)")
+        XCTAssertTrue(waitForAbsence(queuedSteer, timeout: 30),
+                      "the delivered photo is still shown as a queued steer: \(firstRun.debugDescription)")
+        keepScreenshot(firstRun, name: "974-image-only-steer-delivered")
+
+        // Reopen the session in a relaunched, still-paired app: the Gateway's
+        // snapshot must not bring the delivered steer back.
+        firstRun.terminate()
+        let app = launchApp(resettingState: false)
+        defer { app.terminate() }
+        let sessionRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")).firstMatch
+        XCTAssertTrue(waitForHittable(sessionRow, timeout: 90), app.debugDescription)
+        sessionRow.tap()
+        let reopenedReply = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Steer journey saw the photo")
+        ).firstMatch
+        XCTAssertTrue(reopenedReply.waitForExistence(timeout: 90),
+                      "the reopened session does not show the delivered reply: \(app.debugDescription)")
+        XCTAssertFalse(
+            app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "After the current turn")).firstMatch
+                .waitForExistence(timeout: 5),
+            "the reopened session shows the delivered photo as a queued steer: \(app.debugDescription)"
+        )
+        keepScreenshot(app, name: "974-image-only-steer-reopened")
+    }
+
     @MainActor
     func testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs() throws {
         continueAfterFailure = false
@@ -554,6 +646,56 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             "the fixture's own code must pair through the same link: \(app.debugDescription)"
         )
         keepScreenshot(app, name: "424-real-ui-accepted-code-pairs")
+    }
+
+    /// A question `ask_user` asks from inside codemode opens from the running codemode
+    /// row and accepts an answer (#929). Failure mode: the row only matched a form to a
+    /// top-level `ask_user` row, so tapping the codemode row opened its details and the
+    /// question stayed invisible until the run was stopped.
+    @MainActor
+    func testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+
+        let composer = app.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60), app.debugDescription)
+        composer.tap()
+        // The fixture's provider answers this marker with a codemode call that asks.
+        composer.typeText("CODEMODE-ASK-USER-JOURNEY: ask from inside codemode")
+        let send = app.buttons["Send message"]
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), app.debugDescription)
+        send.tap()
+
+        // A question arriving while the chat is open presents itself. Closing it keeps it
+        // pending; from then on the codemode row that asked it is the way back to it, as
+        // when the maintainer opens a worker whose question is already waiting.
+        let submit = app.buttons["Submit all answers"]
+        XCTAssertTrue(submit.waitForExistence(timeout: 90), "the codemode question was never presented: \(app.debugDescription)")
+        app.buttons["Close form and keep answers"].tap()
+        XCTAssertTrue(waitForNonExistence(submit, timeout: 10), app.debugDescription)
+        // The chip reads "Codemode, Invocation" until it runs, then "Builtin Codemode · Codemode, 1 nested, …".
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "Codemode,", "Builtin Codemode")).firstMatch
+        XCTAssertTrue(waitForHittable(row, timeout: 30), "the running codemode row is not tappable: \(app.debugDescription)")
+        row.tap()
+        // The tap reopens the pending question itself, not the row's details sheet.
+        XCTAssertTrue(submit.waitForExistence(timeout: 10),
+                      "tapping the running codemode row did not reopen its pending question: \(app.debugDescription)")
+        // The question text renders as selectable Markdown (#947), so the reopened form is
+        // identified by its own option below rather than a static-text lookup.
+        XCTAssertTrue(app.buttons["Approve it"].exists, app.debugDescription)
+        keepScreenshot(app, name: "929-codemode-ask-user-opened-from-row")
+        app.buttons["Approve it"].tap()
+        submit.tap()
+        let answered = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Codemode question answered")).firstMatch
+        XCTAssertTrue(answered.waitForExistence(timeout: 90), "the answer never reached the codemode script: \(app.debugDescription)")
+        XCTAssertTrue(answered.label.contains("Approve it"), "the codemode script read another answer: \(answered.label)")
+        keepScreenshot(app, name: "929-codemode-ask-user-answered")
     }
 
     /// X setup through the production Settings parents against a real Gateway
@@ -706,6 +848,177 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for (title, name) in [("MCP Servers", "mcp"), ("Extensions", "extensions"), ("Hooks", "hooks"),
                               ("Model Providers", "providers"), ("Custom Models", "custom-models"), ("Setup", "setup")] {
             openSheet("settings-link-\(title)", name); dismissTopSheet(app)
+        }
+    }
+
+    /// Settings clarity (#939) against the real Gateway: Accounts leads with
+    /// Connections, and Push Notifications is its own row leading This iPhone,
+    /// the last group (#956); provenance pills carry the
+    /// Gateway's wording and name a per-model value's model; a text setting's
+    /// return key reads Done, commits through the change path and dismisses the
+    /// keyboard; an add-value row shows the schema's example and format. The kept
+    /// screenshots are the approval and review evidence for each sheet.
+    @MainActor
+    func testSettingsClarityPillsTextDoneAndAccountsFirst() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let schema = try SettingsSchemaInventory.fromEnvironment()
+        let sources = Set(schema.layerLabels.values)
+        try addMcpServerOutsideTron(fixture.agentDirectory, name: "docs-server")
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace) {
+            // New Session: Project Settings is a setup card like its neighbours, and the
+            // Model card's source pill uses the Gateway's wording inside the card.
+            let project = app.buttons["project-settings-link"]
+            XCTAssertTrue(project.waitForExistence(timeout: 30), app.debugDescription)
+            let projectName = URL(fileURLWithPath: fixture.workspace).lastPathComponent
+            let projectValue = project.value as? String ?? ""
+            XCTAssertTrue(project.label == "Project Settings" && projectValue.contains(projectName)
+                          && projectValue.contains("Settings in this project's .pi folder."),
+                          "the Project Settings card shows its value and subtext: \(project.label) / \(projectValue)")
+            // One card geometry: the same width and left edge as its Workspace neighbour.
+            let workspaceCard = app.buttons["new-session-card.Workspace"]
+            XCTAssertEqual(project.frame.minX, workspaceCard.frame.minX, accuracy: 1)
+            XCTAssertEqual(project.frame.width, workspaceCard.frame.width, accuracy: 1)
+            let modelCard = app.buttons["new-session-card.Model"]
+            XCTAssertTrue(self.waitUntil(timeout: 30) { sources.contains { modelCard.label.contains($0) } },
+                          "the Model card names its source in the Gateway's wording: \(modelCard.label)")
+            // Reveal the Model card under the medium detent for the evidence screenshot.
+            for _ in 0..<3 where !modelCard.isHittable || modelCard.frame.maxY > app.frame.maxY - 40 { app.swipeUp() }
+            self.keepScreenshot(app, name: "939-new-session")
+        }
+
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
+        gear.tap()
+        XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
+        // Accounts is the first group: Connections, then providers; the agent's own
+        // sections follow, and This iPhone, led by Push Notifications, comes last.
+        let order = ["settings-link-Connections", "settings-link-Model Providers", "settings-section-model-open",
+                     "settings-link-Hooks", "settings-link-Push Notifications", "settings-link-Appearance",
+                     "settings-link-Logs", "settings-link-Setup"].map { app.buttons[$0] }
+        XCTAssertTrue(order[2].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(order.allSatisfy(\.exists), app.debugDescription)
+        XCTAssertEqual(order.map(\.frame.minY), order.map(\.frame.minY).sorted(), "Settings must open with Accounts: \(order.map(\.frame))")
+        XCTAssertTrue(app.staticTexts["Paired Macs and authorized devices"].exists, "Connections no longer offers push")
+        keepScreenshot(app, name: "939-settings-root-order")
+
+        // Model: a layer pill in the Gateway's wording and the per-model pill by display name.
+        openSettingsSection(app, "model")
+        let thinking = settingRows(app, key: "model.thinking[role=chat]").firstMatch
+        XCTAssertTrue(thinking.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(waitUntil(timeout: 30) { self.badgeLabels(thinking).contains(where: sources.contains) },
+                      "the Thinking row must say where its value comes from: \(badgeLabels(thinking))")
+        // The pill reads "For <name>"; its accessible text appends the provider/id as detail.
+        let modelPill = badgeLabels(thinking).first { $0.hasPrefix("For ") }
+        let pillText = modelPill?.components(separatedBy: ", ").first ?? ""
+        XCTAssertNotNil(modelPill, "a per-model value names its model: \(badgeLabels(thinking))")
+        XCTAssertFalse(pillText.contains("/"), "the model pill uses the display name, not provider/id: \(modelPill ?? "")")
+        keepScreenshot(app, name: "939-model-pills")
+        dismissTopSheet(app)
+
+        // Context: Summary instructions commits on the keyboard's Done and the keyboard goes away.
+        openSettingsSection(app, "context")
+        keepScreenshot(app, name: "939-context-pills")
+        // The settings row combines its labels, so the field is found inside its row.
+        let instructionsRow = settingRow(app, key: "context.compaction.instructions")
+        XCTAssertTrue(instructionsRow.waitForExistence(timeout: 30), app.debugDescription)
+        let field: XCUIElement? = instructionsRow.textFields.firstMatch
+        for _ in 0..<10 where !(field?.isHittable ?? false) { app.swipeUp() }
+        XCTAssertTrue(field?.isHittable ?? false, "Summary instructions has no field: \(app.debugDescription)")
+        XCTAssertEqual(field?.placeholderValue, "Keep file paths and open decisions.", "the field shows the schema's example")
+        field?.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 10), "the field did not raise the keyboard")
+        field?.typeText("Keep file paths.")
+        let done = keyboard.buttons.matching(NSPredicate(format: "label ==[c] %@", "done")).firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "the return key must read Done: \(keyboard.debugDescription)")
+        keepScreenshot(app, name: "939-text-field-done-key")
+        done.tap()
+        XCTAssertTrue(waitForNonExistence(keyboard, timeout: 10), "Done must dismiss the keyboard")
+        XCTAssertTrue(waitUntil(timeout: 60) {
+            let compaction = (try? self.macSettingsDocument(fixture.agentDirectory))?["compaction"] as? [String: Any]
+            return compaction?["instructions"] as? String == "Keep file paths."
+        }, "Done must commit Summary instructions through the change path to the Mac settings.json")
+        XCTAssertTrue(waitForBadge(instructionsRow, schema.label(for: "mac"), timeout: 30),
+                      "the committed value is set on the Mac: \(badgeLabels(instructionsRow))")
+        keepScreenshot(app, name: "939-text-field-committed")
+        dismissTopSheet(app)
+
+        // MCP Servers: the server rows sit in the shared glass group.
+        let mcpLink = app.buttons["settings-link-MCP Servers"]
+        for _ in 0..<12 where !mcpLink.isHittable { app.swipeUp() }
+        mcpLink.tap()
+        let server = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "docs-server")).firstMatch
+        XCTAssertTrue(server.waitForExistence(timeout: 60), app.debugDescription)
+        keepScreenshot(app, name: "939-mcp-servers")
+        dismissTopSheet(app)
+
+        // Extensions: the npm command and a search path say what to enter, with an example.
+        let extensionsLink = app.buttons["settings-link-Extensions"]
+        for _ in 0..<12 where !extensionsLink.isHittable { app.swipeUp() }
+        extensionsLink.tap()
+        for (key, name) in [("sources.npmCommand", "npm"), ("sources.extensions", "search-path")] {
+            guard let row = hittableElement(app, identifier: settingRowToken(key), timeout: 60) else {
+                XCTFail("Extensions has no \(key) row: \(app.debugDescription)"); return
+            }
+            // The row's trailing value pill opens its editor sheet.
+            (row.buttons.allElementsBoundByIndex.last ?? row).tap()
+            // The add-value row combines its labels; its field is the one text field on the editor.
+            let value = app.textFields.matching(NSPredicate(format: "placeholderValue != nil AND placeholderValue != ''")).firstMatch
+            XCTAssertTrue(value.waitForExistence(timeout: 15), "the \(key) sheet has no add-value field: \(app.debugDescription)")
+            XCTAssertNotEqual(value.placeholderValue ?? "", "Value", "the placeholder must be a real example")
+            XCTAssertFalse((value.placeholderValue ?? "").isEmpty, "the add-value field shows the schema's example")
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "For example:")).firstMatch.exists,
+                          "the add-value row says what to enter: \(app.debugDescription)")
+            if key == "sources.npmCommand" {
+                XCTAssertEqual(value.placeholderValue, "pnpm")
+                value.tap()
+                value.typeText("pnpm")
+                let add = app.keyboards.buttons.matching(NSPredicate(format: "label ==[c] %@", "done")).firstMatch
+                XCTAssertTrue(add.waitForExistence(timeout: 5), "the add-value return key must read Done")
+                add.tap()
+                XCTAssertTrue(waitForNonExistence(app.keyboards.firstMatch, timeout: 10), "Done must dismiss the keyboard")
+                XCTAssertTrue(app.staticTexts["pnpm"].waitForExistence(timeout: 5), "Done must add the typed value to the list")
+            }
+            keepScreenshot(app, name: "939-add-value-\(name)")
+            dismissTopSheet(app)
+        }
+        dismissTopSheet(app) // Extensions
+
+        // Connections (Accounts) and the Push Notifications sheet (This iPhone).
+        for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Input needed", "push")] {
+            let link = app.buttons["settings-link-\(title)"]
+            for _ in 0..<20 where !link.isHittable {
+                if title == "Connections" { app.swipeDown() } else { app.swipeUp() }
+            }
+            link.tap()
+            func labelled(_ text: String) -> XCUIElement {
+                app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
+            }
+            XCTAssertTrue(labelled(marker).waitForExistence(timeout: 30), "\(title) did not open: \(app.debugDescription)")
+            if title == "Connections" {
+                XCTAssertFalse(labelled("Input needed").exists, "push alerts moved to their own sheet")
+                assertToolbarTint(app, title: "Connections")
+                // An authorized device's detail sheet (its row reads "Details for
+                // <device> on <Mac>"): its pencil and Done take the
+                // Connections tint of its title, not a hard-coded green (#963).
+                let device = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Details for ' AND label CONTAINS ' on '")).firstMatch
+                XCTAssertTrue(device.waitForExistence(timeout: 30), app.debugDescription)
+                let label = device.label.dropFirst("Details for ".count)
+                let deviceName = String(label[..<(label.range(of: " on ", options: .backwards)?.lowerBound ?? label.endIndex)])
+                device.tap()
+                XCTAssertTrue(app.buttons["device-rename"].waitForExistence(timeout: 30), app.debugDescription)
+                assertToolbarTint(app, title: deviceName)
+                keepScreenshot(app, name: "963-device-detail")
+                dismissTopSheet(app)
+            }
+            keepScreenshot(app, name: "939-\(name)")
+            dismissTopSheet(app)
         }
     }
 
@@ -1300,7 +1613,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// offers it. The setup step assigned that workspace to the model, so the
     /// sheet starts from it without waiting for any read.
     @MainActor
-    private func createSession(_ app: XCUIApplication, inWorkspace workspace: String) {
+    private func createSession(_ app: XCUIApplication, inWorkspace workspace: String,
+                               beforeCreate: (() -> Void)? = nil) {
         let menu = app.buttons["dashboard.menu"]
         XCTAssertTrue(waitForEnabled(menu, timeout: 90), "the dashboard menu never became usable: \(app.debugDescription)")
         menu.tap()
@@ -1320,6 +1634,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let create = app.buttons["Create"]
         XCTAssertTrue(create.waitForExistence(timeout: 60), app.debugDescription)
         XCTAssertTrue(waitForEnabled(create, timeout: 90), "session creation never became ready: \(app.debugDescription)")
+        beforeCreate?()
         create.tap()
     }
 

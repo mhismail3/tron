@@ -4341,6 +4341,15 @@ final class AppModel {
         try await settingsTrust.inspectTrust(target: target)
     }
 
+    func macTerminalStatus() async throws -> MacTerminalStatus {
+        try await settingsTrust.macTerminalStatus()
+    }
+
+    func setMacTerminalKey(device: String, publicKey: String?) async throws {
+        try await settingsTrust.setMacTerminalKey(device: device, publicKey: publicKey)
+        settingsTrust.noteSettingsChanged()
+    }
+
     func setTrust(target: TrustTarget, decision: Bool?) async throws -> JSONValue {
         try await settingsTrust.setTrust(target: target, decision: decision)
     }
@@ -4887,25 +4896,41 @@ final class AppModel {
         func readChapterList() async throws -> HomeChapterListDTO {
             try HomeChapterListDTO.decode(try await read("home.chapterList"))
         }
+        func profileListCapable() -> Bool {
+            lifecycle.gatewayInfo?.capabilities.contains("home-profile-list.v1") == true
+        }
         switch query {
         case .manage:
-            let status = try HomeStatusDTO.decode(try await read("home.status"))
-            let context = try HomeContextDTO.decode(try await read("home.context"))
-            let chapters = chapterListCapable() ? try await readChapterList() : nil
+            // Independent reads share one round trip instead of queuing behind each
+            // other (each is individually fenced). Task reads still wait for status,
+            // which decides whether they may be attempted at all.
+            let readsChapters = chapterListCapable()
+            async let statusValue = read("home.status")
+            async let contextValue = read("home.context")
+            async let chapterValue: JSONValue? = readsChapters ? read("home.chapterList") : nil
+            // The profile belongs to Knowledge, not the designation: a refused read leaves
+            // its row "Unavailable" and never fails Manage Home.
+            async let profileList: HomeProfileListDTO? = profileListCapable()
+                ? optionalRead { try HomeProfileListDTO.decode(try await read("home.profileList")) } : nil
+            let status = try HomeStatusDTO.decode(try await statusValue)
+            let context = try HomeContextDTO.decode(try await contextValue)
+            let chapterJSON = try await chapterValue
+            let chapters = try chapterJSON.map { try HomeChapterListDTO.decode($0) }
             // A refused task or permission read leaves its row "Unavailable"; the sheet still loads.
             var tasks: HomeTaskPageDTO?
             var permissions: HomeTaskPermissionsDTO?
             if status.admitsTaskReads {
-                tasks = try await optionalRead {
+                async let taskPage = optionalRead {
                     try HomeTaskPageDTO.decode(try await read("home.taskList", .object(["limit": .number(20)])))
                 }
-                permissions = try await optionalRead {
+                async let taskPermissions = optionalRead {
                     try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions"))
                 }
+                tasks = try await taskPage
+                permissions = try await taskPermissions
             }
-            return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks, permissions: permissions))
-        case .context:
-            return .context(try HomeContextDTO.decode(try await read("home.context")))
+            return .manage(HomeManageDTO(status: status, context: context, chapters: chapters, tasks: tasks, permissions: permissions,
+                                         profile: try await profileList))
         case .tasks(let cursor):
             let status = try await readTaskStatus()
             var params: [String: JSONValue] = ["limit": .number(20)]
@@ -4922,6 +4947,11 @@ final class AppModel {
                 throw GatewayFailure(code: "unsupported", message: "This Gateway does not support the chapter list.", retryable: false, details: nil)
             }
             return .chapters(try await readChapterList())
+        case .profile:
+            guard profileListCapable() else {
+                throw GatewayFailure(code: "unsupported", message: "This Gateway does not list the learned profile.", retryable: false, details: nil)
+            }
+            return .profile(try HomeProfileListDTO.decode(try await read("home.profileList")))
         case .memory(let sessionID, let continuation):
             try requireMemoryBrowser()
             var values: [String: JSONValue] = ["limit": .number(30)]
@@ -5002,6 +5032,29 @@ final class AppModel {
     func performHomeControl(_ command: HomeMutationCoordinator.Command, authority: HomeMutationCoordinator.Authority) async throws {
         guard command != .designate else { throw CancellationError() }
         _ = try await homeMutations.perform(command, authority: authority)
+        await homeStatus.refreshMounted()
+    }
+
+    /// Whether this Gateway takes the maintainer's learned-profile changes. Without it
+    /// the Profile sheet stays read-only (an older Gateway).
+    var homeProfileEditable: Bool {
+        lifecycle.gatewayInfo?.capabilities.contains("home-profile-edit.v1") == true
+    }
+
+    /// The maintainer's learned-profile change through the Home command owner; the
+    /// answer names the record entries `undoHomeProfileChange` reverts.
+    func changeHomeProfile(_ changes: [HomeProfileChange], authority: HomeMutationCoordinator.Authority) async throws -> HomeProfileChangeResultDTO {
+        let value = try await homeMutations.perform(.changeProfile(changes), authority: authority)
+        await homeStatus.refreshMounted()
+        return try value.decode(HomeProfileChangeResultDTO.self)
+    }
+
+    /// Undo of a profile change is the settings path's own undo: it reverts the change's
+    /// whole group, refused with a conflict when Home changed an item since.
+    func undoHomeProfileChange(_ changeID: String, authority: HomeMutationCoordinator.Authority) async throws {
+        let value = try await homeMutations.perform(.undoProfileChange(changeID), authority: authority)
+        try value.decode(SettingsChangeResult.self).throwIfRefused()
+        settingsTrust.noteSettingsChanged()
         await homeStatus.refreshMounted()
     }
 

@@ -8,6 +8,16 @@ export type LayerId = typeof LAYERS[number];
 export const LAYER_LABELS: Record<LayerId, string> = {
   chat: "Chat", profile: "Profile: Home", project: "Project", mac: "Mac", builtin: "Built-in",
 };
+/** A row's provenance pill: where its value comes from, as a short phrase (#939).
+ * The one source of this wording for every surface; LAYER_LABELS still names
+ * the layer itself in sentences, details and the Changes feed. */
+export const LAYER_SOURCE_LABELS: Record<LayerId, string> = {
+  chat: "Set in this chat", profile: "Set in Home profile", project: "Set in project", mac: "Set on Mac", builtin: "Tron default",
+};
+/** The default a fixed chat value was taken from at start ("From Mac default at start"). */
+export const LAYER_DEFAULT_LABELS: Record<Exclude<LayerId, "chat">, string> = {
+  profile: "Home profile", project: "project default", mac: "Mac default", builtin: "Tron default",
+};
 export const TIERS = ["quiet", "notify", "approve"] as const;
 export type Tier = typeof TIERS[number];
 /** One step up, capped at approve (foundation F3: the web step). */
@@ -26,7 +36,7 @@ export type Control = typeof CONTROLS[number];
 /** The renderer contract the Gateway speaks (doc 7.5). A client names the
  * controls it implements and its version; anything else falls back. */
 export const RENDERER_CONTRACT_VERSION = 1;
-export const QUALIFIER_NAMES = ["role", "model", "provider", "tool", "project", "connection", "key", "direction", "server"] as const;
+export const QUALIFIER_NAMES = ["role", "model", "provider", "tool", "project", "connection", "key", "direction", "server", "note", "device"] as const;
 export type QualifierName = typeof QUALIFIER_NAMES[number];
 export type Qualifiers = Partial<Record<QualifierName, string>>;
 

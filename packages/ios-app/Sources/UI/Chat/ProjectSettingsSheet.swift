@@ -11,10 +11,14 @@ struct ProjectSettingsRoute: Identifiable {
 }
 
 struct ProjectSettingsLink: View {
+    /// A settings row in Manage Session; a setup card among New Session's choices.
+    enum Style { case row, setupCard }
+    static let setupCardCaption = "Settings in this project's .pi folder."
     let cwd: String
     let profileID: String
     /// The row's glyph matches the rows around it.
     var accent: Color = .tronEmerald
+    var style: Style = .row
 
     var body: some View {
         TronProgressiveSheetLink(
@@ -23,9 +27,18 @@ struct ProjectSettingsLink: View {
             accent: .tronEmerald,
             destination: { ProjectSettingsContent(cwd: cwd, profileID: profileID) }
         ) {
-            TronSettingsRow(icon: "folder.badge.gearshape", title: "Project Settings",
-                            subtitle: URL(fileURLWithPath: cwd).lastPathComponent, accent: accent)
+            switch style {
+            case .row:
+                TronSettingsRow(icon: "folder.badge.gearshape", title: "Project Settings",
+                                subtitle: URL(fileURLWithPath: cwd).lastPathComponent, accent: accent)
+            case .setupCard:
+                TronSetupCardLabel(icon: "folder.badge.gearshape", title: "Project Settings",
+                                   value: URL(fileURLWithPath: cwd).lastPathComponent,
+                                   caption: Self.setupCardCaption, accent: accent)
+            }
         }
+        // The link's label is its title; the card's value and subtext stay readable.
+        .accessibilityValue(style == .setupCard ? "\(URL(fileURLWithPath: cwd).lastPathComponent), \(Self.setupCardCaption)" : "")
         .accessibilityIdentifier("project-settings-link")
     }
 }
@@ -41,7 +54,7 @@ struct ProjectSettingsSheet: View {
                     ToolbarItem(placement: .confirmationAction) {
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
+                                .tronToolbarAction(accent: .tronEmerald)
                         }
                         .accessibilityLabel("Done")
                     }

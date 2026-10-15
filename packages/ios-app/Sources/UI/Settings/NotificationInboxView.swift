@@ -9,7 +9,7 @@ struct NotificationInboxToolbarButton: View {
         Button(action: action) {
             Image(systemName: unreadCount > 0 ? "bell.badge.fill" : "bell")
                 .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                .foregroundStyle(Color.tronEmerald)
+                .tronToolbarAction(accent: .tronEmerald)
                 .symbolRenderingMode(.hierarchical)
         }
         .accessibilityLabel(unreadCount > 0
@@ -121,7 +121,7 @@ struct NotificationInboxView: View {
                     isWorking: model.notificationInbox.isMarkingAllRead
                 )
             }
-            .tronToolbarAction(accent: model.notificationInbox.unreadCount > 0 ? .tronEmerald : .tronTextMuted)
+            .tronToolbarAction(accent: .tronEmerald)
             .disabled(model.notificationInbox.unreadCount == 0 || model.notificationInbox.isMarkingAllRead)
             .accessibilityLabel("Mark all notifications read")
         }
@@ -130,7 +130,7 @@ struct NotificationInboxView: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronEmerald)
+                    .tronToolbarAction(accent: .tronEmerald)
             }
             .accessibilityLabel("Done")
         }
@@ -203,8 +203,7 @@ struct NotificationInboxRowList: View {
 
     var body: some View {
         if model.notificationInbox.isLoading && notifications.isEmpty {
-            TronLoadingState(label: "Loading notifications from paired Gateways…", accent: .tronEmerald)
-                .frame(maxWidth: .infinity, minHeight: 220)
+            TronSheetLoadingState(label: "Loading notifications from paired Gateways…", accent: .tronEmerald)
         } else if notifications.isEmpty {
             NotificationInboxEmptyState(filter: filter)
         } else if PresentationClockPolicy.runs(
@@ -327,7 +326,7 @@ private struct NotificationInboxHistoryView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -393,8 +392,9 @@ enum NotificationInboxRelativeTime {
 
 /// One inbox row on the shared settings row's feed variant: the chat and time
 /// on the title line (the Gateway beside the time only when more than one is
-/// paired), one line of message below, and the kind as the icon. Unread rows carry the accent tint; read rows sit
-/// clear on the sheet surface.
+/// paired), one line of message below, and the kind as the icon. Every row sits
+/// on the shared Liquid Glass row surface; read rows are clear glass and unread
+/// rows add the accent tint on top (#956).
 private struct NotificationInboxRow: View {
     let item: NotificationInboxItem
     let title: String
@@ -417,9 +417,9 @@ private struct NotificationInboxRow: View {
                 subtitleColor: isUnread ? .tronTextSecondary : .tronTextMuted,
                 feedTrailing: showsGateway ? "\(item.profileLabel) · \(relativeTime)" : relativeTime
             )
-            .tronListRowHighlight(isUnread)
         }
         .buttonStyle(.plain)
+        .tronGlassSurface(accent: .tronEmerald, tintOpacity: isUnread ? 0.14 : 0, interactive: true)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([
             title,
@@ -492,7 +492,7 @@ private struct NotificationInboxDetailView: View {
                             isWorking: isOpening
                         )
                     }
-                    .tronToolbarAction(accent: isOpening ? .tronTextMuted : .tronEmerald)
+                    .tronToolbarAction(accent: .tronEmerald)
                     .disabled(isOpening)
                     .accessibilityLabel(isOpening ? "Opening chat" : "Open chat")
                 }
@@ -501,7 +501,7 @@ private struct NotificationInboxDetailView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }

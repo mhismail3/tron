@@ -1,3 +1,4 @@
+import type { MacTerminalHost } from "../security/mac-terminal.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { offLoop, stage } from "./request-span.js";
 import { join } from "node:path";
@@ -9,13 +10,14 @@ import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog
 import type { GatewayConfig } from "../config.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
-import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
+import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../home/home-memory-browser.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import type { ChatAppliers, ChangeOutcome, ChangeRequest, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import type { ApprovalRequest } from "../admin/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../admin/settings-record.js";
-import { SECTIONS, recordSubject, schemaKey } from "../admin/settings-schema.js";
+import { KEYS, SECTIONS, auditSubject, recordSubject, schemaKey } from "../admin/settings-schema.js";
+import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, type HomeProfileOp } from "../home/home-profile.js";
 import type { ObservedStore } from "../admin/settings-outside.js";
 import type { SettingsTarget } from "../admin/settings-resolver.js";
 import { actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
@@ -194,6 +196,35 @@ function settingsQualifiers(raw: unknown, label: string): Qualifiers {
   return qualifiers as Qualifiers;
 }
 
+/** One `home.profileChange` op, typed: only the maintainer's actions, each with the
+ * revision he read, and nothing an action does not take. */
+function profileChangeOp(raw: unknown, label: string): HomeProfileOp {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new GatewayError("invalid_request", `${label} must be an object`);
+  const value = raw as Record<string, unknown>;
+  const action = oneOf(value.action, `${label}.action`, HOME_PROFILE_MAINTAINER_ACTIONS);
+  const allowed: Record<typeof action, string[]> = {
+    confirm: ["action", "id", "expectedRevision"],
+    refine: ["action", "id", "expectedRevision", "text", "kind", "reason"],
+    supersede: ["action", "id", "expectedRevision", "text", "kind", "reason"],
+    retire: ["action", "id", "expectedRevision", "reason"],
+  };
+  rejectUnknownFields(value, allowed[action], label);
+  const id = string(value.id, `${label}.id`, { max: 200 });
+  const expectedRevision = string(value.expectedRevision, `${label}.expectedRevision`, { max: 80 });
+  const text = value.text === undefined ? undefined : string(value.text, `${label}.text`, { max: 512 });
+  const kind = value.kind === undefined ? undefined : oneOf(value.kind, `${label}.kind`, HOME_PROFILE_KINDS);
+  const reason = value.reason === undefined ? undefined : string(value.reason, `${label}.reason`, { max: 2_000 });
+  switch (action) {
+    case "confirm": return { action, id, expectedRevision };
+    case "retire": return { action, id, expectedRevision, ...(reason ? { reason } : {}) };
+    case "supersede":
+      if (text === undefined || kind === undefined) throw new GatewayError("invalid_request", `${label}: supersede requires text and kind`);
+      return { action, id, expectedRevision, text, kind, ...(reason ? { reason } : {}) };
+    default:
+      return { action, id, expectedRevision, ...(text === undefined ? {} : { text }), ...(kind ? { kind } : {}), ...(reason ? { reason } : {}) };
+  }
+}
+
 function settingsChangeRequest(raw: unknown, label: string): ChangeRequest {
   const change = object(raw, label);
   rejectUnknownFields(change, ["key", "qualifiers", "layer", "op", "value", "expected"], label);
@@ -289,7 +320,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "home.status", "home.context", "home.open", "home.chapterList", "home.taskStatus", "home.taskList", "home.stopTask", "home.memory.view", "home.memory.evidence",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.stopTask", "home.memory.view", "home.memory.evidence",
   "device.install.config.status", "device.install.status",
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
@@ -355,6 +386,9 @@ export interface GatewayServiceDependencies {
   settingsModel: SettingsModel;
   /** The settings model's one change path, with its record. */
   settingsChanges: SettingsChangePath;
+  /** Mac Terminal's enrollment facts (security/mac-terminal.ts); absent in a
+   * Gateway that owns no ~/.ssh. */
+  macTerminal?: MacTerminalHost;
   modelConfig: ModelConfigService;
   packages: PackageService;
   /** Session-free hook listings for a scope; never opens or registers a session. */
@@ -602,6 +636,7 @@ export class GatewayService {
         ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1", "knowledge-library-rows.v1", "knowledge-curation.v1"] : []),
         ...(this.dependencies.connections ? ["connections.v1"] : []),
         ...(this.dependencies.home ? [HOME_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY] : []),
+        ...(this.dependencies.home && this.dependencies.knowledge ? [HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY] : []),
         ...(this.dependencies.sessionSearch ? ["session-search.v1"] : []),
       ],
     };
@@ -622,6 +657,10 @@ export class GatewayService {
       case "home.chapterList": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home chapter list accepts no parameters");
         return safeJson(await this.requireHome().chapterList());
+      }
+      case "home.profileList": {
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Home profile list accepts no parameters");
+        return safeJson(await this.requireHome().profileList());
       }
       case "home.taskList": {
         rejectUnknownFields(params, ["limit", "cursor"], method);
@@ -659,6 +698,19 @@ export class GatewayService {
           if (typeof params.approved !== "boolean" || !Number.isSafeInteger(params.expiresAt)) throw new GatewayError("invalid_request", "Decision requires approved and an integer expiresAt");
           return safeJson(await this.requireHome().decideTaskGrant(string(params.requestId, "requestId", { max: 160 }), {
             decisionId: string(params.commandId, "commandId", { max: 160 }), approved: params.approved, expiresAt: params.expiresAt as number,
+          }));
+        });
+      case "home.profileChange":
+        // The maintainer's learned-profile changes (docs/settings-model.md 6.4): typed ops
+        // through the one change path, as Home's profile tool, confirmed by his tap.
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "changes"], method);
+          if (!this.dependencies.home) throw new GatewayError("unsupported", "Tron Home is not available on this Gateway");
+          if (!Array.isArray(params.changes) || params.changes.length < 1 || params.changes.length > 50) throw new GatewayError("invalid_request", "changes holds 1 to 50 profile changes");
+          const ops = params.changes.map((raw, index) => profileChangeOp(raw, `changes[${index}]`));
+          return safeJson(await this.dependencies.settingsChanges.changeProfile(ops, {
+            actor: { kind: "ui", id: client.identity }, author: { kind: "maintainer" },
+            commandId: string(params.commandId, "commandId", { min: 8, max: 120 }),
           }));
         });
       case "home.reconfirmPermissions":
@@ -1005,6 +1057,19 @@ export class GatewayService {
       case "device.revoke": {
         const deviceId = string(params.deviceId, "deviceId", { max: 100 });
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(deviceId, async () => {
+          // A revoked iPhone loses its Mac Terminal key too, through the same
+          // logged change path as a revocation from the Mac Terminal screen.
+          // The key goes first: if removing it fails, the device stays paired
+          // and the revoke can be retried, rather than a revoked iPhone keeping
+          // a working SSH key.
+          if ((await this.dependencies.settingsModel?.macTerminalKeys?.read())?.[deviceId] !== undefined) {
+            await this.dependencies.settingsChanges.change({ kind: "mac" }, [{
+              key: "permissions.macTerminalKey", qualifiers: { device: deviceId }, layer: "mac", op: "unset",
+            }], {
+              actor: { kind: "ui", id: client.identity }, reason: "The paired device was revoked",
+              commandId: `${string(params.commandId, "commandId", { min: 8, max: 120 })}:mac-terminal`,
+            });
+          }
           await this.dependencies.notifications?.removeDevice(deviceId);
           const revoked = await this.dependencies.devices.revoke(deviceId, () => client.revokeDevice(deviceId));
           if (revoked) await this.iosDeviceInstallService.removeDevice(deviceId);
@@ -1757,10 +1822,10 @@ export class GatewayService {
         // an existing receipt remains readable without a live subscription.
         const releaseSession = typeof params.sessionId === "string" && client.isSubscribed(params.sessionId)
           ? this.dependencies.sessions.retainLiveSession(params.sessionId) : undefined;
-        return this.mutation(client, method, params, async () => {
+        return this.mutation(client, method, params, async (workToken) => {
           this.requireRetainedSession(client, params, releaseSession);
           const slot = await this.openedSlot(client, params);
-          return safeJson(await this.admitPrompt(slot, params));
+          return safeJson(await this.admitPrompt(slot, params, workToken));
         }, false, true).finally(releaseSession);
       }
       case "session.abort":
@@ -2062,6 +2127,12 @@ export class GatewayService {
           return { loggedOut: true };
         });
 
+      case "macTerminal.status": {
+        rejectUnknownFields(params, [], method);
+        if (!this.dependencies.macTerminal) throw new GatewayError("unsupported", "Mac Terminal is not available on this Gateway");
+        if (client.isLocal) throw new GatewayError("invalid_request", "Mac Terminal enrolls a paired iPhone");
+        return safeJson(await this.dependencies.macTerminal.status(client.identity));
+      }
       case "settings.resolve": {
         rejectUnknownFields(params, ["target", "keys", "renderer"], method);
         const target = await this.canonicalSettingsTarget(params.target);
@@ -2087,6 +2158,12 @@ export class GatewayService {
           const target = await this.canonicalSettingsTarget(params.target);
           if (!Array.isArray(params.changes)) throw new GatewayError("invalid_request", "changes must be an array");
           const changes = params.changes.map((raw, index) => settingsChangeRequest(raw, `changes[${index}]`));
+          // An iPhone enrolls only its own Mac Terminal key, so revoking a
+          // device always finds and removes the key that device can use.
+          if (changes.some(change => change.key === "permissions.macTerminalKey" && change.op === "set"
+            && change.qualifiers?.device !== client.identity)) {
+            throw new GatewayError("invalid_request", "An iPhone can enroll only its own Mac Terminal key");
+          }
           const session = target.kind === "session"
             ? await this.settingsSession(await this.openedSlot(client, { sessionId: target.sessionId }), target.sessionId, params.fence, workToken)
             : undefined;
@@ -2452,12 +2529,12 @@ export class GatewayService {
       // whether it pushes (docs/settings-model.md 5.6, F3).
       const loud = changes.filter(change => change.tier !== "quiet");
       if (loud.length) {
-        const what = [...new Set(loud.map(change => schemaKey(change.key).label))].join(", ");
+        const what = [...new Set(loud.map(change => auditSubject(change.key)?.label ?? change.key))].join(", ");
         void this.settingsPush(context.actor, `settings-outside:${changes[0]!.changeId}`, "explicit", "Changed outside Tron",
           `${what} changed outside Tron in ${context.actor.id}. Review it in Tron.`);
       }
     } else if (context.tier === "notify" && context.actor.kind !== "ui" && !context.approved) {
-      const what = changes.map(change => schemaKey(change.key).label).join(", ");
+      const what = [...new Set(changes.map(change => auditSubject(change.key)?.label ?? change.key))].join(", ");
       void this.settingsPush(context.actor, `settings-applied:${changes[0]!.changeId}`, "explicit", "Setting changed",
         `${actorLabel(context.actor)} changed ${what}${context.reason ? `: ${context.reason}` : ""}. Undo it in Tron.`);
     }
@@ -2486,7 +2563,9 @@ export class GatewayService {
       }
     }
     for (const change of changes) {
-      const key = schemaKey(change.key);
+      // A record subject (a profile item) has no after-apply effect of its own.
+      const key = KEYS.find(candidate => candidate.id === change.key);
+      if (!key) continue;
       if (key.effect === "reload" && change.layer === "mac" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();
       if (key.effect === "next-compaction" && (change.layer === "mac" || projectDir)) {
         this.dependencies.sessions.refreshCompactionPolicies(change.layer === "mac" ? "global" : "project", projectDir ?? this.dependencies.config.tronHome);
@@ -2543,7 +2622,7 @@ export class GatewayService {
    * contract: text, attachments, resource invocations and steering behavior are
    * all validated against the slot the prompt will run in, before any attachment
    * is materialized. */
-  private async admitPrompt(slot: RuntimeSlot, params: Record<string, unknown>): Promise<{ operationId: string }> {
+  private async admitPrompt(slot: RuntimeSlot, params: Record<string, unknown>, workToken?: string): Promise<{ operationId: string }> {
     if (params.text !== undefined && typeof params.text !== "string") {
       throw new GatewayError("invalid_request", "text must be a string");
     }
@@ -2576,6 +2655,21 @@ export class GatewayService {
       if (matches.length !== 1 || shadowed) {
         throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
       }
+    }
+    if (slot.homeTaskWorkerState === "settled") {
+      // A message to a Home worker whose task stopped or settled continues that task in place
+      // (#929): same session, worktree and claim, with this message as its instruction.
+      if (resourceInvocation !== undefined) {
+        throw new GatewayError("invalid_request", "A stopped Home worker continues from a message, not a command");
+      }
+      // Attachments (for example the screenshots a stopped worker asked for) go with the
+      // resume instruction; the brief carries their text envelope, the first turn their images.
+      const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
+      // This request's own work entry must not count as the session being busy.
+      const resumed = await this.requireHome().resumeWorkerSession(slot.id,
+        [text, attachments.envelope].filter(Boolean).join("\n\n"), workToken, attachments.images);
+      // A resume names its worker operation even while it waits for a running-worker slot (#959).
+      return { operationId: resumed.operationId };
     }
     const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
     const visiblePrompt = [resourceArguments ?? text, attachments.envelope].filter(Boolean).join("\n\n");

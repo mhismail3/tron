@@ -92,6 +92,9 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     let openSessionId: String?
     let generation: Int?
     let sessionPresent: Bool
+    /// Home's live chapter is blocked on a pending user interaction (ask_user).
+    /// Absent on an older Gateway.
+    let waitingForUser: Bool?
     let memory: Memory
     /// The chat model Home's activations use; distinct from `memory.model`.
     let model: ModelRef?
@@ -173,6 +176,16 @@ enum HomeStatusLinePresentation {
 
 /// The Manage Home rows' secondary lines, each read from the sheet's own load.
 enum HomeManageRowPresentation {
+    /// Active item count, split by whether the maintainer confirmed them.
+    static func profile(_ list: HomeProfileListDTO?) -> String {
+        guard let list else { return "Unavailable" }
+        let active = list.active
+        guard !active.isEmpty else { return "Nothing learned yet" }
+        let confirmed = active.filter(\.confirmed).count
+        let count = active.count == 1 ? "1 item" : "\(active.count.formatted()) items"
+        return "\(count) · \(confirmed.formatted()) confirmed · \((active.count - confirmed).formatted()) inferred"
+    }
+
     /// Chapter count, and the active chapter's share of the soft limit when measured.
     static func chapters(_ list: HomeChapterListDTO?, fallback: HomeStatusDTO.Chapter?) -> String? {
         guard let list else { return fallback.map(HomeChapterPresentation.manageSubtitle) }

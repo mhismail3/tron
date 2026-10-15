@@ -30,6 +30,11 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
         let attention: Bool
         let pendingGrant: Bool
         var id: String { taskId }
+        /// The Gateway names the dispatched worker `sessionId` (HomeTaskSummary).
+        private enum CodingKeys: String, CodingKey {
+            case taskId, createdAt, updatedAt, title, project, target, lifecycle, outcome, spend, attention, pendingGrant
+            case workerSessionId = "sessionId"
+        }
         var valid: Bool {
             homeID(taskId) && safeHomeCount(createdAt) && safeHomeCount(updatedAt) && updatedAt >= createdAt
                 && (title.map { $0.unicodeScalars.count <= 160 && homeText($0, bytes: 640) } ?? true)
@@ -91,6 +96,13 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
     let workerModel: ModelRef?
     let subagents: Subagents?
     let subagentRuns: SubagentRuns?
+
+    /// The Gateway's task record names the dispatched worker `sessionId`.
+    private enum CodingKeys: String, CodingKey {
+        case taskId, homeId, createdAt, updatedAt, intent, title, project, target, lifecycle, operationId, spend
+        case terminalEvidence, wake, workerModel, subagents, subagentRuns
+        case workerSessionId = "sessionId"
+    }
 
     /// Subagent launches the task admitted; `stoppedAtEnd` is nil when the Gateway cannot prove it.
     struct Subagents: Decodable, Equatable, Sendable {

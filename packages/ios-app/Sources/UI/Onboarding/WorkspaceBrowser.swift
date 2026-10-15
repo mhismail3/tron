@@ -49,8 +49,7 @@ struct WorkspaceBrowser: View {
         NavigationStack {
             Group {
                 if loading && listing == nil {
-                    TronLoadingState(label: "Loading folders…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    TronSheetLoadingState(label: "Loading folders…", accent: .tronEmerald)
                 } else {
                     browser
                         .opacity(navigating ? 0.62 : 1)
@@ -66,7 +65,7 @@ struct WorkspaceBrowser: View {
                     Button { selectCurrentPath() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(currentPath.isEmpty ? Color.tronTextDisabled : Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .disabled(currentPath.isEmpty)
                     .accessibilityLabel("Use current folder")

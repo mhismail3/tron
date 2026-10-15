@@ -358,27 +358,20 @@ struct TranscriptRow: View, Equatable {
     }
 
     private var attachmentStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(displayedAttachments) { part in
-                    if part.type == .image, let id = part.blobId {
-                        TranscriptImageChip(blobID: id)
-                    } else if let attachment = part.attachment {
-                        TranscriptFileChip(
-                            name: attachment.name,
-                            mimeType: attachment.mimeType,
-                            size: attachment.size,
-                            blobID: part.blobId
-                        )
-                    }
+        ChatChipStrip(alignment: item.role == .user ? .trailing : .leading) {
+            ForEach(displayedAttachments) { part in
+                if part.type == .image, let id = part.blobId {
+                    TranscriptImageChip(blobID: id)
+                } else if let attachment = part.attachment {
+                    TranscriptFileChip(
+                        name: attachment.name,
+                        mimeType: attachment.mimeType,
+                        size: attachment.size,
+                        blobID: part.blobId
+                    )
                 }
             }
-            .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
-            .chatSecondaryScrollContent()
         }
-        .scrollClipDisabled()
-        .defaultScrollAnchor(item.role == .user ? .trailing : .leading)
-        .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
         .padding(.vertical, item.role == .user ? 3 : 0)
         .accessibilityLabel("Prompt attachments")
     }
@@ -945,7 +938,7 @@ struct ThinkingTraceDetailSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }

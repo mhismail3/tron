@@ -136,7 +136,7 @@ struct SessionModelSummaryCard<Controls: View, Footer: View>: View {
 }
 
 /// A context window divided into named sections: the bar's segments and the
-/// compact legend under it. Home Context supplies it from `home.context`.
+/// compact legend under it. Manage Home supplies it from `home.context`.
 struct SessionContextSegments: Equatable {
     struct Segment: Identifiable, Equatable {
         let id: String
@@ -151,10 +151,10 @@ struct SessionContextSegments: Equatable {
     let segments: [Segment]
 }
 
-/// The stats card Manage Session, Manage Home and Home Context show. Manage Home
-/// and Home Context supply an accessory (a state pill), placed on a header row above
-/// the usage; Home Context also supplies segments, which replace the plain bar with
-/// one segment per section and a compact legend above the metrics.
+/// The stats card Manage Session and Manage Home show. Manage Home supplies an
+/// accessory (its state pill and last activation), placed on a header row above
+/// the usage, and segments, which replace the plain bar with one segment per
+/// section and a compact legend above the metrics.
 struct SessionContextUsageCard<Accessory: View>: View {
     let snapshot: SessionContextPresentation
     let accessory: Accessory?
@@ -303,6 +303,7 @@ struct SessionContextSegmentedBar: View {
 }
 
 /// One compact line per section: its dot, its name and its size, two to a row.
+/// The free remainder has no line; the header already says how much is left (#963).
 struct SessionContextSegmentLegend: View {
     let segments: SessionContextSegments
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -317,10 +318,6 @@ struct SessionContextSegmentLegend: View {
                         .compactMap { $0 }.joined(separator: ", "))
                     .accessibilityIdentifier("context-segment-\(segment.id)")
             }
-            item(Circle().stroke(Color.tronSlate.opacity(0.7), lineWidth: 1), label: "Free",
-                 tokens: max(0, segments.window - segments.used))
-                .accessibilityLabel("Free, \(max(0, segments.window - segments.used).formatted()) tokens")
-                .accessibilityIdentifier("context-segment-free")
         }
         .padding(.top, 2)
     }

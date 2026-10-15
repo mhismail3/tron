@@ -40,7 +40,12 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch("display-image"); defer { app.terminate() }
         let button = app.buttons["Open Orientation Image photo preview"]
-        XCTAssertTrue(button.waitForExistence(timeout: 15)); button.tap()
+        XCTAssertTrue(button.waitForExistence(timeout: 15))
+        // The lone inline image is the same thumbnail component grouped displays use.
+        XCTAssertEqual(button.identifier, "display-inline-thumbnail")
+        XCTAssertEqual(button.frame.width, 64 * 1.7, accuracy: 1)
+        keepScreenshot(app, "998-inline-display-thumbnail")
+        button.tap()
         let image = app.images["Red above blue, with the close badge at top right."]
         XCTAssertTrue(image.waitForExistence(timeout: 10))
         image.doubleTap()
@@ -272,6 +277,59 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(app, "889-9-Nest views")
         app.buttons["Count"].tap()
         XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: \(expectedTaps + 1)"), "The app stays responsive after nesting views")
+    }
+
+    /// #1006: the Settings › This iPhone › Experimental switch turns the run
+    /// control on and off live, without a relaunch, and it wins over the
+    /// launch argument that started this process with the runner off.
+    @MainActor func testSettingsSwitchAddsAndRemovesSwiftRunControlLive() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-settings", flag: false); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Habits.swift")
+        XCTAssertFalse(runControl(app).exists, "The runner starts off")
+        closeDocument(app)
+
+        setSwiftRunner(app, on: true)
+        openSwiftDisplay(app, named: "Habits.swift")
+        let run = app.buttons["Run Habits.swift"]
+        XCTAssertTrue(run.waitForExistence(timeout: 10), "Turning the switch on adds the run control without a relaunch")
+        keepScreenshot(app, "1006-3-run-control-after-switch-on")
+        run.tap()
+        XCTAssertTrue(app.staticTexts["habits.summary"].waitForExistence(timeout: 10), "The run control runs the app")
+        app.swipeDown(velocity: .fast)
+        XCTAssertTrue(wait(app.staticTexts["habits.summary"], predicate: "exists == false"))
+        closeDocument(app)
+
+        setSwiftRunner(app, on: false)
+        openSwiftDisplay(app, named: "Habits.swift")
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 10))
+        XCTAssertFalse(runControl(app).exists, "Turning the switch off removes the run control")
+        keepScreenshot(app, "1006-4-run-control-after-switch-off")
+    }
+
+    @MainActor private func setSwiftRunner(_ app: XCUIApplication, on: Bool) {
+        let open = app.buttons["fixture.open-settings"]
+        XCTAssertTrue(open.waitForExistence(timeout: 10)); open.tap()
+        let experimental = app.buttons["settings-link-Experimental"]
+        XCTAssertTrue(experimental.waitForExistence(timeout: 10))
+        for _ in 0..<12 where !experimental.isHittable { app.swipeUp() }
+        keepScreenshot(app, "1006-1-settings-this-iphone")
+        experimental.tap()
+        let toggle = app.switches["settings-experimental-swift-apps"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10), app.debugDescription)
+        if (toggle.value as? String == "1") != on { toggle.tap() }
+        XCTAssertTrue(wait(toggle, predicate: "value == %@", value: on ? "1" : "0"), "The switch shows the new state")
+        keepScreenshot(app, "1006-2-experimental-\(on ? "on" : "off")")
+        app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+        XCTAssertTrue(wait(toggle, predicate: "exists == false"), "Experimental is dismissed")
+        app.buttons["settings-done"].tap()
+        XCTAssertTrue(wait(app.buttons["settings-done"], predicate: "exists == false"), "Settings is dismissed")
+    }
+
+    @MainActor private func closeDocument(_ app: XCUIApplication) {
+        let done = app.buttons["Done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10)); done.tap()
+        XCTAssertTrue(wait(done, predicate: "exists == false"))
     }
 
     @MainActor private func launchSwift(_ scenario: String, flag: Bool) -> XCUIApplication {

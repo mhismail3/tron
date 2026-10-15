@@ -356,11 +356,15 @@ export class EpisodicMemory {
     return this.mutex.run(read, signal);
   }
 
-  /** Content-derived page identity belongs to this memory, not an RPC cache.
+  /** Page identity includes the layout because continuation offsets index these parts;
+   * reopening the same ledger may rebuild a different decomposition.
    * No await separates copying a row, its summary and the cursor revision. */
   browserRevision(): string {
     this.assertOpen();
-    return episodicDigest(JSON.stringify([this.dependencies.sessionId, this.generation, this.committedRevision, this.sourceCursor]));
+    return episodicDigest(JSON.stringify([
+      this.dependencies.sessionId, this.generation, this.committedRevision, this.sourceCursor,
+      this.view.map(({ level, index, start, span }) => [level, index, start, span]),
+    ]));
   }
 
   browserCursor(): EpisodicSourceCursor | null {

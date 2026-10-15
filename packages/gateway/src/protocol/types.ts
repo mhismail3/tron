@@ -76,6 +76,9 @@ export interface SessionSummary {
   parentSessionId?: string;
   /** Immutable creation provenance derived from canonical session receipts. */
   creationOrigin?: SessionCreationOrigin;
+  /** The Home task that created this worker session, from the task ledger.
+   * Absent for every session no Home task dispatched. */
+  homeTaskId?: string;
   createdAt: string;
   updatedAt: string;
   /** Stable Gateway-observed start of the current active dashboard period. */
@@ -1050,6 +1053,33 @@ export const HOME_CAPABILITY = "home.v1";
 export const HOME_MEMORY_VIEW_CAPABILITY = "home-memory-view.v1";
 /** The full chapter-list read (#740); older home.v1 servers lack it. */
 export const HOME_CHAPTER_LIST_CAPABILITY = "home-chapter-list.v1";
+/** The learned-profile read (`home.profileList`); advertised only with a Knowledge owner. */
+export const HOME_PROFILE_LIST_CAPABILITY = "home-profile-list.v1";
+/** The maintainer's learned-profile changes (`home.profileChange`, profile entries in
+ * `settings.undo`); advertised with `home-profile-list.v1`. Older Gateways keep the
+ * Profile sheet read-only. */
+export const HOME_PROFILE_EDIT_CAPABILITY = "home-profile-edit.v1";
+
+/** One learned-profile item as `home.profileList` answers it: the Knowledge note's
+ * identity, its kind label, its one-line text and whether the maintainer confirmed it.
+ * `status` is derived the way Home's instructions derive it: only `active` applies. */
+export interface HomeProfileListItem {
+  id: string;
+  revisionId: string;
+  kind: "preference" | "standing-decision" | "delegation-default" | "fact";
+  text: string;
+  confirmed: boolean;
+  status: "active" | "superseded" | "retired";
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** `home.profileList`: every profile-tagged personal note, classified, in Home's
+ * order (kind, then creation); `unclassified` counts notes without one kind label. */
+export interface HomeProfileList {
+  items: HomeProfileListItem[];
+  unclassified: number;
+}
 
 /** One ledger chapter as `home.chapterList` answers it. Sealed chapters carry
  * exactly their recorded seal metrics (a disable-sealed chapter has none); the
@@ -1081,8 +1111,8 @@ export interface HomeChapterContents {
   userMessages: number;
   homeReplies: number;
   tasksDelegated: number;
-  /** At most 8 useful recent merged memory summaries, each at most 200 characters.
-   * Empty when Home's memory is not open. */
+  /** At most 8 useful recent merged memory summaries, each at most 1000 characters
+   * with its lines kept (markdown). Empty when Home's memory is not open. */
   topics: string[];
 }
 
@@ -1204,6 +1234,9 @@ export interface HomeStatus {
   };
   live: boolean;
   sessionPresent: boolean;
+  /** True while Home's live openable chapter is blocked on a semantic user
+   * interaction (a pending ask_user question). Absent on an undesignated Home. */
+  waitingForUser?: boolean;
   /** Home's memory, once a record names one. There are no memory defaults
    * (decision D4), so a Home whose memory is unconfigured refuses its
    * activations until the memory model is set (`model.ref[role=memory]`). */

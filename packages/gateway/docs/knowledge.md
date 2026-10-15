@@ -646,7 +646,9 @@ validate them, and an owner alone gives them meaning. Tron Home's learned profil
 `retired: true` marks a note that has left active use; its earlier revisions stay in
 the ledger. An update or correction that omits `tags` or `retired` keeps the current
 revision's values, because native typed drafts do not model them; naming `tags`
-replaces them. `provenance.reason` (at most 2,000 characters) records why a revision
+replaces them. A draft may name `retired: false` to return a retired note to use (the
+learned profile's undo, [settings-model.md 6.4](settings-model.md#64-learned-profile-changes));
+a stored revision never holds `false`. `provenance.reason` (at most 2,000 characters) records why a revision
 was written. It is ledger metadata, never evidence. All three fields are optional
 under schema v1, so no schema bump is needed. A Gateway that predates them ignores
 them when it reads a note, but it does not carry them forward when it writes the same
@@ -757,7 +759,7 @@ Source keeps exact referring POST/REPLY evidence, and synthesis must cite that
 Source separately from X author commentary.
 
 Private X bookmarks are discovered only through the explicitly invoked,
-paid-gated OAuth X connector. The global `tron-x` skill provides bounded
+paid-gated OAuth X connector. The global `x-posts` skill provides bounded
 newest-first queue discovery, page checkpoints, and identity/coverage
 validation. Browser state is never used to enumerate or sync private bookmarks;
 there is no cookie store, background sync, automatic browser login, or remote
