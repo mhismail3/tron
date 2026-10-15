@@ -409,7 +409,6 @@ struct DashboardServerFilterState: Equatable, Sendable {
         self.sortMode = sortMode
     }
 
-    var isFiltering: Bool { !selectedProfileIDs.isEmpty || sortMode != .home }
     var isAllSelected: Bool { selectedProfileIDs.isEmpty }
     mutating func reconcile(profileIDs: [String]) {
         let admitted = Set(profileIDs)
@@ -1123,11 +1122,6 @@ struct SessionCatalogCoordinator: Equatable {
         sessions.removeAll()
         indicesByID.removeAll()
         freshness = .stale
-    }
-
-    func hasConsistentIndex() -> Bool {
-        indicesByID.count == sessions.count
-            && sessions.enumerated().allSatisfy { indicesByID[$0.element.id] == $0.offset }
     }
 
     private mutating func rebuildIndex() {
