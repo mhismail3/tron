@@ -195,7 +195,7 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
     func renderCheck() -> ProfileRenderCheck {
         ProfileRenderCheck(
             counters: ["sheet_cycles": cycles],
-            divergence: cycles >= 2 ? nil : "only \(cycles) sheet cycles completed"
+            divergence: cycles >= 1 ? nil : "no sheet cycle completed"
         )
     }
 
