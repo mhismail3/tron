@@ -13,6 +13,15 @@ public struct MacShell: Codable, Equatable, Sendable, Identifiable {
     public let closedReason: String?
 
     public var hasExited: Bool { exitedAt != nil }
+
+    public init(id: String, createdAt: String, sequence: Int, exitedAt: String? = nil, exitCode: Int? = nil, closedReason: String? = nil) {
+        self.id = id
+        self.createdAt = createdAt
+        self.sequence = sequence
+        self.exitedAt = exitedAt
+        self.exitCode = exitCode
+        self.closedReason = closedReason
+    }
 }
 
 public struct MacShellChunk: Codable, Equatable, Sendable {

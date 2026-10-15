@@ -252,6 +252,9 @@ final class AppModel {
     let automationCatalog: AutomationCatalogCoordinator
     /// Focused-profile, disposable Home status; never a mirror of Home storage.
     let homeStatus = HomeStatusPresentationOwner()
+    /// Mac Terminal's shells outlive its sheet (#1075), so their controller is
+    /// app-scoped; the shells themselves live on the Mac.
+    let macTerminal = MacTerminalController()
     /// Owns idempotent Home designation receipts independently of dashboard reads.
     let homeMutations: HomeMutationCoordinator
     /// Typed access to Gateway-owned Knowledge; no records are persisted here.

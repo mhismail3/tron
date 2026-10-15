@@ -69,6 +69,9 @@ private struct MacTerminalFixtureConfiguration: Decodable {
     /// A valid host key that is not the sshd's, for the mismatch scenario.
     let otherHostKey: String
     let authorizedKeys: String
+    /// The shell host's argv (the journey's compiled Gateway); absent for the
+    /// plain-shell scenario.
+    let hostCommand: [String]?
 }
 
 private actor MacTerminalFixtureGateway {
@@ -81,9 +84,16 @@ private actor MacTerminalFixtureGateway {
     nonisolated var isStopped: Bool { stopped.withLock { $0 } }
     private var remoteLoginChecks = 0
 
+    /// Each launch gets its own shell host (a Tron home of its own under the
+    /// journey's), so one journey's shells never number or answer in another's.
+    private let hostCommand: [String]?
+
     init(scenario: String, configuration: MacTerminalFixtureConfiguration?) {
         self.scenario = scenario
         self.configuration = configuration
+        hostCommand = configuration?.hostCommand.map { command in
+            Array(command.dropLast()) + [(command.last ?? "") + "/" + UUID().uuidString.prefix(8).lowercased()]
+        }
     }
 
     func attach(_ socket: MacTerminalFixtureSocket) { sockets.append(socket) }
@@ -109,7 +119,9 @@ private actor MacTerminalFixtureGateway {
                 "username": .string(configuration.username), "port": .number(Double(configuration.port)),
                 "hosts": .array(configuration.hosts.map(JSONValue.string)), "hostKeys": .array(hostKeys.map(JSONValue.string)),
                 "remoteLogin": .string(off ? "off" : "on"), "enrolled": .bool(false),
-            ]), nil)
+            ].merging(scenario == "no-host" ? [:] : hostCommand.map {
+                ["hostCommand": .array($0.map(JSONValue.string))]
+            } ?? [:]) { $1 }), nil)
         case "settings.change":
             guard let configuration,
                   let change = params["changes"]?.arrayValue?.first?.objectValue,

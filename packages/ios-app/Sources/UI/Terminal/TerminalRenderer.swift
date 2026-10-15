@@ -190,6 +190,12 @@ struct NativeTerminal: UIViewRepresentable {
             view.feed(byteArray: Array(chunk.data.utf8)[...])
             context.coordinator.lastSequence = chunk.sequence
         }
+        #if HOSTED_TEST
+        // Journeys read what the emulator shows (its normal buffer's text), so
+        // a test proves output survived, not only that a shell answered.
+        view.accessibilityIdentifier = "terminal-emulator"
+        view.accessibilityValue = String(String(decoding: view.getTerminal().getBufferAsData(kind: .normal), as: UTF8.self).suffix(4_000))
+        #endif
         if !isInteractive { view.stopCursorBlinking() }
     }
 
