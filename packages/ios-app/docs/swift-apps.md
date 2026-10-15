@@ -83,9 +83,21 @@ resolve to the program's own declarations or to a fixed list of builtins
 links never open URLs. `print` is a no-op. `@Environment(\.dismiss)` closes
 the presentation the program created around that view (its `sheet` or a
 `NavigationLink` destination, through `SwiftAppPresentedContent`); in the
-program's root view it does nothing, so a program never closes the runner. Unsupported syntax shows a readable message with
-its line number instead of running; an unsupported view or a failing body
-renders an inline diagnostic beside the working views. Diagnostics reuse the
+program's root view it does nothing, so a program never closes the runner.
+Unsupported syntax is collected at grammar-owned boundaries (dictionary literals,
+custom initializers, associated-value cases, protocols, generic declarations,
+tuple loop patterns, type checks and async/await), with a construct name and
+source line for each. At 10 diagnostics parsing stops and explicitly says more
+may remain. No partial program runs. Lexer errors, malformed delimiters and
+nesting exhaustion remain fatal rather than guessing a recovery boundary.
+
+View-builder bodies and native container content isolate a runtime failure to
+its failing statement, preserving earlier and later working siblings, including
+nested stacks and ForEach rows. A work-budget stop preserves completed siblings
+but does not refill the budget to attempt the rest of that entry. Ordinary value
+functions and action closures still throw to their caller; containment never
+converts a failed action into a successful commit. Calling a property as a method
+names that property rather than just printing its dynamic value. Diagnostics reuse the
 shared `TronInfoCard` with semantic error accent, typography and glass surface;
 the runner keeps `tronDocumentSheetChrome`.
 
@@ -226,6 +238,14 @@ fixture (`-readonly-preview-scenario display-swift…`):
   records/arrays, derived totals, published arrays and aliased object fields on
   budget failure; scalar state and object writes on arithmetic failure; successful
   commit afterward; and the shared info card’s primary text ink and visible bounds.
+
+- `testSwiftDiagnosticsPreserveSiblingViews` verifies named, line-numbered
+  failures between working stack children and ForEach rows, then verifies that
+  the same failing value helper still rolls an action back.
+- `testSwiftUnsupportedDiagnosticsAreBoundedAndMalformedSyntaxStops` verifies
+  the 10-diagnostic cap, no execution of a partial parse, and fatal malformed
+  delimiters. The existing failure journey verifies multiple unsupported
+  constructs within the same declaration and across declarations in one report.
 
 ```bash
 scripts/tron-ios-test build

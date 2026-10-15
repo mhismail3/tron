@@ -267,6 +267,8 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 5: Custom initializers'")).firstMatch.exists)
         XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 8: Dictionaries'")).firstMatch.exists)
         XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 14: Enum cases with associated values'")).firstMatch.exists)
+        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 17: Protocols with requirements'")).firstMatch.exists)
+        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS \"Line 18: Generic function 'identity'\"")).firstMatch.exists)
         broken.terminate()
 
         // Nesting deep enough to overflow a recursive parser stops at the parser limit.
@@ -344,7 +346,11 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts[title].exists, "Working sibling survives: \\(title)")
         }
         XCTAssertTrue(diagnostic(app, "Line 7: 'count' is a property, not a method").exists)
-        XCTAssertTrue(diagnostic(app, "Line 23: Index 4 is out of range").exists)
+        XCTAssertTrue(diagnostic(app, "Line 10: Index 4 is out of range").exists)
+        XCTAssertTrue(app.staticTexts["Row -10"].exists)
+        XCTAssertTrue(app.staticTexts["Row 10"].exists, "A failing ForEach row does not erase later rows")
+        XCTAssertTrue(diagnostic(app, "Division by zero").exists)
+        assertToolbarTint(app, title: "Diagnostics")
         keepScreenshot(app, "1039-contained-siblings")
         app.buttons["Count"].tap()
         XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: 1"))
@@ -355,6 +361,27 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         app.buttons["Count"].tap()
         XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: 2"))
         XCTAssertTrue(wait(diagnostic(app, "Action cancelled; state restored."), predicate: "exists == false"))
+    }
+
+    @MainActor func testSwiftUnsupportedDiagnosticsAreBoundedAndMalformedSyntaxStops() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-diagnostic-cap", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Capped.swift")
+        app.buttons["Run Capped.swift"].tap()
+        let capped = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Stopped after 10 unsupported constructs'")).firstMatch
+        XCTAssertTrue(capped.waitForExistence(timeout: 10))
+        XCTAssertTrue(capped.label.contains("Line 1: Custom initializers"))
+        XCTAssertTrue(capped.label.contains("Line 10: Custom initializers"))
+        XCTAssertFalse(capped.label.contains("Line 11:"))
+        XCTAssertFalse(app.staticTexts["Must not run"].exists, "A partial parse is never executed")
+        keepScreenshot(app, "1039-bounded-diagnostics")
+        app.terminate()
+
+        let malformed = launchSwift("display-swift-diagnostic-malformed", flag: true); defer { malformed.terminate() }
+        openSwiftDisplay(malformed, named: "Malformed.swift")
+        malformed.buttons["Run Malformed.swift"].tap()
+        XCTAssertTrue(malformed.staticTexts.matching(NSPredicate(format: "label CONTAINS \"Unbalanced '{'\"")).firstMatch.waitForExistence(timeout: 10),
+                      "Malformed delimiters are fatal, not speculative recovery points")
     }
 
     /// The shared info card uses neutral primary copy and a separate semantic
