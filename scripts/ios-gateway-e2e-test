@@ -26,48 +26,13 @@ source "$repo_root/config/ci-toolchain.env"
 # (TRON_CI_TOOLS_DIR); the fixture's Node is resolved separately, below.
 export PATH="${TRON_CI_TOOLS_DIR:-$repo_root/.ci-tools}/bin:$PATH:/opt/homebrew/bin"
 
-# The fixture's Node is the repository-pinned one, from the same candidates
-# scripts/tron dev and packages/mac-app/scripts/bundle-gateway.sh use, in the one
-# order this harness needs: TRON_NODE_BIN, the pinned nvm directory, Homebrew, and
-# only then this shell's PATH. Those two scripts re-exec or run under a scrubbed
-# PATH, so they can check PATH second; this harness must run under the caller's
-# toolchain (Xcode, .ci-tools), and a shell spawned by the Stable or Debug
-# Gateway carries that Gateway's bundled, team-signed runtime on PATH. That
-# runtime answers the pinned version and owns a sibling npm, so a version check
-# cannot tell it apart; the preflight below refuses the Node finally chosen if it
-# cannot load the Gateway's native modules (#445).
-NODE_VERSION_FILE="$repo_root/.node-version"
-[[ -f "$NODE_VERSION_FILE" ]] || { echo "error: missing canonical Node version file: $NODE_VERSION_FILE" >&2; exit 127; }
-NODE_VERSION="$(<"$NODE_VERSION_FILE")"
-[[ "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: canonical Node version must be one strict x.y.z line" >&2; exit 127; }
-node_matches_pin() {
-  local candidate="$1" actual
-  [[ -x "$candidate" ]] || return 1
-  actual="$("$candidate" --version 2>/dev/null || true)"
-  [[ "$actual" == "v${NODE_VERSION}" ]]
-}
-node_toolchain_matches_pin() {
-  local candidate="$1"
-  node_matches_pin "$candidate" && [[ -x "$(dirname "$candidate")/npm" ]]
-}
-resolve_pinned_node() {
-  local candidate nvm_node
-  if [[ -n "${TRON_NODE_BIN:-}" ]]; then
-    candidate="$TRON_NODE_BIN"
-    [[ "$candidate" == /* ]] && node_toolchain_matches_pin "$candidate" \
-      || { echo "error: TRON_NODE_BIN does not provide exact Node v${NODE_VERSION} with sibling npm" >&2; exit 127; }
-    printf '%s\n' "$candidate"; return
-  fi
-  nvm_node="${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v${NODE_VERSION}/bin/node"
-  if [[ "$nvm_node" == /* ]] && node_toolchain_matches_pin "$nvm_node"; then printf '%s\n' "$nvm_node"; return; fi
-  for candidate in "/opt/homebrew/bin/node" "/usr/local/bin/node"; do
-    if node_toolchain_matches_pin "$candidate"; then printf '%s\n' "$candidate"; return; fi
-  done
-  candidate="$(command -v node 2>/dev/null || true)"
-  if [[ "$candidate" == /* ]] && node_toolchain_matches_pin "$candidate"; then printf '%s\n' "$candidate"; return; fi
-  echo "error: unable to find exact Node v${NODE_VERSION} with sibling npm; checked TRON_NODE_BIN, the pinned nvm directory, Homebrew, and PATH" >&2
-  exit 127
-}
+# The fixture's Node is the repository-pinned one, from the one repository
+# resolver scripts/tron-node (#242): TRON_NODE_BIN, the pinned nvm directory, then
+# PATH and Homebrew, never a signed Gateway payload runtime. A shell spawned by
+# the Stable or Debug Gateway carries that runtime first on PATH; it answers the
+# pinned version and owns a sibling npm. The resolver refuses it by its payload
+# layout and signature, and the preflight below still refuses the Node finally
+# chosen if it cannot load the Gateway's native modules (#445).
 NODE_BIN=""
 NPM_BIN=""
 fixture_environment=()
@@ -91,9 +56,8 @@ build_fixture_environment() {
 }
 require_gateway_node() {
   [[ -n "$NODE_BIN" ]] && return 0
-  NODE_BIN="$(resolve_pinned_node)"
+  NODE_BIN="$("$repo_root/scripts/tron-node")"
   NPM_BIN="$(dirname "$NODE_BIN")/npm"
-  [[ -x "$NPM_BIN" ]] || { echo "error: missing npm sibling of the pinned Node: $NPM_BIN" >&2; exit 127; }
   # npm's launcher runs `/usr/bin/env node`; only the resolved directory moves to
   # the front, so every child of this harness uses this exact toolchain.
   export PATH="$(dirname "$NODE_BIN")${PATH:+:$PATH}"

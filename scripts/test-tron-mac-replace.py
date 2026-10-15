@@ -153,8 +153,7 @@ class Fixture:
         self.root = Path(tempfile.mkdtemp(prefix='tron-mac-replace-e2e-')).resolve()
         self.home = self.root / 'home'
         self.label = f'com.tron.e2e.mac-replace.{os.getpid()}'
-        node_version = (REPO / '.node-version').read_text().strip()
-        self.node = Path.home() / f'.nvm/versions/node/v{node_version}/bin/node'
+        self.node = Path(subprocess.run([REPO / 'scripts/tron-node'], check=True, capture_output=True, text=True).stdout.strip())
         with socket.socket() as probe:
             probe.bind(('127.0.0.1', 0))
             self.port = probe.getsockname()[1]
