@@ -5681,6 +5681,11 @@ export class RuntimeSlot {
         "toolCount", "turnCount", "recentOutput", "output", "error", "attention", "attentionState", "startedAt", "endedAt", "durationMs", "status"] as const) {
         if (source[key] !== undefined) projected[key] = source[key];
       }
+      // The child run's own state is the authority for whether it is still live. Its runner
+      // records the step's terminal status first and persists the run's terminal state only
+      // after finishing its result, so a terminal step under a running run is still live work
+      // that settlement must join (#1021).
+      if (typeof child.state === "string") projected.state = child.state;
       // The released single-child snapshot omits a zero total until its first
       // tool event; an explicitly empty recent-tools list proves that zero.
       if (source.toolCount === undefined && Array.isArray(source.recentTools) && source.recentTools.length === 0) projected.toolCount = 0;

@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatch, fixture, reportCall } from "../../test-support/home-task-fixture.js";
@@ -232,8 +233,15 @@ describe("Home task subagents: settlement and stop", () => {
     expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
   }, 60_000);
 
-  it.each(["ordinary", "refresh during selection"])("stops a workflow's async child that outlives its completed workflow when the task is stopped while it waits (%s)", async (interleaving) => {
+  it.each(["ordinary", "refresh during selection", "late runner terminal state"])("stops a workflow's async child that outlives its completed workflow when the task is stopped while it waits (%s)", async (interleaving) => {
     const f = await fixture(false, false, undefined, true);
+    if (interleaving === "late runner terminal state") {
+      // The child's runner records its step stopped, then holds its run's terminal state:
+      // settlement must join the run, not the step (#1021). Fixture disposal unstubs this.
+      const preload = fileURLToPath(new URL("../../test-support/late-runner-terminal-status-preload.mjs", import.meta.url));
+      vi.stubEnv("NODE_OPTIONS", `${process.env.NODE_OPTIONS ?? ""} --import ${preload}`.trim());
+      vi.stubEnv("TRON_LATE_RUNNER_TERMINAL_MS", "1500");
+    }
     const child = await childModel(f);
     await writeFile(join(f.cwd, "detached-workflow.js"), DETACHED_WORKFLOW_SCRIPT);
     f.faux.setResponses([
