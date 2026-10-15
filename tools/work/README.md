@@ -148,8 +148,13 @@ with elapsed time, live tree RSS and the log's last line, and a result line with
 wall time, peak tree RSS and CPU. The first failing shard stops the run, prints the
 end of its log, names the step and how many later shards did not start, and lists
 the step's `knownFlakes` (for example #1016). A shard past its hard timeout is
-killed with its process group and reported as `TIMEOUT <shard> exceeded its hard
-limit`. Every finished shard appends to `<git common dir>/work/gate/metrics.jsonl`.
+stopped with its whole process tree and reported as `TIMEOUT <shard> exceeded its hard
+limit`. The tree is every process seen descending from the shard, including ones in
+their own session or process group (the iOS lane lease holder's command, `xcodebuild`)
+and ones launchd adopted after their parent died. Each gets SIGTERM and 45 s for its
+own cleanup, so the lease holder releases its simulator lane, then SIGKILL; the log
+records how many were stopped, which needed SIGKILL and any that survived it. A
+cancelled shard and anything a passing shard left running are stopped the same way. Every finished shard appends to `<git common dir>/work/gate/metrics.jsonl`.
 
 **Heavy steps.** A `heavy` shard waits in the host-wide heavy queue
 (`heavy.py`, `scripts/tron-heavy status`;
@@ -163,7 +168,8 @@ wait.
 refuses a dirty worktree or a tree that changed while steps ran. `python3 -B
 scripts/test-gate.py` exercises the real CLI in temporary repositories: the plan for
 each change kind, an injected failure that stops at its shard, a retry that reuses
-passing shards, input invalidation, a hard timeout, background submit/cancel/wait,
+passing shards, input invalidation, a hard timeout, a timed-out step whose processes
+in other sessions (under the real iOS lease holder) all end and free the lane, background submit/cancel/wait,
 and the dirty-tree refusal. It also exercises the real `tron ci` wrapper in a
 shallow fixture checkout (prerequisites, fail-first annotation, local-only refusal),
 Pi versus unrelated lock deltas, transport/LAN plans and complete inherited-suite
