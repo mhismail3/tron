@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { KEYS, SECTIONS, builtinValue, chatLayerApplies, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, builtinValue, chatLayerApplies, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_DEFAULT_LABELS, LAYER_LABELS, LAYER_SOURCE_LABELS, type FormatContext, type LayerId, type Qualifiers } from "./settings-types.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
 import { instanceId } from "./settings-outside.js";
@@ -450,10 +450,6 @@ export function targetLayers(target: SettingsTarget, options: { home?: boolean; 
       ? ["chat", "profile", "mac", "builtin"]
       : options.project === false ? ["chat", "mac", "builtin"] : ["chat", "project", "mac", "builtin"];
   }
-}
-
-export function sectionDeclarations() {
-  return SECTIONS;
 }
 
 export { floorFor };

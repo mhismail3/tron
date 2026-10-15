@@ -372,4 +372,3 @@ export class ConnectionOwner {
   }
 }
 
-export function connectionStatePath(tronHome: string): string { return statePath(tronHome); }
