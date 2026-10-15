@@ -892,6 +892,31 @@ describe("Home worker budget", () => {
     evidence.push({ case: "worker-budget-pressure", deferred: "critical", started: workers.started });
   }, 60_000);
 
+  // #1000: utilisation over the few milliseconds after a start is mostly the reading tick
+  // itself, so it read 0.94 to 0.96 on an idle process. A status read cached that as
+  // `critical` and the next dispatch queued with no session, which Home E2Es then failed
+  // to acquire. Load is pinned so only the utilisation input decides the level.
+  it("starts a restarted Gateway's first task at once: a few-millisecond utilisation window is not host pressure", async () => {
+    const f = await fixture();
+    const reply = (context: unknown) => JSON.stringify(context).includes("First work after start")
+      ? fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }) : fauxAssistantMessage("Home reply");
+    f.faux.setResponses([reply, reply]);
+    vi.spyOn(os, "loadavg").mockReturnValue([0, 0, 0]);
+    // One Home turn first, so Home's chat is on disk for the restarted Gateway.
+    await (await f.registry.acquire(f.home.sessionId)).prompt("Hello");
+    const cold = await f.restart();
+    const owner = cold.homeOwner();
+    // Synchronous startup work just before the first read, as a starting Gateway does.
+    const busyUntil = performance.now() + 20;
+    while (performance.now() < busyUntil) { /* the reading tick stays busy */ }
+    expect((await owner.status()).hostPressure.level).toBe("normal");
+    const handle = await owner.dispatchTask(f.home.sessionId, { taskId: "first-after-start", intent: "First work after start", target: f.cwd });
+    expect(handle).toMatchObject({ queuePosition: null, sessionId: expect.any(String) });
+    expect(f.signals).not.toContainEqual(expect.objectContaining({ event: "home.task.queue", decision: "deferred-pressure" }));
+    expect((await handle.completion).terminalEvidence).toMatchObject({ outcome: "final" });
+    evidence.push({ case: "worker-budget-start-window", started: handle.sessionId !== null });
+  }, 60_000);
+
   it("settles a waiting task at restart without replaying it", async () => {
     const f = await fixture();
     const workers = gatedWorkers(f);
