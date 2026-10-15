@@ -182,6 +182,32 @@ def _script_kind(root: Path, relative: str) -> Optional[str]:
     return kind
 
 
+SUITE_GROUPS = 3
+SUITE_SPLIT_CLASSES = 6
+
+
+def _suite_shards(root: Path, suite: str) -> List[str]:
+    """One command per suite, or, for a unittest suite with many TestCase classes, one per
+    group of consecutive classes balanced by source lines. Groups are computed from the
+    file every time, so a new class is always in some shard."""
+    text = (root / suite).read_text(errors="replace").splitlines()
+    starts = [(i, m.group(1)) for i, line in enumerate(text)
+              if (m := re.match(r"^class (\w+)\(.*unittest\.TestCase", line))]
+    if len(starts) < SUITE_SPLIT_CLASSES:
+        return [f"python3 -B {suite}"]
+    spans = [(name, (starts[n + 1][0] if n + 1 < len(starts) else len(text)) - i) for n, (i, name) in enumerate(starts)]
+    target = sum(size for _, size in spans) / SUITE_GROUPS
+    groups: List[List[str]] = [[]]
+    filled = 0.0
+    for name, size in spans:
+        if filled >= target and len(groups) < SUITE_GROUPS:
+            groups.append([])
+            filled = 0.0
+        groups[-1].append(name)
+        filled += size
+    return [f"python3 -B {suite} " + " ".join(group) for group in groups]
+
+
 def _select(name: str, change: Change, code: List[str]) -> List[str]:
     """Arguments a selecting step needs from the change; empty means the step is not needed."""
     root = change.root
@@ -221,7 +247,7 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
                 for candidate in (f"scripts/test-{stem}.py",):
                     if (root / candidate).is_file():
                         suites.append(candidate)
-        return [f"python3 -B {s}" for s in dict.fromkeys(suites)]
+        return [command for suite in dict.fromkeys(suites) for command in _suite_shards(root, suite)]
     if name == "ios-journeys":
         classes = []
         for path in change.existing():
@@ -282,7 +308,9 @@ def _label(select: Optional[str], selection: str, index: int) -> str:
     if select == "ios-journeys":
         return selection.rsplit("/", 1)[-1] if selection else "smoke"
     if select == "tooling-tests":
-        return Path(selection.split()[-1]).stem
+        parts = selection.split()
+        stem = Path(parts[2]).stem
+        return stem if len(parts) == 3 else f"{stem}:{parts[3]}.."
     return str(index)
 
 
