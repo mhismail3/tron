@@ -93,8 +93,8 @@ plan. Markdown and `docs/` paths never start a build. Representative plans:
   whole default suite in 6 shards, two at a time (`gateway.full`, which supersedes
   `gateway.affected`) plus `gateway.scripts` (three named shards);
 - iOS Swift: one `ios.build` (build-for-testing), then `ios.journeys`, which runs the
-  changed UI test classes (or the smoke set) with test-without-building, one shard
-  per class, from the same stamped products;
+  changed UI test classes (or the smoke set) with test-without-building, two test
+  methods per shard, from the same stamped products;
 - Mac: `mac.build` (build-for-testing; it stages the Gateway payload, so it precedes
   every Gateway step) → `mac.test` (test-without-building); replacement scripts add
   `mac.replace-e2e`;
