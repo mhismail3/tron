@@ -37,14 +37,6 @@ private struct ChatMessageGrowthIdentity: Equatable, Sendable {
 }
 
 enum UserPromptPresentationPolicy {
-    /// Display only: invocation arguments retain the user's original text even
-    /// after the runtime expands a template. Never infer or strip template
-    /// content by matching strings, and never use this preview for submission.
-    static func promptDisplayText(_ resource: ComposerResourceInvocation?) -> String? {
-        guard let resource, resource.source == .prompt else { return nil }
-        return resource.arguments
-    }
-
     static func visibleText(_ text: String?, hasAttachments: Bool = false) -> String? {
         guard let text,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -59,7 +51,7 @@ enum AutomationPromptPresentationPolicy {
 
     static func visibleText(_ item: TranscriptItem) -> String? {
         UserPromptPresentationPolicy.visibleText(
-            UserPromptPresentationPolicy.promptDisplayText(item.semantic?.resourceInvocation) ?? item.text
+            item.text
         )
     }
 
@@ -209,9 +201,7 @@ struct TranscriptRow: View, Equatable {
             AutomationPromptMessageView(item: item)
         } else {
             VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 4) {
-                if let resource = item.semantic?.resourceInvocation {
-                    CanonicalResourceChip(resource: resource)
-                }
+                CanonicalResourceChips(resources: item.semantic?.resourceInvocations ?? [])
                 if !displayedAttachments.isEmpty {
                     attachmentStrip
                 }

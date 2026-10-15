@@ -176,8 +176,9 @@ final class TronHomeSheetsUITests: XCTestCase {
     }
 
     /// Home's composer offers the user-level skills and prompt templates its Gateway
-    /// catalog lists, through the same `@` and `/` pickers as an ordinary chat, and an
-    /// inserted prompt is sent on the logical Home route as that message's resource (#936).
+    /// catalog lists, through the same `@` and `/` pickers as an ordinary chat, and the
+    /// inserted skills and prompts are sent together, in pick order, on the logical
+    /// Home route as that message's resources (#936, #311).
     @MainActor
     func testHomeComposerOffersUserSkillsAndPrompts() {
         continueAfterFailure = false
@@ -203,14 +204,33 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("11-home-composer-prompts")
 
         prompt.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["composer.staged-chip"].waitForExistence(timeout: 5), app.debugDescription)
+        let stagedChips = app.descendants(matching: .any).matching(identifier: "composer.staged-chip")
+        XCTAssertTrue(stagedChips.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+
+        // Each pick appends a chip in order; picking a staged resource again adds
+        // nothing, and one chip is removed alone (#311).
+        func pick(_ trigger: String, _ name: String) {
+            composer.typeText(trigger)
+            let entry = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS 'User'", name)).firstMatch
+            XCTAssertTrue(entry.waitForExistence(timeout: 5), app.debugDescription)
+            entry.tap()
+        }
+        pick("@", "wordcraft")
+        pick("/", "weekly-review")
+        pick("/", "daily-brief")
+        pick("@", "jev")
+        XCTAssertTrue(waitFor(stagedChips, count: 4, timeout: 5), app.debugDescription)
+        app.buttons["Remove resource, Jev"].tap()
+        XCTAssertTrue(waitFor(stagedChips, count: 3, timeout: 5), app.debugDescription)
         composer.typeText("inbox")
-        keep("12-home-composer-prompt-inserted")
+        keep("12-home-composer-resources-inserted")
         let send = app.buttons["Send message"]
         XCTAssertTrue(waitFor(send, "enabled == true", timeout: 5))
         send.tap()
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-prompt-route"], "label CONTAINS 'prompt-route:home.prompt:prompt:daily-brief:inbox'"),
+        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-prompt-route"],
+                              "label CONTAINS 'prompt-route:home.prompt:prompt:daily-brief+skill:wordcraft+prompt:weekly-review:inbox'"),
                       app.staticTexts["fixture.home-prompt-route"].label)
+        keep("13-home-composer-resources-sent")
     }
 
     /// Every Home tool call opens its purpose-built detail from the Home transcript, and
@@ -529,6 +549,10 @@ final class TronHomeSheetsUITests: XCTestCase {
 
     private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
+    }
+
+    private func waitFor(_ query: XCUIElementQuery, count: Int, timeout: TimeInterval = 10) -> Bool {
+        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == %d", count), object: query)], timeout: timeout) == .completed
     }
 
     /// The average color of an element's saturated (inked) pixels: a title's

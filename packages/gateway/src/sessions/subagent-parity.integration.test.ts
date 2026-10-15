@@ -244,7 +244,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
           const category = row.kind === "customMessage" ? details?.reason ?? row.customType : "prompt";
           return { category, origin: row.semantic?.origin.kind ?? "unknown", title: row.semantic?.origin.title ?? null, classification: row.semantic?.kind ?? null,
             direction: row.semantic?.direction ?? null, contextEffect: row.semantic?.contextEffect ?? null, confidence: row.semantic?.origin.confidence ?? null,
-            lifecycle: row.semantic?.lifecycle ?? null, resourceInvocation: normalize(row.semantic?.resourceInvocation ?? null), submittedText: row.semantic?.submittedText ?? null, delivery: row.semantic?.delivery ?? null, visibility: row.semantic?.visibility ?? null,
+            lifecycle: row.semantic?.lifecycle ?? null, resourceInvocations: normalize(row.semantic?.resourceInvocations ?? null), submittedText: row.semantic?.submittedText ?? null, delivery: row.semantic?.delivery ?? null, visibility: row.semantic?.visibility ?? null,
             content: normalize(row.content), details: normalize(row.kind === "customMessage" ? row.details ?? null : null) };
         });
       const semantic = snapshot.extensionPresentation.semanticState;
