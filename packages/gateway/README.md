@@ -3163,18 +3163,24 @@ Each row includes the runtime loader's source, scope, origin, and path when avai
 `session.commandDetail` read requires one exact current `source:name` identity and returns
 that selected prompt, skill, or extension source document only; content is UTF-8 bounded
 to 96 KiB with original byte count and explicit truncation metadata, so catalog loading
-never reads or copies every resource body. Protocol-v7 `session.prompt` accepts one typed
-`resourceInvocation` with source, canonical name, and visible arguments. The Gateway revalidates
-exact live `(source,name)` identity and extension-command precedence before constructing Pi's
-normalized leading invocation. Pending and queued projections retain the same typed resource;
-canonical binding receipts attach it to the resulting user entry so native chips survive restart
-without exposing expanded skill contents or private paths. Resource names are bounded to 512
-UTF-8 bytes and arguments to 5,000 bytes (the receipt-safe semantic bound); newline, carriage return, and tab are allowed prompt content,
-while other controls and unknown fields are rejected. `text` and resource `arguments` are one exact
-contract, including valid empty arguments for no-argument resources; extension commands reject
-attachments at the Gateway boundary regardless of client behavior. Extension and skill commands
-use Pi's literal ASCII-space delimiter; prompt templates retain Pi's whitespace delimiter after
-extension precedence. The same source-specific rules govern typed admission and queue checks. Binding receipts
+never reads or copies every resource body. `session.prompt` accepts `resourceInvocations`, the ordered typed resources one message invokes (#311):
+any mix of at most 16 skills and prompts, each at most once and with empty `arguments`, or exactly one
+extension command whose `arguments` equal `text`. The Gateway revalidates each exact live `(source,name)`
+identity and extension-command precedence. An extension command is Pi's literal leading command and
+rejects attachments at the Gateway boundary regardless of client behavior. Skills and prompts are
+composed by the runtime in its lane (`composeResourcePrompt`): each expansion in order, then the visible
+prompt once, handed to Pi with expansion off, so text that looks like a command stays message text. A skill
+block is byte-identical to Pi's own expansion; a prompt template expands as Pi would with no arguments.
+A saved automation still names at most one skill or prompt and runs it as a one-resource message by the same rule.
+Pending and queued projections retain the same typed list; start receipts record it as `resources` with
+the typed text as `submittedText`, and canonical binding receipts attach both to the resulting user entry,
+whose projected text is the typed text, so native chips survive restart without exposing expanded skill
+contents or private paths. A start receipt written before multi-resource messages names its one resource
+through `source`, `name` and `arguments` and still projects as that resource. Resource names are bounded to
+512 UTF-8 bytes and arguments to 5,000 bytes (the receipt-safe semantic bound); newline, carriage return, and
+tab are allowed prompt content, while other controls and unknown fields are rejected. Extension and skill
+commands typed as text use Pi's literal ASCII-space delimiter; prompt templates retain Pi's whitespace
+delimiter after extension precedence. Binding receipts
 contain canonical target identity only; start receipts own resource identity and trusted producer
 provenance and are recovered from canonical JSONL if live runtime maps have already settled. Image-bearing
 prompt starts also retain the exact submitted text (bounded by the prompt limit); Pi may append generated
