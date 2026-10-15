@@ -216,14 +216,18 @@ export class HomeTaskDispatcher {
     await this.store.removeAbandonedTemporaries();
     // The recovery pass already reads every record; it seeds the catalog's
     // worker index in one batch rather than a second ledger scan.
+    // A worker is named by the task that created it, as live binding records it
+    // (first wins): a resumed task's successor rebinds the same session, so the
+    // ledger's order must not let a successor name it after a restart.
     const workers: Array<[string, string]> = [];
+    const successors: Array<[string, string]> = [];
     try {
       for await (const task of this.store.records()) {
-        if (task.sessionId) workers.push([task.sessionId, task.taskId]);
+        if (task.sessionId) (task.resumes ? successors : workers).push([task.sessionId, task.taskId]);
         await this.recoverTask(task);
       }
     } finally {
-      if (workers.length > 0) this.sessions.recordTaskWorkers(workers);
+      if (workers.length + successors.length > 0) this.sessions.recordTaskWorkers([...workers, ...successors]);
     }
   }
 

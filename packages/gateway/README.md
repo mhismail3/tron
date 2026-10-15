@@ -2948,9 +2948,15 @@ active mobile presentation advances completion and read-through together in one
 durable attention replacement, clears manual unread, and publishes no transient
 unread summary. A Home task worker ends through its `report` tool call, never a
 successful final reply, so a settled task records one completion (`task:<taskId>`)
-for its worker session with the same presentation disposition; an unopened worker
-therefore reads unread like any finished chat. Workers settled before this rule
-carry no attention record and stay read. Catalog rows of a Home task's worker carry `homeTaskId`: RuntimeRegistry
+for its worker session, admitted read: its result reports back to Home, so only
+sessions the maintainer starts himself join the Unread queue on completion (#1003).
+Every completion of a recorded worker (a resumed task reuses its session, and any
+later assistant reply in it) is admitted read the same way, while an explicit
+mark-unread still holds. Recording a worker in the index also acknowledges its
+earlier completions, so the startup seeding pass clears unread left by builds
+before this rule and completions recovered at startup before the index existed;
+a failed acknowledgement logs `home-worker-attention-failed` and is retried by
+the next startup. Catalog rows of a Home task's worker carry `homeTaskId`: RuntimeRegistry
 holds a worker-session index the task dispatcher seeds from its startup recovery
 pass over the ledger and extends on each bind, each change invalidating catalogs
 once, so clients learn which sessions are Home workers from the list they already

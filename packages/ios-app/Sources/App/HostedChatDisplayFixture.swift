@@ -201,6 +201,7 @@ struct HostedHomeDashboardFixture: View {
                                 .accessibilityIdentifier("fixture.home-sheet-read-peak")
                             Text("home-reads:\(homeReads)").accessibilityIdentifier("fixture.home-read-counts")
                             Text(TronDashboardRevealProbe.shared.summary).accessibilityIdentifier("fixture.dashboard-reveals")
+                            Text(HomeUsageLayoutProbe.shared.summary).accessibilityIdentifier("fixture.home-usage-layout")
                             Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.capabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
                                 .accessibilityIdentifier("fixture.home-diagnostics")
                         }
@@ -1306,10 +1307,15 @@ enum HostedHomeDashboardWorkers {
 
     static let newWorker = worker("worker-new", "Freshly dispatched worker", cwd: "/work/tron", ago: 5, phase: .running)
 
-    static let providers: JSONValue = .object(["providers": .array([
-        provider("anthropic", "Anthropic"), provider("openai-codex", "OpenAI Codex"),
-        provider("fixture", "Fixture", usage: false),
-    ])])
+    /// `-home-usage-long-name` adds a single-window provider with a long name.
+    private static var longName: Bool { ProcessInfo.processInfo.arguments.contains("-home-usage-long-name") }
+
+    static var providers: JSONValue {
+        .object(["providers": .array([
+            provider("anthropic", "Anthropic"), provider("openai-codex", "OpenAI Codex"),
+            provider("fixture", "Fixture", usage: false),
+        ] + (longName ? [provider("cortexkit", "Anthropic (CortexKit)")] : []))])
+    }
 
     private static func provider(_ id: String, _ name: String, usage: Bool = true) -> JSONValue {
         .object(["id": .string(id), "name": .string(name), "configured": .bool(true), "usageSupported": .bool(usage),
@@ -1327,7 +1333,7 @@ enum HostedHomeDashboardWorkers {
         return .object(["providers": .array([
             snapshot("anthropic", [window("five-hour", "5h", 42, 18_000), window("weekly", "Weekly", 18, 604_800)]),
             snapshot("openai-codex", [window("five-hour", "5h", 7, 18_000), window("weekly", "Weekly", 63, 604_800)]),
-        ])])
+        ] + (longName ? [snapshot("cortexkit", [window("weekly", "Weekly", 48, 604_800)])] : []))])
     }
 }
 #endif

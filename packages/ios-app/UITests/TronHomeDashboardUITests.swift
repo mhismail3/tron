@@ -2,7 +2,7 @@ import XCTest
 
 /// The Home dashboard view (#973) on the hosted Home fixture: the usage card,
 /// Home's running, recently completed and unread workers from its task
-/// ledger, the shared View more sheet, and the floating Home button above the
+/// ledger, the shared View All sheet, and the floating Home button above the
 /// dashboard logo. Screenshots are kept as attachments.
 final class TronHomeDashboardUITests: XCTestCase {
     @MainActor
@@ -22,15 +22,20 @@ final class TronHomeDashboardUITests: XCTestCase {
         // Only Home's workers appear; the ordinary session does not.
         XCTAssertFalse(app.buttons["session-row-home-shell-fixture:ordinary-session"].exists)
         XCTAssertFalse(app.buttons["home-pinned-row"].exists, "The floating button replaces the pinned row")
+        XCTAssertFalse(app.descendants(matching: .any)["home-in-progress-view-all"].exists, "Only a section over its cap offers View All")
 
         app.swipeUp()
         // Unread is every settled unread session; the ordinary chat among them
-        // is listed in its View more sheet (testUnreadCapsAtFiveWithViewMore).
+        // is listed in its View All sheet (testUnreadCapsAtFiveWithViewAll).
         XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-unread-1"].waitForExistence(timeout: 5), app.debugDescription)
-        let viewMore = element(app, "home-completed-view-more")
-        XCTAssertTrue(viewMore.waitForExistence(timeout: 5), app.debugDescription)
+        // View All sits on the section title's line, right-aligned; no control follows the rows.
+        let viewAll = element(app, "home-completed-view-all")
+        XCTAssertTrue(viewAll.waitForExistence(timeout: 5), app.debugDescription)
+        assertHeaderAction(viewAll, title: app.staticTexts["Recently Completed"], app: app)
+        XCTAssertFalse(app.descendants(matching: .any)["home-completed-view-more"].exists)
+        XCTAssertFalse(app.staticTexts["View more"].exists)
         keep("01-home-dashboard-scrolled")
-        viewMore.tap()
+        viewAll.tap()
         XCTAssertTrue(app.buttons["home-completed-sheet-row-home-shell-fixture:worker-done-7"].waitForExistence(timeout: 5), app.debugDescription)
         keep("02-recently-completed-sheet")
     }
@@ -129,32 +134,87 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(waitFor(card, "label CONTAINS 'Anthropic, ' AND label CONTAINS 'OpenAI Codex, '"), card.label)
     }
 
-    /// Unread shows five rows, then View more opens the shared section sheet
-    /// listing every unread session.
+    /// Unread shows five rows; View All in its header opens the shared section
+    /// sheet listing every unread session.
     @MainActor
-    func testUnreadCapsAtFiveWithViewMore() {
+    func testUnreadCapsAtFiveWithViewAll() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home"]
         app.launch(); defer { app.terminate() }
 
         XCTAssertTrue(element(app, "home-usage-card").waitForExistence(timeout: 30), app.debugDescription)
-        let viewMore = element(app, "home-unread-view-more")
-        for _ in 0..<4 where !viewMore.isHittable { app.swipeUp() }
-        XCTAssertTrue(viewMore.waitForExistence(timeout: 5), app.debugDescription)
+        let viewAll = element(app, "home-unread-view-all")
+        // Scroll the section's last row into view; its header stays pinned above it.
+        let fifth = app.buttons["session-row-home-shell-fixture:worker-unread-5"]
+        for _ in 0..<4 where !(fifth.exists && fifth.isHittable && viewAll.exists && viewAll.isHittable) { app.swipeUp() }
+        XCTAssertTrue(viewAll.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Unread · 6"].exists, app.debugDescription)
+        assertHeaderAction(viewAll, title: app.staticTexts["Unread · 6"], app: app)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Unviewed'")).firstMatch.exists)
         let unreadIDs = ["worker-unread-1", "worker-unread-2", "worker-unread-3", "worker-unread-4", "worker-unread-5", "chat-unread"]
         let shown = unreadIDs.filter { app.buttons["session-row-home-shell-fixture:\($0)"].exists }
         XCTAssertEqual(shown, Array(unreadIDs.prefix(5)), "Unread shows its first five rows")
         keep("09-unread-capped")
 
-        viewMore.tap()
+        viewAll.tap()
         for id in unreadIDs {
             XCTAssertTrue(app.buttons["home-unread-sheet-row-home-shell-fixture:\(id)"].waitForExistence(timeout: 5), app.debugDescription)
         }
         XCTAssertFalse(app.buttons["home-unread-sheet-row-home-shell-fixture:worker-done-1"].exists)
         keep("10-unread-sheet")
+    }
+
+    /// #1003: each usage window is its own right-aligned column, its copy with
+    /// a bar about a quarter of the card wide directly beneath it; two windows
+    /// sit side by side, and the provider name is vertically centered against
+    /// them. A long name keeps clear of its column.
+    @MainActor
+    func testUsageCardRowsShowWindowColumns() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home",
+                               "-home-usage-long-name"]
+        app.launch(); defer { app.terminate() }
+
+        let card = element(app, "home-usage-card")
+        XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(waitFor(card, "label CONTAINS 'Anthropic (CortexKit), 48% used (Weekly)'"), card.label)
+        XCTAssertTrue(card.label.hasPrefix("Anthropic, 42% used (5h) · 18% used (Weekly)"), card.label)
+        let probe = app.staticTexts["fixture.home-usage-layout"]
+        XCTAssertTrue(waitFor(probe, "label CONTAINS 'cortexkit.column0.bar='"), probe.label)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        var frames: [String: CGRect] = [:]
+        for entry in probe.label.split(separator: ";") {
+            let pair = entry.split(separator: "=")
+            let v = pair[1].split(separator: ",").compactMap { Double($0) }
+            frames[String(pair[0])] = CGRect(x: v[0], y: v[1], width: v[2], height: v[3])
+        }
+        let cardFrame = try! XCTUnwrap(frames["card"])
+        for (provider, columns) in [("anthropic", 2), ("openai-codex", 2), ("cortexkit", 1)] {
+            let name = try! XCTUnwrap(frames["\(provider).name"], probe.label)
+            XCTAssertNil(frames["\(provider).column\(columns)"], "\(provider) has \(columns) column(s)")
+            var previous: CGRect?
+            for index in 0..<columns {
+                let column = try! XCTUnwrap(frames["\(provider).column\(index)"], probe.label)
+                let bar = try! XCTUnwrap(frames["\(provider).column\(index).bar"], probe.label)
+                XCTAssertEqual(bar.width, column.width, accuracy: 1, "\(provider) bar spans its own column")
+                XCTAssertEqual(bar.minX, column.minX, accuracy: 1)
+                XCTAssertEqual(bar.maxY, column.maxY, accuracy: 1, "\(provider) bar sits under its copy")
+                XCTAssertEqual(bar.height, 5, accuracy: 0.5)
+                XCTAssertGreaterThan(bar.width / cardFrame.width, 0.2, "\(provider) bar is about a quarter of the card")
+                XCTAssertLessThan(bar.width / cardFrame.width, 0.34, "\(provider) bar no longer spans the card")
+                XCTAssertEqual(column.midY, name.midY, accuracy: 1, "\(provider) name is centered against its columns")
+                XCTAssertGreaterThan(column.minX, name.maxX, "\(provider) name keeps clear of its columns")
+                if let previous {
+                    XCTAssertGreaterThan(column.minX, previous.maxX, "windows sit side by side")
+                    XCTAssertEqual(column.minY, previous.minY, accuracy: 0.5)
+                }
+                previous = column
+            }
+            XCTAssertEqual(previous!.maxX, cardFrame.maxX - 12, accuracy: 1, "\(provider) columns are right-aligned")
+        }
+        keep("11-usage-card-window-columns")
     }
 
     @MainActor
@@ -179,6 +239,15 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(waitFor(home, "value == 'Working'"), app.debugDescription)
         keep("04-home-button-working")
+    }
+
+    /// View All shares its section title's line and sits at the row's trailing edge.
+    @MainActor private func assertHeaderAction(_ action: XCUIElement, title: XCUIElement, app: XCUIApplication) {
+        XCTAssertTrue(title.exists, app.debugDescription)
+        XCTAssertEqual(action.label, "View all sessions in \(title.label.hasPrefix("Unread") ? "Unread" : title.label)")
+        XCTAssertEqual(action.frame.midY, title.frame.midY, accuracy: 2, "View All is on the title's line")
+        XCTAssertGreaterThan(action.frame.minX, title.frame.maxX)
+        XCTAssertGreaterThan(action.frame.maxX, app.frame.width * 0.85, "View All is right-aligned")
     }
 
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
