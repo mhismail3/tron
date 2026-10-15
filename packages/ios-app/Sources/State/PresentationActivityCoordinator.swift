@@ -210,6 +210,8 @@ struct TronPresentationSurface<Content: View>: View {
     @ViewBuilder private let content: () -> Content
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var inheritedParent
+    @Environment(\.tronPresentationStateStore) private var stateStore
+    @Environment(\.tronPresentationStateScope) private var inheritedStateScope
     private let explicitParent: PresentationSurfaceToken?
     @State private var generation = UUID()
 
@@ -246,9 +248,22 @@ struct TronPresentationSurface<Content: View>: View {
         suppliedToken ?? PresentationSurfaceToken(id: id, generation: generation)
     }
 
+    /// A route surface (dashboard, chat route) is the parent of the sheets its
+    /// content presents, so their presentation state ends with the route even
+    /// when a presenter is torn down without its sheet reporting a dismissal.
+    private var statePath: String {
+        PresentationStateStore.path(parent: inheritedStateScope, identity: "surface:\(id)#\(generation)")
+    }
+
+    private var stateScope: PresentationStateScope? {
+        guard registersLifecycle, let stateStore else { return inheritedStateScope }
+        return stateStore.scope(path: statePath)
+    }
+
     var body: some View {
         content()
             .modifier(TronSheetLoadingHostModifier())
+            .environment(\.tronPresentationStateScope, stateScope)
             .environment(\.tronPresentationSurfaceToken, token)
             .environment(
                 \.tronPresentationActivity,
@@ -261,6 +276,7 @@ struct TronPresentationSurface<Content: View>: View {
             .onDisappear {
                 if registersLifecycle {
                     coordinator?.retire(token)
+                    stateStore?.retire(path: statePath)
                     onRetire?(token)
                 }
             }

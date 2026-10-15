@@ -1823,9 +1823,12 @@ the managed sheet modifier, not its content (`PresentationScopedState.swift`):
 - `tronManagedSheet` gives each presentation a `PresentationStateScope`, kept in the
   scene's `PresentationStateStore` (`TronPresentationStateRoot` on the scene root)
   under its identity path: the presenter's scope path plus the sheet identity, and
-  for an item sheet the item's `id`. A rebuilt content finds the same scope. Only
-  an actual dismissal (or a replacement item) retires it, together with every
-  scope presented from inside it.
+  for an item sheet the item's `id`; the presenting call site keeps two
+  presenters that share an identity apart. A rebuilt content finds the same
+  scope. An actual dismissal (or a replacement item) retires it, together with
+  every scope presented from inside it. Route surfaces (the dashboard, a chat
+  route) are the parent scope of the sheets they present, so a route that goes
+  away retires its sheets' state even when no dismissal is reported.
 - Sheet content declares the state that must outlive a rebuild with
   `@PresentationState` instead of `@State`. Outside a managed sheet it is ordinary
   view-local state. A view that appears more than once in one sheet passes
