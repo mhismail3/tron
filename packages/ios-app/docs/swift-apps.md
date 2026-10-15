@@ -92,7 +92,8 @@ the runner keeps `tronDocumentSheetChrome`.
 Actions (including `onAppear`, `onChange`, and gesture callbacks) are
 transactional. A budget stop or any thrown runtime error restores every written
 interpreted storage slot to its pre-action value before showing
-“Action cancelled; state restored” and the line-numbered cause over the app.
+“Action cancelled; state restored” and the cause over the app (with its source
+line when available).
 This includes nested/derived state, projected `@Binding` values, arrays,
 `@Published` and aliased object fields, globals and static storage. The runtime
 journals first writes at storage owners, so reference identity is preserved;
