@@ -15,7 +15,7 @@ import { settingsDependencies } from "../../test-support/settings-dependencies.j
 import { chatSettingChange } from "../../test-support/chat-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
-describe.sequential("compaction cancellation with the pinned runtime", () => {
+describe("compaction cancellation with the pinned runtime", { concurrent: false }, () => {
   it("settles one Stop during between-turn compaction without starting another summary", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-compaction-stop-"));
     const agentDir = join(root, "agent");
@@ -224,7 +224,7 @@ async function expectSettled(item: Awaited<ReturnType<typeof boundaryFixture>>) 
   expect(await readdir(join(item.root, "tron", "gateway", "runtime-markers"))).toEqual([]);
 }
 
-describe.sequential("compaction operation admission and authoritative reconciliation", () => {
+describe("compaction operation admission and authoritative reconciliation", { concurrent: false }, () => {
   it("reports repeated automatic compaction failures without attributing a later success to them", async () => {
     const diagnostics: Array<Record<string, unknown>> = [];
     const item = await boundaryFixture(8_000, undefined, diagnostics);
