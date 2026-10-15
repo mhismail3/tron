@@ -86,6 +86,10 @@ adds the load average (`os.loadavg()`, per CPU) and derives one level:
 | `elevated` | load ≥ 1 × CPUs, event-loop utilisation ≥ 0.7, swap in use growing, memory pressure `warn` |
 | `critical` | load ≥ 3 × CPUs, event-loop utilisation ≥ 0.95, memory pressure `critical` |
 
+- Event-loop utilisation is measured over windows of at least 2 s, and reads
+  within 2 s reuse the last sample. A window of a few milliseconds is mostly the
+  reading tick itself and reads about 0.95 on an idle process, so until the first
+  full window after a start the level rests on load alone (#1000).
 - `home.status.hostPressure: { level, load1PerCpu, eventLoopUtilization, swapUsedBytes, sampledAt }`,
   shown in Home's status row with the standard status treatment.
 - `host.pressure` is logged on each level transition, and `home.task.queue` on
