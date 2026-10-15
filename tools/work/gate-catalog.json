@@ -602,7 +602,7 @@
       "budgetSeconds": 180,
       "timeoutSeconds": 600,
       "class": "heavy",
-      "expectedRssMb": 6000,
+      "expectedRssMb": 7000,
       "pass": "exit 0 and BUILD SUCCEEDED",
       "unlocks": "ios.journeys",
       "memorySample": "host",

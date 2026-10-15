@@ -570,8 +570,12 @@ launch and a launch from the device itself are not debugger sessions.
 
 `scripts/tron-ios-device compile [--fast-debug]` runs the optimized install's
 exact build for `generic/platform=iOS` with `CODE_SIGNING_ALLOWED=NO`, so it
-needs no device, lease, account or profile, and keeps its own
-`build/DerivedData-compile` cache. The gate runs it as `ios.device-compile`
+needs no device, lease, account or profile. Its DerivedData is one owned
+directory per worktree under
+`~/Library/Developer/Tron/ios/device-compile-derived-data`, outside the
+worktree because the Swift package checkouts are nested Git clones that would
+keep `scripts/tron work cleanup` from removing it (#1063); each compile first
+prunes the directories of deleted worktrees. The gate runs it as `ios.device-compile`
 because the UI-validation build defines `HOSTED_TEST`: code that compiles only
 in the shipped configuration (for example a hosted fixture left outside its
 `#if HOSTED_TEST`, #1061) passes every simulator journey yet breaks Rebuild and
