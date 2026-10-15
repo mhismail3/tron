@@ -2212,7 +2212,9 @@ The wrong-code control uses the same link with a code the Gateway refuses: it as
 the app's own `Pairing code is invalid` refusal, and then that the fixture's own link
 pairs through the same address — the setup sheet reaching its workspace step is what
 only a connected Gateway shows — so the control cannot pass by being a broken address.
-`testSettingsSurfacesServeEveryKeyAndEditAtItsLayer` takes its key inventory from
+`testChatSettingsServeEveryKeyAndEditAtChatLayer`,
+`testProjectSettingsServeEveryKeyAndEditAtProjectLayer`, and
+`testMacSettingsServeEveryKeyAndEditAtMacLayer` take their key inventory from
 the fixture Gateway's own built schema (`TRON_E2E_SETTINGS_INVENTORY`, written by the
 harness), never a Swift key list. On Manage Session, the shared Project card and
 Settings it requires every key served on that target to have a row with a value and
@@ -2232,7 +2234,8 @@ and badge back after reopening; Mac-only rows open Settings through Edit at Mac.
 to edit the Mac `settings.json` by rename-replace (`TRON_E2E_AGENT_DIR`) and requires
 `Changed outside Tron` with Apply again, which restores Tron's value. It also proves
 the Built-in switch's persisted setting and live outside MCP additions in the open
-MCP screen and Changes. Both journeys run independently as bounded gate shards;
+MCP screen and Changes. Each surface and the outside-change journey runs independently
+against its own fresh fixture as a bounded gate shard;
 none of the original assertions is omitted. All journeys retain screenshots.
 
 This lane pairs the hosted app for real, and the lane's app container is shared with the
