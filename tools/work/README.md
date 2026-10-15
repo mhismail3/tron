@@ -134,7 +134,9 @@ plan. Markdown and `docs/` paths never start a build. Representative plans:
 
 **Shards and cache.** Each shard's cache key hashes its expanded command and the
 git tree of its declared inputs (`keyExtra: xcode` adds the Xcode version;
-`cacheScope: worktree` binds steps whose products live in the worktree). A passing
+`cacheScope: worktree` binds steps whose products live in the worktree; `cacheScope: source`
+also binds the exact commit and tree, for `ios.build`, whose stamped test products
+`scripts/tron-ios-test run` refuses after any commit). A passing
 shard is recorded under `<git common dir>/work/gate/results/`; a rerun reuses every
 pass whose key still matches and reruns only failed or invalidated shards. Tests are
 never skipped or weakened to meet a budget: a slow step is split into shards or
@@ -161,7 +163,8 @@ wait.
 refuses a dirty worktree or a tree that changed while steps ran. `python3 -B
 scripts/test-gate.py` exercises the real CLI in temporary repositories: the plan for
 each change kind, an injected failure that stops at its shard, a retry that reuses
-passing shards, input invalidation, a hard timeout, background submit/cancel/wait (including a submitted plan with `--tests`),
+passing shards, input invalidation, a hard timeout, background submit/cancel/wait (including a submitted plan with `--tests`), a
+source-scoped step rerunning after an unrelated commit,
 and the dirty-tree refusal. It also exercises the real `tron ci` wrapper in a
 shallow fixture checkout (prerequisites, fail-first annotation, local-only refusal),
 Pi versus unrelated lock deltas, transport/LAN plans and complete inherited-suite

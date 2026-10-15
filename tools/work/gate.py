@@ -11,7 +11,9 @@ A step expands into shards. Each shard has its own content-addressed cache key
 (its expanded command plus the git tree of its inputs in the worktree, dirty or
 not), so a retry reruns only shards that failed or whose inputs changed. A
 passing shard is recorded under the common Git directory; `cacheScope:
-worktree` keys also bind the worktree because their products live there.
+worktree` keys also bind the worktree because their products live there, and
+`cacheScope: source` keys also bind its exact commit and tree because their
+products are stamped with that source state.
 
 Running prints one line per shard as it starts and a heartbeat with elapsed
 time, budget and live tree RSS while it runs, stops at the first failure with
@@ -377,8 +379,12 @@ def cache_key(root: Path, change: Change, shard: Shard) -> str:
         "command": shard.command,
         "inputs": hashlib.sha256(listing.encode()).hexdigest(),
         "extra": [_key_extra(name) for name in step.get("keyExtra", [])],
-        "worktree": str(root) if step.get("cacheScope") == "worktree" else None,
+        "worktree": str(root) if step.get("cacheScope") in ("worktree", "source") else None,
     }
+    # Products stamped with the exact source state (the iOS test products, whose runner
+    # refuses a build from another commit) are valid only for that commit and tree.
+    if step.get("cacheScope") == "source":
+        scope["source"] = [_git(root, "rev-parse", "HEAD").strip(), change.tree]
     # Commands that compare against the merge base depend on it beyond their inputs.
     if "{merge_base}" in step.get("command", ""):
         scope["mergeBase"] = change.merge_base

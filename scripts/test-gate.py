@@ -329,6 +329,36 @@ def hosted_cli(base: Path, env: dict) -> None:
                      "trace": ran, "output": result.stdout, "refusal": refused.stderr})
 
 
+def source_scope(base: Path, env: dict) -> None:
+    """A step whose products are stamped with the exact source state (the iOS build, whose
+    test runner refuses products from another commit) is not reused across commits, even
+    when its inputs are unchanged; an ordinary worktree-scoped step is."""
+    trace = base / "scope-trace"
+    catalog = {"version": 1, "codeExclude": [], "steps": [
+        {"id": f"{scope}-step", "trigger": {"always": True}, "command": f"echo {scope} >> \"$GATE_TRACE\"",
+         "inputs": ["app"], "cacheScope": scope, "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light",
+         "expectedRssMb": 10, "pass": "exit 0", "unlocks": "land"} for scope in ("worktree", "source")]}
+    path = base / "scope-catalog.json"
+    path.write_text(json.dumps(catalog))
+    env = {**env, "TRON_GATE_CATALOG": str(path), "GATE_TRACE": str(trace)}
+    repo = Repo(base / "scope", env)
+    repo.write("app/file", "app\n")
+    repo.commit("app")
+
+    def ran() -> list:
+        lines = trace.read_text().split() if trace.exists() else []
+        trace.unlink(missing_ok=True)
+        return lines
+
+    assert repo.gate("run").returncode == 0 and ran() == ["worktree", "source"]
+    assert repo.gate("run").returncode == 0 and ran() == [], "an unchanged source state reuses both"
+    repo.write("docs.md", "unrelated\n")
+    repo.commit("docs")
+    result = repo.gate("run")
+    evidence.append({"case": "a source-scoped step reruns after an unrelated commit", "stdout": result.stdout[-1500:]})
+    assert result.returncode == 0 and ran() == ["source"], result.stdout
+
+
 def inherited_suite(base: Path, env: dict) -> None:
     repo = Repo(base / "inherited", env)
     # Real unittest discovery includes indirect subclasses. Every one must run
@@ -359,6 +389,7 @@ def main() -> None:
             boundary_plans(base, env)
             hosted_cli(base, env)
             inherited_suite(base, env)
+            source_scope(base, env)
             runner(base, env)
         print(f"Passed gate journeys; evidence: {REPORT}")
     finally:
