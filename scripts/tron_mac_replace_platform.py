@@ -232,8 +232,12 @@ class MacPlatform:
         if not (worktree / '.git').exists():
             worktree.parent.mkdir(parents=True, exist_ok=True)
             run(['/usr/bin/git', '-C', source_root, 'worktree', 'add', '--detach', worktree, revision], log, timeout=300)
-        env = dict(os.environ, PATH=f'{self.home}/.nvm/versions/node/v{(Path(source_root) / ".node-version").read_text().strip()}/bin:'
-                   '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin')
+        # The one repository resolver picks the pinned development Node (#242);
+        # this process inherits the Gateway's signed payload runtime on PATH.
+        code, out, err = capture([Path(source_root) / 'scripts/tron-node'], env=dict(os.environ, HOME=str(self.home)))
+        if code != 0:
+            raise Failure(err.strip() or 'no repository-pinned Node')
+        env = dict(os.environ, PATH=f'{Path(out.strip()).parent}:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin')
         run([worktree / 'scripts/install-ci-tools.sh', 'xcodegen'], log, timeout=900, env=env, cwd=worktree)
         run(['npm', 'ci', '--no-audit', '--no-fund'], log, timeout=1200, env=env, cwd=worktree / 'packages/gateway')
         run([worktree / 'scripts/tron', 'mac', 'generate'], log, timeout=300, env=env, cwd=worktree)

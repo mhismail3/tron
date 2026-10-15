@@ -230,52 +230,11 @@ trap cleanup_bundle_lock EXIT
 trap 'exit 130' INT TERM HUP
 acquire_bundle_lock
 
-# Xcode and LaunchAgents may provide a sanitized PATH. Resolve the exact
-# canonical Node once, before any install/build work, and derive npm from that
-# same directory. A wrong ambient Node is skipped in favor of the exact nvm
-# directory; Homebrew is considered only after its version is proved.
-node_matches_pin() {
-    local candidate="$1" actual
-    [[ -x "$candidate" ]] || return 1
-    actual="$("$candidate" --version 2>/dev/null || true)"
-    [[ "$actual" == "v${NODE_VERSION}" ]]
-}
-node_toolchain_matches_pin() {
-    local candidate="$1"
-    node_matches_pin "$candidate" && [[ -x "$(dirname "$candidate")/npm" ]]
-}
-resolve_pinned_node() {
-    local candidate nvm_node
-    if [[ -n "${TRON_NODE_BIN:-}" ]]; then
-        candidate="$TRON_NODE_BIN"
-        [[ "$candidate" == /* ]] || { echo "TRON_NODE_BIN must be absolute" >&2; exit 127; }
-        node_toolchain_matches_pin "$candidate" || { echo "TRON_NODE_BIN does not provide Node v${NODE_VERSION} with sibling npm" >&2; exit 127; }
-        printf '%s\n' "$candidate"
-        return
-    fi
-    candidate="$(command -v node 2>/dev/null || true)"
-    if [[ "$candidate" == /* ]] && node_toolchain_matches_pin "$candidate"; then
-        printf '%s\n' "$candidate"
-        return
-    fi
-    nvm_node="${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v${NODE_VERSION}/bin/node"
-    if node_toolchain_matches_pin "$nvm_node"; then
-        printf '%s\n' "$nvm_node"
-        return
-    fi
-    for candidate in "/opt/homebrew/bin/node" "/usr/local/bin/node"; do
-        if node_toolchain_matches_pin "$candidate"; then
-            printf '%s\n' "$candidate"
-            return
-        fi
-    done
-    echo "unable to find exact Node v${NODE_VERSION} with sibling npm; checked PATH, the pinned nvm directory, and Homebrew" >&2
-    exit 127
-}
-
-NODE_BIN="$(resolve_pinned_node)"
+# Xcode and LaunchAgents may provide a sanitized PATH. The one repository
+# resolver (#242) chooses the exact pinned development Node once, before any
+# install/build work, and npm comes from that same directory.
+NODE_BIN="$("$REPO_ROOT/scripts/tron-node")"
 NPM_BIN="$(dirname "$NODE_BIN")/npm"
-[[ "$NODE_BIN" == /* && "$NPM_BIN" == /* && -x "$NPM_BIN" ]] || { echo "missing npm sibling of pinned Node: $NPM_BIN" >&2; exit 127; }
 # npm's launcher commonly uses /usr/bin/env node; make only the resolved Node
 # directory first on PATH so all subprocesses use this exact toolchain.
 export PATH="$(dirname "$NODE_BIN")${PATH:+:$PATH}"

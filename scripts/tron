@@ -9,6 +9,15 @@ export PYTHONDONTWRITEBYTECODE=1
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GATEWAY="$ROOT/packages/gateway"
 
+# Gateway development commands run the one repository-pinned development Node
+# (scripts/tron-node, #242), never whatever `node` is first on PATH, which in an
+# agent shell is the Gateway's signed payload runtime.
+use_pinned_node() {
+  local node
+  node="$("$ROOT/scripts/tron-node")" || exit
+  export PATH="$(dirname "$node"):$PATH"
+}
+
 usage() {
   cat <<'EOF'
 Usage: scripts/tron <command> [options]
@@ -123,10 +132,12 @@ case "$cmd" in
     exec "$ROOT/scripts/tron-dev" "$@"
     ;;
   chat)
+    use_pinned_node
     (cd "$GATEWAY" && npm run build >/dev/null)
     exec node "$GATEWAY/dist/client/terminal-chat.js" "$@"
     ;;
   ci)
+    use_pinned_node
     # Hosted CI (.github/workflows/ci.yml) runs exactly these steps, one workflow step
     # each, so a red CI step is reproduced by the same command here. Only deterministic
     # checks belong here; E2E journeys, the nested SDK pass and native builds run in
@@ -174,6 +185,7 @@ case "$cmd" in
     done
     ;;
   diagnose)
+    use_pinned_node
     if [[ ! -f "$GATEWAY/dist/admin/diagnose.js" ]]; then
       echo "missing prepared diagnostic artifact: $GATEWAY/dist/admin/diagnose.js" >&2
       echo "prepare it explicitly with: (cd packages/gateway && npm run build)" >&2

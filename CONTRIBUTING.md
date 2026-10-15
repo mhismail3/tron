@@ -130,6 +130,14 @@ implementations.
 ### Toolchain
 
 Node is pinned exactly by `.node-version`; CI and Mac packaging read that file.
+`scripts/tron-node` is the one resolver for the pinned development Node: it
+prints the chosen `node` (`TRON_NODE_BIN`, then the exact nvm directory, then
+each `node` on `PATH`, then Homebrew), and `scripts/tron-node exec COMMAND` runs a command with
+that Node first on `PATH`. It refuses a signed Gateway payload or app-bundle
+runtime, which Tron agent shells have first on `PATH` but which cannot load
+unsigned native add-ons and has no `npx`. Packaging, `scripts/tron dev`,
+`scripts/tron ci|chat|diagnose`, the iOS Gateway E2E harness, the profiler and
+`scripts/tron work verify` all use it.
 `scripts/tron` sets `PYTHONDONTWRITEBYTECODE=1` so native npm builds never write
 `__pycache__` into the pinned npm tree, which the digest in
 `config/ci-toolchain.env` rejects (#638).
@@ -153,8 +161,8 @@ owns skill routing and the policy-fixture validation commands.
 scripts/tron gate plan          # the ordered gate steps this change needs
 scripts/tron gate run           # run them; the first failure stops with its log
 scripts/tron gate run gateway.full gateway.nested   # the whole suite, in shards
-cd packages/gateway && npx vitest run src/sessions/runtime-registry.integration.test.ts  # one file while diagnosing
-cd packages/gateway && npm audit --omit=dev
+cd packages/gateway && ../../scripts/tron-node exec npx vitest run src/sessions/runtime-registry.integration.test.ts  # one file while diagnosing
+cd packages/gateway && ../../scripts/tron-node exec npm audit --omit=dev
 ```
 
 Gateway mutations require `commandId`. Distinct sessions may run concurrently;

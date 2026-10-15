@@ -249,7 +249,7 @@ its budget is split into shards in the catalog, never weakened or skipped.
 scripts/tron gate plan                     # what this change needs
 scripts/tron gate run [<step>...]          # run (named) steps; reuses valid passes
 scripts/tron gate run --tests "<journey>"  # add an integration or E2E journey
-cd packages/gateway && npx vitest run <owning-test-file>      # diagnosis only
+cd packages/gateway && ../../scripts/tron-node exec npx vitest run <owning-test-file>  # diagnosis only
 scripts/tron-ios-test run --only-testing TronMobileUITests/<Suite>/<test>  # diagnosis only
 ```
 
@@ -261,7 +261,7 @@ When closing an incident, name the signal that would have diagnosed it in one
 step. If that signal was missing, add it at the right level, with its test and
 its row in `packages/gateway/docs/observability.md`, in the same change.
 
-From an agent shell, prefix Node commands with the pinned runtime, or `npx` is missing and the Stable Gateway's `node` shadows it: `PATH="$HOME/.nvm/versions/node/v$(cat .node-version)/bin:$PATH"`.
+From an agent shell, run Node commands through the one pinned-Node resolver, or the Stable Gateway's signed `node` shadows it and `npx` is missing: `scripts/tron-node exec <command>` (for example `cd packages/gateway && ../../scripts/tron-node exec npx vitest run <file>`).
 
 ## Documentation ownership
 
