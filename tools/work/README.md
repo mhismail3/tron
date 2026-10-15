@@ -79,7 +79,7 @@ hand-copying their commands.
 | `gate plan [--tests CMD]... [--json]` | Classifies the change (the worktree, dirty or committed, against its merge base with `origin/main`) and prints the ordered shards it needs, each marked `pending` or `reusable pass`. |
 | `gate run [STEP...] [--tests CMD]... [--force]` | Runs the plan, or the named steps (with their planned prerequisites), in catalog order. |
 | `gate next` | Runs only the next shard without a valid pass, then stops. |
-| `gate submit [run args]` / `jobs` / `wait JOB` / `cancel JOB` | Hands a run to the background and returns at once, so the session keeps working; `jobs` shows each job's live state, heavy-queue position and last line; `wait` streams it and returns its result; `cancel` stops it and its running step. |
+| `gate submit [run args]` / `jobs` / `wait JOB` / `cancel JOB` | Hands a run (with any `gate run` arguments, such as `--tests CMD`, validated before it starts) to the background and returns at once, so the session keeps working; `jobs` shows each job's live state, heavy-queue position and last line; `wait` streams it and returns its result; `cancel` stops it and its running step. |
 | `gate report [--json]` / `gate catalog` | Median and max wall time and peak RSS per shard from every recorded run; the catalog as a table. |
 
 **Hosted CI.** `ciSteps` in the catalog owns the four public `scripts/tron ci`
@@ -161,7 +161,7 @@ wait.
 refuses a dirty worktree or a tree that changed while steps ran. `python3 -B
 scripts/test-gate.py` exercises the real CLI in temporary repositories: the plan for
 each change kind, an injected failure that stops at its shard, a retry that reuses
-passing shards, input invalidation, a hard timeout, background submit/cancel/wait,
+passing shards, input invalidation, a hard timeout, background submit/cancel/wait (including a submitted plan with `--tests`),
 and the dirty-tree refusal. It also exercises the real `tron ci` wrapper in a
 shallow fixture checkout (prerequisites, fail-first annotation, local-only refusal),
 Pi versus unrelated lock deltas, transport/LAN plans and complete inherited-suite

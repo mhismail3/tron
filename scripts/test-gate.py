@@ -130,6 +130,9 @@ FIXTURE_CATALOG = {
         {"id": "par", "trigger": {"paths": ["par/**"]}, "shards": 2, "parallelShards": 2,
          "command": "if [ {shard} = 1 ]; then sleep 1; echo 'shard one fails' >&2; exit 4; fi; sleep 30",
          "inputs": ["par"], "budgetSeconds": 20, "timeoutSeconds": 60, "class": "heavy", "expectedRssMb": 10,
+         "pass": "exit 0", "unlocks": "journey"},
+        {"id": "journey", "trigger": {"select": "named-journeys"}, "command": "{select}",
+         "inputs": ["."], "budgetSeconds": 5, "timeoutSeconds": 10, "class": "heavy", "expectedRssMb": 10,
          "pass": "exit 0", "unlocks": "land"},
     ],
 }
@@ -216,6 +219,17 @@ def runner(base: Path, env: dict) -> None:
     job = result.stdout.split("submitted job ")[1].split()[0]
     waited = repo.gate("wait", job)
     assert waited.returncode == 0 and f"job {job} passed" in waited.stdout and "reused" in waited.stdout, waited.stdout
+    # A submitted full plan forwards option-leading `gate run` arguments: its named journey runs (#1047).
+    ran()
+    result = repo.gate("submit", "--tests", "echo journey >> \"$GATE_TRACE\"")
+    assert result.returncode == 0 and "submitted job" in result.stdout, result.stdout + result.stderr
+    job = result.stdout.split("submitted job ")[1].split()[0]
+    waited = repo.gate("wait", job)
+    evidence.append({"case": "submit forwards --tests to the full plan", "wait": waited.stdout[-1500:]})
+    assert waited.returncode == 0 and f"job {job} passed" in waited.stdout, waited.stdout
+    assert ran() == ["journey"], "the full plan reuses its passes and runs only the named journey"
+    rejected = repo.gate("submit", "--bogus")
+    assert rejected.returncode == 2 and "unrecognized arguments: --bogus" in rejected.stderr, rejected.stderr
     repo.write("slow/file", "slow\n")
 
     # Parallel shards of one step: the first failure stops its running sibling at once.

@@ -886,8 +886,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if name == "run":
             sub.add_argument("steps", nargs="*", help="step ids or shard names (default: the whole plan)")
             sub.add_argument("--force", action="store_true", help="rerun even shards with a valid cached pass")
-    sub = commands.add_parser("submit", help="hand `gate run [args]` to the background and return at once")
-    sub.add_argument("args", nargs=argparse.REMAINDER)
+    commands.add_parser("submit", help="hand `gate run [args]` to the background and return at once")
     commands.add_parser("jobs", help="background gate jobs with live state and heavy-queue position")
     for name in ("wait", "cancel"):
         commands.add_parser(name, help=f"{name} a background gate job").add_argument("job")
@@ -895,6 +894,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub.add_argument("--json", action="store_true")
     sub = commands.add_parser("catalog", help="print the step catalog")
     sub.add_argument("--ci", action="store_true", help="print the catalog's stable hosted CI step names")
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["submit"]:
+        # `submit` forwards everything after it to `gate run`, including option-leading
+        # arguments such as `--tests` (#1047). Validate them as `run` arguments now so a
+        # bad invocation fails here instead of inside the detached job.
+        forwarded = argv[2:] if argv[1:2] == ["--"] else argv[1:]
+        parser.parse_args(["run", *forwarded])
+        return submit(Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip()), forwarded)
     args = parser.parse_args(argv)
     root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     try:
@@ -905,8 +912,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(" ".join(load_catalog().get("ciSteps", [])))
                 return 0
             return catalog_table()
-        if args.action == "submit":
-            return submit(root, args.args)
         if args.action == "jobs":
             return jobs(root)
         if args.action == "wait":
