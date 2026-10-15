@@ -27,6 +27,8 @@ DEVICE_LEASE_DIR="$HOME/.tron/internal/run"
 # Over-the-air development builds: a loopback static server (LaunchAgent) behind
 # Tailscale Serve on a dedicated HTTPS port, reachable only from the tailnet.
 SHARE_DIR="$HOME/.tron/ios-builds"
+# `compile`: one owned DerivedData per worktree, beside ios.build's test products.
+COMPILE_PRODUCTS_ROOT="$HOME/Library/Developer/Tron/ios/device-compile-derived-data"
 SHARE_HTTPS_PORT=8443
 SHARE_BACKEND_PORT=8444
 SHARE_AGENT_LABEL="com.tron.ios-builds"
@@ -105,7 +107,8 @@ xcodegen_command() {
     elif [[ -x "$ROOT_DIR/.ci-tools/bin/xcodegen" ]]; then
         candidate="$ROOT_DIR/.ci-tools/bin/xcodegen"
     else
-        candidate="$(command -v xcodegen 2>/dev/null || true)"
+        # The same search as scripts/tron-ios-test; the version check below pins it.
+        candidate="$(PATH="$PATH:/opt/homebrew/bin" command -v xcodegen 2>/dev/null || true)"
     fi
     [[ -n "$candidate" ]] || die "xcodegen is unavailable; install a current Tron Mac app or run scripts/install-ci-tools.sh xcodegen"
     resolved="$(realpath "$candidate" 2>/dev/null || true)"
@@ -461,11 +464,24 @@ build_validated_app() {
 # install argv for any iOS device, unsigned, so it needs no device, account or
 # provisioning. The simulator UI-validation build defines HOSTED_TEST, so only
 # this build proves the shipped app compiles without hosted-test symbols and
-# under the optimizer (#1061). Its own DerivedData keeps the signed install
-# cache untouched.
+# under the optimizer (#1061).
 compile_unsigned_app() {
     require_full_xcode
-    run_device_xcodebuild "build/DerivedData-compile" "" unsigned
+    # Products live outside the worktree, like ios.build's: the Swift package
+    # checkouts are nested Git clones that would keep `work cleanup` from
+    # removing a finished worktree (#1063). One owned, stamped directory per
+    # worktree; a directory whose worktree is gone is pruned here first.
+    local identity="$ROOT_DIR/scripts/ios-test-build-identity.py" key derived
+    python3 "$ROOT_DIR/scripts/ios-test-simulator.py" prune --products-root "$COMPILE_PRODUCTS_ROOT" \
+        || echo "warning: could not prune device-compile products of deleted worktrees" >&2
+    key="$(python3 "$identity" worktree-key --worktree "$ROOT_DIR")"
+    [[ -n "$key" ]] || die "could not derive this worktree's products key"
+    derived="$COMPILE_PRODUCTS_ROOT/$key"
+    mkdir -p "$derived"
+    printf 'tron.ios-test-owned.v1\n' > "$derived/.tron-ios-test-owned"
+    python3 "$identity" show --worktree "$ROOT_DIR" \
+        | python3 "$identity" write --worktree "$ROOT_DIR" --derived-data "$derived"
+    run_device_xcodebuild "$derived" "" unsigned
     echo "Compiled $SCHEME + $CONFIG ($BUILD_MODE) for generic iOS arm64, unsigned"
 }
 
