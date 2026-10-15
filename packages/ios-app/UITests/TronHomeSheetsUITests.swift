@@ -35,7 +35,10 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(home.waitForExistence(timeout: 15))
         XCTAssertTrue(home.label.contains("Host \(level.lowercased())"), home.label)
         XCTAssertTrue(home.label.contains(workers), home.label)
-        keep("931-\(level)-dashboard")
+        let dashboard = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        dashboard.name = "931-\(level)-dashboard"
+        dashboard.lifetime = .keepAlways
+        add(dashboard)
         home.tap()
         let ring = app.buttons["session-context-button"]
         XCTAssertTrue(ring.waitForExistence(timeout: 15))
