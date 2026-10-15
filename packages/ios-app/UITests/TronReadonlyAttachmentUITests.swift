@@ -343,7 +343,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let taps = app.staticTexts["diagnostics.taps"]
         XCTAssertTrue(taps.waitForExistence(timeout: 10), "A bad footer must not replace the whole body")
         for title in ["Nested sibling", "After nested failure", "Last sibling"] {
-            XCTAssertTrue(app.staticTexts[title].exists, "Working sibling survives: \\(title)")
+            XCTAssertTrue(app.staticTexts[title].exists, "Working sibling survives: \(title)")
         }
         XCTAssertTrue(diagnostic(app, "Line 7: 'count' is a property, not a method").exists)
         XCTAssertTrue(diagnostic(app, "Line 10: Index 4 is out of range").exists)
@@ -370,9 +370,9 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         app.buttons["Run Capped.swift"].tap()
         let capped = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Stopped after 10 unsupported constructs'")).firstMatch
         XCTAssertTrue(capped.waitForExistence(timeout: 10))
-        XCTAssertTrue(capped.label.contains("Line 1: Custom initializers"))
-        XCTAssertTrue(capped.label.contains("Line 10: Custom initializers"))
-        XCTAssertFalse(capped.label.contains("Line 11:"))
+        XCTAssertTrue(capped.label.contains("Line 2: Custom initializers"))
+        XCTAssertTrue(capped.label.contains("Line 11: Custom initializers"))
+        XCTAssertFalse(capped.label.contains("Line 12:"))
         XCTAssertFalse(app.staticTexts["Must not run"].exists, "A partial parse is never executed")
         keepScreenshot(app, "1039-bounded-diagnostics")
         app.terminate()

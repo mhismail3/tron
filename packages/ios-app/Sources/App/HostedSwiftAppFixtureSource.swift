@@ -15,10 +15,10 @@ enum HostedSwiftAppFixtureSource {
         }
         if scenario.contains("diagnostic-cap") {
             let declarations = (1...12).map { "struct Unsupported\($0) { init() {} }" }.joined(separator: "\n")
-            return ("Capped.swift", declarations + "\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
+            return ("Capped.swift", "import SwiftUI\n" + declarations + "\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }
         if scenario.contains("diagnostic-malformed") {
-            return ("Malformed.swift", "struct Broken { init() {\n")
+            return ("Malformed.swift", "import SwiftUI\nstruct Broken { init() {\n")
         }
         if scenario.contains("diagnostics") { return ("Diagnostics.swift", diagnostics) }
         if scenario.contains("limits") { return ("Limits.swift", limits) }
@@ -337,7 +337,7 @@ enum HostedSwiftAppFixtureSource {
         @State private var taps = 0
         var body: some View {
             VStack {
-                Text("Taps: \\(taps)").accessibilityIdentifier("diagnostics.taps")
+                Text("Taps: \(taps)").accessibilityIdentifier("diagnostics.taps")
                 Text([1].count())
                 HStack {
                     Text("Nested sibling")
