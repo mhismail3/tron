@@ -1796,7 +1796,16 @@ also checks Project/catalog sheet ownership while proving inheritance. Layout
 assertions use bounded tolerances only for the identified width/chrome risks;
 screenshots are diagnostic evidence, not substitutes for successful interaction.
 State-boundary integration tests supplement these journeys where the native
-fixture cannot establish store/runtime behavior.
+fixture cannot establish store/runtime behavior. Nested native menus are covered
+by `TronSheetTintUITests`: Settings → Sessions changes and restores retention,
+and Manage Session → Session History opens navigation, fork and bookmark
+presentations at sheet depth two in light and dark. These controls work on the
+iOS 26.5 simulator without changing production presentation ownership (#877).
+The earlier Manage Session → Settings → Sessions route is no longer current:
+the chat gear opens Mac/iPhone Settings directly, while Manage Session owns
+Chat Settings. Do not infer a platform-wide menu failure or rewrite working
+controls from the historical report; physical-device behavior remains a separate
+qualification. Schema choices continue to use the shared picker-sheet design.
 
 Shared Settings conventions (#939):
 
