@@ -191,7 +191,7 @@ async function temporaryRoot(prefix: string): Promise<string> {
   return root;
 }
 
-describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
+describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
   const syntheticTranscriptSizes = new Map<string, number>();

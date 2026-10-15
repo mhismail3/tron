@@ -61,7 +61,10 @@ struct HomeDashboardSections: Equatable {
 /// clock) skip it unless a listed row changed, and its rows are lazy, so
 /// opening builds only the rows on screen and each row's relative-time clock
 /// runs only while that row is visible. Styling is the shared filter sheet's
-/// with the dashboard's `HistoricalSessionRow`.
+/// with the dashboard's `HistoricalSessionRow`. Its floating search button,
+/// in the dashboard's circular glass chrome, opens the shared search pill;
+/// `SessionTitleSearch` filters the rows locally, so a query never builds
+/// more than the matching rows on screen.
 struct HomeSectionRowsSheet: View, Equatable {
     struct Row: Equatable {
         let session: SessionSummary
@@ -72,20 +75,31 @@ struct HomeSectionRowsSheet: View, Equatable {
     let rows: [Row]
     let onOpen: (SessionSummary) -> Void
     let onDone: () -> Void
+    @State private var query = ""
+    @State private var showingSearch = false
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.section == rhs.section && lhs.rows == rhs.rows
     }
 
     var body: some View {
+        let visible = SessionTitleSearch.filter(rows, query: query) { $0.session.title }
         TronDashboardFilterSheet(
             title: section == .unread ? "Unread" : "Recently Completed",
             accent: .tronEmerald,
             detents: [.medium, .large],
             onDone: onDone
         ) {
+            if visible.isEmpty && !rows.isEmpty {
+                TronPlaceholderState(
+                    title: "No matches",
+                    detail: "No session title matches “\(query.trimmingCharacters(in: .whitespacesAndNewlines))”.",
+                    icon: "magnifyingglass",
+                    accent: .tronEmerald
+                )
+            }
             LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
-                ForEach(rows, id: \.session.dashboardID) { row in
+                ForEach(visible, id: \.session.dashboardID) { row in
                     Button {
                         onOpen(row.session)
                     } label: {
@@ -95,7 +109,49 @@ struct HomeSectionRowsSheet: View, Equatable {
                     .accessibilityIdentifier("home-\(section.rawValue)-sheet-row-\(row.session.dashboardID)")
                 }
             }
+            // The floating search control must never cover the last row.
+            .padding(.bottom, 64)
         }
+        .overlay(alignment: .bottomTrailing) { searchChrome }
+        .animation(.snappy(duration: 0.18), value: showingSearch)
+    }
+
+    @ViewBuilder
+    private var searchChrome: some View {
+        if showingSearch {
+            TronSearchBar(
+                text: $query,
+                prompt: "Search titles",
+                focusOnAppear: true,
+                onClose: dismissSearch,
+                // Scrolling the results dismisses the keyboard; only an empty
+                // query closes the pill with it.
+                onFocusChange: { focused in
+                    if !focused && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { dismissSearch() }
+                }
+            )
+            .padding(.horizontal, TronSpacing.section)
+            .padding(.vertical, 8)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else {
+            Button { showingSearch = true } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(TronTypography.sans(size: 22, weight: .semibold))
+                    .foregroundStyle(Color.tronEmerald)
+                    .tronDashboardFloatingCircle(accent: .tronEmerald)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 8)
+            .accessibilityLabel("Search \(section == .unread ? "Unread" : "Recently Completed")")
+            .accessibilityIdentifier("home-\(section.rawValue)-sheet-search")
+            .transition(.scale(scale: 0.72).combined(with: .opacity))
+        }
+    }
+
+    private func dismissSearch() {
+        query = ""
+        showingSearch = false
     }
 }
 
@@ -167,7 +223,7 @@ enum HomeUsageCardLayout {
     static let columnSpacing: CGFloat = 12
     static let nameSpacing: CGFloat = 12
     /// `ProviderUsageProgress`'s own height; the column reserves it under the copy.
-    static let barHeight: CGFloat = 5
+    static let barHeight: CGFloat = ProviderUsageProgress.height
     static let barGap: CGFloat = 4
     /// Status copy without usage windows wraps rather than crowding the name.
     static let statusMaximumWidth: CGFloat = 200
@@ -398,7 +454,7 @@ struct HomeUsageSummaryCard: View {
             .padding(.bottom, part.usedPercent == nil ? 0 : HomeUsageCardLayout.barGap + HomeUsageCardLayout.barHeight)
             .overlay(alignment: .bottom) {
                 if let percent = part.usedPercent {
-                    ProviderUsageProgress(percent: percent, accent: .tronEmerald)
+                    ProviderUsageProgress(percent: percent, accent: .tronEmerald, fillProbe: probe.map { "\($0).fill" })
                         .homeUsageLayoutProbe(probe.map { "\($0).bar" })
                 }
             }

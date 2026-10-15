@@ -930,8 +930,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     /// Settings clarity (#939) against the real Gateway: Accounts leads with
-    /// Connections, and Push Notifications is its own row leading This iPhone,
-    /// the last group (#956); provenance pills carry the
+    /// Connections, Push Notifications is its own row leading This iPhone (#956),
+    /// and Tools & Diagnostics is the last group (#1030); provenance pills carry the
     /// Gateway's wording and name a per-model value's model; a text setting's
     /// return key reads Done, commits through the change path and dismisses the
     /// keyboard; an add-value row shows the schema's example and format. The kept
@@ -975,10 +975,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         gear.tap()
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
         // Accounts is the first group: Connections, then providers; the agent's own
-        // sections follow, and This iPhone, led by Push Notifications, comes last.
+        // sections follow, then This iPhone, led by Push Notifications, and last
+        // Tools & Diagnostics (#1030).
         let order = ["settings-link-Connections", "settings-link-Model Providers", "settings-section-model-open",
                      "settings-link-Hooks", "settings-link-Push Notifications", "settings-link-Appearance",
-                     "settings-link-Logs", "settings-link-Setup"].map { app.buttons[$0] }
+                     "settings-link-Sessions", "settings-link-Mac Terminal", "settings-link-Experimental",
+                     "settings-link-Setup", "settings-link-Logs"].map { app.buttons[$0] }
         XCTAssertTrue(order[2].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(order.allSatisfy(\.exists), app.debugDescription)
         XCTAssertEqual(order.map(\.frame.minY), order.map(\.frame.minY).sorted(), "Settings must open with Accounts: \(order.map(\.frame))")

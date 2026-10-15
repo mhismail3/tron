@@ -9,7 +9,6 @@ struct ChatView: View {
     private let initialEditorText: String?
     private let initialModel: ModelRef?
     private let initialHistoryEntryID: String?
-    private let initialSearchResult: SessionSearchResult?
     /// The Home conversation's logical route: sends go through `home.prompt`,
     /// and Manage Home belongs to this chat whichever chapter it opens.
     private let isHomeRoute: Bool
@@ -80,7 +79,6 @@ struct ChatView: View {
         initialEditorText: String? = nil,
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
-        initialSearchResult: SessionSearchResult? = nil,
         isHomeRoute: Bool = false,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         hostedProbe: ChatHostedProbe? = nil,
@@ -92,7 +90,6 @@ struct ChatView: View {
         self.initialEditorText = initialEditorText
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
-        self.initialSearchResult = initialSearchResult
         self.isHomeRoute = isHomeRoute
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
@@ -118,7 +115,6 @@ struct ChatView: View {
         initialEditorText: String? = nil,
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
-        initialSearchResult: SessionSearchResult? = nil,
         isHomeRoute: Bool = false,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
@@ -129,7 +125,6 @@ struct ChatView: View {
         self.initialEditorText = initialEditorText
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
-        self.initialSearchResult = initialSearchResult
         self.isHomeRoute = isHomeRoute
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
@@ -285,7 +280,6 @@ struct ChatView: View {
             guard activity.allowsPresentationPublication else { return }
             admitPendingFloatingDisplay()
         }
-        .task(id: "search-anchor:\(sessionID):\(initialHistoryEntryID ?? "")") { await navigateToInitialSearchResult() }
         .onChange(of: model.stagedSettingsDecision?.id, initial: true) { _, _ in openManageForStagedSettingsDecision() }
     }
 
@@ -490,26 +484,6 @@ struct ChatView: View {
             composerResourceResults = catalog.entries(for: picker)
         }
         reconcileComposerResourcePicker()
-    }
-
-    private func navigateToInitialSearchResult() async {
-        guard let entryID = initialHistoryEntryID,
-              let searchResult = initialSearchResult,
-              let profileID = model.profiles.selected?.id else { return }
-        // The mounted presentation is the admission fence; the owning
-        // scroll coordinator waits for the exact historical row's layout.
-        guard let generation = model.sessionPresentationGeneration(for: sessionID) else { return }
-        do {
-            guard try await model.navigateToSearchResult(searchResult, profileID: profileID) else {
-                model.presentError(NSError(domain: "TronSearchNavigation", code: 1, userInfo: [NSLocalizedDescriptionKey: "The searched message could not be loaded. Try searching again."]))
-                return
-            }
-            guard generation == model.sessionPresentationGeneration(for: sessionID), !Task.isCancelled else { return }
-            scrollCoordinator.requestHistoricalEntryScroll(semanticID: entryID, installed: transcriptPresentation.installed)
-        } catch is CancellationError { return } catch {
-            guard !Task.isCancelled else { return }
-            model.presentError(error)
-        }
     }
 
     private func handleAppear() {
@@ -2866,24 +2840,6 @@ struct ChatView: View {
             }
             .frame(width: titleWidth, height: ChatToolbarTitleLayout.height)
             .animation(ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion), value: retainedRecoveryStatus)
-        }
-        if model.isShowingHistoricalTranscript {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button { Task { _ = await model.loadHistoricalEarlierTranscript(sessionID: sessionID) } } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .accessibilityLabel("Load older history")
-                Button { Task { _ = await model.loadHistoricalLaterTranscript(sessionID: sessionID) } } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .accessibilityLabel("Load newer history")
-                Button { model.returnToLatestTranscript(sessionID: sessionID) } label: {
-                    Image(systemName: "arrow.uturn.down")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(Color.tronEmerald)
-                }
-                .accessibilityLabel("Return to latest messages")
-            }
         }
         ToolbarItem(placement: .primaryAction) {
             // Two surfaces: the context ring opens Manage Session/Home (this chat,

@@ -2005,7 +2005,7 @@ export class RuntimeRegistry {
       homeModel: (sessionId: string) => this.home.modelFor(sessionId),
       homeRequestPolicy: (sessionId: string) => this.home.requestPolicyFor(sessionId),
       homeInboxAdmission: (sessionId: string, operationId: string, delivery: import("../home/home-wake-inbox.js").HomeWakeDelivery, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => this.home.admitTaskResults(sessionId, operationId, delivery, append, envelope),
-      homeInboxRelease: (taskId: string, operationId: string) => this.home.releaseWakeTrigger(taskId, operationId),
+      homeInboxRelease: (taskId: string, operationId: string, eventId: string) => this.home.releaseWakeTrigger(taskId, operationId, eventId),
       homeInboxSettlement: (sessionId: string, operationId: string) => this.home.settleTaskResults(sessionId, operationId),
       homeIdle: (sessionId: string, by: "user" | "wake") => this.home.noteHomeIdle(sessionId, by),
       homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
@@ -2552,21 +2552,6 @@ export class RuntimeRegistry {
       } catch { /* incomplete parent evidence leaves coverage partial */ }
     }
     return { summary: info, entries: selectedFile, ...(info.fileIdentity ? { fileIdentity: info.fileIdentity } : {}), ...(forkBoundary ? { forkBoundary } : {}), ...(selectedLeafId ? { leafEntryId: selectedLeafId } : {}) };
-  }
-
-  async readSearchTranscriptPage(sessionId: string, before: number, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string): Promise<TranscriptPage> {
-    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
-    return slot.transcriptPage(before, undefined, expectedRuntimeGeneration, expectedLeafEntryId);
-  }
-
-  async readSearchTranscriptPageAtEntry(sessionId: string, entryID: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string, windowEnd?: number): Promise<TranscriptPage> {
-    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
-    return slot.transcriptPageAtEntry(entryID, expectedRuntimeGeneration, expectedLeafEntryId, windowEnd);
-  }
-
-  async readSearchTranscriptPageAfter(sessionId: string, after: number, expectedPreviousEntryId?: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string): Promise<TranscriptPage> {
-    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
-    return slot.transcriptPageAfter(after, expectedPreviousEntryId, expectedRuntimeGeneration, expectedLeafEntryId);
   }
 
   async catalog(scope: "user" | "all" = "user"): Promise<{

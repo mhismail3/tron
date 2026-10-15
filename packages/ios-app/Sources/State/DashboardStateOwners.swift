@@ -410,7 +410,6 @@ struct DashboardServerFilterState: Equatable, Sendable {
     }
 
     var isFiltering: Bool { !selectedProfileIDs.isEmpty || sortMode != .home }
-    var searchIdentity: String { "\(selectedProfileIDs.sorted().joined(separator: ",")):\(sortMode.rawValue)" }
     var isAllSelected: Bool { selectedProfileIDs.isEmpty }
     mutating func reconcile(profileIDs: [String]) {
         let admitted = Set(profileIDs)

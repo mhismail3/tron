@@ -396,7 +396,7 @@ async function persistedCatalog(f: Fixture): Promise<EpisodicMessageRecord[]> {
   return [...(await store.read()).messages.values()];
 }
 
-describe.sequential("Tron Home memory tools end to end", () => {
+describe("Tron Home memory tools end to end", { concurrent: false }, () => {
   it("opens a line into its two children, gives a message whole, and refuses an address that is not a line", async () => {
     const f = await fixture("zoom");
     await prompt(f, "zoom-m0", "reply-r0");

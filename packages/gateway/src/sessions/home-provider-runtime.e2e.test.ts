@@ -108,7 +108,7 @@ async function homeTurn(f: Awaited<ReturnType<typeof fixture>>, text: string): P
   return lastAssistant(sessionOf(home));
 }
 
-describe.sequential("Home's chat runtime", () => {
+describe("Home's chat runtime", { concurrent: false }, () => {
   // A1, A2, A3.
   it("reaches a provider only the Gateway-wide runtime has, through every Home lifecycle step", async () => {
     trackCase(0);

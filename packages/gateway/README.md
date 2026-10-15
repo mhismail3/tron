@@ -171,7 +171,7 @@ per-instance global theme setter; the host-owned RPC callback palette is
 independent. P99-19 tracks an upstream setter request.
 
 Jev uses Pi `ModelRuntime.classify()` with TypeSafe's catalog `jev-latest` for
-Knowledge, session search, and the `jev` tool. Tron retains input bounds,
+Knowledge and the `jev` tool. Tron retains input bounds,
 qualified pre-dispatch price ceilings, assessment versions, and dispatch
 certainty; TypeSafe provider credentials remain Pi-owned. Actual TypeSafe model
 behavior and price may change without a Tron release.
@@ -309,9 +309,10 @@ not observed fails as stale. The committed `pi-sdk-baseline.json` records the
 prior runtime used for rollback verification and any accepted one-way delta for
 that version range; `package.json` remains current-version authority. Run `node scripts/compare-pi-sdk-graph.mjs BASE HEAD`
 to compare the complete resolved dependency closure reachable from the direct Pi
-family, without treating unrelated lockfile churn as an SDK change. CI runs the
-networked rollback matrix and hosted iOS/Gateway boundary only when that graph
-changes (or when explicitly dispatched).
+family, without treating unrelated lockfile churn as an SDK change. When that graph
+changes, run the networked rollback matrix (`npm run test:pi-sdk-rollback`) and the
+iOS/Gateway boundary (`scripts/ios-gateway-e2e-test`) as `work land --tests`
+journeys; hosted CI runs neither.
 
 A maintainer updates the family only with `npm run update:pi-sdk -- <exact-version>`
 from a clean `package.json`/`package-lock.json`. The helper preflights every
@@ -374,7 +375,7 @@ the patch onto that tag, and running `--write`.
 ships both changes (the declaration's `removeWhen`), remove the patch in one
 change: set `pi-coding-agent` in `package.json` back to the exact release
 version, delete `pi-coding-agent-patch.json`, `third_party/pi-coding-agent/`,
-`scripts/build-pi-coding-agent-patch.mjs` and its `reproduce:pi-coding-agent`
+`packages/gateway/scripts/build-pi-coding-agent-patch.mjs` and its `reproduce:pi-coding-agent`
 script, drop the declaration from `packages/mac-app/scripts/stage-gateway-app.sh`
 and the `BUILD_INPUT_FILES` of `scripts/gateway-install-inputs.mjs`, run
 `npm install` so the lock returns to the registry entry, then
@@ -1606,7 +1607,7 @@ from an automation-originated turn to prevent self-replication. Paired Gateway c
 
 Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list` (keyset `cursor`, `filter`, `limit`), `notification.inbox.read` (one inbox ID or APNs request ID), and `notification.inbox.readAll` (a required `through` cut). Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. A registration identical to the stored grant is answered with the same status and writes nothing at all: no command receipt, no credential document, and no delivery-receipt or revocation overlay. Every other upsert keeps its command receipt and is admitted durably as before. `hello` and `system.info` carry `pushRegistrationRevision`, a digest of the grants this Gateway stores and the relay origin they are valid for; it changes whenever a grant is added, rotated, disabled at runtime or retired, so a phone that acknowledged an earlier value re-sends its registration and learns the rotation requirement. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The per-kind policy is Gateway-owned, defaults all three kinds on, and round-trips through registration upsert/status; the ask-notification policy is rechecked inside the same serialized admission transaction that appends the intent, so a concurrent policy disable can no longer admit and deliver an ask notification after the outer read. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
 
-Outbound relay requests use one fixed `/v3/notifications` route (plus the unauthenticated `GET /v3/capabilities` read before queuing the settings "Waiting for you" push, whose allowlisted `settings-approval` category is sent only to a relay that lists it; [settings-model.md decision 35](docs/settings-model.md#101-decisions)), no redirects, a twenty-second deadline that exceeds the relay's bounded APNs deadline, a 2 KiB request and 16 KiB response boundary, and a lowercase-hex HMAC over method, path, timestamp, stable request ID, and the exact body's lowercase-hex SHA-256. Restart recovery retries transient outcomes with the same request ID. When the relay specifically reports that this ID still owns an active provider attempt, the Gateway polls it through the same bounded retry schedule; the relay ledger returns the eventual terminal result without creating a second APNs request. Unclassified ambiguous outcomes remain terminal and are never blindly replayed. Exact relay `invalid_signature` and `installation_unavailable` errors invalidate that grant without persisting or logging response bodies; mobile registration then rotates the capability instead of retrying an identity that cannot reach APNs. The Gateway adds no per-installation or per-session delivery quota; the relay applies a device-wide runaway backstop of 120 requests/hour and 1,000 routine requests/day, with ask and explicit notifications exempt from the daily cap.
+Outbound relay requests use one fixed `/v3/notifications` route (plus the unauthenticated `GET /v3/capabilities` read before queuing the settings "Waiting for you" push, whose allowlisted `settings-approval` category is sent only to a relay that lists it; [settings-model.md decision 35](docs/settings-model.md#81-decisions)), no redirects, a twenty-second deadline that exceeds the relay's bounded APNs deadline, a 2 KiB request and 16 KiB response boundary, and a lowercase-hex HMAC over method, path, timestamp, stable request ID, and the exact body's lowercase-hex SHA-256. Restart recovery retries transient outcomes with the same request ID. When the relay specifically reports that this ID still owns an active provider attempt, the Gateway polls it through the same bounded retry schedule; the relay ledger returns the eventual terminal result without creating a second APNs request. Unclassified ambiguous outcomes remain terminal and are never blindly replayed. Exact relay `invalid_signature` and `installation_unavailable` errors invalidate that grant without persisting or logging response bodies; mobile registration then rotates the capability instead of retrying an identity that cannot reach APNs. The Gateway adds no per-installation or per-session delivery quota; the relay applies a device-wide runaway backstop of 120 requests/hour and 1,000 routine requests/day, with ask and explicit notifications exempt from the daily cap.
 
 ## Transport
 
@@ -2017,12 +2018,12 @@ receives no answer: the Gateway abandons that request's work and records
 `rpc.cancelled` with the stage it interrupted. Cancellation applies only to
 `session.open`, `session.list`, `session.transcript`, `session.history.list`,
 `session.history.entry`, `home.memory.view`, `home.memory.evidence`,
-`session.search`, `model.list`, `provider.list` and `provider.usage`; a cancel for
+`model.list`, `provider.list` and `provider.usage`; a cancel for
 any other method is ignored. An accepted mutation
 or admitted prompt is never cancelled, and neither is a `session.sync`
 acknowledgement: their owners settle them durably whatever the client does with
 their wait.
-Seven of those eleven methods have server-side deadlines
+Seven of those ten methods have server-side deadlines
 (`DISPOSABLE_READ_DEADLINES_MS` in `packages/gateway/src/transport/server.ts`):
 10 s for `session.open`, whose cold load may parse a large transcript before its
 subscription commits, and 5 s for `session.list` and the transcript pages
@@ -2033,11 +2034,11 @@ that outlives its deadline is aborted, answered `busy` with
 `reason=deadline`; the phone waits that hint (bounded to 10 s), retries the read
 once and logs `rpc.retry-after`. A method with no entry in that table has no
 deadline and is never shed: that is every mutation, every prompt, `session.sync`,
-and the four disposable reads whose own owners already allow longer than the
-client does — `session.search` may spend Jev's 20 s on a paid remote-ranked
-evaluation and `provider.usage` answers a typed timed-out snapshot after up to
-10 s per fetch, so a deadline below those owners' bounds would throw away an
-answer they were about to produce (and, for a search, have the phone pay twice).
+and the three disposable reads (`model.list`, `provider.list`,
+`provider.usage`) whose own owners already allow longer than the client does —
+`provider.usage` answers a typed timed-out snapshot after up to 10 s per fetch,
+so a deadline below that owner's bound would throw away an answer it was about
+to produce.
 Concurrency caps queue rather than refuse: two cold runtime loads, one session
 export and two workspace inspections at a time, each a named constant next to its
 user. Cold loads are additionally gated on heap pressure: above
@@ -3738,7 +3739,8 @@ open a real PTY so packaging cannot silently ship a non-executable helper.
 
 ## Session search
 
-[Session search](docs/session-search.md) owns the `session-search.v1` capability.
+[Session search](docs/session-search.md) owns `SessionSearchService`, the
+in-process index Home's `session_search` research tool reads. It has no client RPC.
 
 ## Episodic memory
 
@@ -4175,9 +4177,9 @@ data root. The delegated-provider keeps its separate in-process `PI_SUBAGENTS_TE
 for pi-subagents children; arbitrary shell commands and their process trees do not receive
 that live-home root, Gateway supervision/payload identity, or the `TRON_DATA_DIR` and
 `TRON_HOME_NAME` selectors. Gateway Vitest configurations (regular, scale and corpus), Node
-test scripts, and `scripts/tron work verify` share one environment
-policy. Vitest rejects during setup, before test modules execute; `scripts/tron work verify`
-rejects before checks are selected or carried. The policy expands SDK-style `~` paths and
+test scripts, and `scripts/tron gate` share one environment
+policy. Vitest rejects during setup, before test modules execute; `scripts/tron gate`
+rejects before any step runs. The policy expands SDK-style `~` paths and
 normalizes dot segments, including path-list entries, and interprets `TRON_HOME_NAME` using
 the same home-relative resolution as `resolveTronHome()`.
 

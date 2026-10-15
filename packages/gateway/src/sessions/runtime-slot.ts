@@ -123,7 +123,6 @@ import {
   projectToolResult,
   projectTranscriptPage,
   projectTranscriptPageAfter,
-  projectedTranscriptOrdinal,
   canonicalToolResultCallIDs,
   canonicalToolResultCallIDsFromBranch,
   projectTree,
@@ -608,7 +607,7 @@ export interface RuntimeSlotDependencies {
    * result the run starts with, not yet appended; otherwise the results are appended. */
   homeInboxAdmission: (sessionId: string, operationId: string, delivery: import("../home/home-wake-inbox.js").HomeWakeDelivery, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => Promise<import("../home/home-wake-inbox.js").HomeWakeTrigger | undefined>;
   /** Returns a wake trigger that never reached the canonical session to pending. */
-  homeInboxRelease: (taskId: string, operationId: string) => Promise<void>;
+  homeInboxRelease: (taskId: string, operationId: string, eventId: string) => Promise<void>;
   homeInboxSettlement: (sessionId: string, operationId: string) => Promise<void>;
   /** The Home session is idle again after a user activation or a delivered wake. */
   homeIdle: (sessionId: string, by: "user" | "wake") => void;
@@ -2337,7 +2336,7 @@ export class RuntimeSlot {
         // bash schema is nevertheless the exact SDK definition registered here.
         ...(directBashProcesses ? { customTools: [
           directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition,
-          ...(this.taskWorker ? [this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined,
+          ...(this.taskWorker ? [this.taskWorker.checkinTool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined), this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined,
             async report => {
               // A sealed report decides the outcome, so no task-owned run may still be live then: settlement
               // would stop it after the outcome was fixed. Refuse under the liveness rule settlement uses.
@@ -7767,23 +7766,6 @@ export class RuntimeSlot {
     });
   }
 
-  transcriptPageAtEntry(
-    entryID: string,
-    expectedRuntimeGeneration?: string,
-    expectedLeafEntryID?: string,
-    windowEnd?: number,
-  ): TranscriptPage {
-    this.assertNoTrustReload();
-    const ordinal = projectedTranscriptOrdinal(this.runtime.session.sessionManager, entryID);
-    if (ordinal < 0) throw new GatewayError("not_found", "The canonical entry is not projectable on the active transcript");
-    return this.transcriptPage(
-      Math.max(ordinal + 1, windowEnd ?? ordinal + 1),
-      undefined,
-      expectedRuntimeGeneration,
-      expectedLeafEntryID,
-    );
-  }
-
   transcriptPageAfter(
     after: number,
     expectedPreviousEntryId?: string,
@@ -8301,7 +8283,7 @@ export class RuntimeSlot {
       await session.sendCustomMessage(trigger.message, { triggerTurn: true });
       if (!this.hasCanonicalCustomMessage(eventId)) throw new GatewayError("conflict", "Home wake trigger was not persisted");
     } catch (error) {
-      if (!this.hasCanonicalCustomMessage(eventId)) await this.dependencies.homeInboxRelease(trigger.taskId, operationId);
+      if (!this.hasCanonicalCustomMessage(eventId)) await this.dependencies.homeInboxRelease(trigger.taskId, operationId, eventId);
       throw error;
     } finally {
       this.inboxAttributedMessages.delete(eventId);

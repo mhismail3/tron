@@ -71,3 +71,5 @@ progress.md
 .pi/*
 !.pi/prompts/
 !.pi/prompts/*.md
+!.pi/agents/
+!.pi/agents/*.md
