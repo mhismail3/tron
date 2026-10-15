@@ -1129,8 +1129,9 @@ struct SessionShellView: View {
         }
     }
 
-    /// Recently Completed and Unread: the first rows, then View more opening
-    /// the shared sheet of every row in the section.
+    /// Recently Completed and Unread: the first rows, with View All in the
+    /// header, once the section exceeds its cap, opening the shared sheet of
+    /// every row in the section.
     private func cappedHomeSection(
         _ section: HomeDashboardSections.Section,
         title: String,
@@ -1144,59 +1145,36 @@ struct SessionShellView: View {
                 sessionButton(session, showsContext: true)
                     .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
             }
-            if rows.count > HomeDashboardLayout.sectionRowLimit {
-                SessionListExpansionControls(
-                    workspaceName: title,
-                    canShowLess: false,
-                    canShowMore: true,
-                    isEnabled: true,
-                    onShowLess: {},
-                    onShowMore: { homeSectionSheet = section },
-                    showMoreTitle: "View more",
-                    showMoreHint: hint
-                )
-                .accessibilityIdentifier("home-\(section.rawValue)-view-more")
-                .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .listRowInsets(SessionDashboardLayout.rowInsets)
-            }
         } header: {
-            dashboardSectionHeader(header)
+            dashboardSectionHeader(header, viewAll: rows.count > HomeDashboardLayout.sectionRowLimit ? DashboardSectionHeaderAction(
+                title: "View All",
+                accessibilityLabel: "View all sessions in \(title)",
+                hint: hint,
+                identifier: "home-\(section.rawValue)-view-all",
+                action: { homeSectionSheet = section }
+            ) : nil)
                 .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
         }
     }
 
-    /// The View more sheet of a capped Home section.
+    /// The View All sheet of a capped Home section. Its rows are computed here,
+    /// once per parent update, and handed to an equatable view, so a catalog
+    /// change that leaves the section's rows unchanged re-renders nothing in it.
     private func homeSectionRowsSheet(_ section: HomeDashboardSections.Section) -> some View {
-        TronDashboardFilterSheet(
-            title: section == .unread ? "Unread" : "Recently Completed",
-            accent: .tronEmerald,
-            detents: [.medium, .large],
+        HomeSectionRowsSheet(
+            section: section,
+            rows: homeDashboardSections(filteredSessions).sheetRows(section).map {
+                HomeSectionRowsSheet.Row(session: $0, activity: dashboardPresentation.activity(for: $0))
+            },
+            onOpen: { session in
+                homeSectionSheet = nil
+                openSession(session)
+            },
             onDone: { homeSectionSheet = nil }
-        ) {
-            ForEach(homeDashboardSections(filteredSessions).sheetRows(section), id: \.dashboardID) { session in
-                Button {
-                    homeSectionSheet = nil
-                    openSession(session)
-                } label: {
-                    HistoricalSessionRow(
-                        session: session,
-                        activity: dashboardPresentation.activity(for: session),
-                        showsContext: true
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("home-\(section.rawValue)-sheet-row-\(session.dashboardID)")
-            }
-        }
+        )
+        .equatable()
     }
 
-    /// Reads Home's worker ids from its task ledger for the Home view. A new
-    /// worker appears as a new catalog row, so the catalog size keys a re-read.
-    /// The task is keyed by the surface's activity, so it reads that activity
-    /// directly: `dashboardPresentationIsActive` is published by a sibling
-    /// `onChange` that may run after this task starts.
     /// One container row after every workspace group, owned by
     /// `ArchivedSessionsContainerSection`.
     private func archivedContainerSection(onRevealRows: @escaping () -> Void) -> some View {
@@ -1225,16 +1203,29 @@ struct SessionShellView: View {
         dashboardSectionHeader("Recent Activity · active first")
     }
 
-    private func dashboardSectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(TronTypography.sheetSectionHeader)
-            .foregroundStyle(Color.tronEmerald)
-            .textCase(nil)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, SessionDashboardLayout.headerLeadingPadding)
-            .padding(.top, SessionDashboardLayout.headerTopPadding)
-            .padding(.bottom, SessionDashboardLayout.headerBottomPadding)
-            .listRowInsets(SessionDashboardLayout.headerInsets)
+    private func dashboardSectionHeader(_ title: String, viewAll: DashboardSectionHeaderAction? = nil) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: SessionDashboardLayout.iconTextSpacing) {
+            Text(title)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let viewAll {
+                Button(action: viewAll.action) {
+                    Text(viewAll.title)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(viewAll.accessibilityLabel)
+                .accessibilityHint(viewAll.hint)
+                .accessibilityIdentifier(viewAll.identifier)
+            }
+        }
+        .font(TronTypography.sheetSectionHeader)
+        .foregroundStyle(Color.tronEmerald)
+        .textCase(nil)
+        // Symmetric insets: View All lines up with the rows' trailing timestamps.
+        .padding(.horizontal, SessionDashboardLayout.headerLeadingPadding)
+        .padding(.top, SessionDashboardLayout.headerTopPadding)
+        .padding(.bottom, SessionDashboardLayout.headerBottomPadding)
+        .listRowInsets(SessionDashboardLayout.headerInsets)
     }
 
     private var homePinnedButton: some View {
@@ -1548,6 +1539,15 @@ struct SessionShellView: View {
             }
         }
     }
+}
+
+/// A section header's trailing action, drawn in the header's own font and tint.
+struct DashboardSectionHeaderAction {
+    let title: String
+    let accessibilityLabel: String
+    let hint: String
+    let identifier: String
+    let action: () -> Void
 }
 
 /// Dashboard row geometry, shared with the archived container's rows so both

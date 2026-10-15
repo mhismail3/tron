@@ -1317,7 +1317,7 @@ export class HomeOwner {
       // Refuse arbitrary/cross-chapter references before opening evidence.
       memory.assertBrowserEvidence(evidence);
       const cursor = memory.browserCursor();
-      if (!cursor) throw homeMemorySourceUnavailable();
+      if (!cursor) throw homeMemorySourceUnavailable("no-cursor");
       const entry = await readCanonicalHomeEvidence(source, cursor, evidence, EPISODIC_DEFAULTS, signal, proofs);
       signal?.throwIfAborted();
       const { runtimeGeneration: _generation, entryId: _entryId, ...content } = historyEntry(
@@ -1344,7 +1344,7 @@ export class HomeOwner {
         signal?.throwIfAborted();
         return await owner.browserRead(async memory => {
           const cursor = memory.browserCursor();
-          if (!cursor) throw homeMemorySourceUnavailable();
+          if (!cursor) throw homeMemorySourceUnavailable("no-cursor");
           const source = await this.readHomeSource();
           signal?.throwIfAborted();
           // Consume to completion: a late chapter failure cannot publish an
@@ -1359,7 +1359,9 @@ export class HomeOwner {
       } catch (error) {
         signal?.throwIfAborted();
         if (error instanceof GatewayError) throw error;
-        if (error instanceof EpisodicMemoryError || error instanceof EpisodicSourceChangedError || error instanceof HomeMemoryRefusal) throw homeMemorySourceUnavailable();
+        if (error instanceof EpisodicMemoryError) throw homeMemorySourceUnavailable(`episodic-${error.kind}`);
+        if (error instanceof EpisodicSourceChangedError) throw homeMemorySourceUnavailable("source-changed");
+        if (error instanceof HomeMemoryRefusal) throw homeMemorySourceUnavailable(`refusal-${error.reason}`);
         throw error;
       }
     }, signal);
@@ -1477,7 +1479,8 @@ export class HomeOwner {
       let path: string | undefined;
       try { path = await this.options.sessions.sessionFile(chapter.sessionId); }
       catch (error) {
-        if (chapter.state === "sealed") throw new EpisodicMemoryError("source", `Sealed Home chapter ${chapter.sessionId} cannot be resolved: ${String(error)}`);
+        // A retryable refusal (the catalog has no cut yet) stays itself, not a source failure.
+        if (chapter.state === "sealed" && !(error instanceof GatewayError)) throw new EpisodicMemoryError("source", `Sealed Home chapter ${chapter.sessionId} cannot be resolved: ${String(error)}`);
         throw error;
       }
       if (!path) {

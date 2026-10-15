@@ -75,9 +75,12 @@ export function homeMemoryRevisionChanged(): GatewayError {
     { reason: "home-memory-revision-changed" }, "home-memory-revision-changed");
 }
 
-export function homeMemorySourceUnavailable(): GatewayError {
+/** `cause` is a coded name for the failure the public refusal stands for (its class and
+ * kind or reason), never a path or message: one recorded refusal then names which of
+ * the mapped failures occurred (#968). */
+export function homeMemorySourceUnavailable(cause: string): GatewayError {
   return new GatewayError("busy", "Home memory canonical sources are unavailable", true,
-    { reason: "home-memory-source-unavailable" }, "home-memory-source-unavailable");
+    { reason: "home-memory-source-unavailable", cause }, "home-memory-source-unavailable");
 }
 
 function boundedText(text: string): string {

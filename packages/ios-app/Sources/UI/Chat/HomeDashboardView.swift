@@ -5,17 +5,19 @@ import TronMobileCore
 /// dashboard's synced session catalog: the Gateway marks Home workers on their
 /// rows (`homeTaskId`), so the view issues no reads of its own.
 enum HomeDashboardLayout {
-    /// Recently Completed and Unread show this many rows, then View more.
+    /// Recently Completed and Unread show this many rows; View All lists the rest.
     static let sectionRowLimit = 5
     static let floatingButtonSpacing: CGFloat = 12
 }
 
 /// One projection of the dashboard catalog into the view's three sections.
 /// In Progress and Recently Completed hold Home's workers. Unread is the
-/// viewing queue of every settled unread session, worker or ordinary chat:
-/// unread is the Gateway's cross-client attention projection
-/// (`SessionSummary.isUnread`), cleared when a session is opened, so a
-/// completed worker is either still unread or recently completed, never both.
+/// viewing queue of every settled unread session: unread is the Gateway's
+/// cross-client attention projection (`SessionSummary.isUnread`), cleared when
+/// a session is opened. The Gateway admits a Home worker's completions read
+/// (#1003), so Unread holds the maintainer's own sessions and only a worker he
+/// marked unread himself; a worker is either unread or recently completed,
+/// never both.
 struct HomeDashboardSections: Equatable {
     let inProgress: [SessionSummary]
     let completed: [SessionSummary]
@@ -33,7 +35,7 @@ struct HomeDashboardSections: Equatable {
         var id: String { rawValue }
     }
 
-    /// The rows a capped section's View more sheet lists.
+    /// The rows a capped section's View All sheet lists.
     func sheetRows(_ section: Section) -> [SessionSummary] {
         switch section {
         case .inProgress: inProgress
@@ -51,6 +53,49 @@ struct HomeDashboardSections: Equatable {
             order[section] = order.count + 1
         }
         return order
+    }
+}
+
+/// The View All sheet of a capped Home section (#1003). It is equatable on
+/// its rows, so the parent's frequent updates (a running worker's summary, a
+/// clock) skip it unless a listed row changed, and its rows are lazy, so
+/// opening builds only the rows on screen and each row's relative-time clock
+/// runs only while that row is visible. Styling is the shared filter sheet's
+/// with the dashboard's `HistoricalSessionRow`.
+struct HomeSectionRowsSheet: View, Equatable {
+    struct Row: Equatable {
+        let session: SessionSummary
+        let activity: DashboardSessionActivity
+    }
+
+    let section: HomeDashboardSections.Section
+    let rows: [Row]
+    let onOpen: (SessionSummary) -> Void
+    let onDone: () -> Void
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.section == rhs.section && lhs.rows == rhs.rows
+    }
+
+    var body: some View {
+        TronDashboardFilterSheet(
+            title: section == .unread ? "Unread" : "Recently Completed",
+            accent: .tronEmerald,
+            detents: [.medium, .large],
+            onDone: onDone
+        ) {
+            LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
+                ForEach(rows, id: \.session.dashboardID) { row in
+                    Button {
+                        onOpen(row.session)
+                    } label: {
+                        HistoricalSessionRow(session: row.session, activity: row.activity, showsContext: true)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("home-\(section.rawValue)-sheet-row-\(row.session.dashboardID)")
+                }
+            }
+        }
     }
 }
 
@@ -111,6 +156,24 @@ struct HomeFloatingButton: View {
     }
 }
 
+/// The Home usage card's row metrics. Sizes are `TronTypography` steps: the
+/// provider name one step above the session rows' title, the usage copy one
+/// step below it.
+@MainActor
+enum HomeUsageCardLayout {
+    static let nameSize = TronTypography.sizeBody
+    static let usageSize = TronTypography.sizeBodySM
+    static let columnMinimumWidth: CGFloat = 84
+    static let columnSpacing: CGFloat = 12
+    static let nameSpacing: CGFloat = 12
+    /// `ProviderUsageProgress`'s own height; the column reserves it under the copy.
+    static let barHeight: CGFloat = 5
+    static let barGap: CGFloat = 4
+    /// Status copy without usage windows wraps rather than crowding the name.
+    static let statusMaximumWidth: CGFloat = 200
+    static let coordinateSpace = "home-usage-card"
+}
+
 /// The providers the Home usage card can show: every configured provider whose
 /// account usage the Gateway supports, in the Providers settings order.
 enum HomeUsageProviders {
@@ -148,7 +211,10 @@ struct HomeUsageSummaryCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage(HomeUsageCardPreferences.hiddenProvidersKey) private var hiddenProviders = ""
+    /// About a quarter of the card at the default text size; grows with Dynamic Type.
+    @ScaledMetric(relativeTo: .footnote) private var columnMinimumWidth: CGFloat = HomeUsageCardLayout.columnMinimumWidth
     @State private var usageController = ProviderUsageReadController()
     /// A failed catalog read hides the card instead of leaving its pulse up.
     @State private var catalogReadFailed = false
@@ -224,6 +290,8 @@ struct HomeUsageSummaryCard: View {
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .homeUsageLayoutProbe("card")
+                    .coordinateSpace(.named(HomeUsageCardLayout.coordinateSpace))
                 }
                 .buttonStyle(.plain)
                 .tronGlassSurface(accent: .tronEmerald, cornerRadius: 12, tintOpacity: 0.14, interactive: true)
@@ -246,62 +314,95 @@ struct HomeUsageSummaryCard: View {
         .onChange(of: model.providerInvalidationGeneration) { _, _ in usageController.begin(clear: true) }
     }
 
+    /// A provider row: its name on the left, vertically centered against its
+    /// usage columns on the right, one column per usage window, each its copy
+    /// with its own bar beneath. Accessibility text sizes stack the columns
+    /// under the name, as the dashboard's expansion controls do.
     private func providerRow(_ provider: ProviderSummary) -> some View {
         let snapshot = usageController.snapshots[provider.id]
-        return VStack(alignment: .leading, spacing: 4) {
-            // The usage line keeps its full size: it trails the name when both
-            // fit, else it wraps below the name rather than shrinking.
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    providerName(provider)
-                    Spacer(minLength: 8)
-                    usageLine(snapshot).fixedSize()
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    providerName(provider)
-                    usageLine(snapshot)
-                }
-            }
-            if isLoading {
-                // Hidden layout stand-in for the usage bars.
-                ProviderUsageProgress(percent: 0, accent: .tronEmerald)
-            } else if let snapshot {
-                let percents = snapshot.windows.prefix(2).compactMap(\.usedPercent)
-                if !percents.isEmpty {
-                    HStack(spacing: 8) {
-                        ForEach(Array(percents.enumerated()), id: \.offset) { _, percent in
-                            ProviderUsageProgress(percent: percent, accent: .tronEmerald)
-                        }
-                    }
-                }
-            }
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 6))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: HomeUsageCardLayout.nameSpacing))
+        return layout {
+            providerName(provider)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .homeUsageLayoutProbe("\(provider.id).name")
+            usageColumns(provider, snapshot)
+                .fixedSize()
+                .layoutPriority(1)
         }
     }
 
     private func providerName(_ provider: ProviderSummary) -> some View {
+        // Long names ("Anthropic (CortexKit)") wrap, then scale, before they clip.
         Text(provider.displayName)
-            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+            .font(TronTypography.sans(size: HomeUsageCardLayout.nameSize, weight: .medium))
             .foregroundStyle(Color.tronTextPrimary)
-            .lineLimit(1)
+            .lineLimit(2)
+            .minimumScaleFactor(0.85)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder
-    private func usageLine(_ snapshot: ProviderUsageSnapshot?) -> some View {
+    private func usageColumns(_ provider: ProviderSummary, _ snapshot: ProviderUsageSnapshot?) -> some View {
         if isLoading {
-            // Static stand-in: the card's pulse is the loading indicator.
-            Text(verbatim: ProviderUsagePresentation.loadingPlaceholder)
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                .redacted(reason: .placeholder)
+            // Static stand-ins at the final height: the card's pulse is the loading indicator.
+            HStack(alignment: .top, spacing: HomeUsageCardLayout.columnSpacing) {
+                ForEach(ProviderUsagePresentation.loadingPlaceholderParts, id: \.text) { part in
+                    usageColumn(part, color: Color.tronTextMuted, probe: nil)
+                        .redacted(reason: .placeholder)
+                }
+            }
         } else if let snapshot {
-            Text(ProviderUsagePresentation.summary(snapshot))
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                .foregroundStyle(snapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted)
-                .monospacedDigit()
-                .transition(.opacity)
+            let parts = ProviderUsagePresentation.windowParts(snapshot)
+            let color = snapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted
+            Group {
+                if parts.isEmpty {
+                    Text(ProviderUsagePresentation.summary(snapshot))
+                        .font(TronTypography.sans(size: HomeUsageCardLayout.usageSize, weight: .medium))
+                        .foregroundStyle(color)
+                        .multilineTextAlignment(.trailing)
+                        .frame(maxWidth: HomeUsageCardLayout.statusMaximumWidth, alignment: .trailing)
+                } else {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        HStack(alignment: .top, spacing: HomeUsageCardLayout.columnSpacing) {
+                            ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
+                                usageColumn(part, color: color, probe: "\(provider.id).column\(index)")
+                            }
+                        }
+                        if let note = ProviderUsagePresentation.windowPartsNote(snapshot) {
+                            Text(note)
+                                .font(TronTypography.sans(size: HomeUsageCardLayout.usageSize, weight: .medium))
+                                .foregroundStyle(Color.tronTextMuted)
+                        }
+                    }
+                }
+            }
+            .transition(.opacity)
         } else if !usageController.hasResolved {
             ProviderUsageLoadingLine()
                 .transition(.opacity)
         }
+    }
+
+    /// One window's column: its copy with its bar directly beneath, the bar as
+    /// wide as the column. The overlay is proposed the column's own size, so
+    /// the bar matches the copy without a geometry pass.
+    private func usageColumn(_ part: ProviderUsagePresentation.WindowPart, color: Color, probe: String?) -> some View {
+        Text(part.text)
+            .font(TronTypography.sans(size: HomeUsageCardLayout.usageSize, weight: .medium))
+            .foregroundStyle(color)
+            .monospacedDigit()
+            .lineLimit(1)
+            .frame(minWidth: columnMinimumWidth, alignment: .trailing)
+            .padding(.bottom, part.usedPercent == nil ? 0 : HomeUsageCardLayout.barGap + HomeUsageCardLayout.barHeight)
+            .overlay(alignment: .bottom) {
+                if let percent = part.usedPercent {
+                    ProviderUsageProgress(percent: percent, accent: .tronEmerald)
+                        .homeUsageLayoutProbe(probe.map { "\($0).bar" })
+                }
+            }
+            .homeUsageLayoutProbe(probe)
     }
 
     private func load() async {
@@ -338,6 +439,40 @@ struct HomeUsageSummaryCard: View {
                     && presentationActivity.allowsPresentationPublication
             }
         )
+    }
+}
+
+#if HOSTED_TEST
+/// Frames of the usage card's row parts in the card's coordinates, so the UI
+/// journey proves the row layout: names, window columns and their bars.
+@MainActor @Observable
+final class HomeUsageLayoutProbe {
+    static let shared = HomeUsageLayoutProbe()
+    var frames: [String: CGRect] = [:]
+
+    var summary: String {
+        frames.sorted { $0.key < $1.key }.map { key, frame in
+            "\(key)=\(Int(frame.minX.rounded())),\(Int(frame.minY.rounded())),\(Int(frame.width.rounded())),\(Int(frame.height.rounded()))"
+        }.joined(separator: ";")
+    }
+}
+#endif
+
+extension View {
+    /// Records this part's frame for the hosted UI journey; nothing otherwise.
+    @ViewBuilder
+    func homeUsageLayoutProbe(_ key: String?) -> some View {
+        #if HOSTED_TEST
+        if let key {
+            onGeometryChange(for: CGRect.self) { $0.frame(in: .named(HomeUsageCardLayout.coordinateSpace)) } action: { frame in
+                HomeUsageLayoutProbe.shared.frames[key] = frame
+            }
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
     }
 }
 

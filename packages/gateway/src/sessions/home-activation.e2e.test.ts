@@ -1519,7 +1519,7 @@ describe("Tron Home activations end to end", () => {
       for (const [method, params] of [["home.memory.view", {}], ["home.memory.evidence", { evidence: memoryItems(first)[0]!.evidence }]] as const) {
         const error = await f.service.invoke(client, method, params).then(() => undefined, error => error);
         expect(error).toMatchObject({ code: "busy", diagnosticReason: "home-memory-source-unavailable" });
-        expect(error.details).toEqual({ reason: "home-memory-source-unavailable" });
+        expect(error.details).toEqual({ reason: "home-memory-source-unavailable", cause: expect.stringMatching(/^[a-z-]+$/u) });
         expect(error.message).not.toContain(".jsonl");
       }
       report.cases.push({ case: "memory-browser-revision-and-source-failure", editsInvalidate: true, appendInvalidates: true, partialSuccess: false });

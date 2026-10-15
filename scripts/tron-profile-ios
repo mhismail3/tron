@@ -85,6 +85,10 @@ SCENARIOS: dict[str, tuple[str, float, str]] = {
         "ProfileComposerScenarioTests/testComposerTyping", 10.0,
         "Typing into the composer through ComposerDraftCoordinator and the real ComposerDraftStore while 4 drafts hold image attachments; 400 ms pauses.",
     ),
+    "home-sheet": (
+        "ProfileHomeSheetScenarioTests/testHomeCompletedSheet", 14.0,
+        "Home view over 50 Home workers; opens Recently Completed's sheet, scrolls it end to end and closes it, repeatedly, while 2 running workers publish a summary each second.",
+    ),
     "summary-storm": (
         "ProfileDashboardScenarioTests/testSummaryStorm", 15.0,
         "Dashboard mounted; 5 running sessions each send a session.summary every 750 ms (snapshot rate).",

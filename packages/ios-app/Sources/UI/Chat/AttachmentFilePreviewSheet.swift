@@ -252,7 +252,7 @@ struct AttachmentFilePreviewSheet: View {
 
     /// Experimental: a displayed `.swift` file can run as an interpreted app (#889).
     private var runAction: TronDocumentSheetAction? {
-        guard SwiftAppExperiment.canRun(fileNamed: name),
+        guard SwiftAppExperiment.shared.canRun(fileNamed: name),
               case .prepared(let preview) = phase,
               case .code(let source) = preview.content,
               !preview.isTruncated else { return nil }

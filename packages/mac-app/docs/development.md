@@ -838,6 +838,9 @@ Gateway payload deployment has two real-boundary checks, run with pinned Node 22
 `node --test --test-concurrency=2 scripts/gateway-payload-deploy.test.mjs` (a dev
 candidate staged through the real `tron-dev-state.mjs` and `gateway-payload-deploy.mjs`
 CLIs in a git checkout, and a bounded process-tree kill).
+`node --test scripts/gateway-install-inputs.test.mjs` runs real `npm ci` against a
+temp Gateway whose `node_modules` drifted from its lock. That is the repair Rebuild from
+Source performs (#1010).
 
 ```bash
 xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
