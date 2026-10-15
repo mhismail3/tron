@@ -321,6 +321,8 @@ enum HostedSwiftAppFixtureSource {
         @State private var taps = 0
         @State private var note = ""
         @State private var nested = false
+        @State private var ledger = Ledger(rows: [Entry(amount: 1)])
+        @StateObject private var store = Store()
 
         var body: some View {
             VStack(spacing: 12) {
@@ -329,10 +331,9 @@ enum HostedSwiftAppFixtureSource {
                 Text(note)
                     .accessibilityIdentifier("limits.note")
                 Button("Count") { taps += 1 }
-                Button("Loop forever") {
-                    var n = 0
-                    while true { n += 1 }
-                }
+                Text("State: \(ledger.rows.count)/\(ledger.total)/\(store.items.count)/\(store.child.number)")
+                    .accessibilityIdentifier("limits.state")
+                TransactionButtons(ledger: $ledger, store: store)
                 Button("Recurse forever") { taps = deeper(taps) }
                 Button("Grow forever") {
                     var text = "ab"
@@ -340,6 +341,9 @@ enum HostedSwiftAppFixtureSource {
                 }
                 Button("Read itself") { taps = forever }
                 Button("Overflow") {
+                    taps += 10
+                    note = "must roll back"
+                    store.child.number = 99
                     let lowest = -9223372036854775807 - 1
                     taps = lowest / -1
                 }
@@ -371,6 +375,48 @@ enum HostedSwiftAppFixtureSource {
 
         func deeper(_ n: Int) -> Int {
             deeper(n + 1)
+        }
+    }
+
+    struct Entry {
+        var amount: Int
+    }
+
+    struct Ledger {
+        var rows: [Entry]
+        var total: Int { rows.reduce(0) { $0 + $1.amount } }
+    }
+
+    class Counter {
+        var number = 0
+    }
+
+    class Store: ObservableObject {
+        @Published var items = [1]
+        var child = Counter()
+    }
+
+    struct TransactionButtons: View {
+        @Binding var ledger: Ledger
+        @ObservedObject var store: Store
+
+        var body: some View {
+            HStack {
+                Button("Loop forever") {
+                    change()
+                    while true { store.child.number += 1 }
+                }
+                Button("Commit changes") { change() }
+            }
+        }
+
+        func change() {
+            ledger.rows[0].amount += 1
+            ledger.rows[0].amount += 1
+            ledger.rows.append(Entry(amount: 2))
+            store.items.append(2)
+            let alias = store.child
+            alias.number += 1
         }
     }
 

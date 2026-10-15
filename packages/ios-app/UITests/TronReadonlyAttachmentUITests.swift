@@ -283,7 +283,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         // #909: a program with no NavigationStack or title still gets the
         // shared chrome, titled with the file name.
         assertToolbarTint(app, title: "Limits")
-        XCTAssertTrue(diagnostic(app, "Line 62: Unknown name 'Map'").exists, "An unsupported view renders an inline diagnostic beside working views")
+        XCTAssertTrue(diagnostic(app, "Unknown name 'Map'").exists, "An unsupported view renders an inline diagnostic beside working views")
 
         var expectedTaps = 0
         for (button, message) in [
@@ -298,11 +298,19 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             app.buttons[button].tap()
             XCTAssertTrue(diagnostic(app, message).waitForExistence(timeout: 15), "\(button) stops with a diagnostic")
             keepScreenshot(app, "889-9-\(button)")
+            XCTAssertEqual(app.staticTexts["limits.state"].label, "State: 1/1/1/0",
+                           "A failed action restores nested bindings, arrays and aliased object fields")
+            XCTAssertEqual(taps.label, "Taps: \(expectedTaps)", "Failed writes to other state slots roll back too")
+            XCTAssertEqual(app.staticTexts["limits.note"].label, "")
             app.buttons["Count"].tap()
             expectedTaps += 1
             XCTAssertTrue(wait(taps, predicate: "label == %@", value: "Taps: \(expectedTaps)"), "The app stays responsive after \(button)")
             XCTAssertTrue(wait(diagnostic(app, message), predicate: "exists == false"), "A successful action clears the diagnostic")
         }
+
+        app.buttons["Commit changes"].tap()
+        XCTAssertTrue(wait(app.staticTexts["limits.state"], predicate: "label == %@", value: "State: 2/5/2/1"),
+                      "A successful action commits all writes and recomputes derived state")
 
         // A program-chosen format never reaches Foundation with a mismatched
         // argument: %s and %@ print the value instead of reading memory.
