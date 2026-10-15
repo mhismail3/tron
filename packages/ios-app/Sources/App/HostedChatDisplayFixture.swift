@@ -559,9 +559,6 @@ private actor HostedHomeShellGateway {
             return (.object(["devices": .array([])]), nil)
         case "provider.list" where sheetState == "dashboard-workers":
             return (HostedHomeDashboardWorkers.providers, nil)
-        case "session.search.policy.get":
-            return (.object(["enabled": .bool(false), "perQueryMicroCents": .number(268_800),
-                "dailyMicroCents": .number(2_688_000), "policyRevision": .number(1)]), nil)
         case "provider.usage":
             // Holds the usage card on its loading pulse long enough to see it.
             if ProcessInfo.processInfo.arguments.contains("-home-dashboard-usage-delay") {
@@ -1332,7 +1329,7 @@ enum HostedHomeDashboardWorkers {
         }
         return .object(["providers": .array([
             snapshot("anthropic", [window("five-hour", "5h", 42, 18_000), window("weekly", "Weekly", 18, 604_800)]),
-            snapshot("openai-codex", [window("five-hour", "5h", 7, 18_000), window("weekly", "Weekly", 63, 604_800)]),
+            snapshot("openai-codex", [window("five-hour", "5h", 7, 18_000), window("weekly", "Weekly", 2, 604_800)]),
         ] + (longName ? [snapshot("cortexkit", [window("weekly", "Weekly", 48, 604_800)])] : []))])
     }
 }
