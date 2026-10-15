@@ -24,6 +24,8 @@ for tool in "$@"; do
         || { echo "Mac bundle script contains a duplicated Node version literal" >&2; exit 1; }
       grep -qF 'NODE_VERSION_FILE="$REPO_ROOT/.node-version"' "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" \
         || { echo "Mac bundle script does not read .node-version" >&2; exit 1; }
+      python3 "$ROOT/scripts/node-pin-mirrors.py" check \
+        || { echo "compiled-in Node pins differ from .node-version/config; run scripts/tron-node pin $TRON_NODE_VERSION" >&2; exit 1; }
       for script in bundle-gateway.sh verify-gateway-payload.sh package-dmg.sh; do
         grep -qF 'TRON_NODE_ARM64_RUNTIME_SHA256' "$ROOT/packages/mac-app/scripts/$script" \
           || { echo "Mac script does not use the shared Node runtime pins: $script" >&2; exit 1; }
