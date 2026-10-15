@@ -254,17 +254,31 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
     if name == "ios-journeys":
         # One shard per IOS_METHODS_PER_SHARD test methods of each changed UI test class, all
         # from the same stamped build products; methods are read from the file every time.
+        # A class that names its own harness (`// gate-journey:`) runs as a journey instead.
         shards = []
         for path in change.existing():
             if path.startswith("packages/ios-app/UITests/") and path.endswith("UITests.swift") and "/RealGateway/" not in path:
+                if _harness_journey(root / path):
+                    continue
                 owner = f"TronMobileUITests/{Path(path).stem}"
                 methods = re.findall(r"^\s*func (test\w+)\(", (root / path).read_text(errors="replace"), re.M)
                 for start in range(0, len(methods), IOS_METHODS_PER_SHARD):
                     shards.append(" ".join(f"--only-testing {owner}/{m}" for m in methods[start:start + IOS_METHODS_PER_SHARD]))
         return list(dict.fromkeys(shards)) or [""]
     if name == "named-journeys":
-        return list(change.tests)
+        # The --tests commands, plus the harness of each changed UI test class that needs one
+        # (it cannot pass under the plain runner, so it is never silently left out).
+        harnesses = [_harness_journey(root / path) for path in change.existing()
+                     if path.startswith("packages/ios-app/UITests/") and path.endswith("UITests.swift")]
+        return list(dict.fromkeys([*change.tests, *(command for command in harnesses if command)]))
     raise GateError(f"unknown selector {name}")
+
+
+def _harness_journey(path: Path) -> Optional[str]:
+    """The `// gate-journey: <command>` a UI test class declares when it needs a harness
+    (a real sshd, a real Gateway) that `scripts/tron-ios-test run` alone does not start."""
+    match = re.search(r"^// gate-journey: (scripts/\S+)$", path.read_text(errors="replace"), re.M)
+    return match.group(1) if match else None
 
 
 def _pi_graph_changed(change: Change) -> bool:

@@ -120,7 +120,10 @@ plan. Markdown and `docs/` paths never start a build. Representative plans:
   shipped `Tron Device` + `LocalDevice` app compiled unsigned for arm64 devices, which
   the `HOSTED_TEST` simulator build cannot stand in for), then `ios.journeys`, which
   runs the changed UI test classes (or the smoke set) with test-without-building, two
-  test methods per shard, from the same stamped products;
+  test methods per shard, from the same stamped products. A class that needs a harness
+  the plain runner does not start declares it on its own line,
+  `// gate-journey: scripts/<harness>` (`TronMacTerminalUITests`: a real sshd and
+  shell host), and runs through that command as a `journey` shard instead;
 - Mac: `mac.build` (build-for-testing; it stages the Gateway payload, so it precedes
   every Gateway step) → `mac.test` (test-without-building); replacement scripts add
   `mac.replace-e2e`;

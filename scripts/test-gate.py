@@ -86,6 +86,12 @@ def plans(base: Path, env: dict) -> None:
                           "final class TronHomeSheetsUITests {\n    func testA() {}\n    func testB() {}\n    func testC() {}\n}\n"},
                      ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile", "ios.journeys[TronHomeSheetsUITests.testA+1]",
                       "ios.journeys[TronHomeSheetsUITests.testC]"]),
+        # A UI test class with its own harness runs through it as a journey, never the plain runner.
+        "ios-harness": ({"packages/ios-app/UITests/TronMacTerminalUITests.swift":
+                             "import XCTest\n\n// gate-journey: scripts/ios-mac-terminal-journey\n"
+                             "final class TronMacTerminalUITests {\n    func testA() {}\n}\n"},
+                        ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile", "ios.journeys[smoke]",
+                         "journey[1]"]),
         "mac-only": ({"packages/mac-app/Sources/App.swift": "// app\n"},
                      ["repo.privacy", "repo.whitespace", "mac.build", "mac.test"]),
         "gateway-and-config": ({"packages/gateway/src/home/x.ts": "export const x = 1;\n", "packages/gateway/vitest.config.ts": "export {};\n"},

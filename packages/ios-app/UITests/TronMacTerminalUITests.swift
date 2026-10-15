@@ -1,5 +1,7 @@
 import XCTest
 
+// gate-journey: scripts/ios-mac-terminal-journey
+
 /// Mac Terminal from Settings against a real OpenSSH sshd on this Mac's
 /// Tailscale address (`scripts/ios-mac-terminal-journey` starts it and names
 /// its description in `TRON_MAC_TERMINAL_FIXTURE`). The Gateway is synthetic
