@@ -7,7 +7,7 @@
 # `.node-version` is the only version authority. Candidates, in order:
 #   1. TRON_NODE_BIN (absolute; an explicit choice that fails loudly),
 #   2. the exact nvm directory ($NVM_DIR or ~/.nvm)/versions/node/v<pin>,
-#   3. the first `node` on PATH, then Homebrew,
+#   3. each `node` on PATH in order, then Homebrew,
 # each accepted only when it reports exactly v<pin>, has a sibling `npm`, and is
 # a development toolchain rather than a signed Gateway runtime. A shell spawned
 # by a Gateway has that Gateway's payload runtime first on PATH; it answers the
@@ -78,15 +78,20 @@ resolve() {
     return
   fi
   local candidates=("${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v$NODE_VERSION/bin/node")
-  candidate="$(command -v node 2>/dev/null || true)"
-  [[ -z "$candidate" ]] || candidates+=("$candidate")
+  local entry entries=() seen=" "
+  IFS=: read -r -a entries <<<"${PATH:-}"
+  for entry in ${entries[@]+"${entries[@]}"}; do
+    [[ "$entry" == /* ]] && candidates+=("$entry/node")
+  done
   candidates+=(/opt/homebrew/bin/node /usr/local/bin/node)
   for candidate in "${candidates[@]}"; do
+    [[ -e "$candidate" && "$seen" != *" $candidate "* ]] || continue
+    seen+="$candidate "
     if admit "$candidate"; then
       printf '%s\n' "$candidate"
       return
     fi
-    [[ ! -e "$candidate" ]] || REJECTED+=("  $candidate: $REASON")
+    REJECTED+=("  $candidate: $REASON")
   done
   {
     echo "tron-node: no usable Node v$NODE_VERSION; $INSTALL_HINT"

@@ -120,7 +120,7 @@ regex implementations.
 Node is pinned exactly by `.node-version`; CI and Mac packaging read that file.
 `scripts/tron-node` is the one resolver for the pinned development Node: it
 prints the chosen `node` (`TRON_NODE_BIN`, then the exact nvm directory, then
-`PATH` and Homebrew), and `scripts/tron-node exec COMMAND` runs a command with
+each `node` on `PATH`, then Homebrew), and `scripts/tron-node exec COMMAND` runs a command with
 that Node first on `PATH`. It refuses a signed Gateway payload or app-bundle
 runtime, which Tron agent shells have first on `PATH` but which cannot load
 unsigned native add-ons and has no `npx`. Packaging, `scripts/tron dev`,
