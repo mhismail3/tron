@@ -278,6 +278,9 @@ from tron_mac_replace_journal import Journal, write_json_atomic
 from tron_mac_replace_platform import MacPlatform
 class Fixture(MacPlatform):
     port = int(sys.argv[3])
+    # This test process hosts the fixture Gateway; without this the platform
+    # asks launchd for the live com.tron.server job and probes Stable (#1072).
+    def gateway_pid(self): return int(sys.argv[9])
     def token(self): return json.loads((Path(sys.argv[4]) / 'gateway/local-auth.json').read_text())['bearerToken']
     def node(self): return Path(sys.argv[5]), Path(sys.argv[6])
     def protocol(self): return int(sys.argv[7])
@@ -289,7 +292,7 @@ stopped = Runner(Fixture(), journal).stop_workers()
 journal.finish_step('drain-workers', f'stopped {len(stopped)}')
 journal.settle('succeeded')
 `, join(REPO, "scripts"), store, String(port), f.tronHome, process.execPath, join(REPO, "packages/gateway/node_modules"),
-      String((await import("../version.js")).PROTOCOL_VERSION), operation], { encoding: "utf8" });
+      String((await import("../version.js")).PROTOCOL_VERSION), operation, String(process.pid)], { encoding: "utf8" });
     expect(drain.stderr).toBe("");
     expect(await running.completion).toMatchObject({ terminalEvidence: { outcome: "interrupted", reason: "task-stop" } });
     // The dispatch handle can return before the worker session binds; the task record names it.
