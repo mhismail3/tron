@@ -162,7 +162,7 @@
       "budgetSeconds": 300,
       "timeoutSeconds": 900,
       "class": "heavy",
-      "expectedRssMb": 6000,
+      "expectedRssMb": 3000,
       "artifacts": [
         "packages/mac-app/build/DerivedData/Build/Products"
       ],
@@ -197,7 +197,7 @@
       "budgetSeconds": 180,
       "timeoutSeconds": 300,
       "class": "heavy",
-      "expectedRssMb": 2000,
+      "expectedRssMb": 3500,
       "pass": "exit 0, every test passed",
       "unlocks": "gateway",
       "memorySample": "host",
@@ -254,7 +254,7 @@
       "budgetSeconds": 120,
       "timeoutSeconds": 300,
       "class": "heavy",
-      "expectedRssMb": 1200,
+      "expectedRssMb": 600,
       "artifacts": [
         "packages/gateway/node_modules/.package-lock.json"
       ],
@@ -282,7 +282,7 @@
       "budgetSeconds": 90,
       "timeoutSeconds": 300,
       "class": "light",
-      "expectedRssMb": 1500,
+      "expectedRssMb": 1300,
       "pass": "exit 0",
       "unlocks": "gateway.affected",
       "hosted": "safe"
@@ -311,7 +311,7 @@
       "budgetSeconds": 180,
       "timeoutSeconds": 300,
       "class": "heavy",
-      "expectedRssMb": 3000,
+      "expectedRssMb": 2500,
       "pass": "exit 0, no failed test",
       "unlocks": "gateway.nested",
       "artifacts": [],
@@ -381,7 +381,7 @@
       "budgetSeconds": 180,
       "timeoutSeconds": 300,
       "class": "heavy",
-      "expectedRssMb": 3000,
+      "expectedRssMb": 2500,
       "pass": "exit 0, no failed test",
       "unlocks": "gateway.nested",
       "artifacts": [],
@@ -410,7 +410,7 @@
       "budgetSeconds": 240,
       "timeoutSeconds": 300,
       "class": "heavy",
-      "expectedRssMb": 2000,
+      "expectedRssMb": 1600,
       "knownFlakes": [
         "#1016 home-task-subagents nested settlement can outlive its 60 s bound under heavy host load"
       ],
@@ -503,7 +503,7 @@
       "budgetSeconds": 300,
       "timeoutSeconds": 900,
       "class": "heavy",
-      "expectedRssMb": 7000,
+      "expectedRssMb": 6000,
       "pass": "exit 0 and the products carry the source identity stamp",
       "unlocks": "ios.journeys",
       "memorySample": "host",
@@ -535,7 +535,7 @@
       "budgetSeconds": 240,
       "timeoutSeconds": 420,
       "class": "heavy",
-      "expectedRssMb": 4000,
+      "expectedRssMb": 9000,
       "pass": "exit 0, result bundle passed > 0 and failed = 0",
       "unlocks": "journeys",
       "memorySample": "host",

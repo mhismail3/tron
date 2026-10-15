@@ -39,11 +39,14 @@ one while its command still runs.
   first heavy step always starts, so a large step progresses on a busy host.
   `TRON_HEAVY_SLOTS` (default 4) only caps how many heavy steps run at once.
 - **Measured needs.** Each catalog step's `expectedRssMb` comes from its measured
-  peak on this Mac (`scripts/tron gate report`): Gateway vitest shards 1.3–2.9 GB,
-  nested shards up to 2.1 GB, a type check 1 GB, npm ci 0.6 GB. Xcode and simulator
-  steps do their work in launchd-owned services outside the step's process tree, so
-  their steps sample the host's memory in use instead and claim conservatively
-  (6–7 GB). A command without a measurement claims 4 GB.
+  peak on this Mac (`scripts/tron gate report`, #1022), rounded up: Gateway vitest
+  shards 1.3–2.3 GB (claim 2.5 GB), nested shards 1.3–1.5 GB (1.6 GB), a type check
+  1.2 GB, npm ci 0.6 GB. Xcode and simulator steps do their work in launchd-owned
+  services outside the step's process tree, so they sample the host's memory in use
+  above its level at start: Mac build 1.6 GB and tests 2.9 GB (claim 3–3.5 GB), iOS
+  build 4.9 GB (6 GB) and a simulator journey 8.5 GB (9 GB). A command without a
+  measurement claims 4 GB. Two Gateway shards, or a Gateway shard beside an iOS
+  build, fit together; a simulator journey runs beside light work only.
 - **Queue.** Waiters hold FIFO tickets (owner, worktree, PID, command, need,
   enqueue time); a waiter prints its position and why it waits (memory, load)
   whenever that changes. `scripts/tron-heavy status` prints the budget, claimed
