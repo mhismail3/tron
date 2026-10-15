@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -70,6 +71,49 @@ class Repo:
         return result
 
 
+IOS_DECLARATIONS = '''import XCTest
+
+@MainActor
+final class TronFixtureUITests: XCTestCase, @unchecked Sendable {
+    let label = "func testInString() {"
+    var computed: Int { 1 }
+
+    @MainActor func testMainActor() async throws {}
+
+    @available(iOS 17, *)
+    @MainActor
+    func testAttributed() {
+        func testLocal() {}
+    }
+
+    nonisolated func testNonisolated() throws {}
+    override func testOverridden() {}
+    // func testCommented() {}
+    /* func testBlockCommented() {} */
+    private func testPrivateHelper() {}
+    static func testStatic() {}
+    func testWithArgument(_ value: Int) {}
+    func helper() {}
+
+    struct Nested {
+        func testNested() {}
+    }
+}
+
+final class Helper {
+    func testNotACase() {}
+}
+'''
+IOS_EXTENSION = '''extension TronFixtureUITests {
+    @MainActor func testExtended() {}
+}
+
+class TronDerivedUITests: TronFixtureUITests {
+    func testDerived() {}
+}
+'''
+
+
 def plans(base: Path, env: dict) -> None:
     cases = {
         "gateway-only": ({"packages/gateway/src/home/x.ts": "export const x = 1;\n"},
@@ -83,9 +127,17 @@ def plans(base: Path, env: dict) -> None:
                       "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]"]),
         "ios-only": ({"packages/ios-app/Sources/UI/View.swift": "// view\n",
                       "packages/ios-app/UITests/TronHomeSheetsUITests.swift":
-                          "final class TronHomeSheetsUITests {\n    func testA() {}\n    func testB() {}\n    func testC() {}\n}\n"},
+                          "final class TronHomeSheetsUITests: XCTestCase {\n    func testA() {}\n    func testB() {}\n    func testC() {}\n}\n"},
                      ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile", "ios.journeys[TronHomeSheetsUITests.testA+1]",
                       "ios.journeys[TronHomeSheetsUITests.testC]"]),
+        # Every method XCTest runs is selected whatever its attributes, modifiers or file, and
+        # nothing XCTest does not run is (#1069).
+        "ios-declarations": ({
+            "packages/ios-app/UITests/TronFixtureUITests.swift": IOS_DECLARATIONS,
+            "packages/ios-app/UITests/TronFixtureUITests+Extension.swift": IOS_EXTENSION},
+            ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile",
+             "ios.journeys[TronFixtureUITests.testExtended+1]", "ios.journeys[TronFixtureUITests.testAttributed+1]",
+             "ios.journeys[TronFixtureUITests.testOverridden]", "ios.journeys[TronDerivedUITests.testDerived]"]),
         "mac-only": ({"packages/mac-app/Sources/App.swift": "// app\n"},
                      ["repo.privacy", "repo.whitespace", "mac.build", "mac.test"]),
         "gateway-and-config": ({"packages/gateway/src/home/x.ts": "export const x = 1;\n", "packages/gateway/vitest.config.ts": "export {};\n"},
@@ -104,9 +156,16 @@ def plans(base: Path, env: dict) -> None:
         repo.commit(name)
         result = repo.gate("plan", "--json")
         assert result.returncode == 0, result.stderr
-        actual = [row["shard"] for row in json.loads(result.stdout)["plan"]]
+        rows = json.loads(result.stdout)["plan"]
+        actual = [row["shard"] for row in rows]
         evidence.append({"case": f"plan {name}", "plan": actual})
         assert actual == expected, f"{name}: {actual} != {expected}"
+        if name == "ios-declarations":
+            selected = re.findall(r"--only-testing (\S+)", " ".join(row["command"] for row in rows))
+            assert selected == [f"TronMobileUITests/{test}" for test in (
+                "TronFixtureUITests/testExtended", "TronFixtureUITests/testMainActor", "TronFixtureUITests/testAttributed",
+                "TronFixtureUITests/testNonisolated", "TronFixtureUITests/testOverridden",
+                "TronDerivedUITests/testDerived")], selected
 
 
 FIXTURE_CATALOG = {
