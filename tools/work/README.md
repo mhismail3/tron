@@ -159,10 +159,19 @@ cancelled shard and anything a passing shard left running are stopped the same w
 **Heavy steps.** A `heavy` shard waits in the host-wide heavy queue
 (`heavy.py`, `scripts/tron-heavy status`;
 [host load management](../../packages/gateway/docs/host-load.md#1-heavy-queue-work-tooling))
-with its catalog `expectedRssMb`, so admission accounts for memory; the shard's
-tree holds the lease descriptor and inherits it (`TRON_HEAVY_LEASE_HELD`), so a
-journey that runs `scripts/tron-ios-test` does not wait on itself. Light shards never
-wait.
+with its catalog `expectedRssMb` and `expectedCores` (and `coresMin` when it can build
+with fewer cores, `pool: xcode` when it runs xcodebuild or a simulator), so admission
+accounts for memory, CPU, the Xcode pool and the number of gate runs with heavy work in
+flight: a run takes a gate job slot at its first heavy shard and keeps it until it ends.
+While a shard waits it prints its position, what it waits for and the host's CPU and
+memory now. Its budget and hard limit start when it is admitted: queue time never counts
+toward a timeout, and the result line and metrics record it (`queuedSeconds`). The
+shard's tree holds the lease descriptor and inherits it (`TRON_HEAVY_LEASE_HELD`), so a
+journey that runs `scripts/tron-ios-test` does not wait on itself, plus its core grant
+(`TRON_HEAVY_CORES`), which xcodebuild steps pass as `-jobs`. Each shard's CPU is
+sampled from its process tree and the simulator it names; `metrics.jsonl` records
+`cpuSeconds`, `peakCores` (busiest 10 s) and `loadAtEnd`, and `gate report` prints peak
+cores next to `expectedCores`. Light shards never wait.
 
 `land` runs the whole plan on the merged, committed tree (`gate.verify`) and
 refuses a dirty worktree or a tree that changed while steps ran. `python3 -B

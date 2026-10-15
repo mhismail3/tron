@@ -13,7 +13,9 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 case "${1:-all}" in
   prepare|build|run|run-lan|run-ui|iterate|all)
     if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
-      exec python3 "$repo_root/tools/work/heavy.py" run --owner "ios-gateway-e2e-test ${1:-all} in $(basename "$repo_root")" -- "$0" "$@"
+      # The same measured cost as the ios.gateway-boundary gate step (tools/work/gate-catalog.json).
+      exec python3 "$repo_root/tools/work/heavy.py" run --owner "ios-gateway-e2e-test ${1:-all} in $(basename "$repo_root")" \
+        --pool xcode --need-mb 9000 --cores 12 --cores-min 6 -- "$0" "$@"
     fi
     ;;
 esac
@@ -809,7 +811,8 @@ build_tests() {
       -configuration Test \
       -destination "$destination" \
       -derivedDataPath "$derived_data" \
-      -parallel-testing-enabled NO
+      -parallel-testing-enabled NO \
+      ${TRON_HEAVY_CORES:+-jobs "$TRON_HEAVY_CORES"}
   local xctestrun
   xctestrun="$(find_xctestrun "$xctestrun_glob")"
   [[ -n "$xctestrun" ]] || die "$label build did not produce an xctestrun file"

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Host-wide heavy-run queue journeys with real concurrent processes (#915).
+"""Host-wide heavy-run queue journeys with real concurrent processes (#915, #1023, #1083).
 
-Each case runs tools/work/heavy.py as separate processes against an isolated queue
-directory and observes the commands it starts. Evidence: test-results/tron-heavy.json.
+Each case runs tools/work/heavy.py (or a gate run's job driving it) as separate processes
+against an isolated queue directory and observes the commands it starts. Host CPU, memory
+and booted simulators are pinned through their overrides so admission is deterministic.
+Evidence: test-results/tron-heavy.json.
 """
 from __future__ import annotations
 
@@ -19,10 +21,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HEAVY = ROOT / "tools" / "work" / "heavy.py"
 REPORT = ROOT / "test-results" / "tron-heavy.json"
-# The command each run executes: record its start, wait for its release file, record its end.
-WORK = ("import pathlib, sys, time\n"
+# The command each run executes: record its start with the cores it was granted, wait for
+# its release file, record its end.
+WORK = ("import os, pathlib, sys, time\n"
         "log = pathlib.Path(sys.argv[1]); name = sys.argv[2]; release = pathlib.Path(sys.argv[3])\n"
-        "with log.open('a') as f: f.write(f'start {name}\\n')\n"
+        "with log.open('a') as f: f.write(f'start {name} {os.environ.get(\"TRON_HEAVY_CORES\", \"-\")}\\n')\n"
         "while not release.exists(): time.sleep(0.05)\n"
         "with log.open('a') as f: f.write(f'end {name}\\n')\n")
 
@@ -32,25 +35,42 @@ class Fixture:
         self.root = root
         self.log = root / "log"
         self.log.touch()
-        self.environment = {**{k: v for k, v in os.environ.items() if k != "TRON_HEAVY_LEASE_HELD"},
-                            "TRON_HEAVY_DIR": str(root / "queue"), "TRON_HEAVY_SLOTS": "2",
-                            "TRON_HEAVY_MAX_LOAD": "100000", "TRON_HEAVY_AVAILABLE_MB": "1000000",
+        self.environment = {**{k: v for k, v in os.environ.items() if k not in ("TRON_HEAVY_LEASE_HELD", "TRON_HEAVY_CORES")},
+                            "TRON_HEAVY_DIR": str(root / "queue"), "TRON_HEAVY_SLOTS": "2", "TRON_HEAVY_JOBS": "8",
+                            "TRON_HEAVY_CPUS": "16", "TRON_HEAVY_CPU_BUDGET": "1000", "TRON_HEAVY_BUSY_CORES": "0",
+                            "TRON_HEAVY_BOOTED_SIMULATORS": "0", "TRON_HEAVY_AVAILABLE_MB": "1000000",
                             "TRON_HEAVY_MEMORY_BUDGET_MB": "1000000", **environment}
         self.processes: dict[str, subprocess.Popen] = {}
 
-    def start(self, name: str, need_mb: int = 3000, **environment: str) -> subprocess.Popen:
+    def start(self, name: str, need_mb: int = 3000, cores: float = 1, cores_min: float | None = None,
+              pool: str | None = None, **environment: str) -> subprocess.Popen:
         output = (self.root / f"{name}.out").open("w")
-        process = subprocess.Popen([sys.executable, str(HEAVY), "run", "--owner", name, "--need-mb", str(need_mb), "--",
+        options = ["--cores", str(cores)] + (["--cores-min", str(cores_min)] if cores_min else []) + (["--pool", pool] if pool else [])
+        # Its own session, so a case can kill the holder together with its command tree.
+        process = subprocess.Popen([sys.executable, str(HEAVY), "run", "--owner", name, "--need-mb", str(need_mb), *options, "--",
                                     sys.executable, "-c", WORK, str(self.log), name, str(self.root / f"release-{name}")],
-                                   env={**self.environment, **environment}, stdout=output, stderr=subprocess.STDOUT)
+                                   env={**self.environment, **environment}, stdout=output, stderr=subprocess.STDOUT,
+                                   start_new_session=True)
         self.processes[name] = process
         return process
+
+    def job(self, name: str, steps: int, **environment: str) -> subprocess.Popen:
+        """A gate run: one heavy-queue Job whose steps run one after another (gate.execute)."""
+        output = (self.root / f"{name}.out").open("w")
+        process = subprocess.Popen([sys.executable, "-c", JOB, str(HEAVY.parent), str(self.log), name, str(self.root), str(steps)],
+                                   env={**self.environment, **environment}, stdout=output, stderr=subprocess.STDOUT,
+                                   start_new_session=True)
+        self.processes[name] = process
+        return process
+
+    def granted(self, name: str) -> str:
+        return next(line.split()[2] for line in self.log.read_text().splitlines() if line.split()[:2] == ["start", name])
 
     def release(self, name: str) -> None:
         (self.root / f"release-{name}").touch()
 
     def events(self) -> list[str]:
-        return self.log.read_text().split()
+        return [word for line in self.log.read_text().splitlines() for word in line.split()[:2]]
 
     def started(self) -> list[str]:
         lines = self.log.read_text().splitlines()
@@ -60,7 +80,7 @@ class Fixture:
         lines = self.log.read_text().splitlines()
         running: set[str] = set()
         for line in lines:
-            kind, name = line.split()
+            kind, name = line.split()[:2]
             (running.add if kind == "start" else running.discard)(name)
         return running
 
@@ -74,11 +94,32 @@ class Fixture:
     def close(self) -> None:
         for name in self.processes:
             self.release(name)
+            for step in range(4):
+                self.release(f"{name}.{step}")
         for process in self.processes.values():
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 process.kill()
+
+
+# A gate run's job: `steps` heavy steps in sequence under one heavy.Job, each named
+# <name>.<i> and released by its release file, the job slot held until the run ends.
+JOB = ("import os, pathlib, subprocess, sys\n"
+       "sys.path.insert(0, sys.argv[1]); import heavy\n"
+       "log, name, root, steps = pathlib.Path(sys.argv[2]), sys.argv[3], pathlib.Path(sys.argv[4]), int(sys.argv[5])\n"
+       "job = heavy.Job(name)\n"
+       "try:\n"
+       "    for index in range(steps):\n"
+       "        step = f'{name}.{index}'\n"
+       "        lease = heavy.acquire(step, 'step', need_mb=1000, cores=1, job=job)\n"
+       "        try:\n"
+       "            subprocess.run([sys.executable, '-c', " + repr(WORK) + ", str(log), step, str(root / f'release-{step}')],\n"
+       "                           env={**os.environ, **lease.environment()}, pass_fds=(lease.fd,), check=True)\n"
+       "        finally:\n"
+       "            lease.release()\n"
+       "finally:\n"
+       "    job.release()\n")
 
 
 def wait_until(predicate, label: str, seconds: float = 10.0) -> None:
@@ -106,10 +147,10 @@ def case_slots_fifo_and_positions(root: Path) -> dict:
             wait_until(lambda name=name: name in fixture.running(), f"{name} started")
         for name in ("c", "d"):
             fixture.start(name)
-            wait_until(lambda name=name: "queued at position" in fixture.output(name), f"{name} queued")
+            wait_until(lambda name=name: "position" in fixture.output(name), f"{name} queued")
         # A waiter reprints its position whenever the queue changes.
-        wait_until(lambda: "queued at position 1 of 2" in fixture.output("c"), "c sees d behind it")
-        assert "queued at position 2 of 2" in fixture.output("d"), fixture.output("d")
+        wait_until(lambda: "position 1 of 2" in fixture.output("c"), "c sees d behind it")
+        assert "position 2 of 2" in fixture.output("d"), fixture.output("d")
         status = fixture.status()
         assert status.count("running  slot") == 2 and "queued   #1: c" in status and "queued   #2: d" in status, status
         time.sleep(1.5)
@@ -117,7 +158,7 @@ def case_slots_fifo_and_positions(root: Path) -> dict:
         fixture.release("b")
         wait_until(lambda: "c" in fixture.running(), "c takes the freed slot")
         assert "d" not in fixture.running()
-        wait_until(lambda: "queued at position 1 of 1" in fixture.output("d"), "d advances to the head")
+        wait_until(lambda: "position 1 of 1" in fixture.output("d"), "d advances to the head")
         fixture.release("a")
         wait_until(lambda: "d" in fixture.running(), "d starts next")
         for name in ("c", "d"):
@@ -140,7 +181,7 @@ def case_holder_killed_slot_follows_command_tree(root: Path) -> dict:
         holder.send_signal(signal.SIGKILL)
         holder.wait(timeout=5)
         fixture.start("b")
-        wait_until(lambda: "queued at position 1 of 1" in fixture.output("b"), "b queued behind a's live command")
+        wait_until(lambda: "position 1 of 1" in fixture.output("b"), "b queued behind a's live command")
         time.sleep(1.5)
         assert "b" not in fixture.running(), "the slot outlived its holder only as long as its command"
         fixture.release("a")
@@ -157,12 +198,12 @@ def case_dead_waiter_leaves_queue(root: Path) -> dict:
         fixture.start("a")
         wait_until(lambda: "a" in fixture.running(), "a started")
         waiter = fixture.start("b")
-        wait_until(lambda: "queued at position 1 of 1" in fixture.output("b"), "b queued")
+        wait_until(lambda: "position 1 of 1" in fixture.output("b"), "b queued")
         fixture.start("c")
-        wait_until(lambda: "queued at position 2 of 2" in fixture.output("c"), "c queued behind b")
+        wait_until(lambda: "position 2 of 2" in fixture.output("c"), "c queued behind b")
         waiter.send_signal(signal.SIGKILL)
         waiter.wait(timeout=5)
-        wait_until(lambda: "queued at position 1 of 1" in fixture.output("c"), "c advances past the dead waiter")
+        wait_until(lambda: "position 1 of 1" in fixture.output("c"), "c advances past the dead waiter")
         fixture.release("a")
         wait_until(lambda: "c" in fixture.running(), "c starts")
         fixture.release("c")
@@ -172,17 +213,156 @@ def case_dead_waiter_leaves_queue(root: Path) -> dict:
         fixture.close()
 
 
-def case_load_gate_is_bounded(root: Path) -> dict:
-    fixture = Fixture(root, TRON_HEAVY_MAX_LOAD="0", TRON_HEAVY_PRESSURE_MAX_WAIT_SECONDS="2")
+def case_cpu_admission(root: Path) -> dict:
+    """Free slots and memory do not admit a step whose cores do not fit (#1083).
+
+    The heavy CPU budget binds claims; the host's idle cores bind what runs outside the
+    queue (booted simulators, unqueued builds). A scalable step starts with fewer cores and
+    sizes itself to the grant. A waiter shows its position, why it waits and the host's CPU
+    and memory as they are now.
+    """
+    fixture = Fixture(root, TRON_HEAVY_SLOTS="8", TRON_HEAVY_CPU_BUDGET="12", TRON_HEAVY_STATUS_SECONDS="1")
     try:
-        started = time.monotonic()
-        fixture.start("a")
-        wait_until(lambda: "waiting for host load" in fixture.output("a"), "a waits on host load")
-        wait_until(lambda: "a" in fixture.running(), "a starts after the bounded pressure wait")
-        waited = time.monotonic() - started
-        assert waited >= 1.9, waited
+        fixture.start("a", cores=8)
+        wait_until(lambda: "a" in fixture.running(), "the first heavy step always starts")
+        fixture.start("b", cores=8)
+        wait_until(lambda: "for cpu: heavy steps claim 8 of the 12-core heavy budget; this one needs 8 cores" in fixture.output("b"),
+                   "b waits on the CPU budget with free slots and memory")
+        fixture.start("c", cores=2)
+        wait_until(lambda: "position 2 of 2; ahead waits for cpu" in fixture.output("c"), "c may not pass b, which waits for CPU")
+        # Live status: repeated as a heartbeat, with the host's CPU and memory now.
+        wait_until(lambda: fixture.output("b").count("waiting at position 1 of 2") >= 2, "b repeats its status")
+        line = [l for l in fixture.output("b").splitlines() if "waiting at position 1" in l][-1]
+        assert "host cpu 0.0/16 cores busy" in line and "1000000 MB memory available" in line and "running: a (pid" in line, line
+        status = fixture.status()
+        assert "heavy claims 8/12 cores" in status and "waits for cpu" in status and "waits behind the queue ahead" in status, status
+        time.sleep(1.5)
+        assert fixture.running() == {"a"}, fixture.running()
         fixture.release("a")
-        return {"waitedSeconds": round(waited, 1)}
+        wait_until(lambda: {"b", "c"} <= fixture.running(), "b and c fit together once a ends")
+        assert fixture.granted("b") == "8" and fixture.granted("c") == "2", fixture.log.read_text()
+        # A scalable step (needs 8, can start with 2) takes the 2 cores left and is told so.
+        fixture.start("d", cores=8, cores_min=2)
+        wait_until(lambda: "d" in fixture.running(), "d starts on the cores left")
+        assert fixture.granted("d") == "2", fixture.log.read_text()
+        assert "started in slot" in fixture.output("d") and "(d, 2 cores" in fixture.output("d"), fixture.output("d")
+        for name in ("b", "c", "d"):
+            fixture.release(name)
+        wait_until(lambda: not fixture.running(), "all done")
+        # Live host CPU: with 14 of 16 cores busy outside the queue, a second step needing 4 waits.
+        fixture.start("e", cores=4)
+        wait_until(lambda: "e" in fixture.running(), "e starts")
+        fixture.start("f", cores=4, TRON_HEAVY_BUSY_CORES="14")
+        wait_until(lambda: "for cpu: host has 2.0 of 16 cores idle; this one needs 4 cores" in fixture.output("f"),
+                   "f waits for idle host cores")
+        fixture.release("e")
+        wait_until(lambda: "f" in fixture.running(), "f starts alone: the first step always starts")
+        fixture.release("f")
+        return {"started": fixture.started(), "status": status.splitlines(), "statusLine": line}
+    finally:
+        fixture.close()
+
+
+def case_xcode_pool_counts_booted_simulators(root: Path) -> dict:
+    """At most TRON_HEAVY_XCODE_SLOTS xcode steps, counting simulators still booted (#1083).
+
+    A step waiting only for an Xcode slot does not hold back a Gateway step behind it, and
+    booted simulators never stop the first xcode step.
+    """
+    fixture = Fixture(root, TRON_HEAVY_SLOTS="8", TRON_HEAVY_XCODE_SLOTS="2", TRON_HEAVY_BOOTED_SIMULATORS="2")
+    try:
+        fixture.start("x1", pool="xcode")
+        wait_until(lambda: "x1" in fixture.running(), "the first heavy step always starts")
+        fixture.start("x2", pool="xcode")
+        wait_until(lambda: "an Xcode slot (2 of 2 in use: 1 xcode steps, 2 booted simulators)" in fixture.output("x2"),
+                   "x2 waits: two simulators are booted")
+        fixture.start("g")
+        wait_until(lambda: "g" in fixture.running(), "a Gateway step passes the xcode step waiting for its pool")
+        fixture.release("x1")
+        wait_until(lambda: "x2" in fixture.running(), "x2 starts: with no xcode step running, booted simulators never block")
+        fixture.start("x3", pool="xcode", TRON_HEAVY_BOOTED_SIMULATORS="1")
+        wait_until(lambda: "x3" in fixture.running(), "x3 joins x2 once the tooling released a simulator")
+        for name in ("g", "x2", "x3"):
+            fixture.release(name)
+        return {"started": fixture.started()}
+    finally:
+        fixture.close()
+
+
+def case_gate_jobs_fair_and_bounded(root: Path) -> dict:
+    """At most TRON_HEAVY_JOBS gate runs have heavy work in flight; a running job's next step
+    goes ahead of runs waiting for a job slot, so admitted runs finish first (#1083)."""
+    fixture = Fixture(root, TRON_HEAVY_SLOTS="8", TRON_HEAVY_JOBS="1")
+    try:
+        fixture.job("A", steps=2)
+        wait_until(lambda: "A.0" in fixture.running(), "job A's first step starts")
+        fixture.start("B")
+        wait_until(lambda: "for a gate job slot (1 of 1 gate jobs have heavy work in flight)" in fixture.output("B"),
+                   "B waits for a job slot")
+        fixture.release("A.0")
+        wait_until(lambda: "A.1" in fixture.running(), "A's next step goes ahead of B, which queued first")
+        assert "B" not in fixture.running()
+        fixture.release("A.1")
+        wait_until(lambda: "B" in fixture.running(), "B starts once job A ends")
+        fixture.release("B")
+        assert fixture.processes["A"].wait(timeout=10) == 0
+        return {"started": fixture.started()}
+    finally:
+        fixture.close()
+
+
+def case_dead_holder_slot_reclaimed(root: Path) -> dict:
+    """A holder that dies with its command frees its step slot and its job slot at once."""
+    fixture = Fixture(root, TRON_HEAVY_SLOTS="1", TRON_HEAVY_JOBS="1")
+    try:
+        holder = fixture.start("a")
+        wait_until(lambda: "a" in fixture.running(), "a started")
+        fixture.start("b")
+        wait_until(lambda: "position 1 of 1" in fixture.output("b"), "b queued behind a")
+        os.killpg(holder.pid, signal.SIGKILL)
+        holder.wait(timeout=5)
+        wait_until(lambda: "b" in fixture.running(), "b takes the dead holder's slot")
+        fixture.release("b")
+        # A gate run killed between steps frees the job slot it held without a step slot.
+        job = fixture.job("J", steps=2)
+        wait_until(lambda: "J.0" in fixture.running(), "J's first step runs")
+        fixture.release("J.0")
+        wait_until(lambda: "J.1" in fixture.running(), "J's second step runs")
+        os.killpg(job.pid, signal.SIGKILL)
+        job.wait(timeout=5)
+        fixture.start("c")
+        wait_until(lambda: "c" in fixture.running(), "c takes the killed run's job and step slots")
+        fixture.release("c")
+        return {"started": fixture.started()}
+    finally:
+        fixture.close()
+
+
+def case_queue_wait_is_not_step_time(root: Path) -> dict:
+    """A gate shard's hard limit starts when it is admitted, not when it queues (#1083)."""
+    sys.path.insert(0, str(HEAVY.parent))
+    fixture = Fixture(root, TRON_HEAVY_SLOTS="1")
+    try:
+        fixture.start("a")
+        wait_until(lambda: "a" in fixture.running(), "a holds the only slot")
+        driver = ("import pathlib, sys, threading\n"
+                  "sys.path.insert(0, sys.argv[1]); import gate\n"
+                  "root = pathlib.Path(sys.argv[2])\n"
+                  "step = {'id': 'slow', 'class': 'heavy', 'expectedRssMb': 100, 'expectedCores': 1, 'budgetSeconds': 3,\n"
+                  "        'timeoutSeconds': 3}\n"
+                  "shard = gate.Shard(step, 1, 1, 'sleep 1')\n"
+                  "outcome = gate.run_shard(root, '', shard, root / 'slow.log', dict(__import__('os').environ), '[1/1]')\n"
+                  "print('outcome', outcome.outcome, outcome.seconds, outcome.queued_seconds)\n")
+        output = (root / "slow.out").open("w")
+        process = subprocess.Popen([sys.executable, "-c", driver, str(HEAVY.parent), str(root)], env=fixture.environment,
+                                   stdout=output, stderr=subprocess.STDOUT)
+        wait_until(lambda: "waiting at position 1 of 1 for a step slot" in (root / "slow.out").read_text(), "the shard queues")
+        time.sleep(4)
+        fixture.release("a")
+        assert process.wait(timeout=30) == 0, (root / "slow.out").read_text()
+        result = (root / "slow.out").read_text().split("outcome ")[-1].split()
+        assert result[0] == "pass" and float(result[2]) >= 4 and float(result[1]) < 3, result
+        return {"outcome": result[0], "seconds": float(result[1]), "queuedSeconds": float(result[2])}
     finally:
         fixture.close()
 
@@ -209,12 +389,12 @@ def case_memory_admission(root: Path) -> dict:
         fixture.start("a", need_mb=6000)
         wait_until(lambda: "a" in fixture.running(), "the first heavy step always starts")
         fixture.start("b", need_mb=6000)
-        wait_until(lambda: "waiting for memory: heavy steps claim 6000 MB of the 10000 MB heavy budget" in fixture.output("b"),
+        wait_until(lambda: "for memory: heavy steps claim 6000 MB of the 10000 MB heavy budget" in fixture.output("b"),
                    "b waits on the heavy memory budget with free slots")
         fixture.start("c", need_mb=1000)
-        wait_until(lambda: "queued at position 2 of 2" in fixture.output("c"), "c keeps FIFO order behind b")
+        wait_until(lambda: "position 2 of 2" in fixture.output("c"), "c keeps FIFO order behind b")
         status = fixture.status()
-        assert "6000 MB claimed" in status and "needs 6000 MB" in status, status
+        assert "6000/10000 MB" in status and "a 1 cores 6000 MB" in status and "waits for memory" in status, status
         time.sleep(1.5)
         assert fixture.running() == {"a"}, fixture.running()
         fixture.release("a")
@@ -240,8 +420,9 @@ def case_memory_admission(root: Path) -> dict:
 
 
 def main() -> int:
-    cases = [case_memory_admission, case_slots_fifo_and_positions, case_holder_killed_slot_follows_command_tree,
-             case_dead_waiter_leaves_queue, case_load_gate_is_bounded, case_inherited_slot_never_waits]
+    cases = [case_memory_admission, case_cpu_admission, case_xcode_pool_counts_booted_simulators, case_gate_jobs_fair_and_bounded,
+             case_dead_holder_slot_reclaimed, case_queue_wait_is_not_step_time, case_slots_fifo_and_positions,
+             case_holder_killed_slot_follows_command_tree, case_dead_waiter_leaves_queue, case_inherited_slot_never_waits]
     evidence = []
     failed = False
     for case in cases:
