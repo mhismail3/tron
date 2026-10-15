@@ -118,13 +118,6 @@ struct SessionListSessionExpansion: Equatable {
         totalCount > pageSize && visibleCount(for: groupID, totalCount: totalCount) > pageSize
     }
 
-    mutating func revealMore(groupID: String, totalCount: Int) {
-        let currentCount = visibleCount(for: groupID, totalCount: totalCount)
-        let nextCount = min(max(totalCount, 0), currentCount + pageSize)
-        guard nextCount > currentCount else { return }
-        visibleCountsByGroupID[groupID] = nextCount
-    }
-
     mutating func showLess(groupID: String) {
         visibleCountsByGroupID.removeValue(forKey: groupID)
     }

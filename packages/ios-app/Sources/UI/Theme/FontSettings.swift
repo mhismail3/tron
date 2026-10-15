@@ -65,8 +65,6 @@ enum FontFamily: String, CaseIterable, Identifiable, Sendable {
         case .geistMono: "GeistMono-Regular"
         }
     }
-    var supportsMono: Bool { self == .recursive }
-    var isMonospaced: Bool { category == .mono }
     var isVariable: Bool {
         switch self {
         case .recursive, .alanSans, .comme, .libreBaskerville, .sourceSerif4, .lora, .jetBrainsMono, .geistMono: true

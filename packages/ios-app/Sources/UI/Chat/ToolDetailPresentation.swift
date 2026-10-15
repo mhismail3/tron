@@ -253,7 +253,6 @@ struct ToolDiffPresentation: Hashable, Sendable {
     static let retainedHeadLines = 240
     static let retainedTailLines = 119
     static let maximumRenderedLineCharacters = 360
-    static let compactMaximumVisibleLines = 14
     static let compactHeadLines = 8
     static let compactTailLines = 5
 

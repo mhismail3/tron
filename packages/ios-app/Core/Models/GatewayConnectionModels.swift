@@ -1,11 +1,5 @@
 import Foundation
 
-struct GatewayRuntimeIdentity: Codable, Hashable, Sendable {
-    let sourceRevision: String?
-    let buildFingerprint: String?
-    let runtimeEpoch: String?
-}
-
 package struct GatewayUpdateIdentity: Codable, Hashable, Sendable {
     let version: String?
     let gatewayVersion: String?
