@@ -1336,8 +1336,13 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             self.switchValue(outsideRow) == macEdit.after && !self.badgeLabels(outsideRow).contains { $0.hasPrefix("Changed outside Tron") }
         }, "Apply again must restore Tron's value and clear the outside mark: \(badgeLabels(outsideRow))")
 
-        dismissTopSheet(app) // Changed setting detail
-        dismissTopSheet(app) // Setup Settings
+        // Clearing the outside marker removes its detail link and can retire
+        // that child. Return to the actual Settings root, not a fixed sheet count.
+        for _ in 0..<3 {
+            if app.buttons["settings-done"].isHittable { break }
+            dismissTopSheet(app)
+        }
+        XCTAssertTrue(app.buttons["settings-done"].isHittable, "Apply again must return to Settings")
         // A hand-built screen on the same change path: Extensions' Built-in switch
         // writes `sources.extensions` at the Mac layer (no legacy document read).
         let extensionsLink = app.buttons["settings-link-Extensions"]
