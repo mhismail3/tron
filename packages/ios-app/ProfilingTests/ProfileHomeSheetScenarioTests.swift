@@ -176,11 +176,7 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
               let done = ProfileAccessibility.element(in: presented.view, labels: ["Done"]) else {
             throw ProfileScenarioError.workloadDiverged("the sheet has no Done control")
         }
-        if let control = done as? UIControl ?? (done as? UIView).flatMap({ profileViews(UIControl.self, in: $0).first }) {
-            control.sendActions(for: .touchUpInside)
-        } else if !done.accessibilityActivate() {
-            print("TRON_PROFILE_DEBUG done=\(type(of: done)) controls=\(profileViews(UIControl.self, in: presented.view).map { "\(type(of: $0)):\($0.accessibilityLabel ?? "-")" })")
-        }
+        guard done.accessibilityActivate() else { throw ProfileScenarioError.workloadDiverged("Done refused activation") }
         try await profileWaitUntil("the sheet closes", timeout: .seconds(5)) { self.host?.presentedViewController == nil }
         try await Task.sleep(for: .milliseconds(300))
     }
