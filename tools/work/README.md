@@ -120,8 +120,10 @@ plan. Markdown and `docs/` paths never start a build. Representative plans:
   shipped `Tron Device` + `LocalDevice` app compiled unsigned for arm64 devices, which
   the `HOSTED_TEST` simulator build cannot stand in for), then `ios.journeys`, which
   runs the changed UI test classes (or the smoke set) with test-without-building, two
-  test methods per shard, from the same stamped products. A class that needs a harness
-  the plain runner does not start declares it on its own line,
+  test methods per shard, from the same stamped products. A changed file selects every
+  method XCTest runs that it declares in an `XCTestCase` subclass or its extension,
+  whatever its attributes (`@MainActor`, `@available`) or modifiers. A class that needs
+  a harness the plain runner does not start declares it on its own line,
   `// gate-journey: scripts/<harness>` (`TronMacTerminalUITests`: a real sshd and
   shell host), and runs through that command as a `journey` shard instead;
 - Mac: `mac.build` (build-for-testing; it stages the Gateway payload, so it precedes
@@ -149,8 +151,13 @@ with elapsed time, live tree RSS and the log's last line, and a result line with
 wall time, peak tree RSS and CPU. The first failing shard stops the run, prints the
 end of its log, names the step and how many later shards did not start, and lists
 the step's `knownFlakes` (for example #1016). A shard past its hard timeout is
-killed with its process group and reported as `TIMEOUT <shard> exceeded its hard
-limit`. Every finished shard appends to `<git common dir>/work/gate/metrics.jsonl`.
+stopped with its whole process tree and reported as `TIMEOUT <shard> exceeded its hard
+limit`. The tree is every process seen descending from the shard, including ones in
+their own session or process group (the iOS lane lease holder's command, `xcodebuild`)
+and ones launchd adopted after their parent died. Each gets SIGTERM and 45 s for its
+own cleanup, so the lease holder releases its simulator lane, then SIGKILL; the log
+records how many were stopped, which needed SIGKILL and any that survived it. A
+cancelled shard and anything a passing shard left running are stopped the same way. Every finished shard appends to `<git common dir>/work/gate/metrics.jsonl`.
 
 **Heavy steps.** A `heavy` shard waits in the host-wide heavy queue
 (`heavy.py`, `scripts/tron-heavy status`;
