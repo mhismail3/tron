@@ -39,6 +39,29 @@ let probe = "";
 let root = "";
 let tailnetIPv4 = "";
 
+interface HostResult { outcome: "ok" | "error"; results?: Array<Record<string, unknown>>; error?: string; message?: string }
+
+/** One shell-host link from the app's own client: the steps run in order, then
+ * the link closes, which is what a dismissed sheet or a suspended app does. */
+async function hostLink(endpoint: { hosts: string[]; port: number; username: string; hostKeys: string[] }, privateKeyPEM: string,
+  command: string[], steps: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
+  const result = JSON.parse(await run(probe, ["host"], JSON.stringify({ endpoint, privateKeyPEM, command, steps }))) as HostResult;
+  if (result.outcome !== "ok") throw new Error(`host link failed: ${result.error}: ${result.message}`);
+  return result.results!;
+}
+
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+async function until(condition: () => boolean, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
 interface ProbeResult { outcome: "ok" | "error"; output?: string; exitStatus?: number | null; error?: string; message?: string }
 
 function run(command: string, args: string[], input?: string): Promise<string> {
@@ -101,7 +124,7 @@ const commandId = () => `mac-terminal-${String(++command).padStart(4, "0")}`;
 
 /** A Gateway with the production Mac Terminal wiring (gateway-main.ts) over
  * the fixture's ~/.ssh and host keys. */
-async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory: string, port: number) {
+async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory: string, port: number, hostCommand?: string[]) {
   const agentDir = join(tronHome, "agent");
   await mkdir(agentDir, { recursive: true });
   const runtimeFactory = () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
@@ -124,7 +147,7 @@ async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory:
   const service = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     modelRuntime, trust, settingsModel, settingsChanges, devices, sessions, receipts: new CommandReceiptStore(tronHome),
-    macTerminal: new MacTerminalHost(keys, { hostKeyDirectory, port }),
+    macTerminal: new MacTerminalHost(keys, { hostKeyDirectory, port, hostCommand: () => hostCommand }),
     broadcast: () => {},
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
@@ -276,5 +299,105 @@ describe("Mac Terminal", () => {
       hostKeys: [(await readFile(join(hostDirectory, "ssh_host_ed25519_key.pub"), "utf8")).trim()] }, key.privateKeyPEM);
     expect(off).toMatchObject({ outcome: "error", error: "remoteLoginOff" });
     transcript.push({ case: "remote-login-off", detail: off });
+  }, 180_000);
+
+  it("keeps each shell in the Mac's shell host across disconnects until it exits or is quit (#1075)", async () => {
+    // The host as the Gateway payload ships it: this package compiled, run by
+    // this node, beside the real node_modules (node-pty). A short home keeps
+    // the host's socket path under the Unix limit.
+    const build = await mkdtemp(join(tmpdir(), "tron-mac-terminal-host-build-"));
+    const tronHome = await mkdtemp("/tmp/tmt-");
+    const sshDirectory = join(root, "host-home", ".ssh");
+    const hostDirectory = join(root, "host-sshd");
+    await mkdir(sshDirectory, { recursive: true });
+    await writeFile(join(sshDirectory, "authorized_keys"), "");
+    const port = await freePort();
+    const sshd = await startSshd(hostDirectory, sshDirectory, port);
+    let hostPid: number | undefined;
+    try {
+      await run(process.execPath, [join(HERE, "../../node_modules/typescript/bin/tsc"), "-p", join(HERE, "../../tsconfig.json"),
+        "--outDir", build, "--declaration", "false", "--sourceMap", "false", "--declarationMap", "false"]);
+      await writeFile(join(build, "package.json"), JSON.stringify({ type: "module" }));
+      await symlink(join(HERE, "../../node_modules"), join(build, "node_modules"));
+      const hostCommand = [process.execPath, join(build, "machine", "mac-terminal-host.js"), "connect", "--home", tronHome];
+
+      const { service, pair } = await gateway(join(root, "host-tron"), sshDirectory, hostDirectory, port, hostCommand);
+      const phone = await pair("Fixture iPhone");
+      const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
+      await service.invoke(client(phone), "settings.change", {
+        commandId: commandId(), target: { kind: "mac" },
+        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "set", value: key.publicKey }],
+      });
+      const status = await service.invoke(client(phone), "macTerminal.status", {}) as unknown as MacTerminalStatus;
+      expect(status.hostCommand).toEqual(hostCommand);
+      const endpoint = { hosts: status.hosts, port, username: status.username, hostKeys: status.hostKeys };
+      const link = (steps: Array<Record<string, unknown>>) => hostLink(endpoint, key.privateKeyPEM, status.hostCommand!, steps);
+      const pidOf = (text: unknown, label: string) => Number(new RegExp(`${label}=(\\d+)`, "u").exec(String(text))?.[1]);
+
+      // First link starts the host and opens a shell, then closes: a dismissed sheet.
+      const first = await link([{ do: "open" }]);
+      const shell = first[0]!.shell as string;
+      const opened = await link([
+        { do: "attach", shell, after: 0 },
+        { do: "write", shell, data: "echo pid=$$; echo DONE_$((40+2))\n" },
+        { do: "await", shell, text: "DONE_42" },
+      ]);
+      const pid = pidOf(opened[2]!.text, "pid");
+      expect(pid).toBeGreaterThan(1);
+      hostPid = Number(/"event":"host.started","pid":(\d+)/u.exec(await readFile(join(tronHome, "gateway", "mac-terminal", "host.log"), "utf8"))?.[1]);
+      expect(alive(hostPid)).toBe(true);
+      // The links are gone; the shell is not.
+      expect(alive(pid)).toBe(true);
+      transcript.push({ case: "host-shell-survives-disconnect", detail: { shellAlive: alive(pid) } });
+
+      // Reattaching replays what it printed and reaches the same shell.
+      const again = await link([
+        { do: "list" },
+        { do: "attach", shell, after: 0 },
+        { do: "write", shell, data: "echo again=$$; echo DONE_$((50+2))\n" },
+        { do: "await", shell, text: "DONE_52" },
+      ]);
+      expect(again[0]!.shells).toEqual([expect.objectContaining({ id: shell })]);
+      expect((again[0]!.shells as Array<Record<string, unknown>>)[0]).not.toHaveProperty("exitedAt");
+      expect(String(again[1]!.text)).toContain(`pid=${pid}`);
+      expect(pidOf(again[3]!.text, "again")).toBe(pid);
+
+      // A second shell is its own process; `exit` ends only it, and its output
+      // and exit stay listed.
+      const second = await link([
+        { do: "open" },
+      ]);
+      const other = second[0]!.shell as string;
+      const both = await link([
+        { do: "attach", shell: other, after: 0 },
+        { do: "write", shell: other, data: "echo other=$$; echo DONE_$((60+2))\n" },
+        { do: "await", shell: other, text: "DONE_62" },
+        { do: "write", shell: other, data: "exit 3\n" },
+        { do: "awaitExit", shell: other },
+        { do: "list" },
+      ]);
+      const otherPid = pidOf(both[2]!.text, "other");
+      expect(otherPid).toBeGreaterThan(1);
+      expect(otherPid).not.toBe(pid);
+      expect(both[4]).toMatchObject({ exitCode: 3 });
+      const listed = both[5]!.shells as Array<Record<string, unknown>>;
+      expect(listed.find(entry => entry.id === shell)).not.toHaveProperty("exitedAt");
+      expect(listed.find(entry => entry.id === other)).toMatchObject({ exitCode: 3, exitedAt: expect.any(String) });
+      await until(() => !alive(otherPid), "the exited shell's process to end");
+      expect(alive(pid)).toBe(true);
+      transcript.push({ case: "host-two-shells-exit-one", detail: { listed: listed.map(({ id, exitCode }) => ({ same: id === shell, exitCode })) } });
+
+      // Quit ends the shell and its process group; the host stays for the next one.
+      const quit = await link([{ do: "attach", shell, after: 0 }, { do: "terminate", shell }, { do: "list" }]);
+      await until(() => !alive(pid), "the quit shell's process to end");
+      expect((quit[2]!.shells as Array<Record<string, unknown>>).every(entry => typeof entry.exitedAt === "string")).toBe(true);
+      expect(alive(hostPid)).toBe(true);
+      transcript.push({ case: "host-quit", detail: { shellAlive: alive(pid), hostAlive: alive(hostPid) } });
+    } finally {
+      if (hostPid && alive(hostPid)) process.kill(hostPid, "SIGTERM");
+      await sshd.stop();
+      await rm(build, { recursive: true, force: true });
+      await rm(tronHome, { recursive: true, force: true });
+    }
   }, 180_000);
 });

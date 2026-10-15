@@ -22,12 +22,17 @@ public struct MacTerminalEndpoint: Codable, Equatable, Sendable {
     public var username: String
     /// The Mac's sshd host public keys in OpenSSH form, pinned at enrollment.
     public var hostKeys: [String]
+    /// The argv that reaches the Mac's shell host, which keeps shells across
+    /// disconnects (Gateway `machine/mac-terminal-host.ts`). Absent from a Mac
+    /// whose Tron has none; Mac Terminal then opens a plain login shell.
+    public var hostCommand: [String]?
 
-    public init(hosts: [String], port: Int = 22, username: String, hostKeys: [String]) {
+    public init(hosts: [String], port: Int = 22, username: String, hostKeys: [String], hostCommand: [String]? = nil) {
         self.hosts = hosts
         self.port = port
         self.username = username
         self.hostKeys = hostKeys
+        self.hostCommand = hostCommand
     }
 }
 
@@ -84,9 +89,12 @@ public enum MacTerminalPrivateKey: Sendable {
     public var openSSHPublicKey: String { String(openSSHPublicKey: sshKey.publicKey) }
 }
 
-/// What the shell produces.
+/// What the shell or command produces.
 public enum MacTerminalEvent: Sendable, Equatable {
     case output([UInt8])
+    /// A command's stderr (an exec channel's extended data). A PTY shell has
+    /// none: its stderr is the terminal.
+    case diagnostic([UInt8])
     /// The shell ended; `status` is its exit status when the Mac sent one.
     case closed(status: Int?)
 }
@@ -154,7 +162,8 @@ public final class MacTerminalSession: Sendable {
         shell.triggerUserOutboundEvent(request, promise: nil)
     }
 
-    /// Closing ends the SSH connection; the login shell gets SIGHUP from sshd.
+    /// Closing ends the SSH connection; sshd hangs up what the channel ran
+    /// (a PTY shell gets SIGHUP; the shell host's relay sees end of input).
     public func close() {
         connection.close(promise: nil)
     }
@@ -172,6 +181,28 @@ public enum MacTerminalClient {
         term: String = "xterm-256color",
         connectTimeout: TimeAmount = .seconds(8)
     ) async throws -> MacTerminalSession {
+        try await dial(endpoint: endpoint, privateKey: privateKey, request: .shell(term: term, columns: columns, rows: rows),
+                       connectTimeout: connectTimeout)
+    }
+
+    /// Runs one command without a PTY (an SSH exec channel): its stdout is
+    /// `.output`, its stderr `.diagnostic`. Mac Terminal runs its shell host's
+    /// relay this way (`MacTerminalHostLink`).
+    public static func exec(
+        endpoint: MacTerminalEndpoint,
+        privateKey: MacTerminalPrivateKey,
+        command: String,
+        connectTimeout: TimeAmount = .seconds(8)
+    ) async throws -> MacTerminalSession {
+        try await dial(endpoint: endpoint, privateKey: privateKey, request: .exec(command), connectTimeout: connectTimeout)
+    }
+
+    private static func dial(
+        endpoint: MacTerminalEndpoint,
+        privateKey: MacTerminalPrivateKey,
+        request: ChannelRequest,
+        connectTimeout: TimeAmount
+    ) async throws -> MacTerminalSession {
         let pinned = Set(endpoint.hostKeys.compactMap { try? NIOSSHPublicKey(openSSHPublicKey: $0) })
         guard !pinned.isEmpty else { throw MacTerminalError.noPinnedHostKey }
         var refused = false
@@ -180,7 +211,7 @@ public enum MacTerminalClient {
             do {
                 return try await open(
                     host: host, endpoint: endpoint, pinned: pinned, privateKey: privateKey.sshKey,
-                    columns: columns, rows: rows, term: term, connectTimeout: connectTimeout
+                    request: request, connectTimeout: connectTimeout
                 )
             } catch let error as MacTerminalError {
                 switch error {
@@ -199,9 +230,7 @@ public enum MacTerminalClient {
         endpoint: MacTerminalEndpoint,
         pinned: Set<NIOSSHPublicKey>,
         privateKey: NIOSSHPrivateKey,
-        columns: Int,
-        rows: Int,
-        term: String,
+        request: ChannelRequest,
         connectTimeout: TimeAmount,
         handshakeTimeout: TimeAmount = .seconds(15)
     ) async throws -> MacTerminalSession {
@@ -258,8 +287,7 @@ public enum MacTerminalClient {
                         }
                         return child.eventLoop.makeCompletedFuture {
                             try child.pipeline.syncOperations.addHandler(ShellHandler(
-                                term: term, columns: columns, rows: rows,
-                                ready: ready, continuation: continuation))
+                                request: request, ready: ready, continuation: continuation))
                         }
                     }
                 } catch {
@@ -369,25 +397,30 @@ private final class ConnectionErrorHandler: ChannelInboundHandler {
     }
 }
 
-/// The session channel: requests a PTY and a login shell, then streams bytes.
+/// What a session channel asks sshd for.
+enum ChannelRequest: Sendable {
+    /// A PTY, then the login shell.
+    case shell(term: String, columns: Int, rows: Int)
+    /// One command, no PTY.
+    case exec(String)
+}
+
+/// The session channel: requests a PTY and a login shell, or execs a command,
+/// then streams bytes.
 private final class ShellHandler: ChannelInboundHandler {
     typealias InboundIn = SSHChannelData
 
     private enum Stage { case pty, shell, running }
 
-    let term: String
-    let columns: Int
-    let rows: Int
+    let request: ChannelRequest
     let continuation: AsyncStream<MacTerminalEvent>.Continuation
     private var ready: EventLoopPromise<Void>?
     private var stage = Stage.pty
     private var exitStatus: Int?
 
-    init(term: String, columns: Int, rows: Int, ready: EventLoopPromise<Void>,
+    init(request: ChannelRequest, ready: EventLoopPromise<Void>,
          continuation: AsyncStream<MacTerminalEvent>.Continuation) {
-        self.term = term
-        self.columns = columns
-        self.rows = rows
+        self.request = request
         self.ready = ready
         self.continuation = continuation
     }
@@ -397,13 +430,19 @@ private final class ShellHandler: ChannelInboundHandler {
     }
 
     func channelActive(context: ChannelHandlerContext) {
-        let pty = SSHChannelRequestEvent.PseudoTerminalRequest(
-            wantReply: true, term: term,
-            terminalCharacterWidth: max(columns, 1), terminalRowHeight: max(rows, 1),
-            terminalPixelWidth: 0, terminalPixelHeight: 0,
-            terminalModes: SSHTerminalModes([:])
-        )
-        context.triggerUserOutboundEvent(pty, promise: nil)
+        switch request {
+        case .shell(let term, let columns, let rows):
+            let pty = SSHChannelRequestEvent.PseudoTerminalRequest(
+                wantReply: true, term: term,
+                terminalCharacterWidth: max(columns, 1), terminalRowHeight: max(rows, 1),
+                terminalPixelWidth: 0, terminalPixelHeight: 0,
+                terminalModes: SSHTerminalModes([:])
+            )
+            context.triggerUserOutboundEvent(pty, promise: nil)
+        case .exec(let command):
+            stage = .shell
+            context.triggerUserOutboundEvent(SSHChannelRequestEvent.ExecRequest(command: command, wantReply: true), promise: nil)
+        }
         context.fireChannelActive()
     }
 
@@ -435,7 +474,8 @@ private final class ShellHandler: ChannelInboundHandler {
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let message = unwrapInboundIn(data)
         guard case .byteBuffer(let buffer) = message.data else { return }
-        continuation.yield(.output(Array(buffer.readableBytesView)))
+        let bytes = Array(buffer.readableBytesView)
+        continuation.yield(message.type == .stdErr ? .diagnostic(bytes) : .output(bytes))
     }
 
     func channelInactive(context: ChannelHandlerContext) {
