@@ -105,8 +105,13 @@ struct TerminalSheet: View {
                         Button {
                             controller.show(terminal, model: model)
                         } label: {
+                            // A menu item's second text is its subtitle: why the
+                            // Gateway closed it, when it did (#479).
                             Text(terminal.exitedAt ?? terminal.createdAt)
+                            if let reason = terminal.closedReason { Text(reason) }
                         }
+                        .accessibilityLabel([terminal.exitedAt ?? terminal.createdAt, terminal.closedReason]
+                            .compactMap { $0 }.joined(separator: ", "))
                     }
                 }
             }

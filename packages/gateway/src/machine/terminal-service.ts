@@ -393,7 +393,9 @@ export class TerminalService {
       ...(terminal.exitedAt ? { exitedAt: terminal.exitedAt } : {}),
       ...(terminal.exitCode === undefined ? {} : { exitCode: terminal.exitCode }),
       sequence: terminal.sequence,
-      ...(terminal.closedReason ? { closedReason: terminal.closedReason } : {}),
+      // The reason belongs to a terminal that has exited; until the exit
+      // callback lands the summary stays an ordinary live terminal.
+      ...(terminal.closedReason && terminal.exitedAt ? { closedReason: terminal.closedReason } : {}),
     };
   }
 }

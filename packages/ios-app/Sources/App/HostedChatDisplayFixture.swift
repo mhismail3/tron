@@ -609,6 +609,22 @@ private actor HostedHomeShellGateway {
             if let onHomeRead { await onHomeRead(homeReadSummary()) }
         }
         switch method {
+        // #479: one terminal the Gateway closed after its idle period, so the
+        // sheet opens a fresh live one and lists the closed one under Recent.
+        case "terminal.list" where ProcessInfo.processInfo.arguments.contains("-home-terminal-closed"):
+            return (.object(["terminals": .array([HostedClosedTerminal.closed])]), nil)
+        case "terminal.open" where ProcessInfo.processInfo.arguments.contains("-home-terminal-closed"):
+            return (.object(["terminal": HostedClosedTerminal.live, "replay": .object(["terminal": HostedClosedTerminal.live,
+                "chunks": .array([HostedClosedTerminal.chunk(1, "home % ")]), "reset": .bool(false)])]), nil)
+        case "terminal.attach" where ProcessInfo.processInfo.arguments.contains("-home-terminal-closed"):
+            let closed = params["terminalId"]?.stringValue == "closed-terminal"
+            return (.object(["terminal": closed ? HostedClosedTerminal.closed : HostedClosedTerminal.live,
+                "chunks": .array(closed ? [HostedClosedTerminal.chunk(1, "home % "), HostedClosedTerminal.chunk(2, "\r\n[Closed after 60 minutes idle]\r\n")]
+                    : [HostedClosedTerminal.chunk(1, "home % ")]), "reset": .bool(false)]), nil)
+        case "terminal.detach" where ProcessInfo.processInfo.arguments.contains("-home-terminal-closed"):
+            return (.object(["detached": .bool(true)]), nil)
+        case "terminal.resize" where ProcessInfo.processInfo.arguments.contains("-home-terminal-closed"):
+            return (.object(["resized": .bool(true)]), nil)
         case "terminal.list":
             return (nil, .object(["code": .string("unavailable"),
                 "message": .string("Fixture terminal unavailable for \(params["sessionId"]?.stringValue ?? "missing")"),
@@ -1408,3 +1424,20 @@ enum HostedHomeDashboardWorkers {
     }
 }
 #endif
+
+/// The #479 terminal fixture: a closed terminal with the Gateway's reason, and
+/// the live terminal the sheet opens beside it.
+private enum HostedClosedTerminal {
+    static let closed: JSONValue = .object([
+        "id": .string("closed-terminal"), "sessionId": .string("home-session"), "cwd": .string("/workspace"),
+        "createdAt": .string("2026-01-01T09:00:00Z"), "exitedAt": .string("2026-01-01T10:01:00Z"), "exitCode": .number(0),
+        "sequence": .number(2), "closedReason": .string("Closed after 60 minutes idle"),
+    ])
+    static let live: JSONValue = .object([
+        "id": .string("live-terminal"), "sessionId": .string("home-session"), "cwd": .string("/workspace"),
+        "createdAt": .string("2026-01-01T11:00:00Z"), "sequence": .number(1),
+    ])
+    static func chunk(_ sequence: Int, _ data: String) -> JSONValue {
+        .object(["sequence": .number(Double(sequence)), "data": .string(data)])
+    }
+}

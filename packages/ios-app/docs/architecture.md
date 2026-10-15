@@ -1745,6 +1745,18 @@ Project trust UI states explicitly that trust controls project resource loading
 and is not a sandbox. Device settings list gateway-authorized devices and support
 immediate revocation; revoking this iPhone also removes its local profile.
 
+### Session terminal closed by the Gateway
+
+The Gateway closes an app terminal no device has open once it sits idle at an
+empty prompt, or for a restart (#479; contract in the Gateway README's terminal
+paragraph under restart drain). `TerminalSummary.closedReason` carries why; the
+terminal options menu shows it as the subtitle of that terminal's Recent
+terminals item (a standard menu item, no new component), and its replay ends
+with the same bracketed line. The idle period is the Gateway-declared
+`setup.terminalIdleMinutes` key, rendered by the generic settings renderer.
+`TronSmokeUITests.testClosedTerminalShowsGatewayReason` covers it with the
+`-home-terminal-closed` hosted fixture.
+
 ### Mac Terminal
 
 Settings › Accounts › **Mac Terminal** opens the session terminal's own chrome and

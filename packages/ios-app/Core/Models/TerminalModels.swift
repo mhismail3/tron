@@ -8,6 +8,9 @@ package struct TerminalSummary: Codable, Hashable, Identifiable, Sendable {
     package let exitedAt: String?
     let exitCode: Int?
     package let sequence: Int
+    /// Why the Gateway closed it (an idle period or a restart, #479); nil when
+    /// the shell exited or was quit by the user.
+    package let closedReason: String?
 }
 
 package struct TerminalChunk: Codable, Hashable, Sendable {
@@ -30,6 +33,7 @@ package enum TerminalInventoryPolicy {
     static let maximumSessionIDBytes = 200
     static let maximumCWDBytes = 4_096
     static let maximumTimestampBytes = 64
+    static let maximumClosedReasonBytes = 200
     static let maximumEncodedResponseBytes = 768 * 1_024
 
     package static func admit(
@@ -56,7 +60,9 @@ package enum TerminalInventoryPolicy {
                   identities.insert(terminal.id).inserted else {
                 throw invalidInventory()
             }
-            guard (terminal.exitedAt == nil) == (terminal.exitCode == nil) else {
+            guard (terminal.exitedAt == nil) == (terminal.exitCode == nil),
+                  (terminal.closedReason?.utf8.count ?? 0) <= maximumClosedReasonBytes,
+                  terminal.closedReason == nil || terminal.exitedAt != nil else {
                 throw invalidInventory()
             }
             if let exitedAt = terminal.exitedAt {
