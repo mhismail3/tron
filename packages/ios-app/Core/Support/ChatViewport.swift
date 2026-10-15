@@ -132,7 +132,6 @@ package struct ChatTranscriptGeometry: Equatable {
     /// current marker evidence, not a fabricated minimum height, proves its tail.
     package var isNativeUnderflow: Bool { !hasScrollableOverflow && isPlausibleOpeningViewport }
     package var isAtBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 80 }
-    var isAtExactBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 2 }
     /// Physical scroll settling commonly stops a few points above the computed
     /// edge because content insets and pixel rounding update in separate frames.
     /// This tighter-than-"near bottom" boundary is user-equivalent to reaching

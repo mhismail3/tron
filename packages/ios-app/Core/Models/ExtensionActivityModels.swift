@@ -60,7 +60,6 @@ package enum ExtensionActivityAdmissionPolicy {
     static let maximumDepth = 3
     static let maximumStringBytes = 2_048
     static let maximumEncodedBytes = 256 * 1_024
-    static let terminalStates: Set<ExtensionActivityLifecycleState> = [.completed, .failed, .stopped, .rejected]
 
     package static func admits(_ activity: ExtensionRunActivity) -> Bool {
         var descendantBudget = maximumDescendants
