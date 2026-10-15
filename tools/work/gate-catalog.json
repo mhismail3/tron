@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "The gate step catalog: the one source of truth for every verification step (tools/work/README.md#gate). Plan order is catalog order. Budgets and RSS come from measurements recorded on #1022; `scripts/tron gate report` prints the current ones.",
+  "about": "The gate step catalog: the one source of truth for every verification step (tools/work/README.md#gate). Plan order is catalog order. Budgets and RSS come from measurements recorded on #1022; `scripts/tron gate report` prints the current ones. `hosted` says whether a step can run on hosted CI (`safe`) or needs this Mac (`local-only: reason`).",
   "codeExclude": [
     "**/*.md",
     "**/docs/**"
@@ -21,7 +21,8 @@
       "class": "light",
       "expectedRssMb": 100,
       "pass": "exit 0",
-      "unlocks": "builds"
+      "unlocks": "builds",
+      "hosted": "safe"
     },
     {
       "id": "repo.whitespace",
@@ -38,7 +39,8 @@
       "class": "light",
       "expectedRssMb": 50,
       "pass": "exit 0",
-      "unlocks": "builds"
+      "unlocks": "builds",
+      "hosted": "safe"
     },
     {
       "id": "repo.syntax",
@@ -57,7 +59,8 @@
       "class": "light",
       "expectedRssMb": 100,
       "pass": "exit 0",
-      "unlocks": "builds"
+      "unlocks": "builds",
+      "hosted": "safe"
     },
     {
       "id": "repo.agent-policy",
@@ -84,7 +87,8 @@
       "class": "light",
       "expectedRssMb": 100,
       "pass": "exit 0",
-      "unlocks": "builds"
+      "unlocks": "builds",
+      "hosted": "safe"
     },
     {
       "id": "tooling.tests",
@@ -104,7 +108,8 @@
       "class": "light",
       "expectedRssMb": 400,
       "pass": "exit 0 for every suite shard",
-      "unlocks": "builds"
+      "unlocks": "builds",
+      "hosted": "safe"
     },
     {
       "id": "protocol.contract",
@@ -130,7 +135,8 @@
       "class": "light",
       "expectedRssMb": 200,
       "pass": "exit 0",
-      "unlocks": "builds"
+      "unlocks": "builds",
+      "hosted": "safe"
     },
     {
       "id": "mac.build",
@@ -162,7 +168,8 @@
       ],
       "pass": "exit 0",
       "unlocks": "mac.test",
-      "memorySample": "host"
+      "memorySample": "host",
+      "hosted": "local-only: Xcode and this Mac's signing/launchd setup"
     },
     {
       "id": "mac.test",
@@ -193,7 +200,8 @@
       "expectedRssMb": 2000,
       "pass": "exit 0, every test passed",
       "unlocks": "gateway",
-      "memorySample": "host"
+      "memorySample": "host",
+      "hosted": "local-only: Xcode test host on this Mac"
     },
     {
       "id": "mac.replace-e2e",
@@ -222,7 +230,8 @@
       ],
       "pass": "exit 0, every journey in the artifact passed",
       "unlocks": "gateway",
-      "memorySample": "host"
+      "memorySample": "host",
+      "hosted": "local-only: launchd-detached app replacement on this Mac"
     },
     {
       "id": "gateway.deps",
@@ -250,7 +259,8 @@
         "packages/gateway/node_modules/.package-lock.json"
       ],
       "pass": "exit 0: the install matches the lock",
-      "unlocks": "gateway.typecheck"
+      "unlocks": "gateway.typecheck",
+      "hosted": "safe"
     },
     {
       "id": "gateway.typecheck",
@@ -274,7 +284,8 @@
       "class": "light",
       "expectedRssMb": 1500,
       "pass": "exit 0",
-      "unlocks": "gateway.affected"
+      "unlocks": "gateway.affected",
+      "hosted": "safe"
     },
     {
       "id": "gateway.affected",
@@ -304,7 +315,8 @@
       "pass": "exit 0, no failed test",
       "unlocks": "gateway.nested",
       "artifacts": [],
-      "reports": "test-results/gate/gateway-affected-<shard>-of-<shards>.json (per-file durations for shard balancing)"
+      "reports": "test-results/gate/gateway-affected-<shard>-of-<shards>.json (per-file durations for shard balancing)",
+      "hosted": "safe"
     },
     {
       "id": "gateway.scripts",
@@ -338,7 +350,8 @@
         "update-slow": "cd packages/gateway && node --test --test-concurrency=1 --test-name-pattern='^refuses (rollback|join|execution) ' scripts/update-pi-subagents.integration.test.mjs",
         "update-rest": "cd packages/gateway && node --test --test-concurrency=1 --test-skip-pattern='^refuses (rollback|join|execution) ' scripts/update-pi-subagents.integration.test.mjs",
         "suites": "cd packages/gateway && node --test --test-concurrency=1 scripts/check-pi-subagents.integration.test.mjs scripts/build-pi-subagents-closure.integration.test.mjs scripts/fixture-process-owner.integration.test.mjs && npm run test:pi-sdk-scripts && npm run test:device-binding"
-      }
+      },
+      "hosted": "safe"
     },
     {
       "id": "gateway.full",
@@ -372,7 +385,8 @@
       "pass": "exit 0, no failed test",
       "unlocks": "gateway.nested",
       "artifacts": [],
-      "reports": "test-results/gate/gateway-full-<shard>-of-<shards>.json (per-file durations for shard balancing)"
+      "reports": "test-results/gate/gateway-full-<shard>-of-<shards>.json (per-file durations for shard balancing)",
+      "hosted": "safe"
     },
     {
       "id": "gateway.nested",
@@ -410,7 +424,8 @@
         "subagents-controls": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts src/home/home-task-subagents-controls.e2e.test.ts",
         "rest": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts --exclude 'src/home/home-task-subagents-*.e2e.test.ts'"
       },
-      "parallelShards": true
+      "parallelShards": true,
+      "hosted": "safe"
     },
     {
       "id": "gateway.payload",
@@ -439,7 +454,8 @@
       "class": "heavy",
       "expectedRssMb": 1500,
       "pass": "exit 0",
-      "unlocks": "relay"
+      "unlocks": "relay",
+      "hosted": "safe"
     },
     {
       "id": "relay.check",
@@ -461,7 +477,8 @@
       "class": "heavy",
       "expectedRssMb": 1000,
       "pass": "exit 0",
-      "unlocks": "ios.build"
+      "unlocks": "ios.build",
+      "hosted": "safe"
     },
     {
       "id": "ios.build",
@@ -490,7 +507,8 @@
       "expectedRssMb": 7000,
       "pass": "exit 0 and the products carry the source identity stamp",
       "unlocks": "ios.journeys",
-      "memorySample": "host"
+      "memorySample": "host",
+      "hosted": "local-only: Xcode and the owned simulator lanes"
     },
     {
       "id": "ios.journeys",
@@ -521,7 +539,8 @@
       "expectedRssMb": 4000,
       "pass": "exit 0, result bundle passed > 0 and failed = 0",
       "unlocks": "journeys",
-      "memorySample": "host"
+      "memorySample": "host",
+      "hosted": "local-only: simulator lanes on this Mac"
     },
     {
       "id": "journey",
@@ -538,7 +557,8 @@
       "class": "heavy",
       "expectedRssMb": 3000,
       "pass": "exit 0",
-      "unlocks": "land"
+      "unlocks": "land",
+      "hosted": "local-only: arbitrary local journeys"
     }
   ]
 }
